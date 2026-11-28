@@ -162,7 +162,7 @@ pub enum Tier {
 }
 
 impl Tier {
-    fn from_index(tier: &str) -> Self {
+    pub(crate) fn from_index(tier: &str) -> Self {
         match tier {
             "official" => Tier::Official,
             "community" => Tier::Community,
@@ -314,6 +314,16 @@ fn allowed_file_url(kind: Kind, url: &str) -> bool {
     kind == Kind::Part && host == "github.com" && parts.len() == 6 && parts.get(2..4) == Some(&["releases", "download"][..])
 }
 
+/// The author as shown: `Name (@handle)`, the name or the handle alone, else the owner.
+pub(crate) fn author_of(item: &Item) -> String {
+    match item.author.name.as_deref().filter(|n| !n.trim().is_empty()) {
+        Some(name) if !item.author.handle.is_empty() => format!("{name} (@{})", item.author.handle),
+        Some(name) => name.to_string(),
+        None if !item.author.handle.is_empty() => format!("@{}", item.author.handle),
+        None => item.owner.clone(),
+    }
+}
+
 /// The item `link` names, at the version it asks for (or the newest that runs on `app`).
 pub fn resolve(index: &Index, link: &Link, app: &semver::Version) -> Result<Resolved, Refusal> {
     let kind = link.kind.index_kind();
@@ -394,12 +404,7 @@ pub fn resolve(index: &Index, link: &Link, app: &semver::Version) -> Result<Reso
         return Err(Refusal::Revoked(None));
     }
     let warning = revocation(index, &item.id, Some(&version), "warn").map(|r| r.reason.clone().unwrap_or_default());
-    let author = match item.author.name.as_deref().filter(|n| !n.trim().is_empty()) {
-        Some(name) if !item.author.handle.is_empty() => format!("{name} (@{})", item.author.handle),
-        Some(name) => name.to_string(),
-        None if !item.author.handle.is_empty() => format!("@{}", item.author.handle),
-        None => item.owner.clone(),
-    };
+    let author = author_of(item);
     Ok(Resolved {
         kind: link.kind,
         id: item.id.clone(),

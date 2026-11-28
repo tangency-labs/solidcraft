@@ -546,3 +546,431 @@ fn the_question_ignores_keys_for_its_first_second() {
     crate::ui_kit::set_dialog_mnemonics(false);
     assert!(h.app.workshop.asked_at.is_none());
 }
+
+/// The test index, good until long after the test runs (the window checks freshness against the
+/// clock when an item is chosen).
+fn lasting_index() -> Value {
+    let mut value = index_json(&test_key().0);
+    value["expires_at"] = json!("2099-01-01T00:00:00.000Z");
+    value
+}
+
+fn read_with(answer: Signed, seen: Option<&Path>, app: &semver::Version) -> Result<(index::Index, Vec<solidcraft_engine::workshop::Item>), Refusal> {
+    read_floor(answer, seen, 0, app)
+}
+
+/// [`read_with`] for a window that already holds the sequence `floor`.
+fn read_floor(
+    answer: Signed,
+    seen: Option<&Path>,
+    floor: u64,
+    app: &semver::Version,
+) -> Result<(index::Index, Vec<solidcraft_engine::workshop::Item>), Refusal> {
+    let keys = keys();
+    let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    browser::read(&keys, &|_| Ok(answer.clone()), seen, floor, NOW, app)
+}
+
+/// Wait for the window's background read to finish, and give the catalog it left.
+fn wait_settled(shared: &Arc<std::sync::Mutex<browser::Shared>>) -> solidcraft_engine::workshop::Catalog {
+    for _ in 0..500 {
+        let catalog = browser::lock(shared).catalog.clone();
+        if catalog.state != solidcraft_engine::workshop::State::Loading {
+            return catalog;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the read never settled");
+}
+
+fn nightly() -> semver::Version {
+    semver::Version::parse("0.48.0-nightly.20261126.1").unwrap()
+}
+
+/// The window lists what a link could open, at the version a link without one gets: the newest
+/// that runs here and isn't blocked. A file from anywhere but the Workshop (or a library's GitHub
+/// release) leaves the item out, as the link would refuse it.
+#[test]
+fn the_window_lists_what_a_link_could_open() {
+    crate::i18n::install();
+    let _language = solidcraft_ui_text::scope("en");
+    use solidcraft_engine::workshop::{Kind as K, Tier as T};
+    let (index, items) = read_with(signed(&lasting_index()), None, &nightly()).unwrap();
+    assert_eq!(index.sequence, 42);
+    let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids, ["gears", "k3x9", "tangency-labs.fasteners"]);
+    let gears = &items[0];
+    assert_eq!((gears.kind, gears.tier, gears.version.as_deref()), (K::Plugin, T::Community, Some("1.2.0")));
+    assert_eq!(gears.permissions, ["commands:sketch", "files:read"]);
+    assert_eq!(gears.warning.as_deref(), Some("Slow on big sketches"));
+    assert_eq!((gears.size, gears.author.as_str()), (48211, "A Maker (@maker)"));
+    assert_eq!(gears.page_url, "https://workshop.solidcraft.io/plugin/maker/gears");
+    // 1.2.0 of the bracket is blocked: the list offers 1.1.0, as the link does.
+    assert_eq!((items[1].kind, items[1].version.as_deref(), items[1].tier), (K::Model, Some("1.1.0"), T::Unverified));
+    assert_eq!(items[1].page_url, "https://workshop.solidcraft.io/model/bherbruck/wall-mount-shelf-bracket");
+    assert_eq!(
+        (items[2].kind, items[2].tier, items[2].page_url.as_str()),
+        (K::Part, T::Official, "https://workshop.solidcraft.io/part/tangency-labs/fasteners")
+    );
+    assert_eq!(browser::meta_line(gears), "Plugin · Community · A Maker (@maker) · 47 KB");
+
+    // On an older SolidCraft every version of the plugin needs a newer one: listed, with no
+    // version and the version it needs.
+    let (_, old) = read_with(signed(&lasting_index()), None, &semver::Version::new(0, 30, 0)).unwrap();
+    let gears = old.iter().find(|i| i.id == "gears").unwrap();
+    assert_eq!((gears.version.as_deref(), gears.needs_app.as_deref(), gears.size), (None, Some("0.40.0"), 0));
+}
+
+/// A huge index is read to its first [`browser::MAX_ITEMS`] items; unknown kinds are skipped.
+#[test]
+fn a_huge_or_odd_index_is_read_safely() {
+    let mut value = lasting_index();
+    let many: Vec<Value> = (0..browser::MAX_ITEMS + 50)
+        .map(|n| {
+            json!({"id": std::format!("m{n}"), "kind": if n == 3 { "theme" } else { "model" }, "owner": "o", "slug": std::format!("m{n}"), "name": "M",
+                   "versions": [{"version": "1.0.0", "files": [file("design", "https://workshop.solidcraft.io/api/files/1/download")]}]})
+        })
+        .collect();
+    value["items"] = Value::Array(many);
+    let (_, items) = read_with(signed(&value), None, &nightly()).unwrap();
+    assert_eq!(items.len(), browser::MAX_ITEMS - 1, "one unknown kind skipped, the rest cut at the limit");
+    assert!(items.iter().all(|i| i.id != "m3"));
+    // Oversized, empty or zero-byte files, and bad checksums, are left out like any refused item.
+    let mut odd = lasting_index();
+    odd["items"][0]["versions"] = json!([{"version": "1.0.0", "files": [{"name": "f", "role": "package", "size": 0, "sha256": SHA, "url": "https://workshop.solidcraft.io/x"}]}]);
+    odd["items"][1]["versions"] = json!([{"version": "1.0.0", "files": [{"name": "f", "role": "design", "size": u64::MAX, "sha256": "nothex", "url": "https://workshop.solidcraft.io/x"}]}]);
+    odd["items"][2]["versions"] = json!([]);
+    let (_, items) = read_with(signed(&odd), None, &nightly()).unwrap();
+    assert!(items.is_empty(), "{items:?}");
+}
+
+/// A read that fails keeps the last good list and says why; a good one replaces it. An older
+/// sequence than one seen is a failed read too.
+#[test]
+fn a_bad_or_replayed_index_keeps_the_last_good_list() {
+    let dir = std::env::temp_dir().join(std::format!("sc-workshop-browse-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let seen = dir.join("index-sequence");
+    let mut shared = browser::Shared::default();
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), Some(&seen), &nightly()));
+    assert_eq!(shared.catalog.state, solidcraft_engine::workshop::State::Ready);
+    assert_eq!((shared.catalog.items.len(), shared.catalog.sequence), (3, 42));
+    let mut tampered = signed(&lasting_index());
+    tampered.body.push(b' ');
+    browser::settle(&mut shared, read_with(tampered, Some(&seen), &nightly()));
+    assert_eq!(shared.catalog.state, solidcraft_engine::workshop::State::Failed);
+    assert!(shared.catalog.error.as_deref().is_some_and(|e| !e.is_empty()));
+    assert_eq!(shared.catalog.items.len(), 3, "the last good list stays");
+    assert!(shared.index.is_some());
+    let mut older = lasting_index();
+    older["sequence"] = json!(41);
+    assert_eq!(read_with(signed(&older), Some(&seen), &nightly()).err(), Some(Refusal::Replayed { seen: 42, got: 41 }));
+    assert_eq!(read_with(signed(&lasting_index()), None, &nightly()).map(|(_, i)| i.len()).ok(), Some(3));
+    let offline = {
+        let keys = keys();
+        let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        browser::read(&keys, &|_| Err("offline".into()), None, 0, NOW, &nightly())
+    };
+    assert_eq!(offline.err(), Some(Refusal::Unreachable("offline".into())));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Choosing an item asks the link's question, about the version the list showed; nothing starts
+/// while another item is asked about, and an item the index doesn't list (or an expired index)
+/// is refused with words. Without the host's services (tests, the browser build) the Plugins
+/// menu doesn't offer the window and the session has no Workshop.
+#[test]
+fn choosing_an_item_asks_as_a_link_does() {
+    use solidcraft_engine::workshop::Kind as K;
+    let mut h = crate::scenario::Harness::new();
+    assert!(!browser::offered(&h.app));
+    assert!(h.app.session.workshop.is_none());
+    assert!(!crate::plugin_menu::rows(&h.app).iter().any(|r| r.id == "workshop"));
+    browser::open(&mut h.app);
+    assert!(!h.app.workshop.browser.open, "no window without the Workshop");
+    assert!(browser::control(&mut h.app, &json!({"open": true})).is_err());
+
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    let asked = h.app.workshop.ask.clone().expect("the question");
+    assert_eq!((asked.id.as_str(), asked.version.to_string()), ("gears", "1.2.0".to_string()));
+    assert_eq!(asked.permissions, ["commands:sketch", "files:read"]);
+    // Busy: the question stays as it was.
+    browser::choose(&mut h.app, K::Model, "k3x9");
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
+    h.app.workshop.ask = None;
+    browser::choose(&mut h.app, K::Model, "k3x9");
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.version.to_string()), Some("1.1.0".to_string()));
+    h.app.workshop.ask = None;
+    // Not listed under that kind, or not at all.
+    browser::choose(&mut h.app, K::Model, "gears");
+    browser::choose(&mut h.app, K::Plugin, "nothing");
+    assert!(h.app.workshop.ask.is_none());
+    // An index that has expired since it was read is refused.
+    let mut expired = lasting_index();
+    expired["expires_at"] = json!("2026-11-20T00:00:00Z");
+    let (index, items) = read_with(signed(&expired), None, &nightly()).unwrap();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), Ok((index, items)));
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert!(h.app.workshop.ask.is_none());
+}
+
+/// The session's `workshop.list` reads the window's list through the host.
+#[test]
+fn the_session_lists_what_the_window_shows() {
+    let mut h = crate::scenario::Harness::new();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| Err("offline".to_string())));
+    h.app.services.http_download =
+        Some(Arc::new(|_: &str, _: &Path, _: &dyn Fn(u64, Option<u64>) -> bool| Err(crate::update::FetchError::Failed("offline".into()))));
+    browser::install(&mut h.app);
+    assert!(browser::offered(&h.app) == cfg!(not(target_arch = "wasm32")));
+    let listed = h.app.session.execute("workshop.list", &json!({"kind": "plugin"})).unwrap();
+    assert_eq!(listed["state"], "ready");
+    assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(listed["items"][0]["id"], "gears");
+    assert!(crate::plugin_menu::rows(&h.app).iter().any(|r| r.id == "workshop"));
+
+    // `ui.workshop` drives the window as clicks would; bad values are refused.
+    let shown = browser::control(&mut h.app, &json!({"open": true, "kind": "plugin"})).unwrap();
+    assert_eq!((shown["open"].as_bool(), shown["state"].as_str()), (Some(true), Some("ready")));
+    assert_eq!(shown["shown"], json!(["gears"]));
+    let searched = browser::control(&mut h.app, &json!({"kind": "all", "query": "shelf"})).unwrap();
+    assert_eq!(searched["shown"], json!(["k3x9"]));
+    for bad in [
+        json!({"kind": "theme"}),
+        json!({"query": 3}),
+        json!({"query": "x".repeat(201)}),
+        json!({"open": "yes"}),
+        json!({"choose": "nothing"}),
+        json!({"choose": 1}),
+    ] {
+        assert!(browser::control(&mut h.app, &bad).is_err(), "{bad}");
+    }
+    let asked = browser::control(&mut h.app, &json!({"choose": "gears"})).unwrap();
+    assert_eq!(asked["asking"], "gears");
+    assert!(browser::control(&mut h.app, &json!({"open": false})).is_ok_and(|v| v["open"] == false));
+}
+
+/// The window as it draws, in English and German: names, versions, badges and buttons, and the
+/// search narrowing the list. Pictures for review with `SOLIDCRAFT_WORKSHOP_EVIDENCE=<folder>`.
+#[test]
+fn the_window_draws_the_list_and_searches_it() {
+    for (language, install, tier) in [("en", "Install…", "Community"), ("de", "Installieren…", "Community")] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = language.into();
+        browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+        h.app.workshop.browser.open = true;
+        let ctx = crate::fonts::test_context();
+        let size = egui::vec2(1280.0, 800.0);
+        let mut textures = std::collections::HashMap::new();
+        let mut draw = |h: &mut crate::scenario::Harness, name: &str| {
+            let mut text = String::new();
+            for frame in 0..6 {
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output =
+                    ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
+                        crate::ui_kit::scope(ui, |ui| browser::show(&mut h.app, ui.ctx()));
+                    });
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                if frame == 5 {
+                    text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                    if let Ok(directory) = std::env::var("SOLIDCRAFT_WORKSHOP_EVIDENCE") {
+                        let image = crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+                        std::fs::create_dir_all(&directory).unwrap();
+                        image.save(Path::new(&directory).join(std::format!("workshop-browser-{name}-{language}-1280x800.png"))).unwrap();
+                    }
+                }
+            }
+            text
+        };
+        let all = draw(&mut h, "all");
+        for expected in ["Gears 1.2.0", "Wall mount shelf bracket 1.1.0", install, tier] {
+            assert!(all.contains(expected), "{language}: {expected} missing in {all}");
+        }
+        assert!(!all.contains("Elsewhere"), "{all}");
+        h.app.workshop.browser.query = "shelf".into();
+        let searched = draw(&mut h, "search");
+        assert!(searched.contains("Wall mount shelf bracket") && !searched.contains("Gears 1.2.0"), "{searched}");
+        h.app.workshop.browser.query.clear();
+        h.app.workshop.browser.kind = 3;
+        let parts = draw(&mut h, "parts");
+        assert!(parts.contains("Fasteners") && !parts.contains("Gears 1.2.0"), "{parts}");
+        assert!(h.app.workshop.browser.open);
+    }
+}
+
+/// With no sequence file (no data folder, or one that can't be read) a refresh may not go below
+/// the list already in memory: an older, still valid index fails and the newer list stays.
+#[test]
+fn a_refresh_without_the_sequence_file_never_goes_back() {
+    use solidcraft_engine::workshop::State;
+    let mut shared = browser::Shared::default();
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert_eq!(shared.catalog.sequence, 42);
+    let mut older = lasting_index();
+    older["sequence"] = json!(41);
+    let outcome = read_floor(signed(&older), None, shared.catalog.sequence, &nightly());
+    assert_eq!(outcome.as_ref().err(), Some(&Refusal::Replayed { seen: 42, got: 41 }));
+    browser::settle(&mut shared, outcome);
+    assert_eq!(shared.catalog.state, State::Failed);
+    assert!(shared.catalog.error.as_deref().is_some_and(|e| !e.is_empty()));
+    assert_eq!((shared.catalog.sequence, shared.catalog.items.len()), (42, 3), "the newer list stays");
+    // The same sequence, or a newer one, is read.
+    assert!(read_floor(signed(&lasting_index()), None, 42, &nightly()).is_ok());
+}
+
+/// An item chosen from a list read more than five minutes ago isn't asked about: the list is read
+/// again first, so a block published since can't be missed. A fresh list asks as before.
+#[test]
+fn choosing_from_an_old_list_reads_it_again_first() {
+    use solidcraft_engine::workshop::{Kind as K, State};
+    let mut h = crate::scenario::Harness::new();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = calls.clone();
+    h.app.services.workshop_get = Some(Arc::new(move |_: &str| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("offline".to_string())
+    }));
+    browser::lock(&h.app.workshop.browser.shared).fetched_at = Some(unix_now() - 301);
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert!(h.app.workshop.ask.is_none(), "an old list asks nothing");
+    assert!(h.app.status.is_some(), "and says why");
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "the list was read again");
+    assert_eq!((catalog.state, catalog.items.len()), (State::Failed, 3), "the failed read keeps the old list");
+    // Still old: it can't be asked about even though the read failed.
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert!(h.app.workshop.ask.is_none());
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    // Read just now: the question.
+    browser::lock(&h.app.workshop.browser.shared).fetched_at = Some(unix_now());
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
+}
+
+/// A link's lookup that stored a newer sequence than the window's list stops the window offering
+/// that list's items: `choose` reads again instead of asking.
+#[test]
+fn choosing_from_a_list_older_than_a_stored_sequence_reads_again() {
+    use solidcraft_engine::workshop::Kind as K;
+    let mut h = crate::scenario::Harness::new();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| Err("offline".to_string())));
+    browser::choose_after(&mut h.app, K::Plugin, "gears", Some(43));
+    assert!(h.app.workshop.ask.is_none(), "a list below the stored sequence asks nothing");
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    browser::choose_after(&mut h.app, K::Plugin, "gears", Some(42));
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
+}
+
+/// Lookups and window reads that run together never leave a lower sequence in the file.
+#[test]
+fn the_stored_sequence_never_goes_down_under_concurrent_reads() {
+    let dir = std::env::temp_dir().join(std::format!("sc-workshop-seq-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let seen = dir.join("index-sequence");
+    let keys = keys();
+    let mut answers = Vec::new();
+    for sequence in [40u64, 44, 41, 43, 42, 45, 39, 44] {
+        let mut value = lasting_index();
+        value["sequence"] = json!(sequence);
+        answers.push(signed(&value));
+    }
+    std::thread::scope(|scope| {
+        for answer in &answers {
+            let (keys, seen) = (&keys, &seen);
+            scope.spawn(move || {
+                let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+                let _ = fetch_index(&keys, &|_| Ok(answer.clone()), Some(seen), 0, NOW);
+            });
+        }
+    });
+    assert_eq!(stored_sequence(Some(&seen)), Some(45));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The window's filtering is worked out once per query, kind or list, and gives what the filter
+/// keeps (any case, every word).
+#[test]
+fn the_window_filters_once_per_change() {
+    let mut shared = browser::Shared::default();
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert_eq!(*shared.kept("", 0), [0, 1, 2]);
+    assert_eq!(*shared.kept("SHELF", 0), [1]);
+    assert_eq!(*shared.kept("maker helical", 1), [0]);
+    assert_eq!(*shared.kept("", 3), [2]);
+    assert!(shared.kept("shelf", 1).is_empty());
+    let first = shared.kept("gear", 0);
+    assert!(Arc::ptr_eq(&first, &shared.kept("gear", 0)), "the same answer is reused");
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert!(!Arc::ptr_eq(&first, &shared.kept("gear", 0)), "a new list is filtered again");
+}
+
+/// A panic in the background read settles it as failed: the window isn't left loading, and the
+/// next refresh runs.
+#[test]
+fn a_panic_in_the_read_does_not_leave_the_window_loading() {
+    use solidcraft_engine::workshop::State;
+    let mut h = crate::scenario::Harness::new();
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| -> Result<Signed, String> { panic!("the fetch broke") }));
+    browser::refresh(&mut h.app);
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(catalog.state, State::Failed);
+    assert!(catalog.error.as_deref().is_some_and(|e| !e.is_empty()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = calls.clone();
+    h.app.services.workshop_get = Some(Arc::new(move |_: &str| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("offline".to_string())
+    }));
+    browser::refresh(&mut h.app);
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "a new read started");
+}
+
+/// Opening the window on an empty list starts the read on a worker (here one that can't reach
+/// the Workshop), and an old failure doesn't show while a new read runs.
+#[test]
+fn opening_the_window_on_an_empty_list_starts_the_read() {
+    use solidcraft_engine::workshop::State;
+    let mut h = crate::scenario::Harness::new();
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Err("offline".to_string())
+    }));
+    h.app.services.http_download =
+        Some(Arc::new(|_: &str, _: &Path, _: &dyn Fn(u64, Option<u64>) -> bool| Err(crate::update::FetchError::Failed("offline".into()))));
+    if !browser::offered(&h.app) {
+        return;
+    }
+    let opened = browser::control(&mut h.app, &json!({"open": true})).unwrap();
+    assert_eq!(opened["open"], true);
+    assert_eq!(opened["state"], "loading", "the read started");
+    assert!(opened["error"].is_null());
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(catalog.state, State::Failed);
+    assert!(catalog.error.is_some());
+    let again = browser::control(&mut h.app, &json!({"open": true})).unwrap();
+    assert_eq!(again["state"], "failed", "a failed list isn't read again just by opening");
+}
+
+/// Names, summaries, authors and warnings from the index are cut to a sane length, on a
+/// character boundary.
+#[test]
+fn long_texts_from_the_index_are_cut() {
+    let mut value = lasting_index();
+    value["items"][0]["name"] = json!("é".repeat(500));
+    value["items"][0]["summary"] = json!("s".repeat(3000));
+    value["items"][0]["author"] = json!({"handle": "maker", "name": "n".repeat(500)});
+    value["revoked"][1]["reason"] = json!("ü".repeat(900));
+    let (_, items) = read_with(signed(&value), None, &nightly()).unwrap();
+    let gears = &items[0];
+    assert_eq!(gears.name.chars().count(), 200);
+    assert_eq!(gears.summary.chars().count(), 2000);
+    assert_eq!(gears.author.chars().count(), 200);
+    assert_eq!(gears.warning.as_ref().map(|w| w.chars().count()), Some(500));
+}

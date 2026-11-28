@@ -197,6 +197,7 @@ pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
 pub mod weld;
+pub mod workshop;
 
 pub use check::Contract;
 pub use check::Issue;

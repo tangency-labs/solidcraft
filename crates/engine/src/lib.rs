@@ -67,6 +67,7 @@ pub mod upright_image;
 pub mod usage;
 pub mod view;
 mod view_context;
+pub mod workshop;
 
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
@@ -1005,6 +1006,9 @@ pub struct Session {
     /// How the host uploads a model to EasyPrint (`file.open_in_easyprint`); `None`: it can't. It
     /// belongs to the session like `param_check`, so it survives opening and starting designs.
     pub easyprint_upload: Option<EasyPrintUpload>,
+    /// The host's Workshop catalog (`workshop.list`, `workshop.refresh`); `None`: this app has
+    /// none. The session's, like `easyprint_upload`, so it survives opening and starting designs.
+    pub workshop: Option<workshop::Workshop>,
     /// Whether print faces (`body.print_face`) are saved with the design and kept when one is
     /// opened (#11512). On by default, so scripts and the command line keep them; the app sets it
     /// from its "Keep print faces" preference, which is off unless the user turns it on. Off: a
@@ -1553,6 +1557,7 @@ impl Session {
             plugin_forms_interactive: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
+            workshop: None,
             keep_print_faces: true,
             linked_bodies: true,
             live_links: None,
@@ -1655,6 +1660,7 @@ impl Session {
         plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
+        let workshop = self.workshop.take();
         let keep_print_faces = self.keep_print_faces;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
@@ -1692,6 +1698,7 @@ impl Session {
         self.plugin_state.link_read_source = Default::default();
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
+        self.workshop = workshop;
         self.keep_print_faces = keep_print_faces;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
@@ -3954,6 +3961,7 @@ impl Session {
             plugin_forms_interactive: self.plugin_forms_interactive,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
+            workshop: self.workshop.clone(),
             keep_print_faces: self.keep_print_faces,
             linked_bodies: self.linked_bodies,
             live_links: None,

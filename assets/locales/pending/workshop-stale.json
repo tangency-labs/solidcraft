@@ -1,0 +1,26 @@
+{
+  "en": {
+    "workshop.stale": "The list is more than five minutes old, so it is being read again. Choose the item again when it is done."
+  },
+  "de": {
+    "workshop.stale": "Die Liste ist über fünf Minuten alt und wird neu gelesen. Wähle den Eintrag danach erneut aus."
+  },
+  "ja": {
+    "workshop.stale": "一覧が5分以上前のものなので、読み込み直しています。完了後にもう一度項目を選んでください。"
+  },
+  "zh": {
+    "workshop.stale": "列表已超过五分钟,正在重新读取。完成后请再次选择该项目。"
+  },
+  "ko": {
+    "workshop.stale": "목록이 5분 넘게 지나 다시 읽는 중입니다. 완료되면 항목을 다시 선택하세요."
+  },
+  "vi": {
+    "workshop.stale": "Danh sách đã cũ hơn năm phút nên đang được đọc lại. Hãy chọn lại mục khi xong."
+  },
+  "ar": {
+    "workshop.stale": "القائمة أقدم من خمس دقائق، لذا تُقرأ من جديد. اختر العنصر مرة أخرى بعد الانتهاء."
+  },
+  "he": {
+    "workshop.stale": "הרשימה ישנה מחמש דקות ולכן היא נקראת מחדש. לאחר מכן בחרו את הפריט שוב."
+  }
+}

@@ -657,6 +657,8 @@ view.zoom_mode                    the view: camera only: crates/ui-egui/src/nav_
 weld.create                       a weld graphic record, no geometry: crates/engine/src/tests.rs and crates/ui-egui/src/dialogs_weld_tests.rs
 weld.delete                       removes a weld graphic record: crates/engine/src/tests.rs
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
+workshop.list                     the Workshop catalog, no geometry: crates/engine/src/schema/workshop_tests.rs
+workshop.refresh                  the Workshop catalog, no geometry: crates/engine/src/schema/workshop_tests.rs
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the
 # pull request that gives one a case in solidcore's corpus or a test moves its line to the section

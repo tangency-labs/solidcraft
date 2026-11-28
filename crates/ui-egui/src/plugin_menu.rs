@@ -38,6 +38,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 const INSTALL: &str = "install";
 /// Last import report…: the report of the last file an importer plugin opened, again.
 const LAST_REPORT: &str = "last_import_report";
+/// The Plugins menu's Browse the Workshop… row (`workshop::browser`).
+const WORKSHOP: &str = "workshop";
 
 /// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
 pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
@@ -1175,14 +1177,17 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
     listed
 }
 
-/// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
+/// The menu's rows: Install plugin…, Browse the Workshop… (desktop), Last import report…, a separator, then each
+/// plugin's entries.
 pub(crate) fn rows(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     use crate::ui_kit::Item;
-    let mut rows = vec![
-        Item::action(INSTALL, app.tr("ui.plugin_menu_install"), ""),
-        Item::action(LAST_REPORT, app.tr("ui.plugin_menu_last_report"), "").on_if(app.import_report.is_some()),
-        Item::sep(),
-    ];
+    let mut rows = vec![Item::action(INSTALL, app.tr("ui.plugin_menu_install"), "")];
+    // The desktop app reads the Workshop's list; the browser build and tests have no way to.
+    if crate::workshop::browser::offered(app) {
+        rows.push(Item::action(WORKSHOP, app.tr("workshop.browse"), ""));
+    }
+    rows.push(Item::action(LAST_REPORT, app.tr("ui.plugin_menu_last_report"), "").on_if(app.import_report.is_some()));
+    rows.push(Item::sep());
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(Item::action("empty", app.tr("ui.plugin_menu_empty"), "").on_if(false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
@@ -1258,6 +1263,10 @@ pub(crate) fn choose(app: &mut SolveApp, id: &str) {
     }
     if id == LAST_REPORT {
         crate::import_report::reopen(app);
+        return;
+    }
+    if id == WORKSHOP {
+        crate::workshop::browser::open(app);
         return;
     }
     let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);

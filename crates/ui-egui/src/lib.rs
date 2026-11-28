@@ -1465,6 +1465,7 @@ impl SolveApp {
             applied_system_fonts: false,
         };
         easyprint_ui::install(&mut app);
+        workshop::browser::install(&mut app);
         app
     }
 
