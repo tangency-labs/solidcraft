@@ -1392,8 +1392,8 @@ pub const ELEMENTS: &[Element] = &[
         color_popover(ui, &mut [204, 208, 214]);
     }),
     element!("report_list", |ui, _| {
-        report_list(ui, "sample", 120.0, |ui| {
-            report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
+        report_list(ui, "sample", 120.0, &[Column::new("Report", 1.0).flex(), Column::new("Actions", 0.0).icon_only()], "", |ui, table| {
+            report_header(ui, table, "sample", "2026-10-18 21:04:12 · Internal error ×3", |ui| {
                 bin_button(ui, "Delete");
             });
             text(ui, "solid.fillet · replayable", Text::MonoNote("sample"));
@@ -1407,9 +1407,34 @@ pub const ELEMENTS: &[Element] = &[
     element!("empty_box", |ui, _| {
         empty_box(ui, "empty", "No crash reports.");
     }),
+    element!("report_card", "dialog:card:gallery_crash", None, |ui, _| {
+        report_card(
+            ui,
+            "gallery_crash",
+            ReportCardSummary {
+                title: "Fillet stopped unexpectedly",
+                subtitle: "24 Nov, 09:30 · replayable",
+                icon: "warning",
+                ink: Tokens::get().form_error,
+            },
+            ReportCardDetails {
+                fields: &[
+                    ("version", "Version", "0.49.0 · abc1234"),
+                    ("command", "Command", "solid.fillet"),
+                    ("system", "System", "Windows · x86_64"),
+                ],
+                code: "index out of bounds\nblends.rs:418",
+            },
+            &mut true,
+            "Copy path",
+            |_, _| {},
+        );
+    }),
     element!("report_header", |ui, _| {
-        report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
-            bin_button(ui, "Delete");
+        report_list(ui, "sample", 120.0, &[Column::new("Report", 1.0).flex(), Column::new("Actions", 0.0).icon_only()], "", |ui, table| {
+            report_header(ui, table, "sample", "2026-10-18 21:04:12 · Internal error ×3", |ui| {
+                bin_button(ui, "Delete");
+            });
         });
     }),
     element!("parameter_import", |ui, _| {
@@ -1645,8 +1670,10 @@ pub const ELEMENTS: &[Element] = &[
         text_lines(ui, "gallery", "Licence\nSecond line");
     }),
     element!("report_divider", "dialog:divider:gallery_report", None, |ui, _| {
-        report_list(ui, "gallery_report", row_height() * 3.0, |ui| {
-            text(ui, "Report message", Text::Report("gallery_report", false));
+        report_list(ui, "gallery_report", row_height() * 3.0, &[Column::new("Report", 1.0).flex()], "", |ui, table| {
+            table.row(ui, "message", false, |row| {
+                row.cell(|ui| text(ui, "Report message", Text::Cell));
+            });
             report_divider(ui, "gallery_report");
         });
     }),

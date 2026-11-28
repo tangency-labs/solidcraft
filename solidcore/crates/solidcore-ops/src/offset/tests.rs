@@ -1026,6 +1026,137 @@ fn the_top_moves_out() {
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
+/// An 82 x 47 x 20 box with a post r 10, 10 high, about each corner (#14370), the posts'
+/// outer top edges rounded 6. The round is a quarter tube r 6 about the circle r 4 at z 4
+/// round the post's axis, three quarters of a turn, ending at the box's two walls through the
+/// axis.
+fn posts_with_rounded_tops() -> Body {
+    use std::f64::consts::FRAC_1_SQRT_2;
+    let (a, c) = (41.0, 23.5);
+    let mut b = make_box([-a, -c, 0.0], [2.0 * a, 2.0 * c, 20.0]).unwrap();
+    for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        // the cylinder's seam (its +x side) turned to point into the box, so the union leaves
+        // each post's side one face, as the reporter's extrusion makes it
+        let post = make_cylinder([0.0; 3], 10.0, 10.0).unwrap();
+        let (co, s) = (-sx * FRAC_1_SQRT_2, -sy * FRAC_1_SQRT_2);
+        post.transform(&[
+            [co, s, 0.0, 0.0],
+            [-s, co, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [sx * a, sy * c, 0.0, 1.0],
+        ])
+        .unwrap();
+        b = crate::boolean::boolean(b, post, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    // each post's top edge, through its point outward on the diagonal
+    let h = 10.0 * FRAC_1_SQRT_2;
+    let rims: Vec<usize> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .map(|&(sx, sy)| edge_at(&b, [sx * (a + h), sy * (c + h), 10.0]))
+        .collect();
+    blend(&b, Blend::Round, &rims, &[6.0], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The posts' body shelled t inward, open at the top (part of #14370, whose body also has
+/// the box's corners above the posts chamfered).
+/// The input has 18 faces (4 walls, the bottom, the top, and 4 each of posts, rounds and post
+/// tops), 48 edges and 32 vertices. The shell keeps the 17 faces left with their 48 edges and
+/// 32 vertices, adds their 17 offsets with the 40 edges and 24 vertices off the top, and the
+/// top's ring with its inner 8 edges and 8 vertices: 35 faces, 96 edges, 64 vertices, one
+/// shell. The round's offset is the tube r 6 - t about the same circle, so its edge along the
+/// post top's offset is the circle r 4 at z = 10 - t; the walls move in by t, so that edge runs
+/// on past the round's ends, three quarters of a turn, to the walls' offsets, at sqrt(16 - t^2)
+/// from the axis along them, and through its point outward on the diagonal.
+#[test]
+fn a_box_whose_posts_have_rounded_tops_shells() {
+    use solidcore::query::api_queries::{point_distance, vertex_distance, vertex_on_edge};
+    use std::f64::consts::FRAC_1_SQRT_2;
+    all_fixes();
+    let (a, c) = (41.0, 23.5);
+    // ops computes no square root, so sqrt(16 - t^2) is written out
+    for (t, along) in [(0.5, 3.968_626_966_596_886), (1.0, 3.872_983_346_207_417)] {
+        let b = posts_with_rounded_tops();
+        assert_eq!(b.counts().unwrap(), [18, 48, 32]);
+        let o = order(&b);
+        let lid = through(&b, &o, [0.0, 0.0, 20.0]);
+        shell(&b, &o, &[lid], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        assert_eq!(b.counts().unwrap(), [35, 96, 64], "t {t}");
+        let record = b.to_record().unwrap().0;
+        assert_eq!(record.shells.len(), 1, "t {t}");
+        assert!(b.is_manifold_solid().unwrap(), "t {t}");
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let k = Kernel::default();
+        let brep = b.lock();
+        for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            // each end of the round's edge along the post top's offset: the record's vertex
+            // nearest the closed form, within its own tolerance of it, and the body's vertex
+            // there
+            let ends = [
+                [sx * (a - t), sy * (c - along), 10.0 - t],
+                [sx * (a - along), sy * (c - t), 10.0 - t],
+            ]
+            .map(|[x, y, z]| {
+                let want = Point3::new(x, y, z);
+                let (i, near) = (0..record.vertices.len())
+                    .map(|i| {
+                        let v = &record.vertices[i];
+                        let p = Point3::new(v.point[0], v.point[1], v.point[2]);
+                        (i, point_distance(p, want).unwrap().value)
+                    })
+                    .fold((0, f64::INFINITY), |m, x| if x.1 < m.1 { x } else { m });
+                let tol = record.vertices[i].tolerance;
+                assert!(
+                    near <= tol,
+                    "t {t}: no vertex at {want:?} ({near}, tolerance {tol})"
+                );
+                let id = *brep
+                    .vertex_list()
+                    .iter()
+                    .min_by(|&&u, &&w| {
+                        let d = |v| vertex_distance(&brep, v, want).unwrap().value;
+                        d(u).total_cmp(&d(w))
+                    })
+                    .unwrap();
+                (u32::try_from(i).unwrap(), id)
+            });
+            // the edge joining the two in the record runs through the arc's point outward on
+            // the diagonal: the body's edge nearest that point ends at both, and the point is
+            // within that edge's tolerance of it
+            let joined = record
+                .edges
+                .iter()
+                .find(|e| {
+                    let [p, q] = e.vertices;
+                    [p, q] == [ends[0].0, ends[1].0] || [q, p] == [ends[0].0, ends[1].0]
+                })
+                .unwrap_or_else(|| panic!("t {t}: no edge joins the round's ends"));
+            let h = 4.0 * FRAC_1_SQRT_2;
+            let mid = Point3::new(sx * (a + h), sy * (c + h), 10.0 - t);
+            let (arc, on) = brep
+                .edge_list()
+                .iter()
+                .filter_map(|&e| {
+                    let p = edge_closest_point(&k, &brep, e, mid).ok()?;
+                    Some((e, p.closest.distance))
+                })
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .unwrap();
+            for (_, v) in ends {
+                assert!(vertex_on_edge(&k, &brep, v, arc).unwrap(), "t {t}");
+            }
+            assert!(
+                on <= joined.tolerance,
+                "t {t}: no edge through {mid:?} ({on}, tolerance {})",
+                joined.tolerance
+            );
+        }
+    }
+}
+
 /// `body` with its face through `at` split by the plane `z = height`.
 fn split_at_height(body: &Body, at: [f64; 3], height: f64) -> Body {
     let plane = ([0.0, 0.0, height], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);

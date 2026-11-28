@@ -111,7 +111,7 @@ fn dragging_a_docked_dialog_blocks_viewport_hover() {
 }
 
 /// #1335: a dialog keeps its size while its Select chip is hovered, and its title band
-/// drags it; reopening keeps its position.
+/// drags it; reopened, it is docked again.
 #[test]
 fn a_docked_dialog_keeps_its_size_under_the_pointer_and_moves_by_its_title() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
@@ -141,17 +141,19 @@ fn a_docked_dialog_keeps_its_size_under_the_pointer_and_moves_by_its_title() {
         h.frames(4);
         let viewport = h.app.viewport.rect.unwrap();
         assert!(viewport.contains(h.app.viewport.dialog_rect.unwrap().min));
-        let last = h.app.viewport.dialog_rect.unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
         h.step(&json!({"start":"sketch.create"})).unwrap();
         h.frames(6);
-        assert!((h.app.viewport.dialog_rect.unwrap().min - last.min).length() < 0.01, "reopening keeps the dragged position");
+        // Test change: a dragged dialog keeps its place only until it closes (#22388).
+        assert!((h.app.viewport.dialog_rect.unwrap().min - rest.min).length() < 0.01, "reopening opens docked");
     }
 }
+
+/// A dragged dialog stays while open and the next opens docked.
 #[test]
-fn command_dialogs_keep_the_dragged_position_after_closing() {
+fn a_dragged_dialog_stays_while_open_and_the_next_opens_docked() {
     use crate::scenario::Harness;
     use serde_json::json;
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
@@ -167,23 +169,15 @@ fn command_dialogs_keep_the_dragged_position_after_closing() {
         let rest = h.app.viewport.dialog_rect.unwrap();
         let title = crate::scenario::handle_at("dialog:title").unwrap();
         h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x-300.0,"y1":title.y+60.0,"steps":8}));
-        h.frames(4);
+        h.frames(10);
         let moved = h.app.viewport.dialog_rect.unwrap();
-        assert!((moved.min - rest.min - egui::vec2(-300.0, 60.0)).length() < 2.0);
+        assert!((moved.min - rest.min - egui::vec2(-300.0, 60.0)).length() < 2.0, "stays while open: {rest:?} -> {moved:?}");
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(4);
         assert!(h.app.dialog.is_none());
-        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.step(&json!({"start":"solid.extrude"})).unwrap();
         h.frames(6);
-        let fillet = h.app.viewport.dialog_rect.unwrap();
-        assert!((fillet.right_top() - moved.right_top()).length() < 2.0, "Extrude: {moved:?}, Fillet: {fillet:?}");
-        // A smaller window keeps the kept place on screen.
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.frames(4);
-        h.call("ui.resize", json!({"width":700.0,"height":500.0}));
-        h.step(&json!({"start":"solid.fillet"})).unwrap();
-        h.frames(6);
-        let viewport = h.app.viewport.rect.unwrap();
-        assert!(viewport.contains(h.app.viewport.dialog_rect.unwrap().min), "{viewport:?}");
+        let again = h.app.viewport.dialog_rect.unwrap();
+        assert!((again.min - rest.min).length() < 2.0, "the next opens docked: {rest:?} -> {again:?}");
     }
 }

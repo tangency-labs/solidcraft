@@ -125,6 +125,7 @@ pub fn run_api(site: &str, smoke: bool) -> Result<(), String> {
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
     println!("web-api-test: {}", drawing_test(&browser, server.port)?);
+    println!("web-api-test: {}", views_test(&browser, server.port)?);
     Ok(())
 }
 
@@ -263,6 +264,76 @@ fn start_and_run(tab: &mut Cdp, port: u16, step: &str, kept: &Value) -> Result<V
     wait_for(tab, &ready, &format!("the app starts ({step})"), |v| v == true)?;
     tab.eval(&format!("{DRAWING_TEST}({PLATE}, {kept})"))
 }
+
+/// "Reopen a design's views next time it opens" in the browser (#23271), in a tab of its own: a box
+/// saved in the browser's storage and turned to a camera of its own, the page left (as a person
+/// closes or reloads it: the app never quits), the app started again and the design opened: it
+/// shows that camera exactly, the direction, the zoom and the centre.
+fn views_test(browser: &Chrome, port: u16) -> Result<String, String> {
+    let mut tab = browser.new_tab()?;
+    tab.call("Page.bringToFront", json!({}))?;
+    let left = start_views_step(&mut tab, port, "left", &Value::Null)?;
+    let back = start_views_step(&mut tab, port, "back", &left)?;
+    Ok(format!("a design opened again after the page was left shows the camera it was left with: {back}"))
+}
+
+/// The app started afresh at `?views={step}`, then [`VIEWS_TEST`] run in it with `left`.
+fn start_views_step(tab: &mut Cdp, port: u16, step: &str, left: &Value) -> Result<Value, String> {
+    tab.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{port}{PREFIX}?views={step}")}))?;
+    let ready = format!("location.search === '?views={step}' && !!window.solidcraft && !document.getElementById('solidcraft_loading')");
+    wait_for(tab, &ready, &format!("the app starts ({step})"), |v| v == true)?;
+    tab.eval(&format!("{VIEWS_TEST}({left})"))
+}
+
+/// With `left` null: the setting turned on, a box saved as `Views test.sc` in the browser's storage
+/// (waited for until the browser has the file) and turned to a camera; that camera is the answer.
+/// Else that design opened again, its camera compared with `left`, and the setting turned off.
+const VIEWS_TEST: &str = r#"(async (left) => {
+    const app = window.solidcraft;
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const path = '/opfs/Views test.sc';
+    const deadline = performance.now() + 120_000;
+    const until = async (ready, message) => {
+        while (!(await ready())) {
+            check(performance.now() < deadline, message);
+            await new Promise(done => setTimeout(done, 100));
+        }
+    };
+    if ((await app.request('ui.recover')).dialog) await app.request('ui.recover', {action: 'later'});
+    await app.request('ui.home', {open: false});
+    if (left === null) {
+        await app.request('ui.prefs', {design_reopen_views: true});
+        await app.execute('solid.box', {length: 40, width: 30, height: 20, body_name: 'Views box'});
+        await app.execute('file.save_as', {path});
+        // The page goes next: only once the browser holds the file.
+        const stored = async () => {
+            const root = await navigator.storage.getDirectory();
+            const dirs = [root];
+            for await (const [name, handle] of root.entries()) if (handle.kind === 'directory') dirs.push(handle);
+            for (const dir of dirs) {
+                try { await dir.getFileHandle('Views test.sc'); return true; } catch (_) {}
+            }
+            return false;
+        };
+        await until(stored, 'the design reaches the browser storage');
+        await app.request('ui.camera', {yaw: 2.3, pitch: 0.25, distance: 150, target: [5, -3, 8]});
+        const ui = await app.request('ui.inspect');
+        return ui.camera;
+    }
+    const kept = Object.keys(localStorage).filter(key => key.endsWith('view-memory'));
+    check(kept.some(key => localStorage.getItem(key).includes('Views test.sc')), 'the views were kept when the page was left');
+    const shown = async () => (await app.execute('document.list', {})).documents.some(d => d.active && d.path === path);
+    if (!(await shown())) await app.execute('doc.open', {path});
+    await until(shown, 'the design opens again');
+    // Its parts meshed and every framing the open makes done.
+    for (let frame = 0; frame < 30; frame++) await app.request('ui.inspect');
+    const camera = (await app.request('ui.inspect')).camera;
+    const near = (a, b) => Math.abs(a - b) < 1e-6;
+    const same = ['yaw', 'pitch', 'distance'].every(key => near(camera[key], left[key])) && [0, 1, 2].every(i => near(camera.target[i], left.target[i]));
+    await app.request('ui.prefs', {design_reopen_views: false});
+    check(same, 'the camera came back as it was left: ' + JSON.stringify(camera) + ' instead of ' + JSON.stringify(left));
+    return {yaw: camera.yaw, pitch: camera.pitch, distance: camera.distance, target: camera.target};
+})"#;
 
 /// The script that models the plate and puts a top view at 1:2 on its A3 sheet.
 const PLATE: &str = include_str!("../../examples/acceptance/drawing_m2.json");

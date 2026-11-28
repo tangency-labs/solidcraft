@@ -9361,3 +9361,90 @@ fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
         assert!(rel(v, expected) < 1e-9, "{case}: {v} {expected}");
     }
 }
+
+/// The plate of the kernel case `22151-fillet-wing-cusps-tangent-chain-r2` (#22151): the body
+/// its blend takes, followed back through the copies and tags to a body the entry gives. A
+/// plate outlined by a centre arc R 25, wings R 15 at x = +-45 and tangent lines, extruded 20
+/// at -2 degrees, under a boss whose foot circle is the centre arcs' top edge, drafted alike.
+fn wing_plate() -> Body {
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/kernel_cases/fillets/22151-fillet-wing-cusps-tangent-chain-r2"
+    );
+    let entry: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{dir}.json")).unwrap()).unwrap();
+    let calls = entry["calls"].as_array().unwrap();
+    let given = entry["bodies"].as_object().unwrap();
+    let blend_call = calls
+        .iter()
+        .find(|c| c["op"].as_str().unwrap().starts_with("blend"))
+        .unwrap();
+    let mut id = blend_call["inputs"][0].as_str().unwrap().to_owned();
+    while !given.contains_key(&id) {
+        let made = calls
+            .iter()
+            .find(|c| {
+                c["outputs"]
+                    .as_array()
+                    .is_some_and(|o| o.iter().any(|x| x.as_str() == Some(id.as_str())))
+            })
+            .unwrap();
+        id = made["inputs"][0].as_str().unwrap().to_owned();
+    }
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(format!("{dir}.bodies.json.gz")).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let mut records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records[&id].take()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// A wing's four top edges (`side` +1 the right wing, -1 its mirror image) rounded r 2 in one
+/// blend: the inner arc at the boss's foot (concave), the outer arc and the two lines (convex).
+/// The volume it removes and the body.
+fn wing_rounded(side: f64) -> (f64, Body) {
+    let b = wing_plate();
+    let before = b.volume(1e-10).unwrap();
+    let edges: Vec<usize> = [
+        [24.301_584_610_165_037, 0.0, 20.0],
+        [26.789_241_024_481_07, -18.818_968_619_381_54, 20.0],
+        [59.301_584_610_165_02, 0.0, 20.0],
+        [26.789_241_024_481_12, 18.818_968_619_381_565, 20.0],
+    ]
+    .iter()
+    .map(|p| nearest_edge(&b, [side * p[0], p[1], p[2]]))
+    .collect();
+    blend(&b, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
+    (before - b.volume(1e-10).unwrap(), b)
+}
+
+/// #22151: each line runs tangentially into the arc at the boss's foot, so the wing's top
+/// narrows to zero width at two cusps. The rounds meet there as the blend corner's Roll-over
+/// (convex first, then the concave round with the lines' rounds' ends on the boss's cone as
+/// one chain), not the Mixed corner, whose Coons fill removed 46.650 here and 46.625 on the
+/// mirror image, following where the cone's parametric seam lay. A mirror image removes the
+/// same volume, to rounding, and no face is a Mixed corner's.
+#[test]
+fn a_wing_through_its_cusps_rolls_over_alike_on_either_side() {
+    rig_fixes();
+    let (right, rb) = wing_rounded(1.0);
+    let (left, lb) = wing_rounded(-1.0);
+    assert!(
+        (right - left).abs() <= 1e-9 * right,
+        "right {right} left {left}"
+    );
+    for b in [&rb, &lb] {
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let (_, brep) = kernel_copy(b);
+        for &f in brep.face_list() {
+            let s = brep.face(f).unwrap().surface.as_ref().unwrap();
+            let mixed = matches!(
+                s.procedural_blend(),
+                Some(BlendRef::Corner { corner, .. })
+                    if corner.kind() == solidcore::surface::procedural_blend::corner::CornerKind::Mixed
+            );
+            assert!(!mixed, "a Mixed corner's face");
+        }
+    }
+}

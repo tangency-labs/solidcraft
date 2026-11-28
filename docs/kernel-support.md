@@ -21,7 +21,7 @@ later.
 | Kernel | Adapter | Maintained by | Build feature | Operations | Naming gate | Accuracy gate |
 |---|---|---|---|---|---|---|
 | solidcore | `crates/kernel` (`Solidcore`) | SolidCraft | always on | all (`OpKind::ALL`) | the reference | the reference |
-| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude and revolve of sketch profiles (not tapered, not arcs joined first), boolean, fillet (constant radius, mitred turns) | fails: 168 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
+| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude (not tapered) and revolve of sketch profiles, boolean, fillet (constant radii, mitred turns, the Fillet feature's too), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, or a section to a point; no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
 
 The Open CASCADE row is an experiment that checks the interface fits a second kernel; no build we
 ship routes anything to it. OCCT is LGPL-2.1 with the Open CASCADE exception: it lives in
@@ -67,16 +67,49 @@ extrude and revolve at 058b6c9807):
 - The worst tolerance the records declare is 1e-7 on OCCT results (OCCT's STEP uncertainty, as
   solidcore's reader records it) against 2e-5 to 8e-5 on solidcore's.
 
-**Naming corpus** (`cargo test --profile ci -p solidcraft-cli --test naming_corpus --features
-solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel, at 058b6c9807): 182
-of 185 designs pass on solidcore, whose route runs the code a build without the feature runs. 168
-pass on OCCT, now with every extrude and revolve they make built there, and there their two builds
-name alike and every stored name finds its face or edge. Of the 14 more that fail on OCCT:
+**More matrix rows (at f59520a67e):** on every one of these, OCCT passes, with 0 fail and 0 unsupported:
+- a revolve of a disc drawn as two half circles, the arcs joined first as the Revolve feature asks;
+- a fillet as the Fillet feature rounds it (`fillet_removing`);
+- an equal chamfer, a shell open at the top, a thickened sheet, a face moved out, a drafted side, a two-section loft (square to square), and a loft of a square to a point.
 
-- 11 stop at a cylinder, whose callers need the construction sources solidcore gives its faces
-  (OCCT's primitive results carry none);
+Two cases are looser, both below 1e-12: the draft's volume (2.4e-15 on OCCT against 0 on solidcore) and the loft to a point's volume (6.0e-13 against 2.2e-16).
+
+**Chamfer, shell, thicken and offset faces** (`chamfers_shells_and_thickened_sheets_match_solidcore`
+in `backend/occt.rs`): a cube's edge chamfered 1 back, the cube shelled 1 thick open at the top, a
+10 x 10 sheet thickened 2 up, 2 down and 1 each way, a face moved out 2 and another in 1. On each,
+OCCT's result has solidcore's volume (and the closed form) to 1e-9, its area, face and edge
+counts and centroid, and passes the shared check. These results carry no history yet, so features
+that name their faces find them by geometry only; unequal chamfers, chamfers that carry a face on
+and closed hollows stay on solidcore.
+
+**Split and trim by a plane** (`splits_by_a_plane_match_solidcore_piece_by_piece` and
+`sheets_trimmed_by_a_plane_match_solidcore` in `backend/occt.rs`, and the matrix's split and trim
+rows): a cube cut across, the same plane turned over, a cube cut corner to corner and a cylinder
+halved along its axis give, piece by piece and in solidcore's order (the piece on the plane's
+back first), solidcore's volume (and the closed form) to 1e-9, its area, face and edge counts and
+centroid. Square sheets, one with a hole, trimmed by a plane keep solidcore's area, face and edge
+counts. Matrix: split 5 cases, OCCT 4 pass / 0 fail / 1 unsupported (a plane that misses the
+cube, solidcore's whole body), 0 looser; trim 2 cases, 2 pass, 1 looser below 1e-12 (area
+1.6e-14 against 0 on the sheet with a hole). A plane that misses or nicks the body, several pieces
+a side, splits and trims by faces or sketch curves, trims keeping picked regions and trims of
+solids stay on solidcore. Pieces and trims carry no history yet.
+
+**Naming corpus** (`cargo test --profile ci -p solidcraft-cli --test naming_corpus --features
+solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel, at 650f436b37): 182
+of 185 designs pass on solidcore, whose route runs the code a build without the feature runs. 179
+pass on OCCT, with every primitive, extrude, revolve, boolean, constant fillet, equal chamfer,
+shell, thicken and face offset they make built there, and there their two builds name alike and
+every stored name finds its face or edge. OCCT cylinders, spheres and tori carry solidcore's face
+history and construction sources (a cylinder is solidcore's circle extruded on OCCT and named by
+solidcore's cylinder naming). Two designs solidcore can't build (a shell and a thicken its offset
+refuses) build on OCCT. Five fail on OCCT only:
+
 - 2 variable fillets (solidcore's) fail on a body OCCT made;
+- 1 rectangular pattern's boolean (solidcore's) fails on OCCT-made bodies;
+- 1 join is handed a surface body where solidcore's build has a solid;
 - 1 sketch on a face can't keep its attachment without history.
+
+Any OCCT failure but a stop falls back to solidcore with the reason logged.
 
 The naming gate takes no new failure, so it fails too.
 
