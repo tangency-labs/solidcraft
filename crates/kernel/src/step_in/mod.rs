@@ -80,6 +80,9 @@ pub struct ImportedBody {
     pub refused: Option<String>,
     /// The file marks the body invisible (`INVISIBILITY`), so the design starts with it hidden.
     pub hidden: bool,
+    /// The presentation layer the file puts the body on (`PRESENTATION_LAYER_ASSIGNMENT`), by
+    /// its name; `None` when it is on none.
+    pub layer: Option<String>,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -406,8 +409,12 @@ fn dress_with(
             Some(crate::FacePaint { face: i, color: *c, opacity: opacity.get(f).copied().unwrap_or(1.0), name: color_names.get(f).cloned() })
         })
         .collect();
-    let paint =
-        crate::Paint { opacity: opacity.get(&item).copied().unwrap_or(1.0), faces, name: color.and_then(|_| color_names.get(&item).cloned()) };
+    let paint = crate::Paint {
+        opacity: opacity.get(&item).copied().unwrap_or(1.0),
+        faces,
+        name: color.and_then(|_| color_names.get(&item).cloned()),
+        layer: None,
+    };
     let body = body.with_color(color).with_paint(Some(paint));
     let identities =
         face_origin.iter().map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None })).collect();
@@ -452,6 +459,12 @@ struct Reader {
     invisible_targets: HashSet<u64>,
     /// Items whose bodies the file marks invisible, after resolving the targets above.
     invisible: HashSet<u64>,
+    /// Layers (`PRESENTATION_LAYER_ASSIGNMENT`) by name, with the items, styled items and
+    /// representations each assigns, in file order.
+    layer_targets: Vec<(String, Vec<u64>)>,
+    /// Item → the layer its body is on (the first layer that names it), after resolving the
+    /// targets above.
+    layers: HashMap<u64, String>,
     /// Items that gave no part: reported once when the file could not be read, else (the
     /// body could not be made) at every instance, as the message says.
     unreadable: HashMap<u64, Option<String>>,
@@ -526,6 +539,8 @@ impl Reader {
             styled_items: HashMap::new(),
             invisible_targets: HashSet::new(),
             invisible: HashSet::new(),
+            layer_targets: Vec::new(),
+            layers: HashMap::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
             shown: HashMap::new(),
@@ -670,6 +685,12 @@ impl Reader {
                         self.invisible_targets.extend(items.iter().filter_map(Param::as_ref_id));
                     }
                 }
+                "PRESENTATION_LAYER_ASSIGNMENT" => {
+                    let name = p.first().and_then(Param::as_str).map(str::trim).unwrap_or_default();
+                    if let (false, Some(items)) = (name.is_empty(), p.get(2).and_then(Param::as_list)) {
+                        self.layer_targets.push((name.to_string(), items.iter().filter_map(Param::as_ref_id).collect()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -700,6 +721,28 @@ impl Reader {
             }
         }
         self.invisible = invisible;
+        // A layer assigns an item, the item a styled item styles, or every item of a
+        // representation and of the representations linked to it; an item on two layers is on
+        // the first.
+        for (name, targets) in std::mem::take(&mut self.layer_targets) {
+            let mut queue: Vec<u64> = targets.iter().map(|t| self.styled_items.get(t).copied().unwrap_or(*t)).collect();
+            let mut seen = HashSet::new();
+            while let Some(target) = queue.pop() {
+                if !seen.insert(target) {
+                    continue;
+                }
+                if let Some((items, _)) = self.reps.get(&target) {
+                    for item in items {
+                        self.layers.entry(*item).or_insert_with(|| name.clone());
+                    }
+                    if let Some(links) = self.rep_links.get(&target) {
+                        queue.extend(links.iter().copied());
+                    }
+                } else {
+                    self.layers.entry(target).or_insert_with(|| name.clone());
+                }
+            }
+        }
         for (d, r) in sdrs {
             if let Some(&pd) = pds.get(&d) {
                 self.pd_reps.entry(pd).or_default().push(r);
@@ -865,19 +908,19 @@ impl Reader {
     }
 
     /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
-    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes, scales and origin (an
-    /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
-    /// first).
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes (derived as the STEP reader
+    /// derives them, `solidcore_step::read::operator_axes`), scales and origin (an omitted scale 1,
+    /// an omitted second or third scale the first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
         let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
             let p = solidcore_record::step::product::operator_attributes(e);
             let o = reader.point(p.get(2).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
+            let direction = |i: usize| -> R<Option<[f64; 3]>> {
                 match p.get(i) {
-                    None | Some(Param::Null) => Ok(global),
-                    Some(Param::Ref(id)) => reader.direction(*id),
+                    None | Some(Param::Null) => Ok(None),
+                    Some(Param::Ref(id)) => reader.direction(*id).map(Some),
                     _ => Err("invalid transformation direction".into()),
                 }
             };
@@ -889,7 +932,7 @@ impl Reader {
             };
             let sx = scale(3, 1.0)?;
             let (sy, sz) = (scale(5, sx)?, scale(6, sx)?);
-            let (x, y, z) = (direction(0, [1.0, 0.0, 0.0])?, direction(1, [0.0, 1.0, 0.0])?, direction(4, [0.0, 0.0, 1.0])?);
+            let [x, y, z] = solidcore_step::read::operator_axes(direction(0)?, direction(1)?, direction(4)?, "transformation axes")?;
             let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
             let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
             if !m.iter().flatten().all(|x| x.is_finite()) {
@@ -1338,6 +1381,7 @@ impl Reader {
                         face_origin,
                         refused: part.refused.clone(),
                         hidden: self.invisible.contains(&item),
+                        layer: self.layers.get(&item).cloned(),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {

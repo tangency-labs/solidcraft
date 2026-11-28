@@ -146,6 +146,7 @@ fn the_command_icon_and_option_pictures_are_drawn_where_the_command_is() {
         entries: vec![seat.clone()],
         ribbon_groups: Vec::new(),
         images: Default::default(),
+        declarations: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
         tints: Vec::new(),
@@ -209,7 +210,6 @@ fn ribbon_group_icons_are_loaded_from_the_package_and_missing_or_invalid_images_
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallback() {
-    use crate::app_bar::FileRow;
     use crate::plugin_menu::{command_icon, open_entry, ribbon_buttons, rows};
     use crate::plugin_slots::{Slot, items};
 
@@ -267,8 +267,10 @@ fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallba
     }
     assert_eq!(ribbon_buttons(&h.app).iter().map(|b| b.icon.as_str()).collect::<Vec<_>>(), expected);
     let plugin_rows = rows(&h.app);
-    let FileRow::Sub { rows: sub, .. } = &plugin_rows[3] else { panic!("one submenu for these importer entries") };
-    let menu_icons: Vec<_> = sub.iter().filter_map(|row| if let FileRow::Item(item) = row { Some(item.icon.as_str()) } else { None }).collect();
+    let menu_node = &plugin_rows[3];
+    assert!(!menu_node.children.is_empty(), "one submenu for these importer entries");
+    let sub = &menu_node.children;
+    let menu_icons: Vec<_> = sub.iter().map(|item| &*item.icon).collect();
     let mut expected_menu = expected.clone();
     *expected_menu.last_mut().unwrap() = "";
     assert_eq!(menu_icons, expected_menu, "an unannotated Plugins menu row keeps its previous appearance");
@@ -286,7 +288,7 @@ fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallba
     let file_icons: Vec<_> = file
         .iter()
         .filter_map(|row| match row {
-            FileRow::Item(item) if item.id.starts_with("imports.") => Some(item.icon.as_str()),
+            item if item.id.starts_with("imports.") => Some(&*item.icon),
             _ => None,
         })
         .collect();
@@ -295,7 +297,7 @@ fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallba
         let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
         let group = groups[0].group(ui);
         assert_eq!(group.buttons.iter().map(|button| button.icon).collect::<Vec<_>>(), expected);
-        assert_eq!(group.more.iter().map(|row| row.icon).collect::<Vec<_>>(), expected);
+        assert_eq!(group.more.iter().map(|row| row.icon.clone()).collect::<Vec<_>>(), expected);
     });
     for (i, icon) in expected.iter().enumerate() {
         open_entry(&mut h.app, 0, i);

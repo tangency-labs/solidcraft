@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    solidcraft-<version>-windows-<arch>.msi            installer (WiX v5): all users, or just for me
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
     solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
@@ -62,6 +62,8 @@ if (-not $Version) {
 if (-not $Version) { throw 'could not read [workspace.package] version from Cargo.toml' }
 # MSI ProductVersion is numeric (major.minor.build); pre-release tags are dropped there.
 $MsiVersion = ($Version -split '-')[0]
+# The same, each part zero-padded, so the installer can compare versions as strings.
+$SortableVersion = (($MsiVersion -split '\.') | ForEach-Object { $_.PadLeft(5, '0') }) -join '.'
 
 $Target = switch ($Arch) { 'x64' { 'x86_64-pc-windows-msvc' } 'x86' { 'i686-pc-windows-msvc' } 'arm64' { 'aarch64-pc-windows-msvc' } }
 $Dist = if ($env:DIST) { $env:DIST } else { Join-Path $Root 'dist\release' }
@@ -144,7 +146,7 @@ Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
     -culture en-US -loc (Join-Path $Root 'assets/platforms/windows/solidcraft.en-us.wxl') `
-    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$Icon" `
+    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "SortableVersion=$SortableVersion" -d "BinDir=$Stage" -d "IconPath=$Icon" `
     -o $Msi
 }
 Invoke-Native 'MSI shortcut icon validation (ICE50)' {

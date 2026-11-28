@@ -11,12 +11,12 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_all_with, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
-    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
-    Error, PointClass,
+    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Contract,
+    Corners, Error, PointClass,
 };
 use solidcore_record::brep::{Brep as Record, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -892,6 +892,57 @@ fn two_large_cylinders_touching_along_a_line_union() {
     }
 }
 
+/// Two equal holes of radius 0.9 crossing at right angles in a 25 x 20.9 x 4.5 block, one
+/// along z, the other along y with its axis `d` off the first's along x
+/// (tangency-labs/solidcraft#18475). At d = 0 the walls cross in two ellipses; for nonzero d
+/// they cross in one loop. For negative `d`, its crossings of the y cylinder's +x seam are
+/// 2√(2 · 0.9 |d| − d²) apart, and the seam cuts the loop into two arcs with the same two
+/// ends whose midpoints are 2√(2 · 0.9 |d| − d²) apart on the first hole's far side. The second
+/// cut was refused for d = −1e-5 and −2e-5, where those two arcs were taken for one edge. Each
+/// cut is one valid solid of the block less both holes plus what they share, 16/3 · 0.9³ (the
+/// miss changes that by under 3e-5).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn a_hole_whose_axis_misses_an_equal_crossing_holes_by_a_hair_cuts() {
+    all_fixes();
+    let r = 0.9;
+    let want = 25.0 * 20.9 * 4.5 - PI * r * r * (4.5 + 20.9) + 16.0 / 3.0 * r * r * r;
+    for d in [0.0, -1e-7, -1e-6, -5e-6, -1e-5, -2e-5, 1e-5, -1e-4, 1e-3] {
+        let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
+        let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
+        let first = boolean(block, along_z, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let rim = [Curve::Arc {
+            center: [12.5 + d, -11.45, 2.25],
+            axis: [0.0, 1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let along_y = extrude(
+            &rim,
+            [0.0, 1.0, 0.0],
+            22.9,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let cut = boolean(first, along_y, BooleanOp::Subtract);
+        let cut = cut.unwrap_or_else(|e| panic!("{d}: {e:?}")).unwrap();
+        let report = cut.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{d}: {}", report.text);
+        assert_eq!(cut.solid_count().unwrap(), 1, "{d}");
+        assert!(
+            near(volume(&cut), want),
+            "{d}: {}, closed form {want}",
+            volume(&cut)
+        );
+    }
+}
+
 /// The area two circles of radius `r` whose centres are `d` apart have in common.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn lens_area(r: f64, d: f64) -> f64 {
@@ -1247,6 +1298,11 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
 /// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
 /// or the merge did. With each contact read as one touch at the cusp, the cut builds
 /// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
+/// Then seeds that failed at the other two contacts, 5e-10 to 3e-9 off: where the cut ends
+/// on the floor, the floor's section of the tool's arc face crossed the floor's side once
+/// 2.5e-4 from the cusp and the result was not a solid (seeds 32, 3, 4); and where it
+/// starts, the touch of the block's arc face and the tool's line face was found 1.5e-4 from
+/// the cusp and split the tool's line edge alone, and the merge failed (seeds 2, 14).
 #[test]
 #[allow(clippy::disallowed_methods)] // the oracle points' closed form, not ops computing geometry
 fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
@@ -1260,6 +1316,11 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         (8, 1e-9),
         (28, 1e-9),
         (33, 1e-9),
+        (2, 5e-10),
+        (32, 5e-10),
+        (3, 1e-9),
+        (4, 3e-9),
+        (14, 3e-9),
     ] {
         let tools = cusp_tools(&block, seed, noise);
         // the tools lie inside the block, touching its back face and each other: the cut
@@ -1585,6 +1646,152 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     );
     assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
     assert_eq!(token.polls(), Some(n + 1));
+}
+
+/// tangency-labs/solidcraft#22578: a rod along x (0 to 72, radius 4, chamfered ends, relief
+/// grooves of radius 3.25 at x 25 to 25.5 and 46.5 to 47) and a thread cut of pitch 1.25 and
+/// 21.25 turns from x = -1.25 along +x, a 60 degree V with a rounded root, its top on the rod's
+/// radius, so the coil's outer wall is a cylinder on the rod's own. The cut was refused by the
+/// check (a loop's edges one whole period apart in u) where its twin, the same cut from
+/// x = 73.25 along -x, builds. The twin is this design turned half a turn about the vertical
+/// line through x = 36, which maps the rod, its seam half-plane (y 0, z above the axis), the
+/// coil's profile and its half turns onto themselves: both cuts are one valid solid with the
+/// same face, edge and vertex counts. The coil comes to the cut through its record, as
+/// SolidCraft's does: its walls are their certified nets, without the screw definitions the
+/// record has no field for (built and cut in memory, with them, it built before too).
+///
+/// The volume is the rod's (Pappus over its polygon) less the thread's part inside it,
+/// integrated over the screw motion (volume element r dr du dphi; the chord of the profile at
+/// each radius, an exact integral along x, adaptive in r): 3430.968886633128 mm³, to 1e-12.
+/// The coil's walls lie within the sweep's tolerance of their screw surfaces, so the cut's
+/// volume is within the coil's area times that tolerance of it. Both end discs of the rod stay
+/// whole (the cut lost the one at x = 0).
+#[test]
+fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
+    use solidcore_ops::sweep::screw_sweep;
+    all_fixes();
+    let rod = [
+        [0.0, 0.0],
+        [72.0, 0.0],
+        [72.0, 3.375],
+        [71.375, 4.0],
+        [47.75, 4.0],
+        [46.99999999999999, 3.2500000000000027],
+        [46.49999999999999, 3.250000000000003],
+        [45.750000000000014, 4.0],
+        [26.25, 4.0],
+        [25.500000000000004, 3.2500000000000013],
+        [25.0, 3.2500000000000013],
+        [24.250000000000007, 4.0],
+        [0.6250000000000021, 4.0],
+        [0.0, 3.375],
+    ];
+    // (x, z) to (x, 0, z); `flip` turns it half a turn about the line x = 36 along z, which
+    // leaves the rod as it is (its polygon is its own image, to the last bits as sketched)
+    let at = |[x, z]: [f64; 2], flip: bool| {
+        if flip {
+            [72.0 - x, 0.0, z]
+        } else {
+            [x, 0.0, z]
+        }
+    };
+    let (pitch, turns, tolerance) = (1.25, 21.25, 1.25e-4);
+    let exact = 3_430.968_886_633_128;
+    let cut = |flip: bool| {
+        let n = rod.len();
+        let profile: Vec<Curve> = (0..n)
+            .map(|i| Curve::Line {
+                start: at(rod[i], false),
+                end: at(rod[(i + 1) % n], false),
+            })
+            .collect();
+        let stock = revolve(&profile, [0.0; 3], [1.0, 0.0, 0.0], TAU, true).unwrap();
+        // the V: its root an arc of radius 0.1 about (-1.25, 3.475), its flanks up to radius 4
+        let root = (-1.250_000_000_000_000_2, 3.474_999_999_999_999_6);
+        let (a, b) = (
+            [-1.336_602_540_378_443_4, 3.425],
+            [-1.163_397_459_621_557, 3.425],
+        );
+        let (c, d) = (
+            [-0.831_421_054_837_520_5, 4.0],
+            [-1.668_578_945_162_48, 4.0],
+        );
+        // the arc counter-clockwise about -y from a to b, angle 0 along +x (both turned too)
+        let s = if flip { -1.0 } else { 1.0 };
+        let section = vec![
+            Curve::Arc {
+                center: at([root.0, root.1], flip),
+                axis: [0.0, -s, 0.0],
+                reference: [s, 0.0, 0.0],
+                radius: 0.099_999_999_999_999_31,
+                start: -2.617_993_877_991_492_6,
+                end: -0.523_598_775_598_300_9,
+            },
+            Curve::Line {
+                start: at(b, flip),
+                end: at(c, flip),
+            },
+            Curve::Line {
+                start: at(c, flip),
+                end: at(d, flip),
+            },
+            Curve::Line {
+                start: at(d, flip),
+                end: at(a, flip),
+            },
+        ];
+        let origin = at([root.0, 0.0], flip);
+        let swept = screw_sweep(
+            &section,
+            origin,
+            [s, 0.0, 0.0],
+            pitch,
+            turns,
+            None,
+            tolerance,
+        );
+        // as SolidCraft hands it to the cut: through its record, its walls their nets alone
+        let coil = Body::from_record(&swept.unwrap().to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        // only the coil's walls stray from their surfaces, by the tolerance at most, and the
+        // cut keeps no more of them than the coil has
+        let bound = coil.area(1e-8).unwrap() * tolerance;
+        let r = boolean(stock, coil, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("flip {flip}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        let v = volume(&r);
+        let counts = r.counts().unwrap();
+        eprintln!(
+            "flip {flip}: volume {v} bound {bound} counts {counts:?} {}",
+            report.text
+        );
+        assert!(report.is_valid(), "flip {flip}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "flip {flip}");
+        assert!((v - exact).abs() <= bound, "flip {flip}: {v} vs {exact}");
+        // the rod's end discs, both whole: the coil's caps lie outside the rod (the start
+        // cap past its end, the end cap over the groove, whose radius is under the root's)
+        let (record, order) = r.to_record().unwrap();
+        let discs: Vec<(f64, f64)> = (0..record.faces.len())
+            .filter_map(|i| match &record.faces[i].surface {
+                Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                    Some((origin[0], r.face_area(&order, i, 1e-10).unwrap()))
+                }
+                _ => None,
+            })
+            .collect();
+        let disc = PI * 3.375 * 3.375;
+        assert_eq!(discs.len(), 2, "flip {flip}: {discs:?}");
+        for (x, a) in &discs {
+            assert!(*x == 0.0 || *x == 72.0, "flip {flip}: {discs:?}");
+            assert!((a - disc).abs() <= 1e-9 * disc, "flip {flip}: {discs:?}");
+        }
+        counts
+    };
+    // the twin first: it built before this change too
+    let twin = cut(true);
+    assert_eq!(cut(false), twin);
 }
 
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
@@ -2210,6 +2417,21 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
         .unwrap()
     };
     let c: [f64; 2] = [0.496_405_514_95, 0.059_846_175_546_1];
+    let removed = notch_in_the_seam_cones_rim(c);
+    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
+    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
+}
+
+/// What a round notch, r 0.06 about `c` and from z = 999.5 to the top, takes from the frustum
+/// of radius 3 at z = 0 to 0.5 at z = 1000 about +z: the integral over z of the area the disc
+/// shares with the frustum's circle there (two circles' lens, in closed form), by Simpson's
+/// rule.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn notch_in_the_seam_cones_rim(c: [f64; 2]) -> f64 {
+    let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
     let d = c[0].hypot(c[1]);
     // the area the disc of radius `r` about `c` shares with the disc of radius `big` about the
     // axis, `big` - r < d < `big` + r
@@ -2222,7 +2444,7 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
     let radius_at = |z: f64| r_top + (r_base - r_top) * (height - z) / height;
     let n = 2000;
     let h = depth / f64::from(n);
-    let removed = (0..=n)
+    (0..=n)
         .map(|i| {
             let w = if i == 0 || i == n {
                 1.0
@@ -2235,12 +2457,55 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
         })
         .sum::<f64>()
         * h
-        / 3.0;
-    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
-    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
-        .unwrap()
-        .unwrap();
-    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
+        / 3.0
+}
+
+/// SolidCraft's cone and notch of #22813, as its `solid.cone` and `solid.cylinder` build them
+/// (the operands its boolean was handed, `data/issue_22813_*.smb`): the frustum of
+/// [`a_round_notch_overlapping_a_cones_seam_backwards_is_cut`], revolved so that its side is
+/// parametrised from the top rim down and clockwise, and the r 0.06 notch whose circle reaches
+/// d = 1e-5 past the seam (centre at the angle (0.06 + d) / 0.5 on the rim), then turned
+/// 1e-5 rad about +z (d = 5e-6). The wall's curve crosses the seam at a slant of about 2e-4
+/// rad and comes out of the surface intersection in two pieces, one each side of the seam,
+/// that overlap along it within tolerance. The top one was cut at its crossing, and its rest
+/// ran on along the seam to its end, back along the floor's piece from the proto vertex at the
+/// crossing, which the floor's piece ends at once the two pieces' overlap above it is
+/// combined. Proto edges that meet at a proto vertex were never looked at for an overlap, so
+/// the floor's piece kept its own run beside the seam's, the wall's loop stayed open between
+/// the crossing and where the floor's piece meets the seam, the side face and the notch's
+/// piece of it were one, and the cut came out empty. Each is one valid solid of the five
+/// faces, ten edges and seven vertices of that test, V = the frustum less
+/// [`notch_in_the_seam_cones_rim`].
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_round_notch_a_tolerance_over_a_revolved_cones_seam_is_cut() {
+    all_fixes();
+    let read = |smb: &[u8]| Body::from_smb(smb.to_vec(), false).unwrap();
+    let cone = include_bytes!("data/issue_22813_cone.smb");
+    let frustum = PI * 1000.0 / 3.0 * (9.0 + 1.5 + 0.25);
+    let c = [0.496_405_514_949_725_07, 0.059_846_175_546_130_59];
+    for turn in [0.0, 1e-5_f64] {
+        let notch = read(include_bytes!("data/issue_22813_notch.smb"));
+        let (s, co) = turn.sin_cos();
+        notch
+            .transform(&[
+                [co, s, 0.0, 0.0],
+                [-s, co, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ])
+            .unwrap();
+        let at = [c[0] * co - c[1] * s, c[0] * s + c[1] * co];
+        let cut = boolean(read(cone), notch, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(
+            &cut,
+            [5, 10, 7],
+            frustum - notch_in_the_seam_cones_rim(at),
+            1e-9,
+        );
+    }
 }
 
 /// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
@@ -2914,6 +3179,107 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
     }
 }
 
+/// A cylinder of radius `r` and height `h` about +Z from base centre `base`, its seam turned
+/// `seam_deg` about its axis (SolidCraft's cylinders put the seam where the sketch put it).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
+    let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
+    let (s, co) = seam_deg.to_radians().sin_cos();
+    c.transform(&[
+        [co, s, 0.0, 0.0],
+        [-s, co, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [base[0], base[1], base[2], 1.0],
+    ])
+    .unwrap();
+    c
+}
+
+/// #22582: a point in the plane of a cylinder's cap, on a line along x or y that touches the
+/// rim circle, is at distance sqrt(a^2 + r^2) > r from the axis (`a` its offset along the
+/// line from the touching point): outside. The classifier's first ray runs along that line,
+/// grazing the rim, and its sector answer was a rounding error: inside at some seam angles.
+#[test]
+fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
+    all_fixes();
+    let mut wrong = Vec::new();
+    // the issue's scales: 0.05 and 1 failed, 40 did not
+    for scale in [0.05, 1.0, 40.0] {
+        let ([cx, cy, z0], r, h) = (
+            [10.0 * scale, 22.5 * scale, 30.0 * scale],
+            2.5 * scale,
+            5.0 * scale,
+        );
+        let mut points = Vec::new();
+        for z in [z0, z0 + h] {
+            for a in [0.5 * scale, 1.5 * scale, 3.0 * scale] {
+                // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
+                points.extend([
+                    [cx - a, cy + r, z],
+                    [cx + a, cy + r, z],
+                    [cx - a, cy - r, z],
+                    [cx + a, cy - r, z],
+                    [cx + r, cy - a, z],
+                    [cx - r, cy + a, z],
+                ]);
+            }
+        }
+        // every 5 degrees at scale 1; at the other scales, the seams that failed at scale 1
+        let seams: Vec<u16> = if scale == 1.0 {
+            (0..3600).step_by(50).chain([175, 200, 351, 425]).collect()
+        } else {
+            vec![0, 175, 200, 351, 425, 900]
+        };
+        for tenth in seams {
+            let seam = f64::from(tenth) / 10.0;
+            let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
+            for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
+                if l != Ok(solidcore_ops::PointLocation::Outside) {
+                    wrong.push((scale, seam, *p, l));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} not outside: {wrong:?}", wrong.len());
+}
+
+/// #22582's intersect: box A spans x 7.5..12.5, y 25..30, z 10..30; cylinder B (r 2.5, z
+/// 30..35, axis through (10, 22.5)) stands on A's top plane, where its rim touches A only at
+/// (10, 25, 30) (its other points on that plane are at y < 25). They share one point, so the
+/// intersection is empty, in either order. It was refused as "an intersection was missed":
+/// A's corner (7.5, 25, 30), 3.54 from B's axis, was classified inside B.
+#[test]
+fn a_box_and_a_cylinder_touching_at_a_rim_point_intersect_to_nothing() {
+    all_fixes();
+    for scale in [0.05, 1.0, 40.0] {
+        for seam in [0.0, 35.13, 90.0, 215.13] {
+            let a = || {
+                make_box(
+                    [7.5 * scale, 25.0 * scale, 10.0 * scale],
+                    [5.0 * scale, 5.0 * scale, 20.0 * scale],
+                )
+                .unwrap()
+            };
+            let b = || {
+                cylinder_with_seam(
+                    [10.0 * scale, 22.5 * scale, 30.0 * scale],
+                    2.5 * scale,
+                    5.0 * scale,
+                    seam,
+                )
+            };
+            for (x, y) in [(a(), b()), (b(), a())] {
+                let r = boolean(x, y, BooleanOp::Intersect);
+                assert!(
+                    matches!(r, Ok(None)),
+                    "scale {scale}, seam {seam}: {:?}",
+                    r.map(|r| r.is_some())
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_refused_empty_cut_names_a_vertex_of_the_body_outside_the_tool() {
     all_fixes();
@@ -3392,6 +3758,80 @@ fn a_traced_join_of_the_ten_wedges_in_turn_lies_on_its_operands_and_inside_none(
         assert!(
             classes.iter().any(|c| c[n] == PointClass::OnBoundary),
             "{from} at {p:?} is on no operand's boundary"
+        );
+    }
+}
+
+/// #21931: #17118's cut the other way round, each of the ten wedges less the target. A wedge
+/// reaches out of the target only where the target's groove rounds dip below its slopes near the
+/// top, so what is left is the wedge less its part inside the target, which the intersect of the
+/// target with the wedge gives. The sliver of a groove's round in the wedge's thin edge lies within
+/// the tolerance of the wedge's plane, which the cut keeps (it lies outside the target), so the
+/// sliver must be kept to close the leftover beside it. Deleted, the result was open; kept, it was
+/// made in the wedge's outside, so no face split the wedge's inside and the result had no solid
+/// region. Both came back as "not a closed solid".
+///
+/// The leftover is two pieces, at the two groove rounds the wedge's round passes into, each of
+/// three faces of the wedge and two of the target's round (the sliver one of them): 5 faces,
+/// 9 edges and 6 vertices (6 - 9 + 5 = 2). The cut
+/// and the intersect split the wedge along the same faces of the target, the sliver among them
+/// (the film between the sliver and the wedge's plane goes with the cut), so their volumes add
+/// up to the wedge's exactly. The bound is the accuracy the integration is asked for, 1e-11 of
+/// each volume, about 1.6e-11 over the wedge and the intersect, with a margin: 1e-10, against a
+/// leftover of 6.7e-5.
+#[test]
+fn each_traced_wedge_less_the_grooved_target_leaves_the_part_of_the_wedge_outside_it() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    for i in 0..10 {
+        let w = format!("wedge{i}");
+        let inside = boolean(body("target"), body(&w), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap()
+            .volume(1e-11)
+            .unwrap();
+        let want = body(&w).volume(1e-11).unwrap() - inside;
+        let r = boolean(body(&w), body("target"), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{w}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 2, "{w}");
+        assert_eq!(r.counts().unwrap(), [10, 18, 12], "{w}");
+        let v = r.volume(1e-11).unwrap();
+        assert!(
+            (v - want).abs() <= 1e-10,
+            "{w}: volume {v}, the wedge less its part inside the target {want}"
+        );
+    }
+}
+
+/// #21931: the intersect of each of the ten wedges with the target, the wedge first, is the
+/// intersect the other way round, which builds. The same sliver of a groove's round, kept here
+/// as the copy of the wedge's plane, was made in the wedge's outside, so the faces of the target
+/// that bound the intersect split no region of the wedge and the result had no solid region.
+/// Both orders keep the same faces, so the counts agree and the volumes differ by no more than
+/// ten times the accuracy the integration is asked for.
+#[test]
+fn each_traced_wedge_intersected_with_the_grooved_target_is_the_intersect_either_way_round() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    for i in 0..10 {
+        let w = format!("wedge{i}");
+        let want = boolean(body("target"), body(&w), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+        let r = boolean(body(&w), body("target"), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{w}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "{w}");
+        assert_eq!(r.counts().unwrap(), want.counts().unwrap(), "{w}");
+        let (v, u) = (r.volume(1e-11).unwrap(), want.volume(1e-11).unwrap());
+        assert!(
+            (v - u).abs() <= 1e-10,
+            "{w}: volume {v}, the other way round {u}"
         );
     }
 }
@@ -4814,6 +5254,83 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
 
+#[test]
+fn union_all_mixed_touching_and_apart_preserves_volume_solids_and_validity() {
+    let mut bodies = vec![
+        make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap(),
+        make_box([5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap(),
+    ];
+    for i in 0..20_u32 {
+        let x = 50.0 + f64::from(i) * 20.0;
+        bodies.push(make_box([x, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap());
+    }
+    let u = union_all_with(bodies, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 21);
+    assert_eq!(u.counts().unwrap(), [126, 252, 168]);
+    let want = 1500.0 + 20.0 * 1000.0;
+    let got = volume(&u);
+    assert!(near(got, want), "volume {got} vs {want}");
+}
+
+#[test]
+fn union_all_shuffled_chain_and_hub_spokes_preserve_volume_and_validity() {
+    // Shuffled overlapping box chain
+    let n = 16_u32;
+    let order: [u32; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
+    let chain: Vec<Body> = order
+        .iter()
+        .map(|&i| make_box([f64::from(i) * 5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap())
+        .collect();
+    let u = union_all_with(chain, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [6, 12, 8]);
+    let want = (10.0 + f64::from(n - 1) * 5.0) * 100.0;
+    assert!(near(volume(&u), want), "chain {} vs {want}", volume(&u));
+
+    // Hub (plate) + 16 mutually disjoint spokes (bosses)
+    let mut hub_spokes = vec![make_box([0.0, 0.0, 0.0], [100.0, 100.0, 5.0]).unwrap()];
+    for r in 0..4_u32 {
+        for c in 0..4_u32 {
+            hub_spokes.push(
+                make_box(
+                    [10.0 + f64::from(c) * 20.0, 10.0 + f64::from(r) * 20.0, 5.0],
+                    [6.0, 6.0, 8.0],
+                )
+                .unwrap(),
+            );
+        }
+    }
+    let u = union_all_with(hub_spokes, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [86, 204, 136]);
+    let want = 100.0 * 100.0 * 5.0 + 16.0 * (6.0 * 6.0 * 8.0);
+    assert!(near(volume(&u), want), "hub {} vs {want}", volume(&u));
+
+    // Nested cube inside a hollow box's cavity: overlapping AABBs must NOT take disjoint path.
+    let outer = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    let cavity = make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let hollow = boolean(outer, cavity, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let inner = make_box([7.0, 7.0, 7.0], [6.0, 6.0, 6.0]).unwrap();
+    let nested = union_all_with(vec![hollow, inner], Contract::Proved).unwrap();
+    let report = nested.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(nested.counts().unwrap(), [18, 36, 24]);
+    let want = (8000.0 - 1000.0) + 216.0;
+    assert!(
+        near(volume(&nested), want),
+        "nested {} vs {want}",
+        volume(&nested)
+    );
+}
+
 /// acid-10's near miss: a 50 mm block, joined (or not) by a Ø20 cylinder along x lying 2e-5
 /// deep in its top face, then joined by an r 15 ball centred 14.99998 from its +x face, so
 /// that the ball dips 2e-5 into it, twice the zone tolerance. They meet in a circle of radius
@@ -4879,6 +5396,55 @@ fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
                 "cylinder {with_cylinder}: {p:?}"
             );
         }
+    }
+}
+
+/// The same ball on the block SolidCraft's Box builds: a 50 mm square swept 50 along +z, its
+/// four sides lines, rather than `make_box`'s block (solidcraft#20878, a 0.50 nightly built
+/// before the parting step above). The ball, r 15 centred at x = 64.99998, dips d = 2e-5 into
+/// the +x face, twice the zone tolerance, so the union is one solid: the block and the ball
+/// less the cap the ball dips in, 125000 + 4500 π − π d² (3R − d) / 3 = 139137.166941.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_ball_dipped_twice_the_tolerance_into_a_swept_block_face_joins_it() {
+    all_fixes();
+    let (d, rb): (f64, f64) = (2e-5, 15.0);
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [50.0, 0.0, 0.0],
+        [50.0, 50.0, 0.0],
+        [0.0, 50.0, 0.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let block = extrude(
+        &square,
+        [0.0, 0.0, 1.0],
+        50.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let ball = make_sphere([64.999_98, 25.0, 25.0], rb).unwrap();
+    let u = boolean(block, ball, BooleanOp::Union).unwrap().unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert!(u.is_manifold_solid().unwrap());
+    let want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - PI * d * d * (3.0 * rb - d) / 3.0;
+    assert!(near(volume(&u), want), "{} vs {want}", volume(&u));
+    // In the ball beyond the block face, at its middle and where the ball dips in.
+    for p in [
+        [79.0, 25.0, 25.0],
+        [50.000_005, 25.0, 25.0],
+        [49.999_99, 25.0, 25.0],
+    ] {
+        assert_eq!(u.classify_point(p).unwrap(), PointClass::Inside, "{p:?}");
     }
 }
 
@@ -5217,4 +5783,258 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             );
         }
     }
+}
+
+#[test]
+fn make_other_faces_handles_many_disjoint_touching_and_nested_solids() {
+    all_fixes();
+    // Primary: 12 apart unit cubes plus one small cube inside what will become a cavity of `other`.
+    let mut primary_parts = Vec::new();
+    for i in 0..12 {
+        primary_parts.push(make_box([f64::from(i) * 3.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    // Small primary cube centered at (100, 5, 5) — will lie strictly inside `other`'s outer hollow box.
+    primary_parts.push(make_box([99.5, 4.5, 4.5], [1.0, 1.0, 1.0]).unwrap());
+    let primary = union_all(primary_parts).unwrap();
+
+    // Other: 12 apart unit cubes (disjoint from primary), 4 boxes overlapping primary cubes 0..4,
+    // and a hollow box [95..105, 0..10, 0..10] with cavity [97..103, 2..8, 2..8] enclosing primary's
+    // small cube at (100, 5, 5).
+    let mut other_parts = Vec::new();
+    for i in 0..12 {
+        other_parts.push(make_box([f64::from(i) * 3.0, 5.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    for i in 0..4 {
+        other_parts.push(make_box([f64::from(i) * 3.0 + 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    let outer = make_box([95.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    let inner = make_box([97.0, 2.0, 2.0], [6.0, 6.0, 6.0]).unwrap();
+    let hollow = boolean(outer, inner, BooleanOp::Subtract).unwrap().unwrap();
+    other_parts.push(hollow);
+    let other = union_all(other_parts).unwrap();
+
+    let joined = boolean(primary, other, BooleanOp::Union).unwrap().unwrap();
+    let report = joined.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Expected volume:
+    // - 8 untouched primary cubes: 8.0
+    // - 4 overlapped pairs (each 1.5 x 1 x 1): 6.0
+    // - 12 disjoint other cubes: 12.0
+    // - hollow shell (10^3 - 6^3 = 784) + enclosed small primary cube (1.0): 785.0
+    let expected = 8.0 + 6.0 + 12.0 + 784.0 + 1.0;
+    let got = volume(&joined);
+    assert!(near(got, expected), "got {got}, expected {expected}");
+    assert_eq!(joined.solid_count().unwrap(), 8 + 4 + 12 + 2);
+}
+
+/// Build a closed faceted UV sphere (`nlat` bands × `2*nlat` longitudes, so `2*nlat^2` planar
+/// faces: triangles at poles and planar trapezoids in between) matching #18211's reproducer.
+#[allow(clippy::disallowed_methods)] // test fixture construction, not ops computing geometry
+fn faceted_uv_sphere(nlat: usize, radius: f64) -> Body {
+    use solidcore_record::brep::{
+        Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region,
+        Shell, Surface, Vertex, VERSION,
+    };
+    let nlon = 2 * nlat;
+    let off = PI / nlon as f64;
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let north = 0u32;
+    pts.push([0.0, 0.0, radius]);
+    for i in 1..nlat {
+        let theta = PI * i as f64 / nlat as f64;
+        let st = theta.sin();
+        let ct = theta.cos();
+        for j in 0..nlon {
+            let phi = 2.0 * PI * j as f64 / nlon as f64 + off;
+            pts.push([
+                radius * st * phi.cos(),
+                radius * st * phi.sin(),
+                radius * ct,
+            ]);
+        }
+    }
+    let south = pts.len() as u32;
+    pts.push([0.0, 0.0, -radius]);
+
+    let ring = |i: usize, j: usize| -> u32 { 1 + ((i - 1) * nlon + (j % nlon)) as u32 };
+    let mut polys: Vec<Vec<u32>> = Vec::with_capacity(nlat * nlon);
+    for j in 0..nlon {
+        // Outward CCW viewed from outside (+normal): (north, ring(1, j), ring(1, j+1))
+        polys.push(vec![north, ring(1, j), ring(1, j + 1)]);
+    }
+    for i in 1..nlat - 1 {
+        for j in 0..nlon {
+            polys.push(vec![
+                ring(i, j),
+                ring(i + 1, j),
+                ring(i + 1, j + 1),
+                ring(i, j + 1),
+            ]);
+        }
+    }
+    for j in 0..nlon {
+        polys.push(vec![ring(nlat - 1, j), south, ring(nlat - 1, j + 1)]);
+    }
+
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let norm = |a: [f64; 3]| {
+        let l = dot(a, a).sqrt();
+        [a[0] / l, a[1] / l, a[2] / l]
+    };
+
+    let tol = 1e-6;
+    let mut edge_map: std::collections::BTreeMap<(u32, u32), u32> =
+        std::collections::BTreeMap::new();
+    let mut edges: Vec<Edge> = Vec::new();
+    let mut faces: Vec<Face> = Vec::with_capacity(polys.len());
+
+    for (fi, poly) in polys.iter().enumerate() {
+        let p0 = pts[poly[0] as usize];
+        let p1 = pts[poly[1] as usize];
+        let p2 = pts[poly[2] as usize];
+        let u_axis = norm(sub(p1, p0));
+        let n = norm(cross(sub(p1, p0), sub(p2, p0)));
+        let v_axis = norm(cross(n, u_axis));
+        let uv = |p: [f64; 3]| {
+            let d = sub(p, p0);
+            [dot(d, u_axis), dot(d, v_axis)]
+        };
+        let (mut umin, mut umax, mut vmin, mut vmax) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for &vi in poly {
+            let [u, v] = uv(pts[vi as usize]);
+            umin = umin.min(u);
+            umax = umax.max(u);
+            vmin = vmin.min(v);
+            vmax = vmax.max(v);
+        }
+        let pad = 1e-3;
+        let mut oedges = Vec::with_capacity(poly.len());
+        for (pos, &a) in poly.iter().enumerate() {
+            let b = poly[(pos + 1) % poly.len()];
+            let (lo, hi, forward) = if a < b { (a, b, true) } else { (b, a, false) };
+            let ei = *edge_map.entry((lo, hi)).or_insert_with(|| {
+                let idx = edges.len() as u32;
+                edges.push(Edge {
+                    curve: Curve::Line {
+                        start: pts[lo as usize],
+                        end: pts[hi as usize],
+                    },
+                    nurbs: None,
+                    interval: [0.0, 1.0],
+                    vertices: [lo, hi],
+                    tolerance: tol,
+                    uses: Vec::new(),
+                });
+                idx
+            });
+            edges[ei as usize].uses.push(EdgeUseRef {
+                face: fi as u32,
+                r#loop: 0,
+                position: pos as u32,
+                upper: !forward,
+            });
+            oedges.push(OrientedEdge {
+                edge: ei,
+                forward,
+                pcurve: Curve2::Spline {
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                    points: vec![uv(pts[lo as usize]), uv(pts[hi as usize])],
+                },
+            });
+        }
+        faces.push(Face {
+            surface: Surface::Plane {
+                origin: p0,
+                u_axis,
+                v_axis,
+            },
+            nurbs: None,
+            domain: [[umin - pad, umax + pad], [vmin - pad, vmax + pad]],
+            loops: vec![Loop::Edges { edges: oedges }],
+        });
+    }
+
+    let oriented_faces = (0..faces.len() as u32)
+        .map(|face| OrientedFace {
+            face,
+            forward: true,
+        })
+        .collect();
+    let vertices = pts
+        .into_iter()
+        .map(|point| Vertex {
+            point,
+            tolerance: tol,
+        })
+        .collect();
+    let record = Brep {
+        version: VERSION,
+        tolerance: tol,
+        regions: vec![
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+        ],
+        shells: vec![Shell::Faces {
+            faces: oriented_faces,
+            wires: Vec::new(),
+        }],
+        faces,
+        edges,
+        vertices,
+    };
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// Issue #18211: splitting a closed planar-faceted UV sphere at the XZ plane produces
+/// both closed hemispheres with exact face/edge/vertex counts and volume summing to the
+/// original sphere.
+#[test]
+fn faceted_sphere_plane_split_produces_both_halves() {
+    all_fixes();
+    let nlat = 16usize;
+    let sphere_a = faceted_uv_sphere(nlat, 10.0);
+    let sphere_b = faceted_uv_sphere(nlat, 10.0);
+    let full_vol = volume(&sphere_a);
+    let pos_box = make_box([-60.0, 0.0, -60.0], [120.0, 60.0, 120.0]).unwrap();
+    let neg_box = make_box([-60.0, -60.0, -60.0], [120.0, 60.0, 120.0]).unwrap();
+
+    let pos_half = boolean(sphere_a, pos_box, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let neg_half = boolean(sphere_b, neg_box, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(pos_half.counts().unwrap(), [273, 543, 272]);
+    assert_eq!(neg_half.counts().unwrap(), [273, 543, 272]);
+    let pos_vol = volume(&pos_half);
+    let neg_vol = volume(&neg_half);
+    assert!(
+        (pos_vol - neg_vol).abs() < 1e-6,
+        "halves differ: {pos_vol} vs {neg_vol}"
+    );
+    assert!(
+        (pos_vol + neg_vol - full_vol).abs() < 1e-6,
+        "sum {} != full {full_vol}",
+        pos_vol + neg_vol
+    );
 }

@@ -4,15 +4,20 @@
 //! loop of a planar support. Its straight-edged faces and the attachment polygon
 //! bound a convex polyhedron on the support's outward side. If two opposite exposed
 //! supporting planes have crossed in the offset, their material halfspaces have
-//! empty intersection. No cavity reaches the branch: its offset faces AND its
-//! attachment loop disappear. Removing only the faces would leave a hole.
+//! empty intersection, or meet only on one plane (inset by exactly half the branch's
+//! width), where their common part has no volume. No cavity reaches the branch: its
+//! offset faces AND its attachment loop disappear. Removing only the faces would leave
+//! a hole.
 //!
 //! This is a halfspace contradiction certificate, not a winding/area test: reversing
 //! two dimensions preserves a loop's orientation. It implements the empty-cell event
 //! of the mitred construction (Rossignac and Requicha, 1986, solid offsetting as a set
 //! operation; see docs/offset-and-shell.md). It does not approximate ball erosion.
-//! Opposite normals must agree exactly; the source cell is reconstructed from exact plane
-//! intersections, and crossing inequalities enclose the actual offset definitions. An unproved certificate makes no topology decision.
+//! Opposite normals must agree within the angular tolerance; the source cell is
+//! reconstructed from exact plane intersections, and the crossing is a Farkas certificate on
+//! that cell, decided exactly from the actual offset definitions (each sheet's stored origin
+//! and axes), so a branch turned by a rotation whose cosines round is decided as it is
+//! unturned. An unproved certificate makes no topology decision.
 //! General infeasible cells without an opposite-plane certificate remain open work.
 //!
 //! Deviations: no recursion; component walks visit each source face at most once.
@@ -23,13 +28,13 @@ use std::collections::BTreeSet;
 
 use super::p1::{forget_seconds, OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
-use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::CurveKind;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3};
+use crate::math::{Point3, Vec3, EFF_ZERO_DEG};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::brep_is_manifold_solid;
+use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, DeleteFaceOptions};
@@ -48,25 +53,6 @@ fn missing(what: &'static str) -> SolidError {
 struct Halfspace {
     origin: Point3,
     outward: Vec3,
-}
-
-/// Dot product with the plane's normal, enclosing coordinate subtraction as well.
-/// Exact zero terms stay zero (equal coordinates or a zero coefficient); no epsilon
-/// is used to decide whether a point lies on a coordinate plane.
-fn side(plane: Halfspace, point: Point3) -> Ivl {
-    let mut sum = Ivl::from(0.0);
-    for (p, o, n) in [
-        (point.x, plane.origin.x, plane.outward.x),
-        (point.y, plane.origin.y, plane.outward.y),
-        (point.z, plane.origin.z, plane.outward.z),
-    ] {
-        if p == o || n == 0.0 {
-            continue;
-        }
-        let term = Ivl::from(p).sub_ulp(Ivl::from(o)).mul_ulp(Ivl::from(n));
-        sum = sum.add_ulp(term);
-    }
-    sum
 }
 
 fn plane_of(b: &Brep, f: FaceId) -> Result<Option<Halfspace>> {
@@ -174,6 +160,25 @@ fn straight(b: &Brep, f: FaceId) -> Result<bool> {
     Ok(true)
 }
 
+/// The offset sheet of a branch face whose source outward normal is `outward`, when its
+/// definition is a finite plane parallel to the source within the angular tolerance.
+fn offset_sheet(p: &Plane, outward: Vec3) -> Option<cell::Sheet> {
+    let scale = p.uv_scale();
+    let (origin, x, y) = p.position().canonical();
+    let finite = [scale.x, scale.y]
+        .into_iter()
+        .all(|v| v.is_finite() && v != 0.0)
+        && [origin.x, origin.y, origin.z, x.x, x.y, x.z, y.x, y.y, y.z]
+            .into_iter()
+            .all(f64::is_finite);
+    (finite && p.evaluate_normal().is_parallel_to(outward, EFF_ZERO_DEG)).then_some(cell::Sheet {
+        origin,
+        x,
+        y,
+        outward,
+    })
+}
+
 struct Extinction {
     support: FaceId,
     attachment: LoopId,
@@ -182,20 +187,22 @@ struct Extinction {
 
 impl OffsetExecutive {
     /// Consume certified empty branch cells before any neighbour offsets are mated.
-    /// The source remains intact for the shell difference and for provenance.
+    /// The source remains intact for the shell difference and for provenance. Returns
+    /// the source faces of the branches removed: their offsets hold no cavity, so walls
+    /// meeting across them are not a refusal.
     pub(super) fn remove_extinct_branches(
         &mut self,
         kernel: &mut Kernel,
         original: &Brep,
         notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<BTreeSet<FaceId>> {
         if !self.inset()
             || !self.merge_results()
             || !self.local_faces.is_empty()
             || self.operation() != OffsetOperation::SolidOffset
             || !brep_is_manifold_solid(original)?
         {
-            return Ok(());
+            return Ok(BTreeSet::new());
         }
         let mut events = Vec::new();
         for support in bp1::faces(original, None)? {
@@ -221,14 +228,15 @@ impl OffsetExecutive {
             }
         }
         if events.is_empty() {
-            return Ok(());
+            return Ok(BTreeSet::new());
         }
         let mut result = self
             .take_offset_brep()
             .ok_or_else(|| missing("no offset body"))?;
         let status = self.remove_branches_in(kernel, original, &mut result, &events, notifications);
         self.set_offset_brep(result);
-        status
+        status?;
+        Ok(events.into_iter().flat_map(|e| e.faces).collect())
     }
 
     fn branch_is_empty(
@@ -262,66 +270,36 @@ impl OffsetExecutive {
             };
             facets.push((l, plane));
         }
-        if !cell::convex(kernel, original, attachment, base, facets)? {
+        let Some(cell) = cell::convex(kernel, original, attachment, base, facets)? else {
             return Ok(false);
-        }
-        // Use the actual offset definitions, including their stored origins. For
-        // n and -n the two material halfspaces contradict iff n.(a-b) < 0.
+        };
+        // Use the actual offset definitions: each sheet's plane through its stored
+        // origin and spanned by its stored axes, decided exactly. Source normals that
+        // are opposite only within the angular tolerance (a branch turned by a
+        // rotation, whose cosines round) still pair; the crossing is then certified
+        // on the cell itself rather than from bit-equal normals.
         let result = self
             .offset_brep()
             .ok_or_else(|| missing("no offset body"))?;
         for (i, &(a, pa)) in planes.iter().enumerate() {
             kernel.check_cancelled(OP)?;
             for &(b, pb) in planes.iter().skip(i + 1) {
-                if pa.outward != -pb.outward {
+                if pa.outward.parallel_sense(pb.outward, EFF_ZERO_DEG) != (true, Some(true)) {
                     continue;
                 }
-                let a = self.single_offset_face(original, a)?;
-                let b = self.single_offset_face(original, b)?;
-                let Some(SurfaceKind::Plane(sa)) =
-                    result.face(a)?.surface.as_ref().map(Surface::kind)
-                else {
-                    return Err(missing("planar branch lost its plane"));
+                let sheet = |f: FaceId, outward: Vec3| -> Result<Option<cell::Sheet>> {
+                    let f = self.single_offset_face(original, f)?;
+                    let Some(SurfaceKind::Plane(p)) =
+                        result.face(f)?.surface.as_ref().map(Surface::kind)
+                    else {
+                        return Err(missing("planar branch lost its plane"));
+                    };
+                    Ok(offset_sheet(p, outward))
                 };
-                let Some(SurfaceKind::Plane(sb)) =
-                    result.face(b)?.surface.as_ref().map(Surface::kind)
-                else {
-                    return Err(missing("planar branch lost its plane"));
+                let (Some(sa), Some(sb)) = (sheet(a, pa.outward)?, sheet(b, pb.outward)?) else {
+                    continue;
                 };
-                if ![sa, sb].into_iter().all(|p| {
-                    let scale = p.uv_scale();
-                    [scale.x, scale.y]
-                        .into_iter()
-                        .all(|v| v.is_finite() && v != 0.0)
-                        && (cell::normal_defines_plane(
-                            pa.outward,
-                            p.position().x_axis(),
-                            p.position().y_axis(),
-                        ) || cell::normal_defines_plane(
-                            -pa.outward,
-                            p.position().x_axis(),
-                            p.position().y_axis(),
-                        ))
-                }) {
-                    return Ok(false);
-                }
-                let origins = [sa.position().origin(), sb.position().origin()];
-                if !origins
-                    .into_iter()
-                    .flat_map(|p| [p.x, p.y, p.z])
-                    .all(f64::is_finite)
-                {
-                    return Ok(false);
-                }
-                if side(
-                    Halfspace {
-                        origin: sb.position().origin(),
-                        outward: pa.outward,
-                    },
-                    sa.position().origin(),
-                )
-                .hi < 0.0
-                {
+                if cell.separates(&sa, &sb) {
                     return Ok(true);
                 }
             }

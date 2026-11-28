@@ -1,9 +1,14 @@
 use serde_json::{Value, json};
+use solidcraft_engine::doc::drawing::view::SetBy;
 use solidcraft_engine::doc::drawing::{
     Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
 };
+use solidcraft_engine::doc::drawing_view::{HiddenBodies, OccurrencePaths, Shows};
+use solidcraft_engine::drawing_view::Filter;
+
+use super::view_bodies::{Bodies, Row};
 use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
@@ -200,6 +205,113 @@ pub(super) struct ViewEdit {
     view: u64,
     scale: String,
     style: VisualStyle,
+    /// The components and bodies the view's source places, each ticked when the view draws it
+    /// (#22107). Read once as the panel opens, and again when what it was read from changes.
+    bodies: Option<Bodies>,
+    /// The view's lists are its parent's, not its own.
+    inherited: bool,
+    /// What the view draws, as Shows offers it: all bodies, as shown in the design, or the bodies
+    /// chosen in the list ([`ShowsChoice`]).
+    shows: ShowsChoice,
+    /// What the list was read from: the model's revision and the view's source, `hide`,
+    /// `hide_bodies` and `shows`. Hide in This View, Undo or a model change under the open panel
+    /// reads it again.
+    read_from: Option<ReadFrom>,
+}
+
+#[derive(PartialEq)]
+struct ReadFrom {
+    revision: u64,
+    source: Option<OccurrencePaths>,
+    hide: Option<OccurrencePaths>,
+    hide_bodies: Option<HiddenBodies>,
+    shows: Shows,
+}
+
+/// Edit View's Shows (#22107). As shown in the design is `shows: "design"`; All bodies and Chosen
+/// are both `shows: "all"`, Chosen with the view's own list of what it leaves out. The list also
+/// applies as shown in the design, on top of what the Browser hides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ShowsChoice {
+    All,
+    Design,
+    Chosen,
+}
+
+impl ShowsChoice {
+    const ALL: [ShowsChoice; 3] = [ShowsChoice::All, ShowsChoice::Design, ShowsChoice::Chosen];
+
+    /// What a view's settings show: following the design, or else Chosen when its lists leave
+    /// something out.
+    fn of(shows: Shows, list: Option<&Bodies>) -> ShowsChoice {
+        match shows {
+            Shows::Design => ShowsChoice::Design,
+            Shows::All if list.is_some_and(Bodies::leaves_out) => ShowsChoice::Chosen,
+            Shows::All => ShowsChoice::All,
+        }
+    }
+
+    fn shows(self) -> Shows {
+        if self == ShowsChoice::Design { Shows::Design } else { Shows::All }
+    }
+}
+
+/// The list for view `view`: the bodies `drawing.view.inspect` says its design places, those its
+/// source keeps, ticked as its `hide` and `hide_bodies` leave them. A component is named as the
+/// Browser names its occurrence.
+fn read_bodies(app: &mut SolveApp, view: u64, from: &ReadFrom) -> Option<Bodies> {
+    let read = app.session.execute("drawing.view.inspect", &json!({"view": ids::encode(view)})).ok()?;
+    let source = Filter::new(from.source.as_deref(), &[], &[]);
+    let listed: Vec<(Vec<u64>, String)> = read["bodies"]
+        .as_array()?
+        .iter()
+        .filter_map(|body| Some((serde_json::from_value::<Vec<u64>>(body["path"].clone()).ok()?, body["body"].as_str()?.to_owned())))
+        .filter(|(path, body)| source.keeps(path, body))
+        .collect();
+    let session = &app.session;
+    let name = |path: &[u64]| session.occurrence_placement(path).map(|placement| placement.name).unwrap_or_default();
+    Some(Bodies::new(listed, from.hide.as_deref().unwrap_or_default(), from.hide_bodies.as_deref().unwrap_or_default(), name))
+}
+
+/// Edit View's "Bodies in this view": a tick for each component and body of the view's source,
+/// indented under its component. A long list scrolls in about eight rows, so Apply and OK stay in
+/// a small window; only the rows in sight are laid out.
+fn bodies_list(ui: &mut egui::Ui, view: u64, list: &mut Bodies, inherited: bool, design: bool) {
+    let t = Tokens::get();
+    if inherited {
+        ui_kit::text(ui, &format!("ⓘ {}", tr("ui.drawing_panel.from_parent")), ui_kit::Text::Note("ui.drawing_panel.from_parent"));
+    }
+    let hint = if design { "ui.drawing_panel.bodies_in_view_hint_design" } else { "ui.drawing_panel.bodies_in_view_hint" };
+    ui_kit::text(ui, tr(hint), ui_kit::Text::Hint(hint));
+    let height = t.control_height;
+    let rows = list.rows.clone();
+    egui::ScrollArea::vertical().id_salt(("drawing:edit:bodies", view)).max_height(height * 8.0).show_rows(ui, height, rows.len(), |ui, range| {
+        for row in rows.get(range).unwrap_or_default() {
+            ui.horizontal(|ui| {
+                ui.set_height(height);
+                match row {
+                    Row::Component { path, label, depth } => {
+                        ui.add_space(t.space_12 * *depth as f32);
+                        let (all, any) = list.component(path);
+                        let mut drawn = all;
+                        if ui_kit::checkbox_indeterminate(ui, label, &mut drawn, any && !all).changed() {
+                            list.set_component(path, drawn);
+                        }
+                    }
+                    Row::Body { index, depth } => {
+                        ui.add_space(t.space_12 * *depth as f32);
+                        if let Some(body) = list.bodies.get_mut(*index) {
+                            ui_kit::checkbox(ui, &body.body, &mut body.drawn);
+                        }
+                    }
+                }
+            });
+        }
+    });
+    for gone in &list.unmatched {
+        let text = solidcraft_ui_text::format("ui.drawing_panel.not_found", &[("body", &gone.body)]);
+        ui_kit::text(ui, &format!("⚠ {text}"), ui_kit::Text::Note("ui.drawing_panel.not_found"));
+    }
 }
 
 pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64>) -> bool {
@@ -223,13 +335,38 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
             Some(id) => drawing.view(id).filter(|view| Some(view.sheet) == sheet),
             None => drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()),
         }?;
-        drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value))
+        drawing.resolve_view(view.id).ok().map(|settings| {
+            // A list the view takes from its parent says so, but one the drawing's default gives (none) doesn't.
+            let inherited = [settings.hide.set_by, settings.hide_bodies.set_by].iter().any(|by| matches!(by, SetBy::Parent(_)));
+            let from = ReadFrom {
+                revision: app.session.revision,
+                source: settings.occurrences.value,
+                hide: settings.hide.value,
+                hide_bodies: settings.hide_bodies.value,
+                shows: settings.shows.value,
+            };
+            (view.id, settings.scale.value, settings.visual_style.value, from, inherited, settings.flat.is_some())
+        })
     });
-    let Some((view, scale, style)) = resolved else {
+    // A flat pattern view draws one body's flat, not the model's bodies: it has no list to choose from.
+    let Some((view, scale, style, from, inherited, flat)) = resolved else {
         return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
     };
-    let mut edit =
-        app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
+    let mut edit = app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit {
+        view,
+        scale: scale.to_string(),
+        style,
+        bodies: None,
+        inherited: false,
+        shows: ShowsChoice::All,
+        read_from: None,
+    });
+    if edit.read_from.as_ref() != Some(&from) {
+        edit.bodies = if flat { None } else { read_bodies(app, view, &from) };
+        edit.inherited = inherited;
+        edit.shows = ShowsChoice::of(from.shows, edit.bodies.as_ref());
+        edit.read_from = Some(from);
+    }
     let styles = VisualStyle::ALL;
     let labels = [
         tr("ui.drawing_panel.visible"),
@@ -248,7 +385,32 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         }
         ui_kit::section_heading(ui, tr("ui.scale"));
         ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
-        let valid = edit.scale.trim().parse::<Scale>().is_ok();
+        let mut valid = edit.scale.trim().parse::<Scale>().is_ok();
+        if !flat {
+            ui_kit::section_heading(ui, tr("ui.drawing_panel.bodies_in_view"));
+            let options = ["ui.drawing_panel.shows_all", "ui.drawing_panel.shows_design", "ui.drawing_panel.shows_chosen"].map(tr);
+            let mut chosen = ShowsChoice::ALL.iter().position(|choice| *choice == edit.shows).unwrap_or_default();
+            let row = ui_kit::choice_row(ui, tr("ui.drawing_panel.shows"), "drawing:edit:shows", &mut chosen, &options);
+            crate::scenario::publish_handle("drawing:edit:shows", row.rect.right_center() - egui::vec2(12.0, 0.0));
+            if let Some(choice) = ShowsChoice::ALL.get(chosen) {
+                edit.shows = *choice;
+            }
+        }
+        // The list shows as chosen and as shown in the design, where it leaves out more than the
+        // Browser does.
+        if !flat
+            && edit.shows != ShowsChoice::All
+            && let Some(list) = edit.bodies.as_mut()
+        {
+            bodies_list(ui, view, list, edit.inherited, edit.shows == ShowsChoice::Design);
+            if list.none_drawn() {
+                valid = false;
+                ui_kit::text(ui, tr("ui.drawing_panel.tick_one"), ui_kit::Text::Error("ui.drawing_panel.tick_one"));
+            } else if list.too_many() {
+                valid = false;
+                ui_kit::text(ui, tr("ui.drawing_panel.too_many"), ui_kit::Text::Error("ui.drawing_panel.too_many"));
+            }
+        }
         ui.separator();
         ui.horizontal(|ui| {
             let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
@@ -270,11 +432,34 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     if edit.style != style {
         settings.insert("visual_style".into(), json!(edit.style));
     }
+    if let Some(from) = edit.read_from.as_ref().filter(|_| !flat) {
+        if edit.shows.shows() != from.shows {
+            settings.insert("shows".into(), json!(edit.shows.shows()));
+        }
+        if edit.shows == ShowsChoice::All {
+            // All bodies: the view leaves nothing out, its parent's lists included.
+            if from.hide.as_deref().is_some_and(|paths| !paths.is_empty()) {
+                settings.insert("hide".into(), json!([]));
+            }
+            if from.hide_bodies.as_deref().is_some_and(|bodies| !bodies.is_empty()) {
+                settings.insert("hide_bodies".into(), json!([]));
+            }
+        } else if let Some(list) = &edit.bodies {
+            let (hide, hide_bodies) = list.changes();
+            if let Some(hide) = hide {
+                settings.insert("hide".into(), json!(hide));
+            }
+            if let Some(hide_bodies) = hide_bodies {
+                settings.insert("hide_bodies".into(), json!(hide_bodies));
+            }
+        }
+    }
     app.drawing_workspace.view_edit = Some(edit);
     if (!apply && !ok) || settings.is_empty() {
         return ok;
     }
     match app.run("drawing.view.edit", json!({"view": ids::encode(view), "set": settings})) {
+        // The view's list changed, so the next frame reads the rows again.
         Ok(_) => ok,
         Err(error) => {
             app.set_status(error, true);

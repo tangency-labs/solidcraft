@@ -95,6 +95,7 @@ pub(crate) struct ViewScenes {
     patches: u64,
     sketch_slot: SceneSlot,
     sketch_key: u64,
+    sketch_hold: SketchHold,
     wireframe: crate::wireframe_silhouettes::Outlines,
     hl_slot: SceneSlot,
     hl_key: u64,
@@ -147,6 +148,7 @@ impl ViewScenes {
         std::mem::swap(&mut self.patches, &mut vp.patches);
         std::mem::swap(&mut self.sketch_slot, &mut vp.sketch_slot);
         std::mem::swap(&mut self.sketch_key, &mut vp.sketch_key);
+        std::mem::swap(&mut self.sketch_hold, &mut vp.sketch_hold);
         std::mem::swap(&mut self.wireframe, &mut vp.wireframe);
         std::mem::swap(&mut self.hl_slot, &mut vp.hl_slot);
         std::mem::swap(&mut self.hl_key, &mut vp.hl_key);
@@ -359,6 +361,8 @@ pub struct ViewportState {
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
     sketch_key: u64,
+    /// The sketch scene kept while only the camera moves (#22709).
+    sketch_hold: SketchHold,
     wireframe: crate::wireframe_silhouettes::Outlines,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
@@ -514,6 +518,9 @@ pub struct ViewportState {
     /// turns in the other orbit style than `free_orbit` says until it ends (#20917). None between
     /// drags.
     pub(crate) orbit_flip: Option<bool>,
+    /// Set when a mouse orbit drag starts: whether the `roll_key` was held, so the drag rolls the
+    /// view about the line of sight until it ends (#22691). None between drags.
+    pub(crate) orbit_roll: Option<bool>,
     pub build_ms: f64,
     /// Adaptive supersampling (#1288) and ambient occlusion while moving (#7165): the view drawn
     /// last (its view-projection and pixels) and since when it has held still (app time, s).
@@ -1128,7 +1135,8 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.preferences.vertex_markers.hash(&mut h);
     // The cached ground AO receiver and the ellipse share the selected ground plane.
     app.preferences.ground_shadow_follows_model.hash(&mut h);
-    solidcraft_engine::doc::display_quality::current().hash(&mut h);
+    // The level this window draws at, not the process-wide one another window may have set.
+    crate::prefs::drawn_quality(app).hash(&mut h);
     // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
     // shader has compiled, #4860).
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
@@ -1225,10 +1233,14 @@ fn ground_grid_key(app: &SolveApp, proj: &Proj) -> (u8, [u64; 3], u64, u64, u64)
 
 #[cfg(test)]
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
-    sketch_scene_key_with(app, proj, scene_key(app))
+    sketch_scene_keys(app, proj, scene_key(app)).0
 }
 
-fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
+/// The sketch scene's key, and with it, when only finished sketches make that scene follow the
+/// camera, the same key with the exact view replaced by a coarse one ([`coarse_view_key`]): two
+/// views with the same coarse key differ only in where the camera looks from, which a scene drawn
+/// in the world still shows fairly (#22709).
+fn sketch_scene_keys(app: &SolveApp, proj: &Proj, model_key: u64) -> (u64, Option<u64>) {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     model_key.hash(&mut h);
     app.viewport.wireframe.generation().hash(&mut h);
@@ -1261,16 +1273,55 @@ fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
     crate::dim_view::preview_solve(app).hash(&mut h);
     let sketch_plane = crate::sketch_view::active_sketch(app).and_then(|id| st.sketch(id)).map(|ss| ss.plane).or(preview_plane);
     let has_failed = app.session.model.results.iter().any(|r| r.lost_projections.is_some() && !r.skipped && !r.stale);
-    let view_dependent_sketches =
-        sketch_plane.is_some() || !st.sketches.is_empty() || has_failed || crate::sketch_attachment_ui::lost_guide(app).is_some();
+    let lost_guide = crate::sketch_attachment_ui::lost_guide(app).is_some();
+    let view_dependent_sketches = sketch_plane.is_some() || !st.sketches.is_empty() || has_failed || lost_guide;
+    let mut held = None;
     if view_dependent_sketches {
         true.hash(&mut h);
+        // An open sketch, the plane Create Sketch would take and a failure's feedback are
+        // worked on while the view moves: they follow it exactly.
+        if sketch_plane.is_none() && !has_failed && !lost_guide {
+            let mut coarse = h.clone();
+            coarse_view_key(proj, app.viewport.pixels_per_point()).hash(&mut coarse);
+            held = Some(coarse.finish());
+        }
         crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     } else if app.ui.show_grid && !hide_grid {
         false.hash(&mut h);
         ground_grid_key(app, proj).hash(&mut h);
     }
+    (h.finish(), held)
+}
+
+/// What a sketch scene drawn for one view needs to stay fair in another (#22709): the same
+/// window, pixel density and field of view, and a zoom within one of [`SKETCH_ZOOM_STEPS`] steps
+/// per doubling, so curves stay as finely sampled as their pixels need.
+fn coarse_view_key(proj: &Proj, ppp: f32) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    [proj.rect.width(), proj.rect.height(), ppp].map(f32::to_bits).hash(&mut h);
+    proj.cam.fov.to_bits().hash(&mut h);
+    let zoom = (SKETCH_ZOOM_STEPS * proj.cam.half_height().max(1e-9).log2()).round();
+    (zoom as i64).hash(&mut h);
     h.finish()
+}
+
+/// Zoom steps per doubling of the view's height within which a held sketch scene is kept: about
+/// 19 % each.
+const SKETCH_ZOOM_STEPS: f64 = 4.0;
+
+/// A sketch scene slower to build than this (ms) is kept while only the camera moves, and built
+/// again once the view has rested ([`REFINE_STILL_MS`]); a quicker one is built every frame.
+const SKETCH_HOLD_MS: f64 = 8.0;
+
+/// The sketch scene on screen, kept while only the camera moves (#22709): its coarse key
+/// ([`sketch_scene_keys`]), how long it took to build, and since when the view has rested.
+#[derive(Default)]
+struct SketchHold {
+    coarse: Option<u64>,
+    build_ms: f64,
+    rest: CameraRest,
+    /// The scene on screen was drawn for an earlier view.
+    stale: bool,
 }
 
 #[cfg(test)]
@@ -1464,7 +1515,8 @@ fn edge_px(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], si
 /// Shaded, or wireframe) any frame is. Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
     let fine_already = (!crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2) && !draws_instanced_edges(app);
-    fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+    // Sketches kept from an earlier view while the camera moved are drawn for this one first.
+    !sketch_scene_held(app) && (fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE)
 }
 
 /// Whether the visual style draws placements' edges from their shared edges, whose level
@@ -1520,7 +1572,7 @@ fn drawn_plan(
         .then(|| match refined(app, b) {
             Some((plan, _)) => Some(plan),
             None if repeated_copy(app, b) => None,
-            None => b.gpu_plan_at(solidcraft_engine::doc::display_quality::current()),
+            None => b.gpu_plan_at(crate::prefs::drawn_quality(app)),
         })
         .flatten()
         .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
@@ -1550,7 +1602,7 @@ fn repeated_copy(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool 
 /// The refined plan and mesh `b` is drawn from, when the view has it drawn finer than the chosen
 /// display quality (#1320).
 fn refined(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> crate::display_lod::Refined {
-    app.viewport.lod.lock().ok()?.refined(b, solidcraft_engine::doc::display_quality::current())
+    app.viewport.lod.lock().ok()?.refined(b, crate::prefs::drawn_quality(app))
 }
 
 /// Changes whenever a body's refinement changes (the scene and highlight keys).
@@ -1576,7 +1628,7 @@ fn shown_mesh(
         .flatten()
         // A large body's plan mesh is made on a worker: until then its faces are lit on the
         // mesh drawn here (#3745).
-        .and_then(|_| b.plan_mesh_soon())
+        .and_then(|_| b.plan_mesh_soon(crate::prefs::drawn_quality(app)))
         .unwrap_or_else(|| drawn_mesh(app, b))
 }
 
@@ -1589,11 +1641,13 @@ fn drawn_mesh(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> std::syn
     if crate::render_workspace::active(app) {
         return b.mesh();
     }
-    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
     if let Some((_, mesh)) = refined(app, b) {
         return mesh;
     }
-    if current() == DisplayQuality::Normal { b.mesh() } else { b.plan_mesh().unwrap_or_else(|| b.mesh()) }
+    match crate::prefs::drawn_quality(app) {
+        solidcraft_engine::doc::display_quality::DisplayQuality::Normal => b.mesh(),
+        q => b.plan_mesh_at(q).unwrap_or_else(|| b.mesh()),
+    }
 }
 
 /// The move a Move dialog's earlier types made to body `name`, if it is one they moved
@@ -1647,7 +1701,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     if app.viewport.gpu.is_none() || !crate::display_lod::enabled() {
         return; // The CPU picture draws the reference mesh.
     }
-    let q = solidcraft_engine::doc::display_quality::current();
+    let q = crate::prefs::drawn_quality(app);
     // A moving camera is left alone: every refinement swapped in rebuilds and uploads the whole
     // model scene, which in a large assembly takes tens of milliseconds a time. The bodies keep
     // the step they have until the camera has stood still for [`REFINE_STILL_MS`].
@@ -2207,6 +2261,9 @@ struct BodyDraw {
     edges_shared: bool,
     /// Drawn as its edges alone, whatever the style: what an Isolate hid, shown as wireframe.
     wire: bool,
+    /// Drawn without its edge lines in every style (`body.edge_lines`): an overlay body such as
+    /// a thin label keeps no outline while the others keep theirs.
+    no_edges: bool,
 }
 
 impl BodyDraw {
@@ -2231,6 +2288,7 @@ impl BodyDraw {
             self.wire,
         )
             .hash(&mut h);
+        self.no_edges.hash(&mut h);
         // The block holds the slot its box is tested under: another slot is another block.
         self.motion.hash(&mut h);
         h.finish()
@@ -2238,7 +2296,7 @@ impl BodyDraw {
 
     fn build(&self, out: &mut crate::gpu::BlockBuilder, shaded: bool, edges: bool, hidden_edges: bool, markers: bool) {
         // A body drawn as its edges: no faces, and every edge, as the wireframe style draws.
-        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges) };
+        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges && !self.no_edges) };
         let m = &self.mesh;
         let color = |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color);
         let class = |ti: usize| {
@@ -2805,11 +2863,11 @@ fn shared_mesh(
     app: &SolveApp,
     b: &solidcraft_engine::doc::ModelBody,
 ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
-    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
     if refined(app, b).is_some() {
         return None;
     }
-    let q = current();
+    let q = crate::prefs::drawn_quality(app);
     Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
 }
 
@@ -3087,7 +3145,8 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
 /// Isocurve Analysis: the isoparametric curves of each face it shows, on the faces (depth
 /// tested, as edges are).
 fn isocurves(sc: &mut GpuScene, app: &SolveApp) {
-    let iso = app.session.isocurve_lines();
+    // At the quality this window draws at, which the scene key holds, not the process-wide one.
+    let iso = app.session.isocurve_lines(crate::prefs::drawn_quality(app));
     if !iso.is_empty() {
         let col = sc.color(c4(Tokens::get().accent));
         for line in iso.iter().flat_map(|lines| lines.iter()) {
@@ -3385,7 +3444,11 @@ fn body_scene(
         // (alike faces share a colour): only while every face has a slot of its own.
         let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
         let edge_colours = (slots.edge, slots.hidden_edge);
-        let instanced = if on_gpu || wire {
+        // A body set to draw no edge lines (`body.edge_lines`), unless an Isolate shows it as them.
+        // It is drawn from its own triangles: an instance draws its mesh's shared edges, which
+        // every copy of that mesh shares.
+        let no_edges = !wire && s.doc.edgeless_bodies.contains(&b.name);
+        let instanced = if on_gpu || wire || no_edges {
             None
         } else if face_looks.is_empty() {
             instances.place(b, slots.instance, edge_colours, look, oit, slots.motion)
@@ -3403,7 +3466,7 @@ fn body_scene(
         // a copy shares with the others and which name no motion (with none, the arena full, its
         // faces are drawn in its own colour slot, which does).
         arena.drawn_in_shared(&name, instanced.is_none() && slots.faces != u32::MAX);
-        let edge_tol = if edges || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
+        let edge_tol = if (edges && !no_edges) || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         if edges_shared && let Some((mesh, place)) = &instanced {
             edge_placements.insert(b.name.clone(), (mesh.clone(), *place));
         }
@@ -3427,6 +3490,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared,
                 wire,
+                no_edges,
             },
             None => BodyDraw {
                 name,
@@ -3447,6 +3511,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared: false,
                 wire,
+                no_edges,
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -3567,20 +3632,48 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
 /// Rebuild the sketch scene when what it shows has changed.
 #[cfg(test)]
 pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
-    refresh_sketch_scene_with_key(app, proj, scene_key(app));
+    refresh_sketch_scene_with_key(app, proj, scene_key(app), None);
 }
 
-fn refresh_sketch_scene_with_key(app: &mut SolveApp, proj: &Proj, model_key: u64) {
+/// With `ctx` (the window's frames), a slow sketch scene is kept while only the camera moves, and
+/// built for the view once it has rested (#22709): re-sampling hundreds of shown sketches on
+/// every frame of an orbit made it crawl. The scene is drawn in the world, so the last one is
+/// still a fair picture; a zoom past a step, another window size, or any change to what the
+/// scene shows builds it at once.
+fn refresh_sketch_scene_with_key(app: &mut SolveApp, proj: &Proj, model_key: u64, ctx: Option<&egui::Context>) {
     refresh_wireframe(app, proj, model_key);
-    let sk = sketch_scene_key_with(app, proj, model_key);
-    if sk != app.viewport.sketch_key {
-        let scene = build_sketch_scene(app, proj);
-        if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
-            *slot = Some(scene);
-        }
-        app.viewport.sketch_scenes_built += 1;
-        app.viewport.sketch_key = sk;
+    let (sk, coarse) = sketch_scene_keys(app, proj, model_key);
+    if sk == app.viewport.sketch_key {
+        return;
     }
+    let hold = &mut app.viewport.sketch_hold;
+    if let Some(ctx) = ctx
+        && coarse.is_some()
+        && coarse == hold.coarse
+        && hold.build_ms > SKETCH_HOLD_MS
+    {
+        let wait = hold.rest.wait(sk, ctx.input(|i| i.time) * 1000.0);
+        if wait > 0.0 {
+            hold.stale = true;
+            ctx.request_repaint_after(std::time::Duration::from_millis(wait as u64 + 5));
+            return;
+        }
+    }
+    let t0 = crate::now_ms();
+    let scene = build_sketch_scene(app, proj);
+    if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
+        *slot = Some(scene);
+    }
+    app.viewport.sketch_hold.build_ms = crate::now_ms() - t0;
+    app.viewport.sketch_hold.coarse = coarse;
+    app.viewport.sketch_hold.stale = false;
+    app.viewport.sketch_scenes_built += 1;
+    app.viewport.sketch_key = sk;
+}
+
+/// Whether the sketch scene on screen was drawn for an earlier view, kept while the camera moves.
+pub(crate) fn sketch_scene_held(app: &SolveApp) -> bool {
+    app.viewport.sketch_hold.stale
 }
 
 /// The camera changes only silhouette classification, never the body's mesh or GPU blocks.
@@ -5164,10 +5257,46 @@ struct PickOptions<'a> {
     include_midpoints: bool,
     through: bool,
     feedback: Option<&'a egui::Context>,
+    #[cfg(test)]
+    linear_bodies: bool,
+}
+
+impl PickOptions<'_> {
+    fn use_body_tree(&self) -> bool {
+        #[cfg(test)]
+        {
+            !self.linear_bodies
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    }
+}
+
+enum BodyIndices {
+    All(std::ops::Range<usize>),
+    Some(std::vec::IntoIter<usize>),
+}
+
+impl Iterator for BodyIndices {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        match self {
+            BodyIndices::All(range) => range.next(),
+            BodyIndices::Some(iter) => iter.next(),
+        }
+    }
 }
 
 fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -> Option<Vec<Hit>> {
-    let PickOptions { other_sketch_points, all, include_midpoints, through, feedback } = options;
+    let use_tree = options.use_body_tree();
+    let other_sketch_points = options.other_sketch_points;
+    let all = options.all;
+    let include_midpoints = options.include_midpoints;
+    let through = options.through;
+    let feedback = options.feedback;
     // Select Other and tool picks share the same visible-image boundary as ordinary picks.
     if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
         return Some(Vec::new());
@@ -5438,9 +5567,16 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Nearest face along the ray (hides what is behind it); with `all`, every body's nearest.
     let mut bestf: Option<(f64, Hit)> = None;
     let mut faces = Near::new(all);
-    // Bounds retain the state's body order. Looking each one up by name made both passes
-    // quadratic for assemblies with many small parts.
-    for (i, b) in st.bodies.iter().enumerate() {
+    // Bounds retain the state's body order. When no chained Move transform shifts body boxes,
+    // query the cached `BodyTree` BVH (which yields matching indices in strictly ascending order,
+    // preserving tie-breaking identically to a linear scan).
+    let tree = (use_tree && chained.is_none() && bounds.len() == st.bodies.len()).then(|| body_tree(app, &bounds));
+    let face_bodies = match &tree {
+        Some(t) => BodyIndices::Some(t.candidates(&bounds, |bb| ray_box(o, d, bb, bb.diagonal() * 1e-6 + 1e-9).is_some()).into_iter()),
+        None => BodyIndices::All(0..st.bodies.len()),
+    };
+    for i in face_bodies {
+        let Some(b) = st.bodies.get(i) else { continue };
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
         // Nor do the faces of what an Isolate hid shown as wireframe: only its edges are drawn.
         if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) || wire_ghost(app, b) {
@@ -5516,7 +5652,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let edge_reach = if app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps) { JOINT_EDGE_REACH } else { 6.0 };
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
-    for (i, b) in st.bodies.iter().enumerate() {
+    // Conservative 8.01 px margin on the BVH screen-box query avoids f32 projection rounding
+    // misses on ancestor boxes; the exact 8.0 px check still runs per body below.
+    let edge_bodies = match &tree {
+        Some(t) => BodyIndices::Some(t.candidates(&bounds, |bb| screen_box(proj, bb, 8.01).is_none_or(|r| r.contains(pos))).into_iter()),
+        None => BodyIndices::All(0..st.bodies.len()),
+    };
+    for i in edge_bodies {
+        let Some(b) = st.bodies.get(i) else { continue };
         if !through && !crate::viewport::body_shown(app, &b.name) {
             continue;
         }
@@ -6332,12 +6475,30 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
         let snaps = crate::dialogs_assembly::takes_snaps(d);
-        return hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(|h| {
+        let take = |h: &Hit| {
             d.candidate_on(&app.session, h, snap.as_ref())
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
-        });
+        };
+        let first = hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(take);
+        // A profile a body's face hides is still the profiles input's pick (`Dialog::profile_behind`),
+        // when its fill is shown: a profile with Show Profile off is not taken through the face.
+        let shown_profile = |h: &Hit| matches!(h, Hit::Profile { sketch, .. } if profile_fill_shown(app, *sketch));
+        if let Some((face, picked)) = &first
+            && d.profile_behind(&app.session, face, picked)
+            && let Some(profile) = hits.iter().filter(|h| shown_profile(h)).find_map(take).filter(|(_, s)| matches!(s, Sel::Profile { .. }))
+        {
+            return Some(profile);
+        }
+        return first;
     }
     hits.iter().filter(|h| crate::selection_mode::allowed(app, h)).find_map(|h| hit_candidate(app, h))
+}
+
+/// Whether the view fills the profiles of `sketch`, as the sketch scene decides it: not when the
+/// Browser hides them or the sketch's Show Profile is off.
+fn profile_fill_shown(app: &SolveApp, sketch: u64) -> bool {
+    let st = crate::open_meshing::shown_world(app);
+    !app.session.visibility.hidden_profiles.contains(&sketch) && st.sketch(sketch).is_some_and(|ss| !ss.sketch.view.hide_profile)
 }
 
 /// Every hit a click could pick, in order, each with its selection (Select Other).
@@ -6650,9 +6811,13 @@ fn seen_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, nor
 /// over a face seen at a grazing angle (`GpuScene::lifted_line`). One pass over the mesh's
 /// vertices: the tessellation shares the edge's points with the faces on either side.
 fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3]; 2]> {
+    edge_normal_lookup(m, [e])(e)
+}
+
+fn edge_normal_lookup<'a>(m: &solidcraft_engine::geom::Mesh, edges: impl IntoIterator<Item = &'a [Vec3]>) -> impl Fn(&[Vec3]) -> Vec<[[f32; 3]; 2]> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-7;
-    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = e.iter().map(|p| (key(*p), Vec::new())).collect();
+    let key = move |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = edges.into_iter().flatten().map(|p| (key(*p), Vec::new())).collect();
     for (p, n) in m.positions.iter().zip(&m.normals) {
         if let Some(list) = at.get_mut(&key(*p))
             && list.len() < 8
@@ -6660,17 +6825,19 @@ fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3];
             list.push(*n);
         }
     }
-    e.windows(2)
-        .map(|w| {
-            let mut found: Vec<Vec3> = Vec::new();
-            for p in w {
-                found.extend(at.get(&key(*p)).into_iter().flatten().copied());
-            }
-            let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
-            let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
-            [first.to_f32(), other.to_f32()]
-        })
-        .collect()
+    move |edge| {
+        edge.windows(2)
+            .map(|w| {
+                let mut found: Vec<Vec3> = Vec::new();
+                for p in w {
+                    found.extend(at.get(&key(*p)).into_iter().flatten().copied());
+                }
+                let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
+                let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
+                [first.to_f32(), other.to_f32()]
+            })
+            .collect()
+    }
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
@@ -6827,7 +6994,11 @@ fn hovered_body(app: &SolveApp) -> Option<String> {
 }
 
 fn highlighted_cow(app: &SolveApp) -> std::borrow::Cow<'_, [Sel]> {
-    if app.dialog.is_none() && app.viewport.text_drag.is_none() && crate::agent_chat::hovered_chip(app).is_empty() {
+    if app.dialog.is_none()
+        && app.viewport.text_drag.is_none()
+        && crate::joint_handles::began_on(app).is_none()
+        && crate::agent_chat::hovered_chip(app).is_empty()
+    {
         std::borrow::Cow::Borrowed(&app.session.selection)
     } else {
         std::borrow::Cow::Owned(app.highlighted())
@@ -6966,8 +7137,8 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     }
     lights_hovered_edge(app).hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
-    // which display quality its plan and edges are made.
-    solidcraft_engine::doc::display_quality::current().hash(&mut h);
+    // which display quality its plan and edges are made (this window's).
+    crate::prefs::drawn_quality(app).hash(&mut h);
     lod_generation(app).hash(&mut h);
     // Whole-body highlights redraw the model scene's own blocks: they must be the scene's
     // current ones (their keys and the bodies' ranges in them).
@@ -6999,6 +7170,7 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     }
     app.preview.key.hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
+    app.preview.corner_hover().map(|_| (app.preview.key, app.preview.hovered_corner)).hash(&mut h);
     app.viewport.refused_ring.hash(&mut h);
     // Where a Move dialog has moved its bodies; while its triad is dragged, only that it is.
     if crate::dialogs_move::dragging(app) {
@@ -7139,7 +7311,7 @@ fn wireframe_highlight_plan(
     app.viewport
         .gpu
         .is_some_and(|g| g.tess)
-        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
+        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(crate::prefs::drawn_quality(app))))
         .flatten()
         .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
@@ -7753,6 +7925,33 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let mut lit_shared = EdgeHighlights::default();
     let mut lit_shared_hidden = EdgeHighlights::default();
     let mut selected_instances = HighlightInstances::default();
+    if app.dialog.as_ref().is_some_and(|dialog| matches!(dialog.kind, crate::dialogs::Kind::Sheet(crate::dialogs_sheet::Sm::Flange { ty: 1, .. })))
+        && let Some(corner) = app.preview.corner_hover()
+        && app.body_visible(&corner.body)
+    {
+        let faces: std::collections::BTreeSet<usize> = corner.faces.iter().flatten().copied().collect();
+        let lift = t.hover_face_lift;
+        let (r, g, b) = body_rgb(app, &corner.body);
+        mesh_tris(&mut feedback, &corner.mesh, [r.saturating_add(lift), g.saturating_add(lift), b.saturating_add(lift), 255], true, |face| {
+            faces.contains(&(face as usize))
+        });
+        let edges = || {
+            corner
+                .mesh
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    corner.mesh.edge_pickable(*index)
+                        && corner.mesh.edge_faces.get(*index).is_some_and(|adjacent| adjacent.iter().any(|face| faces.contains(&(*face as usize))))
+                })
+                .map(|(_, edge)| edge.as_slice())
+        };
+        let normals = edge_normal_lookup(&corner.mesh, edges());
+        for edge in edges() {
+            edge_lines(&mut feedback, edge, hover_edge, 1.5, &normals(edge));
+        }
+    }
     // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,
     // so the face a slicer export lays its body on shows at a glance. Drawn before the selection,
     // which lights over it.
@@ -8564,6 +8763,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
+    #[cfg(test)]
+    crate::dialogs::another_window_sets_quality();
     let scene_slot = app.viewport.scene_slot();
     if app.viewport.scene_target != scene_slot {
         app.viewport.invalidate_view_uploads();
@@ -8607,6 +8808,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
+    crate::dialog_drag_undo::track(app, ui.ctx(), primary_pressed, primary_down, manipulator_dragging);
     {
         let platform = crate::tool_modifiers::Platform::of(ui.ctx());
         let held = crate::tool_modifiers::Held::new(mods, platform);
@@ -8679,17 +8881,19 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
-    let hits = hover
-        .filter(|_| {
-            inside
-                && app.viewport.boxsel.is_none()
-                && !crate::joint_drag::active(app)
-                && !joint_handle_pointer
-                && !navigating
-                && !dragging_layer
-                // A part dragged in from the parts library lands in the design, not on a face.
-                && !design_dragged
-        })
+    // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
+    // empty `hits` means empty space only where it ran (`picked`).
+    let picked = hover.filter(|_| {
+        inside
+            && app.viewport.boxsel.is_none()
+            && !crate::joint_drag::active(app)
+            && !joint_handle_pointer
+            && !navigating
+            && !dragging_layer
+            // A part dragged in from the parts library lands in the design, not on a face.
+            && !design_dragged
+    });
+    let hits = picked
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
                 pick_cached(app, &proj, p)
@@ -8793,7 +8997,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else if !layered {
             publish_levels(app);
         }
-        refresh_sketch_scene_with_key(app, &proj, key);
+        refresh_sketch_scene_with_key(app, &proj, key, Some(ui.ctx()));
         if app.viewport.wireframe.busy() {
             ui.ctx().request_repaint();
         }
@@ -9282,6 +9486,24 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             app.edit_feature_of_face(&body, index, point);
         }
+        // Double-click empty space with a component active: go back to its parent, as the
+        // ribbon's Activate Parent does. The same preference as a double-click on a face.
+        if resp.double_clicked()
+            && picked.is_some()
+            && hits.is_empty()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && !reference_pick
+            && mods.is_none()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && app.session.active_sketch.is_none()
+            && app.session.active_component != 0
+            && app.preferences.double_click_components
+        {
+            let _ = app.run("component.activate.parent", json!({}));
+        }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
         // click already allows the pointer a few points of travel, as a mouse moves while it is
@@ -9291,7 +9513,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chord = ui.input(|i| i.pointer.middle_down()) && crate::prefs::nav_chord(app, crate::prefs::NavButton::Right).is_some();
         if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !chord {
             if app.tool.is_some() {
-                crate::tools::finish(app);
+                if !crate::sketch_tools::keep_on_right_click(app) {
+                    crate::tools::finish(app);
+                }
             } else if app.dialog.is_none() {
                 if crate::sketch_tools::detach_simulated_at(app, p) {
                     // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
@@ -9565,6 +9789,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::joint_handles::active(app) && !crate::ui_kit::input_blocked() {
         if let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| p.is_finite()) {
             crate::joint_handles::to(app, &proj, p);
+            joint_motions::follow(app);
         }
         if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
             crate::joint_handles::end_drag(app);
@@ -12577,6 +12802,150 @@ mod tests {
         }
     }
 
+    /// The screen-space candidate bodies returned by `BodyTree` include every body whose screen
+    /// box (or behind-the-eye fallback) can contain the cursor, in strictly ascending order, for
+    /// both perspective and orthographic projections.
+    #[test]
+    fn screen_box_candidate_bodies_include_every_matching_box() {
+        let mut seed = 98765u64;
+        let mut rnd = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64) * 200.0 - 100.0
+        };
+        let mut boxes: Vec<(String, solidcraft_engine::geom::Aabb3)> = (0..300)
+            .map(|i| {
+                let lo = Vec3::new(rnd(), rnd(), rnd());
+                let size = Vec3::new(rnd().abs() * 0.15 + 0.5, rnd().abs() * 0.15 + 0.5, rnd().abs() * 0.15 + 0.5);
+                (format!("B{i}"), solidcraft_engine::geom::Aabb3 { min: lo, max: lo + size })
+            })
+            .collect();
+        boxes.push(("Empty".into(), solidcraft_engine::geom::Aabb3::EMPTY));
+        boxes.push(("Odd".into(), solidcraft_engine::geom::Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) }));
+        let tree = BodyTree::new(&boxes);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        for perspective in [true, false] {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
+            app.cam.target = Vec3::ZERO;
+            app.cam.distance = 60.0;
+            app.cam.yaw = 0.7;
+            app.cam.pitch = 0.4;
+            let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
+            for gx in 0..5 {
+                for gy in 0..4 {
+                    let pos = pos2(80.0 + gx as f32 * 160.0, 60.0 + gy as f32 * 150.0);
+                    let near = tree.candidates(&boxes, |bb| screen_box(&proj, bb, 8.01).is_none_or(|r| r.contains(pos)));
+                    assert!(near.windows(2).all(|w| w[0] < w[1]), "ascending, each once (perspective={perspective})");
+                    for (i, (_, b)) in boxes.iter().enumerate() {
+                        if screen_box(&proj, b, 8.0).is_none_or(|r| r.contains(pos)) {
+                            assert!(near.contains(&i), "body {i} must be a candidate at {pos:?} (perspective={perspective})");
+                        }
+                    }
+                    assert!(near.ends_with(&[boxes.len() - 2, boxes.len() - 1]), "loose boxes are always candidates");
+                }
+            }
+        }
+    }
+
+    /// `pick_hits` accelerated by `BodyTree` returns 100% identical face, edge, and vertex hits
+    /// (and tie-breaking) to a brute-force linear scan across many bodies, including overlapping
+    /// bodies, bodies behind the camera eye, and both perspective and orthographic views.
+    #[test]
+    fn pick_hits_with_body_tree_matches_linear_scan() {
+        let mut s = solidcraft_engine::Session::default();
+        // A 3x3x3 grid of boxes plus overlapping duplicates (tie-breaking) and boxes near/behind
+        // the camera eye.
+        let mut centers = Vec::new();
+        for ix in -1..=1 {
+            for iy in -1..=1 {
+                for iz in -1..=1 {
+                    centers.push([ix as f64 * 25.0, iy as f64 * 25.0, iz as f64 * 25.0]);
+                }
+            }
+        }
+        // Overlapping box at the exact same position as the centre box to verify tie-breaking.
+        centers.push([0.0, 0.0, 0.0]);
+        // Partially overlapping box shifted slightly along +X/+Y.
+        centers.push([4.0, 4.0, 0.0]);
+        // Boxes that sit behind/around the eye in the close-up perspective view below.
+        centers.push([0.0, 0.0, 90.0]);
+        centers.push([45.0, 45.0, 45.0]);
+        for (i, [x, y, z]) in centers.iter().copied().enumerate() {
+            s.execute(
+                "solid.box",
+                &json!({"length": 10.0, "width": 10.0, "height": 10.0, "center": [x, y, z], "operation": "new", "name": format!("Box{i}")}),
+            )
+            .unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let mut saw_face = false;
+        let mut saw_edge = false;
+        let mut saw_vertex = false;
+
+        // Test three camera setups: fitted perspective, close-up perspective (putting some boxes
+        // behind the eye), and orthographic.
+        let views = [(true, None), (true, Some((Vec3::ZERO, 40.0, 0.65, 0.45))), (false, None)];
+        for (perspective, custom) in views {
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
+            if let Some((target, distance, yaw, pitch)) = custom {
+                app.cam.target = target;
+                app.cam.distance = distance;
+                app.cam.yaw = yaw;
+                app.cam.pitch = pitch;
+            } else {
+                app.fit_view();
+            }
+            let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
+            // Probe face centres, edge midpoints, vertices of several boxes, plus empty pixels.
+            let mut probes = vec![pos2(10.0, 10.0), pos2(790.0, 590.0)];
+            for [x, y, z] in [[0.0, 0.0, 0.0], [25.0, 0.0, 0.0], [-25.0, 25.0, -25.0], [4.0, 4.0, 0.0], [0.0, 0.0, 25.0]] {
+                for delta in [
+                    Vec3::new(0.0, 0.0, 5.0), // top face centre
+                    Vec3::new(5.0, 0.0, 5.0), // top edge midpoint
+                    Vec3::new(5.0, 5.0, 5.0), // corner vertex
+                    Vec3::new(5.0, 0.0, 0.0), // +X face centre
+                ] {
+                    if let Some(sp) = proj.to_screen(Vec3::new(x, y, z) + delta)
+                        && rect.contains(sp)
+                    {
+                        probes.push(sp);
+                    }
+                }
+            }
+            for all in [false, true] {
+                for &pos in &probes {
+                    let bvh = pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, ..PickOptions::default() });
+                    let linear =
+                        pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, linear_bodies: true, ..PickOptions::default() });
+                    assert_eq!(bvh, linear, "BVH pick must match linear scan (perspective={perspective}, all={all}, pos={pos:?})");
+                    if let Some(hits) = &bvh {
+                        saw_face |= hits.iter().any(|h| matches!(h, Hit::Face { .. }));
+                        saw_edge |= hits.iter().any(|h| matches!(h, Hit::Edge { .. }));
+                        saw_vertex |= hits.iter().any(|h| matches!(h, Hit::Vertex { .. }));
+                    }
+                }
+            }
+        }
+        assert!(saw_face && saw_edge && saw_vertex, "probes must exercise faces ({saw_face}), edges ({saw_edge}), and vertices ({saw_vertex})");
+    }
+
     /// The origin point hides behind bodies under the same rule as the axes and planes (#10050):
     /// a cylinder standing on the origin hides the dot while the through-bodies preference is
     /// off, and point, axes and planes come through together with the preference on or while a
@@ -12650,6 +13019,7 @@ mod tests {
         let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
+        // The plane as it turns by default, about the line where it is.
         let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);
@@ -12862,7 +13232,14 @@ mod tests {
         h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
         assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
         let sc = build_scene(&h.app);
-        let segments: usize = h.app.session.isocurve_lines().iter().flat_map(|l| l.iter()).map(|l| l.points.len() - 1).sum();
+        let segments: usize = h
+            .app
+            .session
+            .isocurve_lines(solidcraft_engine::doc::display_quality::current())
+            .iter()
+            .flat_map(|l| l.iter())
+            .map(|l| l.points.len() - 1)
+            .sum();
         assert!(segments > 16, "eight curves each way: {segments} segments");
         assert_eq!(accent(&sc.lines, &sc), segments, "every segment on the model, in the accent");
         assert_eq!(accent(&sc.overlay, &sc), 0, "none over the model");
@@ -12885,7 +13262,7 @@ mod tests {
         h.app.run("solid.cylinder", json!({"radius": 12, "height": 50, "base": [6, -20, 0], "operation": "join"})).unwrap();
         h.settle();
         h.app.run("inspect.isocurve", json!({"faces": [[-18, -20, 15], [24, -20, 15]]})).unwrap();
-        let faces = h.app.session.isocurve_lines();
+        let faces = h.app.session.isocurve_lines(solidcraft_engine::doc::display_quality::current());
         assert_eq!(faces.len(), 2, "{:?}", h.app.status);
         // Each piece's lines up the face (x held) and across it (z held), by where they are held.
         let held = |lines: &[solidcraft_engine::kernel::IsoLine], k: usize| {
@@ -14330,6 +14707,7 @@ mod tests {
             simplified: simplified.clone(),
             edges_shared: false,
             wire: false,
+            no_edges: false,
         };
         let lines = |d: &BodyDraw| {
             let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));
@@ -19332,6 +19710,37 @@ mod tests {
     /// A two-finger twist turns the view about the up axis (#6286): counter-clockwise turns the
     /// model counter-clockwise as seen from above, pitch and roll stay, the Orbit around point
     /// keeps its place, and noise or the preference off (the default) leave the camera still.
+    /// With "Roll about the line of sight" on (#22691), the same twist rolls the picture the way the
+    /// fingers turn in any view, keeps heading and pitch, and keeps the Orbit around point on screen;
+    /// it does nothing while the twist itself is off.
+    #[test]
+    fn trackpad_twist_rolls_the_view_about_the_line_of_sight_when_asked() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.trackpad_twist_rolls, "rolling is opt-in");
+        h.call("ui.move", json!({"x":800,"y":500}));
+        h.frame();
+        h.app.preferences.trackpad_twist_rolls = true;
+        let untouched = h.app.cam;
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        assert_eq!(h.app.cam, untouched, "with the twist off, its roll option does nothing");
+        h.app.preferences.trackpad_twist_turns = true;
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        // A view looking along neither axis: the roll must not depend on which way Z points.
+        h.app.cam = solidcraft_viewport::Camera { target: Vec3::new(30.0, -20.0, 5.0), yaw: 0.7, pitch: 0.4, ..h.app.cam };
+        let before = h.app.cam;
+        let origin = before.frame_coords(Vec3::ZERO);
+        // egui counts clockwise: -0.3 is a counter-clockwise twist, which turns the picture
+        // counter-clockwise (a negative roll).
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        let rolled = h.app.cam;
+        let turned = (rolled.roll - before.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((turned + 0.3).abs() < 1e-6, "counter-clockwise rolls the picture counter-clockwise: {turned}");
+        assert_eq!((rolled.yaw, rolled.pitch, rolled.distance), (before.yaw, before.pitch, before.distance), "nothing turns towards or away");
+        assert!((rolled.frame_coords(Vec3::ZERO) - origin).len() < 1e-6, "the origin keeps its place on screen");
+    }
+
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();
@@ -21907,6 +22316,53 @@ mod grid_plane_tests {
             refresh_sketch_scene(&mut app, &proj);
         }
         assert_eq!(app.viewport.sketch_scenes_built, 3, "a change of what the scene shows builds it");
+    }
+
+    /// #22709: a slow sketch scene is kept while only the camera moves, and built for the view
+    /// once it has rested; a zoom past a step, a change of what it shows, a quick scene or an open
+    /// sketch build it at once.
+    #[test]
+    fn a_slow_sketch_scene_is_kept_while_only_the_camera_moves() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut SolveApp, time: f64| {
+            let input = egui::RawInput { time: Some(time), ..Default::default() };
+            drop(ctx.run_ui(input, |ui| {
+                let proj = projection(app, rect);
+                refresh_sketch_scene_with_key(app, &proj, scene_key(app), Some(ui.ctx()));
+            }));
+            app.viewport.sketch_scenes_built
+        };
+        assert_eq!(frame(&mut app, 0.0), 1, "built for the first view");
+        // As if hundreds of sketches had taken this long.
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.016), 1, "an orbit keeps the slow scene");
+        assert!(sketch_scene_held(&app), "drawn for an earlier view");
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.033), 1, "and so does the next orbit frame");
+        assert_eq!(frame(&mut app, 0.1), 1, "a view resting for less than a moment too");
+        assert_eq!(frame(&mut app, 0.033 + REFINE_STILL_MS / 1000.0 + 0.01), 2, "the rested view has its own scene");
+        assert!(!sketch_scene_held(&app));
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.distance *= 0.5;
+        assert_eq!(frame(&mut app, 0.5), 3, "zooming in past a step samples the curves finer at once");
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        app.preferences.sketch_halo = !app.preferences.sketch_halo;
+        assert_eq!(frame(&mut app, 0.52), 4, "a change of what the scene shows builds it at once");
+        app.viewport.sketch_hold.build_ms = 1.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.54), 5, "a quick scene follows every frame");
+        app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+        assert_eq!(frame(&mut app, 0.56), 6, "opening a sketch builds it");
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.58), 7, "the open sketch and its grid follow the camera exactly");
     }
 
     /// The capacity hint only reserves room: the scene's bytes are those of one built without it.

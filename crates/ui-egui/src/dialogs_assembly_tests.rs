@@ -2529,7 +2529,11 @@ fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
 }
 
 fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
-    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    click_row_at(h, &[occurrence]);
+}
+
+fn click_row_at(h: &mut crate::scenario::Harness, path: &[u64]) {
+    let at = h.call("ui.at", json!({"occurrence": path, "control": "row"}));
     assert_eq!(at["ok"], true, "{at}");
     let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
     assert_eq!(clicked["ok"], true, "{clicked}");
@@ -2569,6 +2573,158 @@ fn as_built_takes_a_two_body_component_as_one() {
         assert_eq!(c[0].0, "joint.as_built");
         assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
     }
+}
+
+/// Component Outer holding sub-component Inner, and component Other beside them.
+fn outer_inner_other() -> (crate::scenario::Harness, u64, u64, u64) {
+    outer_inner_other_with(true)
+}
+
+/// As [`outer_inner_other`]; without `outer_body` Outer holds Inner and no body of its own.
+fn outer_inner_other_with(outer_body: bool) -> (crate::scenario::Harness, u64, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corner: Option<[f64; 3]>| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        if let Some(corner) = corner {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body"})).unwrap();
+        }
+        occ
+    };
+    let outer = component(&mut h, "Outer", outer_body.then_some([0.0, 0.0, 0.0]));
+    let inner = component(&mut h, "Inner", Some([0.0, 0.0, 10.0]));
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let other = component(&mut h, "Other", Some([40.0, 0.0, 0.0]));
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    let held = if outer_body { 2 } else { 1 };
+    assert_eq!(h.app.session.occurrence_bodies(&[outer], true).unwrap().len(), held, "Outer holds Inner's body too");
+    assert_eq!(h.app.session.occurrence_bodies(&[outer, inner], true).unwrap().len(), 1);
+    (h, outer, inner, other)
+}
+
+/// A component that holds a sub-component, picked by its Browser row or selected when As-Built
+/// starts, is one component: the body its sub-component places counts as the picked component,
+/// so Components waits for the second one. The sub-component picked by its own row is itself, also
+/// before or after Outer's row; a body picked in the canvas counts as its own component.
+#[test]
+fn as_built_takes_a_component_with_a_sub_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = outer_inner_other();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "Outer's body and Inner's");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        assert_eq!(apply_commands(&h.app, d).unwrap_err(), "select two components", "preselected {preselected}");
+        click_row(&mut h, other);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)));
+    }
+    let (mut h, outer, inner, other) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    let d = h.app.dialog.as_ref().unwrap();
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(other)), "the sub-component by its own row");
+
+    // Outer by its row, then Inner by its own: Inner is the second component, not a click that
+    // takes its body out again.
+    let (mut h, outer, inner, _) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    click_row_at(&mut h, &[outer, inner]);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "Inner's body stays, Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Outer, then Inner by its own row");
+
+    // The other order: Inner by its own row, then Outer by its row, are two components too.
+    let (mut h, outer, inner, _) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    click_row(&mut h, outer);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "both bodies, Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(outer)), "Inner, then Outer by its row");
+
+    // Outer by its row, then a body of Other picked in the canvas.
+    let (mut h, outer, _, other) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let body = h.app.session.occurrence_bodies(&[other], true).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: body });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.active, 1, "two components: Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)), "with a body picked in the canvas");
+
+    // Outer with no body of its own: its row and Inner's hold the same body, and are still two
+    // components, in the order clicked.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, other) = outer_inner_other_with(false);
+        h.app.start("joint.as_built");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 0, "one component so far (Outer first {outer_first})");
+        click_row_at(&mut h, &second);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!((d.inputs[0].items.len(), d.active), (1, 1), "Inner's one body, Position is next (Outer first {outer_first})");
+        let c = apply_commands(&h.app, d).unwrap();
+        let want = if outer_first { (json!(outer), json!(inner)) } else { (json!(inner), json!(outer)) };
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), want, "Outer with no body (Outer first {outer_first})");
+        if outer_first {
+            // Position is active, so Other's row is not a third component, and picks no position.
+            click_row(&mut h, other);
+            let d = h.app.dialog.as_ref().unwrap();
+            assert_eq!((d.inputs[0].items.len(), d.active, d.inputs[1].items.len()), (1, 1, 0), "Other's row changes nothing");
+            let c = apply_commands(&h.app, d).unwrap();
+            assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Other's row leaves the two components");
+        }
+    }
+}
+
+/// Both grounded: Outer, which holds a sub-component, picked by its row, and Other make a joint
+/// that moves neither, as OK counts them; Outer alone is one component, with nothing to say yet.
+#[test]
+fn as_built_grounded_note_counts_a_component_with_a_sub_component_as_one() {
+    let (mut h, outer, _, other) = outer_inner_other();
+    for o in [outer, other] {
+        h.app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    h.frames(2);
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let held = |h: &crate::scenario::Harness| {
+        let d = h.app.dialog.as_ref().unwrap();
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        grounded_sides(&h.app, f, &d.inputs).map(|g| g.occurrence)
+    };
+    assert_eq!(held(&h), None, "Outer alone");
+    click_row(&mut h, other);
+    assert_eq!(held(&h), Some(other), "two grounded components: the note, and Unground frees the second");
 }
 
 /// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
@@ -2653,6 +2809,94 @@ fn rigid_group_preserves_two_instances_of_one_component() {
     assert_eq!(commands, vec![("joint.rigid_group".into(), json!({"occurrences": [first, second]}))]);
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
+/// #23189: Rigid Group counts a component picked whole (its Browser row, or selected when the
+/// window opens) as that component, as As-Built does: Outer, which holds sub-component Inner, is
+/// one component, and OK waits for a second. Inner's own row adds Inner on purpose, before or
+/// after Outer's; a body picked in the canvas counts as its own component.
+#[test]
+fn rigid_group_takes_a_component_with_a_sub_component_as_one() {
+    let group = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap());
+    let want = |occurrences: [u64; 2]| Ok(vec![("joint.rigid_group".to_string(), json!({ "occurrences": occurrences }))]);
+    let select = Err("Select two or more components.".to_string());
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = outer_inner_other();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "Outer's body and Inner's (preselected {preselected})");
+        assert_eq!(group(&h), select, "one component (preselected {preselected})");
+        click_row(&mut h, other);
+        assert_eq!(group(&h), want([outer, other]), "Outer and Other (preselected {preselected})");
+    }
+
+    // Outer by its row, then Inner by its own: Inner is a second component, not a click that takes
+    // its body out again. The other order too.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other();
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "both bodies (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "in the order clicked (Outer first {outer_first})");
+    }
+
+    // Outer by its row, then a body of Other picked in the canvas.
+    let (mut h, outer, _, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let body = h.app.session.occurrence_bodies(&[other], true).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: body });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(group(&h), want([outer, other]), "with a body picked in the canvas");
+
+    // Outer by its row, then Outer's own body taken out in the canvas: what is left is Inner's
+    // body, which counts as Inner again, not as the whole pick that no longer holds.
+    let (mut h, outer, inner, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let own = h.app.session.occurrence_bodies(&[outer], false).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: own });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([inner, other]), "Outer's body taken out");
+
+    // Outer with no body of its own: its row alone is one component, and its row and Inner's,
+    // which hold the same body, are two, in the order clicked.
+    let (mut h, outer, _, other) = outer_inner_other_with(false);
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    assert_eq!(group(&h), select, "Outer with no body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([outer, other]), "Outer with no body, then Other");
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other_with(false);
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's one body (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "Outer with no body and Inner (Outer first {outer_first})");
+    }
 }
 
 /// Two top faces mate face to face: B ends up upside down on A, not inside it;

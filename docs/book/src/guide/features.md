@@ -63,7 +63,10 @@ the same for any feature.
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
 what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
-(I) does more.
+(I) does more. With its **Spacing of several holes** option ticked, three or more round edges or
+holes measure together: the gap between each neighbouring pair in order along the row, the span,
+whether the spacing is even (and the gap that differs when a hole is left out), and for a bolt
+circle its pitch-circle diameter and the angle between holes.
 
 **Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
@@ -125,6 +128,15 @@ existing picks. With the setting off, picks only add profiles.
 **To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
+
+Scripts and MCP can end an extrusion at a construction plane or point, or start it there:
+`to: {plane: "Target"}` (or just the plane's name) and `to: {construct_point: "P1"}`, and the
+same for `from`. The extrusion follows the plane or the point when a parameter moves it. A
+plane parallel to the sketch ends the extrusion on it. A plane at a slant cuts the end along
+it, as a slanted face does. A plane the extrusion runs along gives no end, so it is refused. A
+point ends the extrusion on the plane through it, parallel to the sketch. The Extrude dialog
+doesn't offer these picks yet; editing such an extrusion in the dialog keeps its plane or
+point unless you pick another target.
 
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
@@ -487,6 +499,13 @@ An explicit origin must contain three finite numeric coordinates in millimetres
 (`[x, y, z]` or `{x, y, z}`); omitting it uses the world origin. Expressions and
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
+
+Linear, rectangular, and circular body patterns require the stored coordinates of
+each copy to be finite and at most 10¹² in absolute value. This includes surface
+origins and curve control points. A cylinder's cap plane origin can cross the
+limit while all of its vertices still fit. Reduce the spacing or the number of
+copies in a linear or rectangular pattern, or adjust the axis origin, angle, or
+number of copies in a circular pattern.
 
 ## Axes and points on round edges and faces
 

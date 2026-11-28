@@ -856,6 +856,39 @@ fn dialog_layout_annotations_are_checked_at_load() {
 }
 
 #[test]
+fn icon_button_choices_are_checked_at_load_and_lists_of_them_take_distinct_options() {
+    let buttons = json!({"version":1,"style":"buttons"});
+    let options = json!([{"const":"a","x-solidcraft-icon":"a.svg"},{"const":"b","x-solidcraft-icon":"b.svg"}]);
+    let one = json!({"type":"string","oneOf":options,"x-solidcraft-choice":buttons});
+    let many = json!({"type":"array","uniqueItems":true,"items":{"type":"string","oneOf":options},"x-solidcraft-choice":buttons});
+    let load = |property: &Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"p":property}}}]);
+        parse(&value)
+    };
+    load(&one).unwrap();
+    load(&many).unwrap();
+    let refused = |property: Value| matches!(load(&property), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("properties.p.x-solidcraft-choice"));
+    for annotation in [json!({"version":2,"style":"buttons"}), json!({"version":1,"style":"tiles"}), json!({"version":1}), json!("buttons")] {
+        let mut property = one.clone();
+        property["x-solidcraft-choice"] = annotation.clone();
+        assert!(refused(property), "{annotation}");
+    }
+    let mut repeating = many.clone();
+    repeating["uniqueItems"] = json!(false);
+    assert!(refused(repeating), "a list of choices needs uniqueItems");
+    assert!(refused(json!({"type":"number","x-solidcraft-choice":buttons})));
+    assert!(refused(json!({"type":"array","uniqueItems":true,"items":{"type":"object"},"x-solidcraft-choice":buttons})));
+
+    // The pictures of a list's options are package images like a choice's.
+    let schema = json!({"type":"object","properties":{"p":many}});
+    assert_eq!(images::referenced(&schema), ["a.svg", "b.svg"]);
+    assert_eq!(images::annotations(&schema)[0].0, "properties.p.items.oneOf.0.x-solidcraft-icon");
+    assert!(check_input(&schema, &json!({"p":["b","a"]})).is_ok());
+    assert!(check_input(&schema, &json!({"p":["a","a"]})).is_err(), "uniqueItems refuses a repeated option");
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
@@ -1985,6 +2018,116 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         schema[keyword][0]["additionalProperties"] = json!(false);
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
+}
+
+fn workspace_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make"}, {"name":"enter", "effect":"read"}, {"name":"leave", "effect":"read"}]);
+    value["runtime"]["ui"] = json!({
+        "ui_version": 1,
+        "panels": [{"id":"tools", "title":"Tools", "zones":["left","right"], "layout":{
+            "root":0, "nodes":[
+                {"widget":{"group":[1,2]}},
+                {"widget":{"text":"Choose a tool"}},
+                {"widget":{"button":{"label":"Make", "icon":null, "entry":"make"}}}
+            ]
+        }}],
+        "workspaces": [{"id":"cam", "name":"Manufacture", "icon":"gear", "applies_to":["part","assembly"],
+            "ribbon":[{"name":"Tools", "groups":[{"name":"Setup", "entries":["make"]}]}],
+            "panels":[["left",["tools"]]], "builtin_panels":["browser"], "on_enter":"enter", "on_exit":"leave"
+        }]
+    });
+    value
+}
+
+#[test]
+fn workspace_declarations_validate_and_round_trip() {
+    let parsed = parse(&workspace_manifest()).unwrap();
+    let declarations = parsed.runtime.unwrap().ui.unwrap();
+    assert_eq!(declarations.ui_version, 1);
+    assert_eq!(declarations.workspaces[0].applies_to, vec![ui::DesignKind::Part, ui::DesignKind::Assembly]);
+    assert_eq!(declarations.workspaces[0].panels, vec![(ui::DockZone::Left, vec!["tools".into()])]);
+    assert_eq!(declarations.workspaces[0].on_enter.as_deref(), Some("enter"));
+    assert_eq!(declarations.workspaces[0].on_exit.as_deref(), Some("leave"));
+    let encoded = serde_json::to_value(&declarations).unwrap();
+    assert_eq!(serde_json::from_value::<ui::Declarations>(encoded).unwrap(), declarations);
+    assert_eq!(ui::WORKSPACE_HOOK_DEADLINE_MS, 1000);
+}
+
+#[test]
+fn workspace_declarations_require_the_ui_capability_and_a_command_runtime() {
+    let mut missing_capability = workspace_manifest();
+    missing_capability["capabilities"] = json!(["commands@0.2"]);
+    assert!(matches!(parse(&missing_capability), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.ui"));
+
+    let mut importer_value = importer();
+    importer_value["capabilities"] = json!(["formats@0.2", "ui@0.1"]);
+    importer_value["runtime"]["ui"] = workspace_manifest()["runtime"]["ui"].clone();
+    assert!(parse(&importer_value).is_err());
+}
+
+#[test]
+fn workspace_hooks_and_ribbon_only_reference_declared_entries() {
+    for bad_hook in ["make", "missing"] {
+        for field in ["on_enter", "on_exit"] {
+            let mut value = workspace_manifest();
+            value["runtime"]["ui"]["workspaces"][0][field] = json!(bad_hook);
+            assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("hooks")));
+        }
+    }
+    let mut value = workspace_manifest();
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(["other.make"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("ribbon")));
+    value = workspace_manifest();
+    value["runtime"]["ui"]["panels"][0]["layout"]["nodes"][2]["widget"]["button"]["entry"] = json!("missing");
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_panel_placements_require_allowed_zones_and_unique_ids() {
+    for panels in [
+        json!([["bottom", ["tools"]]]),
+        json!([["left", ["missing"]]]),
+        json!([["left", ["tools"]], ["right", ["tools"]]]),
+        json!([["left", []], ["left", ["tools"]]]),
+    ] {
+        let mut value = workspace_manifest();
+        value["runtime"]["ui"]["workspaces"][0]["panels"] = panels;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("panels")));
+    }
+    let mut value = workspace_manifest();
+    let duplicate = value["runtime"]["ui"]["panels"][0].clone();
+    value["runtime"]["ui"]["panels"].as_array_mut().unwrap().push(duplicate);
+    assert!(parse(&value).is_err());
+    value = workspace_manifest();
+    value["runtime"]["ui"]["workspaces"][0]["applies_to"] = json!(["part", "part"]);
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_ribbon_limits_allow_boundaries_and_refuse_excess() {
+    let mut value = workspace_manifest();
+    let tabs = (0..6).map(|i| json!({"name":format!("Tab {i}"), "groups":[{"name":"Tools", "entries":vec!["make"; 10]}]})).collect::<Vec<_>>();
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"] = json!(tabs);
+    assert!(parse(&value).is_ok());
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 11]);
+    assert!(parse(&value).is_err());
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 10]);
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"].as_array_mut().unwrap().push(json!({"name":"Extra", "groups":[]}));
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_count_limit_allows_the_boundary_and_refuses_excess() {
+    let mut value = workspace_manifest();
+    let mut workspace = value["runtime"]["ui"]["workspaces"][0].clone();
+    workspace["id"] = json!("inspection");
+    value["runtime"]["ui"]["workspaces"].as_array_mut().unwrap().push(workspace.clone());
+    assert!(parse(&value).is_ok());
+    workspace["id"] = json!("extra");
+    value["runtime"]["ui"]["workspaces"].as_array_mut().unwrap().push(workspace);
+    assert!(matches!(parse(&value), Err(HostError::LimitExceeded { .. })));
 }
 
 #[test]

@@ -984,7 +984,7 @@ crates/kernel/src/fill.rs:matched_patch dot
 crates/kernel/src/fill.rs:normal_curvature dot
 crates/kernel/src/fill.rs:planar cross,dot,normalized
 crates/kernel/src/helix.rs:helix_profile atan2,cross,dot,normalized
-crates/kernel/src/helix.rs:loft_to_point dot
+crates/kernel/src/helix.rs:loft_to_point_plan dot
 crates/kernel/src/helix.rs:loft_to_point_with_rails dot
 crates/kernel/src/helix.rs:rot cross,dot
 crates/kernel/src/helix.rs:sweep_helix_mesh normalized,triangles
@@ -1100,15 +1100,16 @@ crates/kernel/src/smlib_sweeps.rs:imp::cornered_controlled cross,dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::curve cross,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::direction_offset atan2,cross,dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::drafted_loop cross,normalized
-crates/kernel/src/smlib_sweeps.rs:imp::extrude cross,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::extrude_sources dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::halves_across dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::mitre_cutter cross,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::mitre_of dot,normalized
+crates/kernel/src/smlib_sweeps.rs:imp::name_revolution dot
 crates/kernel/src/smlib_sweeps.rs:imp::path_curve normalized
 crates/kernel/src/smlib_sweeps.rs:imp::path_turn atan2,cross,dot,normalized
+crates/kernel/src/smlib_sweeps.rs:imp::profile_normal cross,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::reach_along atan2,dot,normalized
-crates/kernel/src/smlib_sweeps.rs:imp::revolve dot,normalized
+crates/kernel/src/smlib_sweeps.rs:imp::revolution_curves normalized
 crates/kernel/src/smlib_sweeps.rs:imp::roles cross,dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::run_rails cross,dot,normalized
 crates/kernel/src/smlib_sweeps.rs:imp::section_offsets dot
@@ -1149,7 +1150,6 @@ crates/kernel/src/surface_ruled.rs:end_directions normalized
 crates/kernel/src/surface_ruled.rs:far_curves solve
 crates/kernel/src/surface_ruled.rs:normal_at cross,normalized
 crates/kernel/src/surface_ruled.rs:planned dot,normalized
-crates/kernel/src/surface_ruled.rs:ruled_surface_with dot
 crates/kernel/src/surface_trim.rs:nearest_faces triangles
 crates/kernel/src/surfaces.rs:extend cross,dot,normalized
 crates/kernel/src/surfaces.rs:extrude_sheet normalized
@@ -1217,9 +1217,7 @@ crates/ui-egui/src/canvas.rs:stored_plane cross,normalized
 crates/ui-egui/src/canvas.rs:taper_handle atan2
 crates/ui-egui/src/canvas.rs:to_segment distance,dot
 crates/ui-egui/src/configurations_ui.rs:column_menu triangles
-crates/ui-egui/src/context_menu.rs:sector atan2
 crates/ui-egui/src/context_menu.rs:tangent_chain tangent_chain
-crates/ui-egui/src/context_menu.rs:track_hold distance
 crates/ui-egui/src/control_click.rs:ControlClick::remap distance
 crates/ui-egui/src/dialogs.rs:Dialog::extrude_target dot
 crates/ui-egui/src/dialogs.rs:FaceSnap::new dot,triangles
@@ -1480,7 +1478,8 @@ crates/ui-egui/src/viewport.rs:build_block triangles
 crates/ui-egui/src/viewport.rs:build_shared_tris triangles
 crates/ui-egui/src/viewport.rs:build_sketch_scene cross,dot
 crates/ui-egui/src/viewport.rs:current_face dot
-crates/ui-egui/src/viewport.rs:edge_normals dot
+# Display only: picks mesh normals to lift edge highlights at grazing angles.
+crates/ui-egui/src/viewport.rs:edge_normal_lookup dot
 crates/ui-egui/src/viewport.rs:feature_parts triangles
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot

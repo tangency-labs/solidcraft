@@ -200,14 +200,68 @@ macro_rules! target_point {
 }
 
 target_point!(
-    /// Extrude's `to`: a [`Point3`], with the handler's message.
+    /// Extrude's `to2` and Surface Extrude's `to`: a [`Point3`], with the handler's message.
     ToPoint,
     "must be a point [x, y, z] on the face, vertex or point to extrude to"
 );
-target_point!(
-    /// Extrude's `from`: a [`Point3`], with the handler's message.
-    FromPoint,
-    "must be a point [x, y, z] on the face or point to start from"
+
+/// Extrude's `to` and `from`: a [`Point3`], or a construction plane or point the extent follows
+/// (#8527), as `extent_param` reads them. Kept as given, for the handler.
+macro_rules! object_target {
+    ($(#[$doc:meta])* $name:ident, $message:literal) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $name(pub Value);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                use crate::cmd::GeoForm;
+                use solidcraft_doc::construct::GeoRef;
+                let v = Value::deserialize(d)?;
+                let fits = params::vec3(&v).is_some()
+                    || (v.is_object() || v.is_string())
+                        && match crate::cmd::geo_form(&v) {
+                            Ok(GeoForm::Plane(plane)) => plane_problem(plane).is_none(),
+                            Ok(GeoForm::ConstructPoint(_)) => true,
+                            Ok(GeoForm::Saved(g)) => matches!(g, GeoRef::Plane { .. } | GeoRef::ConstructPoint { .. } | GeoRef::Origin),
+                            _ => false,
+                        };
+                if fits { Ok($name(v)) } else { Err(D::Error::custom($message)) }
+            }
+        }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn inline_schema() -> bool {
+                true
+            }
+            fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+                let point = generator.subschema_for::<Point3>();
+                let plane = generator.subschema_for::<PlaneParam>();
+                json_schema!({
+                    "anyOf": [
+                        point,
+                        {"type": "object", "properties": {"plane": plane}, "required": ["plane"], "description": "A plane the extent follows when it moves: XY, XZ, YZ or a construction plane's name. A plane parallel to the sketch ends the extrude on it; a plane at a slant cuts the end along it; a plane the extrusion runs along is refused."},
+                        {"type": "object", "properties": {"construct_point": {"type": "string"}}, "required": ["construct_point"], "description": "A construction point by name: the extrude ends on the plane through it, parallel to the sketch, and follows it when it moves."},
+                        {"type": "string", "description": "A plane's name, as {plane: name}."}
+                    ]
+                })
+            }
+        }
+    };
+}
+
+object_target!(
+    /// Extrude's `to`: a point, a plane or a construction point, with the handler's message.
+    ToObject,
+    "must be a point [x, y, z] on the face, vertex or point to extrude to, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
+);
+object_target!(
+    /// Extrude's `from`: a point, a plane or a construction point, with the handler's message.
+    FromObject,
+    "must be a point [x, y, z] on the face or point to start from, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
 );
 
 target_point!(
@@ -325,7 +379,7 @@ impl JsonSchema for CoilAxis {
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, a flat end face (`{face: [x, y, z]}`: the coil starts at its centre and grows along its outward normal), or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [{
                 "type": "object",
                 "properties": {
@@ -705,9 +759,9 @@ keyword_param!(
     /// `solid.coil`'s `section`.
     CoilSectionParam,
     "section",
-    &["circular", "circle", "square"],
-    "circular or square",
-    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+    &["circular", "circle", "square", "triangle", "triangular"],
+    "circular, square or triangle",
+    "The shape swept along the helix: circular (the default; circle is an alias), square, or triangle (triangular is an alias): an equilateral triangle pointing at the axis, for a thread-like groove or thread. Any case."
 );
 keyword_param!(
     /// `solid.coil`'s `section_position`.
@@ -812,6 +866,22 @@ keyword_param!(
     &["inside", "outside"],
     "inside or outside",
     "Which edge of the rim face the band runs along: inside (the default) or outside. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.dogbone`'s `style`.
+    DogboneStyleParam,
+    "style",
+    &["normal", "minimal", "t_bone", "tbone"],
+    "normal, minimal or t_bone",
+    "Where each relief sits in its corner: normal (the default), on the corner's bisector, the circle through the sharp corner; minimal, on the bisector, stopping `gap` short of the sharp corner; or t_bone (alias tbone), centred on one wall's line, the longer or the shorter one (`side`), the circle through the corner: at a square corner it bites that wall only, at a sharper corner it also bites the other wall. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.dogbone`'s `side`.
+    DogboneSideParam,
+    "side",
+    &["longer", "long", "shorter", "short"],
+    "longer or shorter",
+    "T-bone style only: which wall at each corner a relief bites, longer (the default; alias long) or shorter (alias short). Matching ignores case."
 );
 
 /// How a feature combines with existing bodies, as `features::operation` reads it.
