@@ -1,7 +1,11 @@
 {
   "area": "booleans",
   "bodies": {
-    "b6": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
       "keeping_splines": false,
       "trusted": true
     }
@@ -9,7 +13,20 @@
   "calls": [
     {
       "inputs": [
-        "b6"
+        "b3",
+        "b4"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b5"
       ],
       "op": "copy",
       "outputs": [
@@ -96,5 +113,5 @@
     "tangency-labs/solidcraft#19699",
     "dutchman-cad/stress-corpus S9323"
   ],
-  "what": "Stress corpus S9323: a cylinder r 20, z 0 to 60 (seam at 0.6131 rad), joined with a 4.8 square pad 4.8 tall on its top, turned 45 degrees with its +x corner 0.00001 past the rim. At the body's 0.00002 tolerance the join leaves no sliver: the pad's corner is one vertex on the rim, which splits the cylinder's top rim into two arcs, both bordering the top plane. The side drafted 3 degrees about its base, pulled up, leaning in: the cone is r 20 - 60 tan 3 degrees at the top, so the whole pad stays above z = 60 and its underside outside the cone is uncovered. V = pi h (R^2 + R r + r^2) / 3 + 4.8^3, R = 20, r = 20 - 60 tan 3 degrees, h = 60. Faces: the cone, the base, the top (the disc r less the pad's footprint), the pad's underside past the cone, and the pad's top and four sides: 9. Edges: the cone's seam, its base circle and its top circle in three arcs (split at the seam and where two pad sides cross it), the pad's four bottom edges on the top with the two crossing ones' outer pieces on the underside, its four upright edges and its four top edges: 19. Vertices: the seam's two, the two crossings, the pad's eight: 12."
+  "what": "Stress corpus S9323: a cylinder r 20, z 0 to 60 (seam at 0.6131 rad), joined with a 4.8 square pad 4.8 tall on its top, turned 45 degrees with its +x corner 0.00001 past the rim. The case replays SolidCraft's traced join of the two extruded records. At their 0.00002 tolerance the join leaves no sliver: the pad's corner is one vertex on the rim, which splits the cylinder's top rim into two arcs, both bordering the top plane. The side drafted 3 degrees about its base, pulled up, leaning in: the cone is r 20 - 60 tan 3 degrees at the top, so the whole pad stays above z = 60 and its underside outside the cone is uncovered. V = pi h (R^2 + R r + r^2) / 3 + 4.8^3, R = 20, r = 20 - 60 tan 3 degrees, h = 60. Faces: the cone, the base, the top (the disc r less the pad's footprint), the pad's underside past the cone, and the pad's top and four sides: 9. Edges: the cone's seam, its base circle and its top circle in three arcs (split at the seam and where two pad sides cross it), the pad's four bottom edges on the top with the two crossing ones' outer pieces on the underside, its four upright edges and its four top edges: 19. Vertices: the seam's two, the two crossings, the pad's eight: 12."
 }
