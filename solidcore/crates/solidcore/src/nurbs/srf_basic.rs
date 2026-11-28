@@ -287,7 +287,10 @@ impl Surface {
             .flatten()
             .any(|point| point.exceeds_model_coordinate_bound())
         {
-            return Err(SolidError::surface(OP_NEW, SurfaceFailure::ControlPointOutsideModel));
+            return Err(SolidError::surface(
+                OP_NEW,
+                SurfaceFailure::ControlPointOutsideModel,
+            ));
         }
         Ok(Self {
             net: Arc::new(net),
@@ -1339,7 +1342,10 @@ mod tests {
         let rational = vec![vec![weighted; 2]; 2];
         let error = Surface::new(rational, 1, 1, knots.clone(), knots).unwrap_err();
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(error.surface_failure(), Some(&SurfaceFailure::ControlPointOutsideModel));
+        assert_eq!(
+            error.surface_failure(),
+            Some(&SurfaceFailure::ControlPointOutsideModel)
+        );
     }
 
     fn bilinear() -> Surface {

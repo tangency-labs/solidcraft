@@ -1448,7 +1448,10 @@ mod tests {
         let far_cartesian = CPoint::new(1.0, 0.0, NOZ, 1e-200);
         let error = Curve::new(vec![weighted_start, far_cartesian], 1, knots).unwrap_err();
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(error.curve_failure(), Some(&CurveFailure::ControlPointOutsideModel));
+        assert_eq!(
+            error.curve_failure(),
+            Some(&CurveFailure::ControlPointOutsideModel)
+        );
     }
 
     fn line2() -> Curve {
