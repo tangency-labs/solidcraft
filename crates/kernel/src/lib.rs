@@ -667,6 +667,7 @@ pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
+pub use surfaces::morph_surface;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;
