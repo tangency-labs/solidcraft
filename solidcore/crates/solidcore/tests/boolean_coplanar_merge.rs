@@ -217,3 +217,96 @@ fn deleting_faces_inside_a_union_walks_only_near_the_face() {
         );
     }
 }
+
+/// A shelf shifted left by `d` inside a pocket overhangs the left inner wall by `d` and stops
+/// `d` short of the right inner wall. Across the entire tolerance boundary `[0, 2.5e-5]`
+/// (`[5e-6, 2e-5)` previously failed with `NoRadialEdgeUse` because `split_edges_at_vertices`
+/// / `coincident_line_edges` mated edges at `2e-5` while planar `surface_coincidence_check`
+/// tested at `5e-6`), the union must produce a valid closed manifold solid with the exact
+/// analytic volume.
+#[test]
+fn shifted_shelf_join_succeeds_across_coincidence_tolerance_window() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    use solidcore::topology::brep::p2::is_manifold_solid;
+
+    for d in [
+        0.0,
+        4.9e-6,
+        5.0e-6,
+        7.0e-6,
+        1.0e-5,
+        1.3169768e-5,
+        1.9e-5,
+        2.01e-5,
+    ] {
+        let mut k = Kernel::default();
+        let outer = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        let pocket = create_box(&mut k, Point3::new(2.0, 2.0, 2.0), 16.0, 16.0, 18.0).unwrap();
+        let body = boolean_difference(&mut k, outer, pocket).unwrap();
+        let shelf = create_box(&mut k, Point3::new(2.0 - d, 8.0, 2.0), 16.0, 2.0, 18.0).unwrap();
+        let mut joined = boolean_union(&mut k, body, shelf)
+            .unwrap_or_else(|e| panic!("d={d:e}: union failed: {e}"));
+        assert!(
+            is_manifold_solid(&joined).unwrap(),
+            "d={d:e}: not manifold solid"
+        );
+        let lines = check_brep(&mut k, &mut joined, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "d={d:e}: check failed: {lines:?}");
+
+        let store = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let vol = brep_volume(&k, &mut joined, 1e-10, &attrs).unwrap();
+        let gap_open = d >= 2e-5;
+        let expected = 3968.0 - if gap_open { 36.0 * d } else { 0.0 };
+        // Tolerance 1e-5 is >70x smaller than the gap volume 36*d = 7.236e-4 at d = 2.01e-5.
+        assert!(
+            (vol - expected).abs() < 1e-5,
+            "d={d:e}: volume {vol} vs expected {expected}"
+        );
+        // Gap closed: two rectangular pockets (16 faces, 36 edges, 24 vertices).
+        // Gap open: one C-shaped pocket around the shelf (15 faces, 36 edges, 24 vertices).
+        let expected_counts = if gap_open { [15, 36, 24] } else { [16, 36, 24] };
+        assert_eq!(
+            [
+                joined.face_list().len(),
+                joined.edge_list().len(),
+                joined.vertex_list().len(),
+            ],
+            expected_counts,
+            "d={d:e}: unexpected topology counts"
+        );
+        // Every vertex lies on the exact boundary S of (outer \ pocket) U shelf within the
+        // coincidence snap distance (<= d when snapped, <= 1e-9 when the gap stays open).
+        let max_v_dist = if gap_open { 1e-9 } else { d + 1e-9 };
+        let x_planes = [0.0, 2.0, 18.0 - d, 18.0, 20.0];
+        let y_planes = [0.0, 2.0, 8.0, 10.0, 18.0, 20.0];
+        let z_planes = [0.0, 2.0, 20.0];
+        for &vid in joined.vertex_list() {
+            let p = solidcore::topology::vertex::point(&joined, vid).unwrap();
+            let dx = x_planes
+                .iter()
+                .map(|&x| (p.x - x).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dy = y_planes
+                .iter()
+                .map(|&y| (p.y - y).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dz = z_planes
+                .iter()
+                .map(|&z| (p.z - z).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            assert!(
+                dist <= max_v_dist,
+                "d={d:e}: vertex {p:?} is {dist:e} off operand planes (max {max_v_dist:e})"
+            );
+        }
+    }
+}
