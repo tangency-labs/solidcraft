@@ -1,26 +1,100 @@
 //! SolidCraft's MCP server: its tools, instructions and resources over the shared server
 //! (`solidcraft-mcp-server`), with the agent's folders and the output options around each call.
 
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, mpsc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Contents, Info, ProgressReporter, Tools};
+use solidcraft_mcp_server::{Contents, Info, ProgressReporter, Reference, ResourceError, Tools, notification};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_mcp_server::{Incoming, cancelled_notification, read_message, response};
 
-use crate::backend::Backend;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::backend::Remote;
+use crate::backend::{Backend, DesignState};
 use crate::options::Options;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::tools::call_tool_with;
 use crate::tools::{CallContext, call_tool_with_context, tool_definitions_with};
+
+/// Maximum number of resource URIs a single MCP session may subscribe to simultaneously.
+pub const MAX_RESOURCE_SUBSCRIPTIONS: usize = 256;
+
+/// Bound on undrained notifications kept in memory when a caller neither runs [`Server::serve`]
+/// nor calls [`Server::take_notifications`].
+const MAX_PENDING_NOTIFICATIONS: usize = 1024;
+
+/// How often [`Server::serve`] polls a bridged desktop app for external design changes while idle.
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Backoff after an idle poll cannot reach the bridged app, avoiding repeated reconnect attempts
+/// while the app is not running.
+#[cfg(not(target_arch = "wasm32"))]
+const FAILED_POLL_BACKOFF: Duration = Duration::from_secs(5);
+
+/// Callback receiving server-to-client JSON-RPC 2.0 notifications as they are emitted.
+pub type NotificationSink = Box<dyn FnMut(Value)>;
+
+/// Bounded per-session set of subscribed resource URIs (`resources/subscribe`).
+pub(crate) struct ResourceSubscriptions {
+    uris: BTreeSet<String>,
+    limit: usize,
+}
+
+impl ResourceSubscriptions {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self { uris: BTreeSet::new(), limit }
+    }
+
+    pub(crate) fn subscribe(&mut self, uri: &str) -> Result<(), ResourceError> {
+        if self.uris.contains(uri) {
+            return Ok(());
+        }
+        if self.uris.len() >= self.limit {
+            return Err(ResourceError::InvalidParams(format!("resource subscription limit reached (maximum {})", self.limit)));
+        }
+        self.uris.insert(uri.to_owned());
+        Ok(())
+    }
+
+    pub(crate) fn unsubscribe(&mut self, uri: &str) -> bool {
+        self.uris.remove(uri)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.uris.is_empty()
+    }
+
+    pub(crate) fn uris(&self) -> Vec<String> {
+        self.uris.iter().cloned().collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.uris.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
+    }
+}
+
+/// Whether `uri` reflects the active design and should receive `notifications/resources/updated`
+/// when the design changes. The static command catalog (`solidcraft://commands`) is unaffected by
+/// design edits.
+fn uri_affected_by_design_change(uri: &str) -> bool {
+    uri != "solidcraft://commands"
+}
 
 /// What every MCP client is told at `initialize`: how to plan, build and verify a part. It stays
 /// version-neutral (no workaround for a quirk of the current kernel or solver: those belong in
@@ -197,17 +271,100 @@ struct Agent {
     listed: Options,
     /// Out-of-band cancellation flag for the currently executing request, if any.
     cancel: Option<Arc<AtomicBool>>,
+    /// True once the client sent `notifications/initialized`.
+    initialized: bool,
+    /// Per-session subscribed resource URIs (`resources/subscribe`).
+    subscriptions: ResourceSubscriptions,
+    /// Last observed active design identity, revision, and optional structural inventory.
+    last_design: Option<DesignState>,
+    /// Optional push sink invoked immediately when a server-to-client notification is emitted.
+    notification_sink: Option<NotificationSink>,
+    /// Bounded queue of notifications awaiting flush in `serve` or `take_notifications`.
+    pending_notifications: VecDeque<Value>,
 }
 
 impl Agent {
+    fn result_says(result: &Value, what: &str) -> bool {
+        result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(what))))
+    }
+
+    fn result_unavailable(result: &Value) -> bool {
+        Self::result_says(result, crate::backend::NOT_RUNNING) || Self::result_says(result, crate::backend::STILL_RUNNING)
+    }
+
+    /// Whether this session is actively tracking and emitting resource notifications.
+    fn notifications_active(&self) -> bool {
+        self.initialized || !self.subscriptions.is_empty() || self.notification_sink.is_some()
+    }
+
+    /// Whether `uri` names a resource currently served by this server.
+    fn is_known_resource(&self, uri: &str) -> bool {
+        self.resources().iter().any(|r| r.get("uri").and_then(Value::as_str) == Some(uri))
+    }
+
+    /// Capture the baseline design state without emitting notifications if none is recorded yet.
+    fn ensure_design_baseline(&mut self) {
+        if self.last_design.is_none() {
+            self.last_design = self.backend.design_state();
+        }
+    }
+
+    /// Emit one server-to-client JSON-RPC notification to the sink (if any) and the drain queue.
+    fn emit(&mut self, note: Value) {
+        if let Some(sink) = self.notification_sink.as_mut() {
+            sink(note.clone());
+        }
+        if self.pending_notifications.len() >= MAX_PENDING_NOTIFICATIONS {
+            self.pending_notifications.pop_front();
+        }
+        self.pending_notifications.push_back(note);
+    }
+
+    /// Compare `current` against the last observed design state, updating it and emitting
+    /// `notifications/resources/list_changed` and `notifications/resources/updated` as needed.
+    fn observe_design_state(&mut self, current: DesignState) -> usize {
+        let Some(previous) = self.last_design.take() else {
+            self.last_design = Some(current);
+            return 0;
+        };
+        let same = previous.document_id == current.document_id && previous.revision == current.revision;
+        let list_changed = previous.document_id != current.document_id
+            || match (&previous.structure, &current.structure) {
+                (Some(before), Some(after)) => before != after,
+                _ => true,
+            };
+        self.last_design = Some(current);
+        if same {
+            return 0;
+        }
+        let mut emitted = 0;
+        if list_changed {
+            self.emit(notification("notifications/resources/list_changed", None));
+            emitted += 1;
+        }
+        for uri in self.subscriptions.uris() {
+            if uri_affected_by_design_change(&uri) {
+                self.emit(notification("notifications/resources/updated", Some(json!({"uri": uri}))));
+                emitted += 1;
+            }
+        }
+        emitted
+    }
+
+    /// Query the backend for any design revision change that occurred outside an MCP tool call.
+    /// Returns `None` when the backend could not report its design state.
+    fn poll_external_changes(&mut self) -> Option<usize> {
+        let current = self.backend.design_state()?;
+        Some(self.observe_design_state(current))
+    }
+
     /// The selection block for a reply, `None` when nothing is selected or the backend cannot say
     /// (no app listening, an app from before `document.selection`).
     fn selection(&mut self, tool: &str, result: &Value) -> Option<String> {
         // `running` and `pending` ask how an earlier request is getting on: they never wait for
         // another question to the app. Neither does a reply that says a request is still running,
         // or one that never reached the app.
-        let says = |what: &str| result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(what))));
-        if matches!(tool, "running" | "pending") || says(crate::backend::NOT_RUNNING) || says(crate::backend::STILL_RUNNING) {
+        if matches!(tool, "running" | "pending") || Self::result_unavailable(result) {
             return None;
         }
         let reply = self.backend.call("document.selection", json!({})).ok()?;
@@ -225,6 +382,28 @@ impl Agent {
         }
         self.options.or(self.app_options.unwrap_or_default())
     }
+}
+
+/// `--structured`: the result's reply as data, `structuredContent: {"result", "notes"?}`, for a
+/// program calling the tools. `result` is the first text block read as JSON (the text itself when
+/// it is not JSON: a message); `notes` are the text blocks after it (a notice, the selection). It
+/// is built from what every tool already returns, so a new tool is covered without a change here.
+/// Keys a result already carries (`panel_error`, `plugin_error`) stay.
+pub(crate) fn structure(result: &mut Value) {
+    let texts: Vec<&str> =
+        result["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect();
+    let Some((first, rest)) = texts.split_first() else { return };
+    let reply = serde_json::from_str::<Value>(first).unwrap_or_else(|_| Value::String((*first).to_string()));
+    let notes: Vec<Value> = rest.iter().map(|t| Value::String((*t).to_string())).collect();
+    let mut data = match result.get_mut("structuredContent").map(Value::take) {
+        Some(Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    data.insert("result".into(), reply);
+    if !notes.is_empty() {
+        data.insert("notes".into(), Value::Array(notes));
+    }
+    result["structuredContent"] = Value::Object(data);
 }
 
 impl Tools for Agent {
@@ -255,6 +434,10 @@ impl Tools for Agent {
     }
 
     fn call_with_progress(&mut self, name: &str, args: &Value, progress: Option<&ProgressReporter>) -> Value {
+        let track_changes = self.notifications_active() && !matches!(name, "running" | "quit_app");
+        if track_changes {
+            self.ensure_design_baseline();
+        }
         let options = self.listed;
         // The open design's folder counts, and goes on counting for the rest of this run when a
         // save-as or open moves the design elsewhere (#7181).
@@ -289,6 +472,16 @@ impl Tools for Agent {
         {
             content.push(json!({"type": "text", "text": block}));
         }
+        if self.options.structured {
+            structure(&mut result);
+        }
+        if track_changes
+            && !ctx.is_cancelled()
+            && !Self::result_unavailable(&result)
+            && let Some(current) = self.backend.design_state()
+        {
+            self.observe_design_state(current);
+        }
         result
     }
 
@@ -299,26 +492,96 @@ impl Tools for Agent {
         ]
     }
 
+    fn resource_templates(&self) -> Vec<Value> {
+        crate::resources::templates()
+    }
+
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
-        let read = match uri {
-            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
-            _ => return None,
-        };
-        Some(read.map(|v| Contents::json(&v)))
+        match uri {
+            "solidcraft://design" => Some(self.backend.call("document.inspect", json!({"measure": true})).map(|v| Contents::json(&v))),
+            "solidcraft://commands" => Some(self.backend.call("engine.commands", json!({})).map(|v| Contents::json(&v))),
+            _ => crate::resources::read_template(self.backend.as_mut(), uri),
+        }
+    }
+
+    fn prompts(&self) -> Vec<Value> {
+        crate::prompts::definitions()
+    }
+
+    fn get_prompt(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        crate::prompts::get(name, args)
+    }
+
+    fn complete(&mut self, reference: Reference<'_>, argument: &str, value: &str) -> Vec<String> {
+        crate::resources::complete(self.backend.as_mut(), reference, argument, value)
+    }
+
+    fn resource_subscribe(&self) -> bool {
+        true
+    }
+
+    fn resource_list_changed(&self) -> bool {
+        true
+    }
+
+    fn subscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+        if !self.is_known_resource(uri) {
+            return Err(ResourceError::NotFound(format!("unknown resource `{uri}`")));
+        }
+        self.subscriptions.subscribe(uri)?;
+        self.ensure_design_baseline();
+        Ok(())
+    }
+
+    fn unsubscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+        if self.subscriptions.unsubscribe(uri) || self.is_known_resource(uri) {
+            return Ok(());
+        }
+        Err(ResourceError::NotFound(format!("unknown resource `{uri}`")))
+    }
+
+    fn on_initialized(&mut self) {
+        self.initialized = true;
+        self.ensure_design_baseline();
+    }
+
+    fn take_notifications(&mut self) -> Vec<Value> {
+        self.pending_notifications.drain(..).collect()
     }
 }
 
 /// SolidCraft's MCP server over a [`Backend`].
 pub struct Server {
     inner: solidcraft_mcp_server::Server<Agent>,
+    #[cfg(not(target_arch = "wasm32"))]
+    poll_interval: Duration,
+    #[cfg(not(target_arch = "wasm32"))]
+    last_failed_poll: Option<Instant>,
 }
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
         let info = Info { name: "solidcraft", title: "SolidCraft", version: env!("CARGO_PKG_VERSION"), max_line: solidcraft_engine::MAX_LINE };
-        let agent = Agent { backend, scope: None, options: Options::default(), app_options: None, listed: Options::default(), cancel: None };
-        Self { inner: solidcraft_mcp_server::Server::new(info, agent) }
+        let agent = Agent {
+            backend,
+            scope: None,
+            options: Options::default(),
+            app_options: None,
+            listed: Options::default(),
+            cancel: None,
+            initialized: false,
+            subscriptions: ResourceSubscriptions::new(MAX_RESOURCE_SUBSCRIPTIONS),
+            last_design: None,
+            notification_sink: None,
+            pending_notifications: VecDeque::new(),
+        };
+        Self {
+            inner: solidcraft_mcp_server::Server::new(info, agent),
+            #[cfg(not(target_arch = "wasm32"))]
+            poll_interval: DEFAULT_POLL_INTERVAL,
+            #[cfg(not(target_arch = "wasm32"))]
+            last_failed_poll: None,
+        }
     }
     /// Install a thread-safe sink for server-to-client notifications (`notifications/progress`).
     pub fn with_notifier(mut self, emit: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
@@ -337,6 +600,36 @@ impl Server {
     pub fn with_options(mut self, options: Options) -> Self {
         self.inner.tools().options = options;
         self
+    }
+    /// Attach a sink that receives every server-to-client JSON-RPC notification as it is emitted.
+    pub fn with_notification_sink(mut self, sink: impl FnMut(Value) + 'static) -> Self {
+        self.inner.tools().notification_sink = Some(Box::new(sink));
+        self
+    }
+    /// How often [`Server::serve`] polls a bridged desktop app for external design changes while
+    /// idle (default: 500 ms).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+    /// Drain server-to-client notifications queued since the last drain.
+    pub fn take_notifications(&mut self) -> Vec<Value> {
+        self.inner.take_notifications()
+    }
+    /// Observe the backend for external design changes (e.g. user or in-app Assistant edits in a
+    /// connected desktop app) and emit any resulting resource notifications. Returns the number of
+    /// notifications emitted.
+    pub fn poll_changes(&mut self) -> usize {
+        self.inner.tools().poll_external_changes().unwrap_or(0)
+    }
+    /// Resource URIs currently subscribed to in this session, in sorted order.
+    pub fn subscribed_resources(&mut self) -> Vec<String> {
+        self.inner.tools().subscriptions.uris()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_max_subscriptions(&mut self, limit: usize) {
+        self.inner.tools().subscriptions.set_limit(limit);
     }
     /// The options tools use now: the server's own, with what the app's Preferences turn on.
     pub fn options(&mut self) -> Options {
@@ -428,12 +721,31 @@ impl Server {
                     }
                     Ok(())
                 });
-                for (incoming, ids) in rx {
+                loop {
+                    let (incoming, ids) = if self.should_poll_external() {
+                        match rx.recv_timeout(self.poll_interval) {
+                            Ok(item) => item,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {
+                                self.poll_external_in_serve();
+                                if !self.flush_notifications(&out_tx) {
+                                    break;
+                                }
+                                continue;
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        }
+                    } else {
+                        match rx.recv() {
+                            Ok(item) => item,
+                            Err(mpsc::RecvError) => break,
+                        }
+                    };
                     let cancel_flag = flight.lock().ok().map(|mut f| f.start(ids));
                     self.inner.tools().cancel = cancel_flag;
                     if let Ok(mut s) = side.lock() {
                         *s = self.side();
                     }
+                    self.last_failed_poll = None;
                     let reply = match incoming {
                         Incoming::Line(line) => self.inner.handle_line(&line),
                         Incoming::Refused(reply) => Some(reply),
@@ -442,9 +754,9 @@ impl Server {
                     if let Ok(mut f) = flight.lock() {
                         f.finish();
                     }
-                    let sent = reply.map_or(Ok(()), |reply| out_tx.send(reply));
+                    let sent = reply.is_none_or(|reply| out_tx.send(reply).is_ok()) && self.flush_notifications(&out_tx);
                     in_flight.fetch_sub(1, Ordering::SeqCst);
-                    if sent.is_err() {
+                    if !sent {
                         break;
                     }
                 }
@@ -455,6 +767,34 @@ impl Server {
             let written = writer.join().unwrap_or_else(|_| Err(std::io::Error::other("the stdout writer stopped")));
             written.and(read)
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn should_poll_external(&mut self) -> bool {
+        let agent = self.inner.tools();
+        !agent.backend.in_process() && agent.notifications_active()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_external_in_serve(&mut self) {
+        let backoff = FAILED_POLL_BACKOFF.min(self.poll_interval.saturating_mul(10));
+        if let Some(failed_at) = self.last_failed_poll
+            && failed_at.elapsed() < backoff
+        {
+            return;
+        }
+        if self.inner.tools().poll_external_changes().is_some() {
+            self.last_failed_poll = None;
+        } else {
+            self.last_failed_poll = Some(Instant::now());
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn flush_notifications(&mut self, out_tx: &mpsc::Sender<String>) -> bool {
+        for note in self.inner.take_notifications() {
+            if out_tx.send(note.to_string()).is_err() {
+                return false;
+            }
+        }
+        true
     }
     /// A fresh bridge to the app for answering `running` apart from the call in progress, with
     /// the options tools run with now; `None` when the backend is not bridged to an app.
@@ -469,5 +809,21 @@ impl Server {
     }
     pub fn handle(&mut self, msg: Value) -> Option<Value> {
         self.inner.handle(msg)
+    }
+    /// Bind a loopback-only TCP listener on `addr` and serve MCP Streamable HTTP (`POST /mcp`,
+    /// `GET /mcp`, `DELETE /mcp`) until `config.shutdown` is triggered.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn serve_http(&mut self, addr: std::net::SocketAddr, config: solidcraft_mcp_server::HttpConfig) -> std::io::Result<()> {
+        let config =
+            if config.session_id_generator.is_none() { config.with_session_id_generator(solidcraft_control::server::new_token) } else { config };
+        self.inner.serve_http(addr, config)
+    }
+    /// Serve MCP Streamable HTTP on an already-bound loopback `listener` until `config.shutdown`
+    /// is triggered. Multiple local MCP clients share this warm session in strict FIFO order.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn serve_http_listener(&mut self, listener: std::net::TcpListener, config: solidcraft_mcp_server::HttpConfig) -> std::io::Result<()> {
+        let config =
+            if config.session_id_generator.is_none() { config.with_session_id_generator(solidcraft_control::server::new_token) } else { config };
+        self.inner.serve_http_listener(listener, config)
     }
 }

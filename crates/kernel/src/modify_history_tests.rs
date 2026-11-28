@@ -499,6 +499,7 @@ fn painted_cube() -> Body {
         opacity: 1.,
         faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }))
 }
 
@@ -751,5 +752,18 @@ mod smlib {
         assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
         let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
         assert!(e.to_string().contains("not supported yet"), "{e}");
+    }
+
+    /// #22807: drafting an Ø20 x 100 mm cylinder by 6° about XY closes the cone to an apex at
+    /// z = 10 / tan(6°) ≈ 95.14 mm < 100 mm. The refusal names that geometric reason and is
+    /// `KernelError::Invalid`, not "not supported yet".
+    #[test]
+    fn draft_cylinder_closing_below_top_is_refused_with_reason() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 100.0).unwrap();
+        let e = offset_backend::draft(&rod, &[Vec3::new(10.0, 0.0, 50.0)], &Plane::XY, Vec3::Z, 6.0_f64.to_radians()).unwrap_err();
+        assert!(matches!(e, crate::KernelError::Invalid(_)), "{e:?}");
+        let text = e.to_string();
+        assert!(text.contains("a drafted cone would close within the face"), "{text}");
+        assert!(!text.contains("not supported yet"), "{text}");
     }
 }

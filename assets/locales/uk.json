@@ -6404,7 +6404,7 @@
   "ui.drawing_detail.step_size": "Клацніть, щоб задати розмір ділянки.",
   "ui.drawing_detail.title": "Виносний вид",
   "ui.drawing_dimension_tool.pick": "Клацніть ребро у виді креслення.",
-  "ui.drawing_dimension_tool.place": "Клацніть аркуш, щоб розмістити розмір.",
+  "ui.drawing_dimension_tool.place": "Клацніть аркуш або натисніть Enter, щоб розмістити розмір.",
   "ui.drawing_export.all_sheets": "Усі аркуші",
   "ui.drawing_export.dxf": "DXF (лінії)",
   "ui.drawing_export.dxf_note": "Показаний аркуш, його лінії в міліметрах, окремий шар для кожного типу ліній. Затінені види та зображення пропускаються.",

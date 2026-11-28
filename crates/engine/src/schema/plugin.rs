@@ -344,6 +344,10 @@ pub struct InstallResult {
     /// Host-drawn panels declared by the plugin, shown during permission review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panels: Vec<crate::plugin::ui::PanelSpec>,
+    /// Workspaces declared by the plugin, shown during permission review. They are inert data;
+    /// any enter or exit hook is a read-only entry listed in `entry_points`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<crate::plugin::ui::WorkspaceSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.

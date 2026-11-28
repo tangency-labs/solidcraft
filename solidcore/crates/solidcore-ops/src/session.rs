@@ -48,7 +48,9 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use solidcore::blend::fillet_section::definition::StationMemo;
 use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
-use solidcore::topology::brep::p3::brep_copy;
+use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
+use solidcore::topology::proto_topology::p1::CopyBrepMap;
+use solidcore::EntityRef;
 use solidcore::{Brep, SolidError};
 
 use crate::body::Body;
@@ -1069,6 +1071,28 @@ pub(crate) fn measure_body<T: Answer>(
         drop(b);
         let mut copy = copy.unwrap_or_else(|p| resume_unwind(p))?;
         f(k, &mut copy)
+    })
+}
+
+/// [`measure_body`] on a copy that maps the body's entities to their copies
+/// ([`brep_copy_mapped`]): `f` gets the map from each of the body's entities to its copy.
+///
+/// # Errors
+/// Those of [`measure_body`].
+pub(crate) fn measure_body_mapped<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &mut Brep, &CopyBrepMap<EntityRef>) -> solidcore::Result<T>,
+) -> Result<T> {
+    if body.is_poisoned() {
+        return Err(unfinished(call));
+    }
+    run_on(call, &[("brep", body)], |k| {
+        let b = body.lock();
+        let copy = catch_unwind(AssertUnwindSafe(|| brep_copy_mapped(k, &b)));
+        drop(b);
+        let (mut copy, map) = copy.unwrap_or_else(|p| resume_unwind(p))?;
+        f(k, &mut copy, &map)
     })
 }
 

@@ -3191,7 +3191,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
         id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
     let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
     let d = s.drawing("test").unwrap().clone();
-    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&d, sheet).unwrap());
+    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&s, &d, sheet).unwrap());
     let shown = crate::drawing_view::shown(&s);
     let lettering = Lettering::of(&s, &d);
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
@@ -3977,7 +3977,7 @@ fn closed_drawing_tiles_release_live_requests_and_parked_exports_use_their_own_l
     s.open_drawing = Some(first);
     let copied = s.scratch_as_shown();
     let view = s.doc.drawing(first).unwrap().views[0].id;
-    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
+    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view.view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
     assert!(copied.drawing_scenes.parked.is_empty());
     extract(&mut s, first_sheet).unwrap();
     // A changed view supplies a fresh request without changing its owning tile.
@@ -5192,7 +5192,10 @@ fn automatic_marks_distinguish_placed_occurrences_and_exclusions() {
         s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == front)).unwrap().id;
     let resolved = s.drawing("test").unwrap().resolve_view(projected).unwrap();
     let shown = crate::drawing_view::shown(&s).unwrap();
-    assert_eq!(shown.of_view(&resolved).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(), vec![vec![first]]);
+    assert_eq!(
+        shown.of_view(&crate::drawing_view::DrawnView::own(resolved)).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(),
+        vec![vec![first]]
+    );
     assert!(s.execute("drawing.auto_center_mark.exclude", &json!({"view": view, "edge": {"point": [166,0,10], "path": [second]}})).is_err());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 2);
@@ -6344,7 +6347,7 @@ fn a_views_sketch_is_drawn_through_its_view_and_goes_with_it_without_solving_aga
         let shown = settled(s, sheet);
         assert_eq!(bytes(&shown.scene), bytes(&built(s, sheet).scene));
         let d = s.drawing("test").unwrap().clone();
-        let centre = views_on(&d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
+        let centre = views_on(s, &d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
         let origin = s.drawing_scenes.views[&front].drawn.frame.unwrap().paper_map().apply(Vec2::ZERO) + centre;
         let (path, _, width) = stroke_path(&cached_sketch_group(&shown.scene, id).items[0]);
         let order: Vec<_> = shown.scene.groups.iter().map(|group| (group.object, group.kind)).collect();
@@ -8409,4 +8412,239 @@ fn a_view_leaves_out_a_hidden_body_of_a_part() {
     let (lo, hi, length) = across(&one.scene);
     assert!((lo - 150.0).abs() < 1e-6 && (hi - 250.0).abs() < 1e-6 && (length - 240.0).abs() < 1e-6, "{lo} {hi} {length}");
     assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A view that shows only what the design shows (#22107) follows the browser's eyes through the
+/// provider's cache, as the window reads it: hiding the door leaves that one view of four out of date
+/// (the other three draw every body), and once drawn it is the carcass alone; showing the door again
+/// puts it out of date again and brings the door back. A change that moves the revision alone (here
+/// as a selection does) keeps the set the view was drawn from, so the view stays up to date.
+#[test]
+fn only_a_view_that_shows_the_design_follows_an_eye_toggle() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let base = |s: &mut Session, at: [f64; 2], shows: &str| {
+        let made = run(s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:2", "position_mm": at, "shows": shows}));
+        ids::decode(made["view"].as_str().unwrap()).unwrap()
+    };
+    let design = base(&mut s, [100.0, 200.0], "design");
+    let others = [base(&mut s, [300.0, 200.0], "all"), base(&mut s, [100.0, 80.0], "all"), base(&mut s, [300.0, 80.0], "all")];
+    let across = |scene: &Scene, view: u64| {
+        let group = scene.groups.iter().find(|g| g.object == view && g.kind == ObjectKind::View).unwrap();
+        let (lo, hi, _) = reach(group);
+        hi.x - lo.x
+    };
+    let both = settled(&mut s, sheet);
+    assert!(both.stale.is_empty());
+    assert!((across(&both.scene, design) - 110.0).abs() < 1e-6, "220 mm at 1:2");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![design], "only the view that follows the design");
+    let one = settled(&mut s, sheet);
+    assert!((across(&one.scene, design) - 50.0).abs() < 1e-6, "the carcass alone");
+    for other in others {
+        assert!((across(&one.scene, other) - 110.0).abs() < 1e-6, "every body");
+    }
+    assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+
+    let drawn_from = s.design_hidden();
+    s.refresh_display();
+    assert!(Arc::ptr_eq(&drawn_from, &s.design_hidden()), "the same set, the same Arc");
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty(), "a revision alone redraws nothing");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![design]);
+    let again = settled(&mut s, sheet);
+    assert!((across(&again.scene, design) - 110.0).abs() < 1e-6, "the door is back");
+}
+
+/// A drawing whose views all draw every body never works out what the design hides (#22107), however
+/// much the browser hides: following the eyes costs a sheet of "all" views nothing.
+#[test]
+fn a_sheet_of_views_of_every_body_never_reads_the_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:1", "position_mm": [200, 150]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    crate::occurrences::DESIGN_HIDDEN_BUILDS.with(|n| n.set(0));
+    let scene = settled(&mut s, sheet);
+    built(&s, sheet);
+    assert_eq!(crate::occurrences::DESIGN_HIDDEN_BUILDS.with(std::cell::Cell::get), 0);
+    let group = scene.scene.groups.iter().find(|g| g.kind == ObjectKind::View).unwrap();
+    let (lo, hi, _) = reach(group);
+    assert!((hi.x - lo.x - 220.0).abs() < 1e-6, "the eye counts for nothing");
+}
+
+/// What the design hides for a drawing follows the eyes of bodies, placements and folders, and never
+/// an open sketch (#22107): a body a sketch being edited rolls off stays drawn, so a drawing doesn't
+/// change while someone sketches. A hidden placement hides the bodies under it, by their path.
+#[test]
+fn what_the_design_hides_leaves_an_open_sketch_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Kept"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Gone"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "30 mm", "name": "Edited"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.remove", json!({"bodies": ["Gone"]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Kept"], "visible": false}));
+    let before = s.design_hidden();
+    assert!(before.hides(&[], "Kept") && !before.hides(&[], "Gone"));
+    run(&mut s, "timeline.roll_to", json!({"feature": "Edited"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Edited"}));
+    assert!(s.body_removed_later("Gone") && !s.body_visible("Gone"), "the viewport leaves it out");
+    let sketching = s.design_hidden();
+    assert!(sketching.hides(&[], "Kept") && !sketching.hides(&[], "Gone"), "a drawing doesn't");
+    assert_eq!(*sketching, *before);
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let placed = s.doc.occurrences[0].id;
+    run(&mut s, "browser.visibility", json!({"paths": [[placed]], "visible": false}));
+    let hidden = s.design_hidden();
+    assert!(hidden.hides(&[placed], "Plate") && !hidden.hides(&[], "Plate"), "by its placement's path");
+}
+
+/// A vertical bore and a cross bore. Front and top SVG must contain no two-point path
+/// shorter than 1e-3 mm, and each view must still draw a straight edge longer than 5 mm. The
+/// sheet border is outside the view groups, so it does not count.
+#[test]
+fn odd_angle_cross_bores_export_no_sub_micron_stroke() {
+    let mut cases = Vec::new();
+    for degrees in [0.0_f64, 15.0, 30.0, 45.0, 60.0, 77.0, 89.5, 89.999] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 32, "base": [20, 15, -1], "operation": "cut", "targets": ["Block"]}));
+        let a = f64::to_radians(degrees);
+        let (cos_a, sin_a) = (a.cos(), a.sin());
+        let base = [20.0 - 40.0 * cos_a, 15.0 - 40.0 * sin_a, 10.0];
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 4, "height": 80, "axis": [cos_a, sin_a, 0.0], "base": base, "operation": "cut", "targets": ["Block"]}),
+        );
+        cases.push((format!("a={degrees}"), cross_bore_sheet_strokes(s)));
+    }
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 10, "base": [20, 15, 20], "operation": "join", "targets": ["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 32, "base": [20, 15, -1], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 42, "base": [-1, 15, 8], "axis": "X", "operation": "cut", "targets": ["Block"]}));
+    cases.push(("boss".to_string(), cross_bore_sheet_strokes(s)));
+
+    let report = cases
+        .iter()
+        .map(|(label, (short, edges))| format!("{label}: {short} two-point paths shorter than 1e-3 mm; both views keep an edge over 5 mm: {edges}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let clean = cases.iter().all(|(_, (short, edges))| *short == 0 && *edges);
+    assert!(
+        clean,
+        "a cross-drilled block's front and top SVG must have no two-point path shorter than 1e-3 mm, and each view must keep a straight edge longer than 5 mm:\n{report}"
+    );
+}
+
+/// Front and top SVG of `design`: how many two-point paths in the whole export are shorter than
+/// 1e-3 mm, and whether both view groups (not the sheet border) contain a straight run over 5 mm.
+fn cross_bore_sheet_strokes(design: Session) -> (usize, bool) {
+    let (mut s, sheet, views) = front_and_top_of(design);
+    let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet), "format": "svg"}));
+    let svg = export["svg"].as_str().unwrap();
+    let mut short = 0;
+    for piece in svg.split(" d=\"").skip(1) {
+        let Some((d, _)) = piece.split_once('"') else { continue };
+        if cross_bore_two_point_length(d).is_some_and(|len| len < 1e-3) {
+            short += 1;
+        }
+    }
+    let views_with_edge = views
+        .into_iter()
+        .filter(|view| {
+            let marker = format!("<g data-object=\"{view}\" data-kind=\"view\">\n");
+            let Some((_, rest)) = svg.split_once(&marker) else { return false };
+            let Some((group, _)) = rest.split_once("</g>") else { return false };
+            group.split(" d=\"").skip(1).any(|piece| piece.split_once('"').is_some_and(|(d, _)| cross_bore_straight_length(d) > 5.0))
+        })
+        .count();
+    (short, views_with_edge == 2)
+}
+
+/// `M<x> <y>L<x> <y>` and nothing else: its length in paper mm. Digits, an optional minus and an
+/// optional fraction, as the SVG writer emits them.
+fn cross_bore_two_point_length(d: &str) -> Option<f64> {
+    let rest = d.strip_prefix('M')?;
+    let (x0, y0, rest) = cross_bore_xy(rest)?;
+    let rest = rest.strip_prefix('L')?;
+    let (x1, y1, rest) = cross_bore_xy(rest)?;
+    rest.is_empty().then_some((x1 - x0).hypot(y1 - y0))
+}
+
+/// Length of the straight pieces of `d` (`L`, and `Z` back to the subpath start). An arc or curve
+/// stops the measure; the sheet border and the block edges are straight.
+fn cross_bore_straight_length(d: &str) -> f64 {
+    let mut rest = d;
+    let mut total = 0.0;
+    let mut pen: Option<(f64, f64)> = None;
+    let mut start: Option<(f64, f64)> = None;
+    while let Some(cmd) = rest.chars().next() {
+        match cmd {
+            'M' | 'L' => {
+                let Some((x, y, next)) = cross_bore_xy(&rest[cmd.len_utf8()..]) else { break };
+                if cmd == 'L' {
+                    if let Some((px, py)) = pen {
+                        total += (x - px).hypot(y - py);
+                    }
+                } else {
+                    start = Some((x, y));
+                }
+                pen = Some((x, y));
+                rest = next;
+            }
+            'Z' | 'z' => {
+                if let (Some((px, py)), Some((sx, sy))) = (pen, start) {
+                    total += (sx - px).hypot(sy - py);
+                }
+                pen = start;
+                rest = &rest[cmd.len_utf8()..];
+            }
+            _ => break,
+        }
+    }
+    total
+}
+
+/// One SVG point: `<x> <y>`.
+fn cross_bore_xy(s: &str) -> Option<(f64, f64, &str)> {
+    let (x, s) = cross_bore_svg_number(s)?;
+    let s = s.strip_prefix(' ')?;
+    let (y, s) = cross_bore_svg_number(s)?;
+    Some((x, y, s))
+}
+
+/// A number as the SVG writer emits it: an optional minus, digits, and an optional fraction.
+fn cross_bore_svg_number(s: &str) -> Option<(f64, &str)> {
+    let bytes = s.as_bytes();
+    let mut i = usize::from(bytes.first() == Some(&b'-'));
+    let whole = i;
+    while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+    }
+    if i == whole {
+        return None;
+    }
+    if bytes.get(i) == Some(&b'.') {
+        i += 1;
+        let frac = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == frac {
+            return None;
+        }
+    }
+    s[..i].parse().ok().map(|n| (n, &s[i..]))
 }

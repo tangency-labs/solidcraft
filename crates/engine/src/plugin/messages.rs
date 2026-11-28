@@ -10,6 +10,7 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ("plugin_error.failed", "{plugin}: {reason}"),
     ("plugin_error.failed_export", "{plugin} could not export {file}: {reason}"),
     ("plugin_error.failed_file", "{plugin} could not open {file}: {reason}"),
+    ("plugin_error.folder_option_read_approval", "the option {option} needs read approval for its folder"),
     (
         "plugin_error.fuel_ceiling",
         "it asks for {requested} fuel, and plugins may use {allowed}. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
@@ -67,7 +68,7 @@ pub struct PluginFailure {
 }
 
 /// `id`'s text in this thread's language, or its English when no catalog has it.
-fn say(id: &str, args: &[(&str, &str)]) -> String {
+pub(super) fn say(id: &str, args: &[(&str, &str)]) -> String {
     let text = solidcraft_ui_text::format(id, args);
     if text != id {
         return text;

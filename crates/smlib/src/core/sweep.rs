@@ -24,12 +24,12 @@
 
 use std::f64::consts::{PI, TAU};
 
+use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::curve::p3::compute_crvs_normal;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
@@ -107,27 +107,28 @@ fn line(start: [f64; 3], end: [f64; 3]) -> Out<Curve> {
 }
 
 /// `arc`: centre, unit axis, unit reference direction (square to the axis), radius, start and
-/// end angles (radians, counter-clockwise about the axis from the reference).
+/// end angles (radians, counter-clockwise about the axis from the reference). The capi's
+/// argument checks, then the kernel's one arc of a definition ([`Ellipse::arc`], as
+/// solidcore-ops makes its arcs), so a curve list here makes the curves ops' own would.
 fn arc(k: &Kernel, center: [f64; 3], axis: [f64; 3], reference: [f64; 3], radius: f64, start: f64, end: f64) -> Out<Curve> {
     if !coord_ok(&center) || ![radius, start, end].iter().all(|x| x.is_finite()) {
         return Err(Error::Argument);
     }
-    let (Some(axis), Some(r)) = (unit(axis), unit(reference)) else { return Err(Error::Argument) };
-    if axis.dot(r).abs() > 1e-9 {
+    let (Some(a), Some(r)) = (unit(axis), unit(reference)) else { return Err(Error::Argument) };
+    if a.dot(r).abs() > 1e-9 {
         return Err(Error::Argument);
     }
     let sweep = end - start;
     if !(radius > 1e-9 && radius < MAX_COORD) || start.abs() > 1e6 || !(sweep > 1e-9 && sweep <= TAU * (1.0 + 1e-12)) {
         return Err(Error::Argument);
     }
-    // The circle's own parameter starts at the arc's start: SMLib takes intervals in degrees
-    // within [-360, 360].
-    let y = axis.cross(r);
-    let x0 = r * start.cos() + y * start.sin();
-    let y0 = axis.cross(x0);
-    let frame = Axis2Placement::new(v3(center), x0, y0);
-    let degrees = Extent1d::from_min_max(0.0, (sweep * 180.0 / PI).min(360.0));
-    called(Ellipse::create_canonical_circle(k, &frame, radius, Some(&degrees), None)).map(Curve::from)
+    let definition = ArcDefinition { centre: v3(center), axis: v3(axis), reference: v3(reference), radius, start, end };
+    match Ellipse::arc(k, &definition) {
+        Ok(c) => Ok(Curve::from(c)),
+        // the kernel's own checks of the definition: an argument refused, as the capi words it
+        Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+        Err(e) => Err(status(e)),
+    }
 }
 
 /// `nurbs`: control points (x, y, z, weight), then points + degree + 1 knots, clamped (end
@@ -642,12 +643,13 @@ fn piecewise(k: &mut Kernel, profile: &[Curve], segs: &[Segment], cap: bool) -> 
 /// the start, half way and the end. Along a straight path the sweep is SM_API's linear sweep, and
 /// turning with arcs about one axis its rotational sweep: both build the walls exactly, as the
 /// sweep piece by piece does along lines and arcs that turn with the path ([`piecewise`]). Any
-/// other path takes solidcore-ops' curve sweep of the curves made here
-/// ([`solidcore_ops::sweep::curve_sweep_in`]), which round a closed path sweeps each loop of a
-/// capped profile on its own and takes the holes' tubes from the first loop's.
+/// other path is solidcore-ops' curve sweep ([`solidcore_ops::sweep::curve_sweep`]), which round
+/// a closed path sweeps each loop of a capped profile on its own and takes the holes' tubes from
+/// the first loop's.
 pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFrame, cap: bool) -> Result<(Body, [Affine; 3])> {
     let mut placed = [motion(Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 0.0)); 3];
-    let body = making("smlib_sweep", |k| {
+    // `None`: the path is none of those, so the curve sweep takes it
+    let made = run("smlib_sweep", |k| {
         let (curves, along) = match (parse(k, profile), parse(k, path)) {
             (Ok(c), Ok(p)) => (c, p),
             (Err(e), _) | (_, Err(e)) => return Ok(Err(e)),
@@ -662,7 +664,7 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
                 let t = dir * (distance * 0.5 * j as f64);
                 m.t = [t.x, t.y, t.z];
             }
-            return finish(r, cap);
+            return Ok(finish(r, cap)?.map(Some));
         }
         if frame == SweepFrame::Follow
             && let Some((centre, axis, angle)) = circular(k, path, &along)?
@@ -684,7 +686,7 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
                 let [x, y, z] = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)].map(|e| turned(e, kv, a));
                 *m = motion(x, y, z, t);
             }
-            return finish(r, cap);
+            return Ok(finish(r, cap)?.map(Some));
         }
         // Along lines and arcs, turning with the path, the sweep is exact piece by piece.
         if frame == SweepFrame::Follow
@@ -693,25 +695,42 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
             return Ok(match piecewise(k, &curves, &segs, cap)? {
                 Ok((b, motions)) => {
                     placed = motions;
-                    finish(b, cap)?
+                    finish(b, cap)?.map(Some)
                 }
                 Err(e) => Err(e),
             });
         }
-        let frame = match frame {
-            SweepFrame::Follow => solidcore_ops::sweep::SweepFrame::Follow,
-            SweepFrame::Translate => solidcore_ops::sweep::SweepFrame::Translate,
-        };
-        Ok(match solidcore_ops::sweep::curve_sweep_in(k, &curves, &along, frame, cap) {
-            Ok(Ok((b, motions))) => {
-                placed = motions.map(|a| Affine { m: a.m, t: a.t });
-                finish(b, cap)?
+        Ok(Ok(None))
+    })??;
+    if let Some(b) = made {
+        return Ok((Body::from_kernel(b), placed));
+    }
+    let follows = frame == SweepFrame::Follow;
+    let frame = match frame {
+        SweepFrame::Follow => solidcore_ops::sweep::SweepFrame::Follow,
+        SweepFrame::Translate => solidcore_ops::sweep::SweepFrame::Translate,
+    };
+    let (curves, along) = (ops_curves(profile), ops_curves(path));
+    // the capi's contract: a closed manifold solid when capped, faces otherwise
+    let swept = super::call::ops_as("smlib_sweep", &[], sweep_error, || {
+        solidcore_ops::sweep::curve_sweep(&curves, &along, frame, cap, solidcore_ops::Contract::Closed)
+    });
+    let (body, motions) = match swept {
+        // Round a closed loop of lines and arcs that turns with the path, the curve sweep cannot
+        // close a wall that shrinks to an edge: a profile reaching a corner arc's centre. There
+        // solidcore-ops' exact sweep piece by piece builds it, the wall closing to that edge.
+        // Where the curve sweep builds, its result (and the names given to its faces) stays.
+        Err(e) if follows && path.iter().all(|c| matches!(c, Profile::Line { .. } | Profile::Arc { .. })) => {
+            match super::call::ops_as("smlib_sweep", &[], sweep_error, || solidcore_ops::sweep::sweep_round_closed_path(&curves, &along, cap)) {
+                Ok(Some(built)) => built,
+                // not a closed loop of lines and arcs: the curve sweep's refusal stands
+                Ok(None) => return Err(e),
+                Err(exact) => return Err(exact),
             }
-            Ok(Err(e)) => Err(sweep_error("smlib_sweep", e, None)),
-            Err(e) => Err(status(e)),
-        })
-    })?;
-    Ok((body, placed))
+        }
+        r => r?,
+    };
+    Ok((body, motions.map(|a| Affine { m: a.m, t: a.t })))
 }
 
 /// `smlib_loft`: a skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` across them.

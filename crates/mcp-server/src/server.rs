@@ -13,7 +13,7 @@ use crate::schema::{check_arguments, check_prompt_arguments};
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SUPPORTED_VERSIONS: &[&str] = &[PROTOCOL_VERSION, "2025-03-26", "2024-11-05"];
 
-const PARSE_ERROR: i64 = -32700;
+pub(crate) const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
@@ -129,6 +129,27 @@ pub enum Reference<'a> {
     Resource(&'a str),
 }
 
+/// Why `resources/subscribe` or `resources/unsubscribe` was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResourceError {
+    /// Invalid parameter or session subscription limit reached (`-32602`).
+    InvalidParams(String),
+    /// No resource matches the requested URI (`-32002`).
+    NotFound(String),
+    /// Internal server error (`-32603`).
+    Internal(String),
+}
+
+impl ResourceError {
+    fn into_rpc(self) -> (i64, String) {
+        match self {
+            Self::InvalidParams(message) => (INVALID_PARAMS, message),
+            Self::NotFound(message) => (RESOURCE_NOT_FOUND, message),
+            Self::Internal(message) => (INTERNAL_ERROR, message),
+        }
+    }
+}
+
 /// An app's tools, served by [`Server`].
 pub trait Tools {
     /// What every client is told at `initialize`.
@@ -172,6 +193,32 @@ pub trait Tools {
         let _ = uri;
         None
     }
+    /// Whether this app supports `resources/subscribe` and `resources/unsubscribe`
+    /// (`capabilities.resources.subscribe`).
+    fn resource_subscribe(&self) -> bool {
+        false
+    }
+    /// Whether this app may send `notifications/resources/list_changed`
+    /// (`capabilities.resources.listChanged`).
+    fn resource_list_changed(&self) -> bool {
+        false
+    }
+    /// Subscribe this session to updates for resource `uri` (`resources/subscribe`). Called only
+    /// when [`Tools::resource_subscribe`] is `true` and `uri` is a non-empty string.
+    fn subscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+        Err(ResourceError::NotFound(format!("unknown resource `{uri}`")))
+    }
+    /// Cancel this session's subscription to resource `uri` (`resources/unsubscribe`). Called only
+    /// when [`Tools::resource_subscribe`] is `true` and `uri` is a non-empty string.
+    fn unsubscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+        Err(ResourceError::NotFound(format!("unknown resource `{uri}`")))
+    }
+    /// Called when the client sends `notifications/initialized`.
+    fn on_initialized(&mut self) {}
+    /// Drain any server-to-client JSON-RPC notifications queued since the last drain.
+    fn take_notifications(&mut self) -> Vec<Value> {
+        Vec::new()
+    }
     /// The prompts `prompts/list` serves (MCP `Prompt`: name, title, description, arguments).
     fn prompts(&self) -> Vec<Value> {
         Vec::new()
@@ -211,7 +258,7 @@ pub struct Server<T: Tools> {
     on_cancel: Option<Box<dyn FnMut(&Value, Option<&str>) + Send>>,
 }
 
-fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
+pub(crate) fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
 }
 
@@ -271,6 +318,22 @@ pub fn response(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
+/// A JSON-RPC 2.0 server-to-client notification (no `id`).
+pub fn notification(method: &str, params: Option<Value>) -> Value {
+    match params {
+        Some(params) => json!({"jsonrpc": "2.0", "method": method, "params": params}),
+        None => json!({"jsonrpc": "2.0", "method": method}),
+    }
+}
+
+fn require_uri(params: &Value) -> Result<&str, (i64, String)> {
+    match params.get("uri") {
+        Some(Value::String(uri)) if !uri.trim().is_empty() => Ok(uri.as_str()),
+        Some(_) => Err((INVALID_PARAMS, "`uri` must be a non-empty string".to_string())),
+        None => Err((INVALID_PARAMS, "missing resource `uri`".to_string())),
+    }
+}
+
 impl<T: Tools> Server<T> {
     pub fn new(info: Info, tools: T) -> Self {
         Self { info, tools, initialized: false, notifier: None, on_cancel: None }
@@ -294,6 +357,10 @@ impl<T: Tools> Server<T> {
     }
     pub fn is_initialized(&self) -> bool {
         self.initialized
+    }
+    /// Drain any server-to-client notifications queued by the app's [`Tools`] since the last drain.
+    pub fn take_notifications(&mut self) -> Vec<Value> {
+        self.tools.take_notifications()
     }
 
     /// Serve newline-delimited JSON-RPC until `input` closes. Only protocol messages go to
@@ -331,6 +398,12 @@ impl<T: Tools> Server<T> {
                     output.write_all(b"\n")?;
                     output.flush()?;
                 }
+                for note in self.take_notifications() {
+                    let line = note.to_string();
+                    output.write_all(line.as_bytes())?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                }
             }
             Ok(())
         })();
@@ -351,16 +424,23 @@ impl<T: Tools> Server<T> {
             return None;
         }
         let reply = match serde_json::from_str::<Value>(line) {
-            Ok(Value::Array(batch)) if batch.is_empty() => Some(error(Value::Null, INVALID_REQUEST, "empty batch")),
-            Ok(Value::Array(batch)) if batch.len() > MAX_BATCH => Some(error(Value::Null, INVALID_REQUEST, "batch too large")),
-            Ok(Value::Array(batch)) => {
-                let replies: Vec<Value> = batch.into_iter().filter_map(|m| self.handle(m)).collect();
-                (!replies.is_empty()).then_some(Value::Array(replies))
-            }
-            Ok(msg) => self.handle(msg),
+            Ok(value) => self.handle_value(value),
             Err(e) => Some(error(Value::Null, PARSE_ERROR, format!("parse error: {e}"))),
         };
         reply.map(|r| r.to_string())
+    }
+
+    /// One parsed JSON-RPC message or batch in, at most one JSON-RPC reply out.
+    pub(crate) fn handle_value(&mut self, value: Value) -> Option<Value> {
+        match value {
+            Value::Array(batch) if batch.is_empty() => Some(error(Value::Null, INVALID_REQUEST, "empty batch")),
+            Value::Array(batch) if batch.len() > MAX_BATCH => Some(error(Value::Null, INVALID_REQUEST, "batch too large")),
+            Value::Array(batch) => {
+                let replies: Vec<Value> = batch.into_iter().filter_map(|m| self.handle(m)).collect();
+                (!replies.is_empty()).then_some(Value::Array(replies))
+            }
+            msg => self.handle(msg),
+        }
     }
 
     pub fn handle(&mut self, msg: Value) -> Option<Value> {
@@ -376,7 +456,10 @@ impl<T: Tools> Server<T> {
         let params = o.get("params").cloned().unwrap_or(Value::Null);
         let Some(id) = id else {
             match method {
-                "notifications/initialized" => self.initialized = true,
+                "notifications/initialized" => {
+                    self.initialized = true;
+                    self.tools.on_initialized();
+                }
                 "notifications/cancelled" => {
                     if let Some(c) = cancelled_from_params(&params) {
                         self.tools.cancel(&c.request_id, c.reason.as_deref());
@@ -434,6 +517,16 @@ impl<T: Tools> Server<T> {
                     .map_err(|e| (INTERNAL_ERROR, e))?;
                 Ok(json!({"contents": [contents.block(uri)]}))
             }
+            "resources/subscribe" if self.tools.resource_subscribe() => {
+                let uri = require_uri(params)?;
+                self.tools.subscribe_resource(uri).map_err(ResourceError::into_rpc)?;
+                Ok(json!({}))
+            }
+            "resources/unsubscribe" if self.tools.resource_subscribe() => {
+                let uri = require_uri(params)?;
+                self.tools.unsubscribe_resource(uri).map_err(ResourceError::into_rpc)?;
+                Ok(json!({}))
+            }
             "prompts/get" if !self.tools.prompts().is_empty() => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "missing prompt `name`".to_string()))?;
                 let args = match params.get("arguments") {
@@ -480,7 +573,11 @@ impl<T: Tools> Server<T> {
     fn capabilities(&self) -> Value {
         let mut capabilities = json!({"tools": {"listChanged": false}});
         if !self.tools.resources().is_empty() || !self.tools.resource_templates().is_empty() {
-            capabilities["resources"] = json!({"listChanged": false});
+            let mut resources = json!({"listChanged": self.tools.resource_list_changed()});
+            if self.tools.resource_subscribe() {
+                resources["subscribe"] = json!(true);
+            }
+            capabilities["resources"] = resources;
         }
         if !self.tools.prompts().is_empty() {
             capabilities["prompts"] = json!({"listChanged": false});

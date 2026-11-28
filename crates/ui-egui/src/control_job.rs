@@ -133,9 +133,12 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
-/// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
-/// since an answer from the design as it was when asked has no order to keep.
+/// of bodies, minutes on an assembly of 150; exact hidden-line drawing views of a thousand-body
+/// assembly, #20484): they run on a copy too, whatever the preference, since an answer from the
+/// design as it was when asked has no order to keep.
 const READ_ON_A_COPY: &[&str] = &[
+    "drawing.scene",
+    "drawing.view.snapshot",
     "model.mesh",
     "plugin.inspect",
     // Compiles the package's component to check it: tens of seconds for a large importer.
@@ -678,7 +681,7 @@ impl SolveApp {
             if let Some(level) = level {
                 copy.param_check = level;
             }
-            let quality = solidcraft_engine::doc::display_quality::current();
+            let quality = crate::prefs::drawn_quality(self);
             let (tx, prepared) = std::sync::mpsc::channel();
             #[cfg(test)]
             let gate = self.apply_gate.clone();
@@ -726,11 +729,15 @@ impl SolveApp {
         if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
-        // Reading the design (a measure, an inspection that measures): on a copy, answered from
-        // there, preference or not. On a large assembly it took a minute on the window thread,
-        // and the window, answering nothing meanwhile, was closed as not responding (#4604).
+        // Reading the design (a measure, an inspection that measures, an automatic drawing scene):
+        // on a copy, answered from there, preference or not. On a large assembly it took a minute
+        // on the window thread, and the window, answering nothing meanwhile, was closed as not
+        // responding (#4604, #20484). A deferred drawing's `drawing.scene` settles the live sheet
+        // cache, so it stays on the window thread.
         if self.control_answering.len() < MAX_ANSWERING
             && let Some((id, params)) = reading(&req)
+            && (id != "drawing.scene"
+                || self.session.drawing("drawing.scene").is_ok_and(|d| d.updates == solidcraft_engine::doc::drawing::Updates::Automatic))
         {
             return self.answer_on_a_copy(req, id, params);
         }
@@ -768,7 +775,7 @@ impl SolveApp {
         // The request's own level (#9184) checks it on the copy, and the reply says so, as
         // `control::handle` does; a word that is no level is refused there.
         let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
-        let mut copy = self.session.scratch();
+        let mut copy = if id == "drawing.scene" { self.session.scratch_as_shown() } else { self.session.scratch() };
         if let Some(level) = level {
             copy.param_check = level;
         }
@@ -926,7 +933,8 @@ impl SolveApp {
                         let before = self.session.doc.clone();
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
-                        let replies = self.session.accept_commands(prepared);
+                        let chat_turn = job.req.chat_turn.as_ref();
+                        let replies = crate::agent_chat::with_tool_request(self, chat_turn, |app| app.session.accept_commands(prepared));
                         // A read or a failed run leaves this design's document as it was, so the
                         // Start page stays up. An edit that landed shows this design, as clicking
                         // its tab does (`documents::switch`). The dialog only runs on the session

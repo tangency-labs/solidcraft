@@ -431,16 +431,19 @@ pub fn paint_assembly_section(
                     state.selected_features.clear();
                 }
 
-                crate::ui_kit::Menu::context(&resp, |ui| {
-                    crate::dialogs_assembly::joint_menu(app, ui, (joint.id, joint.kind, joint.suppressed), &mut open, &mut run);
-                    if run.is_some() && run_targets.is_empty() {
-                        run_targets = if state.selected_joints.contains(&joint.id) {
-                            app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| state.selected_joints.contains(id)).collect()
-                        } else {
-                            vec![joint.id]
-                        };
+                if crate::ui_kit::Menu::context_active(&resp) {
+                    let items = crate::dialogs_assembly::joint_menu_items(app, (joint.id, joint.kind, joint.suppressed));
+                    if let Some(picked) = crate::ui_kit::Menu::context_items(&resp, &items) {
+                        crate::dialogs_assembly::run_joint_menu_item(app, &picked, (joint.id, joint.suppressed), &mut open, &mut run);
+                        if run.is_some() && run_targets.is_empty() {
+                            run_targets = if state.selected_joints.contains(&joint.id) {
+                                app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| state.selected_joints.contains(id)).collect()
+                            } else {
+                                vec![joint.id]
+                            };
+                        }
                     }
-                });
+                }
 
                 let stroke_color = if is_selected {
                     if is_active { t.text } else { t.text_dim }
@@ -666,11 +669,14 @@ pub fn paint_assembly_section(
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through tracks - drawn using clipped painter p so it slides under the splitter bar when scrolled
-        p.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, purple_accent));
+        p.line_segment(
+            [pos2(line_x, line_top), pos2(line_x, line_bottom - super::canvas::MARKER_FOOT_OVERLAP)],
+            Stroke::new(line_width, purple_accent),
+        );
 
-        // Bottom handle cap on vertical line
-        let bottom_cap_rect = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
-        p.rect_filled(bottom_cap_rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, purple_accent);
+        // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
+        let rows_bottom = content_tracks_top + component_ids.len() as f32 * ROW_HEIGHT;
+        p.add(super::canvas::marker_foot(line_x, line_bottom, purple_accent, rows_bottom > section_rect.bottom() + 0.5));
 
         // Square pin handle in Tier 1 contacting vertical line
         let pin_size = if marker_hovered || marker_dragged { vec2(15.0, 15.0) } else { vec2(14.0, 14.0) };

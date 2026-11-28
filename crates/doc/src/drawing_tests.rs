@@ -104,7 +104,7 @@ pub(crate) fn plate() -> Drawing {
         })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None })]);
+    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None, along: None })]);
     d.validate().unwrap();
     d
 }
@@ -416,7 +416,14 @@ fn full_block() -> TitleBlock {
     use solidcraft_geom::cell::{Content, Fit, HAlign, Part};
     let cell = |i: usize| {
         let (x, y) = ((i % 8) as f64 * 20.0 - 160.0, (i / 8) as f64 * 6.75);
-        let value = TextCell { content: Content(vec![Part::Text("-".into())]), cap_mm: 2.5, align: HAlign::Left, fit: Fit::default(), image: None };
+        let value = TextCell {
+            content: Content(vec![Part::Text("-".into())]),
+            cap_mm: 2.5,
+            align: HAlign::Left,
+            fit: Fit::default(),
+            image: None,
+            mass_unit: None,
+        };
         Cell { name: format!("cell_{i}"), rect_mm: [x, y, x + 20.0, y + 6.75], label: None, kind: CellKind::Text(value) }
     };
     TitleBlock { size_mm: Vec2::new(160.0, 54.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells: (0..64).map(cell).collect() }
@@ -1952,7 +1959,14 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     // current deduplication only in this hostile-size fixture, preserving the
     // original validation work at both sides of the production limit.
     for i in 0..703 {
-        sk.constraints.push(Constraint { id: format!("budget_h{i}"), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+        sk.constraints.push(Constraint {
+            id: format!("budget_h{i}"),
+            kind: K::Horizontal { l: line },
+            param: None,
+            driven: false,
+            driven_param: None,
+            text: None,
+        });
     }
     sk.add_constraint(K::Radius { c: a, value: 5.0 }, None).unwrap();
     sk.add_constraint(K::Radius { c: b, value: 5.0 }, None).unwrap();
@@ -1966,7 +1980,14 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     let before = d.clone();
     let e = d
         .edit_sheet_sketch(&crate::Document::default(), 41, |sketch| {
-            sketch.constraints.push(Constraint { id: "budget_h703".into(), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+            sketch.constraints.push(Constraint {
+                id: "budget_h703".into(),
+                kind: K::Horizontal { l: line },
+                param: None,
+                driven: false,
+                driven_param: None,
+                text: None,
+            });
             assert_eq!(sketch.constraints.len(), 707);
             assert_eq!(4 * sketch.constraints.len().pow(2) + sketch.constraints.len() - 1, 2_000_102);
             Ok(())
