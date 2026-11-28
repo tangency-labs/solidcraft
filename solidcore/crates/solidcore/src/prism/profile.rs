@@ -1107,7 +1107,7 @@ pub fn height(frame: &Frame, q: Point3) -> f64 {
 /// three products and two sums move it by at most `gamma_3 Σ |w_i n_i|`, over the computed `w`
 /// and `n`. With `|exact w_i| <= |w_i| / (1 - u)`, the computed height is within
 /// `gamma_4 Σ |w_i n_i| + gamma_3 Σ |w_i| c_i` of the exact one. The bound's own roundings,
-/// at most seven in a chain, take `1 + gamma_8`, and products that underflow, each off by at
+/// at most eight in a chain, take `1 + gamma_10`, and products that underflow, each off by at
 /// most half the least subnormal, are covered by `f64::MIN_POSITIVE (2 + |w|_1)`.
 #[must_use]
 pub fn side(frame: &Frame, q: Point3, tol: f64) -> Option<bool> {
@@ -1126,7 +1126,7 @@ pub fn side(frame: &Frame, q: Point3, tol: f64) -> Option<bool> {
     let size = w.x.abs() + w.y.abs() + w.z.abs();
     let h = Bounded {
         value: w.dot(n),
-        bound: (gamma(4) * terms + gamma(3) * crossed) * (1.0 + gamma(8))
+        bound: (gamma(4) * terms + gamma(3) * crossed) * (1.0 + gamma(10))
             + f64::MIN_POSITIVE * (2.0 + size),
     };
     let below = Bounded {

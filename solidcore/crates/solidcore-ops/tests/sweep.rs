@@ -1883,7 +1883,8 @@ fn a_loft_s_hostile_ends_are_refused() {
 
 /// The side of its section's plane an apex rises to, `true` along the plane's normal: either
 /// side of the plane z = 5, and of the same plane turned over. An apex in the plane, within
-/// `APEX_OFF_PLANE` of it, or not finite is refused.
+/// `APEX_OFF_PLANE` of it, or not finite is refused, and so is any apex of a plane whose axes
+/// are parallel.
 #[test]
 fn an_apex_rises_to_the_side_of_its_sections_plane_it_is_proved_on() {
     use solidcore_ops::sweep::{apex_above, APEX_OFF_PLANE};
@@ -1906,6 +1907,14 @@ fn an_apex_rises_to_the_side_of_its_sections_plane_it_is_proved_on() {
     ] {
         assert_eq!(apex_above(&plane, apex), Err(Error::Argument), "{apex:?}");
     }
+    let flat = Plane {
+        y: Vec3::new(1.0, 0.0, 0.0),
+        ..plane
+    };
+    assert_eq!(
+        apex_above(&flat, Vec3::new(4.0, -3.0, 15.0)),
+        Err(Error::Argument)
+    );
 }
 
 /// A loft to a point through a station that bulges out (the base square again, half way up):

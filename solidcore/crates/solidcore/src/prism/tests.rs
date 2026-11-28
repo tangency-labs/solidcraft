@@ -4842,7 +4842,7 @@ fn a_point_is_on_a_side_of_a_plane_only_where_the_rounding_of_its_height_proves_
     assert_eq!(side(&xy(), Vec3::new(1.0, 1.0, 0.0), tol), None);
     assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, 5e-10), tol), None);
     // On the world's own axes every product is exact, so a height just past `tol` is proved
-    // however far out the point lies.
+    // even 100 km out.
     assert_eq!(side(&xy(), Vec3::new(1e8, -1e8, 2e-9), tol), Some(true));
     // A plane at a slant through the origin, and a point 100 km out on it: its height computes
     // to 3.7e-9, past `tol`, but is 7.4e-10 on the given numbers (exact rational arithmetic),
@@ -4881,6 +4881,15 @@ fn a_point_is_on_a_side_of_a_plane_only_where_the_rounding_of_its_height_proves_
     assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, f64::NAN), tol), None);
     assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, f64::INFINITY), tol), None);
     assert_eq!(side(&xy(), Vec3::new(3.0, 4.0, 30.0), -1.0), None);
+    // Nor do a height or a bound that overflow: a point at the largest coordinates, and axes so
+    // long that their cross product does.
+    assert_eq!(side(&xy(), Vec3::new(f64::MAX, f64::MAX, 1.0), tol), None);
+    let huge = Frame {
+        origin: [0.0; 3],
+        x_axis: [1e200, 0.0, 0.0],
+        y_axis: [0.0, 1e200, 0.0],
+    };
+    assert_eq!(side(&huge, Vec3::new(0.0, 0.0, 1.0), tol), None);
 }
 
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to

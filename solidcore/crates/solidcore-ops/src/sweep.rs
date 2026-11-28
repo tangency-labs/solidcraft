@@ -2005,9 +2005,9 @@ pub fn skin_with_ends(
     create_skin_primitive_with_ends(k, counts, curves, 3, cap, kernel_ends).map(|r| Ok(r.brep))
 }
 
-/// How near its section's plane (mm) an apex lies in it, for [`apex_above`]: the ratio
-/// [`loft_to_point`] proves an apex off its section by, `1e-9` of the section's size and at
-/// least of 1.
+/// How near its section's plane (mm) an apex lies in it, for [`apex_above`]: a distance, the
+/// same `1e-9` [`loft_to_point`] proves an apex off a section of unit size by (there a ratio of
+/// the section's size, at least 1).
 pub const APEX_OFF_PLANE: f64 = 1e-9;
 
 /// Whether `apex` lies on the side of the section's `plane` its normal (`plane.x × plane.y`)
@@ -2017,7 +2017,8 @@ pub const APEX_OFF_PLANE: f64 = 1e-9;
 ///
 /// # Errors
 /// [`Error::Argument`] for an apex not proved off the plane: within [`APEX_OFF_PLANE`] of it,
-/// too near that for the rounding to tell, or not finite.
+/// too near that for the rounding to tell, or not finite; and for a plane with no side, its
+/// axes parallel or not finite.
 pub fn apex_above(plane: &solidcore_record::Plane, apex: solidcore_record::Vec3) -> Result<bool> {
     kp::side(&convert::plane(plane), convert::vec3(apex), APEX_OFF_PLANE).ok_or(Error::Argument)
 }
