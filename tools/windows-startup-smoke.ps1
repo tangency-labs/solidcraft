@@ -14,7 +14,9 @@ $cases = @(
     @{ Name = 'saved 2x, backend preference dx12'; Graphics = '{"msaa":2,"backend":"dx12"}'; Env = @{}; Args = @(); Expect = '(requested 2x)' },
     @{ Name = 'damaged graphics.json'; Graphics = '{"msaa":'; Env = @{}; Args = @(); Expect = 'SolidCraft graphics: ' },
     @{ Name = 'WGPU_BACKEND=dx12 with FXC'; Graphics = $null; Env = @{ WGPU_BACKEND = 'dx12'; WGPU_DX12_COMPILER = 'fxc' }; Args = @(); Expect = 'graphics: Dx12' },
-    @{ Name = 'safe mode'; Graphics = '{"msaa":8,"backend":"vulkan"}'; Env = @{}; Args = @('--safe-mode'); Expect = 'graphics: Dx12' }
+    @{ Name = 'safe mode'; Graphics = '{"msaa":8,"backend":"vulkan"}'; Env = @{}; Args = @('--safe-mode'); Expect = 'graphics: Dx12' },
+    # Our own window runner (opt-in): the same app, settings and control channel without eframe.
+    @{ Name = 'own window runner'; Graphics = $null; Env = @{ SOLIDCRAFT_WINDOW_RUNNER = 'own' }; Args = @(); Expect = 'runs on its own runner' }
 )
 
 $failed = @()

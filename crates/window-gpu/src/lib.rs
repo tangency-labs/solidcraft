@@ -10,6 +10,8 @@
 
 pub use egui_wgpu;
 pub use egui_wgpu::wgpu;
+#[cfg(not(target_arch = "wasm32"))]
+pub use egui_winit;
 
 pub mod painter;
 #[cfg(not(target_arch = "wasm32"))]

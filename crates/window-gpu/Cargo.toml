@@ -23,7 +23,7 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "way
 # The runner (native only: in a browser the page runs the loop). Its input; winit's own platform
 # features come from it.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
+egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "serde", "wayland", "x11"] }
 
 [dev-dependencies]
 # Native backends, so the example opens a window (the app picks its own).
