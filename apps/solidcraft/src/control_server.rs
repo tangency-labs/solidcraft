@@ -254,15 +254,21 @@ fn listen_on_listener(
 mod tests {
     use super::*;
 
-    /// #743: the wake's proxy arrives when the event loop starts. Clones share the launch's
-    /// holder, and a wake without a proxy yet (the loop not started) is a no-op, not an error.
+    /// #743: the wake's waker arrives when the event loop starts. Clones share the launch's
+    /// holder, and a wake without a waker yet (the loop not started) is a no-op, not an error.
     #[test]
-    fn the_wake_shares_its_proxy_holder() {
+    fn the_wake_shares_its_waker_holder() {
         let wake = Wake::default();
         wake.run_logic_now();
         let other = wake.clone();
-        assert!(std::sync::Arc::ptr_eq(&wake.proxy, &other.proxy));
-        assert!(wake.proxy.lock().unwrap().is_none());
+        assert!(std::sync::Arc::ptr_eq(&wake.waker, &other.waker));
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = woken.clone();
+        other.set(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        wake.run_logic_now();
+        assert_eq!(woken.load(std::sync::atomic::Ordering::Relaxed), 1, "the clone's waker wakes the original");
     }
 
     use solidcraft_control::server::Waits;
