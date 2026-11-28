@@ -84,7 +84,8 @@ Entry inputs are object schemas; selection and target fields are arrays. Named s
 `{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
 slots exist. SolidCraft matches File and Help menu names ignoring case; other menu names draw no
 host menu items. The Model tab's Plugins group (and its Plugins menu) lists every installed entry regardless of its slots.
-Ribbon names match the existing Design tabs ignoring case; other names use the Plugins tab.
+Ribbon names match the existing Design tabs ignoring case; Model and other names draw no extra button,
+since the Model tab's Plugins group already lists the entry. There is no separate Plugins tab.
 Only enabled plugins contribute host slots. Each plugin's ribbon group carries its name, and every
 slot item has a plugin badge. Slot clicks resolve the namespaced entry against the Plugins menu's
 shared list and open the same input-schema dialog through `plugin_menu::open_entry`. The dialog
