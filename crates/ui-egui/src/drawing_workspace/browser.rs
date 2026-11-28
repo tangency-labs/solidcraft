@@ -15,7 +15,7 @@ use crate::ui_kit::{
     browser::{Event, Node, NodeMenu, RowOut, Rows},
 };
 
-use super::{active_sheet, edit_object, open_sheet_menu, select_sheet};
+use super::{MenuRow, active_sheet, edit_object, open_sheet_menu, select_sheet};
 
 pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let t = Tokens::get();
@@ -23,7 +23,12 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     picker(app, rows.ui());
     if let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() {
         let key = format!("drawing:browser:{}", encode(drawing.id));
-        if branch(app, rows, &key, Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() }, true) {
+        let item = Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() };
+        let (open, menu_at) = branch(app, rows, &key, item, true, NodeMenu::Host);
+        if let Some(at) = menu_at {
+            open_sheet_menu(app, drawing.id, MenuRow::Drawing, Rect::from_min_max(at, at));
+        }
+        if open {
             let active = active_sheet(app);
             for sheet in &drawing.sheets {
                 show_sheet(app, rows, &drawing, sheet, active == Some(sheet.id));
@@ -34,7 +39,7 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     }
 
     let label = app.tr_label("Source design").to_string();
-    if branch(app, rows, "drawing:browser:source", Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, false) {
+    if branch(app, rows, "drawing:browser:source", Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, false, NodeMenu::None).0 {
         let name = app.session.doc.name.clone();
         let node = row(
             rows,
@@ -133,17 +138,23 @@ fn fold_id(app: &SolveApp, rows: &mut Rows<'_>, key: &str) -> Id {
     rows.ui().make_persistent_id((app.session.uid, key))
 }
 
-fn branch(app: &SolveApp, rows: &mut Rows<'_>, key: &str, mut item: Row<'_>, default_open: bool) -> bool {
+/// A folding row: whether it is open, and where its menu was asked for, if it was.
+fn branch(app: &SolveApp, rows: &mut Rows<'_>, key: &str, mut item: Row<'_>, default_open: bool, menu: NodeMenu<'_>) -> (bool, Option<egui::Pos2>) {
     let id = fold_id(app, rows, key);
-    let open = rows.ui().data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+    let mut open = rows.ui().data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
     item.fold = Some(open);
-    for event in row(rows, key, item, NodeMenu::None).events {
-        if let Event::Fold { open, .. } = event {
-            rows.ui().data_mut(|data| data.insert_temp(id, open));
-            return open;
+    let mut menu_at = None;
+    for event in row(rows, key, item, menu).events {
+        match event {
+            Event::Fold { open: next, .. } => {
+                rows.ui().data_mut(|data| data.insert_temp(id, next));
+                open = next;
+            }
+            Event::Menu { at, .. } => menu_at = Some(at),
+            _ => {}
         }
     }
-    open
+    (open, menu_at)
 }
 
 fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: &Sheet, selected: bool) {
@@ -178,7 +189,7 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                     app.set_status(error, true);
                 }
             }
-            Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
+            Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, MenuRow::Sheet(sheet.id), Rect::from_min_max(at, at)),
             _ => {}
         }
     }

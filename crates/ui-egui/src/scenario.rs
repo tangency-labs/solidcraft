@@ -296,6 +296,22 @@ impl Harness {
         raw
     }
 
+    /// Background work `settle` waits for, as a person would: a file opening, recovering or saving
+    /// in the background, the offer to stand it up being worked out (its estimate can end frames
+    /// after the meshing), a view being drawn on a worker, a window checking what its material
+    /// does, a picked drawing being read before its placement window opens, or Drawing Settings
+    /// looking up its font's note.
+    fn busy(&self) -> bool {
+        !self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || self.app.insert_read.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.stand_up_later.is_some()
+            || self.app.op_check.busy()
+            || !crate::drawing_jobs::idle(&self.app)
+            || crate::drawing_workspace::drawing_settings::looking(&self.app)
+    }
+
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.frame();
@@ -357,24 +373,20 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background, the offer to stand it up being
-        // worked out (its estimate can end frames after the meshing), a view being drawn on a
-        // worker, a window checking what its material does, or a picked drawing being read before
-        // its placement window opens: wait for it (as a person would).
+        // Wait for background work, then run a few frames. Work those frames start (a window opened
+        // by the last input starts its lookup in its first frame) is waited for too, under one bound.
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle()
-            || self.app.saving.is_some()
-            || self.app.insert_read.is_some()
-            || crate::open_meshing::active(&self.app)
-            || self.app.stand_up_later.is_some()
-            || self.app.op_check.busy()
-            || !crate::drawing_jobs::idle(&self.app))
-            && began.elapsed() < std::time::Duration::from_secs(120)
-        {
-            self.frame();
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        let bound = std::time::Duration::from_secs(120);
+        loop {
+            while self.busy() && began.elapsed() < bound {
+                self.frame();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            self.frames(4);
+            if !self.busy() || began.elapsed() >= bound {
+                break;
+            }
         }
-        self.frames(4);
     }
 
     /// One control request, then frames until its input has been handled.

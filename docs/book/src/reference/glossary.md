@@ -546,6 +546,20 @@ its provenance, not its place.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
 
+### line group
+
+The set of line widths a drawing's lines are drawn in, named by the width of its wide line.
+
+A visible edge is a wide line; a hidden edge, a centre line and a thin line are narrow lines, half
+as wide (ISO 128). A drawing has one, and a sheet or a view may choose another.
+
+- **In SolidCraft:** `line_group` of `drawing.create`, `drawing.set`, `drawing.sheet.add`,
+  `drawing.sheet.set` and `drawing.view.edit`, one of `0.25`, `0.35`, `0.5`, `0.7`, `1`, `1.4` or
+  `2`; the Drawing Settings window's Line group row.
+- **Don't use:** line weight, pen, line thickness.
+- **Elsewhere:** line group, line width group.
+- **For translators:** a set of widths named by one number; not a group of lines on the sheet.
+
 ### master spline
 
 One tooth left out, or one space filled, in a shaft spline, so that the hub goes on in one position only.

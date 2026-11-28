@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.drawing_browser.delete_confirm": "حذف {name} وجميع أوراقها؟"
+  },
+  "de": {
+    "ui.drawing_browser.delete_confirm": "{name} mit allen Blättern löschen?"
+  },
+  "en": {
+    "ui.drawing_browser.delete_confirm": "Delete {name} and all its sheets?"
+  },
+  "he": {
+    "ui.drawing_browser.delete_confirm": "למחוק את {name} ואת כל הגיליונות שלו?"
+  },
+  "ja": {
+    "ui.drawing_browser.delete_confirm": "{name} とすべてのシートを削除しますか？"
+  },
+  "ko": {
+    "ui.drawing_browser.delete_confirm": "{name}과 모든 시트를 삭제할까요?"
+  },
+  "vi": {
+    "ui.drawing_browser.delete_confirm": "Xóa {name} và tất cả các tờ của bản vẽ này?"
+  },
+  "zh": {
+    "ui.drawing_browser.delete_confirm": "删除 {name} 及其所有图纸？"
+  }
+}

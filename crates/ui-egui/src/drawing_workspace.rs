@@ -14,6 +14,7 @@ use solidcraft_theme::Tokens;
 pub(crate) mod browser;
 pub(crate) mod detail;
 pub(crate) mod dimension;
+pub(crate) mod drawing_settings;
 pub(crate) mod export;
 mod first_sheet;
 pub(crate) mod note;
@@ -44,9 +45,11 @@ pub struct State {
     shown_for: Option<u64>,
     selection_seen: Option<u64>,
     add_sheet: Option<panels::AddSheet>,
+    drawing_settings: Option<drawing_settings::Settings>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
-    delete_sheet: Option<(u64, u64, u64)>,
+    /// The sheet or drawing waiting on its delete Confirm: (document, drawing, row).
+    delete: Option<(u64, u64, MenuRow)>,
     first_sheet: Option<first_sheet::BlankSheet>,
     /// The drawing that was open when New drawing… was chosen: its setup page's Back opens it
     /// again, and so does entering Drawing again with no drawing made.
@@ -108,9 +111,10 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.shown_for = None;
         app.drawing_workspace.selection_seen = None;
         app.drawing_workspace.add_sheet = None;
+        app.drawing_workspace.drawing_settings = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
-        app.drawing_workspace.delete_sheet = None;
+        app.drawing_workspace.delete = None;
         app.drawing_workspace.first_sheet = None;
         app.drawing_workspace.strip = None;
         app.drawing_workspace.settings = None;
@@ -133,7 +137,8 @@ fn open_a_drawing(app: &mut SolveApp) {
 }
 
 /// Opens the design's drawing `id` on its first sheet, fitted, in place of the one open: the
-/// drawing picker's choice. The panels and picks of the drawing left go with it.
+/// drawing picker's choice, and the drawing beside a deleted one. The panels and picks of the
+/// drawing left go with it.
 pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
     if app.session.open_drawing == Some(id) {
         app.drawing_workspace.return_to = None;
@@ -149,6 +154,14 @@ pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
         }
         Err(error) => app.set_status(error, true),
     }
+}
+
+/// The drawing the picker lists after `id`, or before it when `id` is the last: the one that
+/// opens in its place when `id` is deleted. The picker lists the design's drawings in order.
+fn beside_in_picker(app: &SolveApp, id: u64) -> Option<u64> {
+    let drawings = &app.session.doc.drawings;
+    let at = drawings.iter().position(|drawing| drawing.id == id)?;
+    drawings.get(at + 1).or_else(|| drawings.get(at.checked_sub(1)?)).map(|drawing| drawing.id)
 }
 
 /// New drawing…: closes the open drawing, which stays in the design, so the setup page shows to
@@ -329,10 +342,12 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.set")
 }
 
-/// Dismiss the current Drawing inspector without touching source or drawing data.
+/// Dismiss the current Drawing inspector without touching source or drawing data. The Drawing
+/// Settings window is not the inspector: it stays beside it, and closes itself when Drawing, its
+/// tab or its drawing goes.
 pub fn close_panel(app: &mut SolveApp) -> bool {
     let open = app.drawing_workspace.settings_open
         || app.drawing_workspace.options.is_some()
@@ -359,13 +374,14 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
 
 /// Esc with the panel open: a tool's or a double-click's panel closes (true), and the selection
 /// stays for the next Esc. The panel that shows the selected object's options is not a step of its
-/// own: Esc clears the selection, as in a sketch, and the panel goes with it.
+/// own: Esc clears the selection, as in a sketch, and the panel goes with it. With no panel open,
+/// Esc closes the Drawing Settings window.
 pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
     let state = &app.drawing_workspace;
     if state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for {
         return false;
     }
-    close_panel(app)
+    close_panel(app) || app.drawing_workspace.drawing_settings.take().is_some()
 }
 
 /// The one view, dimension or note selected shows its options in the right panel, where a tool
@@ -459,6 +475,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
         "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
+        drawing_settings::COMMAND => app.drawing_workspace.drawing_settings = drawing_settings::open(app),
         "drawing.view.base" | "drawing.view.base.planned" => {
             app.drawing_workspace.placement = placement::Placement::new(app);
             app.drawing_workspace.options = Some(Tool::Base);
@@ -856,29 +873,39 @@ fn sheet_card(
     let menu_button = ui_kit::icon_button_at(ui, menu, "dots", app.tr("ui.drawing_sheets.actions"));
     crate::scenario::publish_target(&format!("drawing:sheets:menu:{key}"), menu_button.rect);
     if menu_button.clicked() {
-        let owner = (app.session.uid, drawing.id, sheet.id);
-        let open = app.drawing_workspace.sheet_menu.as_ref().is_some_and(|menu| menu.owner == owner);
+        let owner = (app.session.uid, drawing.id);
+        let row = MenuRow::Sheet(sheet.id);
+        let open = app.drawing_workspace.sheet_menu.as_ref().is_some_and(|menu| menu.owner == owner && menu.row == row);
         if open {
             app.drawing_workspace.sheet_menu = None;
         } else {
-            open_sheet_menu(app, drawing.id, sheet.id, menu);
+            open_sheet_menu(app, drawing.id, row, menu);
         }
     }
 }
 
+/// The row a Browser or sheet-card menu belongs to: one sheet, or the drawing itself (#19048).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) enum MenuRow {
+    Sheet(u64),
+    Drawing,
+}
+
+/// The open row menu: the (document, drawing) it belongs to, and which row.
 struct SheetMenu {
-    owner: (u64, u64, u64),
+    owner: (u64, u64),
+    row: MenuRow,
     anchor: Rect,
     keyboard_row: Option<usize>,
 }
 
-fn open_sheet_menu(app: &mut SolveApp, drawing: u64, sheet: u64, anchor: Rect) {
-    app.drawing_workspace.sheet_menu = Some(SheetMenu { owner: (app.session.uid, drawing, sheet), anchor, keyboard_row: None });
+fn open_sheet_menu(app: &mut SolveApp, drawing: u64, row: MenuRow, anchor: Rect) {
+    app.drawing_workspace.sheet_menu = Some(SheetMenu { owner: (app.session.uid, drawing), row, anchor, keyboard_row: None });
 }
 
 fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut menu) = app.drawing_workspace.sheet_menu.take() else { return };
-    let (document, drawing_id, sheet_id) = menu.owner;
+    let (document, drawing_id) = menu.owner;
     if !active(app) || app.session.uid != document {
         return;
     }
@@ -886,28 +913,43 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
     if drawing.id != drawing_id {
         return;
     }
-    let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
+    use ui_kit::Item;
+    let (heading, items) = match menu.row {
+        MenuRow::Drawing => {
+            // Off with the engine's own refusal (a sheet sketch open).
+            let refusal = solidcraft_engine::find_command("drawing.delete").and_then(|spec| spec.allowed(&app.session).err());
+            let items = vec![
+                Item::action(drawing_settings::COMMAND, app.tr("cmd.drawing_set"), "settings"),
+                Item::sep(),
+                Item::action("delete", app.tr("cmd.drawing_delete"), "delete").off_because(refusal.map(|why| crate::i18n::tr_diagnostic(&why))),
+            ];
+            (&drawing.name, items)
+        }
+        MenuRow::Sheet(sheet_id) => {
+            let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
+            let items = vec![
+                Item::action("open_new", app.tr("sheet_views.open_new"), "sheet"),
+                Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
+                Item::action("rename", app.tr_label("Rename"), "rename"),
+                Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
+                    .off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
+                Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
+                Item::sep(),
+                Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
+                    .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
+            ];
+            (&sheet.name, items)
+        }
+    };
     let popup = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::unique(("drawing_sheet_actions", menu.owner)))
+        .area(egui::Id::unique(("drawing_sheet_actions", menu.owner, menu.row)))
         .fixed_pos(menu.anchor.right_bottom())
         .constrain(true)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             ui_kit::Menu::show(ui, ui_kit::LIST_W, |ui| {
-                use ui_kit::Item;
-                ui_kit::Menu::heading(ui, &sheet.name);
-                let items = [
-                    Item::action("open_new", app.tr("sheet_views.open_new"), "sheet"),
-                    Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
-                    Item::action("rename", app.tr_label("Rename"), "rename"),
-                    Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
-                        .off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
-                    Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
-                    Item::sep(),
-                    Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
-                        .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
-                ];
-                let enabled = items.each_ref().map(|item| item.enabled && !item.is_sep());
+                ui_kit::Menu::heading(ui, heading);
+                let enabled = items.iter().map(|item| item.enabled && !item.is_sep()).collect::<Vec<_>>();
                 let keyboard_pick = ui_kit::Menu::navigate(ctx, &enabled, &mut menu.keyboard_row)
                     .then(|| menu.keyboard_row.and_then(|index| items.get(index)).cloned())
                     .flatten();
@@ -918,6 +960,16 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
             })
         });
     if let Some(action) = popup.inner {
+        if action.id == "delete" {
+            app.drawing_workspace.delete = Some((document, drawing_id, menu.row));
+            return;
+        }
+        let MenuRow::Sheet(sheet_id) = menu.row else {
+            if action.id == drawing_settings::COMMAND {
+                start(app, drawing_settings::COMMAND);
+            }
+            return;
+        };
         match action.id.as_str() {
             "open_new" => {
                 if let Err(error) = crate::sheet_views::open_in(app, drawing_id, sheet_id, true) {
@@ -937,7 +989,6 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     app.drawing_workspace.add_sheet = Some(form);
                 }
             }
-            "delete" => app.drawing_workspace.delete_sheet = Some(menu.owner),
             _ => {}
         }
         return;
@@ -1161,7 +1212,8 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
 pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     first_sheet::show_picker(app, ctx);
     show_sheet_menu(app, ctx);
-    show_delete_sheet(app, ctx);
+    show_delete(app, ctx);
+    drawing_settings::show(app, ctx);
     if app
         .drawing_workspace
         .add_sheet
@@ -1183,32 +1235,69 @@ pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn show_delete_sheet(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(pending @ (document, drawing_id, sheet_id)) = app.drawing_workspace.delete_sheet.take() else { return };
+/// The Confirm before a sheet or the whole drawing is deleted: one pending delete for either row.
+fn show_delete(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(pending @ (document, drawing_id, row)) = app.drawing_workspace.delete.take() else { return };
     if !active(app) || app.session.uid != document {
         return;
     }
-    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
-    if drawing.id != drawing_id || drawing.sheets.len() <= 1 {
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
+    if drawing.id != drawing_id {
         return;
     }
-    let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
-    let label = app.tr("cmd.drawing_sheet_delete");
-    let message = solidcraft_ui_text::format("ui.drawing_sheets.delete_confirm", &[("name", &sheet.name)]);
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique(("drawing_delete_sheet", pending)), "delete", label)
+    let encode = solidcraft_engine::doc::ids::encode;
+    let (label, message, command, params) = match row {
+        MenuRow::Drawing => (
+            "cmd.drawing_delete",
+            solidcraft_ui_text::format("ui.drawing_browser.delete_confirm", &[("name", &drawing.name)]),
+            "drawing.delete",
+            serde_json::json!({"drawing": encode(drawing_id)}),
+        ),
+        MenuRow::Sheet(sheet_id) => {
+            let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id).filter(|_| drawing.sheets.len() > 1) else { return };
+            (
+                "cmd.drawing_sheet_delete",
+                solidcraft_ui_text::format("ui.drawing_sheets.delete_confirm", &[("name", &sheet.name)]),
+                "drawing.sheet.delete",
+                serde_json::json!({"sheet": encode(sheet_id), "contents": "delete"}),
+            )
+        }
+    };
+    let label = app.tr(label);
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique(("drawing_delete", pending)), "delete", label)
         .tone(ui_kit::Tone::Danger)
         .actions(label, app.tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
             ui.label(message);
         });
     if answer == ui_kit::Action::Ok {
-        if let Err(error) =
-            app.run("drawing.sheet.delete", serde_json::json!({"sheet":solidcraft_engine::doc::ids::encode(sheet_id),"contents":"delete"}))
-        {
-            app.set_status(error, true);
+        // The drawing beside it in the picker opens in its place, so deleting one of several does
+        // not look like starting over; with none left, the page that makes one shows. Design's
+        // undo brings the drawing back. `drawing.delete` itself only closes it.
+        let beside = beside_in_picker(app, drawing_id);
+        match app.run(command, params) {
+            // The drawing's panels and drafts go with it once it is gone. A delete the engine
+            // refuses (a sheet sketch started meanwhile) leaves them as they were.
+            Ok(_) if row == MenuRow::Drawing => {
+                // The delete has already closed the drawing's Sheet view (`sheet_views::drop_deleted`),
+                // and the focus moved on: to another drawing's Sheet view, which opens that drawing,
+                // or with none left to a Model view, which leaves Drawing. So the panels close here
+                // whatever opened, and with no drawing left Drawing comes back on the page that makes one.
+                close_panel(app);
+                match beside {
+                    Some(id) => open_drawing(app, id),
+                    None => {
+                        if let Err(error) = crate::workspace::enter(app, "drawing") {
+                            app.set_status(error, true);
+                        }
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(error) => app.set_status(error, true),
         }
     } else if !closed && answer != ui_kit::Action::Cancel {
-        app.drawing_workspace.delete_sheet = Some(pending);
+        app.drawing_workspace.delete = Some(pending);
     }
 }
 
@@ -2499,6 +2588,394 @@ mod tests {
         let (text, _, error) = h.app.status.clone().unwrap();
         assert!(!error && text.contains("Shop.scdwg") && text.contains(".scdwg"), "{text}");
         assert!(!path.exists() && h.dir.join("Shop.scdwg").is_file());
+    }
+
+    /// A design with a box, in Drawing, with a drawing made by `drawing.create` with `params` open.
+    fn drawing_open(params: serde_json::Value) -> Harness {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", params).unwrap();
+        h.frames(8);
+        h
+    }
+
+    fn open_drawing_settings(h: &Harness) -> Option<(u64, u64)> {
+        h.app.drawing_workspace.drawing_settings.as_ref().map(|settings| settings.owner)
+    }
+
+    fn the_drawing(h: &Harness) -> std::sync::Arc<solidcraft_engine::doc::drawing::Drawing> {
+        h.app.session.drawing("drawing.inspect").unwrap().clone()
+    }
+
+    /// File › Drawing Settings… opens the window; each row it changes is one undo step, picking the
+    /// value already set is none, and the window follows an undo. Running `drawing.set` opens nothing.
+    #[test]
+    fn file_menu_drawing_settings_opens_the_window_and_each_change_is_one_undo_step() {
+        use serde_json::json;
+        use solidcraft_engine::geom::{cell::Projection, paper::line::LineGroup};
+
+        let mut h = drawing_open(json!({}));
+        h.app.run("drawing.set", json!({"updates":"deferred"})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), None, "a command run by a program opens no window");
+
+        // The row's own action, as the other File-row tests run it: the menu scrolls once its rows
+        // outgrow the window, so a click by its text can land on a row scrolled out of view.
+        crate::toolbar::run_file_row(&mut h.app, "drawing.set");
+        h.frames(3);
+        assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, the_drawing(&h).id)));
+
+        let steps = h.app.session.undo.len();
+        for _ in 0..2 {
+            h.step(&json!({"click":{"handle":"drawing:drawing_settings:projection:first"}})).unwrap();
+            h.frames(2);
+            assert_eq!(the_drawing(&h).projection, Projection::First);
+            assert_eq!(h.app.session.undo.len(), steps + 1, "one undo step, and none for picking it again");
+        }
+        h.step(&json!({"click":{"handle":"dialog:Line group"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:list:drawing_settings_line_group:0.7"}})).unwrap();
+        h.frames(2);
+        assert_eq!(the_drawing(&h).line_group, LineGroup::Mm0_7);
+        assert_eq!(h.app.session.undo.len(), steps + 2);
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(the_drawing(&h).line_group, LineGroup::Mm0_5);
+        assert_eq!(the_drawing(&h).projection, Projection::First);
+        assert!(open_drawing_settings(&h).is_some(), "the window stays open through an undo");
+    }
+
+    /// The Browser's drawing row has a menu whose Drawing Settings opens the window on that drawing.
+    #[test]
+    fn browser_drawing_row_menu_opens_drawing_settings() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({}));
+        let drawing = the_drawing(&h).id;
+        let row = format!("drawing:browser:{}", solidcraft_engine::doc::ids::encode(drawing));
+        h.step(&json!({"click":{"handle":row},"button":"right"})).unwrap();
+        h.frames(3);
+        // The drawing row opens the same popup as the sheet rows below it.
+        h.step(&json!({"widget":"Drawing Settings"})).unwrap();
+        h.frames(3);
+        assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, drawing)));
+    }
+
+    /// Drawing Settings is a window of its own, not the right panel: picking one object and then
+    /// another shows each one's options in the panel, and the window stays open beside them.
+    #[test]
+    fn selecting_objects_keeps_drawing_settings_open_beside_their_options() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({}));
+        let drawing = the_drawing(&h).id;
+        let note = |h: &mut Harness, at: [f64; 2]| {
+            let added = h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":at,"content":"Deburr"})).unwrap();
+            solidcraft_engine::doc::ids::decode(added["note"].as_str().unwrap()).unwrap()
+        };
+        let (first, second) = (note(&mut h, [50.0, 50.0]), note(&mut h, [120.0, 80.0]));
+        h.step(&json!({"start":"drawing.set"})).unwrap();
+        h.frames(2);
+        for object in [first, second] {
+            h.app.session.selection = vec![solidcraft_engine::Sel::Drawing { drawing, object }];
+            h.frames(3);
+            assert_eq!(h.app.drawing_workspace.options.and_then(Tool::object), Some(object), "the panel shows the picked note's options");
+            assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, drawing)), "the window stays open");
+        }
+        // Esc clears the selection and its options first, then closes the window.
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.selection.is_empty() && h.app.drawing_workspace.options.is_none());
+        assert!(open_drawing_settings(&h).is_some());
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), None, "a second Esc closes the window");
+    }
+
+    /// `ui.start` of `drawing.set` (the palette's and agents' way) opens the window. It belongs to the
+    /// drawing it opened on: it closes when another drawing opens, and when its own drawing closes.
+    #[test]
+    fn drawing_settings_closes_with_its_drawing_and_opens_from_ui_start() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({}));
+        let first = the_drawing(&h).id;
+        h.step(&json!({"start":"drawing.set"})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, first)));
+
+        h.app.run("drawing.create", json!({"name":"Second"})).unwrap();
+        h.frames(2);
+        assert_ne!(the_drawing(&h).id, first);
+        assert_eq!(open_drawing_settings(&h), None, "another drawing open closes the window");
+
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(first)})).unwrap();
+        h.step(&json!({"start":"drawing.set"})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, first)));
+        h.app.run("drawing.close", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), None, "its drawing closed closes the window");
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(first)})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), None, "reopening the drawing does not bring the window back");
+    }
+
+    /// A font this computer lacks is named under the Font row, and a language outside the catalogs
+    /// shows its own tag. Picking the built-in font and a listed language is one undo step each.
+    #[test]
+    fn drawing_settings_font_and_language_rows_show_values_outside_their_lists() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"font":"No Such Family Q7","language":"fr-CA"}));
+        assert!(start(&mut h.app, "drawing.set"));
+        // The note is looked up on a worker (the font folders, read cold) that the window starts in
+        // its first frame, inside `settle`'s last frames: `settle` alone still waits for it.
+        h.settle();
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_some(), "the font's note shows");
+        assert!(h.widget("fr-CA").is_some(), "the language shows its own tag, not English");
+
+        let steps = h.app.session.undo.len();
+        h.step(&json!({"click":{"handle":"dialog:Font"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"drawing:drawing_settings:font:built_in"}})).unwrap();
+        h.frames(3);
+        assert_eq!(the_drawing(&h).font, "");
+        assert_eq!(h.app.session.undo.len(), steps + 1);
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_none(), "the built-in font needs no note");
+        // An undo brings the font back without a reply to read the note from: it is looked up again.
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        h.settle();
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_some(), "the note follows an undo");
+        h.app.run("edit.redo", json!({})).unwrap();
+        h.frames(2);
+        h.settle();
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_none(), "and a redo");
+        assert_eq!(h.app.session.undo.len(), steps + 1);
+
+        h.step(&json!({"click":{"handle":"dialog:Language"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:list:drawing_settings_language:de"}})).unwrap();
+        h.frames(2);
+        assert_eq!(the_drawing(&h).language, "de");
+        assert_eq!(h.app.session.undo.len(), steps + 2);
+    }
+
+    /// The File menu offers Drawing Settings… only in Drawing with a drawing open.
+    #[test]
+    fn file_menu_offers_drawing_settings_only_with_a_drawing_open() {
+        let offered = |h: &Harness| {
+            crate::toolbar::file_rows(&h.app).iter().any(|row| matches!(row, crate::app_bar::FileRow::Item(item) if item.id == "drawing.set"))
+        };
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        assert!(!offered(&h), "not in Design");
+        enter(&mut h.app, true).unwrap();
+        assert!(!offered(&h), "not in Drawing without a drawing");
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        assert!(offered(&h), "in Drawing with a drawing open");
+        enter(&mut h.app, false).unwrap();
+        assert!(!offered(&h), "not once Drawing is left");
+    }
+
+    /// Right-clicks the Browser's drawing row and picks Delete Drawing, so its Confirm shows.
+    fn ask_to_delete_the_drawing(h: &mut Harness, drawing: u64) {
+        let row = format!("drawing:browser:{}", solidcraft_engine::doc::ids::encode(drawing));
+        h.step(&serde_json::json!({"click":{"handle":row},"button":"right"})).unwrap();
+        h.frames(3);
+        h.step(&serde_json::json!({"widget":"Delete Drawing"})).unwrap();
+        h.frames(3);
+    }
+
+    /// Delete Drawing on the Browser's drawing row asks first, then deletes the whole drawing as one
+    /// step of the model and closes its panels. The page that starts a drawing shows. Design's
+    /// Ctrl+Z brings the same drawing back, and entering Drawing opens it with no new step.
+    #[test]
+    fn browser_drawing_menu_deletes_the_open_drawing_after_confirmation() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let drawing = the_drawing(&h);
+        let steps = h.app.session.undo.len();
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(2);
+        ask_to_delete_the_drawing(&mut h, drawing.id);
+        assert!(h.widget("Delete Bracket and all its sheets?").is_some(), "the Confirm names the drawing");
+        assert!(std::sync::Arc::ptr_eq(&the_drawing(&h), &drawing), "nothing is deleted before the Confirm");
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.session.doc.drawings.is_empty());
+        assert_eq!(h.app.session.open_drawing, None);
+        assert_eq!(h.app.session.undo.len(), steps + 1, "one step of the model");
+        assert!(!h.app.drawing_workspace.settings_open, "the drawing's panels close with it");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "the page that starts a drawing shows");
+
+        // With no drawing open, Drawing's own undo does nothing; the model's is Design's, entered
+        // as the workspace menu does.
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc.drawings.len(), 1, "Design's Ctrl+Z undoes the delete");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(3);
+        assert!(std::sync::Arc::ptr_eq(&the_drawing(&h), &drawing), "the same drawing is back, and open");
+        assert_eq!(h.app.session.undo.len(), steps, "the undo took its one step and opening the drawing added none");
+        assert_eq!(active_sheet(&h.app), Some(drawing.sheets[0].id));
+    }
+
+    /// Cancel in Delete Drawing's Confirm leaves the design, its steps and the open drawing as
+    /// they were.
+    #[test]
+    fn cancelling_delete_drawing_changes_nothing() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let (doc, steps, open) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.open_drawing);
+        let drawing = the_drawing(&h).id;
+        ask_to_delete_the_drawing(&mut h, drawing);
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(3);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.open_drawing), (steps, open));
+    }
+
+    /// A Delete Drawing the engine refuses (a sheet sketch started while the Confirm is up, as over
+    /// the control channel) keeps the drawing and its open panels, and the status line says why.
+    /// Both kinds are open: the Drawing Settings window, and the sheet's settings in the right
+    /// panel, which a delete that goes through closes (`close_panel`).
+    #[test]
+    fn a_refused_delete_drawing_keeps_the_drawing_and_its_panels() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let drawing = the_drawing(&h);
+        assert!(start(&mut h.app, "drawing.set"));
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(2);
+        ask_to_delete_the_drawing(&mut h, drawing.id);
+        let sheet = solidcraft_engine::doc::ids::encode(drawing.sheets[0].id);
+        h.app.run("drawing.sketch.create", json!({"owner": sheet})).unwrap();
+        let open = Some((h.app.session.uid, drawing.id));
+        assert_eq!(open_drawing_settings(&h), open, "Drawing Settings is open when the delete is confirmed");
+        assert!(h.app.drawing_workspace.settings_open, "and so is the sheet's settings panel");
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc.drawings.len(), 1, "the engine refused the delete");
+        assert_eq!(h.app.session.open_drawing, Some(drawing.id));
+        assert_eq!(open_drawing_settings(&h), open, "a refused delete closes none of the drawing's panels");
+        assert!(h.app.drawing_workspace.settings_open, "the sheet's settings panel stays open too");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(error && text.contains("sheet sketch"), "{text}");
+    }
+
+    /// Delete Drawing with other drawings left opens the one after it in the picker, on its first
+    /// sheet, not the page that starts a drawing. The deleted drawing's panels close with it, and
+    /// opening the next adds no step.
+    #[test]
+    fn delete_drawing_opens_the_next_drawing_in_the_picker() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        h.app.run("drawing.create", json!({"name":"Plate"})).unwrap();
+        h.app.run("drawing.create", json!({"name":"Cover"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(ids[1])})).unwrap();
+        h.frames(3);
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(2);
+        let steps = h.app.session.undo.len();
+        ask_to_delete_the_drawing(&mut h, ids[1]);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!(left, [ids[0], ids[2]]);
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "the drawing after it in the picker opens");
+        assert_eq!(h.app.session.undo.len(), steps + 1, "one step of the model, and none for opening the next");
+        assert!(!h.app.drawing_workspace.settings_open, "the deleted drawing's panels close with it");
+        assert_eq!(active_sheet(&h.app), Some(the_drawing(&h).sheets[0].id), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the page that starts a drawing");
+    }
+
+    /// Delete Drawing on the last drawing in the picker opens the one before it. Deleting the only
+    /// drawing left shows the page that starts a drawing.
+    #[test]
+    fn delete_drawing_of_the_last_in_the_picker_opens_the_one_before() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let first = the_drawing(&h);
+        h.app.run("drawing.create", json!({"name":"Plate"})).unwrap();
+        h.frames(3);
+        let last = the_drawing(&h).id;
+        assert_eq!(h.app.session.doc.drawings.last().map(|d| d.id), Some(last), "Plate is last in the picker");
+        ask_to_delete_the_drawing(&mut h, last);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, Some(first.id), "the drawing before it opens");
+        assert_eq!(active_sheet(&h.app), Some(first.sheets[0].id), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the page that starts a drawing");
+
+        ask_to_delete_the_drawing(&mut h, first.id);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.session.doc.drawings.is_empty());
+        assert_eq!(h.app.session.open_drawing, None);
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "with none left, the page that starts a drawing shows");
+    }
+
+    /// Undo after Delete Drawing opened the next one: the delete is a step of the model, so
+    /// Drawing's undo, which goes through the open drawing's own steps, leaves it alone. Design's
+    /// undo brings the deleted drawing back in its old place in the picker. Undo opens and closes
+    /// no drawing, so the one opened in its place stays open, in Design and back in Drawing.
+    #[test]
+    fn undo_after_delete_drawing_brings_it_back_and_keeps_the_neighbour_open() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"A"}));
+        h.app.run("drawing.create", json!({"name":"B"})).unwrap();
+        h.app.run("drawing.create", json!({"name":"C"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(ids[1])})).unwrap();
+        h.frames(3);
+        let b = h.app.session.doc.drawings[1].clone();
+        let steps = h.app.session.undo.len();
+        ask_to_delete_the_drawing(&mut h, ids[1]);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!((left, h.app.session.open_drawing), (vec![ids[0], ids[2]], Some(ids[2])), "C opens in B's place");
+
+        // In Drawing, undo goes through C's own steps: it has none, so the delete stays.
+        let refused = h.app.run("edit.undo", json!({})).unwrap_err();
+        assert!(refused.contains("nothing to undo in this drawing"), "{refused}");
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!((left, h.app.session.open_drawing), (vec![ids[0], ids[2]], Some(ids[2])), "Drawing's undo leaves the delete");
+
+        // Design's undo takes back the model's step: B is back where it was, and C stays open.
+        // Design and Drawing are entered as the workspace menu does: a Sheet view left focused
+        // would keep the drawing's undo.
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(3);
+        let back: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!(back, ids, "B is back in the picker, in its old place");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc.drawings[1], &b), "the same drawing, as it was");
+        assert_eq!(h.app.session.undo.len(), steps, "the undo took the delete's one step");
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "undo opens no drawing: C stays open");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "entering Drawing again keeps C open, not B");
+        assert_eq!(active_sheet(&h.app), Some(the_drawing(&h).sheets[0].id));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
