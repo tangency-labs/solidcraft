@@ -180,7 +180,7 @@ pub(crate) fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manife
         return Err("plugin.json: too large".into());
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("plugin.json: {e}"))?;
-    solidcraft_engine::plugin::parse_manifest(&bytes, name).map_err(|e| e.to_string())
+    solidcraft_engine::plugin::parse_package_manifest(&bytes, name, dir).map_err(|e| e.to_string())
 }
 
 /// The preference's keys for `shader`'s chosen pictures (`plugin/shader/<texture name>`).

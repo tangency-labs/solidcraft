@@ -1421,6 +1421,18 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
 /// [`parse_manifest_for`], using an explicit host semantic version. The minimum host version is
 /// checked before unknown fields, legacy API declarations or capability support.
 pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_version: &str) -> Result<Manifest> {
+    parse_manifest_with_layouts(text, folder, app, host_version, |file| Err(invalid(format!("layout {file}"), "a package file reader is required")))
+}
+
+/// Parse a package manifest, resolving panel layout files before validation. The reader must
+/// refuse links and paths outside the package and bound its read to `ui::MAX_LAYOUT_FILE_BYTES`.
+pub fn parse_manifest_with_layouts(
+    text: &[u8],
+    folder: &str,
+    app: &str,
+    host_version: &str,
+    mut read: impl FnMut(&str) -> Result<Vec<u8>>,
+) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
@@ -1459,10 +1471,9 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     }
     // Shared field definitions are inlined first; a manifest without them keeps its exact
     // deserialization (and error positions).
-    let expanded = match parsed.as_mut().map(schema_refs::expand).transpose()? {
-        Some(true) => parsed,
-        _ => None,
-    };
+    let layout_files = parsed.as_mut().map(|value| ui::resolve_layout_files(value, &mut read)).transpose()?.unwrap_or_default();
+    let schemas_expanded = parsed.as_mut().map(schema_refs::expand).transpose()?.unwrap_or(false);
+    let expanded = if schemas_expanded || !layout_files.is_empty() { parsed } else { None };
     let mut manifest: Manifest = match expanded {
         Some(mut value) => {
             schema_order::take_orders(&mut value);
@@ -1518,6 +1529,13 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
             return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
         } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
+        }
+        if let Some(ui) = &runtime.ui {
+            for (index, file) in &layout_files {
+                if let Some(panel) = ui.panels.get(*index) {
+                    panel.layout.validate(runtime).map_err(|e| invalid(format!("layout {file}"), e.to_string()))?;
+                }
+            }
         }
         runtime.validate()?;
     }

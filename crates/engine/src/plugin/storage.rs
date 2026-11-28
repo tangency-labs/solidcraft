@@ -263,7 +263,7 @@ pub fn blob<'a>(doc: &'a Document, id: &str, path: &str) -> Option<&'a [u8]> {
 fn installed(s: &Session, id: &str) -> Option<craft_plugin::Manifest> {
     let dir = s.plugin_state.packages.get(id).map(std::path::PathBuf::from).or_else(|| s.plugin_state.plugins_dir().map(|dir| dir.join(id)))?;
     let bytes = solidcraft_io::vfs::read(&dir.join("plugin.json").to_string_lossy(), super::MAX_MANIFEST_BYTES).ok()?;
-    super::parse_manifest(&bytes, id).ok()
+    super::parse_package_manifest(&bytes, id, &dir).ok()
 }
 #[cfg(target_arch = "wasm32")]
 fn installed(_s: &Session, _id: &str) -> Option<craft_plugin::Manifest> {

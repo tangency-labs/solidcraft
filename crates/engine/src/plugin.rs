@@ -254,6 +254,43 @@ impl AppState {
 
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     let manifest = craft_plugin::parse_manifest_for_version(text, folder, "SolidCraft", env!("CARGO_PKG_VERSION"))?;
+    validate_manifest(manifest)
+}
+
+/// Parse a manifest with its package's layout files, through the caller's file scope.
+pub fn parse_package_manifest(text: &[u8], folder: &str, dir: &Path) -> Result<Manifest> {
+    let manifest = craft_plugin::parse_manifest_with_layouts(text, folder, "SolidCraft", env!("CARGO_PKG_VERSION"), |file| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let check = |at: &Path| -> craft_plugin::Result<()> {
+                solidcraft_io::vfs::check(&at.to_string_lossy()).map_err(|e| layout_file_error(file, &e.to_string()))?;
+                let meta = std::fs::symlink_metadata(at).map_err(|e| layout_file_error(file, &e.to_string()))?;
+                if meta.file_type().is_symlink() {
+                    return Err(layout_file_error(file, "links are not allowed"));
+                }
+                Ok(())
+            };
+            check(dir)?;
+            let mut at = dir.to_path_buf();
+            for part in file.split('/') {
+                at.push(part);
+                check(&at)?;
+            }
+        }
+        solidcraft_io::vfs::read(&dir.join(file).to_string_lossy(), craft_plugin::ui::MAX_LAYOUT_FILE_BYTES)
+            .map_err(|e| layout_file_error(file, &e.to_string()))
+    })?;
+    validate_manifest(manifest)
+}
+
+fn layout_file_error(file: &str, reason: &str) -> HostError {
+    HostError::InvalidManifest {
+        field: format!("layout {file}"),
+        reason: messages::say("plugin_error.layout_file", &[("file", file), ("reason", reason)]),
+    }
+}
+
+fn validate_manifest(manifest: Manifest) -> Result<Manifest> {
     let refuse = |field: &str, reason: String| -> EngineError { HostError::InvalidManifest { field: field.into(), reason }.into() };
     if let Some(runtime) = &manifest.runtime {
         for entry in &runtime.entries {
@@ -416,14 +453,15 @@ pub fn read_package(path: &str) -> Result<Package> {
     let folder = dir.file_name().and_then(|s| s.to_str()).ok_or_else(|| error("package needs an id folder"))?;
     let manifest_path = dir.join("plugin.json");
     let bytes = solidcraft_io::vfs::read(&manifest_path.to_string_lossy(), MAX_MANIFEST_BYTES).map_err(|e| error(e.to_string()))?;
-    let manifest = parse_manifest(&bytes, folder)?;
+    let manifest = parse_package_manifest(&bytes, folder, dir)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module_path = dir.join(&runtime.module);
         solidcraft_io::vfs::read(&module_path.to_string_lossy(), runtime.max_component_bytes()).map_err(|e| error(e.to_string()))?
     } else {
         Vec::new()
     };
-    Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
+    let approval = resolved_package_hash(&bytes, &component, &manifest);
+    Ok(Package { manifest, approval, component })
 }
 
 /// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
@@ -472,6 +510,26 @@ pub fn revoke(s: &mut Session, id: &str) -> Result<bool> {
 
 /// The most files and folders one plugin folder holds; install and removal both stop there.
 pub(super) const MAX_FILES: usize = 1024;
+
+// Keep inline approvals unchanged. File layouts are part of the reviewed package too.
+pub(super) fn resolved_package_hash(text: &[u8], component: &[u8], manifest: &Manifest) -> String {
+    let external = serde_json::from_slice::<Value>(text).ok().is_some_and(|v| {
+        v.pointer("/runtime/ui/panels")
+            .and_then(Value::as_array)
+            .is_some_and(|panels| panels.iter().any(|panel| panel.pointer("/layout/file").is_some()))
+    });
+    if external {
+        let mut bytes = text.to_vec();
+        if let Some(ui) = manifest.runtime.as_ref().and_then(|r| r.ui.as_ref())
+            && let Ok(layouts) = serde_json::to_vec(ui)
+        {
+            bytes.extend_from_slice(&layouts);
+        }
+        package_hash(&bytes, component)
+    } else {
+        package_hash(text, component)
+    }
+}
 
 pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();

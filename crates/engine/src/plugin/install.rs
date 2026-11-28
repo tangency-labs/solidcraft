@@ -2,7 +2,7 @@
 //! the installed plugins and renamed into `plugins/<id>/`. A plugin already installed under that
 //! id is replaced only when the caller says so.
 
-use super::{Manifest, parse_manifest};
+use super::Manifest;
 use craft_plugin::HostError;
 use solidcraft_io::safe_zip;
 #[cfg(not(target_arch = "wasm32"))]
@@ -121,7 +121,12 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         .ok()
         .and_then(|v| v.get("id").and_then(serde_json::Value::as_str).map(str::to_string))
         .unwrap_or_default();
-    let manifest = parse_manifest(text, &id).map_err(|e| match e {
+    let manifest = craft_plugin::parse_manifest_with_layouts(text, &id, "SolidCraft", env!("CARGO_PKG_VERSION"), |file| {
+        files.iter().find(|f| f.path == file).map(|f| f.bytes.clone()).ok_or_else(|| super::layout_file_error(file, "file not found in the package"))
+    })
+    .map_err(crate::EngineError::from)
+    .and_then(super::validate_manifest)
+    .map_err(|e| match e {
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
@@ -171,7 +176,7 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
     } else {
         &[]
     };
-    let approval = super::package_hash(text, component);
+    let approval = super::resolved_package_hash(text, component, &manifest);
     Ok(Unpacked { manifest, approval, archive, files })
 }
 
@@ -217,7 +222,7 @@ pub fn installed(plugins: &Path, id: &str) -> Option<(String, String)> {
         return None;
     }
     let text = std::fs::read(folder.join("plugin.json")).ok().filter(|t| t.len() <= super::MAX_MANIFEST_BYTES);
-    Some(match text.and_then(|t| parse_manifest(&t, id).ok()) {
+    Some(match text.and_then(|t| super::parse_package_manifest(&t, id, &folder).ok()) {
         Some(m) => (m.name, m.version),
         None => (id.to_string(), String::new()),
     })
