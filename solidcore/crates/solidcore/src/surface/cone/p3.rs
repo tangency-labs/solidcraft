@@ -2363,7 +2363,10 @@ mod tests {
             .intersect_with_cone(&k, &domain, &cylinder, &other, Some(1e-7))
             .unwrap();
         // Cone against cylinder takes the general intersector, never an analytic circle.
-        assert!(more, "a coaxial cone and cylinder fall back to the general intersector");
+        assert!(
+            more,
+            "a coaxial cone and cylinder fall back to the general intersector"
+        );
         assert!(
             more || (!out.deviations.is_empty() && out.deviations[0] <= 1e-7),
             "more={more} deviations={:?}",
@@ -2412,7 +2415,10 @@ mod tests {
             .intersect_with_cone(&k, &domain, &b, &other, Some(1e-7))
             .unwrap();
         // Two coaxial cones take the general intersector, never an analytic circle.
-        assert!(more, "two coaxial cones fall back to the general intersector");
+        assert!(
+            more,
+            "two coaxial cones fall back to the general intersector"
+        );
         assert!(
             more || (!out.curve_types.is_empty()
                 && out
