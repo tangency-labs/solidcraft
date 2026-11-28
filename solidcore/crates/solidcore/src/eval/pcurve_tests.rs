@@ -5,6 +5,7 @@
 )] // test arithmetic and its tables
 use super::super::{form, CurveEval, Frame, SurfaceEval};
 use super::*;
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn frame(origin: [f64; 3], x_axis: [f64; 3], y_axis: [f64; 3]) -> Frame {
@@ -91,7 +92,7 @@ fn faces_tangent_along_an_edge_are_ordered_by_how_fast_they_curve_away() {
         points: vec![[0., 0.], [0., 1.]],
     };
     for turn in [0.0f64, 0.3, 1.1, 2.5, 4.0] {
-        let (s, c) = turn.sin_cos();
+        let (s, c) = det::sin_cos(turn);
         let at = |r: f64, z: f64| [r * c, r * s, z];
         let turned = |origin: [f64; 3]| frame(origin, [c, s, 0.], [-s, c, 0.]);
         let bar = Surface::Cylinder {
@@ -130,13 +131,13 @@ fn faces_tangent_along_an_edge_are_ordered_by_how_fast_they_curve_away() {
         }
     }
     let bar = |turn: f64| {
-        let (s, c) = turn.sin_cos();
+        let (s, c) = det::sin_cos(turn);
         Surface::Cylinder {
             frame: frame([0.; 3], [c, s, 0.], [-s, c, 0.]),
             radius: 0.5,
         }
     };
-    let (s, c) = 0.3f64.sin_cos();
+    let (s, c) = det::sin_cos(0.3f64);
     let curve = Curve::Line {
         start: [0.5 * c, 0.5 * s, 0.],
         end: [0.5 * c, 0.5 * s, 1.],
@@ -456,7 +457,7 @@ fn circles_about_the_axis_are_u_lines() {
     let at = |h: f64| [1., -2., 3. + h];
     let tilt = 0.3f64;
     let rotated = |origin: [f64; 3], down: bool| {
-        let (s, c) = tilt.sin_cos();
+        let (s, c) = det::sin_cos(tilt);
         frame(
             origin,
             [c, s, 0.],
@@ -481,7 +482,7 @@ fn circles_about_the_axis_are_u_lines() {
                 half_angle: half,
             },
             4.,
-            2. + 4. * half.tan(),
+            2. + 4. * det::tan(half),
             4.,
         ),
         (
@@ -491,7 +492,7 @@ fn circles_about_the_axis_are_u_lines() {
             },
             3.,
             4.,
-            3f64.atan2(4.),
+            det::atan2(3f64, 4.),
         ),
         (
             Surface::Sphere {
@@ -500,7 +501,7 @@ fn circles_about_the_axis_are_u_lines() {
             },
             -3.,
             4.,
-            (-3f64).atan2(4.),
+            det::atan2(-3f64, 4.),
         ),
         (
             Surface::Torus {
@@ -555,7 +556,7 @@ fn rulings_are_v_lines() {
         radius_at_origin: 3.,
         half_angle: half,
     };
-    let (s, c) = 2f64.sin_cos();
+    let (s, c) = det::sin_cos(2f64);
     let up = Curve::Line {
         start: [4. * c, 4. * s, -1.],
         end: [4. * c, 4. * s, 6.],
@@ -564,7 +565,7 @@ fn rulings_are_v_lines() {
         start: [4. * c, 4. * s, 6.],
         end: [4. * c, 4. * s, -1.],
     };
-    let r = |z: f64| 3. + (z - 1.) * half.tan();
+    let r = |z: f64| 3. + (z - 1.) * det::tan(half);
     let slant = Curve::Line {
         start: [r(2.) * c, r(2.) * s, 2.],
         end: [r(5.) * c, r(5.) * s, 5.],
@@ -594,7 +595,7 @@ fn rulings_are_v_lines() {
 /// sphere, a plane's ellipse on a cylinder, a circle off the axis on a plane.
 #[test]
 fn curves_without_a_closed_form_are_refused() {
-    let (s, c) = 0.5f64.sin_cos();
+    let (s, c) = det::sin_cos(0.5f64);
     let sphere = Surface::Sphere {
         frame: about_z([0.; 3], false),
         radius: 6.,
@@ -801,7 +802,7 @@ fn meridians_at_a_pole_span_the_face_box() {
         radius: 6.,
     };
     let at = |a: f64| Curve::Circle {
-        frame: frame([0.; 3], [a.cos(), a.sin(), 0.], [0., 0., 1.]),
+        frame: frame([0.; 3], [det::cos(a), det::sin(a), 0.], [0., 0., 1.]),
         radius: 6.,
     };
     let (first, last) = (at(0.), at(1.5 * PI));
@@ -864,7 +865,7 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
         };
         let ax = Axes::new(&sf);
         for turn in [0f64, 2.1, -0.7] {
-            let x = ax.x * turn.cos() + ax.y * turn.sin();
+            let x = ax.x * det::cos(turn) + ax.y * det::sin(turn);
             let p = |v: Vec3| [v.x, v.y, v.z];
             let (o, r, z) = (ax.o, x * 6., ax.z * 6.);
             let circle = Curve::Circle {
@@ -1733,7 +1734,7 @@ fn intersection_curves_lie_on_both_surfaces() {
         frame: about_z([0.; 3], false),
         radius: 5.,
     };
-    let k = 0.4f64.tan();
+    let k = det::tan(0.4f64);
     let plane = Surface::Plane {
         origin: [0., 0., 20.],
         u_axis: [1., 0., k],
@@ -1743,7 +1744,11 @@ fn intersection_curves_lie_on_both_surfaces() {
     let leader: Vec<[f64; 3]> = (0..=12)
         .map(|i| {
             let a = 0.2 + 2.5 * i as f64 / 12.;
-            [5. * a.cos(), 5. * a.sin(), 20. + 5. * a.cos() * k]
+            [
+                5. * det::cos(a),
+                5. * det::sin(a),
+                20. + 5. * det::cos(a) * k,
+            ]
         })
         .collect();
     let curve = Curve::SurfaceIntersection {
@@ -1755,7 +1760,7 @@ fn intersection_curves_lie_on_both_surfaces() {
     for i in 0..=48 {
         let p = eval.point(12. * i as f64 / 48.).unwrap();
         assert!(
-            (p.x.hypot(p.y) - 5.).abs() < 1e-11 && (p.z - 20. - p.x * k).abs() < 1e-11,
+            (det::hypot(p.x, p.y) - 5.).abs() < 1e-11 && (p.z - 20. - p.x * k).abs() < 1e-11,
             "{i}: {p:?}"
         );
     }
@@ -1787,7 +1792,7 @@ fn helical_strip(r: [f64; 2], rise: f64, at: f64) -> (Surface, Curve) {
         (0..n)
             .map(|i| {
                 let a = TAU * i as f64 / PER_TURN;
-                [r * a.cos(), r * a.sin(), a / TAU + rise]
+                [r * det::cos(a), r * det::sin(a), a / TAU + rise]
             })
             .collect()
     };
@@ -1855,7 +1860,7 @@ fn a_curve_weaving_across_a_thread_flank_is_refused() {
     // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
     let [a, b] = [0.40625, 0.4234375];
     let ts: Vec<f64> = (0..=12).map(|i| a + (b - a) * i as f64 / 12.).collect();
-    let v = |t: f64| 0.5 + 0.02 * (3. * TAU * (t - a) / (b - a)).sin();
+    let v = |t: f64| 0.5 + 0.02 * det::sin(3. * TAU * (t - a) / (b - a));
     let on: Vec<[f64; 3]> = ts
         .iter()
         .map(|&t| s.point([t, v(t)]).unwrap())
@@ -1912,10 +1917,10 @@ fn a_spline_edge_ending_on_a_closed_forms_seam_gets_the_segment_between_its_ends
         let start = end - 0.05;
         let theta = |t: f64| start + 0.0495 * t + 0.0005 * t * t;
         let dtheta = |t: f64| 0.0495 + 0.001 * t;
-        let at = |t: f64| [r * theta(t).cos(), r * theta(t).sin(), 0.35 * t];
+        let at = |t: f64| [r * det::cos(theta(t)), r * det::sin(theta(t)), 0.35 * t];
         let tangent = |t: f64| {
             let (a, w) = (theta(t), dtheta(t));
-            [-r * w * a.sin(), r * w * a.cos(), 0.35]
+            [-r * w * det::sin(a), r * w * det::cos(a), 0.35]
         };
         let (p0, p3, d0, d3) = (at(0.), at(1.), tangent(0.), tangent(1.));
         let edge = Curve::Spline {
@@ -2082,8 +2087,8 @@ fn hostile_records_give_errors() {
         points: (0..n)
             .map(|i| {
                 [
-                    (i as f64 * 0.01).cos(),
-                    (i as f64 * 0.01).sin(),
+                    det::cos(i as f64 * 0.01),
+                    det::sin(i as f64 * 0.01),
                     (i % 2) as f64,
                 ]
             })
@@ -2490,7 +2495,7 @@ fn a_pcurves_derivative_is_answered_on_its_interval_and_only_in_numbers() {
         knots: vec![0., 0., 0., 1., 1., 1.],
         homogeneous: vec![[1., 0., 1.], [w, w, w], [0., 1., 1.]],
     };
-    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-12;
+    let near = |a: [f64; 2], b: [f64; 2]| det::hypot(a[0] - b[0], a[1] - b[1]) < 1e-12;
     for (t, point, way) in [(0., [1., 0.], [0., s]), (1., [0., 1.], [-s, 0.])] {
         let (p, d) = eval_d1(&quarter, t).unwrap();
         assert!(near(p, point) && near(d, way), "{t}: {p:?} {d:?}");
@@ -2654,7 +2659,7 @@ fn an_edge_whose_pace_repeats_on_a_dyadic_grid_gets_a_reparametrised_line() {
             .collect(),
     };
     let bow = 3.0e-4;
-    let pace = |t: f64| t + bow * (16.0 * PI * t).sin().powi(2);
+    let pace = |t: f64| t + bow * det::powi(det::sin(16.0 * PI * t), 2);
     let count = 256;
     let params: Vec<f64> = (0..=count).map(|j| j as f64 / count as f64).collect();
     for reversed in [false, true] {
@@ -3006,7 +3011,8 @@ fn curves_apart(points: &[[f64; 3]], a: &[f64], b: &[f64], p: usize, rng: &mut L
         .filter(|t| **t >= first && **t <= last)
         .map(|&t| {
             let (x, y) = (de_boor(points, a, p, t), de_boor(points, b, p, t));
-            ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()
+            (det::powi(x[0] - y[0], 2) + det::powi(x[1] - y[1], 2) + det::powi(x[2] - y[2], 2))
+                .sqrt()
         })
         .fold(0.0, f64::max)
 }
@@ -3016,9 +3022,9 @@ fn first_order_estimate(points: &[[f64; 3]], knots: &[f64], p: usize, delta: f64
     let mut l = 0.0_f64;
     for (i, w) in points.windows(2).enumerate() {
         let gap = knots[i + p + 1] - knots[i + 1];
-        let step = ((w[1][0] - w[0][0]).powi(2)
-            + (w[1][1] - w[0][1]).powi(2)
-            + (w[1][2] - w[0][2]).powi(2))
+        let step = (det::powi(w[1][0] - w[0][0], 2)
+            + det::powi(w[1][1] - w[0][1], 2)
+            + det::powi(w[1][2] - w[0][2], 2))
         .sqrt();
         if gap > 0.0 {
             l = l.max(p as f64 * step / gap);
@@ -3044,8 +3050,8 @@ fn polygon(n: usize, rng: &mut Lcg) -> Vec<[f64; 3]> {
             let x = i as f64;
             [
                 0.6 * x + 3.0 * rng.next(),
-                20.0 * (x / 9.0).sin() + 3.0 * rng.next(),
-                5.0 * (x / 3.0).cos() + 6.0 * rng.next(),
+                20.0 * det::sin(x / 9.0) + 3.0 * rng.next(),
+                5.0 * det::cos(x / 3.0) + 6.0 * rng.next(),
             ]
         })
         .collect()
@@ -3196,7 +3202,7 @@ fn the_knot_shift_bound_counts_a_leg_of_tiny_coordinates() {
             cp(6.0 * scale, 8.0 * scale),
         ];
         let knots = [0.0, 0.0, 0.5, 1.0, 1.0];
-        let leg = (3.0 * scale).hypot(4.0 * scale);
+        let leg = det::hypot(3.0 * scale, 4.0 * scale);
         for delta in [1e-12, 1e-6, 1e-3] {
             let displacement = leg * delta / (0.5 + delta);
             let bound = knot_shift_bound(&points, &knots, 1, delta).unwrap();

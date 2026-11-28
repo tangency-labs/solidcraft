@@ -547,10 +547,10 @@ mod tests {
     #[test]
     fn plan_mesh_soon_makes_it_on_a_worker() {
         let body = ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap(), 1);
-        assert!(body.plan_mesh_soon().is_none(), "not made in the asking frame");
+        assert!(body.plan_mesh_soon(crate::display_quality::current()).is_none(), "not made in the asking frame");
         let began = std::time::Instant::now();
         let soon = loop {
-            if let Some(mesh) = body.plan_mesh_soon() {
+            if let Some(mesh) = body.plan_mesh_soon(crate::display_quality::current()) {
                 break mesh;
             }
             assert!(began.elapsed() < std::time::Duration::from_secs(30), "the worker made it");

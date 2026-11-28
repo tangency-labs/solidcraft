@@ -188,6 +188,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
+        (app.design_report.is_some(), "document.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
         (app.help.about, "about"),
@@ -231,7 +232,7 @@ fn ui_state(app: &SolveApp) -> Value {
 
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
-fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+pub(crate) fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
     if solidcraft_engine::panels::commands::is_command(id) {
         // No first-body meshing, camera-follow or fit tail for application layout.
         return app.run(id, params);
@@ -305,6 +306,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     // Placement failure does not establish an empty model. Keep its camera and
     // let the existing placement diagnostic explain the unavailable world.
     let was_empty = fit_command && history_may_fit && app.session.world_state().is_ok_and(|world| world.bodies.is_empty());
+    app.docs.camera_recalled = false;
     let r = app.run(id, params);
     // Update Links in a part edited in place reads the assembly around it too, as its button does.
     if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
@@ -312,6 +314,8 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     }
     if r.is_ok()
         && was_empty
+        // A design opened with its remembered camera shows it as it was left (#23271).
+        && !app.docs.camera_recalled
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
@@ -1113,19 +1117,21 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter a built-in or plugin workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::workspace::enter(app, w.as_str())
+        && let Err(e) = crate::workspace::enter(app, &w)
     {
         return err(e);
     }
     ok(json!({"workspace":current_workspace(app)}))
 }
 
-/// The workspace shown: drawing, render or design.
-fn current_workspace(app: &SolveApp) -> &'static str {
-    if crate::drawing_workspace::active(app) {
+/// The workspace shown, including namespaced plugin workspaces.
+fn current_workspace(app: &SolveApp) -> &str {
+    if let Some(id) = crate::plugin_workspaces::active_id(app) {
+        id
+    } else if crate::drawing_workspace::active(app) {
         "drawing"
     } else if crate::render_workspace::active(app) {
         "render"

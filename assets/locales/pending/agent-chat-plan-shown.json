@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.ai_auto_plan_file": "it writes its plan in SolidCraft's own folder",
+    "ui.ai_auto_plan_read": "it reads its own plan in SolidCraft's folder",
+    "ui.ai_declined_write": "Declined: {title}. Claude Code writes only its plan here; it changes the design through SolidCraft's tools.",
+    "ui.ai_unasked_write": "Stopped: Claude Code ran {tool} without asking first, so the chat couldn't check what it wrote. Its adapter may have changed; please report this."
+  },
+  "ar": {
+    "ui.ai_auto_plan_file": "يكتب خطته في مجلد SolidCraft الخاص",
+    "ui.ai_auto_plan_read": "يقرأ خطته في مجلد SolidCraft الخاص",
+    "ui.ai_declined_write": "مرفوض: {title}. لا يكتب Claude Code هنا إلا خطته؛ ويغيّر التصميم عبر أدوات SolidCraft.",
+    "ui.ai_unasked_write": "أُوقف: شغّل Claude Code الأداة {tool} دون أن يسأل أولًا، فلم تتمكن الدردشة من التحقق مما كتبه. ربما تغيّر محوّله؛ يُرجى الإبلاغ عن ذلك."
+  },
+  "de": {
+    "ui.ai_auto_plan_file": "es schreibt seinen Plan in SolidCrafts eigenen Ordner",
+    "ui.ai_auto_plan_read": "es liest seinen Plan in SolidCrafts eigenem Ordner",
+    "ui.ai_declined_write": "Abgelehnt: {title}. Claude Code schreibt hier nur seinen Plan; das Design ändert es über die Werkzeuge von SolidCraft.",
+    "ui.ai_unasked_write": "Angehalten: Claude Code hat {tool} ausgeführt, ohne vorher zu fragen, daher konnte der Chat nicht prüfen, was es geschrieben hat. Sein Adapter hat sich möglicherweise geändert; bitte melden Sie das."
+  },
+  "he": {
+    "ui.ai_auto_plan_file": "הוא כותב את התוכנית שלו בתיקייה של SolidCraft עצמה",
+    "ui.ai_auto_plan_read": "הוא קורא את התוכנית שלו בתיקייה של SolidCraft עצמה",
+    "ui.ai_declined_write": "נדחה: {title}. כאן Claude Code כותב רק את התוכנית שלו; הוא משנה את התכן דרך הכלים של SolidCraft.",
+    "ui.ai_unasked_write": "נעצר: Claude Code הפעיל את {tool} בלי לשאול קודם, ולכן הצ'אט לא יכול היה לבדוק מה הוא כתב. ייתכן שהמתאם שלו השתנה; נא לדווח על כך."
+  },
+  "ja": {
+    "ui.ai_auto_plan_file": "SolidCraft 専用のフォルダーに計画を書き込むため",
+    "ui.ai_auto_plan_read": "SolidCraft 専用のフォルダーにある自分の計画を読むため",
+    "ui.ai_declined_write": "拒否しました: {title}。ここでは Claude Code が書き込むのは計画だけです。デザインは SolidCraft のツールで変更します。",
+    "ui.ai_unasked_write": "停止しました: Claude Code が先に確認せずに {tool} を実行したため、チャットは書き込んだ内容を確認できませんでした。アダプターが変更された可能性があります。報告してください。"
+  },
+  "ko": {
+    "ui.ai_auto_plan_file": "SolidCraft 전용 폴더에 계획을 씀",
+    "ui.ai_auto_plan_read": "SolidCraft 전용 폴더의 계획을 읽음",
+    "ui.ai_declined_write": "거부됨: {title}. 여기서 Claude Code는 계획만 씁니다. 디자인은 SolidCraft의 도구로 변경합니다.",
+    "ui.ai_unasked_write": "중지됨: Claude Code가 먼저 묻지 않고 {tool}을(를) 실행해서 채팅이 무엇을 썼는지 확인할 수 없었습니다. 어댑터가 바뀌었을 수 있으니 신고해 주세요."
+  },
+  "vi": {
+    "ui.ai_auto_plan_file": "nó ghi kế hoạch của mình vào thư mục riêng của SolidCraft",
+    "ui.ai_auto_plan_read": "nó đọc kế hoạch của mình trong thư mục riêng của SolidCraft",
+    "ui.ai_declined_write": "Đã từ chối: {title}. Ở đây Claude Code chỉ ghi kế hoạch của mình; nó thay đổi thiết kế qua các công cụ của SolidCraft.",
+    "ui.ai_unasked_write": "Đã dừng: Claude Code đã chạy {tool} mà không hỏi trước, nên cuộc trò chuyện không thể kiểm tra những gì nó đã ghi. Bộ điều hợp của nó có thể đã thay đổi; vui lòng báo cáo lỗi này."
+  },
+  "zh": {
+    "ui.ai_auto_plan_file": "它把计划写在 SolidCraft 自己的文件夹里",
+    "ui.ai_auto_plan_read": "它读取 SolidCraft 自己文件夹里的计划",
+    "ui.ai_declined_write": "已拒绝：{title}。在这里 Claude Code 只写它的计划；它通过 SolidCraft 的工具修改设计。",
+    "ui.ai_unasked_write": "已停止：Claude Code 未先询问就运行了 {tool}，因此聊天无法检查它写入了什么。它的适配器可能已更改；请报告此问题。"
+  }
+}

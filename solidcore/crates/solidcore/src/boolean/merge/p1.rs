@@ -72,7 +72,7 @@
 //! vertices, each surviving edge on a line covers the certified gaps the join left
 //! (`topology::brep::p5::cover_joined_line_gaps`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::boolean::{BooleanFailure, BooleanStage};
@@ -518,6 +518,7 @@ fn find_brep_region_of_other_face_inner(
         }
         break;
     }
+    let mut query: Option<BrepQuery<'static>> = None;
     for other_eu in edges {
         let e = eu::edge(other, other_eu)?.ok_or_else(|| {
             SolidError::boolean_null_defect(
@@ -540,14 +541,10 @@ fn find_brep_region_of_other_face_inner(
         else {
             continue;
         };
+        let query = query.get_or_insert_with(|| BrepQuery::of_brep(brep));
         // (the classification's construction tolerance, the edge's, is not read)
         let Some(pc) = ignore_failure(classify_point_editing_disabled(
-            k,
-            &BrepQuery::of_brep(brep),
-            brep,
-            point,
-            0.0,
-            false,
+            k, query, brep, point, 0.0, false,
         ))?
         else {
             continue;
@@ -575,6 +572,68 @@ fn find_brep_region_of_other_face_inner(
         }
     }
     Ok(fallback)
+}
+
+/// Classify an unmated other-operand face use into a primary region using a caller-owned
+/// [`BrepQuery`], returning both the region and the classified sample point on the edge
+/// that settled it (not upstream). Used by `make_other_faces` to share one `BrepQuery`
+/// across all disjoint seed faces before mutating `brep`.
+pub(crate) fn classify_unmated_other_face_with_query(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &Brep,
+    other_faceuse: FaceuseId,
+    query: &BrepQuery<'_>,
+) -> Result<Option<(RegionId, Point3)>> {
+    let listed = crate::topology::brep::p1::regions(brep, None)?;
+    let single_region = if listed.len() == 1 {
+        listed.first().copied()
+    } else {
+        None
+    };
+    let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
+    for other_eu in edges {
+        let e = eu::edge(other, other_eu)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "an edge use of the other face's loops has no edge, though the kernel links \
+                 every edge use to its edge",
+            )
+        })?;
+        let edge = other.edge(e)?;
+        let curve = edge
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::EdgeWithoutCurve))?;
+        let Some(point) =
+            ignore_failure(curve.evaluate_point(k, edge.interval.evaluate(0.456789)))?
+        else {
+            continue;
+        };
+        if let Some(region) = single_region {
+            return Ok(Some((region, point)));
+        }
+        let Some(pc) = ignore_failure(classify_point_editing_disabled(
+            k, query, brep, point, 0.0, false,
+        ))?
+        else {
+            continue;
+        };
+        if pc.point_class() != PointClassType::Region {
+            continue;
+        }
+        return match pc.object() {
+            Some(EntityRef::Region(r)) => Ok(Some((r, point))),
+            _ => Err(SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "the point classified to a region records no region, though a region class \
+                 always records the region it found",
+            )),
+        };
+    }
+    Ok(None)
 }
 
 /// `pBrep->Point3DClassify(point, tolerance, boundary, sPC)` (unit `query.brep`) with
@@ -768,6 +827,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         relations.edges.clone()
     };
     let mut endpoints = Vec::new();
+    let mut endpoint_seen = HashSet::new();
     // WR-304: the edges checked so far, and those the merging below left with one face
     // on both sides (checked too, though they are no intersection edges).
     let mut queued: BTreeSet<EdgeId> = edges.iter().copied().collect();
@@ -780,7 +840,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         next += 1;
         if left_inside_face.contains(&e) {
             // A later removal may have deleted it
-            if !brep.edge_list().contains(&e) {
+            if brep.edge(e).is_err() {
                 continue;
             }
         } else if !check_all_edges && relations.mates.edges.other(e).is_none() {
@@ -862,7 +922,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         let a = edge::vertex(brep, e)?;
         let b = edge::other_vertex(brep, e, a)?;
         for v in [a, b].into_iter().flatten() {
-            if !endpoints.contains(&v) {
+            if endpoint_seen.insert(v) {
                 endpoints.push(v);
             }
         }
@@ -910,8 +970,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         }
     }
     let mut vertices = relations.vertices.clone();
+    let mut vertex_seen: HashSet<VertexId> = vertices.iter().copied().collect();
     for v in endpoints {
-        if !vertices.contains(&v) {
+        if vertex_seen.insert(v) {
             vertices.push(v);
         }
     }
@@ -964,7 +1025,7 @@ pub(crate) fn boolean_post_process_with_notifications(
                 joined.push(survivor);
             }
             for (e, owner, proven) in owners {
-                if !brep.edge_list().contains(&e) {
+                if brep.edge(e).is_err() {
                     continue;
                 }
                 let restored = brep.edge_mut(e)?.curve.as_mut().is_some_and(|curve| {
@@ -1565,6 +1626,7 @@ impl TemporaryBrepShift {
 mod tests {
 
     use super::*;
+    use crate::math::det;
 
     /// A 1 x 2 x 3 box's origin corner (three faces, none parallel), moved `d` along x,
     /// with vertex tolerance `tolerance`.
@@ -1645,7 +1707,7 @@ mod tests {
         let mut points: Vec<Point3> = (0..20)
             .map(|i| {
                 let a = f64::from(i) * std::f64::consts::TAU / 20.0;
-                centre + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)
+                centre + Vec3::new(2.0 * det::cos(a), 2.0 * det::sin(a), 0.0)
             })
             .collect();
         points.push(centre + Vec3::new(0.3, -0.2, 0.0));
