@@ -26,6 +26,7 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use std::cell::OnceCell;
 
 use super::vec::{v3, VecExt};
@@ -201,7 +202,7 @@ impl Query {
             return Some(vec![(t0, p0), (t1, p1)]);
         }
         let sag = sag.max(1e-12);
-        let turn = (std::f64::consts::TAU / 20.0).cos();
+        let turn = det::cos(std::f64::consts::TAU / 20.0);
         let mut out = vec![(t0, p0)];
         // Pieces still to look at; the last pushed is looked at first, so pushing the right half
         // before the left keeps the output in order.
@@ -891,7 +892,7 @@ fn ray_surface(surface: &Surface, o: Vec3, d: Vec3) -> Option<Vec<f64>> {
         } => {
             // r(v) = r0 + v tan(half), v along z; the radial distance squared is r(v)².
             let (c, z) = (v3(frame.origin), v3(frame.x_axis).cross(v3(frame.y_axis)));
-            let k = half_angle.tan();
+            let k = det::tan(*half_angle);
             let (w, dd) = ((o - c) - z * (o - c).dot(z), d - z * d.dot(z));
             let (h, dh) = ((o - c).dot(z), d.dot(z));
             let (r, dr) = (radius_at_origin + h * k, dh * k);

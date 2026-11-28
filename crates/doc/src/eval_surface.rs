@@ -152,15 +152,21 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, angle, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
                 crate::ExtendMode::Natural => kernel::ExtendMode::Natural,
                 crate::ExtendMode::Tangent => kernel::ExtendMode::Tangent,
                 crate::ExtendMode::Curvature => kernel::ExtendMode::Curvature,
+                crate::ExtendMode::Law => kernel::ExtendMode::Law,
             };
-            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours };
+            // Law only (0: tangent to the surface); the other modes keep no angle.
+            let angle = match angle {
+                Some(a) => val(vals, a, Kind::Angle)?,
+                None => 0.0,
+            };
+            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours, angle };
             let out = match up_to {
                 None => {
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Distance(val(vals, distance, Kind::Length)?)))?
@@ -327,6 +333,105 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             ));
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, faired, mb.feature) };
+            }
+            Ok(())
+        }
+        FeatureKind::SurfaceMorph {
+            body,
+            faces,
+            base,
+            base_face,
+            control,
+            control_face,
+            projection,
+            map_mode,
+            scale,
+            tolerance,
+            flip_u,
+            flip_v,
+            swap_uv,
+            keep_original,
+        } => {
+            let scale_val = val(vals, scale, Kind::Unitless)?;
+            let tol = val(vals, tolerance, Kind::Length)?;
+            let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let Some(mb) = st.bodies.get(i).cloned() else {
+                return Err(DocError::Invalid("body".into()));
+            };
+            let base_mb = st.body(base).cloned().ok_or_else(|| DocError::Unknown(format!("body `{base}`")))?;
+            let control_mb = st.body(control).cloned().ok_or_else(|| DocError::Unknown(format!("body `{control}`")))?;
+
+            // Resolve face picks in each operand's own frame before moving into a common frame.
+            let mut picked_faces: Vec<usize> = Vec::new();
+            for p in faces {
+                let fi =
+                    crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Morph: no face of {body} at {}", p.0)))?;
+                if !picked_faces.contains(&fi) {
+                    picked_faces.push(fi);
+                }
+            }
+
+            let base_fi = match base_face {
+                Some(p) => crate::appearance::face_index_at(&base_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {base} at {}", p.0)))?,
+                None => 0,
+            };
+            let control_fi = match control_face {
+                Some(p) => crate::appearance::face_index_at(&control_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {control} at {}", p.0)))?,
+                None => 0,
+            };
+
+            // Bring target, base, and control into the destination body's frame so offsets and
+            // component placements on any operand are respected and Keep Original keeps placement.
+            let body_world = |b: &ModelBody| -> crate::Mat {
+                let m = doc.component_transform(doc.model_body_component(b));
+                doc.model_body_offset(b).map(|o| crate::mat_mul(&m, o)).unwrap_or(m)
+            };
+            let dest_world = if *keep_original { doc.component_transform(f.component) } else { body_world(&mb) };
+            let inv_dest =
+                crate::mat_inverse(&dest_world).ok_or_else(|| DocError::Invalid("Morph: destination placement cannot be inverted".into()))?;
+            let in_dest = |b: &ModelBody| -> Result<kernel::Body> {
+                let bw = body_world(b);
+                if bw == dest_world {
+                    return Ok(b.body.clone());
+                }
+                let rel = crate::mat_mul(&inv_dest, &bw);
+                if crate::is_identity(&rel) {
+                    Ok(b.body.clone())
+                } else {
+                    st.body_in_frame(b, &rel)
+                        .map(|moved| moved.body)
+                        .map_err(|e| DocError::Invalid(format!("Morph: body `{}` cannot be moved into frame: {e}", b.name)))
+                }
+            };
+            let target_body = in_dest(&mb)?;
+            let base_body = in_dest(&base_mb)?;
+            let control_body = in_dest(&control_mb)?;
+
+            let opts = kernel::services::morph::MorphOptions {
+                projection: match *projection {
+                    crate::MorphProjection::Normal => kernel::services::morph::MorphProjection::Normal,
+                    crate::MorphProjection::Direction { dir } => kernel::services::morph::MorphProjection::Direction(dir),
+                },
+                map_mode: match *map_mode {
+                    crate::MorphMapMode::NormalToNormal => kernel::services::morph::MorphMapMode::NormalToNormal,
+                    crate::MorphMapMode::Translate => kernel::services::morph::MorphMapMode::Translate,
+                },
+                scale: scale_val,
+                flip_u: *flip_u,
+                flip_v: *flip_v,
+                swap_uv: *swap_uv,
+                tolerance: tol,
+                faces: if picked_faces.is_empty() { None } else { Some(picked_faces) },
+            };
+            let morphed = kernel::morph_surface(&target_body, &base_body, base_fi, &control_body, control_fi, &opts)?;
+
+            if *keep_original {
+                let name = new_name(st, f, 0);
+                st.bodies.push(ModelBody { sheet: mb.sheet, ..ModelBody::new(name, morphed, f.id) });
+            } else if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody { sheet: mb.sheet, component: mb.component, ..ModelBody::new(mb.name, morphed, mb.feature) };
             }
             Ok(())
         }

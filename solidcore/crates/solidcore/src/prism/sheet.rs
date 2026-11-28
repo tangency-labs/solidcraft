@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use super::profile::{simple_loops, Loop2, Region2, Seg2};
+use super::profile::{simple_loops, to_local, Loop2, Region2, Seg2};
 use super::read::{planar_pieces, principal, Run};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
@@ -98,6 +98,49 @@ pub fn region_loops(region: &Region2, tol: f64) -> Result<RegionLoops> {
     Ok(out)
 }
 
+/// A loop's straight pieces, read from their curves, made to meet their neighbours: at each
+/// vertex where an edge starts (`corners`, the vertex for the first piece of each edge) a line
+/// ending a hair from the next piece is carried onto it, onto the next piece's start where that
+/// is a curve (whose ends its curve fixes) and onto the vertex where both are lines. A boolean
+/// that merges a vertex with a corner a hair away keeps each edge's curve and moves the vertex,
+/// so the curves of two edges that share it end up to the edges' tolerance apart; read as they
+/// are, the loop is no longer closed at a finer tolerance (SolidCraft #23209). A line moved so
+/// stays within that tolerance of its curve. Lines that would shrink to a point stay as read.
+fn weld_lines(segs: &mut [(Option<VertexId>, Seg2)], corners: &[Option<Point2>]) {
+    let n = segs.len();
+    for j in 0..n {
+        let i = j.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1));
+        if i == j {
+            continue;
+        }
+        let (Some(Some(vertex)), Some((_, prev)), Some((_, next))) =
+            (corners.get(j), segs.get(i), segs.get(j))
+        else {
+            continue;
+        };
+        let (prev, next) = (*prev, *next);
+        if prev.end() == next.start() {
+            continue;
+        }
+        let at = match (&prev, &next) {
+            (Seg2::Line { .. }, Seg2::Line { .. }) => *vertex,
+            (Seg2::Line { .. }, _) => next.start(),
+            (_, Seg2::Line { .. }) => prev.end(),
+            _ => continue,
+        };
+        let keeps = |s: &Seg2, a: Point2, b: Point2| !matches!(s, Seg2::Line { .. }) || a != b;
+        if !keeps(&prev, prev.start(), at) || !keeps(&next, at, next.end()) {
+            continue;
+        }
+        if let Some((_, Seg2::Line { b, .. })) = segs.get_mut(i) {
+            *b = at;
+        }
+        if let Some((_, Seg2::Line { a, .. })) = segs.get_mut(j) {
+            *a = at;
+        }
+    }
+}
+
 /// The faces of the planar sheet `b` as regions of `frame`: each face's loops read exactly
 /// ([`planar_pieces`], each span of a free-form curve a segment), split where a loop passes one
 /// vertex twice (a cut-out touching the outline, material meeting at a corner), seen from the
@@ -168,6 +211,14 @@ pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<Sh
                     out.touching |= *owner.entry(v).or_insert(f) != f;
                 }
             }
+            let corners = segs
+                .iter()
+                .map(|(v, _)| match v {
+                    Some(v) => Ok(Some(to_local(frame, b.vertex(*v)?.point))),
+                    None => Ok(None),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            weld_lines(&mut segs, &corners);
             for piece in simple_loops(segs, |a, b| a.is_some() && a == b) {
                 pieces.push(if up > 0.0 { piece } else { piece.reversed() });
             }

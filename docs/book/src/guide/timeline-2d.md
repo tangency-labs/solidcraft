@@ -9,23 +9,27 @@ components, you can see which component owns each step and which steps depend on
 
 ## Turning on the 2D Timeline
 
-You switch between the 1D and the 2D Timeline in the timeline itself:
+The bottom timeline is the 1D strip when it is one row high and the 2D Timeline when it is taller, the
+way the History in a side column changes between its strip and its names as you widen it. You switch
+in the timeline itself:
 
-1. **The view button**: Click the button left of the `…` menu in the timeline's header. In the 1D
-   timeline it shows three rows of chips and switches to the 2D Timeline. In the 2D Timeline it
-   shows one row and switches back. It sits at the same place in both.
-2. **Control channel or agent tools**: Set `timeline_2d` through the control channel. The first
+1. **The chevron**: At the right end of the timeline's header, a chevron points up in the 1D strip.
+   Click it to raise the row to the 2D Timeline's standard height; the chevron then points down, and a
+   click lowers the row back to the strip.
+2. **Dragging the top edge**: Drag the timeline's top edge up. Heights between the strip and the
+   2D Timeline's smallest height are skipped: the row snaps to the nearer side.
+3. **Control channel or agent tools**: Set `timeline_2d` through the control channel. The first
    request on a connection also needs a `"token"` parameter:
    ```json
    {"id": 1, "method": "ui.prefs", "params": {"timeline_2d": true}}
    ```
 
 The 2D Timeline shows only at the bottom of the window. With the history on the left, under the
-browser or in the browser, the button is off and the 1D timeline stays.
+browser or in the browser, there is no chevron and the 1D list stays.
 
-The 2D Timeline then takes the place of the timeline at the bottom of the window, as its own panel
-(`timeline-2d`). Its header holds the title, the playback buttons (First, Back, Play, Forward,
-Last), the settings button and the view button. SolidCraft remembers your choice.
+The 2D Timeline is the History panel itself, taller. Its header holds the title, the playback
+buttons (First, Back, Play, Forward, Last), the settings button and the chevron. SolidCraft remembers
+the height with the rest of your layout.
 
 ### Options
 

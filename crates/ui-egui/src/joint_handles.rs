@@ -10,8 +10,8 @@ use std::{
 use egui::{Pos2, Shape, Stroke, vec2};
 use serde_json::json;
 use solidcraft_engine::{
-    Sel,
-    doc::{Document, apply_point, joints, mat_inverse, mat_mul},
+    DragPreview, Sel,
+    doc::{Document, Mat, ModelState, apply_point, joints, mat_inverse, mat_mul},
 };
 
 use crate::{
@@ -35,8 +35,8 @@ pub(crate) struct Mode {
 struct Drag {
     axis: joints::MotionAxis,
     initial: f64,
-    world: solidcraft_engine::doc::Mat,
-    last_world: solidcraft_engine::doc::Mat,
+    world: Mat,
+    last_world: Mat,
     start: f64,
     last: f64,
     raw: f64,
@@ -46,8 +46,42 @@ struct Drag {
     fine: bool,
     radius: f64,
     actual: f64,
-    step: Option<Arc<Document>>,
-    checkpoint: Option<u64>,
+    frames: Frames,
+}
+
+#[derive(Clone, Debug)]
+enum Frames {
+    /// Each frame is solved on the drag's own copy of the design and shown via GPU motions; the
+    /// release applies the last value as one `joint.drive`.
+    Shown(Box<Shown>),
+    /// Each frame runs `joint.drive` directly on the live design (e.g. with contact sets on).
+    Applied { step: Option<Arc<Document>>, checkpoint: Option<u64> },
+}
+
+#[derive(Clone, Debug)]
+struct Shown {
+    design: Arc<Document>,
+    world: Arc<ModelState>,
+    pending: BTreeMap<u64, Mat>,
+    pose: Document,
+    last_value: Option<f64>,
+}
+
+fn on_the_design(app: &SolveApp) -> bool {
+    let s = &app.session;
+    s.doc.assembly.contact_enabled || !s.pending_moves.is_empty() || (s.active_component != 0 && s.active_occurrence_path.is_some())
+}
+
+pub(crate) fn began_on(app: &SolveApp) -> Option<(&Arc<Document>, &Arc<ModelState>, &BTreeMap<u64, Mat>)> {
+    match &app.viewport.joint_handles.as_ref()?.drag.as_ref()?.frames {
+        Frames::Shown(sh) => Some((&sh.design, &sh.world, &sh.pending)),
+        Frames::Applied { .. } => None,
+    }
+}
+
+fn moves(design: &Document, pose: &Document) -> BTreeMap<u64, Mat> {
+    let mine: BTreeMap<u64, &Mat> = design.occurrences.iter().map(|o| (o.id, &o.transform)).collect();
+    pose.occurrences.iter().filter(|o| mine.get(&o.id).is_some_and(|m| **m != o.transform)).map(|o| (o.id, o.transform)).collect()
 }
 
 pub(crate) fn selected_occurrence(app: &SolveApp) -> Option<u64> {
@@ -304,10 +338,17 @@ pub(crate) fn cancel(app: &mut SolveApp) -> bool {
     }
     let Some(mut mode) = app.viewport.joint_handles.take() else { return false };
     if let Some(d) = mode.drag.take() {
-        if let Some(checkpoint) = d.checkpoint {
-            let _ = app.session.execute("edit.restore_checkpoint", &json!({"checkpoint":checkpoint}));
-        } else if d.step.is_some() {
-            let _ = app.run("edit.undo", json!({}));
+        app.session.drag_preview = None;
+        app.viewport.joint_motions = None;
+        match d.frames {
+            Frames::Shown(_) => {}
+            Frames::Applied { step, checkpoint } => {
+                if let Some(checkpoint) = checkpoint {
+                    let _ = app.session.execute("edit.restore_checkpoint", &json!({"checkpoint":checkpoint}));
+                } else if step.is_some() {
+                    let _ = app.run("edit.undo", json!({}));
+                }
+            }
         }
         mode.refresh(app);
         app.viewport.joint_handles = Some(mode);
@@ -465,7 +506,20 @@ pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some(initial) = initial else { return false };
     let start = if axis.angular { polar(proj, p, &axis).map(|q| q.0) } else { along(proj, p, &axis) };
     let (Some(start), Some(radius)) = (start, radius(app, proj, &axis)) else { return false };
-    let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
+    let frames = if on_the_design(app) {
+        let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
+        Frames::Applied { step: None, checkpoint }
+    } else {
+        let s = &app.session;
+        Frames::Shown(Box::new(Shown {
+            design: s.doc.clone(),
+            world: crate::open_meshing::session_world(s),
+            pending: s.pending_moves.clone(),
+            pose: (*s.doc).clone(),
+            last_value: None,
+        }))
+    };
+    app.viewport.hover = None;
     let Some(mode) = app.viewport.joint_handles.as_mut() else { return false };
     let world = joints::occurrence_world(&app.session.doc, mode.occurrence);
     mode.drag = Some(Drag {
@@ -482,8 +536,7 @@ pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         fine: false,
         radius,
         actual: 0.0,
-        step: None,
-        checkpoint,
+        frames,
     });
     true
 }
@@ -517,11 +570,20 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         app.viewport.joint_handles = Some(mode);
         return;
     };
-    if d.step.as_ref().is_some_and(|doc| !app.session.undo.last().is_some_and(|s| Arc::ptr_eq(&s.doc, doc))) {
-        mode.drag = Some(d);
-        app.viewport.joint_handles = Some(mode);
-        end_drag(app);
-        return;
+    match &d.frames {
+        Frames::Shown(sh) if !Arc::ptr_eq(&sh.design, &app.session.doc) => {
+            app.session.drag_preview = None;
+            app.viewport.joint_motions = None;
+            app.viewport.joint_handles = Some(mode);
+            return;
+        }
+        Frames::Applied { step, .. } if step.as_ref().is_some_and(|doc| !app.session.undo.last().is_some_and(|s| Arc::ptr_eq(&s.doc, doc))) => {
+            mode.drag = Some(d);
+            app.viewport.joint_handles = Some(mode);
+            end_drag(app);
+            return;
+        }
+        _ => {}
     }
     let amount = if d.axis.angular {
         polar(proj, p, &d.axis).map(|(a, r)| d.rotate(a, r, app.preferences.joint_rotation_coarse, app.preferences.joint_rotation_fine))
@@ -529,37 +591,69 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         along(proj, p, &d.axis).map(|v| v - d.start)
     };
     if let Some(amount) = amount.filter(|v| v.is_finite() && v.abs() < 1e8) {
-        let current = joints::joint_values(&app.session.doc.active_assembly().assembly);
-        if let (Some(joint), Some(values)) =
-            (app.session.doc.assembly.joints.iter().find(|j| j.id == d.axis.joint), current.get(&d.axis.joint).cloned())
-        {
-            let mut wanted = d.initial + amount / d.axis.scale;
-            if let Some((lo, hi)) = joint.limits.get(d.axis.index).copied().flatten() {
-                wanted = wanted.clamp(lo.min(hi), lo.max(hi));
-            }
-            let changed = values.get(d.axis.index).is_some_and(|v| (v - wanted).abs() > 1e-10);
-            if changed {
-                let value = if joint.kind.is_angle(d.axis.index) { wanted.to_degrees() } else { wanted };
-                let own = if d.step.is_some() { app.session.undo.pop() } else { None };
-                let before = app.session.doc.clone();
-                let reply = app.run("joint.drive", json!({"joint":d.axis.joint,"index":d.axis.index,"value":value,"quiet":true,"continuous":true}));
-                let pushed = reply.is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
-                if let Some(step) = own {
-                    if pushed {
-                        app.session.undo.pop();
-                    }
-                    app.session.undo.push(step);
-                } else if pushed {
-                    d.step = app.session.undo.last().map(|s| s.doc.clone());
-                }
-                if let Ok(reply) = reply
-                    && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
+        let mut wanted = d.initial + amount / d.axis.scale;
+        match &mut d.frames {
+            Frames::Shown(sh) => {
+                let current = joints::joint_values(&sh.pose.active_assembly().assembly);
+                if let (Some(joint), Some(values)) =
+                    (sh.pose.assembly.joints.iter().find(|j| j.id == d.axis.joint), current.get(&d.axis.joint).cloned())
                 {
-                    app.set_status(why, false);
+                    if let Some((lo, hi)) = joint.limits.get(d.axis.index).copied().flatten() {
+                        wanted = wanted.clamp(lo.min(hi), lo.max(hi));
+                    }
+                    let changed = values.get(d.axis.index).is_some_and(|v| (v - wanted).abs() > 1e-10);
+                    if changed {
+                        let (reached, stopped_by_loop) =
+                            solidcraft_engine::cmd::drive_preview(&mut sh.pose, &app.session.model.state(), d.axis.joint, d.axis.index, wanted);
+                        sh.last_value = Some(reached);
+                        app.session.drag_preview = Some(DragPreview { design: sh.design.clone(), moves: moves(&sh.design, &sh.pose) });
+                        if let Some(joint_name) = stopped_by_loop {
+                            let reply = json!({"stopped_by_loop": {"joint": joint_name}});
+                            if let Some(why) = crate::dialogs_assembly::drive_stop(&reply) {
+                                app.set_status(why, false);
+                            }
+                        }
+                    }
+                }
+            }
+            Frames::Applied { step, .. } => {
+                let current = joints::joint_values(&app.session.doc.active_assembly().assembly);
+                if let (Some(joint), Some(values)) =
+                    (app.session.doc.assembly.joints.iter().find(|j| j.id == d.axis.joint), current.get(&d.axis.joint).cloned())
+                {
+                    if let Some((lo, hi)) = joint.limits.get(d.axis.index).copied().flatten() {
+                        wanted = wanted.clamp(lo.min(hi), lo.max(hi));
+                    }
+                    let changed = values.get(d.axis.index).is_some_and(|v| (v - wanted).abs() > 1e-10);
+                    if changed {
+                        let value = if joint.kind.is_angle(d.axis.index) { wanted.to_degrees() } else { wanted };
+                        let own = if step.is_some() { app.session.undo.pop() } else { None };
+                        let before = app.session.doc.clone();
+                        let reply =
+                            app.run("joint.drive", json!({"joint":d.axis.joint,"index":d.axis.index,"value":value,"quiet":true,"continuous":true}));
+                        let pushed = reply.is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
+                        if let Some(own_step) = own {
+                            if pushed {
+                                app.session.undo.pop();
+                            }
+                            app.session.undo.push(own_step);
+                        } else if pushed {
+                            *step = app.session.undo.last().map(|s| s.doc.clone());
+                        }
+                        if let Ok(reply) = reply
+                            && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
+                        {
+                            app.set_status(why, false);
+                        }
+                    }
                 }
             }
         }
-        let now = joints::occurrence_world(&app.session.doc, mode.occurrence);
+        let pose_doc = match &d.frames {
+            Frames::Shown(sh) => &sh.pose,
+            Frames::Applied { .. } => &*app.session.doc,
+        };
+        let now = joints::occurrence_world(pose_doc, mode.occurrence);
         if d.axis.angular {
             if let Some(inv) = mat_inverse(&d.last_world) {
                 let delta = mat_mul(&now, &inv);
@@ -579,8 +673,30 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
 pub(crate) fn end_drag(app: &mut SolveApp) {
     let Some(mut mode) = app.viewport.joint_handles.take() else { return };
     if let Some(d) = mode.drag.take() {
-        if let Some(checkpoint) = d.checkpoint {
-            let _ = app.session.execute("edit.restore_checkpoint", &json!({"checkpoint":checkpoint,"forget":true}));
+        app.session.drag_preview = None;
+        app.viewport.joint_motions = None;
+        match d.frames {
+            Frames::Shown(sh) => {
+                if Arc::ptr_eq(&sh.design, &app.session.doc)
+                    && let Some(reached) = sh.last_value
+                    && (reached - d.initial).abs() > 1e-10
+                    && let Some(joint) = app.session.doc.assembly.joints.iter().find(|j| j.id == d.axis.joint)
+                {
+                    let value = if joint.kind.is_angle(d.axis.index) { reached.to_degrees() } else { reached };
+                    let reply =
+                        app.run("joint.drive", json!({"joint":d.axis.joint,"index":d.axis.index,"value":value,"quiet":true,"continuous":true}));
+                    if let Ok(reply) = reply
+                        && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
+                    {
+                        app.set_status(why, false);
+                    }
+                }
+            }
+            Frames::Applied { checkpoint, .. } => {
+                if let Some(checkpoint) = checkpoint {
+                    let _ = app.session.execute("edit.restore_checkpoint", &json!({"checkpoint":checkpoint,"forget":true}));
+                }
+            }
         }
         mode.refresh(app);
     }
@@ -598,7 +714,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let axes = if let Some(d) = &mode.drag {
         let mut axis = d.axis.clone();
         if let Some(inverse) = mat_inverse(&d.world) {
-            let delta = mat_mul(&joints::occurrence_world(&app.session.doc, mode.occurrence), &inverse);
+            let pose_doc = match &d.frames {
+                Frames::Shown(sh) => &sh.pose,
+                Frames::Applied { .. } => &*app.session.doc,
+            };
+            let delta = mat_mul(&joints::occurrence_world(pose_doc, mode.occurrence), &inverse);
             axis.origin = apply_point(&delta, axis.origin);
         }
         vec![axis]
@@ -1173,5 +1293,36 @@ mod tests {
             assert_eq!(h.app.session.selection, selection);
             assert_eq!(h.app.session.undo.len(), undo);
         }
+    }
+
+    #[test]
+    fn handle_drag_uses_drag_preview_and_applies_one_drive_on_release() {
+        let (mut h, _) = assembly("slider", Vec3::X, false);
+        h.app.start("occurrence.move");
+        h.frames(3);
+        let a = h.app.viewport.joint_handles.as_ref().unwrap().axes[0].clone();
+        let proj = projection(&h);
+        let r = radius(&h.app, &proj, &a).unwrap();
+        let start = a.origin + a.axis * r * 0.7;
+        let from = proj.to_screen(start).unwrap();
+        let to = proj.to_screen(start + a.axis * 10.).unwrap();
+        let before_doc = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        pointer(&mut h, from, true);
+        move_to(&mut h, to);
+        assert!(active(&h.app));
+        assert!(began_on(&h.app).is_some(), "handle drag must use Shown preview frames");
+        assert!(h.app.session.drag_preview.is_some(), "drag_preview must hold the previewed moves");
+        assert!(Arc::ptr_eq(&h.app.session.doc, &before_doc), "live document must stay untouched mid-drag");
+        assert!(
+            h.app.highlighted().iter().all(|s| matches!(s, Sel::Body { .. } | Sel::Occurrence { .. })),
+            "face selection promotes to body during handle drag so GPU motions stay active: {:?}",
+            h.app.highlighted()
+        );
+        pointer(&mut h, to, false);
+        assert!(!active(&h.app));
+        assert!(h.app.session.drag_preview.is_none());
+        assert!(!Arc::ptr_eq(&h.app.session.doc, &before_doc), "release applies the drive to the live document");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole handle drag");
     }
 }
