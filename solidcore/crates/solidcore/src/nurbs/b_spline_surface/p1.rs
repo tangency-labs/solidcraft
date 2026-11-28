@@ -461,8 +461,10 @@ pub struct BSplineSurface {
 #[derive(Debug, Default)]
 pub(crate) struct NurbSlot(Arc<NurbData>);
 
+/// What a [`NurbSlot`] holds: the NURB and the cell index built from it (the index is
+/// not part of the NURB and an edit drops it).
 #[derive(Default)]
-struct NurbData {
+pub(crate) struct NurbData {
     value: OnceLock<Surface>,
     cells: OnceLock<Option<Box<CellIndex>>>,
 }
@@ -485,7 +487,7 @@ impl Clone for NurbData {
 }
 
 /// A [`NurbSlot`]'s cell, as a cache keeps it ([`NurbSlot::cell`]).
-pub(crate) type NurbCell = Arc<OnceLock<Surface>>;
+pub(crate) type NurbCell = Arc<NurbData>;
 
 impl NurbSlot {
     /// No NURB (`NULL`).
