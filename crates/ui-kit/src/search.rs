@@ -191,7 +191,8 @@ impl CommandSearch {
         let size = galley.size() + vec2(padding, t.space_4);
         let r = Rect::from_min_size(pos2(right.x - size.x, right.y - size.y / 2.0), size);
         t.container_rect(ui.painter(), r, Self::inner_radius(), t.dialog_footer, t.dialog_rule);
-        ui.painter().galley(r.min + vec2(padding / 2.0, t.space_2), galley, t.form_dim);
+        let at = super::text::centred_in(ui.painter(), &galley, r.center());
+        ui.painter().galley(at, galley, t.form_dim);
         size.x
     }
 
@@ -416,6 +417,27 @@ mod tests {
         assert_eq!(t.radius_xl, 10);
         assert_eq!(CommandSearch::inner_radius(), 4);
         assert_eq!(f32::from(CommandSearch::inner_radius()), f32::from(t.radius_xl) - t.space_6);
+    }
+
+    #[test]
+    fn keycap_glyphs_read_centred_in_their_pills() {
+        // #23381: the glyph's row box was centred in the chip, but the font's capitals sit low
+        // in their row box, so the glyph read low in the pill. Its ink must sit in the middle.
+        let ctx = crate::test_support::context();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 100.0))), ..Default::default() };
+        let output = crate::test_support::raw_frame(&ctx, input, |ui| {
+            CommandSearch::key(ui, pos2(120.0, 60.0), "S");
+        });
+        let ink = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.pos.y + text.galley.mesh_bounds.center().y),
+                _ => None,
+            })
+            .expect("the cap's glyph");
+        // The cap's box is centred on the given right-hand point; so must the glyph's ink be.
+        assert!((ink - 60.0).abs() <= 0.5, "the cap's ink centre {ink} is {} pt off the pill centre", ink - 60.0);
     }
 
     #[test]

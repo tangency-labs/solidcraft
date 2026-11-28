@@ -1,3 +1,4 @@
+use crate::math::det;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
 
 use super::*;
@@ -22,7 +23,7 @@ fn close3(a: Vec3, b: Vec3) -> bool {
 
 /// The unit wall directions of a corner of angle `theta`: `a` along +x, `b` turned `theta` from it.
 fn walls(theta: f64) -> (Vec3, Vec3) {
-    (Vec3::X, Vec3::new(theta.cos(), theta.sin(), 0.0))
+    (Vec3::X, Vec3::new(det::cos(theta), det::sin(theta), 0.0))
 }
 
 /// How far `c` lies from the line of the wall along unit `d` through the corner (the origin): a
@@ -60,12 +61,12 @@ fn removed_area(angle: f64, options: &Options) -> Option<f64> {
         if d >= r {
             0.0
         } else {
-            r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+            r * r * det::acos(d / r) - d * (r * r - d * d).sqrt()
         }
     };
     match options.style {
-        Style::Normal => Some(r * r * (PI - angle - angle.sin())),
-        Style::Minimal { gap } => Some(2.0 * segment((r + gap) * (angle / 2.0).sin())),
+        Style::Normal => Some(r * r * (PI - angle - det::sin(angle))),
+        Style::Minimal { gap } => Some(2.0 * segment((r + gap) * det::sin(angle / 2.0))),
         Style::TBone { .. } if angle >= FRAC_PI_2 - ANGLE_SLACK => Some(PI * r * r / 2.0),
         Style::TBone { .. } => None,
     }
@@ -82,10 +83,10 @@ fn grid_area(c: Vec3, r: f64, theta: f64) -> f64 {
         for j in 0..n {
             let x = c.x - r + (f64::from(i) + 0.5) * h;
             let y = c.y - r + (f64::from(j) + 0.5) * h;
-            if (x - c.x).powi(2) + (y - c.y).powi(2) > r * r {
+            if det::powi(x - c.x, 2) + det::powi(y - c.y, 2) > r * r {
                 continue;
             }
-            let ang = y.atan2(x);
+            let ang = det::atan2(y, x);
             let in_wedge = ang >= 0.0 && ang <= theta;
             if !in_wedge {
                 inside_disc_outside_wedge += 1;
@@ -118,7 +119,10 @@ fn normal_reliefs_at_60_and_120_degrees_follow_the_bisector() {
         let w = wedge(theta, Style::Normal);
         let half = theta / 2.0;
         assert!(
-            close3(w.centre, Vec3::new(R * half.cos(), R * half.sin(), 0.0)),
+            close3(
+                w.centre,
+                Vec3::new(R * det::cos(half), R * det::sin(half), 0.0)
+            ),
             "{theta}: {:?}",
             w.centre
         );
@@ -181,7 +185,7 @@ fn the_normal_relief_removes_the_least_of_any_circle_through_the_corner() {
         let least = grid_area(normal, R, theta);
         for share in [0.1, 0.3, 0.7, 0.9] {
             let phi = share * theta;
-            let c = Vec3::new(R * f64::cos(phi), R * f64::sin(phi), 0.0);
+            let c = Vec3::new(R * det::cos(phi), R * det::sin(phi), 0.0);
             assert!(grid_area(c, R, theta) > least, "{theta} {phi}");
         }
     }
@@ -225,7 +229,7 @@ fn a_minimal_circle_that_only_touches_its_walls_is_unreached() {
         };
         // The largest gap that reaches: the circle about (r + g*) on the bisector is tangent to
         // both walls, (r + g*) sin(θ/2) = r. A gap ε g* short of it goes ε g* sin(θ/2) deep.
-        let largest = R * (1.0 / (theta / 2.0).sin() - 1.0);
+        let largest = R * (1.0 / det::sin(theta / 2.0) - 1.0);
         // At g* and 1e-13 g* short (under 1e-13 mm deep): a touch, no cut.
         for eps in [0.0, 1e-13] {
             assert_eq!(
@@ -282,7 +286,7 @@ fn a_t_bone_bites_the_wall_it_is_told_to() {
     assert!(off_wall(sharp.centre, b) < R);
     assert!(close(
         2.0 * sharp.centre.dot(b),
-        2.0 * R * (PI / 3.0).cos(),
+        2.0 * R * det::cos(PI / 3.0),
         1e-12
     ));
     assert_eq!(
@@ -299,7 +303,7 @@ fn a_t_bone_bites_every_corner_of_a_square_pocket_the_same_way_round() {
     // so a quarter turn takes each relief's centre (from its corner) to the next corner's.
     let square = [(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)];
     for turn in [0.0, 0.3, FRAC_PI_4, 1.0, 2.5, -2.0] {
-        let (c, s) = (f64::cos(turn), f64::sin(turn));
+        let (c, s) = (det::cos(turn), det::sin(turn));
         let at = |k: usize| {
             let (x, y) = square[k % 4];
             Point3::new(x * c - y * s + 123.4, x * s + y * c - 56.7, 8.9)
@@ -545,7 +549,7 @@ fn a_relief_clears_a_sloped_open_end() {
     let cap = c.base + c.axis * c.height;
     for k in 0..64 {
         let phi = f64::from(k) * PI / 32.0;
-        let p = cap + Vec3::new(phi.cos(), phi.sin(), 0.0) * R;
+        let p = cap + Vec3::new(det::cos(phi), det::sin(phi), 0.0) * R;
         assert!((p - top).dot(n) >= 0.0, "{phi}");
     }
     // No face at the end: blind. A square top: the radius.
@@ -757,12 +761,12 @@ fn a_relief_stops_short_of_a_tilted_blind_floor() {
     // the relief stops 2R·tan β (reach · tan β) short of the floor, its end disc on or above it.
     for beta in [0.1_f64, 0.4, 0.9] {
         let lean = Vec3::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0);
-        let n = Vec3::Z * beta.cos() + lean * beta.sin();
+        let n = Vec3::Z * det::cos(beta) + lean * det::sin(beta);
         let floor: &[Option<Vec3>] = &[Some(n)];
         let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [floor, top], &o).unwrap() else {
             panic!("tilted floor β = {beta}: no relief");
         };
-        let back = 2.0 * R * beta.tan();
+        let back = 2.0 * R * det::tan(beta);
         assert!((c.base.z - (4.0 + back)).abs() < 1e-9, "β = {beta}: {c:?}");
         assert!(
             (c.height - (6.0 + R - back)).abs() < 1e-9,
@@ -770,14 +774,14 @@ fn a_relief_stops_short_of_a_tilted_blind_floor() {
         );
         for k in 0..64 {
             let a = f64::from(k) * PI / 32.0;
-            let p = c.base + Vec3::new(a.cos(), a.sin(), 0.0) * R;
+            let p = c.base + Vec3::new(det::cos(a), det::sin(a), 0.0) * R;
             assert!(
                 n.dot(p - here) >= -1e-9,
                 "β = {beta}: {p:?} under the floor"
             );
         }
         // Tilted the other way the floor falls away under the relief: nothing to stop short of.
-        let n = Vec3::Z * beta.cos() - lean * beta.sin();
+        let n = Vec3::Z * det::cos(beta) - lean * det::sin(beta);
         let floor: &[Option<Vec3>] = &[Some(n)];
         let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [floor, top], &o).unwrap() else {
             panic!("falling floor β = {beta}: no relief");

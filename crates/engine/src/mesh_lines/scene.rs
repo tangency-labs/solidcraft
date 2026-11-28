@@ -613,11 +613,13 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
         progress.check()?;
         let mut budget = Budget::new(&global, &progress);
         let mut paths: Vec<Path> = Vec::new();
+        let mut whole = part.closed;
         let mut previous: Option<Vec3> = None;
         for p in &part.points {
             let b = view.project(*p)?;
             let Some(a) = previous.replace(b) else { continue };
             if xy(a).dist(xy(b)) <= eps {
+                whole = false;
                 continue;
             }
             if !claim(&count, 1, MAX_SEGMENTS) {
@@ -643,10 +645,12 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                 query.instance_node(0)?;
                 covered = query.covered;
             }
+            whole &= covered.spans.is_empty();
             let mut cursor = 0.;
             let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), Refused> {
                 let (p, q) = (xy(a + (b - a) * lo), xy(a + (b - a) * hi));
                 if p.dist(q) <= eps {
+                    whole = false;
                     return Ok(());
                 }
                 if let Some(path) = paths.last_mut().filter(|path| path.hidden == hidden && path.points.last().is_some_and(|e| e.dist(p) <= eps)) {
@@ -655,7 +659,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                     if !claim(&output, 1, MAX_LINES) {
                         return Err(Refused::Work);
                     }
-                    paths.push(Path { points: vec![p, q], hidden });
+                    paths.push(Path { points: vec![p, q], closed: false, hidden });
                 }
                 Ok(())
             };
@@ -665,6 +669,12 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                 cursor = hi;
             }
             emit(cursor, 1., false)?;
+        }
+        if whole
+            && paths.len() == 1
+            && let Some(path) = paths.first_mut()
+        {
+            path.closed = true;
         }
         progress.advance(1)?;
         Ok((paths, budget.spent))
@@ -697,6 +707,40 @@ mod tests {
         c.add(0.2, 0.9).unwrap();
         c.add(0.8, 1.).unwrap();
         assert_eq!(c.spans, vec![(0., 1.)]);
+    }
+
+    #[test]
+    fn projection_keeps_closure_only_for_a_whole_source_curve() {
+        let mut scene = Scene { meshes: Vec::new(), placements: Vec::new(), triangles: 0, bytes: 0, sources: false, reference_hides_model: true };
+        let points = vec![
+            Vec3::new(-1., 3., 0.),
+            Vec3::new(4., 3., 0.),
+            Vec3::new(9., 3., 0.),
+            Vec3::new(9., 8., 0.),
+            Vec3::new(-1., 8., 0.),
+            Vec3::new(-1., 3., 0.),
+        ];
+        let view = View::orthographic(&solidcore_record::Plane::XY);
+        for closed in [false, true] {
+            let parts = [Part { points: points.clone(), closed, on_top: false }];
+            let paths = drawing(&scene, &parts, &view).unwrap().sketch;
+            assert_eq!(paths.len(), 1);
+            assert_eq!(paths[0].closed, closed, "endpoint equality does not invent source closure");
+        }
+        scene.meshes.push(Arc::new(box_mesh()));
+        scene.placements.push(Placement {
+            mesh: 0,
+            transform: solidcraft_doc::IDENTITY,
+            visibility: Vec::new(),
+            tangent: Vec::new(),
+            joins: Vec::new(),
+            reference: false,
+        });
+        let parts = [Part { points, closed: true, on_top: false }];
+        let paths = drawing(&scene, &parts, &view).unwrap().sketch;
+        assert!(paths.iter().any(|p| p.hidden));
+        assert!(paths.iter().any(|p| !p.hidden));
+        assert!(paths.iter().all(|p| !p.closed));
     }
 
     fn box_mesh() -> Mesh {

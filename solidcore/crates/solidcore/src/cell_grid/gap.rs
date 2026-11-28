@@ -8,6 +8,7 @@
 //! worked out in closed form, and the least distance between them and the ends is the answer. No
 //! sampling, no flattening.
 
+use crate::math::det;
 use crate::math::Vec2;
 
 use super::free;
@@ -16,7 +17,7 @@ use super::vec::Vec2Ext;
 
 /// The direction of `v` as an angle.
 fn angle_of(v: Vec2) -> f64 {
-    v.y.atan2(v.x)
+    det::atan2(v.y, v.x)
 }
 
 /// The point of `arc` (an arc piece) nearest the line `ab`, where that point is interior to the

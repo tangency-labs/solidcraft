@@ -2498,8 +2498,12 @@ mod tests {
         use solidcore_record::Vec3;
         let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         let faces = vec![solidcraft_kernel::FacePaint { face: 0, color: [0., 0., 1.], opacity: 1., name: Some("Accent".into()) }];
-        let named =
-            part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
+        let named = part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint {
+            opacity: 1.,
+            faces,
+            name: Some("Body grey".into()),
+            layer: None,
+        }));
         let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
         let mut doc = Document::new("Named colours");
         doc.add_feature(
@@ -2531,7 +2535,7 @@ mod tests {
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
             .with_color(Some([0.25, 0.5, 0.75]))
-            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None }));
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None, layer: None }));
         let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
         let model = saved_model(vec![block, tetra.clone()]);
         let doc = document();
@@ -2640,6 +2644,7 @@ mod tests {
             opacity: 1.0,
             faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
             name: None,
+            layer: None,
         }));
         let mut model = saved_model(vec![broken]);
         model.records["model_bodies"][0]["name"] = json!("CoolingFin");
@@ -2748,6 +2753,7 @@ mod tests {
             opacity: 0.5,
             faces: vec![FacePaint { face: 0, color: [1.0, 0.0, 0.0], opacity: 0.8, name: None }],
             name: None,
+            layer: None,
         }));
         // Clearing face paint keeps inherited `regularization_protected = true`, so this body
         // shares `base`'s record and has `color == None, paint == None` yet encodes differently.

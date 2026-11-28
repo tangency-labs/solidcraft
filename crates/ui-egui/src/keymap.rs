@@ -2707,10 +2707,9 @@ mod tests {
         h.step(&json!({"click": {"handle": "prefs:keyboard_profile:nx"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.preferences.keyboard_profile, "nx");
-        assert!(
-            h.widget("Ctrl+W for Show/Hide Selection is not used: SolidCraft keeps this key for itself.").is_some(),
-            "the left-out key is reported"
-        );
+        // The note names the key as this platform writes it (the Command key on macOS).
+        let note = format!("{} for Show/Hide Selection is not used: SolidCraft keeps this key for itself.", crate::ui_kit::chord_label("Ctrl+W"));
+        assert!(h.widget(&note).is_some(), "the left-out key is reported: {note}");
     }
 }
 
