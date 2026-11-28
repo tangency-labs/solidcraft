@@ -84,11 +84,16 @@ pub enum Event {
         /// The path it would read, when it is one of Claude Code's own read tools
         /// ([`super::acp::read_path`]).
         reads: Option<std::path::PathBuf>,
+        /// The file it would write, when it is one of Claude Code's own write tools
+        /// ([`super::acp::write_path`]).
+        writes: Option<std::path::PathBuf>,
+        /// The plan it asks the user to approve ([`super::acp::plan_text`]).
+        plan: Option<String>,
         /// Which of Claude Code's own tools it asks about, when the Claude adapter says
         /// ([`super::acp::ClaudeCalls`]), whatever command started it.
         claude_tool: Option<String>,
     },
-    /// One of Claude Code's read tools completed without asking first, which its session's ask
+    /// One of Claude Code's read or write tools completed without asking first, which its session's ask
     /// rule forbids ([`super::acp::ClaudeCalls`]): the panel stops the message and says so.
     Unasked {
         tool: String,

@@ -265,11 +265,11 @@ impl AcpBackend {
                 out.push(Event::Plan(entries));
             }
             Incoming::Plan { .. } => {}
-            Incoming::Permission { rpc, title, kind, options, reads, call, claude_tool } => {
+            Incoming::Permission { rpc, title, kind, options, reads, writes, plan, call, claude_tool } => {
                 let claude_tool = self.calls.question(call.as_deref(), claude_tool.as_deref());
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, kind, options, reads, claude_tool });
+                out.push(Event::Permission { key: self.next_key, title, kind, options, reads, writes, plan, claude_tool });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),

@@ -2459,38 +2459,49 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     });
                 }
             }
-            Item::Permission { title, options, answer: given, .. } => {
+            Item::Permission { title, options, answer: given, plan, .. } => {
                 let card = ui_kit::assistant_approval(
                     ui,
                     &trf("ui.agent_chat_permission", &[("title", &crate::agent_label::card_title(solidcraft_ui_text::locale(), title))]),
-                    |ui| match given {
-                        Some(a) => {
-                            ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                    |ui| {
+                        // The plan the question asks to approve, in full (#19571).
+                        if let Some(plan) = plan {
+                            let shown = ui_kit::assistant_tool_detail(ui, |ui| {
+                                ui.set_min_width(ui.available_width().max(0.0));
+                                ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, plan, all_selected));
+                            });
+                            solidcraft_ui_registry::publish_rect("agent_chat:plan", shown.response.rect);
                         }
-                        None => {
-                            ui_kit::assistant_actions(ui, |ui| {
-                                for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
-                                {
-                                    let r = if o.kind == "allow_once" {
-                                        ui_kit::primary_button(ui, &o.name)
-                                    } else {
-                                        ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
-                                    };
-                                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
-                                    if r.clicked() {
-                                        answer = Some((n, Some(o.id.clone())));
-                                    }
-                                }
-                                ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-                                    for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
-                                        let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                        match given {
+                            Some(a) => {
+                                ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                            }
+                            None => {
+                                ui_kit::assistant_actions(ui, |ui| {
+                                    for o in
+                                        options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
+                                    {
+                                        let r = if o.kind == "allow_once" {
+                                            ui_kit::primary_button(ui, &o.name)
+                                        } else {
+                                            ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
+                                        };
                                         solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                         if r.clicked() {
                                             answer = Some((n, Some(o.id.clone())));
                                         }
                                     }
+                                    ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+                                        for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
+                                            let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                                            solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                            if r.clicked() {
+                                                answer = Some((n, Some(o.id.clone())));
+                                            }
+                                        }
+                                    });
                                 });
-                            });
+                            }
                         }
                     },
                 );
@@ -3707,6 +3718,7 @@ mod tests {
                 key: 4,
                 title: "Run solid.fillet".into(),
                 answer: None,
+                plan: None,
                 options: vec![
                     PermissionOption { id: "reject".into(), name: "Deny".into(), kind: "reject_once".into() },
                     PermissionOption { id: "remember".into(), name: "Always allow".into(), kind: "allow_always".into() },
@@ -3730,6 +3742,41 @@ mod tests {
             let always = solidcraft_ui_registry::handle_at("agent_chat:permission:remember").expect("always");
             assert!(once.x > always.x, "primary once choice remains on the right");
             assert_eq!(app.agent_chat.waiting(), 1, "drawing never answers an approval");
+        }
+    }
+
+    /// The plan a question asks the user to approve is drawn in it, inside the panel and above its
+    /// answers, at every width (#19571).
+    #[test]
+    fn the_plan_a_question_asks_to_approve_is_shown_above_its_answers() {
+        for width in [280.0, 440.0, 760.0] {
+            let ctx = crate::fonts::test_context();
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.agent_chat.items.push(Item::Permission {
+                key: 9,
+                title: "Ready to code?".into(),
+                answer: None,
+                plan: Some("# Plan: a block with a hole\n\n1. `solid.box` 40 x 20 x 10 mm, named Block.\n2. A 5 mm hole through its centre.".into()),
+                options: vec![
+                    PermissionOption { id: "exit-plan-default".into(), name: "Yes, manually approve edits".into(), kind: "allow_once".into() },
+                    PermissionOption { id: "reject".into(), name: "No, keep planning".into(), kind: "reject_once".into() },
+                ],
+            });
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
+            solidcraft_ui_registry::clear_handles();
+            let view = PanelView::of(&mut app, &ctx);
+            let mut output = ctx.run_ui(input, |ui| {
+                ui.set_width(width);
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, 720.0));
+            });
+            output.textures_delta.clear();
+            let plan = solidcraft_ui_registry::rect_of("agent_chat:plan").expect("the plan is drawn");
+            assert!(plan.left() >= 0.0 && plan.right() <= width + 16.0, "plan outside {width}: {plan:?}");
+            assert!(plan.height() > 40.0, "a heading and two steps: {plan:?}");
+            for id in ["exit-plan-default", "reject"] {
+                let at = solidcraft_ui_registry::handle_at(&format!("agent_chat:permission:{id}")).expect("answer drawn");
+                assert!(at.y > plan.bottom(), "{id} below the plan at {width}: {at:?} {plan:?}");
+            }
         }
     }
 
