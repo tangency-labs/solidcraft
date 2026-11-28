@@ -997,8 +997,14 @@ impl Surface {
             boundary_memo: BoundaryMemo::new(),
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
-            definition: None,
-            // (the definition goes, what it says of the net stays)
+            // The definition goes, what it says of the net stays; a screw sweep's goes with the
+            // copy as its label only, which no evaluation reads, so the exact intersections of
+            // a wall (`procedural_sweep::cylinder_section`) still know what it is.
+            definition: self.kept_sweep().map(|sweep| {
+                let mut label = sweep.clone();
+                label.make_label();
+                Box::new(KeptDefinition::Sweep(label))
+            }),
             fitted_net: self.net_is_fitted(),
         })
     }
@@ -4294,6 +4300,37 @@ impl Surface {
             *out = section;
             return Ok(());
         }
+        // (not upstream) A screw-swept wall cut by a cylinder on its axis: the net's iso curves at
+        // the profile's crossings of the radius, exactly (`procedural_sweep::cylinder_section`).
+        {
+            use crate::surface::procedural_sweep::cylinder_section::intersect as screw_section;
+            let swept = match (
+                screw_wall(self),
+                other.kind(),
+                screw_wall(other),
+                self.kind(),
+            ) {
+                (Some(wall), SurfaceKind::Cone(c), _, _) => {
+                    screw_section(k, wall, uv_domain, c, other, other_uv_domain, tolerance)
+                        .map(|r| r.map(|r| (r, false)))
+                }
+                (_, _, Some(wall), SurfaceKind::Cone(c)) => {
+                    screw_section(k, wall, other_uv_domain, c, self, uv_domain, tolerance)
+                        .map(|r| r.map(|r| (r, true)))
+                }
+                _ => Ok(None),
+            };
+            if let Some((mut section, reversed)) = native_failure(swept)?.flatten() {
+                if reversed {
+                    std::mem::swap(
+                        &mut section.surface1_uv_curves,
+                        &mut section.surface2_uv_curves,
+                    );
+                }
+                *out = section;
+                return Ok(());
+            }
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,
@@ -5302,6 +5339,15 @@ pub const fn base_number_control_points() -> usize {
 ///
 /// # Errors
 ///
+/// A screw-swept wall's definition (live or its label) and its net, for the exact
+/// intersections a wall has in closed form.
+fn screw_wall(s: &Surface) -> Option<(&ProceduralSweep, &BSplineSurface)> {
+    match (s.kept_sweep(), s.kind()) {
+        (Some(sweep), SurfaceKind::BSpline(net)) => Some((sweep, net)),
+        _ => None,
+    }
+}
+
 /// Those of [`crate::intersect::surface_intersector::p5::do_intersection`].
 #[allow(clippy::too_many_arguments)] // upstream's argument list
 pub fn base_global_surface_intersect(
