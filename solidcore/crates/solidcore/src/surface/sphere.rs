@@ -87,8 +87,9 @@
 //!   upstream: a failure leaves the default-constructed `SmPoint3d`
 //!   ([`Vec3::UNDEF`], assuming the failing call does not write it).
 //! - **`GlobalSurfaceIntersect`.** The special cases switch on the other surface's
-//!   kind (plane, cone, sphere, surface of revolution); the fallback
-//!   `SmSurface::GlobalSurfaceIntersect` runs on the [`Surface`] holding the sphere
+//!   kind (plane, cone, sphere, surface of revolution); not upstream, a cylinder takes
+//!   the cone's case, as the cylinder's own dispatch does with the sphere second; the
+//!   fallback `SmSurface::GlobalSurfaceIntersect` runs on the [`Surface`] holding the sphere
 //!   ([`Sphere::global_surface_intersect_with`] takes it from the caller;
 //!   [`Sphere::global_surface_intersect`] wraps an unowned copy). `DropPointFast`
 //!   through [`SurfaceKind::Sphere`] runs the inherited body with the sphere's
@@ -1089,8 +1090,10 @@ impl Sphere {
                 need_nurb_intersection = more;
                 *out = found;
             }
-            // (an SmCylinder is not SmCone_TYPE: the default branch)
-            SurfaceKind::Cone(c) if c.type_code() == crate::surface::surface::p2::CONE_TYPE => {
+            // (not upstream: a cylinder too. An SmCylinder is not SmCone_TYPE there and
+            // goes to the general intersection, though the cylinder's own dispatch takes
+            // this case, so the order of the two surfaces chose the result.)
+            SurfaceKind::Cone(c) => {
                 need_nurb_intersection = self.intersect_with_cone_into(
                     k,
                     uv_domain,
@@ -1131,7 +1134,6 @@ impl Sphere {
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
-            | SurfaceKind::Cone(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::CurveBounded(_)

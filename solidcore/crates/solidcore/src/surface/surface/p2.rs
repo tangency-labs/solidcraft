@@ -79,6 +79,11 @@
 //!   ([`Surface::global_surface_intersect_with_partial`]). The general intersection
 //!   resets them first (`SmSurfaceIntersector::DoIntersection`): a special case that asks
 //!   for it keeps none of its own outputs.
+//! - **A torus second** (not upstream): a sphere, cone, cylinder or surface of revolution
+//!   first runs the torus's special cases (`torus_special_cases_into`, which also take a
+//!   cylinder) with the torus first and swaps the UV curves, so both orders take the same
+//!   closed form; upstream's dispatch of the first surface has no torus case, and the
+//!   torus's own takes no cylinder.
 //! - **Touching loops** (not upstream, WR-405, tangency-labs/solidcore#892):
 //!   `create_plane_with_3d_curves`
 //!   joins a loop touching another loop of its face at a vertex into that loop
@@ -4294,6 +4299,47 @@ impl Surface {
             *out = section;
             return Ok(());
         }
+        // (not upstream) a torus second takes the torus's special cases against a sphere,
+        // a cone or cylinder and a surface of revolution, which go to the general
+        // intersection with the torus second there, so both orders take the same closed
+        // form; the torus is the first surface of its cases, so the UV curves are swapped,
+        // also in a partial output. (The kinds are those of the surfaces as given: making
+        // a NURB keeps the kind.)
+        if matches!(other.kind(), SurfaceKind::Torus(_))
+            && matches!(
+                self.kind(),
+                SurfaceKind::Sphere(_) | SurfaceKind::Cone(_) | SurfaceKind::SurfOfRevolution(_)
+            )
+        {
+            if let SurfaceKind::Torus(t) = other.kind_with_nurb(k)? {
+                let more = torus_special_cases_into(
+                    t,
+                    k,
+                    other,
+                    other_uv_domain,
+                    self,
+                    uv_domain,
+                    approx_tol_3d,
+                    out,
+                );
+                core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
+                if more? {
+                    base_global_surface_intersect_into(
+                        k,
+                        self,
+                        uv_domain,
+                        other,
+                        other_uv_domain,
+                        use_surface_edges,
+                        approx_tol_3d,
+                        ang_tol_rad,
+                        context,
+                        out,
+                    )?;
+                }
+                return Ok(());
+            }
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,
@@ -4362,65 +4408,21 @@ impl Surface {
                 },
                 out,
             ),
-            // the inherited SmSurfOfRevolution::GlobalSurfaceIntersect: the plane
-            // special case runs the inherited IntersectWithPlane with the torus's iso
-            // circles, the sphere, cone and surface of revolution cases the inherited
-            // intersections with the torus's domain conversion; each then takes the
-            // general intersection when it needs more (which resets the output arrays
-            // first: SmSurfaceIntersector::DoIntersection); any other surface takes the
-            // general intersection
+            // the inherited SmSurfOfRevolution::GlobalSurfaceIntersect
+            // (`torus_special_cases_into`); each case then takes the general intersection
+            // when it needs more (which resets the output arrays first:
+            // SmSurfaceIntersector::DoIntersection)
             SurfaceKind::Torus(t) => {
-                // (each special case resets the outputs on entry)
-                *out = SurfaceIntersection::default();
-                // (not upstream, #15049) the generators' contact where both are faces'
-                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                let more = torus_special_cases_into(
+                    t,
                     k,
-                    [Some(self), Some(other)],
-                );
-                // IntersectWithSphere / IntersectWithCone: a planar generator, else
-                // the general intersection
-                let revolved = |other: &dyn Revolved, out: &mut SurfaceIntersection| {
-                    if !t.base().planar_generator {
-                        return Ok(true);
-                    }
-                    intersect_revolved_into(
-                        t.as_ref(),
-                        k,
-                        uv_domain,
-                        other,
-                        other_uv_domain,
-                        approx_tol_3d,
-                        contact,
-                        out,
-                    )
-                };
-                let more = match other.kind_with_nurb(k)? {
-                    // the plane's boxes take its face's tolerance
-                    SurfaceKind::Plane(p) => t.intersect_with_plane_owned_into(
-                        k,
-                        p,
-                        crate::surface::plane::p2::PlaneOwner::of(other)?,
-                        other_uv_domain,
-                        approx_tol_3d,
-                        out,
-                    )?,
-                    SurfaceKind::Sphere(o) => revolved(o.as_ref(), out)?,
-                    SurfaceKind::Cone(o) if o.type_code() == CONE_TYPE => {
-                        revolved(o.as_ref(), out)?
-                    }
-                    // (IntersectWithSurfOfRevolution checks the generator itself)
-                    SurfaceKind::SurfOfRevolution(o) => intersect_revolved_into(
-                        t.as_ref(),
-                        k,
-                        uv_domain,
-                        o.as_ref(),
-                        other_uv_domain,
-                        approx_tol_3d,
-                        contact,
-                        out,
-                    )?,
-                    _ => true,
-                };
+                    self,
+                    uv_domain,
+                    other,
+                    other_uv_domain,
+                    approx_tol_3d,
+                    out,
+                )?;
                 if more {
                     base_global_surface_intersect_into(
                         k,
@@ -5364,6 +5366,78 @@ pub(crate) fn base_global_surface_intersect_in<O: SolutionObject + Copy + Partia
             ang_tol_rad,
         ),
     }
+}
+
+/// The special cases of the torus `t` (held by `this`, over `uv_domain`) against `other`,
+/// into `out`, and whether the general intersection is still needed: the inherited
+/// `SmSurfOfRevolution::GlobalSurfaceIntersect`. The plane case runs the inherited
+/// `IntersectWithPlane` with the torus's iso circles; the sphere, cone, cylinder and
+/// surface of revolution cases the inherited intersections with the torus's domain
+/// conversion; any other surface needs the general intersection. Each case resets `out`
+/// on entry; on an error `out` keeps what it appended before it, as upstream leaves its
+/// output arrays.
+///
+/// Not upstream: a cylinder takes the cone's case (an `SmCylinder` is not `SmCone_TYPE`
+/// there and goes to the general intersection), so a torus and a cylinder about one axis
+/// meet in their exact circles.
+#[allow(clippy::too_many_arguments)]
+fn torus_special_cases_into(
+    t: &Torus,
+    k: &Kernel,
+    this: &Surface,
+    uv_domain: &Extent2d,
+    other: &Surface,
+    other_uv_domain: &Extent2d,
+    approx_tol_3d: Option<f64>,
+    out: &mut SurfaceIntersection,
+) -> Result<bool> {
+    // (each special case resets the outputs on entry)
+    *out = SurfaceIntersection::default();
+    // (not upstream, #15049) the generators' contact where both are faces'
+    let contact =
+        crate::surface::surf_of_revolution::p3::revolved_contact_tol(k, [Some(this), Some(other)]);
+    // IntersectWithSphere / IntersectWithCone: a planar generator, else the general
+    // intersection
+    let revolved = |other: &dyn Revolved, out: &mut SurfaceIntersection| {
+        if !t.base().planar_generator {
+            return Ok(true);
+        }
+        intersect_revolved_into(
+            t,
+            k,
+            uv_domain,
+            other,
+            other_uv_domain,
+            approx_tol_3d,
+            contact,
+            out,
+        )
+    };
+    Ok(match other.kind_with_nurb(k)? {
+        // the plane's boxes take its face's tolerance
+        SurfaceKind::Plane(p) => t.intersect_with_plane_owned_into(
+            k,
+            p,
+            crate::surface::plane::p2::PlaneOwner::of(other)?,
+            other_uv_domain,
+            approx_tol_3d,
+            out,
+        )?,
+        SurfaceKind::Sphere(o) => revolved(o.as_ref(), out)?,
+        SurfaceKind::Cone(o) => revolved(o.as_ref(), out)?,
+        // (IntersectWithSurfOfRevolution checks the generator itself)
+        SurfaceKind::SurfOfRevolution(o) => intersect_revolved_into(
+            t,
+            k,
+            uv_domain,
+            o.as_ref(),
+            other_uv_domain,
+            approx_tol_3d,
+            contact,
+            out,
+        )?,
+        _ => true,
+    })
 }
 
 /// [`base_global_surface_intersect_in`] into `out`: `SmSurfaceIntersector::DoIntersection`
@@ -10004,5 +10078,242 @@ mod swap_definition_tests {
             assert_eq!(events, 0, "{what}: notified a swap that failed");
             assert_eq!(format!("{s:?}"), before, "{what}: changed by a failed swap");
         }
+    }
+}
+
+#[cfg(test)]
+mod order_dependence_tests {
+    use super::*;
+    use crate::curve::curve::CurveKind;
+    use crate::math::det;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{gamma, CPoint};
+    use crate::surface::torus::TorusOptions;
+
+    fn frame(z: f64) -> Axis2Placement {
+        Axis2Placement::new(Point3::new(0.0, 0.0, z), Vec3::X, Vec3::Y)
+    }
+
+    fn sphere(k: &Kernel, radius: f64) -> Surface {
+        Surface::from(Sphere::create_canonical(k, &frame(0.0), radius).unwrap())
+    }
+
+    /// The torus about the z axis through the origin, major radius 10, minor radius 3.
+    fn torus(k: &Kernel) -> Surface {
+        let t = Torus::create_canonical(k, &frame(0.0), 10.0, 3.0, TorusOptions::default(), None)
+            .unwrap();
+        assert!(t.base().planar_generator);
+        Surface::from(t)
+    }
+
+    /// The cylinder of `radius` about the z axis from z = -20 to 20.
+    fn cylinder(k: &Kernel, radius: f64) -> Surface {
+        let mut c = Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, -20.0),
+            Vec3::X,
+            Vec3::Y,
+            radius,
+            0.0,
+            360.0,
+            40.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        let s = Surface::from(c);
+        assert_eq!(s.type_code(), CYLINDER_TYPE);
+        s
+    }
+
+    /// The cone about the z axis whose radius is `10 + z`, from z = -5 to 5.
+    fn cone(k: &Kernel) -> Surface {
+        let mut c = Cone::new_bounded(
+            Point3::new(0.0, 0.0, -5.0),
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            15.0,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        let s = Surface::from(c);
+        assert_eq!(s.type_code(), CONE_TYPE);
+        s
+    }
+
+    /// The surface of revolution of the line x = 12 from z = -5 to 5 about the z axis.
+    fn revolved_line(k: &Kernel) -> Surface {
+        let line = NurbCurve::new(
+            vec![
+                CPoint::new(12.0, 0.0, -5.0, 1.0),
+                CPoint::new(12.0, 0.0, 5.0, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let mut r = SurfOfRevolution::new(
+            k,
+            Curve::from(BSplineCurve::from_nurb(line, 1, false)),
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        assert!(r.planar_generator());
+        r.make_nurb(k).unwrap();
+        Surface::from(r)
+    }
+
+    /// The curves' points at nine parameters each, to compare two results bit for bit.
+    fn points(k: &Kernel, out: &SurfaceIntersection) -> Vec<Vec<Point3>> {
+        out.curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                (0..9)
+                    .map(|i| {
+                        let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 8.0;
+                        c.evaluate_point(k, t).unwrap()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What is wrong with the intersection of `a` and `b` in either order, against circles
+    /// about the z axis, one at each `(z, rho)` of `want` (from the closed form): each a
+    /// whole analytic circle (the special case ran, not the general intersector, whose
+    /// curves are traced B-splines) crossing the surfaces, the same bit for bit in both
+    /// orders.
+    fn circle_failures(
+        k: &Kernel,
+        what: &str,
+        a: &Surface,
+        b: &Surface,
+        want: &[(f64, f64)],
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        let (da, db) = (
+            a.natural_uv_domain_with_nurb(k).unwrap(),
+            b.natural_uv_domain_with_nurb(k).unwrap(),
+        );
+        let ab = a
+            .global_surface_intersect(k, &da, b, &db, [false; 2], None, None)
+            .unwrap();
+        let ba = b
+            .global_surface_intersect(k, &db, a, &da, [false; 2], None, None)
+            .unwrap();
+        // A loose bound, not a derived one: the hand values and the circles' centres, radii
+        // and rational evaluation are each some dozens of rounded operations on coordinates
+        // below 20 (the largest measured distance is 3.6e-15).
+        let bound = gamma(32) * 20.0;
+        for (order, out) in [("first", &ab), ("second", &ba)] {
+            let kinds: Vec<_> = out
+                .curves_3d
+                .iter()
+                .map(|c| matches!(c.kind(), CurveKind::Ellipse(_)))
+                .collect();
+            if kinds != vec![true; want.len()] {
+                failures.push(format!("{what}, {order} order: analytic circles {kinds:?}"));
+                continue;
+            }
+            if out.curve_types != vec![TsectCurveType::Crossing; want.len()] {
+                failures.push(format!("{what}, {order} order: {:?}", out.curve_types));
+            }
+            let mut curves = points(k, out);
+            curves.sort_by(|x, y| x[0].z.total_cmp(&y[0].z));
+            for (curve, &(z, rho)) in curves.iter().zip(want) {
+                // on the circle: each point's height and distance from the axis
+                let off = curve
+                    .iter()
+                    .map(|p| (p.z - z).abs().max((det::hypot(p.x, p.y) - rho).abs()))
+                    .fold(0.0f64, f64::max);
+                eprintln!("{what}, {order} order: circle at z {z}, rho {rho}: off {off:e}");
+                // the whole circle: closed, and no half turn between two of its points
+                let (first, last) = (curve[0], curve[curve.len() - 1]);
+                let mut angles: Vec<f64> = curve.iter().map(|p| det::atan2(p.y, p.x)).collect();
+                angles.sort_by(f64::total_cmp);
+                let gap = angles.windows(2).map(|w| w[1] - w[0]).fold(
+                    angles[0] + 2.0 * core::f64::consts::PI - angles[angles.len() - 1],
+                    f64::max,
+                );
+                if off > bound || first.distance(last) > bound || gap >= core::f64::consts::PI {
+                    failures.push(format!(
+                        "{what}, {order} order: circle at z {z}, rho {rho}: {off:e} off it,                          ends {:e} apart, largest angle gap {gap}",
+                        first.distance(last)
+                    ));
+                }
+            }
+        }
+        // the same special case in either order: the same curves bit for bit (the UV curves
+        // of these cases are all `None`, so their swap is not seen here)
+        if points(k, &ab) != points(k, &ba)
+            || ab.curve_types != ba.curve_types
+            || ab.deviations != ba.deviations
+        {
+            failures.push(format!("{what}: the two orders differ"));
+        }
+        failures
+    }
+
+    /// A sphere or torus meets a cylinder, a cone, a sphere or a surface of revolution
+    /// about its own axis in the same exact circles whichever surface comes first.
+    #[test]
+    fn coaxial_sphere_and_torus_pairs_take_their_closed_form_in_either_order() {
+        let k = Kernel::default();
+        let mut failures = Vec::new();
+        // sphere x² + y² + z² = 25 and cylinder rho = 3: z = ±4
+        failures.extend(circle_failures(
+            &k,
+            "sphere/cylinder",
+            &sphere(&k, 5.0),
+            &cylinder(&k, 3.0),
+            &[(-4.0, 3.0), (4.0, 3.0)],
+        ));
+        // the torus (rho - 10)² + z² = 9 and rho = 12: z = ±√5
+        let s5 = 5.0f64.sqrt();
+        failures.extend(circle_failures(
+            &k,
+            "torus/cylinder",
+            &torus(&k),
+            &cylinder(&k, 12.0),
+            &[(-s5, 12.0), (s5, 12.0)],
+        ));
+        failures.extend(circle_failures(
+            &k,
+            "torus/revolved line",
+            &torus(&k),
+            &revolved_line(&k),
+            &[(-s5, 12.0), (s5, 12.0)],
+        ));
+        // and rho = 10 + z: 2z² = 9
+        let h = 3.0 / 2.0f64.sqrt();
+        failures.extend(circle_failures(
+            &k,
+            "torus/cone",
+            &torus(&k),
+            &cone(&k),
+            &[(-h, 10.0 - h), (h, 10.0 + h)],
+        ));
+        // and rho² + z² = 100: 20 rho - 100 = 91
+        let rho: f64 = 191.0 / 20.0;
+        let z = (100.0 - rho * rho).sqrt();
+        failures.extend(circle_failures(
+            &k,
+            "torus/sphere",
+            &torus(&k),
+            &sphere(&k, 10.0),
+            &[(-z, rho), (z, rho)],
+        ));
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

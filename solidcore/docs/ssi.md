@@ -321,7 +321,11 @@ closed form against the other surface's kind first (§5). Each special case retu
 flag saying whether the general intersector is still needed; when it is, `do_intersection`
 (`intersect/surface_intersector/p5.rs`) runs on an `AdvSurfaceIntersector` and resets the output
 first. Any other pair, and every B-spline, procedural blend, offset or curve-bounded surface, goes
-straight to the general intersector.
+straight to the general intersector. A sphere takes a cylinder as it takes a cone, and a sphere,
+cone, cylinder or surface of revolution first runs the torus's cases against a torus second, with
+the UV curves swapped, so these pairs take the same closed form in either order. A surface of
+revolution or an extrusion first still sends a cylinder to the general intersector, though the
+cylinder first takes the closed form.
 
 `ssi` orders its own paths the same way (`ssi/src/intersect.rs`, `intersect_bodies`): closed forms for
 a plane against a sphere or a degree-2 form (`quadric`), then the field path where one side has an
@@ -509,11 +513,12 @@ These are the pairs solved in closed form; every other pair is traced.
 | plane/cone | parabola or hyperbola section, or parallel off-axis | the general intersector | same |
 | plane/sphere | \|d\| < R | a circle; a touch point at \|d\| = R | `surface/sphere.rs`, `Sphere::intersect_with_plane` |
 | sphere/sphere | not concentric | a circle, or a touch point | `Sphere::intersect_with_sphere` |
-| sphere/cone | centre on the cone's axis | circles of the cone | `Sphere::intersect_with_cone` |
+| sphere/cone or cylinder | centre on the axis | circles of the cone or cylinder | `Sphere::intersect_with_cone` |
 | cylinder/cylinder | parallel axes | lines from the circle/circle section | `Cone::intersect_with_cone` |
 | cylinder/cylinder | equal radii, axes meeting | two ellipses | same |
 | plane/surface of revolution | plane through the axis; square to it | the generator rotated in; circles | `surface/surf_of_revolution/p1.rs` |
 | revolution/revolution | same axis, planar generators | circles at the generators' intersections | `surf_of_revolution/p3.rs` |
+| torus/sphere, cone, cylinder or revolution | same axis, planar generators | circles at the generators' intersections, in either order | `surface/surface/p2.rs`, `torus_special_cases_into` |
 | plane/extrusion, extrusion/extrusion or cylinder | extrusion parallel to the plane or to the other | lines along the extrusion | `surface/surf_of_extrusion/p2.rs` |
 | plane/torus | square to the axis; through it | circles; meridian circles | `surface/torus.rs` (plane side: `surface/plane/p2.rs`, WR-721) |
 
