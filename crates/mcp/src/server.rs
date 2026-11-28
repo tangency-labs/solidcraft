@@ -23,7 +23,7 @@ use crate::backend::{Backend, DesignState};
 use crate::options::Options;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::tools::call_tool_with;
-use crate::tools::{CallContext, call_tool_with_context, tool_definitions_with};
+use crate::tools::{CORE_TOOLS, CallContext, call_tool_with_context, tool_definitions_with};
 
 /// Maximum number of resource URIs a single MCP session may subscribe to simultaneously.
 pub const MAX_RESOURCE_SUBSCRIPTIONS: usize = 256;
@@ -129,6 +129,38 @@ Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` 
 The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it.\n\n\
 A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
+/// [`INSTRUCTIONS`] for the core tool listing ([`Options::core_tools`]): the same guidance, with
+/// commands found by `find_commands` and run by `call_command`, and only tools the listing has.
+/// `tests::core_instructions_name_only_listed_tools` checks the names.
+const CORE_INSTRUCTIONS: &str = "SolidCraft is an independent parametric 3D CAD app, and these tools drive it: when its window is \
+open the user watches the model appear, otherwise a headless session builds it. When asked to design or build a part, do it \
+with these tools straight away. Units are millimetres and degrees in expressions, Z is up.\n\n\
+Start: for anything beyond one primitive, call `skill_reference {\"skill\":\"solidcraft-modeling\"}` first (command shapes, \
+ids, plane axes, worked examples and the known traps of this version; `file: \"SKILL.md\"` has the workflow). Then \
+`inspect_design {\"measure\":false,\"sketches\":false}` to see what is already there.\n\n\
+Plan: work the numbers out first (the parameters, the expected volume and bounding box after each stage, the world point you \
+will use for each edge or face pick). Then build in a few `batch` calls (all-or-nothing; the reply names the failing step; \
+`save`, `measure` and `set_parameter` can be steps). Use `verbose: false`. Name every feature. `find_commands {\"query\": words}` \
+gives the matching command ids with their parameters; `call_command {\"id\", \"params\"}` runs one, checked against its schema first.\n\n\
+Routes: a plate, block, boss, standoff or hole is cheapest as a primitive with expression fields (`solid.box`, `solid.cylinder`, \
+`solid.hole`, `solid.fillet`, `solid.shell`, patterns and mirror), no sketch. Sketch when the profile is not a box or a circle. \
+Fillet outside edges before shelling, build inside features after the shell, then the holes and cuts through walls. Give a blind \
+hole or a hole through one wall of a hollow part its depth.\n\n\
+Parametric: a size or position that must follow a parameter is an expression in a feature field (`\"L/2 - 10\"`), a sketch \
+dimension to `\"origin\"` or an edge, or a pattern spacing; a plain number never follows a parameter. Every sketch must end at \
+dof 0 (`sketch.solve` reports it). A pick (`edges: [[x,y,z]]`, `faces: [[x,y,z]]`) is a number that snaps to the nearest edge \
+or face and follows it when parameters change.\n\n\
+Verify: `measure {}` after each stage and compare volume and bbox with your numbers; `ok: true` alone proves nothing: a cut \
+that leaves the volume unchanged has missed, a join that adds a body did not touch. Positions of holes and bosses come from \
+`body_topology` (cylinder origin, axis and radius), not from the volume or the centre of mass of a symmetric part. To check that the design follows its parameters, change them in one `batch` with \
+`coalesce_parameters: true` (one rebuild), `measure`, then set them back the same way before saving.\n\n\
+Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
+(`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
+The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it.\n\n\
+A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.\n\n\
+These are the core tools: every other SolidCraft action is a command, found with `find_commands` and run with `call_command` or \
+as a `batch` step.";
+
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
 /// (`doc.open`, `file.save`, `file.save_as`) through `execute` or as `batch` steps. Each reads or
 /// writes the file it names through the agent's scope.
@@ -137,6 +169,7 @@ fn design_files(name: &str, args: &Value) -> Vec<String> {
         let params = match command {
             "open" | "save" | "doc.open" | "file.save" | "file.save_as" => params,
             "execute" if matches!(params["command"].as_str(), Some("doc.open" | "file.save" | "file.save_as")) => &params["params"],
+            "call_command" if matches!(params["id"].as_str(), Some("doc.open" | "file.save" | "file.save_as")) => &params["params"],
             _ => return None,
         };
         params["path"].as_str().map(str::to_owned)
@@ -408,12 +441,16 @@ pub(crate) fn structure(result: &mut Value) {
 
 impl Tools for Agent {
     fn instructions(&self) -> String {
-        format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
+        let instructions = if self.options.core_tools { CORE_INSTRUCTIONS } else { INSTRUCTIONS };
+        format!("{instructions} Backend: {}.", self.backend.describe())
     }
 
     fn list(&mut self) -> Vec<Value> {
         self.listed = self.options();
         let mut tools = tool_definitions_with(self.listed);
+        if self.listed.core_tools {
+            tools.retain(|t| t["name"].as_str().is_some_and(|n| CORE_TOOLS.contains(&n)));
+        }
         // Every installed, enabled plugin's entries, read afresh: a plugin turned off or removed
         // since the last listing is gone from this one.
         tools.extend(crate::plugin_tools::definitions(self.backend.as_mut()));

@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod find;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod http;
 mod mesh_warnings;
@@ -30,6 +31,8 @@ pub use backend::DesignStructure;
 pub use backend::Headless;
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::Remote;
+pub use options::ALL_TOOLS_ENV;
+pub use options::ALL_TOOLS_FLAG;
 pub use options::COMPACT_ENV;
 pub use options::COMPACT_FLAG;
 pub use options::Options;
@@ -39,6 +42,7 @@ pub use server::NotificationSink;
 pub use server::Server;
 pub use solidcraft_mcp_server::PROTOCOL_VERSION;
 pub use solidcraft_mcp_server::SUPPORTED_VERSIONS;
+pub use tools::CORE_TOOLS;
 pub use tools::CallContext;
 pub use tools::call_tool;
 pub use tools::call_tool_with;

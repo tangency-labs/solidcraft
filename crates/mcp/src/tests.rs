@@ -6742,6 +6742,89 @@ fn structured_results_keep_notes_and_existing_keys() {
     assert_eq!(image["structuredContent"], json!({"result": {"width": 4}}), "an image's text block is its reply");
 }
 
+fn core_server() -> Server {
+    Server::new(Box::new(Headless::default())).with_options(crate::Options { core_tools: true, ..Default::default() })
+}
+
+/// The core listing has the command search and call pair and the session tools, nothing else;
+/// every other tool still answers by name, and the full listing has the pair too.
+#[test]
+fn core_listing_is_short_and_reaches_every_tool() {
+    let mut s = core_server();
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    assert_eq!(names, crate::CORE_TOOLS, "in the order the full list has them");
+    let all = tool_definitions();
+    let size = |t: &[Value]| serde_json::to_string(t).unwrap().len();
+    assert!(size(tools) * 3 < size(&all), "core {} bytes, all {}", size(tools), size(&all));
+    for name in crate::CORE_TOOLS {
+        assert!(all.iter().any(|t| t["name"] == *name), "`{name}` is in the full listing too");
+    }
+    // A tool left out of the listing answers as before.
+    tool(&mut s, "new_design", json!({}));
+    assert!(tool(&mut s, "list_commands", json!({"filter": "solid.box", "compact": true})).as_array().is_some_and(|c| !c.is_empty()));
+
+    let init = call(&mut s, 2, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}}));
+    let text = init["result"]["instructions"].as_str().unwrap();
+    assert!(text.contains("find_commands") && !text.contains("list_commands"), "{text}");
+    let init = call(&mut server(), 2, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}}));
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("list_commands"), "the full listing keeps its instructions");
+}
+
+/// The core instructions name only tools the core listing has (or batch steps), and real commands.
+#[test]
+fn core_instructions_name_only_listed_tools() {
+    let mut s = core_server();
+    let init = call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}}));
+    let text = init["result"]["instructions"].as_str().unwrap().to_owned();
+    let ident = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.');
+    let named: Vec<&str> =
+        text.split('`').skip(1).step_by(2).map(|span| span.split_once(" {").map_or(span, |(head, _)| head)).filter(|w| ident(w)).collect();
+    for must in ["find_commands", "call_command", "batch", "measure", "skill_reference", "solid.box"] {
+        assert!(named.contains(&must), "{named:?}");
+    }
+    // `save` and `set_parameter` are named as batch steps, which they can be.
+    for name in named {
+        let known = if name.contains('.') {
+            solidcraft_engine::find_command(name).is_some()
+        } else {
+            crate::CORE_TOOLS.contains(&name) || ["save", "set_parameter"].contains(&name)
+        };
+        assert!(known, "the core instructions name `{name}`, which the core listing doesn't have");
+    }
+}
+
+/// `call_command` runs a command once its params fit the schema, refuses them naming the field
+/// otherwise (nothing runs), and works as a batch step; `find_commands` finds what it runs.
+#[test]
+fn call_command_checks_params_then_runs() {
+    let mut s = core_server();
+    let found = tool(&mut s, "find_commands", json!({"query": "box", "limit": 3}));
+    assert_eq!(found["matches"][0]["id"], "solid.box", "{found}");
+    assert!(found["matches"][0]["input"].as_str().unwrap().contains("length: LengthExpr"), "{found}");
+
+    let made = tool(&mut s, "call_command", json!({"id": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    assert_eq!(made["created_bodies"], json!(["Body1"]), "{made}");
+    let typo = raw_tool(&mut s, "call_command", json!({"id": "solid.box", "params": {"lenght": 10, "width": 20, "height": 30}}));
+    assert_eq!(typo["result"]["isError"], true, "{typo}");
+    let why = typo["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(why.contains("lenght") && why.contains("find_commands"), "{why}");
+    let unknown = raw_tool(&mut s, "call_command", json!({"id": "solid.boxx", "params": {}}));
+    assert_eq!(unknown["result"]["isError"], true, "{unknown}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the refused calls ran nothing");
+
+    let stepped = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "call_command", "params": {"id": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0]}}}]}),
+    );
+    assert!(stepped["error"].is_null(), "{stepped}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    let refused = raw_tool(&mut s, "batch", json!({"commands": [{"command": "find_commands", "params": {"query": "box"}}]}));
+    assert!(refused.to_string().contains("call it on its own"), "{refused}");
+}
+
 #[test]
 fn initialize_advertises_resource_subscribe_and_list_changed_capabilities() {
     let mut s = server();
