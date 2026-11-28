@@ -281,6 +281,20 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
         chords: &[],
     },
+    // Public navigation documentation; no product code or assets are used.
+    // https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm
+    NavPreset {
+        id: "right-drag-orbit",
+        label: "Right-drag orbit",
+        help: "Right drag orbits; middle drag or Ctrl/Cmd+right drag pans; wheel zooms",
+        reverse_zoom: false,
+        reverse_drag_zoom: false,
+        middle_double_click: None,
+        // Restore orbit even when the previous mapping left the right button to its menu.
+        right_drag_orbits: Some(true),
+        bindings: &[bind(Right, NavKeys::CTRL, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
+        chords: &[],
+    },
     NavPreset {
         id: "solidworks",
         label: "SolidWorks",
@@ -455,13 +469,18 @@ impl NavPreset {
     pub(crate) fn translated_label(&self) -> &str {
         match self.id {
             "creo" => solidcraft_ui_text::tr("nav.creo.label"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.label"),
             TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
             _ => solidcraft_ui_text::tr_label(self.label),
         }
     }
 
     pub(crate) fn translated_help(&self) -> &str {
-        if self.id == "creo" { solidcraft_ui_text::tr("nav.creo.help") } else { solidcraft_ui_text::tr_label(self.help) }
+        match self.id {
+            "creo" => solidcraft_ui_text::tr("nav.creo.help"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.help"),
+            _ => solidcraft_ui_text::tr_label(self.help),
+        }
     }
 }
 
@@ -1488,6 +1507,11 @@ impl FreeOrbitKey {
         Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
     }
 
+    /// The Roll key (`roll_key`, #22691), from the same keys (no key for an unknown one).
+    pub fn roll_of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.roll_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
     pub fn parse(id: &str) -> Option<FreeOrbitKey> {
         Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
     }
@@ -1919,7 +1943,8 @@ pub(crate) fn held_panel_layout(app: &SolveApp) -> Option<Option<serde_json::Val
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    theme_picker::row(app, ui);
+    let locked = app.policy.locks("theme");
+    crate::policy::row(ui, locked, |ui| theme_picker::row(app, ui));
 }
 
 fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, action_theme: Option<String>) {
@@ -3346,6 +3371,17 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(serde_json::Value::Bool(true)) => true,
         Some(_) => return Err("`forget_stand_up` must be true".into()),
     };
+    // Importing or following a theme turns it on, which the organization's policy has set.
+    // The saved path written back unchanged is not a change: it starts nothing and is kept.
+    let theme_locked = app.policy.locks("theme");
+    let saved_follow = rest.get("theme_follow").and_then(serde_json::Value::as_str) == Some(app.preferences.theme_follow.as_str());
+    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty()) && !saved_follow;
+    if theme_locked && (rest.contains_key("theme_import") || follows) {
+        return Err("`theme` is set by your organization's policy and cannot be changed here".into());
+    }
+    if theme_locked && saved_follow && !app.policy.locks("theme_follow") {
+        rest.remove("theme_follow");
+    }
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
     let imported = rest
@@ -3393,7 +3429,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") && !follow_locked => {
+        // Picking a theme stops following one; the organization's theme, which no pick changes, does not.
+        None if rest.contains_key("theme") && !follow_locked && !theme_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -3691,6 +3728,10 @@ pub fn import_theme_bytes(app: &mut SolveApp, bytes: Vec<u8>) {
 }
 
 pub fn import_theme(app: &mut SolveApp, v: &serde_json::Value) -> Result<String, String> {
+    // Importing turns the theme on, which the organization's policy has set.
+    if app.policy.locks("theme") {
+        return Err(solidcraft_ui_text::tr("policy.set_by_organization").to_string());
+    }
     let theme = match v {
         serde_json::Value::String(text) => crate::theme_files::parse(text)?,
         other => crate::theme_files::from_value(other)?,
@@ -3726,7 +3767,9 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 }
 
 fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
-    followed_theme(&app.preferences, &app.prefs_window.follow).or_else(|| {
+    // A theme the organization's policy sets wins over a followed file.
+    let followed = (!app.policy.locks("theme")).then(|| followed_theme(&app.preferences, &app.prefs_window.follow)).flatten();
+    followed.or_else(|| {
         crate::theme_files::find(
             theme_picker::active_id(&app.preferences, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
             &app.preferences.custom_themes,
@@ -4433,6 +4476,9 @@ fn prepare_preferences(
         return Err("`dimension_colour` must be null or three numbers 0…255".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    if !solidcraft_engine::doc::weld::SYMBOL_STANDARDS.contains(&new.weld_symbol_standard.as_str()) {
+        return Err("unknown weld_symbol_standard".into());
+    }
     new.retain_legacy_panel_fields(base);
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
@@ -4620,6 +4666,12 @@ fn prepare_preferences(
     }
     if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
         return Err("`free_orbit_key` must be none, alt or ctrl".into());
+    }
+    // The same key as `free_orbit_key` is allowed here, so a profile that sets the two one at a
+    // time never trips over the other's current value; the free-orbit key then wins and the
+    // Roll key does nothing (`decide_orbit_roll`), and Preferences greys the clash out.
+    if FreeOrbitKey::parse(&new.roll_key).is_none() {
+        return Err("`roll_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
@@ -13018,6 +13070,41 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
         set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+    }
+
+    #[test]
+    fn right_drag_orbit_picker_enables_orbit_and_persists_only_after_apply() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        choose_nav_preset(&mut h.app.preferences, nav_preset("solidworks"));
+        assert!(!h.app.preferences.right_drag_orbits);
+        let before = h.app.preferences.clone();
+        for apply in [false, true] {
+            h.call("ui.prefs", json!({"open":"Navigation"}));
+            scroll_to_and_click(&mut h, "prefs:nav");
+            h.step(&json!({"click":{"handle":"dialog:list:right-drag-orbit"}})).unwrap();
+            assert_eq!(h.app.preferences.nav, "right-drag-orbit");
+            assert!(h.app.preferences.right_drag_orbits);
+            assert!(!h.app.preferences.zoom_reverse);
+            assert_eq!(h.app.preferences.free_orbit, before.free_orbit, "orbit style remains a separate preference");
+            if apply {
+                h.call("ui.prefs", json!({"button":"apply"}));
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            if !apply {
+                assert_eq!(h.app.preferences, before);
+            }
+        }
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(restored.preferences.nav, "right-drag-orbit");
+        assert!(restored.preferences.right_drag_orbits);
+        assert_eq!(nav_mode(&restored, NavButton::Right, Modifiers::NONE), Some(NavMode::Orbit));
+        for mods in [Modifiers::CTRL, Modifiers::COMMAND] {
+            assert_eq!(nav_mode(&restored, NavButton::Right, mods), Some(NavMode::Pan));
+        }
+        assert_eq!(nav_mode(&restored, NavButton::Middle, Modifiers::NONE), Some(NavMode::Pan));
+        assert_eq!(nav_mode(&restored, NavButton::Left, Modifiers::NONE), None);
     }
 
     #[test]

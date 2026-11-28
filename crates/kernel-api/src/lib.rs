@@ -35,6 +35,7 @@ pub mod mesh;
 pub mod modelling;
 pub mod planar;
 pub mod points;
+pub mod profiles;
 pub mod projection;
 pub mod query;
 pub mod runtime;
@@ -54,8 +55,9 @@ pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 pub use planar::{Planar, PlanarRefused};
 pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
+pub use profiles::{ProfileCurve, ProfileRefused, Profiles};
 pub use projection::{ProjectionRefused, Projections};
-pub use query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use query::{FaceHit, MembersClosest, OutlineStretch, Queries, QueryRefused, SurfacePoint};
 pub use runtime::{ErrorClass, FailureCode, Runtime};
 pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
 pub use shaft_spline::ShaftSplines;
@@ -144,6 +146,9 @@ pub enum OpKind {
     Tessellate,
     /// The kernel's runtime: stopping its work, the code of its last failed call ([`Runtime`]).
     Runtime,
+    /// Bodies from profiles of curves in space: revolved, extruded, planar sheets, balls
+    /// ([`Profiles`]).
+    Profiles,
 }
 
 impl OpKind {
@@ -180,6 +185,7 @@ impl OpKind {
         OpKind::Sections,
         OpKind::Tessellate,
         OpKind::Runtime,
+        OpKind::Profiles,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -216,6 +222,7 @@ impl OpKind {
             OpKind::Sections => "sections",
             OpKind::Tessellate => "tessellate",
             OpKind::Runtime => "runtime",
+            OpKind::Profiles => "profiles",
         }
     }
 

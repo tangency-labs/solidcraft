@@ -2814,7 +2814,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         let notes: Vec<String> =
             reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
         app.plugin_menu.dialogs.remove(at);
-        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", crate::display_user_path(&path))]);
         for note in notes {
             done = std::format!("{done} · {note}");
         }
