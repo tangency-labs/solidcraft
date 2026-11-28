@@ -160,12 +160,15 @@ pub use sheet_surface_features::{CornerJoinKind, CornerJoinParams, SheetEdgeName
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_edge;
 pub mod weld_fusion;
 pub mod weld_groove;
 pub mod weld_projection;
 pub mod weld_seam;
 pub mod weld_spot;
 pub mod weld_stake;
+pub mod weld_stud;
+pub mod weld_surfacing;
 
 pub use assembly::BomType;
 pub use assembly::ExpressedAt;
