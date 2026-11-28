@@ -536,6 +536,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             ribbon_groups: Vec::new(),
+            panel_entries: Default::default(),
             images: Default::default(),
             declarations: Default::default(),
             swatches: Default::default(),

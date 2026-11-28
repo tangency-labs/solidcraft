@@ -2328,6 +2328,7 @@ mod tests {
                 entries: vec![entry],
                 declarations: Default::default(),
                 ribbon_groups: Vec::new(),
+                panel_entries: Default::default(),
                 images: Default::default(),
                 swatches: Default::default(),
                 shaders: Vec::new(),

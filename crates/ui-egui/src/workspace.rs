@@ -1458,6 +1458,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: runtime.entries,
+            panel_entries: Default::default(),
             ribbon_groups: Vec::new(),
             images: Default::default(),
             declarations: runtime.ui.unwrap(),

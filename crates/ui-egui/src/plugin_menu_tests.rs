@@ -2148,6 +2148,7 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         groups: BTreeSet::new(),
         entries,
         ribbon_groups: Vec::new(),
+        panel_entries: Default::default(),
         images: Default::default(),
         declarations: Default::default(),
         swatches: Default::default(),
@@ -2227,6 +2228,74 @@ fn multiple_entries_without_ribbon_groups_keep_the_original_buttons() {
     assert!(buttons.iter().all(|b| b.icon == "prefs_plugins"));
     choose_ribbon(&mut app, &buttons[1].id);
     assert_eq!(app.plugin_menu.dialog().unwrap().entry, "bevel", "the original button still opens its entry directly");
+}
+
+/// A panel plugin with a docked panel whose buttons, form, list and table run helper entries.
+fn panel_bins() -> Listed {
+    let mut plugin = listed(
+        "bins",
+        vec![
+            entry("bin", "read", json!([{"kind":"menu","name":"Bin"}])),
+            entry("panel", "read", json!([{"kind":"ribbon","name":"Model"}])),
+            entry("refresh", "read", json!([])),
+            entry("quick", "read", json!([])),
+            entry("settings-change", "read", json!([])),
+            entry("pick", "read", json!([])),
+            entry("row-edit", "read", json!([])),
+            entry("inspect", "read", json!([])),
+        ],
+    );
+    let ui: solidcraft_engine::plugin::ui::Declarations = serde_json::from_value(json!({
+        "ui_version": 1,
+        "panels": [{
+            "id": "bins", "title": "Bins", "zones": ["right"],
+            "layout": {"root": 0, "nodes": [
+                {"widget": {"group": [1, 2, 3, 4, 5]}},
+                {"widget": {"button": {"label": "Refresh", "icon": null, "entry": "refresh"}}},
+                {"widget": {"toolbar": [
+                    {"label": "Quick", "icon": null, "entry": "quick"},
+                    {"label": "Bin", "icon": null, "entry": "bin"},
+                    {"label": "Panel", "icon": null, "entry": "panel"}
+                ]}},
+                {"widget": {"form": {"bind": "/settings", "fields": [
+                    {"key": "size", "label": "Size", "kind": "number", "choices": [], "on_change": "settings-change"}
+                ]}}},
+                {"widget": {"item-list": {"bind": "/bins", "on_select": "pick"}}},
+                {"widget": {"table": {"bind": "/rows", "row_id": "id", "columns": [], "select": "none", "on_select": null, "on_edit": "row-edit"}}}
+            ]}
+        }],
+        "workspaces": []
+    }))
+    .unwrap();
+    plugin.panel_entries = crate::plugins::panel_entries(&ui);
+    plugin
+}
+
+#[test]
+fn entries_only_a_docked_panel_runs_stay_out_of_the_plugins_group_and_menu() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![panel_bins()];
+    assert_eq!(
+        app.plugin_menu.listed[0].panel_entries.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["bin", "panel", "pick", "quick", "refresh", "row-edit", "settings-change"],
+        "buttons, toolbar items, form changes, list picks and table edits name panel entries"
+    );
+    let buttons = ribbon_buttons(&app);
+    assert_eq!(
+        buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+        ["plugin_entry:bins:bin", "plugin_entry:bins:panel", "plugin_entry:bins:inspect"],
+        "panel helpers leave the Plugins group; entries with a slot or no panel use stay"
+    );
+    let Some(menu) = rows(&app).pop().map(|row| row.children).filter(|children| !children.is_empty()) else { panic!("the plugin keeps its submenu") };
+    let labels: Vec<_> = menu.iter().map(|i| (i.id.as_str(), i.label.as_str())).collect();
+    assert_eq!(labels, [("entry:0:0", "Bin…"), ("entry:0:1", "panel…"), ("entry:0:7", "inspect…")], "the menu keeps each entry's index");
+    app.toolbar_custom.load(&json!({"version":4,"panels":{"DESIGN/MODEL/CREATE":["bins.refresh"]}}));
+    assert!(ribbon_buttons(&app).iter().any(|b| b.id == "plugin_entry:bins:refresh"), "a saved individual pin keeps its button");
+    app.toolbar_custom.panels.clear();
+    let helpers = ["refresh", "quick", "settings-change", "pick", "row-edit"];
+    app.plugin_menu.listed[0].entries.retain(|e| helpers.contains(&e.name.as_str()));
+    assert!(ribbon_buttons(&app).is_empty());
+    assert_eq!(rows(&app).len(), 3, "a plugin with only panel helpers adds no empty submenu");
 }
 
 #[test]
