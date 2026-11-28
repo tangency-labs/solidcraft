@@ -266,12 +266,13 @@ impl Shared {
     /// Adds viewports a pass showed, applies their commands and drops the ones it no longer shows.
     fn apply_viewport_output(&mut self, outputs: egui::OrderedViewportIdMap<ViewportOutput>) {
         let shown: ViewportIdSet = outputs.keys().copied().collect();
+        let ctx = self.ctx.clone();
         for (id, output) in outputs {
             let ViewportOutput { parent, class, builder, viewport_ui_cb, commands, repaint_delay } = output;
             let ids = ViewportIdPair::from_self_and_parent(id, parent);
             let viewport = self.viewport_for(ids, class, builder, viewport_ui_cb);
             match &viewport.window {
-                Some(window) => egui_winit::process_viewport_commands(&self.ctx, &mut viewport.info, commands, window, &mut viewport.actions),
+                Some(window) => egui_winit::process_viewport_commands(&ctx, &mut viewport.info, commands, window, &mut viewport.actions),
                 None => viewport.deferred_commands.extend(commands),
             }
             if repaint_delay < std::time::Duration::MAX {
