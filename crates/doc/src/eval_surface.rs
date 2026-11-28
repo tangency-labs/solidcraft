@@ -1122,6 +1122,14 @@ fn round_seam(
     if seams.is_empty() {
         return Err(DocError::Invalid("Surface Fillet and Chamfer: the two surfaces don't meet along an edge".into()));
     }
+    // One seam is blended at a time: surfaces that meet along more than one edge would leave more
+    // than one round, which `first` and `none` cannot split back into two surfaces and a round, so
+    // every trim refuses them alike, before any of them does its own work.
+    if seams.len() > 1 {
+        return Err(DocError::Invalid(
+            "Surface Fillet and Chamfer: a blend with more than one seam is not supported yet: pick surfaces that meet along one edge".into(),
+        ));
+    }
     let mut picks = Vec::with_capacity(seams.len());
     for k in seams {
         let Some(p) = kernel::edge_middle(&sewn.body, k)? else {

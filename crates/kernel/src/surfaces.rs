@@ -586,15 +586,18 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
 pub fn rounded_parts(body: &Body, a: Vec3, b: Vec3) -> Result<[Body; 3]> {
     body.require_brep("rounded parts")?;
     let r = body.record();
+    let history = body.history().ok_or_else(|| invalid("the body has no history to tell its round by"))?;
+    let rounds: Vec<usize> =
+        history.faces.iter().enumerate().filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. }))).map(|(k, _)| k).collect();
+    if rounds.len() > 1 {
+        return Err(invalid("a blend with more than one seam is not supported yet: pick surfaces that meet along one edge"));
+    }
     if r.faces.len() != 3 {
         return Err(invalid("the body is not two surfaces and a round between them"));
     }
-    let history = body.history().ok_or_else(|| invalid("the body has no history to tell its round by"))?;
-    let round = history
-        .faces
-        .iter()
-        .position(|f| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. })))
-        .ok_or_else(|| invalid("the body has no round"))?;
+    let Some(&round) = rounds.first() else {
+        return Err(invalid("the body has no round"));
+    };
     let (fa, fb) = picks_off_the_rounds(body, a, b, &[round])?;
     Ok([taken(body, r, &[(fa, false)])?, taken(body, r, &[(fb, false)])?, taken(body, r, &[(round, false)])?])
 }

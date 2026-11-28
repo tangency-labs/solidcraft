@@ -1393,6 +1393,48 @@ mod tests {
         assert!((area(&s, "A") - 400.0).abs() < 1e-6 && (area(&s, "B") - 400.0).abs() < 1e-6);
     }
 
+    /// Two half-round walls (radius 5, z -8..8): A round the z axis, arched up through (0, 5); B
+    /// round (0, 6), arched down through (0, 1). The circles cross at (±4, 3), so the kept caps
+    /// (A's top, B's bottom) meet along two lines: a blend with two seams is refused alike in
+    /// every trim mode, with a message that names the limit, and the design is unchanged. Two
+    /// sheets meeting along one edge still blend in every mode.
+    #[test]
+    fn surface_fillet_refuses_two_seams_alike_in_every_trim_mode() {
+        let wall = |s: &mut Session, name: &str, start: [f64; 2], end: [f64; 2], through: [f64; 2]| {
+            let sk = format!("{name} sketch");
+            run(s, "sketch.create", json!({"plane": "XY", "name": sk}));
+            let arc = run(s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}))["created"]["curves"][0]
+                .as_str()
+                .unwrap()
+                .to_string();
+            run(s, "sketch.finish", json!({}));
+            run(s, "surface.extrude", json!({"sketch": sk, "curves": [arc], "distance": 16, "direction": "symmetric", "body_name": name}));
+        };
+        let lens = || {
+            let mut s = Session::default();
+            wall(&mut s, "A", [5.0, 0.0], [-5.0, 0.0], [0.0, 5.0]);
+            wall(&mut s, "B", [5.0, 6.0], [-5.0, 6.0], [0.0, 1.0]);
+            s
+        };
+        for trim in ["both", "first", "none"] {
+            let mut s = lens();
+            let before = s.doc.features.len();
+            let p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 1, 0]}, "radius": 0.5, "trim": trim});
+            let err = s.execute("surface.fillet", &p).expect_err(trim).to_string();
+            assert!(err.contains("a blend with more than one seam is not supported yet"), "{trim}: {err}");
+            assert_eq!(s.doc.features.len(), before, "{trim}");
+            let st = s.world_state().unwrap();
+            assert!(st.body("A").is_some() && st.body("B").is_some(), "{trim}");
+        }
+        for trim in ["both", "first", "none"] {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            let p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": trim});
+            s.execute("surface.fillet", &p).unwrap_or_else(|e| panic!("{trim}: {e}"));
+        }
+    }
+
     /// Surface Fillet refuses what it cannot round, without changing the design.
     #[test]
     fn surface_fillet_refuses_what_it_cannot_round() {
