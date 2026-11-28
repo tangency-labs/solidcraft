@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
@@ -103,6 +103,32 @@ Press Pull, Delete Face and Move Face.
 - **Don't use:** dumb solid, frozen feature.
 - **Elsewhere:** base feature, dumb solid, imported body.
 - **For translators:** not a base flange of sheet metal, and not a base sketch.
+
+### bend allowance
+
+The flat length a bend takes in a sheet's flat pattern, measured along the bend's neutral axis.
+
+For bend angle θ, inner radius R, thickness T and K-factor K, it is θ · (R + K·T). A press brake
+chart often gives it for a 90° bend. Compare *bend deduction*.
+
+- **In SolidCraft:** `allowance_mm` in `sheet.export_bend_table`; the `allowance` value of a sheet
+  metal rule's `unfold_method` (Sheet Metal Rules › Unfold › Bend Allowance), with the 90° value
+  in `unfold_value`.
+- **Elsewhere:** BA.
+- **For translators:** a length added for the bend, not a permission or a tolerance.
+
+### bend deduction
+
+How much shorter a sheet's flat blank is than its flange lengths measured to the outside of the
+bend.
+
+At 90° it is 2·(R + T) less the bend allowance, for inner radius R and thickness T. A press brake
+chart often gives it for a 90° bend. Compare *bend allowance*.
+
+- **In SolidCraft:** the `deduction` value of a sheet metal rule's `unfold_method` (Sheet Metal
+  Rules › Unfold › Bend Deduction), with the 90° value in `unfold_value`.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
 
 ### bill of materials
 
@@ -333,6 +359,25 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### dogbone
+
+A round relief, of a router bit's diameter, cut into an inside corner so that a square part seats
+where the bit would leave a round.
+
+A dogbone runs the length of the corner edge. Its normal style is centred on the corner's
+bisector with its circle through the sharp corner; minimal stops a gap short of the corner.
+T-bone: the relief is centred on one wall's line, the longer or the shorter one. At a square
+corner it bites that wall only; at a sharper corner it also bites the other wall.
+
+- **In SolidCraft:** the `solid.dogbone` command; its `diameter`, `style` (`normal`, `minimal`,
+  `t_bone`), `gap`, `side` (`longer`, `shorter`), `max_angle` and `along` parameters; the
+  `dogbone` feature type in a design file.
+- **Don't use:** relief cut, corner relief (sheet metal's word for the cut where two flanges meet),
+  overcut.
+- **Elsewhere:** dog-bone fillet, T-bone, mortise relief.
+- **For translators:** not a fillet or a round (those add material or round an edge off); the
+  relief removes material beyond the corner.
+
 ### end cap
 
 A plate that closes the open end of a frame member, shaped like the member profile's outer outline
@@ -372,6 +417,16 @@ construction plane.
 - **Elsewhere:** feature, operation.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
+
+### finger joint
+
+A connection made by alternating rectangular projections on two parts.
+
+- **In SolidCraft:** `solid.finger_joint`; the `FingerJointFeature` timeline feature and its
+  `bodies`, `count`, `clearance`, `inverted` and `edge_offset` parameters.
+- **Don't use:** dovetail joint.
+- **Elsewhere:** box joint, finger joint.
+- **For translators:** a woodworking connection, not an anatomical joint.
 
 ### folder
 
@@ -422,6 +477,30 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
+
+### keyboard profile
+
+A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
+
+A keyboard profile sits under the user's own keys: a key the user changes always wins, and stays
+when another keyboard profile is chosen. Each one is a file that maps keys to existing commands,
+and it never adds a command. It is an app setting, not part of a design, and a settings profile
+carries the chosen one.
+
+- **In SolidCraft:** Preferences › Shortcuts › Keyboard profile; the `keyboard_profile`
+  preference; the files in `crates/ui-egui/keyboard-profiles/`.
+- **Don't use:** keymap, key scheme, preset (for the set of keys).
+- **Elsewhere:** keyboard profile, keyboard scheme, keymap.
+- **For translators:** a set of keyboard shortcuts, not a settings profile, a sketch profile or a
+  frame profile (see *Words with more than one meaning*, "Profile").
 
 ### lay
 
@@ -763,6 +842,22 @@ to each other keep a quarter, three an eighth. A section has at most six.
 - **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
   feature.
 
+### section stack
+
+A row of parallel planes through a mesh body, each with a sketch of the curves fitted to the
+mesh's section there, and optionally the slabs extruded between them.
+
+The planes run along one plane's normal at a set spacing; a plane that misses the mesh gets no
+sketch. The sketches and slabs are ordinary features in one timeline folder.
+
+- **In SolidCraft:** `mesh.section_stack` (`body`, `plane`, `from`, `to`, `spacing`,
+  `max_sections`, `extrude`, `name`); the Section Stack button under SURFACE › Convert.
+- **Don't use:** slice stack, X-ray (for the command), section sketch.
+- **Elsewhere:** mesh slicing, cross-section stack.
+- **For translators:** "section" is a cut through a mesh body that makes sketch geometry, not
+  a section plane of Section Analysis, which only changes the view; "slabs" are the solid layers
+  extruded between the planes.
+
 ### settings profile
 
 A named set of input and interface preferences that can be switched, exported and imported as
@@ -970,11 +1065,13 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
 | | the cross-section a frame member follows | frame profile | `frame.profile.*` |
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
+| | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
+| | the clearance between two flanges at a sheet corner | *corner gap* | the Gap row in a Flange corner card or the Corner Join dialog |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
-| | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
 | | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
@@ -998,6 +1095,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 

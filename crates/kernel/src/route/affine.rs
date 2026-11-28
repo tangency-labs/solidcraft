@@ -64,6 +64,15 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2], Affin
     }
 }
 
+/// The axes `x` and `y` of a frame whose normal runs along `d`: `y` along `v`'s part square to
+/// `d` and `x = y × unit(d)`, both unit. Refused for numbers not finite, no length, or a `v` whose part
+/// square to `d` is within its own rounding.
+pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.frame_axes(d, v),
+    }
+}
+
 /// A plane's axes with the coordinates smaller than `noise` dropped, each unit again. `None`
 /// when nothing sound is left; the caller keeps its own axes.
 pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
@@ -153,6 +162,17 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 pub fn rect_of_aspect(bl: [f64; 2], br: [f64; 2], top_left: Option<[f64; 2]>, aspect: f64) -> Option<[[f64; 2]; 4]> {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.rect_of_aspect(bl, br, top_left, aspect),
+    }
+}
+
+/// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+/// through `at` along the unit direction `dir`: tilted by the least turn that makes it parallel
+/// to the line, then moved along its normal until it holds the line; a plane that already holds
+/// it comes back unchanged. The new origin and axes; `None` for a number not finite or a line
+/// square to the plane.
+pub fn plane_onto_line(origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.plane_onto_line(origin, x, y, at, dir),
     }
 }
 

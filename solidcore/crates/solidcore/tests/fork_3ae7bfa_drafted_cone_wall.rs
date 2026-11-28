@@ -17,8 +17,8 @@
 //!   V = (40, 10 tan 5, 10) where the front top edge meets the concave arc has three edges.
 //!
 //! Two more cases of 3ae7bfa (#2497): a draft that leans off its profile's plane builds, its
-//! arc's wall the ruled B-spline on its oblique cone; and with `keep_exact_pcurves` a seam
-//! that crosses a span end of its cone keeps its pcurve as built, cut at the crossing.
+//! arc's wall the ruled B-spline on its oblique cone; and a seam that crosses a span end of
+//! its cone keeps its pcurve as built, cut at the crossing (WR-722).
 //!
 //! Volumes in closed form (the capi test's): each wall leans in by t tan 5 at height t, so
 //! the bar's section at height t is the rectangle x in [d, 40], y in [d, 16 - d] and the half
@@ -414,10 +414,9 @@ fn cone_pcurve_gap(k: &Kernel, b: &Brep) -> f64 {
 }
 
 /// A 240 degree segment of R 8 about the origin, from -90 degrees counterclockwise to 150,
-/// closed by its chord, drafted `deg` with `keep_exact_pcurves`.
+/// closed by its chord, drafted `deg`.
 fn segment_240(deg: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.keep_exact_pcurves = true;
     let o = Point3::new(0.0, 0.0, 0.0);
     let x = Vec3::new(0.0, -1.0, 0.0);
     let at = |deg: f64| {
@@ -431,7 +430,7 @@ fn segment_240(deg: f64) -> (Kernel, Brep) {
     (k, b)
 }
 
-/// #2497: with `keep_exact_pcurves`, a seam that crosses a span end of its drafted cone
+/// #2497: a seam that crosses a span end of its drafted cone
 /// keeps its pcurve as built, cut at the crossing.
 ///
 /// The 240 degree segment drafted `deg` degrees: the arc's wall is the cone about Z of

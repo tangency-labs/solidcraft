@@ -11,7 +11,7 @@ use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 use solidcraft_geom::Ring;
 use solidcraft_kernel::CylinderFace;
 
-use super::{Snap, XRef, component_bodies};
+use super::{FacePick, Snap, XRef, component_bodies};
 use crate::history_names::Match;
 use crate::{DocError, Document, IDENTITY, Mat, ModelBody, ModelState, Result, apply_point, apply_vector, mat_inverse};
 
@@ -47,9 +47,16 @@ pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64,
         return Ok(nf);
     }
     // On none of them (the face's body has gone to another component since): wherever the name
-    // is now.
+    // is now. Never silently resolve onto a different linked component's own bodies (e.g. after
+    // single-placement `component.relink` when a face was not matched onto the new source).
     let hit = crate::name_lookup::locate_face(st, name, pick).ok_or_else(|| gone(name))?;
     let body = st.bodies.get(hit.body).ok_or_else(|| gone(name))?;
+    if body.component != component
+        && doc.model_body_component(body) == body.component
+        && doc.links.get(&body.component).is_some_and(|l| l.feature == body.feature)
+    {
+        return Err(gone(name));
+    }
     let Some(offset) = doc.model_body_offset(body).copied() else {
         return Ok(NamedFace { body, face: hit.face, point: hit.point, offset: IDENTITY });
     };
@@ -58,7 +65,58 @@ pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64,
     Ok(NamedFace { body, face, point: apply_point(&offset, at), offset })
 }
 
+/// Capture a between-faces pick on the exact trimmed geometry of this component's bodies.
+/// Unlike the older face-centre picks, a wall must be found and named at creation.
+pub fn between_face_pick(doc: &Document, st: &ModelState, component: u64, pick: Vec3) -> Result<FacePick> {
+    let picked = component_bodies(doc, st, component)
+        .into_iter()
+        .filter_map(|body| {
+            let offset = doc.model_body_offset(body).copied().unwrap_or(IDENTITY);
+            let at = apply_point(&mat_inverse(&offset)?, pick);
+            let tolerance = (body.body.size() * 1e-3).max(1e-3);
+            let (distance, index) = body.body.face_and_dist_at(at, tolerance)?;
+            Some((distance, body, index))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    let no_face =
+        || DocError::Invalid(format!("no face of this part at [{:.3}, {:.3}, {:.3}]; center takes two faces of one part", pick.x, pick.y, pick.z));
+    let (_, body, index) = picked.ok_or_else(no_face)?;
+    let face = crate::naming::face_names(body).get(index).filter(|name| !name.is_empty()).cloned().ok_or_else(no_face)?;
+    Ok(FacePick { pick, face })
+}
+
+/// Resolve a between-faces pick strictly within its component. If several bodies have the
+/// name, the saved pick distinguishes their copies by exact distance to the trimmed face.
+pub(super) fn between_face<'a>(doc: &Document, st: &'a ModelState, component: u64, p: &FacePick) -> Result<NamedFace<'a>> {
+    let mut found = component_bodies(doc, st, component).into_iter().filter(|b| !b.body.is_mesh()).flat_map(|body| {
+        let offset = doc.model_body_offset(body).copied().unwrap_or(IDENTITY);
+        (0..body.body.face_count())
+            .filter_map(move |face| crate::naming::face_has_name(body, face, &p.face).then_some(NamedFace { body, face, point: p.pick, offset }))
+    });
+    let first = found.next().ok_or_else(|| gone(&p.face))?;
+    let Some(second) = found.next() else { return Ok(first) };
+    [first, second]
+        .into_iter()
+        .chain(found)
+        .filter_map(|f| {
+            let local = apply_point(&mat_inverse(&f.offset)?, p.pick);
+            let distance = f.body.body.closest_to_point(&[f.face], &[], local.into()).ok()??.distance;
+            Some((distance, f))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, f)| f)
+        .ok_or_else(|| gone(&p.face))
+}
+
 impl NamedFace<'_> {
+    /// The exact plane of a between-faces wall in component coordinates.
+    pub(super) fn wall_plane(&self, name: &str) -> Result<(Vec3, Vec3)> {
+        let Some(solidcraft_kernel::FaceSurface::Plane { point, normal }) = solidcraft_kernel::face_surface(&self.body.body, self.face) else {
+            return Err(DocError::Invalid(format!("joint origin: face `{name}` is not planar; center takes two planar faces")));
+        };
+        Ok((apply_point(&self.offset, point), apply_vector(&self.offset, *normal)))
+    }
+
     /// A point of the component's coordinates in the body's own.
     fn local(&self, p: Vec3) -> Vec3 {
         if self.offset == IDENTITY {

@@ -1,0 +1,50 @@
+{
+  "en": {
+    "Parent": "Parent",
+    "cmd.component_activate_parent": "Activate Parent",
+    "help.component.activate.parent": "Activates the component one level up from the active one, or the design at the top. Use it when you are done with a part you activated, instead of finding its parent in the Browser.",
+    "ui.heading_active_component": "ACTIVE COMPONENT"
+  },
+  "ar": {
+    "Parent": "الأب",
+    "cmd.component_activate_parent": "تنشيط المكوّن الأب",
+    "help.component.activate.parent": "ينشّط المكوّن الأعلى بمستوى واحد من المكوّن النشط، أو التصميم عند القمة. استخدمه عند الانتهاء من جزء نشّطته، بدلًا من البحث عن أبيه في المستعرض.",
+    "ui.heading_active_component": "المكوّن النشط"
+  },
+  "de": {
+    "Parent": "Übergeordnet",
+    "cmd.component_activate_parent": "Übergeordnete Komponente aktivieren",
+    "help.component.activate.parent": "Aktiviert die Komponente eine Ebene über der aktiven, an der Spitze die Konstruktion. Verwenden Sie es, wenn Sie mit einem aktivierten Teil fertig sind, statt die übergeordnete Komponente im Browser zu suchen.",
+    "ui.heading_active_component": "AKTIVE KOMPONENTE"
+  },
+  "he": {
+    "Parent": "אב",
+    "cmd.component_activate_parent": "הפעלת רכיב האב",
+    "help.component.activate.parent": "מפעיל את הרכיב שרמה אחת מעל הרכיב הפעיל, או את התכן בראש העץ. יש להשתמש בו בסיום העבודה על חלק שהופעל, במקום לחפש את רכיב האב שלו בעץ התכן.",
+    "ui.heading_active_component": "רכיב פעיל"
+  },
+  "ja": {
+    "Parent": "親",
+    "cmd.component_activate_parent": "親をアクティブ化",
+    "help.component.activate.parent": "アクティブなコンポーネントの1つ上のコンポーネント（最上位ではデザイン）をアクティブにします。アクティブにした部品の作業が終わったら、ブラウザで親を探す代わりに使います。",
+    "ui.heading_active_component": "アクティブなコンポーネント"
+  },
+  "ko": {
+    "Parent": "상위",
+    "cmd.component_activate_parent": "상위 구성 요소 활성화",
+    "help.component.activate.parent": "활성 구성 요소의 한 단계 위 구성 요소를 활성화하며, 맨 위에서는 디자인을 활성화합니다. 활성화한 부품의 작업을 마쳤을 때 브라우저에서 상위 구성 요소를 찾는 대신 사용하세요.",
+    "ui.heading_active_component": "활성 구성 요소"
+  },
+  "vi": {
+    "Parent": "Cụm cha",
+    "cmd.component_activate_parent": "Kích hoạt cụm cha",
+    "help.component.activate.parent": "Kích hoạt cụm chi tiết cao hơn cụm đang hoạt động một cấp, hoặc thiết kế khi đã ở trên cùng. Dùng khi bạn đã xong với một chi tiết đã kích hoạt, thay vì tìm cụm cha của nó trong Trình duyệt.",
+    "ui.heading_active_component": "CỤM ĐANG HOẠT ĐỘNG"
+  },
+  "zh": {
+    "Parent": "父级",
+    "cmd.component_activate_parent": "激活父级",
+    "help.component.activate.parent": "激活当前激活组件的上一级组件，在最顶层时激活设计。处理完已激活的零件后使用，无需在浏览器中查找其父级。",
+    "ui.heading_active_component": "激活的组件"
+  }
+}

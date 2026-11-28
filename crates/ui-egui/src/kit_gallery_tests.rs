@@ -11,6 +11,11 @@ use solidcraft_engine::kernel::Continuity;
 use solidcraft_theme::Tokens;
 
 const APP_ELEMENTS: &[Element] = &[
+    element!("navigation_mapping", |ui, _| {
+        let app = crate::test_support::sample_app();
+        let rows = crate::prefs::navigation::mapping_rows(&app);
+        settings_mouse_mapping(ui, &rows, |_| {});
+    }),
     element!("history_icons", |ui, _| history_example(ui, false)),
     element!("history_names", |ui, _| history_example(ui, true)),
     element!("radial_menu", |ui, _| {
@@ -55,6 +60,22 @@ const APP_ELEMENTS: &[Element] = &[
         row(ui, "Gallery", |ui| ui.label(tip));
     }),
 ];
+
+#[test]
+fn navigation_mapping_fixture_uses_the_real_default_rows_and_headerless_columns() {
+    let fixture = APP_ELEMENTS.iter().find(|element| element.name == "navigation_mapping").unwrap();
+    check_elements(std::slice::from_ref(fixture), crate::fonts::test_context);
+    let app = crate::test_support::sample_app();
+    let rows = crate::prefs::navigation::mapping_rows(&app);
+    assert!(rows.len() >= 3);
+    for index in 0..rows.len() {
+        assert!(crate::scenario::rect_of(&format!("dialog:table:mouse_mapping:{index}")).is_some());
+    }
+    for column in ["input", "action"] {
+        assert!(crate::scenario::rect_of(&format!("dialog:column:mouse_mapping:{column}")).is_none());
+        assert!(crate::scenario::rect_of(&format!("dialog:table:mouse_mapping:0:cell:{column}")).is_some());
+    }
+}
 
 #[test]
 fn app_elements_have_geometry_and_stay_in_their_allocation_in_both_themes() {
@@ -508,6 +529,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
             app.session.path = Some(fixture.clone());
             let preview = image::load_from_memory(include_bytes!("../../../assets/samples/exports/0.png")).unwrap().to_rgba8();
             let preview = egui::ColorImage::from_rgba_unmultiplied([preview.width() as usize, preview.height() as usize], preview.as_raw());
+            let preview = crate::ui_kit::PreviewImage { picture: preview, shadow: None };
             crate::home::install(&mut app.home, &ctx, &fixture, Some(preview));
             app.preferences.theme = if dark { "dark" } else { "light" }.into();
             app.ui.dark = dark;

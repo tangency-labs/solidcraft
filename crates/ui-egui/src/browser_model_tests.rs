@@ -928,6 +928,34 @@ fn a_large_assemblys_placements_are_named_beside_the_window() {
     assert!(placement.bodies.iter().any(|b| b.world == placed), "{placed} is named at {path:?}");
 }
 
+/// Building the Browser's body-by-component index uses `Document::model_body_components` (one
+/// pass over features and bodies) and groups every body into its exact owning component.
+#[test]
+fn browser_model_groups_multi_component_bodies_identically() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "RootBox"})).unwrap();
+    h.app.run("component.create", json!({"name": "Alpha", "grounded": false})).unwrap();
+    let alpha = h.app.session.active_component;
+    for k in 0..4 {
+        h.app.run("solid.cylinder", json!({"radius": 2, "height": 6, "base": [k * 10, 0, 0], "body_name": format!("A{k}")})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("component.create", json!({"name": "Beta", "grounded": false})).unwrap();
+    let beta = h.app.session.active_component;
+    for k in 0..3 {
+        h.app.run("solid.cylinder", json!({"radius": 2, "height": 6, "base": [k * 10, 20, 0], "body_name": format!("B{k}")})).unwrap();
+    }
+    let model = super::model::Model::new(&h.app.session);
+    let state = h.app.session.model.state();
+    for (i, body) in state.bodies.iter().enumerate() {
+        let owner = h.app.session.doc.model_body_component(body);
+        assert!(model.bodies.get(&owner).is_some_and(|list| list.contains(&i)), "body {} missing from component {owner}", body.name);
+    }
+    assert_eq!(model.bodies.get(&0).map(Vec::len), Some(1));
+    assert_eq!(model.bodies.get(&alpha).map(Vec::len), Some(4));
+    assert_eq!(model.bodies.get(&beta).map(Vec::len), Some(3));
+}
+
 #[test]
 fn clicking_a_nested_occurrence_in_the_viewport_reveals_its_row_without_opening_it() {
     let mut h = crate::scenario::Harness::new();

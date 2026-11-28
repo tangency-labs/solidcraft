@@ -235,7 +235,7 @@ pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
 
 /// Panel bindings own arrows only while shared chrome has actual keyboard focus.
 /// Every other application-reserved key remains protected for every command.
-fn reserved_for(id: &str, key: &str) -> bool {
+pub(crate) fn reserved_for(id: &str, key: &str) -> bool {
     // Undo and Redo own the undo keys: they are ordinary bindings that can be moved or removed.
     RESERVED.contains(&key)
         && !(matches!(id, "edit.undo" | "edit.redo") && matches!(key, "Ctrl+Z" | "Ctrl+Y" | "Ctrl+Shift+Z"))
@@ -265,7 +265,7 @@ pub(crate) fn panel_shortcuts(app: &SolveApp) -> Vec<(solidcraft_engine::panels:
 /// Read the same chord that recording a key produces, independent of case and modifier order.
 /// The last token is the key; the preceding tokens are modifiers. Keep the historical primary
 /// Ctrl/Cmd alias, explicit Control+Command chords and old physical modifier-key names.
-fn canonical_key(text: &str) -> Option<String> {
+pub(crate) fn canonical_key(text: &str) -> Option<String> {
     chord(text).map(|shortcut| key_name(shortcut.logical_key, shortcut.modifiers))
 }
 
@@ -379,17 +379,36 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
     keys(app, id).into_iter().next()
 }
 
-/// Every key a command runs from now.
+/// Every key a command runs from now: the user's own, else the keyboard profile's, else its
+/// registered keys.
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut)).into_iter().map(str::to_string).collect(),
+        None => base_keys(app, id).into_iter().map(str::to_string).collect(),
     }
 }
 
-/// The keys a command has until the user changes them: its registered shortcut, and for Redo
-/// also Ctrl+Shift+Z (#12902).
-fn default_keys(id: &str, shortcut: Option<&'static str>) -> Vec<&'static str> {
+/// The keys a command has until the user changes them: the chosen keyboard profile's (#15302),
+/// else its registered keys.
+fn base_keys<'a>(app: &'a SolveApp, id: &str) -> Vec<&'a str> {
+    let registered = || default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
+    crate::keyboard_profiles::chosen(app).and_then(|p| p.keys_of(app, id)).unwrap_or_else(registered)
+}
+
+/// The command whose own key (one the user set) is `key`, when it can't share that key with `id`.
+/// A keyboard profile never takes such a key (#15302).
+pub(crate) fn user_key_holder(app: &SolveApp, id: &str, key: &str) -> Option<&'static str> {
+    app.keymap
+        .custom
+        .iter()
+        .filter(|(other, keys)| other.as_str() != id && clash(other, id) && keys.iter().any(|k| k == key))
+        // A saved key can name a command that no longer exists; it holds nothing.
+        .find_map(|(other, _)| solidcraft_engine::find_command(other).map(|c| c.id))
+}
+
+/// The keys a command has with no keyboard profile: its registered shortcut, and for Redo also
+/// Ctrl+Shift+Z (#12902).
+pub(crate) fn default_keys(id: &str, shortcut: Option<&'static str>) -> Vec<&'static str> {
     let mut keys: Vec<&'static str> = shortcut.filter(|k| !k.is_empty()).into_iter().collect();
     if id == "edit.redo" {
         keys.push("Ctrl+Shift+Z");
@@ -411,7 +430,10 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => default_keys(command.id, command.shortcut),
+        None => match crate::keyboard_profiles::chosen(app).and_then(|p| p.keys_of(app, command.id)) {
+            Some(keys) => keys,
+            None => default_keys(command.id, command.shortcut),
+        },
     }
 }
 
@@ -448,7 +470,7 @@ pub(crate) fn scope(id: &str) -> Scope {
 
 /// Whether two commands can't share a key: a sketch tool and a model command can (#4163), each
 /// running where it belongs; anything else can't.
-fn clash(a: &str, b: &str) -> bool {
+pub(crate) fn clash(a: &str, b: &str) -> bool {
     let (x, y) = (scope(a), scope(b));
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
@@ -561,8 +583,12 @@ fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
 
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
 /// its own; then the family's key starts the command it is bound to, and the other key the
-/// variant.
+/// variant. With the shape tools' Sketch Palette option on, the key starts the command the menu
+/// lists it next to, whichever variant was used last (#22247).
 fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
+    if app.preferences.shortcut_starts_listed_tool {
+        return id;
+    }
     let chosen = app.preferences.sketch_variants.resolve(id);
     if chosen != id && effective(app, chosen).is_some() { id } else { chosen }
 }
@@ -631,10 +657,17 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
     Ok(())
 }
 
-/// Keep a command's keys, as a change only when they aren't its default.
+/// Keep a command's keys, as a change only when they aren't the ones it has without the user's
+/// (the keyboard profile's, or its registered keys).
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
-    if keys.iter().map(String::as_str).eq(default) {
+    // Against the profile's whole list, not `base_keys`: that one leaves out keys other commands'
+    // own keys hold now, and a key chosen to match it would be lost when they change.
+    let registered = || default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
+    let stable: Vec<&str> = match crate::keyboard_profiles::chosen(app).and_then(|p| p.base.get(id)) {
+        Some(list) => list.iter().map(String::as_str).collect(),
+        None => registered(),
+    };
+    if keys.iter().map(String::as_str).eq(stable) {
         app.keymap.custom.remove(id);
     } else {
         app.keymap.custom.insert(id.to_string(), keys);
@@ -649,6 +682,65 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
             app.preferences.preview_reselect_modifier = Default::default();
         }
     }
+}
+
+/// The Keyboard profile drop-down (#15302), and the profile's keys that are not applied: keys the
+/// app keeps for itself, and keys one of the user's own keys already holds.
+fn profile_picker(app: &mut SolveApp, ui: &mut egui::Ui) {
+    use crate::keyboard_profiles::{DEFAULT, all, chosen};
+    let standard = app.tr("prefs.keyboard_profile_default");
+    let current = chosen(app).map_or(standard, |p| p.label.as_str());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(app.tr("prefs.keyboard_profile")).backing_on_hover_text(app.tr("prefs.keyboard_profile_tip"));
+        if app.keymap.read_only {
+            ui.label(egui::RichText::new(current).strong());
+            return;
+        }
+        let combo = ui.allocate_ui(egui::vec2(200.0, ui_kit::row_height()), |ui| {
+            ui_kit::dropdown_menu(ui, "keyboard_profile", current, |ui| {
+                for (id, label) in std::iter::once((DEFAULT, standard)).chain(all().iter().map(|p| (p.id, p.label.as_str()))) {
+                    let handle = format!("prefs:keyboard_profile:{id}");
+                    let picked = chosen(app).map_or(DEFAULT, |p| p.id) == id;
+                    let response = ui_kit::list_picker(ui, &handle, label, picked);
+                    if response.clicked() {
+                        app.preferences.keyboard_profile = id.to_string();
+                        ui.close();
+                    }
+                    crate::scenario::publish_handle(&handle, response.rect.center());
+                }
+            })
+        });
+        crate::scenario::publish_handle("prefs:keyboard_profile", combo.inner.rect.center());
+    });
+    let Some(profile) = chosen(app) else { return };
+    let command = |id: &'static str| -> &'static str { solidcraft_engine::find_command(id).map_or(id, |c| app.tr_command(c.id, c.label)) };
+    let lines: Vec<String> = profile
+        .left_out(app)
+        .iter()
+        .map(|left| {
+            let key = crate::ui_kit::chord_label(&left.key);
+            match left.taken_by {
+                None => solidcraft_ui_text::format("prefs.keyboard_profile_reserved", &[("key", &key), ("command", command(left.command))]),
+                Some(other) => solidcraft_ui_text::format(
+                    "prefs.keyboard_profile_taken",
+                    &[("key", &key), ("command", command(left.command)), ("other", command(other))],
+                ),
+            }
+        })
+        .collect();
+    if !lines.is_empty() {
+        ui_kit::text(ui, &lines.join("\n"), ui_kit::Text::Note("keyboard_profile_left_out"));
+    }
+}
+
+/// Where a shortcut row's keys come from, when not from SolidCraft's registered keys: the user, or
+/// the keyboard profile (#15302).
+fn key_source(app: &SolveApp, id: &str) -> Option<String> {
+    if app.keymap.custom.contains_key(id) {
+        return Some(app.tr("keymap.changed_by_you").to_string());
+    }
+    let profile = crate::keyboard_profiles::chosen(app).filter(|p| p.base.contains_key(id))?;
+    Some(solidcraft_ui_text::format("keymap.from_profile", &[("profile", &profile.label)]))
 }
 
 fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
@@ -810,6 +902,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.keymap.read_only {
                 ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
             }
+            profile_picker(app, ui);
             ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
                 .backing_on_hover_text(app.tr("ui.sketch_keys_only_tip"));
             if let Some(chosen) = outcome(app, ui) {
@@ -1014,7 +1107,12 @@ fn shortcut_row(
         .collect();
     let width = ui.available_width().max(0.0);
     let actions_width = if editing { t.control_height * 2.0 + t.space_4 } else { 0.0 };
-    let name_width = ui_kit::ContentWidth::label(ui, label).min(width * 0.45);
+    // Where the keys come from, drawn under the name when that isn't SolidCraft's own keys. The
+    // name column fits it too, so a short name ("Fit") doesn't wrap the note letter by letter.
+    let source = key_source(app, command.id);
+    let source_width =
+        source.as_ref().map_or(0.0, |s| ui.painter().layout_no_wrap(s.clone(), egui::FontId::proportional(t.font_caption), t.text_dim).size().x);
+    let name_width = ui_kit::ContentWidth::label(ui, label).max(source_width).min(width * 0.45);
     let widest = widths.iter().copied().fold(0.0, f32::max);
     let beside = width - name_width - t.space_14 - actions_width - t.space_8 >= widest;
     let controls_width = (width - actions_width - t.space_8 - if beside { name_width + t.space_14 } else { 0.0 }).max(0.0);
@@ -1027,12 +1125,12 @@ fn shortcut_row(
         }
         line_width += if line_width > 0.0 { t.space_8 + next } else { *next };
     }
-    let label_galley = ui.painter().layout(
-        label.to_owned(),
-        egui::FontId::proportional(t.font_label),
-        t.form_ink,
-        if beside { name_width.max(1.0) } else { width.max(1.0) },
-    );
+    let mut name_text = egui::text::LayoutJob::simple(label.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink, 0.0);
+    if let Some(source) = source {
+        name_text.append(&format!("\n{source}"), 0.0, egui::TextFormat::simple(egui::FontId::proportional(t.font_caption), t.text_dim));
+    }
+    name_text.wrap.max_width = if beside { name_width.max(1.0) } else { width.max(1.0) };
+    let label_galley = ui.painter().layout_job(name_text);
     let label_height = label_galley.size().y.max(t.control_height);
     let control_height = lines as f32 * t.control_height + lines.saturating_sub(1) as f32 * t.space_4;
     let height = if beside { label_height.max(control_height) } else { label_height + control_height + t.space_4 } + t.space_8;
@@ -2354,6 +2452,264 @@ mod tests {
         );
         assert_eq!(crate::toolbar_custom::export(&restored), before);
         assert_eq!(restored.preferences.preview_reselect_modifier, PreviewModifier::Alt);
+    }
+
+    #[test]
+    fn every_keyboard_profile_reads_names_real_commands_and_shares_no_key() {
+        use crate::keyboard_profiles::{self, BUILTIN};
+        assert_eq!(keyboard_profiles::all().len(), BUILTIN.len(), "every shipped profile reads");
+        for (id, text) in BUILTIN {
+            let file: Value = serde_json::from_str(text).unwrap();
+            let profile = keyboard_profiles::find(id).unwrap();
+            for (command, keys) in file["keys"].as_object().unwrap() {
+                assert!(solidcraft_engine::find_command(command).is_some(), "{id}: `{command}` is a command");
+                let names: Vec<&str> =
+                    keys.as_str().map(|k| vec![k]).unwrap_or_else(|| keys.as_array().unwrap().iter().filter_map(Value::as_str).collect());
+                for name in names {
+                    let key = canonical_key(name).unwrap_or_else(|| panic!("{id}: `{name}` is a key"));
+                    let applied = profile.mapped[command.as_str()].contains(&key);
+                    let kept = profile.reserved.iter().any(|left| left.command == command && left.key == key && left.taken_by.is_none());
+                    assert!(applied != kept, "{id}: {key} for {command} is either applied or reported");
+                    assert_eq!(kept, reserved_for(command, &key), "{id}: only the app's own keys are left out");
+                }
+            }
+            // With the profile chosen, each mapped key is its command's first, and no command that
+            // can't share a key with it holds it too.
+            let mut a = app();
+            a.preferences.keyboard_profile = id.to_string();
+            for (command, keys) in &profile.mapped {
+                for key in keys {
+                    let holders: Vec<_> = commands_for(&a, key).into_iter().filter(|other| other != command && clash(other, command)).collect();
+                    assert!(holders.is_empty(), "{id}: {key} for {command} is also on {holders:?}");
+                }
+                if let Some(first) = keys.first() {
+                    assert_eq!(
+                        keys_for_spec(&a, solidcraft_engine::find_command(command).unwrap()).first(),
+                        Some(&first.as_str()),
+                        "{id}: {command}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_saved_key_of_a_command_that_no_longer_exists_does_not_hide_the_real_holder() {
+        let mut a = app();
+        // Sorts before Home View, and clashes with every command.
+        a.keymap.custom.insert("no.such.command".into(), vec!["F8".into()]);
+        bind(&mut a, "view.home", "F8", false).unwrap();
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(user_key_holder(&a, "view.normal_to", "F8"), Some("view.home"));
+        assert!(!keys(&a, "view.normal_to").contains(&"F8".to_string()));
+        let left = crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a);
+        assert!(left.iter().any(|l| l.command == "view.normal_to" && l.key == "F8" && l.taken_by == Some("view.home")));
+    }
+
+    #[test]
+    fn a_keyboard_profile_sits_under_the_users_own_keys_and_survives_save_and_switching() {
+        let mut a = app();
+        assert_eq!(a.preferences.keyboard_profile, "solidcraft", "SolidCraft's keys by default");
+        // Before choosing NX, the user put F8 on Home View.
+        bind(&mut a, "view.home", "F8", false).unwrap();
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"], "End went to Isometric View");
+        assert_eq!(keys(&a, "view.isometric"), ["End", "Ctrl+7"], "the profile's key first, SolidCraft's kept");
+        assert_eq!(command_for(&a, "End"), Some("view.isometric"));
+        assert_eq!(keys(&a, "file.save_as"), ["Ctrl+Shift+A", "Ctrl+Shift+S"]);
+        assert!(keys(&a, "ui.assistant").is_empty(), "Save As took Ctrl+Shift+A from Assistant");
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        assert_eq!(command_for(&a, "R"), Some("sketch.rectangle.two_point"), "a sketch tool keeps R in a sketch");
+        assert_eq!(command_for(&a, "A"), Some("sketch.arc.three_point"));
+        a.run("sketch.finish", json!({})).unwrap();
+        assert_eq!(command_for(&a, "R"), Some("solid.revolve"), "and the model gets Revolve");
+        // The app's own key and the user's own key are reported, not applied.
+        let left = crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a);
+        let left: Vec<_> = left.iter().map(|l| (l.command, l.key.as_str(), l.taken_by)).collect();
+        assert_eq!(left, [("ui.toggle_visibility", "Ctrl+W", None), ("view.normal_to", "F8", Some("view.home"))]);
+        assert_eq!(keys(&a, "ui.toggle_visibility"), ["V"]);
+        assert!(!keys(&a, "view.normal_to").contains(&"F8".to_string()));
+        assert_eq!(command_for(&a, "F8"), Some("view.home"), "the user's own key wins");
+        // A change is a change from the profile: the profile's key isn't one, and Reset goes back to it.
+        bind(&mut a, "view.fit", "Ctrl+F", false).unwrap();
+        assert!(!a.keymap.custom.contains_key("view.fit"));
+        bind(&mut a, "view.fit", "F9", false).unwrap();
+        reset(&mut a, Some("view.fit"));
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"]);
+        bind(&mut a, "view.fit", "F9", false).unwrap();
+        // Saved and read back, and through Export and Import.
+        let saved = a.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        restored.preferences = serde_json::from_value(serde_json::to_value(&a.preferences).unwrap()).unwrap();
+        for name in ["view.fit", "view.home", "view.isometric", "view.normal_to", "ui.assistant"] {
+            assert_eq!(keys(&restored, name), keys(&a, name), "{name} after a restart");
+        }
+        let exported = crate::toolbar_custom::export(&a);
+        let mut imported = app();
+        crate::toolbar_custom::import(&mut imported, &exported).unwrap();
+        assert_eq!(imported.preferences.keyboard_profile, "nx");
+        assert_eq!(keys(&imported, "view.fit"), ["F9"]);
+        // Back to SolidCraft: the standard keys, and the user's own keys stay.
+        a.preferences.keyboard_profile = "solidcraft".into();
+        assert_eq!(keys(&a, "view.isometric"), ["Ctrl+7"]);
+        assert_eq!(keys(&a, "file.save_as"), ["Ctrl+Shift+S"]);
+        assert_eq!(keys(&a, "ui.assistant"), ["Ctrl+Shift+A"]);
+        assert_eq!(keys(&a, "view.fit"), ["F9"]);
+        assert_eq!(keys(&a, "view.home"), ["F8"]);
+    }
+
+    #[test]
+    fn onshape_keys_split_between_a_sketch_and_the_model() {
+        let mut a = app();
+        a.preferences.keyboard_profile = "onshape".into();
+        // In the model: Shift+letters build features, F fits, Y shows and hides.
+        assert_eq!(command_for(&a, "Shift+E"), Some("solid.extrude"));
+        assert_eq!(command_for(&a, "Shift+F"), Some("solid.fillet"));
+        assert_eq!(command_for(&a, "Shift+W"), Some("solid.revolve"));
+        assert_eq!(command_for(&a, "F"), Some("view.fit"));
+        assert_eq!(command_for(&a, "Y"), Some("ui.toggle_visibility"));
+        assert_eq!(keys(&a, "view.front"), ["Shift+1", "Ctrl+1"]);
+        assert_eq!(keys(&a, "solid.fillet"), ["Shift+F"], "Fit took F");
+        // In a sketch: single letters are tools and constraints.
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        for (key, id) in [
+            ("V", "sketch.constraint.vertical"),
+            ("H", "sketch.constraint.horizontal"),
+            ("E", "sketch.constraint.equal"),
+            ("T", "sketch.constraint.tangent"),
+            ("M", "sketch.trim"),
+            ("Q", "sketch.construction"),
+            ("X", "sketch.extend"),
+            ("R", "sketch.rectangle.center"),
+            ("G", "sketch.rectangle.two_point"),
+            ("U", "sketch.project"),
+            ("Shift+F", "sketch.fillet"),
+            ("Shift+S", "sketch.point"),
+        ] {
+            assert_eq!(command_for(&a, key), Some(id), "{key} in a sketch");
+        }
+        assert_eq!(keys(&a, "ui.toggle_visibility"), ["Y"], "Vertical took V");
+        assert!(crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a).is_empty(), "Onshape's keys are all used");
+    }
+
+    #[test]
+    fn older_preferences_and_unknown_profiles_keep_solidcrafts_keys() {
+        let older: crate::prefs::Prefs = serde_json::from_value(json!({"nav": "nx", "sketch_keys_only": true})).unwrap();
+        assert_eq!(older.keyboard_profile, "solidcraft", "a saved NX mouse preset applies no keys");
+        let mut a = app();
+        a.preferences = older;
+        assert_eq!(keys(&a, "view.fit"), ["End"]);
+        a.preferences.keyboard_profile = "a-profile-from-a-newer-version".into();
+        assert!(crate::keyboard_profiles::chosen(&a).is_none());
+        assert_eq!(keys(&a, "view.fit"), ["End"]);
+        assert_eq!(keys(&a, "solid.fillet"), ["F"]);
+        // An older shortcuts file has no profile: importing it keeps the one chosen.
+        a.preferences.keyboard_profile = "solidworks".into();
+        crate::toolbar_custom::import(&mut a, &json!({"format": "solidcraft-shortcuts/1", "shortcuts": {}})).unwrap();
+        assert_eq!(a.preferences.keyboard_profile, "solidworks");
+        assert_eq!(keys(&a, "view.fit"), ["F", "End"]);
+        assert!(keys(&a, "solid.fillet").is_empty(), "Fit took F from Fillet");
+        // A key chosen while another command's own key thins the profile's list is still the
+        // user's: here Fillet's F leaves Fit only End, and Fit's End must outlive a switch.
+        bind(&mut a, "view.fit", "F9", false).unwrap();
+        bind(&mut a, "solid.fillet", "F", false).unwrap();
+        bind(&mut a, "view.fit", "End", false).unwrap();
+        assert_eq!(a.keymap.custom.get("view.fit").map(Vec::as_slice), Some(&["End".to_string()][..]));
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(keys(&a, "view.fit"), ["End"], "the user's End, not NX's Ctrl+F");
+        a.preferences.keyboard_profile = "solidworks".into();
+        reset(&mut a, None);
+        assert!(crate::toolbar_custom::import(&mut a, &json!({"format": "solidcraft-shortcuts/1", "keyboard_profile": 7})).is_err());
+        let long = "x".repeat(65);
+        assert!(crate::toolbar_custom::import(&mut a, &json!({"format": "solidcraft-shortcuts/1", "keyboard_profile": long})).is_err());
+        assert_eq!(a.preferences.keyboard_profile, "solidworks", "a refused file changes nothing");
+    }
+
+    #[test]
+    fn a_hostile_profile_file_never_applies_a_reserved_or_unknown_key() {
+        let many: Vec<&str> = vec!["X"; 20];
+        let file = json!({"label": " Test ", "provenance": "test", "keys": {
+            "view.fit": ["Ctrl+S", "Escape", "Shift+F9", "Shift+F9", "Hyper+Q", ""],
+            "no.such.command": "Q",
+            "solid.shell": many,
+        }});
+        let profile = crate::keyboard_profiles::parse("test", &file).unwrap();
+        assert_eq!(profile.label, "Test");
+        assert_eq!(profile.mapped["view.fit"], ["Shift+F9"]);
+        assert_eq!(profile.base["view.fit"], ["Shift+F9", "End"]);
+        assert_eq!(profile.mapped["solid.shell"], ["X"]);
+        assert!(!profile.mapped.contains_key("no.such.command"));
+        assert_eq!(profile.reserved.iter().map(|l| l.key.as_str()).collect::<Vec<_>>(), ["Ctrl+S", "Escape"]);
+        assert!(!profile.base.contains_key("sketch.construction"), "a sketch tool and a model command share X");
+        for bad in [json!({}), json!({"label": "", "keys": {}}), json!({"label": "L", "keys": {"view.fit": 3}}), json!({"label": "L", "keys": []})] {
+            assert!(crate::keyboard_profiles::parse("test", &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_shortcut_row_says_under_its_name_where_its_keys_come_from() {
+        let ctx = crate::fonts::test_context();
+        let row_of = |a: &SolveApp, id: &str, label: &str| {
+            let command = command_specs().into_iter().find(|c| c.id == id).unwrap();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.scope_builder(
+                    egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(500.0, 100.0))),
+                    |ui| {
+                        ui_kit::scope(ui, |ui| {
+                            shortcut_row(a, ui, command, &["End"], label, false);
+                        });
+                    },
+                );
+            });
+            output.textures_delta.clear();
+            output.shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(label) => {
+                    let rows = &text.galley.rows;
+                    let last = rows.last().map(|r| text.pos.y + r.min_y()).unwrap_or_default();
+                    Some((text.galley.job.text.clone(), text.pos.x, rows.len(), last))
+                }
+                _ => None,
+            })
+        };
+        let source_of = |a: &SolveApp| row_of(a, "view.isometric", "Isometric View");
+        let mut a = app();
+        let (plain, _, rows, _) = source_of(&a).unwrap();
+        assert_eq!((plain.as_str(), rows), ("Isometric View", 1), "SolidCraft's own keys say nothing");
+        a.preferences.keyboard_profile = "nx".into();
+        let (text, x, rows, last) = source_of(&a).unwrap();
+        assert_eq!(text, "Isometric View\nFrom NX");
+        assert_eq!(rows, 2, "on its own line");
+        assert!((x - 20.0).abs() < 0.5, "at the row's left edge, under the name: {x}");
+        assert!(last > 20.0 + solidcraft_theme::Tokens::get().font_label, "below the name: {last}");
+        // A name shorter than its note: the note still keeps to one line.
+        let (text, _, rows, _) = row_of(&a, "view.fit", "Fit").unwrap();
+        assert_eq!((text.as_str(), rows), ("Fit\nFrom NX", 2), "a short name doesn't wrap its note");
+        bind(&mut a, "view.isometric", "F9", false).unwrap();
+        assert_eq!(source_of(&a).unwrap().0, "Isometric View\nChanged by you");
+    }
+
+    #[test]
+    fn the_shortcuts_page_chooses_a_keyboard_profile_from_its_drop_down() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.read_only = false;
+        h.frames(3);
+        let picker = crate::scenario::handle_at("prefs:keyboard_profile").expect("the drop-down is on the page");
+        h.step(&json!({"click": {"handle": "prefs:keyboard_profile"}})).unwrap();
+        h.frames(2);
+        let nx = crate::scenario::handle_at("prefs:keyboard_profile:nx").expect("NX is offered");
+        assert!(nx.y > picker.y, "the list opens below the drop-down");
+        for id in ["solidcraft", "fusion", "inventor", "onshape", "solidworks"] {
+            assert!(crate::scenario::handle_at(&format!("prefs:keyboard_profile:{id}")).is_some(), "{id} is offered");
+        }
+        h.step(&json!({"click": {"handle": "prefs:keyboard_profile:nx"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.keyboard_profile, "nx");
+        // The note names the key as this platform writes it (the Command key on macOS).
+        let note = format!("{} for Show/Hide Selection is not used: SolidCraft keeps this key for itself.", crate::ui_kit::chord_label("Ctrl+W"));
+        assert!(h.widget(&note).is_some(), "the left-out key is reported: {note}");
     }
 }
 
