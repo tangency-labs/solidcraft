@@ -35,8 +35,9 @@ FULL_PREFIXES = (".cargo/", ".config/", "scripts/")
 FULL_FILES = ("Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml")
 # Changes here affect no code: documentation, packaging, the other workflows and GitHub settings,
 # and the GitHub bots' scripts (tested in the repository checks). Root *.md files too, unless
-# embedded (below).
-IGNORED_PREFIXES = ("docs/", "packaging/", ".github/", "scripts/claim/", "scripts/triage/")
+# embedded (below). The TypeScript client (typescript/) is no Rust package: Select checks'
+# `typescript` runs its own tests for it.
+IGNORED_PREFIXES = ("docs/", "packaging/", ".github/", "scripts/claim/", "scripts/triage/", "typescript/")
 IGNORED_FILES = ("vendor/README.md",)
 # Root files that a crate embeds (include_str!), so they are not ignorable documentation.
 EMBEDDED = {

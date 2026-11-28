@@ -30,19 +30,9 @@ use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
 use crate::{KernelError, Result, guard, record};
 
-/// What splits the faces.
-#[derive(Clone, Debug)]
-pub enum SplitTool<'a> {
-    /// A plane (unbounded).
-    Plane(Plane),
-    /// The surface of another body's face (`face` in that body's face order), extended. Split
-    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
-    /// sheet as it is, or with the whole sheet where that does not cut through ([`split_body`]).
-    Face { body: &'a Body, face: usize },
-    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
-    /// normal); each curve splits on its own, an open one extended past its ends.
-    Curves { plane: Plane, curves: Vec<Vec<Seg2>>, along: Option<Vec3> },
-}
+/// What splits the faces: a plane, another body's face, or sketch curves swept
+/// ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
+pub type SplitTool<'a> = solidcraft_kernel_api::SplitTool<'a, Body>;
 
 /// Most segments a sketch tool may hold.
 pub(crate) const MAX_SEGMENTS: usize = 4096;
@@ -546,15 +536,11 @@ pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
 }
 
-/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
-/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
-/// over `[body]`: each piece of a split face is Split from it, every other face Kept.
-pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
-    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
-}
-
-/// Like [`split_faces`], with the body face each face of the result came from (in face order).
+/// Split the given faces (indices in `body`'s face order) where the tool meets them, with the
+/// body face each face of the result came from (in face order). The solid is unchanged. A listed
+/// face the tool misses is an error naming it; a tool that runs into the faces and ends inside
+/// them, cutting none through, is an error saying so. The result's history is over `[body]`: each
+/// piece of a split face is Split from it, every other face Kept.
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     let _span = solidcraft_profile::span("kernel", "split_faces_with_map");
     let (b, map, made) = split(body, faces, tool)?;
@@ -845,6 +831,29 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
     split_body(tool, &SplitTool::Face { body: &trough, face: round })
 }
 
+/// `tool`, a prism run on past the surface of `face` of `target`, cut at that surface carried on
+/// past the face's edges (a plane without end, a cylinder, cone, sphere or torus along its
+/// surface), keeping the pieces that start at `start`: no on-face test, as the whole profile ends
+/// on the extended surface. `None` when a kept piece still has its end cap at `far`: the
+/// surface does not cross the prism's path over some of the profile (a cone's apex side, a plane
+/// running along the path), so that part has no end.
+///
+/// The two heights are told apart by the body's own tolerance, never more than a quarter of the
+/// distance between them, as in [`face_split_if_on_face`].
+pub fn face_split_extended(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+    let mut out = Vec::new();
+    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+        if !has_cap_at(&part, plane, start, far - start) {
+            continue;
+        }
+        if has_cap_at(&part, plane, far, far - start) {
+            return Ok(None);
+        }
+        out.push(part);
+    }
+    Ok(Some(out))
+}
+
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
 /// cap there), by the body's own tolerance never over a quarter of `span`
 /// ([`solidcore_ops::cap::is_square_plane_at_height`]).
@@ -1001,7 +1010,7 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{box_solid, cylinder, measure};
+    use crate::{box_solid, cylinder, measure, split_faces};
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)

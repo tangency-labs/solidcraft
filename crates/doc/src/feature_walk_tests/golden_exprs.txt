@@ -554,6 +554,11 @@ surface_extend_to_face
   inputs:
     Distance = extend.distance (Length)
   expressions: extend.distance
+surface_extend_law
+  inputs:
+    Distance = extend.distance (Length)
+    Angle = extend.law_angle (Angle)
+  expressions: extend.distance, extend.law_angle
 surface_ruled
   inputs:
     Distance = ruled.distance (Length)

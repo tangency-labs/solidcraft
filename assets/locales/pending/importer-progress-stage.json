@@ -1,0 +1,34 @@
+{
+  "en": {
+    "file_load.plugin_importing": "Importing with {plugin}...",
+    "file_load.plugin_preparing": "Preparing the {plugin} importer (first use may take a while)..."
+  },
+  "ar": {
+    "file_load.plugin_importing": "جارٍ الاستيراد باستخدام {plugin}...",
+    "file_load.plugin_preparing": "جارٍ إعداد مستورد {plugin} (قد يستغرق الاستخدام الأول بعض الوقت)..."
+  },
+  "de": {
+    "file_load.plugin_importing": "Import mit {plugin} läuft...",
+    "file_load.plugin_preparing": "Der Importer {plugin} wird vorbereitet (die erste Verwendung kann etwas dauern)..."
+  },
+  "he": {
+    "file_load.plugin_importing": "מייבא באמצעות {plugin}...",
+    "file_load.plugin_preparing": "מכין את המייבא {plugin} (השימוש הראשון עשוי להימשך זמן מה)..."
+  },
+  "ja": {
+    "file_load.plugin_importing": "{plugin} でインポートしています...",
+    "file_load.plugin_preparing": "{plugin} インポーターを準備しています（初回は時間がかかる場合があります）..."
+  },
+  "ko": {
+    "file_load.plugin_importing": "{plugin}(으)로 가져오는 중...",
+    "file_load.plugin_preparing": "{plugin} 가져오기 도구 준비 중(처음 사용할 때 시간이 걸릴 수 있습니다)..."
+  },
+  "vi": {
+    "file_load.plugin_importing": "Đang nhập bằng {plugin}...",
+    "file_load.plugin_preparing": "Đang chuẩn bị trình nhập {plugin} (lần đầu sử dụng có thể mất một lúc)..."
+  },
+  "zh": {
+    "file_load.plugin_importing": "正在使用 {plugin} 导入...",
+    "file_load.plugin_preparing": "正在准备 {plugin} 导入器（首次使用可能需要一些时间）..."
+  }
+}
