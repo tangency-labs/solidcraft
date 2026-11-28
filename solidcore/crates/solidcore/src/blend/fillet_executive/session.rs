@@ -122,12 +122,6 @@ pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
-/// The session's note at a bevel corner of three chamfers of both convexities.
-const MIXED_CHAMFER_CORNER: &str = "Fillet Error: chamfers of convex and of concave edges meet at the vertex; their mitre is not built yet";
-/// The same, as the refusing step's reason.
-const MIXED_CHAMFER_CORNER_REASON: &str =
-    "chamfers of convex and of concave edges meet at the vertex";
-
 /// The tangency within which the band check takes two blended edges for one tangent chain
 /// (`chains_among`), radians: 10 degrees, as a chamfer's chain (`two_offsets`) and an
 /// edge's continuation (`edge_refusals`) take it.
@@ -447,6 +441,11 @@ struct SessionObjects<'target> {
     /// linear section on offsets equal to the distance. Their solvers keep no chamfer
     /// definition (there is no wedge), so [`FilletSession::chamfer_fit`] reads them here.
     knife_chamfers: Vec<EdgeId>,
+    /// (not upstream, #22798) The blends whose bands the band check found crossing only past
+    /// free ends of their edges, edges that share no vertex
+    /// ([`FilletSession::bands_crossing_past_ends`]): their target edges, two by two. Set where
+    /// those crossings were the check's only refusal; empty otherwise.
+    bands_crossing_past_ends: Vec<EdgeId>,
 }
 
 impl SessionObjects<'_> {
@@ -1887,6 +1886,7 @@ impl<'target> FilletSession<'target> {
                 chamfer_corner: None,
                 band_cut_cache: None,
                 knife_chamfers: Vec::new(),
+                bands_crossing_past_ends: Vec::new(),
             },
             _gn_scope: gn_scope,
         })
@@ -2590,9 +2590,6 @@ impl<'target> FilletSession<'target> {
                                 refusal: None,
                             });
                         }
-                        ChamferClass::MixedConvexity => {
-                            corner.chamfer_mixed_convexity = true;
-                        }
                         ChamferClass::Declined(_) => {}
                     }
                 }
@@ -3200,6 +3197,18 @@ impl<'target> FilletSession<'target> {
         &self.objects.roll_overs
     }
 
+    /// Not upstream (#22798): where the band check refused the blends only because bands
+    /// cross past free ends of their edges (two edges that share no vertex and end on a face
+    /// beyond, their rails running on past those ends and crossing on the face they share,
+    /// as on the top of a block whose corners a sphere trims), the target edges of each such
+    /// pair, two by two in the check's order; empty otherwise. Each pair's blends, built one
+    /// after the other, meet where their surfaces cross: the later one runs on into the
+    /// earlier one's face and the two are trimmed at their mitre there.
+    #[must_use]
+    pub fn bands_crossing_past_ends(&self) -> &[EdgeId] {
+        &self.objects.bands_crossing_past_ends
+    }
+
     /// Not upstream (#10876): the session is the blend corner's Roll-over's second pass, the
     /// concave chain (B2's remainder with B1's end arc on its end face), handed the first
     /// pass's faces, with `ends` its vertices V where the chain meets the cliff
@@ -3219,7 +3228,10 @@ impl<'target> FilletSession<'target> {
     /// meet each other) or the Facet (one plane through the rails' crossings), refused
     /// where the asked type does not exist. Unset, the corner is the Mitre where it exists,
     /// at four or more chamfers the patch or (crossings in one plane) the Facet, and
-    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). It
+    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). Three
+    /// chamfers of both convexities are the exception: the pinned corner builds nothing
+    /// there, so where their mitre point is outside the corner they are refused with the fit
+    /// whether a type was set or not. It
     /// overrides the corner's bevel flag ([`Self::set_corner_bevel`]) at
     /// such a corner. Set it before [`Self::do_fillet`] (the corners are made there).
     pub fn set_chamfer_corner(&mut self, corner: crate::blend::blend_corner::BlendChamferCorner) {
@@ -5637,6 +5649,9 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner patch is not live"))?;
+        // the chamfer event's mitre of both convexities: the rails are trimmed, so the
+        // chamfers' surfaces are continued to their mitre point before the faces are made
+        crate::blend::blend_corner::chamfer::continue_chamfer_surfaces(k, pseudo, corner)?;
         corner.calc_corner_geom_with(&mut (), |corner, ()| {
             // SmFilletCorner::CreateCornerPatch, building into m_pFilletBrep.
             let body = intermediate
@@ -6641,8 +6656,13 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         solvers: &[FilletObject],
     ) -> Result<bool> {
         use crate::geom::global_solver::SolverOperation;
+        self.bands_crossing_past_ends.clear();
         let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
+        // Not the fork's (#22798): the pairs whose bands cross only past a free end of the
+        // band's own edge (below), two by two; refused only once every other test passed,
+        // and noted for the caller, which can build such a pair one blend after the other
+        let mut crossing: Vec<EdgeId> = Vec::new();
         // Not the fork's (#18823): a band lies beside its edge and, past the edge's ends, beside
         // the edges its edge runs on into tangentially, up to the sections its corners placed.
         // Where a tangent chain's blends meet, their shared section crosses the chain where a
@@ -7080,8 +7100,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                         )? {
                                             continue;
                                         }
+                                        return Ok(false);
                                     }
-                                    return Ok(false);
+                                    // Not the fork's (#22798): past a free end of edge `b`
+                                    // (no other blended edge meets it there), and past one
+                                    // of edge `a` too, the two bands cross on the face beyond
+                                    // both edges' ends, where neither blend's ball, along its
+                                    // own edge, rolls on what the other takes off; the two
+                                    // blends built one after the other mitre there. Noted,
+                                    // and refused only once the other pairs are judged. A
+                                    // sample beside edge `a`, or past an end of it that another
+                                    // blended edge meets, refuses as before.
+                                    let past_a = past_free_end(
+                                        k,
+                                        edge_curves.get(a),
+                                        corner_ends.get(a).map_or(&[][..], Vec::as_slice),
+                                        p,
+                                        tol,
+                                    );
+                                    if !matches!(past_a, Ok(true)) {
+                                        return Ok(false);
+                                    }
+                                    let pair = [edge_a, edge_b];
+                                    let noted = crossing
+                                        .chunks(2)
+                                        .any(|c| c == pair || c == [edge_b, edge_a]);
+                                    if !noted {
+                                        crossing.extend(pair);
+                                    }
                                 }
                                 continue;
                             }
@@ -7168,7 +7214,11 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
             }
         }
-        Ok(true)
+        if crossing.is_empty() {
+            return Ok(true);
+        }
+        self.bands_crossing_past_ends = crossing;
+        Ok(false)
     }
 }
 
@@ -7256,6 +7306,43 @@ fn inside_band_past_run_end(
     }
     let from_rail = (sample - r).dot(section * (1.0 / width));
     Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
+}
+
+/// Whether `p`'s foot on an edge (`edge`: its curve, its interval and the ends of its curve)
+/// is an end of the edge that no other blended edge meets (`corners`: the edge's ends that
+/// other blended edges share, the band check's `corner_ends`), within `tol`: `p` lies past a
+/// free end of the edge (#22798). A closed edge (both ends one point) has no end, and an edge
+/// not gathered none either.
+///
+/// # Errors
+/// Those of the drop onto the edge and its evaluation.
+fn past_free_end(
+    k: &Kernel,
+    edge: Option<&(
+        crate::curve::curve::Curve,
+        crate::geom::extent1d::Extent1d,
+        [crate::math::Point3; 2],
+    )>,
+    corners: &[(crate::math::Point3, Vec<usize>)],
+    p: crate::math::Point3,
+    tol: f64,
+) -> Result<bool> {
+    let Some((curve, ivl, [q0, q1])) = edge else {
+        return Ok(false);
+    };
+    if (*q0 - *q1).length() <= tol {
+        return Ok(false);
+    }
+    let dropped = drop_onto_edge(k, curve, ivl, p)?;
+    if !dropped.success {
+        return Ok(false);
+    }
+    let foot = curve.evaluate_point(k, dropped.parameter)?;
+    let at_end = dropped.parameter <= ivl.min()
+        || dropped.parameter >= ivl.max()
+        || [*q0, *q1].iter().any(|&q| (foot - q).length() <= tol);
+    let at_corner = corners.iter().any(|(q, _)| (foot - *q).length() <= tol);
+    Ok(at_end && !at_corner)
 }
 
 /// The blends that meet a band's edge at a corner, as [`inside_corner_wedge`] reads them.
@@ -8973,29 +9060,6 @@ impl SessionObjects<'_> {
         if let Some(corner) = self.corners.get_mut(id.0 as usize) {
             if let Some(event) = corner.chamfer_corner.as_ref() {
                 corner.bevel = event.definition.is_mitre();
-            }
-        }
-        // Chamfers of both convexities at a vertex of three, as a bevel: the bevel looks for
-        // the chamfers' common point from a rails' crossing towards the vertex, and here it
-        // lies across the vertex's faces. Refused, at the vertex, until the chamfer event
-        // builds their mitre.
-        if let Some(corner) = self.corners.get(id.0 as usize) {
-            if corner.bevel && corner.chamfer_mixed_convexity {
-                let vertex = corner.filleted_vertex();
-                let location =
-                    vertex.and_then(|v| crate::topology::vertex::point(self.target, v).ok());
-                executive.error.note_vertex_error(
-                    vertex
-                        .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
-                    location,
-                    crate::blend::fillet_geom::p1::FilStatus::Failure,
-                    crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
-                    Some(MIXED_CHAMFER_CORNER),
-                );
-                return Err(SolidError::Unsupported {
-                    operation: NATIVE,
-                    reason: MIXED_CHAMFER_CORNER_REASON,
-                });
             }
         }
         let edgeuses = self
