@@ -928,7 +928,7 @@ pub struct FitSearch {
 /// The search's budget is [`FIT_CANDIDATES`] candidates and nothing else. It reads no clock: a
 /// time limit would make the size depend on how fast the computer is and how busy it is, and
 /// `fit: reduce` keeps that size in the model. A cancelled evaluation stops the search with an
-/// error before its next candidate.
+/// error, before its next candidate or as the candidate it stopped returns.
 fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
     largest_that_fits_within(size, hint, blend, FIT_CANDIDATES)
 }
@@ -1007,7 +1007,12 @@ fn largest_that_fits_within(size: f64, hint: Option<f64>, blend: impl Fn(f64) ->
         tried += 1;
         // A candidate fits only as a body SMLib's check accepts: each is checked as it is built,
         // whatever the evaluation's validation mode (`crate::validation`).
-        match crate::validation::validating(crate::Validation::EachStep, || blend(n as f64 * q)).0 {
+        let outcome = crate::validation::validating(crate::Validation::EachStep, || blend(n as f64 * q)).0;
+        // Cancelled while the candidate ran: its failure says nothing of its size.
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("the search for the largest size that fits"));
+        }
+        match outcome {
             Ok(b) => {
                 let step = n - lo;
                 lo = n;
@@ -2930,6 +2935,37 @@ mod tests {
         .err()
         .expect("a cancelled search is an error");
         assert!(e.to_string().contains("cancelled"), "{e}");
+        // Cancelled while its last candidate runs (a budget of two): that candidate's failure is
+        // the cancel, not a refusal of its size, so the first candidate's size is not returned as
+        // the answer.
+        struct Flag(std::sync::atomic::AtomicBool);
+        impl crate::watch::Watch for Flag {
+            fn cancelled(&self) -> bool {
+                self.0.load(std::sync::atomic::Ordering::Relaxed)
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let flag = std::sync::Arc::new(Flag(std::sync::atomic::AtomicBool::new(false)));
+        let calls = std::cell::Cell::new(0);
+        let found = crate::watch::watching(flag.clone(), || {
+            largest_that_fits_within(
+                0.3,
+                None,
+                |_| {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == 1 {
+                        return Ok(body.clone());
+                    }
+                    flag.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Err(crate::watch::cancelled_error("boolean"))
+                },
+                2,
+            )
+        });
+        assert_eq!(calls.get(), 2);
+        let e = found.err().expect("cancelled during a candidate is an error, not the first size");
+        assert!(e.to_string().contains("the search for the largest size that fits cancelled"), "{e}");
     }
 
     /// Replay seed 242's selected edges, including tangent propagation as the command does.
