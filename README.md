@@ -294,7 +294,8 @@ them: read [DISCLAIMER.md](DISCLAIMER.md).
 
 MIT OR Apache-2.0, at your option. Developed under the
 [clean-room contribution rules](AGENTS.md); third-party code and assets retain their
-documented licences and attribution.
+documented licences and attribution. The licence covers the code, not the name and logo: see
+[TRADEMARKS.md](TRADEMARKS.md) for how to name a fork or a product built on SolidCraft.
 
 That includes the user interface code: the UI kit, the theme's design tokens, the look's glyphs,
 themes and icon code. SolidCraft's branding and artwork are licensed separately, under
