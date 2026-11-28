@@ -571,6 +571,7 @@ pub use route::trim_keep;
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
@@ -632,6 +633,7 @@ pub use surface_kind::EdgeCircle;
 pub use surface_kind::FaceSurface;
 pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
 pub use surface_kind::same_face_record_surface;

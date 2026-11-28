@@ -9882,6 +9882,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 wall2: thin.as_ref().and_then(|t| t.thickness2.as_deref().map(str::to_string)).unwrap_or_else(|| length_default(s, "1")),
             };
             d.extra.insert("convention".into(), json!(extent.convention));
+            if extent.extend_to_face {
+                d.extra.insert("extend_to_face".into(), json!(true));
+            }
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);

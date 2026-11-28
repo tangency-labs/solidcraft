@@ -195,6 +195,11 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
+    /// With `to` a face: carry the face's surface on past its edges (a plane without end; a
+    /// cylinder, cone, sphere or torus along its surface), so a profile wider than the face, or
+    /// over a bore in it, ends on it instead of being refused. Default: false.
+    #[serde(default)]
+    pub extend_to_face: Option<bool>,
     /// Start at this face or point (From Object), or at a plane or a construction point,
     /// followed when it moves. On a flat face or a plane at a slant the start follows its slope,
     /// and a distance moves it along the extrusion.

@@ -53,6 +53,7 @@ fn schemas_and_the_key_check_agree() {
             "distance",
             "distance2",
             "exact_regions",
+            "extend_to_face",
             "extent",
             "face",
             "face_body",

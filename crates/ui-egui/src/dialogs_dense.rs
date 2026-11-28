@@ -728,6 +728,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if ext == 1 {
                 enter |= expr_row(ui, "To Offset", to_offset);
+                // A profile wider than the To face ends on the face's surface carried on past it.
+                let row = ui.scope(|ui| form_row(ui, "ui.extend_to_face", |ui| extra_check(ui, &mut d.extra, "extend_to_face")));
+                row.response.backing_on_hover_text(tr("ui.extrude_extend_to_face_tip"));
+            } else {
+                d.extra.remove("extend_to_face");
             }
             if two_sided(*direction) {
                 // The second side takes the extent types of the first (#18691).

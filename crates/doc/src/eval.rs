@@ -12754,6 +12754,9 @@ fn feature_tools_with_constructor(
                 && val(vals, tp, Kind::Angle)? != 0.0
             {
                 let taper = val(vals, tp, Kind::Angle)?;
+                if extent.extend_to_face && curved.is_some() {
+                    return Err(DocError::Invalid("not supported yet: extending the To face with a taper".into()));
+                }
                 if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
                     return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
                 }
@@ -12822,7 +12825,7 @@ fn feature_tools_with_constructor(
                     tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
-                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
+                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len, extent.extend_to_face)?;
                 }
                 return Ok(tools);
             }
@@ -12869,6 +12872,17 @@ fn feature_tools_with_constructor(
                 if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
                     let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off)?;
                     hs.extend([rise_lo, rise_hi]);
+                }
+                // The To face's surface carried on past its edges can lie farther along than the
+                // target does: the tool runs out to where it meets the profile's footprint.
+                if extent.extend_to_face {
+                    let surface = to_face.and_then(|(_, face)| kernel::face_surface(&tb.body, face));
+                    let Some(surface) = surface else {
+                        return Err(DocError::Invalid(
+                            "not supported yet: extending a To face that is not a plane, cylinder, cone, sphere or torus".into(),
+                        ));
+                    };
+                    hs.extend(kernel::extended_levels(&surface, &ss.plane, &footprint_points(&ss.plane, &regions)).into_iter().map(|h| h - off));
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
@@ -12977,7 +12991,7 @@ fn feature_tools_with_constructor(
             {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
-                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
+                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far, extent.extend_to_face)?;
             }
             if let Some((s_lo, s_hi)) = side_two {
                 let mut second = Vec::new();
@@ -17680,7 +17694,19 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 /// at the face's surface extended past them ([`trim_to_offset_face`] with no offset), refused
 /// when a piece still runs out to `far`. `near` is a point on the face (the To pick).
 #[allow(clippy::too_many_arguments)]
-fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+fn trim_to_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    plane: &Plane,
+    start: f64,
+    far: f64,
+    extend: bool,
+) -> Result<Vec<Traced>> {
+    if extend {
+        return trim_to_extended_face(tools, target, face, plane, start, far);
+    }
     let mut out = Vec::new();
     let mut on_face = true;
     for t in &tools {
@@ -17721,6 +17747,47 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3,
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run to the To face's surface carried on past the face's edges (the Extend the To face
+/// option): each tool's prism split by that surface (the kernel's
+/// [`kernel::face_split_extended`], no on-face test), the pieces that start at `start` kept. Refused
+/// where the surface does not cross the tool's path over some of the profile (a cone's apex side,
+/// a plane that runs along the extrusion), which leaves that part with no end.
+fn trim_to_extended_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let mut out = Vec::new();
+    for t in &tools {
+        let Some(parts) = kernel::face_split_extended(&t.body, &target.body, face, plane, start, far)? else {
+            return Err(DocError::Invalid(
+                "the To face, extended, does not meet the whole profile: its surface never crosses the extrusion's path over part of it (the far side of a cone's apex, or a plane that runs along the extrusion)".into(),
+            ));
+        };
+        out.extend(parts.into_iter().map(|part| Traced::step(part, &[t])));
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// Points over `regions` in `plane`'s frame, in the plane: the outlines and a grid across their box.
+fn footprint_points(plane: &Plane, regions: &[Region2]) -> Vec<Vec3> {
+    let outline: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in &outline {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    let mut pts = outline;
+    if lo.x <= hi.x && lo.y <= hi.y {
+        const N: usize = 16;
+        for i in 0..=N {
+            for j in 0..=N {
+                pts.push(Vec2::new(lo.x + (hi.x - lo.x) * i as f64 / N as f64, lo.y + (hi.y - lo.y) * j as f64 / N as f64));
+            }
+        }
+    }
+    pts.into_iter().map(|p| plane.to_world(p)).collect()
 }
 
 /// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
@@ -17780,9 +17847,10 @@ fn trim_to_curved_face(
     plane: &Plane,
     start: f64,
     far: f64,
+    extend: bool,
 ) -> Result<Vec<Traced>> {
     if to_offset.abs() <= 1e-9 {
-        return trim_to_face(tools, target, face, to, plane, start, far);
+        return trim_to_face(tools, target, face, to, plane, start, far, extend);
     }
     let n = plane.normal();
     let travel = if far > start { n } else { n * -1.0 };
@@ -17846,7 +17914,7 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
-    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through, false) {
         Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
         cut => cut?,
     };

@@ -65,6 +65,7 @@ pub mod dome;
 pub mod dxf;
 pub mod error;
 pub mod extend;
+pub mod extended_levels;
 pub mod face_pair;
 pub mod face_surface;
 pub mod faceted;
