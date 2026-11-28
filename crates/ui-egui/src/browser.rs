@@ -2979,7 +2979,7 @@ impl CanvasPanel {
     pub fn measured_distance(&self) -> f64 {
         let dx = self.b[0] - self.a[0];
         let dy = self.b[1] - self.a[1];
-        dx.hypot(dy)
+        (dx * dx + dy * dy).sqrt()
     }
 
     /// The direction, in degrees, Straighten turns the line A–B to.

@@ -298,7 +298,7 @@ fn hit_point_in(panel: &crate::browser::CanvasPanel, plane: &Plane, proj: &Proj,
         let Some(at) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
             continue;
         };
-        let d = at.distance(screen);
+        let d = (at - screen).length();
         if d > GRAB_PX {
             continue;
         }
@@ -447,8 +447,9 @@ pub(crate) fn paint_marks(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter
         let label = distance_preview_label(app, panel);
         let mid = pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
         let dir = b - a;
-        let perp = if dir.length() > 1e-3 {
-            let n = vec2(-dir.y, dir.x).normalized();
+        let dir_len = dir.length();
+        let perp = if dir_len > 1e-3 {
+            let n = vec2(-dir.y / dir_len, dir.x / dir_len);
             if n.y > 0.0 { -n } else { n }
         } else {
             vec2(0.0, -1.0)
