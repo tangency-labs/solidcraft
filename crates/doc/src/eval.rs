@@ -1110,10 +1110,25 @@ fn law_by_law(
     }
 }
 
-/// `Posts` for `Posts (1)`: the body a split piece was numbered after.
-fn split_piece_of(name: &str) -> Option<&str> {
+/// `Posts` and `1` for `Posts (1)`: the body a split piece was numbered after, and that number.
+fn split_piece_of(name: &str) -> Option<(&str, u32)> {
     let (base, n) = name.strip_suffix(')')?.rsplit_once(" (")?;
-    (!n.starts_with('0') && n.parse::<u32>().is_ok()).then_some(base)
+    if n.starts_with('0') {
+        return None;
+    }
+    Some((base, n.parse().ok()?))
+}
+
+/// Whether `body` still holds the extra piece a cut numbered `n` (`(1)`, `(2)`, …).
+/// That index is inside only when it is at least 1 and below the material-region count.
+/// A mesh body has none of those pieces.
+fn numbered_piece_in(body: &Body, n: u32) -> bool {
+    if body.is_mesh() {
+        return false;
+    }
+    let regions = body.record().material_regions().len();
+    let Ok(n) = usize::try_from(n) else { return false };
+    (1..regions).contains(&n)
 }
 
 /// The warning of a sketch whose profile search was cut short (#6896).
@@ -20766,13 +20781,21 @@ fn eval_feature_kind(
                     // Designs saved before #2247 combined the pieces a cut split off a body that
                     // was already several pieces (`Posts`, `Posts (1)`). A cut keeps them in one
                     // body now: the piece is in `Posts`, which is a tool too or the body joined to.
+                    // A pattern copy is named the same way (`T (9)`). While its number is below the
+                    // body's material-region count (a mesh has none) it is one of those pieces; past
+                    // that the copy is gone (a pattern count lowered by a parameter), so the Combine
+                    // builds without it and says so. A numbered name listed without its seed is unknown.
                     None => match split_piece_of(t) {
-                        Some(base)
+                        Some((base, n))
                             if st.body(base).is_some()
                                 && (tools.iter().any(|o| **o == *base)
                                     || (**target == *base && matches!(operation, Operation::Join | Operation::NewBody))) =>
                         {
-                            append_warning(warning, format!("`{t}` is part of `{base}` now"));
+                            if st.body(base).is_some_and(|b| numbered_piece_in(&b.body, n)) {
+                                append_warning(warning, format!("`{t}` is part of `{base}` now"));
+                            } else {
+                                append_warning(warning, format!("`{t}` is not there any more; skipped"));
+                            }
                         }
                         // A tool whose feature is suppressed is left out, as a suppressed feature is
                         // everywhere else: the Combine builds from the tools that are there (#13474).
