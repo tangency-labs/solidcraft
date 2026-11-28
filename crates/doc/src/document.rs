@@ -1638,12 +1638,22 @@ pub enum FeatureKind {
         /// the tool's body (#13303). Each cuts the pieces it crosses.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_bodies: Vec<BodyName>,
-        /// A straight line of this sketch as the tool (#1552): the plane through it along the
-        /// sketch's normal, which follows the sketch.
+        /// Curves of this sketch as the tool (#1552), which follow the sketch: one straight line
+        /// splits as the plane through it along the sketch's normal; any other curve, or the
+        /// chain `line` and `curves` join into, is swept along the normal through the body, its
+        /// open ends continued past it, and cuts as that sheet.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line: Option<String>,
+        /// More curves of `sketch`, joined end to end with `line` into one chain (#7492).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        curves: Vec<String>,
+        /// With sketch curves: an open chain's ends run on along their tangents past the body (the
+        /// default, and one straight line is its plane), or, false, the curves cut as drawn and are
+        /// refused where they do not cut the body through.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        extend: bool,
     },
     /// A construction axis (CONSTRUCT axes).
     ConstructionAxis {
