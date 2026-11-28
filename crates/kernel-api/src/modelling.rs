@@ -178,6 +178,74 @@ pub struct Taper {
     pub corner: DraftCorner,
 }
 
+/// What splits a body's faces, with `F` the kernel's body.
+pub enum SplitTool<'a, F> {
+    /// A plane (unbounded).
+    Plane(Plane),
+    /// The surface of another body's face (`face` in that body's face order), extended. Split
+    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
+    /// sheet as it is, or with the whole sheet where that does not cut through.
+    Face {
+        /// The body the face is on.
+        body: &'a F,
+        /// The face, in that body's face order.
+        face: usize,
+    },
+    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
+    /// normal); each curve splits on its own, an open one extended past its ends.
+    Curves {
+        /// The sketch plane.
+        plane: Plane,
+        /// The chains of segments.
+        curves: Vec<Vec<Seg2>>,
+        /// The direction they are swept along.
+        along: Option<Vec3>,
+    },
+}
+
+impl<F> Clone for SplitTool<'_, F> {
+    fn clone(&self) -> Self {
+        match self {
+            SplitTool::Plane(p) => SplitTool::Plane(*p),
+            SplitTool::Face { body, face } => SplitTool::Face { body, face: *face },
+            SplitTool::Curves { plane, curves, along } => SplitTool::Curves { plane: *plane, curves: curves.clone(), along: *along },
+        }
+    }
+}
+
+impl<F: std::fmt::Debug> std::fmt::Debug for SplitTool<'_, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SplitTool::Plane(p) => f.debug_tuple("Plane").field(p).finish(),
+            SplitTool::Face { body, face } => f.debug_struct("Face").field("body", body).field("face", face).finish(),
+            SplitTool::Curves { plane, curves, along } => {
+                f.debug_struct("Curves").field("plane", plane).field("curves", curves).field("along", along).finish()
+            }
+        }
+    }
+}
+
+/// What a trim keeps.
+#[derive(Clone, Copy, Debug)]
+pub enum TrimKeep<'a> {
+    /// Every piece on the side of the tool this point is on. A tool of several sketch curves
+    /// has no one side: the region the point picks is kept.
+    Side(Vec3),
+    /// The regions the points pick (a region: the pieces that hang together once the tool has
+    /// cut the body, each picked by the piece nearest a point).
+    Regions(&'a [Vec3]),
+}
+
+impl TrimKeep<'_> {
+    /// The points that pick what is kept.
+    pub fn points(&self) -> &[Vec3] {
+        match self {
+            TrimKeep::Side(p) => std::slice::from_ref(p),
+            TrimKeep::Regions(at) => at,
+        }
+    }
+}
+
 /// The body-making operations of one kernel ([`crate::OpKind`]'s primitives, `Extrude` to
 /// `OffsetFaces`).
 ///
@@ -209,15 +277,54 @@ pub trait Modelling: Backend {
     fn boolean(&self, a: &Self::Form, b: &Self::Form, op: BoolOp) -> Result<Option<Self::Form>, Self::Error>;
     /// Constant-radius rounds of the edges nearest `edges`, turning at side edges as `turn` says.
     fn fillet(&self, body: &Self::Form, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::fillet`], with the picks whose edges are gone: where some rounds overflow
+    /// their faces those are built first, and a picked edge one of them removes whole is not
+    /// rounded; a single concave round running off the flat face it rolls on carries that face
+    /// on. The picks left out come back with the body.
+    fn fillet_removing(&self, body: &Self::Form, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Self::Form, Vec<Vec3>), Self::Error>;
+    /// Each edge nearest `edges` rounded at its own radius (`radii` in `edges`' order), in one
+    /// blend.
+    fn fillet_each(&self, body: &Self::Form, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Self::Form, Self::Error>;
+    /// Constant-radius rounds set back from the corners at the vertices nearest each point by
+    /// its distance, with a patch between the rounds there.
+    fn fillet_setback(&self, body: &Self::Form, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Self::Form, Self::Error>;
     /// An equal chamfer of the edges nearest `edges`.
     fn chamfer(&self, body: &Self::Form, edges: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::chamfer`], and where a single concave chamfer runs off the flat face it
+    /// rolls on, that face carried on.
+    fn chamfer_carrying_face(&self, body: &Self::Form, edges: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
     /// An unequal chamfer: `d1` along the first face (the one facing up most, the other with
     /// `flip`), the second side by distance or angle.
     fn chamfer_sides(&self, body: &Self::Form, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::chamfer_sides`], carrying a flat face on as [`Modelling::chamfer_carrying_face`].
+    fn chamfer_sides_carrying_face(
+        &self,
+        body: &Self::Form,
+        edges: &[Vec3],
+        d1: f64,
+        side: ChamferSide,
+        flip: bool,
+    ) -> Result<Self::Form, Self::Error>;
     /// The body hollowed to `thickness`, open at the faces nearest `open`.
     fn shell(&self, body: &Self::Form, open: &[Vec3], thickness: f64) -> Result<Self::Form, Self::Error>;
     /// A sheet thickened to `thickness`, to both sides when `symmetric`.
     fn thicken(&self, sheet: &Self::Form, thickness: f64, symmetric: bool) -> Result<Self::Form, Self::Error>;
     /// The faces nearest `at` moved `distance` along their normals.
     fn offset_faces(&self, body: &Self::Form, at: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
+    /// The faces nearest `faces` tilted by `angle` about their line on the `neutral` plane, so
+    /// that they lean in (positive angle) going along `pull`.
+    fn draft(&self, body: &Self::Form, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Self::Form, Self::Error>;
+    /// The faces `faces` (in the body's face order) split where `tool` meets them, the solid
+    /// unchanged, with the body face each face of the result came from.
+    fn split_faces(&self, body: &Self::Form, faces: &[usize], tool: &SplitTool<'_, Self::Form>) -> Result<(Self::Form, Vec<usize>), Self::Error>;
+    /// The body split into the closed parts on either side of `tool`, those on its back first.
+    fn split_body(&self, body: &Self::Form, tool: &SplitTool<'_, Self::Form>) -> Result<Vec<Self::Form>, Self::Error>;
+    /// The body split by `sheet`'s faces `faces` exactly as they are, never extended, `face`
+    /// giving the sides; refused unless they cut it into closed solids.
+    fn split_body_by_faces(&self, body: &Self::Form, sheet: &Self::Form, face: usize, faces: &[usize]) -> Result<Vec<Self::Form>, Self::Error>;
+    /// The body split by every face of the surface body `sheet` exactly as it is, where that
+    /// cuts it into closed solids (`None` where it doesn't), `face` giving the sides.
+    fn split_body_by_sheet_where_it_cuts(&self, body: &Self::Form, sheet: &Self::Form, face: usize) -> Result<Option<Vec<Self::Form>>, Self::Error>;
+    /// A surface body cut where `tool` meets it, keeping what `keep` says.
+    fn trim_keep(&self, body: &Self::Form, tool: &SplitTool<'_, Self::Form>, keep: TrimKeep<'_>) -> Result<Self::Form, Self::Error>;
 }
