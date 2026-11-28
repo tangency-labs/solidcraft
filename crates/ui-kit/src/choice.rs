@@ -483,7 +483,7 @@ pub fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices: &[Tool
                 egui::Button::new("")
                     .fill(fill)
                     .stroke(if on { egui::Stroke::new(t.sketch_mode_border, t.sketch_accent) } else { t.control_border_stroke(t.control_border) })
-                    .corner_radius(t.control_radius)
+                    .corner_radius(t.sketch_mode_radius)
                     .min_size(vec2(t.sketch_mode_size, t.sketch_mode_size)),
             );
             crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);

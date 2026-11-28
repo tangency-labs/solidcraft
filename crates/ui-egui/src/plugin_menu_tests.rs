@@ -943,6 +943,16 @@ fn a_list_of_options_sends_the_ticked_consts_in_option_order_within_its_counts()
     assert!(params(&fields).is_err(), "three ticks exceed maxItems");
     fields[0].1 = Input::Choices(Vec::new());
     assert!(params(&fields).is_err(), "none is under minItems");
+    let values = ["front".to_owned(), "back".to_owned(), "left".to_owned()];
+    assert_eq!(chosen_options(&values, &json!(["back", "front"])), Some(Input::Choices(vec![0, 1])));
+    assert_eq!(chosen_options(&values, &json!(["back", "back"])), None, "a repeat stays as typed, not collapsed");
+
+    // A hook that narrows the options drops a ticked one it took away, so it cannot stay stuck.
+    fields[0].1 = Input::Choices(vec![0, 1]);
+    fields[0].0.hook = Some(json!({"choices": ["front", "left"]}).as_object().cloned().unwrap_or_default());
+    refresh_conditions(&mut fields);
+    assert_eq!(fields[0].1, Input::Choices(vec![0]));
+    assert_eq!(params(&fields), Ok(json!({"sides":["front"]})));
 
     let buttons = form(&sides(json!({"x-solidcraft-choice":{"version":1,"style":"buttons"}}))).expect("drawn");
     assert!(buttons[0].0.buttons);
@@ -4544,6 +4554,19 @@ fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() 
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"mode":true,"part":"same"}));
     poll(&mut h.app);
     assert!(h.app.plugin_menu.dialog().unwrap().file_job.is_none(), "unchanged values must not queue another update");
+}
+
+#[test]
+fn a_dialog_hook_sees_the_ticked_options_of_a_list() {
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.input_schema = json!({"type":"object","properties":{"sides":{"type":"array","uniqueItems":true,"default":["back","front"],
+        "items":{"type":"string","oneOf":[{"const":"front"},{"const":"back"}]}}}});
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    assert_eq!(dialog_values(dialog), json!({"sides":["front","back"]}));
 }
 
 #[test]

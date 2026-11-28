@@ -747,14 +747,13 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
     }
 }
 
-/// A list of option values as the options it names, in their order; `None` when an item is not one.
+/// A list of option values as the options it names, in their order; `None` when an item is not
+/// one, or names an option twice (the text then stays as typed, for correction).
 fn chosen_options(values: &[String], list: &Value) -> Option<Input> {
-    let chosen = list
-        .as_array()?
-        .iter()
-        .map(|item| item.as_str().and_then(|item| values.iter().position(|v| v == item)))
-        .collect::<Option<std::collections::BTreeSet<_>>>()?;
-    Some(Input::Choices(chosen.into_iter().collect()))
+    let mut chosen =
+        list.as_array()?.iter().map(|item| item.as_str().and_then(|item| values.iter().position(|v| v == item))).collect::<Option<Vec<_>>>()?;
+    chosen.sort_unstable();
+    chosen.windows(2).all(|pair| pair[0] != pair[1]).then_some(Input::Choices(chosen))
 }
 
 /// Tick or untick option `index`, keeping the options in order.
@@ -820,6 +819,11 @@ fn refresh_with_memory(fields: &mut [(Field, Input)], remembered: Option<&Value>
             {
                 field.available.retain(|i| values.get(*i).is_some_and(|v| choices.iter().any(|c| c.as_str() == Some(v))));
             }
+        }
+        // A list draws only its available options, so an option that stopped being one could
+        // not be unticked: it is dropped.
+        if let Input::Choices(chosen) = input {
+            chosen.retain(|i| field.available.contains(i));
         }
         field.controls = Some(controls);
         if declared_visible {
@@ -2155,7 +2159,19 @@ fn select_file(app: &mut SolveApp, id: u64, source: String) {
 
 fn dialog_values(dialog: &EntryDialog) -> Value {
     Value::Object(
-        dialog.fields.iter().flatten().filter(|(f, _)| f.visible).filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect(),
+        dialog
+            .fields
+            .iter()
+            .flatten()
+            .filter(|(f, _)| f.visible)
+            .filter_map(|(f, i)| {
+                match i {
+                    Input::Choices(_) => input_value(f, i),
+                    _ => scalar_value(f, i),
+                }
+                .map(|v| (f.key.clone(), v))
+            })
+            .collect(),
     )
 }
 

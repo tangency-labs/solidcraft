@@ -373,7 +373,7 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             return Err(bad(field, "has too many items"));
         }
         let mut seen = std::collections::BTreeSet::new();
-        if schema.get("uniqueItems") == Some(&Value::Bool(true)) && !items.iter().all(|item| seen.insert(item.to_string())) {
+        if schema.get("uniqueItems") == Some(&Value::Bool(true)) && !items.iter().all(|item| seen.insert(unique_key(item))) {
             return Err(bad(field, "has repeated items"));
         }
         if let Some(item) = schema.get("items") {
@@ -442,4 +442,22 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         }
     }
     Ok(())
+}
+
+/// An item's text for `uniqueItems`: equal JSON values get the same text. Numbers compare by
+/// value (`1` and `1.0` are one item, as in `scalar_equal`) and object keys in any order.
+fn unique_key(value: &Value) -> String {
+    match value {
+        Value::Number(n) => match n.as_f64() {
+            Some(f) if n.is_f64() && f.is_finite() && f.fract() == 0.0 && f.abs() < 1e18 => format!("{}", f as i64),
+            _ => n.to_string(),
+        },
+        Value::Array(items) => format!("[{}]", items.iter().map(unique_key).collect::<Vec<_>>().join(",")),
+        Value::Object(map) => {
+            let mut fields: Vec<String> = map.iter().map(|(k, v)| format!("{}:{}", Value::from(k.as_str()), unique_key(v))).collect();
+            fields.sort_unstable();
+            format!("{{{}}}", fields.join(","))
+        }
+        _ => value.to_string(),
+    }
 }

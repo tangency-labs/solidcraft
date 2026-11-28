@@ -886,6 +886,11 @@ fn icon_button_choices_are_checked_at_load_and_lists_of_them_take_distinct_optio
     assert_eq!(images::annotations(&schema)[0].0, "properties.p.items.oneOf.0.x-solidcraft-icon");
     assert!(check_input(&schema, &json!({"p":["b","a"]})).is_ok());
     assert!(check_input(&schema, &json!({"p":["a","a"]})).is_err(), "uniqueItems refuses a repeated option");
+    // Items are compared as JSON values: numbers by value, object keys in any order.
+    let any = json!({"type":"object","properties":{"n":{"type":"array","uniqueItems":true}}});
+    assert!(check_input(&any, &json!({"n":[1, 1.0]})).is_err());
+    assert!(check_input(&any, &json!({"n":[[{"a":1,"b":2}],[{"b":2.0,"a":1}]]})).is_err());
+    assert!(check_input(&any, &json!({"n":[1, 1.5, "1", [1], {"a":1}]})).is_ok());
 }
 
 #[test]
