@@ -210,7 +210,7 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        (meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+        (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()).hash(&mut h);
     }
     Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
 }
@@ -1313,28 +1313,28 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn library_cache_identity_tracks_replacements_with_preserved_mtime() {
+        use std::os::unix::fs::MetadataExt;
+
         let h = crate::scenario::Harness::new();
         let path = h.dir.join("replaced.sc");
+        let replacement = h.dir.join("replacement.sc");
         std::fs::write(&path, b"old").unwrap();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let original = std::fs::metadata(&path).unwrap();
         let before = cache_path(path.to_str().unwrap()).unwrap();
-        // The change time ticks at the kernel's coarse clock (one jiffy, often 4 ms or more), so a
-        // replacement inside the same tick is indistinguishable by metadata. Replace until it ticks.
-        use std::os::unix::fs::MetadataExt;
-        let ctime = |p: &std::path::Path| std::fs::metadata(p).map(|m| (m.ctime(), m.ctime_nsec())).unwrap();
-        let first = ctime(&path);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-            std::fs::write(&path, b"new").unwrap();
-            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
-            if ctime(&path) != first || std::time::Instant::now() > deadline {
-                break;
-            }
-        }
-        assert_ne!(ctime(&path), first, "the change time never moved");
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
-        assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
+        // Keep both files alive until rename, so their inodes cannot be reused.
+        std::fs::write(&replacement, b"new").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(original.modified().unwrap()))
+            .unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!(original.len(), after.len());
+        assert_eq!(original.modified().unwrap(), after.modified().unwrap());
+        assert_ne!((original.dev(), original.ino()), (after.dev(), after.ino()));
+        assert_ne!(before, cache_path(path.to_str().unwrap()).unwrap());
     }
 
     #[test]
