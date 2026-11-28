@@ -173,8 +173,15 @@ pub struct Silhouette {
 }
 
 /// How far face `face` of `b` may be drawn from what it is: a blend's net certified again
-/// against its rebuilt definition, its bound ε ([`crate::face_surface::Exact::Blend`]), 0 for an
-/// exact round, whose net is its definition, and for every other face, which is its surface.
+/// against its rebuilt definition, its bound ε ([`crate::face_surface::Exact::Blend`]); 0 for an
+/// exact round, whose net is its definition, for a face that is its surface, and for a
+/// screw-swept wall, which is drawn from its net as before (its definition is not given back to
+/// the kernel yet, as `face_surface` does not).
+///
+/// # Errors
+/// A net its definition does not certify, or a definition the kernel does not rebuild, as
+/// [`HlrError::Invalid`] (loading the record into the kernel refuses both); a cancel; an
+/// internal failure of the session.
 fn face_bound(b: &Brep, face: usize) -> Result<f64, HlrError> {
     let Some(f) = b.faces.get(face) else {
         return Err(HlrError::Invalid("face"));
@@ -191,15 +198,23 @@ fn face_bound(b: &Brep, face: usize) -> Result<f64, HlrError> {
             "a blend face whose net its definition does not certify",
         )),
         Err(crate::Error::Cancelled) => Err(HlrError::Cancelled),
-        Err(_) => Err(HlrError::Unsupported(
+        Err(crate::Error::Reentered | crate::Error::Internal(_)) => {
+            Err(HlrError::Internal("a blend face's definition"))
+        }
+        Err(_) => Err(HlrError::Invalid(
             "a blend face whose definition the kernel does not rebuild",
         )),
     }
 }
 
-/// The body `b` in the kernel's kinds. A blend face is its NURBS form, with its certified bound
-/// from its definition ([`face_bound`]).
+/// The body `b` in the kernel's kinds ([`kernel_body_cancellable`], never cancelled).
 fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
+    kernel_body_cancellable(b, &|| false)
+}
+
+/// The body `b` in the kernel's kinds, polling `cancel` before each face. A blend face is its
+/// NURBS form, with its certified bound from its definition ([`face_bound`]).
+fn kernel_body_cancellable(b: &Brep, cancel: &dyn Fn() -> bool) -> Result<k::body::Brep, HlrError> {
     let curve = |c| solidcore_convert::curve(c).map_err(|_| HlrError::Unsupported("edge curve"));
     let surface = |s: &Surface| match s {
         Surface::Blend { .. } => Err(HlrError::Unsupported(
@@ -226,6 +241,10 @@ fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
         .iter()
         .enumerate()
         .map(|(fi, f)| {
+            // Rebuilding a blend's definition is the longest step between the kernel's polls.
+            if cancel() {
+                return Err(HlrError::Cancelled);
+            }
             // A blend's label has no surface of its own: its face is drawn as its NURBS form.
             let (label, form) = match (&f.surface, &f.nurbs) {
                 (Surface::Blend { .. } | Surface::Sweep { .. }, Some(net)) => (net, None),
@@ -286,7 +305,7 @@ pub fn prepare_cancellable(
     cancel: &dyn Fn() -> bool,
 ) -> Result<Prepared, HlrError> {
     crate::record_check::validate(b).map_err(|_| HlrError::Invalid("portable B-rep"))?;
-    k::prepare_cancellable(&kernel_body(b)?, opts, cancel)
+    k::prepare_cancellable(&kernel_body_cancellable(b, cancel)?, opts, cancel)
 }
 
 /// The hidden-line drawing of the scene `scene` of the bodies `defs` in `view`, on the calling
@@ -803,6 +822,41 @@ mod tests {
                 "a blend face whose net its definition does not certify"
             ))
         ));
+    }
+
+    /// A blend whose net is a plane, which no definition is rebuilt on: refused as an invalid
+    /// record, naming why, as loading it into the kernel refuses it.
+    #[test]
+    fn a_blend_face_whose_definition_does_not_rebuild_is_refused() {
+        let (mut rec, face) = variable_round();
+        rec.faces[face].nurbs = Some(Surface::Plane {
+            origin: [0., 0., 30.],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 1., 0.],
+        });
+        assert!(crate::face_surface::FaceSurface::of(&rec, face).is_err());
+        assert!(matches!(
+            prepare(&rec, &Options::default()),
+            Err(HlrError::Invalid(
+                "a blend face whose definition the kernel does not rebuild"
+            ))
+        ));
+    }
+
+    /// Preparing polls the caller's cancel before it rebuilds any blend's definition.
+    #[test]
+    fn preparing_a_blend_is_cancelled_before_its_definition_is_rebuilt() {
+        let (rec, _) = variable_round();
+        let calls = std::cell::Cell::new(0);
+        let cancel = || {
+            calls.set(calls.get() + 1);
+            true
+        };
+        assert!(matches!(
+            prepare_cancellable(&rec, &Options::default(), &cancel),
+            Err(HlrError::Cancelled)
+        ));
+        assert_eq!(calls.get(), 1);
     }
 
     /// What a face is reaches the kernel: a procedural blend's face with its certified bound

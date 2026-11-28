@@ -2,8 +2,9 @@
 //! intervals, and its faces' surfaces, NURBS forms, domains and edge loops, in the evaluator's
 //! kinds ([`crate::eval::geometry`]). `solidcore-ops`' `hlr` fills it from a record through
 //! `solidcore-convert`; a blend face comes as its NURBS form, its net B, with B's certified bound
-//! ε from the blend's definition S ([`Face::bound`]), so the drawing reads B only with answers at
-//! least ε wide (docs/definitions-and-certificates.md §3.7, §7 invariant 2).
+//! ε from the blend's definition S ([`Face::bound`]), and the drawing widens what it reads on B
+//! by ε: its curves' accuracy, and its ray tests to first order
+//! (docs/definitions-and-certificates.md §3.7, §7 invariant 2).
 
 use crate::eval::{Curve, Surface};
 use crate::math::{Transform, Vec3};
@@ -73,7 +74,8 @@ pub struct Face {
     pub loops: Vec<Loop>,
     /// How far `surface` may lie from what the face is (mm): the certified bound ε of a blend's
     /// net B from the blend's definition S, |B − S| ≤ ε at every parameter
-    /// (docs/definitions-and-certificates.md §4.1); 0 where the surface is the face itself.
+    /// (docs/definitions-and-certificates.md §4.1); 0 where the surface is the face itself, and
+    /// for a face whose producer gives no bound (a screw-swept wall's net, for now).
     pub bound: f64,
 }
 

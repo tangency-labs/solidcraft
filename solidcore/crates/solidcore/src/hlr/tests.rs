@@ -915,6 +915,70 @@ fn a_silhouette_on_a_surface_within_its_bound_is_bounded_by_it() {
     }
 }
 
+/// A ray that passes less than ε deep through a surface within ε of its face decides nothing:
+/// seen along +y, a cylinder of radius 10 about z, its side within ε = 0.01, stands in front of
+/// the edge x = 10 − δ, y = 20, z in [5, 25] (edge 9 of a box behind it). The edge's ray crosses
+/// the side twice, 2√(r² − x²) apart, each crossing at |n · d| = √(1 − (x / r)²): their margins
+/// ε / |n · d| add up to more than half that distance exactly where δ < ε (the depth). At
+/// δ = 0.005 the edge is uncertain; at δ = 0.02 the side hides it, as it does at ε = 0.
+#[test]
+fn a_ray_passing_a_surface_less_than_its_bound_deep_decides_nothing() {
+    let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    for (eps, depth, want) in [
+        (0.01, 0.005, Visibility::Uncertain),
+        (0.01, 0.02, Visibility::Hidden),
+        (0., 0.005, Visibility::Hidden),
+    ] {
+        let x = 10. - depth;
+        let back = prepare(
+            &cuboid([x - 1., 20., 5.], [x, 21., 25.]),
+            &Options::default(),
+        )
+        .unwrap();
+        let side = super::prepare(
+            &bounded(&cylinder(10., 30.), |i| if i == 0 { eps } else { 0. }),
+            &Options::default(),
+        )
+        .unwrap();
+        let d = hidden_lines(
+            &[back, side],
+            &[identity(0, [0.; 3]), identity(1, [0.; 3])],
+            &view,
+            &Options::default(),
+            &never,
+        )
+        .unwrap();
+        // Edge 9 joins corners 1 (x, 20, 5) and 5 (x, 20, 25).
+        let got: Vec<Visibility> = edge_line(&d, 0, 9)
+            .pieces
+            .iter()
+            .map(|p| p.visibility)
+            .collect();
+        assert!(
+            !got.is_empty() && got.iter().all(|v| *v == want),
+            "ε {eps}, depth {depth}: {got:?}"
+        );
+    }
+}
+
+/// A curve on a surface within `bound` of its face: an exact one is bounded by it, a bounded or
+/// sampled one grows by it, and nothing changes at 0.
+#[test]
+fn a_curves_accuracy_widens_by_its_surfaces_bound() {
+    let bounded = |d| CurveAccuracy::Bounded {
+        max_deviation_mm: d,
+    };
+    let sampled = |d| CurveAccuracy::Sampled {
+        max_sample_deviation_mm: d,
+    };
+    assert_eq!(widened(CurveAccuracy::Analytic, 0.25), bounded(0.25));
+    assert_eq!(widened(bounded(0.5), 0.25), bounded(0.75));
+    assert_eq!(widened(sampled(0.5), 0.25), sampled(0.75));
+    for a in [CurveAccuracy::Analytic, bounded(0.5), sampled(0.5)] {
+        assert_eq!(widened(a, 0.), a);
+    }
+}
+
 /// A bound is a distance: a negative or non-finite one is refused.
 #[test]
 fn a_face_bound_that_is_no_distance_is_refused() {

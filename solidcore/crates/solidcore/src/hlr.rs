@@ -291,12 +291,12 @@ pub fn prepare_cancellable(
     if !(1..=MAX_TRIM_SAMPLES).contains(&opts.trim_samples) {
         return Err(HlrError::Invalid("trim samples"));
     }
-    // Work on the body moved to its own centre: rounding in ray and inversion formulas grows
-    // with the coordinates, and a part may be modelled far from the origin (W05a finding 7).
     // A bound is a distance: a negative or non-finite one says nothing.
     if !b.faces.iter().all(|f| f.bound >= 0. && f.bound.is_finite()) {
         return Err(HlrError::Invalid("face bound"));
     }
+    // Work on the body moved to its own centre: rounding in ray and inversion formulas grows
+    // with the coordinates, and a part may be modelled far from the origin (W05a finding 7).
     let offset = anchor(b);
     let moved = shifted(b, offset);
     let b = &moved;
@@ -1318,7 +1318,7 @@ pub fn hidden_lines_on(
             .ok_or(HlrError::Invalid("placement"))?;
         for piece in &mut l.pieces {
             let (geometry, accuracy) = piece_geometry(t, piece, p, view);
-            let accuracy = within(accuracy, t.bound);
+            let accuracy = widened(accuracy, t.bound);
             piece.geometry = geometry.into_iter().map(|g| shift_seg(g, shift)).collect();
             piece.accuracy = accuracy;
             piece.points = piece.points.iter().map(|q| shifted(*q)).collect();
@@ -1421,7 +1421,7 @@ pub fn silhouettes(
                     sag,
                 };
                 let (geometry, accuracy) = piece_geometry(&track, &piece, placed, view);
-                let accuracy = within(accuracy, track.bound);
+                let accuracy = widened(accuracy, track.bound);
                 out.push(Silhouette {
                     face: *face,
                     geometry: geometry.into_iter().map(|g| shift_seg(g, shift)).collect(),
@@ -2248,11 +2248,14 @@ fn shift_seg(g: Seg2, d: [f64; 2]) -> Seg2 {
     }
 }
 
-/// `accuracy` of a curve drawn on a surface that may lie `bound` from what its face is: the
-/// curve stands for the face's own within its deviation plus `bound` (a surface within ε of
-/// another at every parameter projects within ε of it). An exact curve on such a surface is
-/// bounded by `bound`; nothing changes where `bound` is 0.
-fn within(accuracy: CurveAccuracy, bound: f64) -> CurveAccuracy {
+/// `accuracy` of a curve drawn on a surface that may lie `bound` from what its face is, widened
+/// by `bound`: each point drawn is the image of a point of that surface, and the face's point at
+/// the same parameters is within `bound` of it, so the curve lies within its deviation plus
+/// `bound` of the face's own image. For an outline that bounds how far the line lies from the
+/// face's image, not from the face's own outline, which a bound on positions alone does not
+/// place. An exact curve on such a surface is bounded by `bound`; nothing changes where `bound`
+/// is 0.
+fn widened(accuracy: CurveAccuracy, bound: f64) -> CurveAccuracy {
     if !(bound > 0.) {
         return accuracy;
     }
@@ -3198,25 +3201,39 @@ fn classify_point_counted(
                 *tests += 1;
                 hits.clear();
                 f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
+                // A face drawn from a surface within ε of what it is crosses the ray within
+                // ε / |n · d| of a hit on that surface, to first order; `None` where there is no
+                // normal to cross along, and nothing is known of the face.
+                let margin = |h: &Hit| -> Option<f64> {
+                    if !(f.bound > 0.) {
+                        return Some(0.);
+                    }
+                    let c = f.surface.normal(h.uv)?.dot(dl).abs();
+                    (c > 0.).then(|| f.bound / c)
+                };
                 for h in &hits {
                     let p = f.surface.point(h.uv);
-                    // A face drawn from a surface within ε of what it is: that face crosses the
-                    // ray within ε / |n · d| of this hit, to first order (a grazing hit, where
-                    // first order fails, is uncertain anyway). Closer than that to the face's
-                    // boundary, or to `start`, the hit decides nothing: the face itself may pass
-                    // on either side of the point, or miss the ray.
-                    let margin = if f.bound > 0. {
-                        match f.surface.normal(h.uv).map(|n| n.dot(dl).abs()) {
-                            Some(c) if c > 0. => f.bound / c,
-                            // No normal to cross along: nothing is known of the face here.
-                            _ => {
-                                uncertain = true;
-                                continue;
-                            }
-                        }
-                    } else {
-                        0.
+                    // Closer than its margin to the face's boundary, or to `start`, the hit
+                    // decides nothing: the face itself may pass on either side of the point, or
+                    // miss the ray. So does a hit with another crossing of the same surface within
+                    // twice their margins: the ray passes it less than ε deep (a parabola through
+                    // two crossings is their distance times its slope over 4 deep), and the face
+                    // may miss it. A ray within ε of a face's surface that never crosses it is
+                    // not seen here.
+                    let Some(margin) = margin(h) else {
+                        uncertain = true;
+                        continue;
                     };
+                    if margin > 0.
+                        && hits.iter().any(|g| {
+                            !std::ptr::eq(g, h)
+                                && margin(g)
+                                    .is_none_or(|m| (g.lam - h.lam).abs() < 2. * (margin + m))
+                        })
+                    {
+                        uncertain = true;
+                        continue;
+                    }
                     // Hits nearer the point than `start` are its own surface or rounding.
                     let start = if is_own { own_eps } else { ctx.eps_own };
                     let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len() + margin;
