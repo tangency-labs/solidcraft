@@ -7566,6 +7566,63 @@ fn walls_at_90_and_60_degrees_close_their_corner_either_way_round() {
     }
 }
 
+/// #23534: a 48 × 81 base standing at y = 92 (T = R = g = 2.5, K 0.325), a floor `floor` deep
+/// on its bottom edge, a web 15 high on its left edge, and, unless `wall` is false, a wall 33.5
+/// high on the web's free edge, parallel to the base: all at 90°, outside, flipped, their heights
+/// to the outer face. The part's volume and its faces, edges and vertices.
+fn floor_web_and_wall(floor: f64, wall: bool) -> (f64, [u64; 3]) {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"active": true, "bend_radius": "2.5 mm", "k_factor": 0.325, "name": "Blech", "thickness": "2.5 mm"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "offset": -92, "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[-0.5, 5], [47.5, 5], [47.5, 86], [-0.5, 86]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"name": "Base", "rule": "Blech", "sketch": "S"}));
+    let flange = |at: [f64; 3], height: f64| {
+        json!({"angle": "90 deg", "edges": [at], "flip": true, "height": height, "height_from": "outer", "position": "outside", "type": "edge"})
+    };
+    run(&mut s, "sheet.flange", flange([23.75, 92.0, 5.0], floor));
+    run(&mut s, "sheet.flange", flange([-0.5, 92.0, 45.75], 15.0));
+    if wall {
+        run(&mut s, "sheet.flange", flange([-5.5, 77.0, 45.75], 33.5));
+    }
+    assert!(no_errors_or_warnings(&s), "floor {floor}, wall {wall}: {:?}", s.model.results);
+    let m = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{m}");
+    let count = |k: &str| m["total"][k].as_u64().unwrap_or(u64::MAX);
+    (m["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN), [count("faces"), count("edges"), count("vertices")])
+}
+
+/// #23534: a wall on the free edge of a web whose corner with a floor is mitred builds, however
+/// deep the floor. The floor and the web close their corner with a rip that runs up the web's
+/// whole side; the wall, set out by the thickness to its outer sharp, used to add a strip to the
+/// web past that rip's end, which the rip's cut never reached. The strip lay under the wall's
+/// bend, on the bend's end face, and the sew refused the two ("sew: ambiguous edge contact"). A
+/// floor 14.9 deep (shorter than the web) left the web set back past the rip and built.
+///
+/// By hand: the corner's rip keeps each of the two walls (g/2)·√2 = 1.767767 off its mitre line,
+/// whose corner lies T = 2.5 past the base's edge (the outer sharps), so the web runs on
+/// T − (g/2)·√2 = 0.732233 below the base's bottom edge, and the wall's bend along its free edge
+/// is L = 81.732233 long. The wall adds its bend, a ring sector L·(π/2)·(R + T/2)·T, and its leg,
+/// 33.5 − (R + T) = 28.5 out from the bend, L·28.5·T: 85.976202·L = 7027.007932, whatever the
+/// floor reaches under it, and the same faces, edges and vertices.
+#[test]
+fn a_wall_on_a_web_mitred_to_a_floor_builds_whatever_the_floor_reaches_under_it() {
+    let (t, r, g) = (2.5, 2.5, 2.5);
+    let l = 81.0 + t - (g / 2.0) * 2.0_f64.sqrt();
+    let want = l * t * (FRAC_PI_2 * (r + t / 2.0) + (33.5 - (r + t)));
+    assert!((want - 7027.007932).abs() < 1e-5, "{want}");
+    let added = |floor: f64| {
+        let ((with, with_counts), (without, without_counts)) = (floor_web_and_wall(floor, true), floor_web_and_wall(floor, false));
+        (with - without, with_counts.iter().zip(without_counts).map(|(a, b)| a.saturating_sub(b)).collect::<Vec<_>>())
+    };
+    let (deep, deep_counts) = added(92.0);
+    let (shallow, shallow_counts) = added(14.9);
+    // The measure follows the bends by facets.
+    assert!(rel(deep, want) < 1e-4, "{deep} vs {want}");
+    assert!(rel(deep, shallow) < 1e-9, "{deep} vs {shallow}");
+    assert_eq!(deep_counts, shallow_counts);
+}
+
 /// The bends' lengths in the flat pattern, in the order the bends were made.
 fn bend_lengths(s: &mut Session) -> Vec<f64> {
     flat(s)["bends"].as_array().cloned().unwrap_or_default().iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect()
