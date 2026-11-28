@@ -333,9 +333,14 @@ impl CheckFailure {
         // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
         for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
             // The test's name ends where its values or its owner start.
-            let name =
-                [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
-            let owner = line.rsplit_once("[owner ").and_then(|(_, rest)| rest.strip_suffix(']')).map(str::trim).filter(|o| !o.is_empty());
+            let name = [line.find(" ("), line.find(" [owner"), line.find(" [edge")]
+                .into_iter()
+                .flatten()
+                .min()
+                .map_or(line, |end| line.get(..end).unwrap_or(line))
+                .trim_end();
+            let owner =
+                line.rsplit_once("[owner ").and_then(|(_, rest)| rest.split_once(']')).map(|(owner, _)| owner.trim()).filter(|o| !o.is_empty());
             let i = match tests.iter().position(|t| t.name == name) {
                 Some(i) => i,
                 None => {
@@ -474,10 +479,26 @@ mod tests {
                 t.number.map(|n| n.to_string()),
                 t.name.split_once("Test #").map(|(_, r)| r.chars().take_while(char::is_ascii_digit).collect())
             );
-            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.ends_with(&format!("[owner {o}]")))), "{t:?}");
+            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.contains(&format!("[owner {o}]")))), "{t:?}");
         }
         assert!(failure.to_string().starts_with(&format!("{} failed test", report.failures)), "{failure}");
         assert_eq!(failing_check(&good).unwrap(), None, "the box passes");
+    }
+
+    #[test]
+    fn a_failed_test_on_an_edge_keeps_its_owner_and_counts_with_the_others() {
+        let line = |edge: u32| {
+            format!(
+                "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check [owner SmEdge] [edge {edge}]
+"
+            )
+        };
+        let check = solidcraft_smlib::CheckReport { failures: 2, text: line(4) + &line(17) };
+        let failure = CheckFailure::of(&check).unwrap();
+        assert_eq!(failure.tests.len(), 1, "{failure:?}");
+        let test = &failure.tests[0];
+        assert_eq!((test.number, test.times, test.owners.as_slice()), (Some(61), 2, &["SmEdge".to_string()][..]));
+        assert_eq!(test.name, "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check");
     }
 
     #[test]

@@ -1,15 +1,18 @@
 //! The kernel's validity check: `SmBrep::ValidatePointers`, then `AssertValid` over the whole
 //! topology graph, reported a line per failed test.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport};
+use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport, ObjectKey};
 use solidcore::topology::brep::validation::{
     check_brep_local, check_brep_scoped, BrepCheck, CheckLevel as KernelCheckLevel,
 };
 
 /// What a check holds the tolerance pass to: [`ValidityScope::Stitched`] for a body a stitch produced.
 pub use solidcore::topology::brep::validation::ValidityScope;
+use solidcore::topology::proto_topology::p1::CopyBrepMap;
+use solidcore::topology::Brep;
 use solidcore::topology::NamingScheme;
 use solidcore::topology::{EdgeId, FaceId};
 use solidcore::EntityRef;
@@ -17,7 +20,7 @@ use solidcore::SolidError;
 
 use crate::body::Body;
 use crate::order::Order;
-use crate::session::{measure_body, measure_body_mapped};
+use crate::session::measure_body_mapped;
 use crate::{Error, Result};
 
 /// How many of solidcore's tests to run.
@@ -38,6 +41,8 @@ pub struct CheckReport {
     pub failures: usize,
     /// One line per failed test, such as
     /// `SmBrep::Test #82 Tolerance: Vertex tolerance relative to brep tolerance (offset=2, tolerance=0.01) [owner SmVertex]`.
+    /// A line about an edge, its uses, trims or curve ends with `[edge N]`, N the edge's index in the
+    /// body's edge order (the `EdgeId` index, which an import's [`Order`] gives a record edge).
     pub text: String,
 }
 
@@ -125,9 +130,14 @@ impl Body {
         let lv = kernel_level(level);
         // the body's own naming scheme: the copy the check runs on is named afresh
         let unknown = self.lock().naming() == NamingScheme::Unknown;
-        report(measure_body("check", self, |k, b| {
-            answer(unknown, || check_brep_scoped(k, b, lv, scope))
-        })?)
+        let originals = self.lock().edge_list().to_vec();
+        let mut owners = EdgeOwners::default();
+        let checked = measure_body_mapped("check", self, |k, b, map| {
+            let checked = answer(unknown, || check_brep_scoped(k, b, lv, scope))?;
+            owners = EdgeOwners::of(b, map, &originals);
+            Ok(checked)
+        })?;
+        report(checked, &owners)
     }
 
     /// The tests [`Body::check`] runs of some of the body's entities and of no other
@@ -173,7 +183,9 @@ impl Body {
             (fs, es)
         };
         let unknown = self.lock().naming() == NamingScheme::Unknown;
-        report(measure_body_mapped("check local", self, |k, b, map| {
+        let originals = self.lock().edge_list().to_vec();
+        let mut owners = EdgeOwners::default();
+        let checked = measure_body_mapped("check local", self, |k, b, map| {
             // the copy's ids are its own: the entities are mapped to their copies
             let faces = crate::split::copies_of(map, &picked_faces, EntityRef::Face, |e| match e {
                 EntityRef::Face(f) => Some(f),
@@ -186,8 +198,11 @@ impl Body {
             let (Some(faces), Some(edges)) = (faces, edges) else {
                 return Ok(Err(Refusal::Exception));
             };
-            answer(unknown, || check_brep_local(k, b, lv, &faces, &edges))
-        })?)
+            let checked = answer(unknown, || check_brep_local(k, b, lv, &faces, &edges))?;
+            owners = EdgeOwners::of(b, map, &originals);
+            Ok(checked)
+        })?;
+        report(checked, &owners)
     }
 }
 
@@ -222,15 +237,65 @@ fn answer(
     }
 }
 
+/// The edge, by its arena index (`EdgeId::index`), that each object a check names stands
+/// for: the edge itself, its uses and their trims, and the curve the edge owns.
+#[derive(Default)]
+struct EdgeOwners(BTreeMap<ObjectKey, u32>);
+
+impl EdgeOwners {
+    /// The owners of `originals`' edges, by the identities the check ran on `b`, a copy of the
+    /// body that `map` maps those edges to, gives them.
+    fn of(b: &Brep, map: &CopyBrepMap<EntityRef>, originals: &[EdgeId]) -> Self {
+        let mut index_of = BTreeMap::new();
+        let mut owners = BTreeMap::new();
+        for &original in originals {
+            let Some(EntityRef::Edge(copy)) =
+                map.get_at(Some(EntityRef::Edge(original))).ok().flatten()
+            else {
+                continue;
+            };
+            index_of.insert(copy, original.index());
+            owners.insert(topology_key(EDGE, copy.index()), original.index());
+            owners.insert(topology_key(CURVE, copy.index()), original.index());
+        }
+        for (use_, edgeuse) in b.edgeuses().iter() {
+            let Some(index) = edgeuse.edge.and_then(|e| index_of.get(&e)).copied() else {
+                continue;
+            };
+            owners.insert(topology_key(EDGEUSE, use_.index()), index);
+            owners.insert(topology_key(TRIM, use_.index()), index);
+        }
+        Self(owners)
+    }
+
+    /// The edge `r` is about: the first of its owner, reporter and other object that is one.
+    fn of_report(&self, r: &AssertReport) -> Option<u32> {
+        [r.owner, r.other, r.reporter]
+            .into_iter()
+            .flatten()
+            .find_map(|key| self.0.get(&key).copied())
+    }
+}
+
+const EDGE: u64 = 16016;
+const EDGEUSE: u64 = 16005;
+const TRIM: u64 = 20003;
+const CURVE: u64 = 20001;
+
+/// The key a report names a topology object by: its type code over its index.
+const fn topology_key(type_code: u64, index: u32) -> ObjectKey {
+    ObjectKey((type_code << 32) | index as u64)
+}
+
 /// The kernel's check `c` as the capi reports it.
-fn report(c: std::result::Result<BrepCheck, Refusal>) -> Result<CheckReport> {
+fn report(c: std::result::Result<BrepCheck, Refusal>, owners: &EdgeOwners) -> Result<CheckReport> {
     let c = match c {
         Ok(c) => c,
         Err(r) => return Err(r.error()),
     };
     let mut text = String::new();
     let mut failures = 0usize;
-    collect(&c.pointer_reports, &mut text, &mut failures);
+    collect(&c.pointer_reports, owners, &mut text, &mut failures);
     if !c.pointers.is_passed() && failures == 0 {
         failures += 1;
         let _ = writeln!(text, "SmBrep::ValidatePointers failed without a report");
@@ -245,7 +310,7 @@ fn report(c: std::result::Result<BrepCheck, Refusal>) -> Result<CheckReport> {
             // the kernel's own contract broken: AssertValid runs after a clean pointer check
             return Err(Error::Exception);
         };
-        collect(&c.reports, &mut text, &mut failures);
+        collect(&c.reports, owners, &mut text, &mut failures);
         if !ok && failures == 0 {
             failures += 1;
             text.push_str("SmBrep::AssertValid failed without a report\n");
@@ -265,7 +330,7 @@ fn text(s: &str) -> &str {
 
 /// The capi's `line()`: `<reporting type>::Test #<n> <name>: <message> [owner <type>]`, the owner
 /// tag only when the report names the owner's type.
-fn report_line(r: &AssertReport) -> String {
+fn report_line(r: &AssertReport, owners: &EdgeOwners) -> String {
     let msg = r.format_log_message();
     let mut s = format!(
         "{}::Test #{} {}: {}",
@@ -279,16 +344,19 @@ fn report_line(r: &AssertReport) -> String {
         s.push_str(owner);
         s.push(']');
     }
+    if let Some(edge) = owners.of_report(r) {
+        let _ = write!(s, " [edge {edge}]");
+    }
     s
 }
 
 /// The capi's `collect()`: appends the failed reports of `list`, one line each, and counts them;
 /// SMLib's warnings ([`AssertReport::is_warning`]: `SmBrep` test 21, "Suspicious Shell Count", a
 /// body of several faces with one shell each, is one) are neither.
-fn collect(list: &AssertArray, out: &mut String, failures: &mut usize) {
+fn collect(list: &AssertArray, owners: &EdgeOwners, out: &mut String, failures: &mut usize) {
     for r in list.reports().iter().filter(|r| !r.ok && !r.is_warning()) {
         *failures += 1;
-        out.push_str(&report_line(r));
+        out.push_str(&report_line(r, owners));
         out.push('\n');
     }
 }
