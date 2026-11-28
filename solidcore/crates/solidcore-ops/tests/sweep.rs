@@ -1881,6 +1881,33 @@ fn a_loft_s_hostile_ends_are_refused() {
     assert!(refused(&beside, [LoftEnd::Free, square_end(1.0)]));
 }
 
+/// The side of its section's plane an apex rises to, `true` along the plane's normal: either
+/// side of the plane z = 5, and of the same plane turned over. An apex in the plane, within
+/// `APEX_OFF_PLANE` of it, or not finite is refused.
+#[test]
+fn an_apex_rises_to_the_side_of_its_sections_plane_it_is_proved_on() {
+    use solidcore_ops::sweep::{apex_above, APEX_OFF_PLANE};
+    use solidcore_record::{Plane, Vec3};
+    let plane = Plane {
+        origin: Vec3::new(1.0, 2.0, 5.0),
+        ..Plane::XY
+    };
+    let over = Plane {
+        y: Vec3::new(0.0, -1.0, 0.0),
+        ..plane
+    };
+    assert_eq!(apex_above(&plane, Vec3::new(4.0, -3.0, 15.0)), Ok(true));
+    assert_eq!(apex_above(&plane, Vec3::new(4.0, -3.0, -15.0)), Ok(false));
+    assert_eq!(apex_above(&over, Vec3::new(4.0, -3.0, 15.0)), Ok(false));
+    for apex in [
+        Vec3::new(4.0, -3.0, 5.0),
+        Vec3::new(4.0, -3.0, 5.0 + APEX_OFF_PLANE / 2.0),
+        Vec3::new(4.0, -3.0, f64::NAN),
+    ] {
+        assert_eq!(apex_above(&plane, apex), Err(Error::Argument), "{apex:?}");
+    }
+}
+
 /// A loft to a point through a station that bulges out (the base square again, half way up):
 /// a closed solid fuller than the pyramid (200) and inside the prism over the base (600). Rows of
 /// different counts, an apex in the base's plane, a single row, and parameters that do not run

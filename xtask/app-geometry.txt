@@ -984,8 +984,6 @@ crates/kernel/src/fill.rs:matched_patch dot
 crates/kernel/src/fill.rs:normal_curvature dot
 crates/kernel/src/fill.rs:planar cross,dot,normalized
 crates/kernel/src/helix.rs:helix_profile atan2,cross,dot,normalized
-crates/kernel/src/helix.rs:loft_to_point_plan dot
-crates/kernel/src/helix.rs:loft_to_point_with_rails dot
 crates/kernel/src/helix.rs:rot cross,dot
 crates/kernel/src/helix.rs:sweep_helix_mesh normalized,triangles
 crates/kernel/src/iges_in.rs:Tr::arc atan2
