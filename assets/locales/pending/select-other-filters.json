@@ -1,0 +1,74 @@
+{
+  "en": {
+    "ui.select_other.cat_bodies": "Bodies",
+    "ui.select_other.cat_construction": "Construction",
+    "ui.select_other.cat_edges": "Edges",
+    "ui.select_other.cat_faces": "Faces",
+    "ui.select_other.cat_sketch": "Sketch",
+    "ui.select_other.cat_vertices": "Vertices",
+    "ui.select_other.filter_all": "All"
+  },
+  "ar": {
+    "ui.select_other.cat_bodies": "أجسام",
+    "ui.select_other.cat_construction": "إنشاء",
+    "ui.select_other.cat_edges": "حواف",
+    "ui.select_other.cat_faces": "وجوه",
+    "ui.select_other.cat_sketch": "رسم",
+    "ui.select_other.cat_vertices": "رؤوس",
+    "ui.select_other.filter_all": "الكل"
+  },
+  "de": {
+    "ui.select_other.cat_bodies": "Körper",
+    "ui.select_other.cat_construction": "Konstruktion",
+    "ui.select_other.cat_edges": "Kanten",
+    "ui.select_other.cat_faces": "Flächen",
+    "ui.select_other.cat_sketch": "Skizze",
+    "ui.select_other.cat_vertices": "Eckpunkte",
+    "ui.select_other.filter_all": "Alle"
+  },
+  "he": {
+    "ui.select_other.cat_bodies": "גופים",
+    "ui.select_other.cat_construction": "בנייה",
+    "ui.select_other.cat_edges": "צלעות",
+    "ui.select_other.cat_faces": "פאות",
+    "ui.select_other.cat_sketch": "סקיצה",
+    "ui.select_other.cat_vertices": "קודקודים",
+    "ui.select_other.filter_all": "הכול"
+  },
+  "ja": {
+    "ui.select_other.cat_bodies": "ボディ",
+    "ui.select_other.cat_construction": "構築",
+    "ui.select_other.cat_edges": "エッジ",
+    "ui.select_other.cat_faces": "面",
+    "ui.select_other.cat_sketch": "スケッチ",
+    "ui.select_other.cat_vertices": "頂点",
+    "ui.select_other.filter_all": "すべて"
+  },
+  "ko": {
+    "ui.select_other.cat_bodies": "본체",
+    "ui.select_other.cat_construction": "구성",
+    "ui.select_other.cat_edges": "모서리",
+    "ui.select_other.cat_faces": "면",
+    "ui.select_other.cat_sketch": "스케치",
+    "ui.select_other.cat_vertices": "꼭짓점",
+    "ui.select_other.filter_all": "전체"
+  },
+  "vi": {
+    "ui.select_other.cat_bodies": "Khối",
+    "ui.select_other.cat_construction": "Dựng hình",
+    "ui.select_other.cat_edges": "Cạnh",
+    "ui.select_other.cat_faces": "Mặt",
+    "ui.select_other.cat_sketch": "Phác thảo",
+    "ui.select_other.cat_vertices": "Đỉnh",
+    "ui.select_other.filter_all": "Tất cả"
+  },
+  "zh": {
+    "ui.select_other.cat_bodies": "实体",
+    "ui.select_other.cat_construction": "构造",
+    "ui.select_other.cat_edges": "边",
+    "ui.select_other.cat_faces": "面",
+    "ui.select_other.cat_sketch": "草图",
+    "ui.select_other.cat_vertices": "顶点",
+    "ui.select_other.filter_all": "全部"
+  }
+}
