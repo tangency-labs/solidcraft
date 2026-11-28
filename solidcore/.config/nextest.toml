@@ -1,0 +1,7 @@
+# cargo-nextest settings for the solidcore workspace. A test that never finishes (an infinite
+# loop, a non-converging iteration) is terminated after 40 minutes and reported as a failure,
+# so a hang is a clear failure instead of a stall. Several honest tests take 10 to 20 minutes on a
+# loaded machine, so the limit sits well above that, and below the 60 minute CI job cap so the failing test is named before the job is cancelled.
+[profile.default]
+slow-timeout = { period = "300s", terminate-after = 8 }
+fail-fast = false
