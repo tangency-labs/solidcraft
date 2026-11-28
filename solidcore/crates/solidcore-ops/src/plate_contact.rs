@@ -708,8 +708,13 @@ fn plan_joints(
             out.push((Some(JointSkip::MeetsOtherJoint(other)), Vec::new()));
             continue;
         }
+        // A joint that cuts nothing (every tab refused) holds no direction on its plates.
+        let cuts_something = !mine.is_empty();
         cuts.extend(mine.into_iter().map(|o| (j, s, p, o)));
-        for (plate, dir) in [(s, p.normal), (t, m)] {
+        for (plate, dir) in [(s, p.normal), (t, m)]
+            .into_iter()
+            .filter(|_| cuts_something)
+        {
             if let Some(d @ None) = dirs.get_mut(plate) {
                 *d = Some((dir, j));
             }
@@ -1443,6 +1448,30 @@ mod tests {
         );
         assert_eq!(
             run(&[(2, 0, side), (1, 0, p)]),
+            vec![None, Some(JointSkip::OtherDirection(0))]
+        );
+    }
+
+    /// A joint that cuts nothing holds no direction: a wall flush with Bottom's edge y = 100 has
+    /// every slot `at_edge`, so the post on x = 160 after it still gets its X joint; the wall
+    /// that cuts does hold Z against the post.
+    #[test]
+    fn a_joint_that_cuts_nothing_takes_no_direction() {
+        let (s, p) = bottom();
+        let side = Plane {
+            normal: Vec3::X,
+            offset: 160.0,
+        };
+        let flush = make_box([20.0, 94.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let post = make_box([160.0, 20.0, 1.0], [40.0, 60.0, 4.0]).unwrap();
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let plates = [s, flush, post, wall];
+        let run = |joints: &[(usize, usize, Plane)]| {
+            tab_slot_joints(&plates, joints, spec2(), TOL).unwrap()
+        };
+        assert_eq!(run(&[(1, 0, p), (2, 0, side)]), vec![None, None]);
+        assert_eq!(
+            run(&[(3, 0, p), (2, 0, side)]),
             vec![None, Some(JointSkip::OtherDirection(0))]
         );
     }

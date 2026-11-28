@@ -976,3 +976,38 @@ fn each_slot_reads_the_thickness_under_it() {
     assert_eq!(at(&mut k, 170.0, 190.0), FarSide::Missing);
     assert!(slot_thickness_under(&mut k, &s, p, &rect(20.0, 60.0, 30.0, 36.0), 0.0).is_err());
 }
+
+/// A spline-trimmed pocket far from the slot (x 100..130, y 60..80) is proven apart by its box
+/// before any placement, which may refuse a cubic; one whose box overlaps the slot is not.
+#[test]
+fn a_distant_cubic_loop_is_apart_by_its_box() {
+    use crate::math::Point2;
+    use crate::prism::profile::{Loop2, Seg2};
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: Point2::new(a.0, a.1),
+        b: Point2::new(b.0, b.1),
+    };
+    let pocket = |x: f64, y: f64| Loop2 {
+        segs: vec![
+            line((x, y), (x + 30.0, y)),
+            line((x + 30.0, y), (x + 30.0, y + 20.0)),
+            Seg2::Cubic {
+                p0: Point2::new(x + 30.0, y + 20.0),
+                p1: Point2::new(x + 20.0, y + 25.0),
+                p2: Point2::new(x + 10.0, y + 15.0),
+                p3: Point2::new(x, y + 20.0),
+            },
+            line((x, y + 20.0), (x, y)),
+        ],
+    };
+    let slot = Loop2 {
+        segs: vec![
+            line((20.0, 30.0), (30.0, 30.0)),
+            line((30.0, 30.0), (30.0, 36.0)),
+            line((30.0, 36.0), (20.0, 36.0)),
+            line((20.0, 36.0), (20.0, 30.0)),
+        ],
+    };
+    assert!(boxes_apart(&slot, &pocket(100.0, 60.0), 1e-6));
+    assert!(!boxes_apart(&slot, &pocket(10.0, 25.0), 1e-6));
+}

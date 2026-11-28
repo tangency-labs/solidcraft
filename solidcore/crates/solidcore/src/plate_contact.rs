@@ -1161,6 +1161,11 @@ pub fn slot_thickness_under(
             crate::prism::sheet::planar_face_regions(k, s, &frame, tol, |g, _| Ok(g == id))?
                 .regions;
         'region: for region in &regions {
+            // A face proven away from the slot is passed before the placement, which a trim
+            // it cannot decide (a cubic) would refuse.
+            if boxes_apart(outline, &region.outer, tol) {
+                continue;
+            }
             match outline
                 .placement(&region.outer, tol)
                 .ok_or_else(undecided)?
@@ -1170,6 +1175,9 @@ pub fn slot_thickness_under(
                 _ => return Ok(FarSide::Uneven),
             }
             for hole in &region.holes {
+                if boxes_apart(outline, hole, tol) {
+                    continue;
+                }
                 match outline.placement(hole, tol).ok_or_else(undecided)? {
                     LoopPlacement::Outside => {}
                     LoopPlacement::Inside => continue 'region,
@@ -1184,6 +1192,28 @@ pub fn slot_thickness_under(
         }
     }
     Ok(FarSide::Missing)
+}
+
+/// Whether the bounding boxes of loops `a` and `b` are more than `tol` apart along x or y, which
+/// proves the loops disjoint whatever their curves. `false` when an extent cannot be read.
+fn boxes_apart(
+    a: &crate::prism::profile::Loop2,
+    b: &crate::prism::profile::Loop2,
+    tol: f64,
+) -> bool {
+    use crate::math::Vec2;
+    use crate::prism::profile::Region2;
+    let region = |l: &crate::prism::profile::Loop2| Region2 {
+        outer: l.clone(),
+        holes: Vec::new(),
+    };
+    let (a, b) = (region(a), region(b));
+    [Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0)]
+        .into_iter()
+        .any(|d| match (a.extent_along(d, tol), b.extent_along(d, tol)) {
+            (Some((alo, ahi)), Some((blo, bhi))) => ahi + tol < blo || bhi + tol < alo,
+            _ => false,
+        })
 }
 
 /// Slot `k`'s prism (design 7.2): its outline in `p`'s frame ([`slot_face`]'s `(u, w)` plane)

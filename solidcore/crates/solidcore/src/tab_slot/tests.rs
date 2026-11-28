@@ -513,6 +513,9 @@ fn a_width_filling_the_whole_room_does_not_panic() {
     for seed in 0..64 {
         let v = vary((0.1, 1.0), &[0.3], 0.5, 0.0, 0.0, seed, 10.0).unwrap();
         let (s, w) = v[0];
-        assert!(s >= 0.1 - 1e-12 && s + w <= 1.0 + 1e-12, "seed {seed}: {v:?}");
+        assert!(
+            s >= 0.1 - 1e-12 && s + w <= 1.0 + 1e-12,
+            "seed {seed}: {v:?}"
+        );
     }
 }
