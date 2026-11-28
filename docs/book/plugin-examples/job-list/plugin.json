@@ -3,7 +3,7 @@
   "name": "Job List",
   "version": "0.1.0",
   "description": "Keeps a list of machining jobs in the design and shows it in a docked panel.",
-  "capabilities": ["commands@0.2", "ui@0.1", "storage@0.1"],
+  "capabilities": ["commands@0.2", "ui@0.1", "storage@0.1", "forms@0.1"],
   "runtime": {
     "module": "job-list.wasm",
     "data_format": 1,
@@ -18,7 +18,17 @@
         }}
       },
       {"name": "clear", "effect": "edit", "input_schema": {"type": "object", "properties": {}}},
-      {"name": "refresh", "effect": "read", "input_schema": {"type": "object", "properties": {}}}
+      {"name": "refresh", "effect": "read", "input_schema": {"type": "object", "properties": {}}},
+      {"name": "remove", "effect": "edit", "input_schema": {"type": "object", "properties": {}}},
+      {"name": "edit", "effect": "read", "input_schema": {"type": "object", "properties": {}}},
+      {
+        "name": "update",
+        "effect": "edit",
+        "input_schema": {"type": "object", "additionalProperties": true, "properties": {
+          "name": {"type": "string", "title": "Job"},
+          "tool": {"type": "number", "title": "Tool diameter", "minimum": 0.1, "unit": "mm"}
+        }}
+      }
     ],
     "ui": {
       "ui_version": 1,
@@ -28,6 +38,7 @@
           {"widget": {"group": [1, 2]}},
           {"widget": {"toolbar": [
             {"label": "Refresh", "icon": null, "entry": "refresh"},
+            {"label": "Remove", "icon": null, "entry": "remove"},
             {"label": "Clear", "icon": null, "entry": "clear"}
           ]}},
           {"widget": {"table": {
@@ -36,7 +47,7 @@
               {"key": "name", "label": "Job", "unit": null},
               {"key": "tool", "label": "Tool", "unit": "length"}
             ],
-            "select": "single", "on_select": null, "on_edit": null
+            "select": "single", "on_select": null, "on_edit": "edit"
           }}}
         ]}
       }],
