@@ -8298,6 +8298,13 @@ fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, n
     })
 }
 
+/// The point an Emboss turns its picked profiles about: the middle of the bounds of `regions`, in
+/// the sketch's coordinates. The Emboss marker in the view stands where it lands, moved by the
+/// offsets.
+pub fn emboss_middle(regions: &[Region2]) -> Vec2 {
+    crate::frame::anchor_point(regions, crate::frame::Anchor::Center)
+}
+
 /// The profiles an Emboss lays on its face (#20386): `regions`, as [`select_profiles`] gives them,
 /// turned `angle` radians counter-clockwise about the middle of their bounds and then moved by
 /// `shift`, all in the sketch's coordinates, so the shift runs along the sketch's x and y whatever
@@ -8316,12 +8323,22 @@ pub fn emboss_placement(regions: Vec<Region2>, shift: Vec2, angle: f64) -> Resul
     // A point p goes to R (p − middle) + middle + shift, which is R p + (shift + middle − R middle).
     let mut to = shift;
     if angle != 0.0 {
-        let middle = crate::frame::anchor_point(&regions, crate::frame::Anchor::Center);
+        let middle = emboss_middle(&regions);
         to += middle - solidcraft_geom::Similarity2::new(1.0, angle, Vec2::ZERO).ok_or_else(out_of_range)?.apply(middle);
     }
     let by = solidcraft_geom::Similarity2::new(1.0, angle, to).ok_or_else(out_of_range)?;
     let placed = |l: &solidcore_record::Loop2| solidcore_record::Loop2 { segs: l.segs.iter().map(|s| s.similar(&by)).collect() };
     Ok(regions.iter().map(|r| Region2 { outer: placed(&r.outer), holes: r.holes.iter().map(placed).collect() }).collect())
+}
+
+/// The box round an Emboss's picked profiles where the build puts it: the bounds of `regions`,
+/// turned and moved exactly as [`emboss_placement`] turns and moves the profiles themselves. Its
+/// four corners in the sketch's coordinates, in order round the box from the one that was lowest;
+/// none without a profile. The Emboss handles outline it while they drag.
+pub fn emboss_box(regions: &[Region2], shift: Vec2, angle: f64) -> Result<Vec<Vec2>> {
+    let Some((lo, hi)) = crate::frame::profile_bounds(regions) else { return Ok(Vec::new()) };
+    let bounds = Region2 { outer: solidcore_record::Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]), holes: Vec::new() };
+    Ok(emboss_placement(vec![bounds], shift, angle)?.iter().flat_map(|r| r.outer.segs.iter().map(|s| s.start())).collect())
 }
 
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {

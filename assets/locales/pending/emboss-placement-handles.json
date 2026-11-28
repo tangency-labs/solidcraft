@@ -1,0 +1,34 @@
+{
+  "en": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely."
+  },
+  "ar": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "اسحب لتحريك المقاطع على النموذج. اضغط Alt أو Ctrl لتحريكها بحرية.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "اسحب لتدوير المقاطع بخطوات 5°. اضغط Alt أو Ctrl لتدويرها بحرية."
+  },
+  "de": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "Ziehen, um die Profile über das Modell zu verschieben. Alt oder Strg gedrückt halten, um sie stufenlos zu verschieben.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "Ziehen, um die Profile in 5°-Schritten zu drehen. Alt oder Strg gedrückt halten, um sie stufenlos zu drehen."
+  },
+  "he": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "יש לגרור כדי להזיז את הפרופילים על פני המודל. יש להחזיק Alt או Ctrl להזזה חופשית.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "יש לגרור כדי לסובב את הפרופילים בצעדים של 5°. יש להחזיק Alt או Ctrl לסיבוב חופשי."
+  },
+  "ja": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "ドラッグしてプロファイルをモデル上で移動します。Alt または Ctrl を押したままにすると自由に移動します。",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "ドラッグしてプロファイルを 5° 刻みで回転します。Alt または Ctrl を押したままにすると自由に回転します。"
+  },
+  "ko": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "드래그하여 프로파일을 모델 위에서 이동합니다. 자유롭게 이동하려면 Alt 또는 Ctrl 키를 누른 채로 드래그하세요.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "드래그하여 프로파일을 5° 단위로 회전합니다. 자유롭게 회전하려면 Alt 또는 Ctrl 키를 누른 채로 드래그하세요."
+  },
+  "vi": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "Kéo để di chuyển các biên dạng trên mô hình. Giữ phím Alt hoặc Ctrl để di chuyển tự do.",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "Kéo để xoay các biên dạng theo từng bước 5°. Giữ phím Alt hoặc Ctrl để xoay tự do."
+  },
+  "zh": {
+    "Drag to move the profiles across the model. Hold Alt or Ctrl to move them freely.": "拖动以在模型上移动轮廓。按住 Alt 或 Ctrl 可自由移动。",
+    "Drag to turn the profiles in 5° steps. Hold Alt or Ctrl to turn them freely.": "拖动以 5° 为步长旋转轮廓。按住 Alt 或 Ctrl 可自由旋转。"
+  }
+}

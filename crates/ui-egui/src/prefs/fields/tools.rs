@@ -74,11 +74,11 @@ macro_rules! tools_preferences {
             /// keeps it, as if New Body were picked by hand: `auto_operation` doesn't choose for it (#19870).
             /// Off by default: the window opens and chooses as before. Editing a feature keeps its operation.
             new_body_default: bool = false, PAGE_TOOLS => check_id("prefs.new_body_default");
-            /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
-            /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
-            /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
-            /// then placed by its click only, as before, and its Position input takes faces only; a
-            /// primitive by its fields, its inputs or the selection it opened with.
+            /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, Emboss, and the
+            /// Box, Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and,
+            /// where it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap
+            /// Fit is then placed by its click only, as before, and its Position input takes faces only; an
+            /// Emboss by its fields; a primitive by its fields, its inputs or the selection it opened with.
             placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
             /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
             remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");

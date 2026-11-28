@@ -7407,7 +7407,15 @@ pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value
 /// A wrapped Emboss edit keeps its profile guide in the saved author occurrence.
 /// An invalid saved context must not draw the guide at a different occurrence.
 pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option<solidcore_record::Plane>, String> {
-    let Some(dialog) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Emboss { .. })) else { return Ok(None) };
+    let Some(dialog) = app.dialog.as_ref() else { return Ok(None) };
+    emboss_plane_of(app, dialog, sketch)
+}
+
+/// [`emboss_profile_plane`] for `dialog`, which a placement handle's drag has taken out of the app.
+pub(crate) fn emboss_plane_of(app: &SolveApp, dialog: &Dialog, sketch: u64) -> Result<Option<solidcore_record::Plane>, String> {
+    if !matches!(dialog.kind, Kind::Emboss { .. }) {
+        return Ok(None);
+    }
     let Some((feature, _)) = dialog.editing else { return Ok(None) };
     let Some(feature) = app.session.doc.feature(feature) else { return Err("the edited feature is missing".into()) };
     let FeatureKind::Emboss { sketch: source, face: Some(face), .. } = &feature.kind else { return Ok(None) };
