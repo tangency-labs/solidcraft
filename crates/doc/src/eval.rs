@@ -1274,6 +1274,11 @@ pub struct ModelState {
     cut_extents: BTreeMap<u64, (Plane, (f64, f64))>,
 }
 
+/// The model as it was before each feature ran (by feature id), for the features a pattern
+/// copies: a copy of a source whose own result changed the model it is built against is built
+/// where the source was built (see [`replay`]).
+pub type SourceStates = BTreeMap<u64, Arc<ModelState>>;
+
 /// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
 /// pieces it was joined with: the most any such piece shared with another, least first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -6548,6 +6553,8 @@ impl Model {
         let mut resolved_joints: BTreeMap<u64, crate::CapturedJoint> = BTreeMap::new();
         let mut start = 0;
         let mut back: Option<overlap::Refused> = None;
+        // The model as it was before each feature ran, for the features a pattern copies.
+        let mut before_states: SourceStates = SourceStates::new();
         'pass: loop {
             if let Some(refused) = back.take() {
                 let s = refused.saved;
@@ -6575,6 +6582,10 @@ impl Model {
                     back = Some(refused);
                     continue 'pass;
                 }
+                // The model as it was before this feature ran: a pattern that copies this feature
+                // builds the copy where the feature was built, when the model it is built against
+                // no longer holds what the feature was built from (see `replay`).
+                before_states.insert(f.id, state.clone());
                 if let Some(s) = stepper.as_mut() {
                     s.flush_for_feature(f, &state);
                 }
@@ -6935,6 +6946,7 @@ impl Model {
                                 heal,
                                 meshes,
                                 prepared_imports.get(f.id),
+                                Some(&before_states),
                             );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
@@ -11381,7 +11393,11 @@ fn hole_spots_raw<'a>(vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Fe
         _ => {
             let dir = self::direction(vals, direction, "direction")?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
+            // The source hole is already drilled at `p`, so projecting `p` along `dir` with
+            // `hole_start` shoots straight through the opening onto an opposite wall of a hollow
+            // body or the bottom of a blind bore (#23221). Resolve the reference frame from `p`
+            // and the reference edges directly.
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, p, dir, false)? };
             Ok((vec![HoleSpot { at: p, point: None }], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
         }
     }
@@ -16461,6 +16477,7 @@ fn replay(
     features: &[FeatureId],
     mats: &[Mat],
     warning: &mut Option<String>,
+    sources: Option<&SourceStates>,
 ) -> Result<()> {
     /// Build the transformed tool copies for one boolean source feature in [`replay`].
     #[allow(clippy::too_many_arguments)]
@@ -16477,6 +16494,7 @@ fn replay(
         targets: &[String],
         extra_tol: f64,
         record_probes: bool,
+        sources: Option<&SourceStates>,
     ) -> Result<ReplayBuilt> {
         // Copies are made in their source's tools' frame and meet each target where it is shown,
         // as the source's own tools do (#3383).
@@ -16619,7 +16637,17 @@ fn replay(
                 }
                 None => with_named_face_points(doc, vals, named_from.unwrap_or(st), src)?.map(|(g, _)| g),
             };
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None)?;
+            let tools = match feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None) {
+                Ok(tools) => tools,
+                // The source's own result changed the model the copy is built against: a join of
+                // its own took the face its To Object points at, and the copy cannot be cut back
+                // to a face that is gone. The copy is built where the source was built, against
+                // the model as it was then, so that it is the source's own tool, moved (#14305).
+                Err(e) => {
+                    let Some(before) = sources.and_then(|s| s.get(&src.id)) else { return Err(e) };
+                    feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), before, &mut None, &mut Vec::new(), &mut None)?
+                }
+            };
             if record_probes {
                 probe_boxes.extend(tools.iter().map(|t| tool_cut_box(&t.body, extra_tol)));
             }
@@ -16662,12 +16690,13 @@ fn replay(
         missed: &mut usize,
         total: &mut usize,
         warning: &mut Option<String>,
+        sources: Option<&SourceStates>,
     ) -> Result<()> {
         let (op, targets, scoped, built) = match prebuilt {
             Some(ready) => ready,
             None => {
                 let (op, targets, scoped) = resolve_replay_targets(st, f, src);
-                let built = build_replay_copies(doc, vals, st, named_from, own, &scoped, src, mats, first, &targets, 0.0, false)?;
+                let built = build_replay_copies(doc, vals, st, named_from, own, &scoped, src, mats, first, &targets, 0.0, false, sources)?;
                 (op, targets, scoped.into_owned(), built)
             }
         };
@@ -16734,6 +16763,7 @@ fn replay(
         missed: &mut usize,
         total: &mut usize,
         warning: &mut Option<String>,
+        sources: Option<&SourceStates>,
     ) -> Result<()> {
         let Some(first_src) = batch.entries.first().map(|e| e.src) else { return Ok(()) };
         let multi = batch.entries.len() > 1;
@@ -16754,7 +16784,22 @@ fn replay(
             if topology_changed {
                 *st = saved;
                 for entry in batch.entries {
-                    apply_single_entry(doc, vals, f_outer, st, named_from, own, entry.src, entry.mats, entry.first, None, missed, total, warning)?;
+                    apply_single_entry(
+                        doc,
+                        vals,
+                        f_outer,
+                        st,
+                        named_from,
+                        own,
+                        entry.src,
+                        entry.mats,
+                        entry.first,
+                        None,
+                        missed,
+                        total,
+                        warning,
+                        sources,
+                    )?;
                 }
                 return Ok(());
             }
@@ -16812,7 +16857,7 @@ fn replay(
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             let r = val(vals, radius, Kind::Length)?;
             // A fillet's own per-edge radii, in the order of its picks (as it saved its edges).
@@ -16887,7 +16932,7 @@ fn replay(
         // An Offset Face repeats at the copied faces of the body they lie on.
         if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             let d = val(vals, distance, Kind::Length)?;
             let picked: Vec<Vec3> = crate::plain(faces);
@@ -16917,7 +16962,7 @@ fn replay(
         }
         if let FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } = &src.kind {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             // Use the pick as resolved *before* this edit changed its supporting surface.
             let at = match st.named_faces.get(&src.id).and_then(|p| p.first()) {
@@ -16975,7 +17020,7 @@ fn replay(
         // the feature made, as it is here, placed by the pattern.
         if matches!(src.kind, FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }) {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             let made: Vec<ModelBody> = st.bodies.iter().filter(|b| b.feature == src.id).cloned().collect();
             if made.is_empty() {
@@ -17000,7 +17045,7 @@ fn replay(
         // mirror of a right-hand M8 hole is a right-hand M8 hole, not a left-hand one.
         if let FeatureKind::Thread { face, target_bodies, .. } = &src.kind {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             let picks = PickFrames::new(doc, st, own, src);
             // Each further face is kept in its own target body's frame, where the thread finds it.
@@ -17045,7 +17090,7 @@ fn replay(
         });
         if pending.is_some() && !matches_pending {
             if let Some(batch) = pending.take() {
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
             (op, targets, scoped) = resolve_replay_targets(st, f, src);
             can_batch = plan.len() > 1 && batch_limit > 1 && batchable_cut_source(src, &scoped, op);
@@ -17067,6 +17112,7 @@ fn replay(
             &targets,
             extra_tol,
             can_batch && pending.is_some(),
+            sources,
         )?;
         if can_batch && !built.copies.is_empty() {
             let fits_pending = pending.as_ref().is_some_and(|batch| batch.copies.len() + built.copies.len() <= batch_limit);
@@ -17096,11 +17142,12 @@ fn replay(
             if let Some(batch) = pending.take() {
                 // Pending batch is full, or this source's probes/tools may interact with it: apply
                 // the pending batch first and rebuild this source against the updated model.
-                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
                 (op, targets, scoped) = resolve_replay_targets(st, f, src);
                 can_batch = plan.len() > 1 && batch_limit > 1 && batchable_cut_source(src, &scoped, op);
                 extra_tol = if can_batch { target_tol(st, &scoped, &targets) } else { 0.0 };
-                built = build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, *first, &targets, extra_tol, false)?;
+                built =
+                    build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, *first, &targets, extra_tol, false, sources)?;
                 new_boxes = if can_batch && !built.copies.is_empty() && built.copies.len() < batch_limit {
                     built.copies.iter().map(|t| tool_cut_box(&t.body, extra_tol)).collect()
                 } else {
@@ -17138,10 +17185,11 @@ fn replay(
             &mut missed,
             &mut total,
             warning,
+            sources,
         )?;
     }
     if let Some(batch) = pending.take() {
-        flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+        flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
     }
     if missed > 0 {
         append_warning(warning, format!("{missed} of {total} cut copies remove no material"));
@@ -18637,9 +18685,10 @@ fn eval_feature(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    sources: Option<&SourceStates>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, sources);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -18709,6 +18758,7 @@ fn eval_feature_kind(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    sources: Option<&SourceStates>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -19470,7 +19520,7 @@ fn eval_feature_kind(
             let mats = own_copies(doc, vals, st, f)?;
             let before = st.bodies.len();
             if bodies.is_empty() {
-                replay(doc, vals, f, st, features, &mats, warning)?;
+                replay(doc, vals, f, st, features, &mats, warning, sources)?;
                 return if *join { join_pattern_copies(st, f, features, bodies, before) } else { Ok(()) };
             }
             // Bodies: each copy is a new body named after its source. Unresolved/missing bodies
@@ -19483,7 +19533,7 @@ fn eval_feature_kind(
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let m = mirror_copy(doc, vals, st, f, plane)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[m], warning);
+                return replay(doc, vals, f, st, features, &[m], warning, sources);
             }
             let mut output = 0;
             // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:

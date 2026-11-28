@@ -53,7 +53,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split { .. } => Some("solid.split_body"),
-        Kind::DeleteFaces => Some("face.delete"),
+        Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::TransformFace { .. } => Some("solid.transform_face"),
         Kind::Thread { .. } => Some("solid.thread"),
@@ -116,7 +116,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),
-            crate::dialogs_assembly::Asm::RigidGroup => Some("joint.rigid_group"),
+            crate::dialogs_assembly::Asm::RigidGroup { .. } => Some("joint.rigid_group"),
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
@@ -1440,6 +1440,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
+        Kind::DeleteFaces { heal } => {
+            ui_kit::options(ui, "delete_face_options", &mut [("ui.delete_face_heal", heal)]);
+        }
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);

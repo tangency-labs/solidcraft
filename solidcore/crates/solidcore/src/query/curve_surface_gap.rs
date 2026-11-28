@@ -827,6 +827,12 @@ impl NetSurface {
             // polynomial piece over the part, so the jump itself is not widened by the
             // part's width in the other direction)
             let mut gap = |ku: usize, kv: usize, kt: usize, across_u: bool, a: [f64; 4]| {
+                // (#23139: from the net's control points where its pieces are polynomials,
+                // which does not grow with the part's length along the line)
+                if let Some(from_net) = self.net_jump([ku, kv], kt, across_u, a)? {
+                    jump = jump.max(from_net);
+                    return Ok(());
+                }
                 let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
                 let mid = |lo: f64, hi: f64| (lo + 0.5 * (hi - lo)).max(lo).min(hi);
                 let (mu, mv) = (mid(a[0], a[1]), mid(a[2], a[3]));
@@ -869,6 +875,181 @@ impl NetSurface {
             }
         }
         Ok((out, slack))
+    }
+
+    /// Not upstream (#23139): `sup |S - S~|` over the part `[a0, a1] x [b0, b1]` past a knot
+    /// line, from the net's control points: `S` the surface on the part's own span (`kt`
+    /// across the line, the other direction's span as `kept`'s) and `S~` the polynomial of
+    /// the spans `kept` continued over it. `None` where this bound does not apply (the
+    /// caller then encloses the two sides apart): a weight other than 1 among the control
+    /// points of either piece, a line where the net itself is not continuous, a part that
+    /// does not touch the line or runs past its span in the other direction, or a normal
+    /// not proved away from zero.
+    ///
+    /// With `t` the parameter across the line `t = x`, `r` the one along it, and `P`, `P~`
+    /// the net's two polynomials, `D = P - P~` is zero on the line (a knot of multiplicity at
+    /// most the degree: both pieces end on the same row of control points there). Its
+    /// derivative across the line there is the jump of the net's own, `E(r) = P_t - P~_t`: a
+    /// B-spline in `r` on the net's basis whose control points are
+    /// `q (R[j+1] - R[j]) / (x[j+q+1] - x[j+1]) - q (R[j] - R[j-1]) / (x[j+q] - x[j])`, `R[j]`
+    /// the row on the line, so `|E| <= e`, the largest of those over the columns of the
+    /// part's span (the basis is non-negative and sums to 1 there); `e = 0` below full
+    /// multiplicity, where the net is `C^1`. Over a part of width `s`:
+    /// `|D_t| <= e + s sup |D_tt|`, `|D_r| <= s sup |D_rt|` and `|D| <= s sup |D_t|`, the
+    /// second partials each at most the two pieces' own bounds added. That is the net's jump.
+    /// An offset's is `D + d (n - n~)`, and for the normals `N = P_r x P_t`,
+    /// `N - N~ = D_r x P_t + P~_r x D_t` and `|n - n~| <= 2 |N - N~| / |N~|`
+    /// (`a/|a| - b/|b| = (a - b)/|b| + a (|b| - |a|) / (|a| |b|)`, each term at most
+    /// `|a - b| / |b|`).
+    ///
+    /// A net that is smooth across the line (a loft through sections of Bézier pieces: a
+    /// knot of full multiplicity at every joint of a section that is `C^2` there) has an
+    /// `e` of the size of its control points' rounding, whatever the part's length along
+    /// the line. The two sides enclosed apart differ by their enclosures' widths, which
+    /// grow with that length, and held a trim along such a line open at every depth
+    /// (#23139: 45,000 pieces a trim, each bisection ending at [`MAX_PIECES`]).
+    fn net_jump(
+        &self,
+        kept: [usize; 2],
+        kt: usize,
+        across_u: bool,
+        a: [f64; 4],
+    ) -> Result<Option<f64>> {
+        let n = &self.net;
+        let [ku, kv] = kept;
+        // (`t` across the line, `r` along it)
+        let (knots_t, q, count_t, k_kept, knots_r, p, count_r, k_r) = if across_u {
+            (&n.u, n.p, n.nu, ku, &n.v, n.q, n.nv, kv)
+        } else {
+            (&n.v, n.q, n.nv, kv, &n.u, n.p, n.nu, ku)
+        };
+        let ([r0, r1], [t0, t1]) = if across_u {
+            ([a[2], a[3]], [a[0], a[1]])
+        } else {
+            ([a[0], a[1]], [a[2], a[3]])
+        };
+        if kt == k_kept || k_r < p || k_r >= count_r || kt < q || kt >= count_t {
+            return Ok(None);
+        }
+        // the line: the own span's end towards the kept one
+        let x = if kt > k_kept {
+            knot(knots_t, kt as isize)
+        } else {
+            knot(knots_t, kt as isize + 1)
+        };
+        if !(t0 <= x && x <= t1 && t0.is_finite() && t1.is_finite()) {
+            return Ok(None);
+        }
+        // (the columns of the part's span carry it only inside that span)
+        if !(knot(knots_r, k_r as isize) <= r0 && r1 <= knot(knots_r, k_r as isize + 1)) {
+            return Ok(None);
+        }
+        let Some(first) = knots_t.iter().position(|&y| y == x) else {
+            return Ok(None);
+        };
+        let m = knots_t.iter().filter(|&&y| y == x).count();
+        if m > q || first == 0 {
+            return Ok(None);
+        }
+        // the control point of column `i` (along the line) and row `j` (across it)
+        let point = |i: usize, j: usize| -> Option<V3<Ivl>> {
+            let at = if across_u {
+                j.checked_mul(n.nv)?.checked_add(i)?
+            } else {
+                i.checked_mul(n.nv)?.checked_add(j)?
+            };
+            let c = n.pw.get(at.checked_mul(4)?..)?;
+            let (&x, &y, &z, &w) = (c.first()?, c.get(1)?, c.get(2)?, c.get(3)?);
+            (w == 1.0).then_some(V3 {
+                x: Ivl::from(x),
+                y: Ivl::from(y),
+                z: Ivl::from(z),
+            })
+        };
+        // (every control point of either piece is a plain point: the pieces are polynomials)
+        let (rows_lo, rows_hi) = (kt.min(k_kept) - q, kt.max(k_kept));
+        for i in (k_r - p)..=k_r {
+            for j in rows_lo..=rows_hi {
+                if point(i, j).is_none() {
+                    return Ok(None);
+                }
+            }
+        }
+        let mut e = 0.0_f64;
+        if m == q {
+            // (the row on the line: the knots `first .. first + q` are the line's)
+            let j = first - 1;
+            if j == 0 || j + 1 >= count_t {
+                return Ok(None);
+            }
+            let above = Ivl::from(knot(knots_t, (j + q + 1) as isize))
+                - Ivl::from(knot(knots_t, (j + 1) as isize));
+            let below =
+                Ivl::from(knot(knots_t, (j + q) as isize)) - Ivl::from(knot(knots_t, j as isize));
+            if !(above.lo > 0.0 && below.lo > 0.0) {
+                return Ok(None);
+            }
+            let deg = Ivl::from(q as f64);
+            for i in (k_r - p)..=k_r {
+                let (Some(lower), Some(on), Some(upper)) =
+                    (point(i, j - 1), point(i, j), point(i, j + 1))
+                else {
+                    return Ok(None);
+                };
+                let d = minus(
+                    scaled(minus(upper, on), deg / above),
+                    scaled(minus(on, lower), deg / below),
+                );
+                let Some(size) = norm_upper(d) else {
+                    return Ok(None);
+                };
+                e = e.max(size);
+            }
+        }
+        let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
+        // (an offset's own side is its formula's only away from a pole: refused there as
+        // the two sides enclosed apart are)
+        self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 0)?;
+        let own = nurbs_partials_over_piece(n, tu, tv, a[0], a[1], a[2], a[3], 2)?;
+        let cont = nurbs_partials_over_piece(n, ku, kv, a[0], a[1], a[2], a[3], 2)?;
+        // (a partial of order `i` along the line and `j` across it)
+        let at = |part: &Partials<Ivl>, i: usize, j: usize| {
+            if across_u {
+                part.at(j, i)
+            } else {
+                part.at(i, j)
+            }
+        };
+        let size = |v: V3<Ivl>| norm_upper(v).map(Ivl::from);
+        let (Some(own_tt), Some(cont_tt), Some(own_rt), Some(cont_rt), Some(own_t), Some(cont_r)) = (
+            size(at(&own, 0, 2)),
+            size(at(&cont, 0, 2)),
+            size(at(&own, 1, 1)),
+            size(at(&cont, 1, 1)),
+            size(at(&own, 0, 1)),
+            size(at(&cont, 1, 0)),
+        ) else {
+            return Ok(None);
+        };
+        let width = (Ivl::from(t1) - Ivl::from(x))
+            .mag()
+            .max((Ivl::from(x) - Ivl::from(t0)).mag());
+        let s = Ivl::from(width);
+        let d_t = Ivl::from(e) + s * (own_tt + cont_tt);
+        let d_r = s * (own_rt + cont_rt);
+        let mut jump = s * d_t;
+        if let Some(d) = self.offset.filter(|d| !(d.lo == 0.0 && d.hi == 0.0)) {
+            let Some(normal) = norm_lower(cross(at(&cont, 1, 0), at(&cont, 0, 1))) else {
+                return Ok(None);
+            };
+            // (`norm_lower` gives a finite value)
+            if normal <= 0.0 {
+                return Ok(None);
+            }
+            let turned = d_r * own_t + cont_r * d_t;
+            jump = jump + Ivl::from(d.mag()) * Ivl::from(2.0) * turned / Ivl::from(normal);
+        }
+        Ok(jump.hi.is_finite().then_some(jump.hi))
     }
 
     fn slack(p: &Partials<Ivl>, over_u: f64, over_v: f64) -> Result<f64> {
@@ -9318,6 +9499,68 @@ mod tests {
         for (lk, continuity) in [(1, 0), (2, 1)] {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
             assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
+        }
+    }
+
+    /// #23139: a join the net is smooth across has no jump to add. The base is
+    /// `z = (x^2 / 4) (1 + y^2)` over `x` in `[0, 2]`, `y` in `[0, 1]`: two cubic Bézier
+    /// pieces in `u` (a triple knot at `u = 1`: continuous by count only, one polynomial in
+    /// fact), quadratic in `v`, offset by `0.5`. A box across the join with `1e-11` of it
+    /// past the line, as a trim along the line crosses it by rounding, has that overshoot
+    /// in its slack and nothing else: the overshoot times the offset's first partials,
+    /// which are under 2 there (`|S_u| < 1.2`, the offset adding less than `0.5` times a
+    /// curvature under 1) and enclosed under 10, so the slack is under `1e-10`, whether the
+    /// box is `1/32` long or a half. The two sides enclosed apart differ by their
+    /// enclosures' widths over the part's length along the line (`v` in `[0.4, 0.6]`):
+    /// that gave a slack of `5e-2` here, and kept every piece of a trim along such a line
+    /// open.
+    #[test]
+    fn an_offset_box_across_a_smooth_join_has_only_its_overshoot_in_the_slack() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let third = 1.0 / 3.0;
+        let columns = [
+            [0.0, 0.0],
+            [third, 0.0],
+            [2.0 * third, 1.0 / 12.0],
+            [1.0, 0.25],
+            [4.0 * third, 5.0 / 12.0],
+            [5.0 * third, 2.0 * third],
+            [2.0, 1.0],
+        ];
+        let net: Vec<Vec<CPoint>> = columns
+            .iter()
+            .map(|&[x, z]| {
+                [[0.0, 1.0], [0.5, 1.0], [1.0, 2.0]]
+                    .iter()
+                    .map(|&[y, g]| CPoint::new(x, y, z * g, NOW))
+                    .collect()
+            })
+            .collect();
+        let base = NurbSurface::new(
+            net,
+            3,
+            2,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(base, false));
+        let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
+        let probes = [Point2::new(0.5, 0.5), Point2::new(1.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        for length in [1.0 / 32.0, 0.5] {
+            let w = V3 {
+                x: Ivl::new(1.0 - length, 1.0 + 1.0e-11),
+                y: Ivl::new(0.4, 0.6),
+                z: Ivl::from(0.0),
+            };
+            let (_, slack) = net.partials(&[w], 2, 1).unwrap();
+            assert!(slack > 0.0 && slack < 1.0e-10, "{slack:e} over {length}");
         }
     }
 

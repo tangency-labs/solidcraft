@@ -525,6 +525,7 @@ fn painted_cube() -> Body {
         opacity: 1.,
         faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }))
 }
 

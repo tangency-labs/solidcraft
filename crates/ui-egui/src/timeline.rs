@@ -633,14 +633,15 @@ fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u6
 /// ones when the timeline is filtered to a component, with the entry's label, for one delete
 /// through [`delete_features`] so the confirmation still lists what would fail. Not offered
 /// before the marker, nor when the menu acts on several selected features: an entry that acts
-/// partly on the selection and partly beyond it is hard to read.
+/// partly on the selection and partly beyond it is hard to read. Nor when the feature itself is
+/// all it would delete: Delete beside it does the same (#23191).
 fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) -> Option<(String, Vec<u64>)> {
     if index < marker || menu_targets(app, id).len() > 1 {
         return None;
     }
     let ids = features_from(app, marker, shown);
     // A feature the bar's filter leaves out has nothing shown after the marker to delete.
-    if ids.is_empty() {
+    if ids.is_empty() || ids == [id] {
         return None;
     }
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
