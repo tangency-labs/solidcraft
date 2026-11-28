@@ -332,6 +332,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "surface_boundary",
         FeatureKind::SurfaceMatch { .. } => "continuity",
         FeatureKind::SurfaceFair { .. } => "surface_fair",
+        FeatureKind::SurfaceMorph { .. } => "surface_morph",
         FeatureKind::Revolve { .. } => "revolve",
         FeatureKind::Fillet { .. } => "fillet",
         FeatureKind::Chamfer { .. } => "chamfer",
@@ -372,7 +373,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
-        FeatureKind::Move { .. } => "move",
+        FeatureKind::Move { .. } | FeatureKind::TransformFace { .. } => "move",
         FeatureKind::CapturePosition { .. } => "capture",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
         FeatureKind::MeshReduce { .. } => "mesh_reduce",
@@ -573,17 +574,6 @@ impl MenuRule {
     pub(crate) fn one(&self, item: Item) -> Item {
         item.off_because(self.one_off.clone())
     }
-
-    /// The same entry as a row of the vertical History's menu: `row` draws it, enabled or not
-    /// as it is told, and the reason goes on its hover.
-    pub(crate) fn one_row(&self, row: impl FnOnce(bool) -> egui::Response) -> egui::Response {
-        use crate::ui_kit::BackingTooltipExt as _;
-        let row = row(self.one_off.is_none());
-        match &self.one_off {
-            Some(why) => row.backing_on_hover_text(why.as_str()),
-            None => row,
-        }
-    }
 }
 
 /// Delete's label in a feature's menu: how many features it deletes when that is more than one.
@@ -591,16 +581,6 @@ pub(crate) fn delete_label(count: usize) -> String {
     match count {
         1 => solidcraft_ui_text::tr_label("Delete").to_string(),
         n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
-    }
-}
-
-/// Delete in a feature's menu, in both timelines: the selected features when the right-clicked
-/// one is among them, labelled with how many, else that feature alone (#5005).
-pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    let targets = menu_targets(app, id);
-    if crate::ui_kit::menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
-        delete_features(app, targets);
-        ui.close();
     }
 }
 
@@ -648,13 +628,10 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
     Some((solidcraft_ui_text::format(key, &[("count", &ids.len().to_string())]), ids))
 }
 
-/// The [`after_marker`] entry as a button.
-pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
-    let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
-    if crate::ui_kit::menu::button(ui, &label, "delete").clicked() {
-        delete_features(app, ids);
-        ui.close();
-    }
+/// The optional delete-after-marker entry as menu data.
+pub(crate) fn delete_after_marker_item(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) -> Option<Item> {
+    after_marker(app, id, index, marker, shown)
+        .map(|(label, ids)| Item::action("ui.deleteAfterMarker", &label, "delete").with(json!({"features":ids})))
 }
 
 /// A History bar feature's menu (`Target::Timeline`): edit, rename, group, suppress, roll back,
@@ -727,19 +704,6 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// The timeline anchor of a feature: the last one clicked, where a Shift+click range starts.
 pub(crate) fn anchor_key(id: u64) -> String {
     format!("f:{id}")
-}
-
-/// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
-pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
-        let features = menu_targets(app, id);
-        let _ = app.run("timeline.copy", json!({ "features": features }));
-        ui.close();
-    }
-    if crate::ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
-        let _ = app.run("timeline.paste", json!({}));
-        ui.close();
-    }
 }
 
 /// A feature tooltip's (and its copied message's) name, type, error and warning: an import's
@@ -990,44 +954,6 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     out.join(" ")
 }
 
-/// Copy Error Message (or Copy Warning Message) in the menu of a feature that has one. It is
-/// one feature's message, so the [`MenuRule`] leaves it out for several selected features.
-pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
-    if menu_rule(app, id).many {
-        return;
-    }
-    let Some(text) = feature_message(app, id) else { return };
-    let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
-    let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
-        ui.ctx().copy_text(text);
-        ui.close();
-    }
-}
-
-/// Reuse the Browser action so both History layouts edit the same sketch attachment.
-pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if !matches!(app.session.doc.feature(id).map(|feature| &feature.kind), Some(FeatureKind::Sketch { .. })) {
-        return;
-    }
-    let Some(item) =
-        crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().find(|item| item.id == "ui.redefineSketch")
-    else {
-        return;
-    };
-    use crate::ui_kit::BackingTooltipExt as _;
-    // The item says why it is off: it takes one sketch, so it is off for several selected features.
-    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
-    let response = match &item.tip {
-        Some(tip) => response.backing_on_hover_text(tip.as_str()),
-        None => response,
-    };
-    if response.clicked() {
-        crate::context_menu::run_item(app, &item, response.rect.center());
-        ui.close();
-    }
-}
-
 /// Shift+click on a feature: select the features from the anchor (the last feature clicked, or
 /// the last selected one) to this one. `order` is the timeline as drawn this frame, taken from
 /// the list it was drawn from so the range never mixes two orders. Ctrl as well adds the range to
@@ -1223,16 +1149,20 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
-pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
-    if crate::hole_folder::holes(app, folder).is_none() {
-        return;
+pub(crate) fn edit_holes_item(app: &SolveApp, folder: u64) -> Option<Item> {
+    crate::hole_folder::holes(app, folder).map(|_| Item::action("ui.history.editHoles", "Edit Holes", "hole").with(json!({"folder":folder})))
+}
+
+pub(crate) fn run_holes_item(app: &mut SolveApp, item: &Item) -> bool {
+    if item.id != "ui.history.editHoles" {
+        return false;
     }
-    if crate::ui_kit::menu::button(ui, "Edit Holes", "hole").clicked() {
-        if let Err(why) = crate::hole_folder::open(app, folder) {
-            app.set_status(why, true);
-        }
-        ui.close();
+    if let Some(folder) = item.params.as_ref().and_then(|p| p.get("folder")).and_then(Value::as_u64)
+        && let Err(why) = crate::hole_folder::open(app, folder)
+    {
+        app.set_status(why, true);
     }
+    true
 }
 
 /// Where the bottom History strip publishes its marker and feature chips.
@@ -1426,7 +1356,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     // edited or picked component's features, after the path to it (`timeline_scope`).
     let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
     crate::timeline_scope::follow(app);
-    let history = crate::timeline_fold::history(app, &strip);
+    let history = crate::timeline_fold::cached(app, ui, &strip);
     // The edited component's last feature, scrolled into view once (`timeline_scope`): the
     // folded chip holding it, its component's own chip, or the feature itself. Read before the
     // path, whose click asks for it in what the next frame shows.

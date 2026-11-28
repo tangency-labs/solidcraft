@@ -103,6 +103,7 @@ use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZO
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1610,8 +1611,8 @@ impl Plane {
                     // A side of zero length makes its roots one point.
                     let h = bi_norm_in.unitize().map_or(0.0, |n| {
                         let support = sqrt(
-                            (radius_x * n.dot(x_axis)).powi(2)
-                                + (radius_y * n.dot(circ_y_axis_for_plane_normal)).powi(2),
+                            det::powi(radius_x * n.dot(x_axis), 2)
+                                + det::powi(radius_y * n.dot(circ_y_axis_for_plane_normal), 2),
                         );
                         max2(support - n.dot(plane_start_pt - center).abs(), 0.0)
                     });
@@ -1731,13 +1732,13 @@ impl Plane {
             let vec = point1 - center;
             let dx = vec.dot(x_axis);
             let dy = vec.dot(y_axis);
-            let enter_ang_rad = (radius_x / radius_y * dy).atan2(dx);
+            let enter_ang_rad = det::atan2(radius_x / radius_y * dy, dx);
 
             // ellipse end angle Rad
             let vec = point2 - center;
             let dx = vec.dot(x_axis);
             let dy = vec.dot(y_axis);
-            let exit_ang_rad = (radius_x / radius_y * dy).atan2(dx);
+            let exit_ang_rad = det::atan2(radius_x / radius_y * dy, dx);
 
             // ellipse start/stop angles deg with periodicity
             let enter_ang_deg = anal_ivl
@@ -1767,8 +1768,8 @@ impl Plane {
                 let arc_len = (trim_ivl.length() * (PI / 180.0)) * radius_x;
                 if arc_len < tol {
                     // build a degenerate line at the degenerate point
-                    let cos_u = (trim_ivl.min() * PI / 180.0).cos();
-                    let sin_u = (trim_ivl.min() * PI / 180.0).sin();
+                    let cos_u = det::cos(trim_ivl.min() * PI / 180.0);
+                    let sin_u = det::sin(trim_ivl.min() * PI / 180.0);
                     let point = center + cos_u * radius_x * x_axis + sin_u * radius_y * y_axis;
                     let Some(crv) = ignored(BSplineCurve::create_degenerate_curve(3, point))?
                     else {
@@ -2044,6 +2045,154 @@ mod tests {
             row[1].z += 0.125;
         }
         assert!(defers(&rows));
+    }
+
+    /// #22808: multi-span degree-1 translated closed spline extrusion (such as a periodic
+    /// spline wall extended during `local_operation` face offset): the exact isocurve and
+    /// both UV curves are extracted in both UV orders, both strictly inside a span and at an
+    /// interior knot, while non-monotone heights and open multi-span surfaces defer to
+    /// general SSI.
+    #[test]
+    fn multi_span_translated_spline_rows_give_one_section_in_either_parameter_direction() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        let closed_row = |z, shift| {
+            [
+                (1.0, shift),
+                (0.0, 1.0 + shift),
+                (-1.0, shift),
+                (1.0, shift),
+            ]
+            .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+            .to_vec()
+        };
+        let multi_rows = vec![
+            closed_row(-2.0, 0.0),
+            closed_row(0.0, 0.5),
+            closed_row(4.0, 1.5),
+        ];
+        let mut multi = BSplineSurface::from_data(
+            2,
+            3,
+            1,
+            2,
+            4,
+            6,
+            &multi_rows,
+            &[0.0, 0.0, 1.0, 3.0, 3.0],
+            &[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let lifted_dom = Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0);
+        let mut lifted = Plane::new(
+            Vec3::new(0.0, 0.0, 2.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &lifted_dom,
+        );
+        lifted.make_nurb().unwrap();
+        let check_uvs =
+            |sec: &SurfaceIntersection, surf: &BSplineSurface, pl: &Plane, expected_z: f64| {
+                assert_eq!(sec.curve_types, [TsectCurveType::Crossing]);
+                let c = &sec.curves_3d[0];
+                let uv_s = sec.surface1_uv_curves[0].as_ref().unwrap();
+                let uv_p = sec.surface2_uv_curves[0].as_ref().unwrap();
+                let iv = c.natural_interval();
+                for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    let s = iv.evaluate(t);
+                    let p3 = c.evaluate_point(&k, s).unwrap();
+                    assert!((p3.z - expected_z).abs() < 1e-12, "z={}", p3.z);
+                    let uvs = uv_s.evaluate_point(&k, s).unwrap();
+                    let lifted_s = surf.evaluate_point(Point2::new(uvs.x, uvs.y)).unwrap();
+                    assert!(lifted_s.distance(p3) < 1e-12);
+                    let uvp = uv_p.evaluate_point(&k, s).unwrap();
+                    let lifted_p = pl.evaluate_point(Point2::new(uvp.x, uvp.y));
+                    assert!(lifted_p.distance(p3) < 1e-12);
+                }
+            };
+        for swap in [false, true] {
+            if swap {
+                multi.swap_uv().unwrap();
+            }
+            let dom = multi.natural_uv_domain();
+            // Strictly inside the second linear span (z = 2 lies halfway between z = 0 and z = 4).
+            let section = spline_section::intersect(&k, &multi, &dom, &lifted, &lifted_dom, 1e-6)
+                .unwrap()
+                .unwrap();
+            check_uvs(&section, &multi, &lifted, 2.0);
+            // Exactly at the interior knot (z = 0 lies on row 1).
+            let at_knot = spline_section::intersect(
+                &k,
+                &multi,
+                &dom,
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .unwrap();
+            check_uvs(&at_knot, &multi, &plane, 0.0);
+        }
+        // Non-monotone multi-span heights (plane crosses twice) must defer.
+        let folded_rows = vec![
+            closed_row(-1.0, 0.0),
+            closed_row(2.0, 0.5),
+            closed_row(-1.0, 1.0),
+        ];
+        let folded = BSplineSurface::from_data(
+            2,
+            3,
+            1,
+            2,
+            4,
+            6,
+            &folded_rows,
+            &[0.0, 0.0, 1.0, 2.0, 2.0],
+            &[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert!(spline_section::intersect(
+            &k,
+            &folded,
+            &folded.natural_uv_domain(),
+            &plane,
+            &plane.natural_uv_domain(),
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+        // Open multi-span translated extrusions must defer to general SSI.
+        let open_row = |z, shift| {
+            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        };
+        let open_multi = BSplineSurface::from_data(
+            2,
+            2,
+            1,
+            2,
+            4,
+            5,
+            &[open_row(-2.0, 0.0), open_row(0.0, 0.5), open_row(4.0, 1.5)],
+            &[0.0, 0.0, 1.0, 3.0, 3.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert!(spline_section::intersect(
+            &k,
+            &open_multi,
+            &open_multi.natural_uv_domain(),
+            &lifted,
+            &lifted_dom,
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]

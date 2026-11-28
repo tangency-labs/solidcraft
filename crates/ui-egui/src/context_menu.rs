@@ -11,9 +11,12 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::menu::{list_row_lit, menu_frame, scroll_rows};
-use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, MenuItem, Surface};
-use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
+#[cfg(test)]
+use crate::ui_kit::LIST_W;
+use crate::ui_kit::{Container, Item, Menu, MenuAnchor, Surface};
+use egui::{Pos2, Rect};
+#[cfg(test)]
+use egui::{Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::prelude::*;
@@ -195,7 +198,12 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     };
     Item {
         id: id.into(),
-        label: label.into(),
+        label: if info.as_ref().is_some_and(|info| info.label == label) {
+            solidcraft_ui_text::tr_command(id, label)
+        } else {
+            solidcraft_ui_text::tr_label(label)
+        }
+        .into(),
         shortcut,
         enabled: info.as_ref().is_some_and(|i| i.enabled),
         icon: info.map(|i| i.icon).unwrap_or_default().into(),
@@ -203,6 +211,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         children: Vec::new(),
         swatch: None,
         tip: None,
+        ..Default::default()
     }
 }
 
@@ -231,22 +240,8 @@ pub enum BrowserMenu {
 #[derive(Default)]
 pub struct MenuState {
     pub target: Target,
-    /// The list row chosen with the arrow keys (Enter runs it).
-    pub key_row: Option<usize>,
-    /// The open flyouts: the row of the menu that opened the first, the row of that flyout that
-    /// opened the second, and so on.
-    submenu: Vec<usize>,
-    /// The row chosen with the arrow keys in the innermost open flyout.
-    submenu_key: Option<usize>,
-    /// The level the pointer came to rest on another row of while a flyout further in was open,
-    /// and when (it closes the flyouts further in after [`crate::ui_kit::SUBMENU_CLOSE_DELAY`]).
-    submenu_leave: Option<(usize, f64)>,
     /// The radial ring is shown (viewport menus).
     pub radial: bool,
-    /// The right button is held through the menu: releasing over a direction picks it.
-    pub flick: bool,
-    /// A right press in the viewport that may become a press-and-hold: where and when.
-    press: Option<(Pos2, f64)>,
     /// `ui.menu` asked to open at a point once the pointer got there.
     pending: Option<(Pos2, Target)>,
     /// An inline rename in progress.
@@ -329,9 +324,12 @@ pub struct Rename {
 }
 
 /// Radial slots, clockwise from the top.
+#[cfg(test)]
 const DIRS: usize = 8;
 /// Half axes of the ring of radial items.
+#[cfg(test)]
 const RX: f32 = crate::ui_kit::RADIAL_RADIUS;
+#[cfg(test)]
 const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
 
 // ---------------------------------------------------------------------------------------------
@@ -681,7 +679,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
-        Target::ViewGizmo => crate::view_gizmo::menu_items(app),
+        Target::ViewGizmo => view_gizmo_items(app),
         Target::Section { plane } => crate::browser::section_items(app, *plane),
         Target::Analysis => crate::browser::analysis_items(app),
         Target::FrameTubes => crate::dialogs_frame::menu_items(app),
@@ -1147,6 +1145,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
         } else {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
+        if matches!(sel, [Sel::Face { .. }]) {
+            v.push(cmd(app, "solid.transform_face", "Transform Face"));
         }
         v.push(cmd(app, "solid.shell", "Shell"));
         v.push(cmd(app, "solid.dome", "Dome"));
@@ -1690,6 +1691,23 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     entries
 }
 
+/// The view navigator's menu: Set as Front / Top (#6455) makes the principal axis nearest the
+/// view that face for this design; then the navigator's own items (its type, Axes or Custom, and
+/// Home).
+fn view_gizmo_items(app: &SolveApp) -> Vec<Item> {
+    // Midway between two faces, a Set as is refused, so its item is off too.
+    let set = |face: &str, label: &str| {
+        let which = if face == "front" { solidcraft_viewport::FrameFace::Front } else { solidcraft_viewport::FrameFace::Top };
+        let ok = solidcraft_viewport::ViewFrame::set_from_view(&app.cam, which).is_some();
+        act("view.frame", label, "camera").with(json!({"set": face, "camera": app.cam})).on(ok)
+    };
+    let mut set_as = act("ui.setAs", app.tr("ui.set_as"), "camera");
+    set_as.children = vec![set("front", "Front"), set("top", "Top")];
+    let mut items = vec![set_as, Item::sep()];
+    items.extend(crate::view_gizmo::menu_items(app));
+    items
+}
+
 /// Visit every entry of a menu, each flyout's entries before the row that opens it, so a visit
 /// may add entries to that row's flyout without seeing them.
 fn each_item(items: &mut [Item], f: &mut dyn FnMut(&mut Item)) {
@@ -1857,7 +1875,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(!visibility_bodies.is_empty()),
     );
     if bodies_hidden(app) {
-        v.push(act("ui.showAll", "Show All Bodies", "eye"));
+        v.push(act("ui.showAllBodies", "Show All Bodies", "eye"));
     }
     if let Some(item) = isolate_component_item(app, id, &bodies) {
         v.push(item);
@@ -2500,6 +2518,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             // One command and so one undo step: everything shown, folders and placements included.
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
+        "ui.showAllBodies" => {
+            // Bodies, placements and the Bodies folders and groups only, in one step: hidden
+            // sketches, construction items and joints stay hidden (#22707).
+            let _ = app.run("browser.visibility", json!({ "folder": "bodies", "visible": true }));
+        }
         "ui.isolate" => {
             // The picked bodies stay (shown if they were hidden) and everything else goes, other
             // components as components (#7896), in one step.
@@ -2508,8 +2531,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.unisolate" => {
-            // What the Isolates hid comes back, or everything when none is in effect (#8120); one
-            // undo step, as Isolate is.
+            // What the Isolates hid comes back, or every body when none is in effect (#8120,
+            // #22707); one undo step, as Isolate is.
             let _ = app.run("browser.visibility", json!({ "visible": true, "unisolate": true }));
         }
         "ui.lock" => {
@@ -3517,13 +3540,8 @@ pub fn dismiss_if_browser_took(app: &mut SolveApp) {
 }
 
 fn open_target(app: &mut SolveApp, at: Pos2, target: Target) {
-    app.menu.key_row = None;
-    app.menu.submenu.clear();
-    app.menu.submenu_key = None;
-    app.menu.submenu_leave = None;
     app.menu.radial = target == Target::Viewport && app.preferences.radial_context_menu;
     app.menu.target = target;
-    app.menu.flick = false;
     app.menu.opener = None;
     app.menu.shown = false;
     app.menu.window = None;
@@ -3600,7 +3618,6 @@ pub fn open_from(app: &SolveApp, opener: Rect, target: &Target) -> bool {
 
 pub fn close(app: &mut SolveApp) {
     app.viewport.context_menu = None;
-    app.menu.flick = false;
     app.menu.opener = None;
     app.menu.window = None;
 }
@@ -3756,7 +3773,7 @@ pub fn pick(app: &mut SolveApp, key: &str) -> Result<Value, String> {
     if !item.enabled {
         return Err(format!("`{}` is disabled", item.label));
     }
-    if !runs_itself(&item) {
+    if !item.children.is_empty() && !item.submenu_action && item.id != "ui.appearance" {
         return Err(format!("`{}` only opens a flyout: pick one of its entries", item.label));
     }
     close(app);
@@ -3764,129 +3781,19 @@ pub fn pick(app: &mut SolveApp, key: &str) -> Result<Value, String> {
     Ok(json!({ "ran": item.id, "label": item.label }))
 }
 
-/// Where the radial menu goes so its ring stays on screen.
+pub use crate::ui_kit::menu::place;
+
+#[cfg(test)]
 fn radial_center(at: Pos2, screen: Rect) -> Pos2 {
-    let mx = RX + 4.0;
-    let my = RY + 4.0;
-    let x = if screen.width() > 2.0 * mx { at.x.clamp(screen.left() + mx, screen.right() - mx) } else { screen.center().x };
-    let y = if screen.height() > 2.0 * my { at.y.clamp(screen.top() + my, screen.bottom() - my) } else { screen.center().y };
-    pos2(x, y)
+    Menu::marking_center(at, screen)
 }
-
-/// The height [`menu_frame`] adds around its rows: margins and border.
-const MENU_CHROME: f32 = 14.0;
-
-/// The room a menu leaves between itself and the window's top and bottom edges.
-const MENU_SCREEN_GAP: f32 = 4.0;
-
-/// Height of a list of items as [`list_row`] draws them in [`menu_frame`] (margins and border).
-fn list_height(items: &[Item]) -> f32 {
-    MENU_CHROME
-        + items
-            .iter()
-            .map(|i| {
-                if i.is_sep() {
-                    11.0
-                } else if i.is_heading() {
-                    24.0
-                } else {
-                    30.0
-                }
-            })
-            .sum::<f32>()
+#[cfg(test)]
+fn sector(offset: Vec2) -> Option<usize> {
+    Menu::marking_sector(offset)
 }
-
-/// Where the list goes next to a ring centred at `c`: below it when it fits, otherwise beside
-/// it (right, else left), kept on screen.
-fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
-    let below = c.y + RY + 12.0;
-    if below + h <= screen.bottom() - 4.0 {
-        return pos2((c.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left())), below);
-    }
-    let y = (c.y - h / 2.0).clamp(screen.top() + 4.0, (screen.bottom() - h - 4.0).max(screen.top()));
-    let right = c.x + RX + 12.0;
-    if right + LIST_W <= screen.right() - 4.0 {
-        return pos2(right, y);
-    }
-    pos2((c.x - RX - 12.0 - LIST_W).max(screen.left() + 4.0), y)
-}
-
-/// Where a menu of `size` opened at `at` goes: right of and below the point (`gap` away) when it
-/// fits in `screen`, flipped to the left or above it when it would run past that edge, and
-/// against the far edge when it fits on neither side. A flipped menu ends at the cursor, so it
-/// stays in view even when the window reaches past the screen (#1354).
-pub fn place(at: Pos2, gap: Vec2, size: Vec2, screen: Rect) -> Pos2 {
-    let axis = |at: f32, gap: f32, len: f32, lo: f32, hi: f32| {
-        if at + gap + len <= hi {
-            at + gap
-        } else if at - gap - len >= lo {
-            at - gap - len
-        } else {
-            (hi - len).max(lo)
-        }
-    };
-    pos2(axis(at.x, gap.x, size.x, screen.left(), screen.right()), axis(at.y, gap.y, size.y, screen.top(), screen.bottom()))
-}
-
-/// The radial slot a pointer offset points at (none near the centre).
-fn sector(d: Vec2) -> Option<usize> {
-    if d.length() < 22.0 {
-        return None;
-    }
-    // Clockwise from the top (screen y points down).
-    let a = d.x.atan2(-d.y).to_degrees();
-    let k = ((a + 360.0 + 22.5) / 45.0).floor() as i64;
-    Some((k.rem_euclid(DIRS as i64)) as usize)
-}
-
-/// Press-and-hold of the right button in the viewport opens the menu; releasing over a
-/// direction picks it.
-fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.preferences.radial_context_menu || crate::mouse_gesture::active(app) {
-        app.menu.press = None;
-        app.menu.flick = false;
-        app.menu.radial = false;
-        return;
-    }
-    let (pressed, down, released, pos, time) = ctx.input(|i| {
-        (
-            i.pointer.button_pressed(egui::PointerButton::Secondary),
-            i.pointer.secondary_down(),
-            i.pointer.button_released(egui::PointerButton::Secondary),
-            i.pointer.latest_pos(),
-            i.time,
-        )
-    });
-    let free = app.tool.is_none() && app.dialog.is_none() && app.preferences.nav != crate::prefs::OPENSCAD_NAV;
-    if pressed && free && app.viewport.context_menu.is_none() && app.viewport.mouse.is_some() {
-        app.menu.press = pos.map(|p| (p, time));
-    }
-    if let Some((p0, t0)) = app.menu.press {
-        let moved = pos.is_some_and(|p| p.distance(p0) > 5.0);
-        if !down || moved {
-            app.menu.press = None;
-        } else if time - t0 > 0.35 {
-            app.menu.press = None;
-            open(app, p0, crate::tool_modifiers::Held::from_modifiers(ctx.input(|i| i.modifiers)));
-            app.menu.flick = true;
-        } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(30));
-        }
-    }
-    if released && app.menu.flick {
-        app.menu.flick = false;
-        if let (Some(at), Some(p)) = (app.viewport.context_menu, pos) {
-            let c = radial_center(at, ctx.content_rect());
-            if app.menu.radial
-                && let Some(k) = sector(p - c)
-                && p.distance(c) > 36.0
-                && let Some(item) = radial_items(app).into_iter().nth(k).filter(|i| i.enabled)
-            {
-                close(app);
-                run_item(app, &item, at);
-            }
-        }
-    }
+#[cfg(test)]
+fn list_place(center: Pos2, height: f32, screen: Rect) -> Pos2 {
+    Menu::marking_list_place(center, height, screen)
 }
 
 /// Show the open menu, the rename box and the Properties window.
@@ -3898,7 +3805,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.pending = None;
         if target == Target::Viewport { open(app, at, crate::tool_modifiers::Held::default()) } else { open_for(app, at, target) }
     }
-    track_hold(app, ctx);
+    let marking = app.preferences.radial_context_menu && !crate::mouse_gesture::active(app);
+    let can_start = app.tool.is_none()
+        && app.dialog.is_none()
+        && app.preferences.nav != crate::prefs::OPENSCAD_NAV
+        && app.viewport.context_menu.is_none()
+        && app.viewport.mouse.is_some();
+    if let Some(at) = Menu::marking_trigger(ctx, egui::Id::unique("sc_context_menu"), marking, can_start) {
+        open(app, at, crate::tool_modifiers::Held::from_modifiers(ctx.input(|input| input.modifiers)));
+    }
+    if !marking {
+        app.menu.radial = false;
+    }
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);
     crate::quick_menu::watch(app, ctx);
@@ -3916,252 +3834,47 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 /// Draw the open menu in `ctx`'s window and act on its picks and on clicks outside it.
 fn show_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
-    let screen = ctx.content_rect();
     let target = app.menu.target.clone();
     let mut list = items(app, &target);
     show_current_keys(app, &mut list);
-    let mut picked: Option<Item> = None;
-    let pointer = ctx.input(|i| i.pointer.latest_pos());
-    let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
-
-    let list_at = if target == Target::Workspace {
-        pos2(at.x.clamp(screen.left(), (screen.right() - 470.0).max(screen.left())), at.y)
-    } else if app.menu.radial {
-        let c = radial_center(at, screen);
-        let radial = radial_items(app);
-        let area = Rect::from_center_size(c, vec2(2.0 * (RX + 4.0), 2.0 * (RY + 4.0)));
-        inside |= pointer.is_some_and(|p| area.contains(p));
-        let hot = pointer.and_then(|p| sector(p - c));
-        let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::unique("sc_marking_menu"))
-            .fixed_pos(area.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                let _ = ui.allocate_exact_size(area.size(), Sense::hover());
-                picked = crate::ui_kit::radial_menu(ui, c, &radial, hot).or(picked.take());
-            });
-        inside |= resp.response.contains_pointer();
-        list_place(c, list_height(&list), screen)
-    } else if list_height(&list) > screen.height() - 2.0 * MENU_SCREEN_GAP {
-        // Taller than the window: it fills the window's height and scrolls.
-        let x = place(at, Vec2::ZERO, vec2(LIST_W, 0.0), screen).x;
-        pos2(x, screen.top() + MENU_SCREEN_GAP)
-    } else {
-        place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
-    };
-
-    // The keys act on the innermost open level: Up and Down choose a row, Right or Enter open its
-    // flyout, Enter runs anything else and Left closes the innermost flyout.
-    let open = open_levels(&list, &app.menu.submenu).len() - 1;
-    app.menu.submenu.truncate(open);
-    if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) && open > 0 {
-        let back = app.menu.submenu.pop();
-        if open > 1 {
-            app.menu.submenu_key = back;
-        } else {
-            app.menu.key_row = back;
-            app.menu.submenu_key = None;
-        }
-    } else if let Some(rows) = open_levels(&list, &app.menu.submenu).pop() {
-        let cursor = if open == 0 { &mut app.menu.key_row } else { &mut app.menu.submenu_key };
-        let enabled: Vec<_> = rows.iter().map(|i| i.enabled && !i.is_sep() && !i.is_heading()).collect();
-        let enter = crate::ui_kit::Menu::navigate(ctx, &enabled, cursor);
-        let right = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight));
-        if let Some(k) = *cursor
-            && let Some(item) = rows.get(k)
+    for item in &mut list {
+        item.submenu_action = item.id == "ui.appearance";
+        if target == Target::Workspace
+            && let Some((slug, description, tabs)) = workspace_style(item)
         {
-            if (right || enter) && !item.children.is_empty() {
-                app.menu.submenu.push(k);
-                app.menu.submenu_key = item.children.iter().position(|c| c.enabled);
-            } else if enter {
-                picked = Some(item.clone());
-            }
+            item.aliases.push(format!("workspace:menu:{slug}"));
+            item.tip = Some(match tabs {
+                Some(tabs) => format!("{}\n{}", solidcraft_ui_text::tr(description), solidcraft_ui_text::tr(tabs)),
+                None => solidcraft_ui_text::tr(description).to_string(),
+            });
         }
     }
-    let path = app.menu.submenu.clone();
-    let levels = open_levels(&list, &path);
-    let leaving = app.menu.submenu_leave.map(|(depth, _)| depth);
-    let key_row = app.menu.key_row;
-    let mut seen: Vec<Seen> = Vec::new();
-    let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::unique("sc_context_menu"))
-        .fixed_pos(list_at)
-        .constrain(true)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            if target == Target::Workspace {
-                picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
-            } else {
-                // A menu taller than the window scrolls between full-width bars; a menu opened
-                // anywhere else starts at its top again.
-                let rows = egui::Id::unique(("sc_context_menu_rows", at.x.to_bits(), at.y.to_bits()));
-                let room = screen.height() - MENU_CHROME - 2.0 * MENU_SCREEN_GAP;
-                menu_frame(ui, |ui| {
-                    scroll_rows(ui, rows, room, list_height(&list) - MENU_CHROME, |ui| {
-                        seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked))
-                    })
-                });
-            }
-        });
-    inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
-    // The quick menu closes when the pointer moves well away from it without picking.
-    if target == Target::Quick && app.menu.submenu.is_empty() && crate::quick_menu::left(resp.response.rect, pointer) {
+    let pointer = ctx.pointer_hover_pos();
+    let just_opened = !std::mem::replace(&mut app.menu.shown, true);
+    let id = egui::Id::unique("sc_context_menu");
+    let output = if app.menu.radial {
+        Menu::marking_popup(ctx, id, at, &list, &radial_items(app), just_opened)
+    } else {
+        Menu::popup(ctx, id, app.menu.opener.map_or(MenuAnchor::Point(at), MenuAnchor::Rect), &list, just_opened)
+    };
+    if target == Target::Quick && output.depth == 0 && output.rect.is_some_and(|rect| crate::quick_menu::left(rect, pointer)) {
         close(app);
         return;
     }
-    let mut leftward = false;
-    for (depth, rows) in levels.iter().copied().enumerate().skip(1) {
-        let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
-        // One area per flyout and contents: an egui area keeps its last size, so a flyout sharing
-        // one with a shorter one would be squeezed into it and scroll.
-        let id = egui::Id::unique(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
-        let cursor = if depth == path.len() { app.menu.submenu_key } else { None };
-        let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height((screen.height() - 28.0).max(30.0))
-                .show(ui, |ui| level_rows(ui, rows, depth, cursor, path.get(depth).copied(), leaving == Some(depth), &mut picked))
-                .inner
-        });
-        inside |= sub.response.contains_pointer() || pointer.is_some_and(|p| sub.response.rect.contains(p));
-        leftward = sub.response.rect.center().x < row.center().x;
-        seen.push(sub.inner);
-    }
-
-    let moved = ctx.input(|i| i.pointer.delta() != Vec2::ZERO);
-    if let Some((depth, k)) = seen.iter().enumerate().rev().find_map(|(depth, s)| s.opens.map(|k| (depth, k))) {
-        if path.get(depth) != Some(&k) {
-            app.menu.submenu.truncate(depth);
-            app.menu.submenu.push(k);
-            app.menu.submenu_key = None;
-            ctx.request_repaint();
-        }
-        app.menu.submenu_leave = None;
-    } else if let Some(depth) = seen.iter().rposition(|s| s.other_row).filter(|depth| *depth < path.len()) {
-        // The flyouts further in close once the pointer moves on to another row of this level and
-        // rests there (#6657). A pointer that is still (the flyout opened with the keys) leaves
-        // them open.
-        let mut since = app.menu.submenu_leave.filter(|(at, _)| *at == depth).map(|(_, since)| since);
-        if moved || since.is_some() {
-            if crate::ui_kit::Menu::flyout_leaving(ctx, &mut since) {
-                app.menu.submenu.truncate(depth);
-                app.menu.submenu_key = None;
-                ctx.request_repaint();
-            }
-            app.menu.submenu_leave = since.map(|since| (depth, since));
-        }
-    } else {
-        app.menu.submenu_leave = None;
-    }
-
-    let shown = std::mem::replace(&mut app.menu.shown, true);
-    let (primary, secondary, esc) = ctx.input(|i| {
-        (
-            shown && i.pointer.button_pressed(egui::PointerButton::Primary),
-            shown && i.pointer.button_pressed(egui::PointerButton::Secondary),
-            i.key_pressed(egui::Key::Escape),
-        )
-    });
-    if secondary && inside && app.menu.radial {
-        // A right press on the ring: drag toward a command and release to pick it.
-        app.menu.flick = true;
-    } else if (primary || secondary) && !inside || esc {
+    let popped_out = app.menu.window.is_some();
+    if output.close {
         close(app);
     }
-    if let Some(item) = picked {
-        let popped_out = app.menu.window.is_some();
-        close(app);
+    if let Some(item) = output.picked {
+        if !item.keep_open {
+            close(app);
+        }
         if popped_out {
             app.menu.deferred = Some((item, at));
         } else {
             run_item(app, &item, at);
         }
     }
-}
-
-/// The rows of each open level: the menu itself, then every open flyout in turn. It stops at a
-/// row that is gone or has no flyout.
-fn open_levels<'a>(list: &'a [Item], path: &[usize]) -> Vec<&'a [Item]> {
-    let mut levels = vec![list];
-    for &k in path {
-        match levels.last().and_then(|rows| rows.get(k)) {
-            Some(item) if !item.children.is_empty() => levels.push(&item.children),
-            _ => break,
-        }
-    }
-    levels
-}
-
-/// A click runs the row: one without a flyout, or Appearance, which keeps its direct editor
-/// action as well as the quick choices in its flyout.
-fn runs_itself(item: &Item) -> bool {
-    item.children.is_empty() || item.id == "ui.appearance"
-}
-
-/// What the pointer did on one level of the menu this frame.
-#[derive(Default)]
-struct Seen {
-    /// Where the row whose flyout is open was drawn.
-    anchor: Option<Rect>,
-    /// A row with a flyout the pointer moved onto or clicked: its flyout opens.
-    opens: Option<usize>,
-    /// The pointer is on a row without a flyout.
-    other_row: bool,
-}
-
-/// Draw one level's rows: `cursor` is the row chosen with the keys, `open` the row whose flyout
-/// is open and `leaving` that the pointer is about to close it.
-fn level_rows(
-    ui: &mut egui::Ui,
-    rows: &[Item],
-    depth: usize,
-    cursor: Option<usize>,
-    open: Option<usize>,
-    leaving: bool,
-    picked: &mut Option<Item>,
-) -> Seen {
-    let mut seen = Seen::default();
-    let mut on_open = false;
-    for (k, item) in rows.iter().enumerate() {
-        if item.is_sep() || item.is_heading() {
-            let _ = list_row_lit(ui, item, false);
-            continue;
-        }
-        // Flyout entries may share an id (swatches): their handles add the label.
-        let handle = format!("{}:{}", item.id, item.label);
-        let mut kit = MenuItem::from_item(item, cursor == Some(k) || (open == Some(k) && !leaving));
-        if depth > 0 {
-            kit.id = &handle;
-        }
-        let row = kit.show(ui);
-        // A row chosen with the keys scrolls into view in a menu taller than the window.
-        if cursor == Some(k) && ui.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown)) {
-            row.scroll_to_me(None);
-        }
-        let row = match &item.tip {
-            Some(tip) => row.backing_on_hover_text(tip.as_str()),
-            None => row,
-        };
-        if item.children.is_empty() {
-            if row.clicked() && item.enabled {
-                *picked = Some(item.clone());
-            }
-            seen.other_row |= row.hovered();
-            continue;
-        }
-        if item.enabled && row.clicked() && runs_itself(item) {
-            *picked = Some(item.clone());
-        } else if item.enabled && (crate::ui_kit::Menu::flyout_hover(&row) || row.clicked()) {
-            seen.opens = Some(k);
-        }
-        if open == Some(k) {
-            seen.anchor = Some(row.rect);
-            on_open |= row.hovered();
-        }
-    }
-    // A separator, a heading or the gap between two rows is not the open row either: its flyout
-    // goes on closing there instead of lighting its row again and starting the delay over (#17668).
-    seen.other_row |= !on_open && ui.rect_contains_pointer(ui.min_rect());
-    seen
 }
 
 fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
@@ -4217,38 +3930,20 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 }
 
 /// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).
-fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
-    use crate::ui_kit::WorkspaceStyle;
-    use solidcraft_theme::AccentRamp;
+fn workspace_style(item: &Item) -> Option<(&'static str, &'static str, Option<&'static str>)> {
     if item.params.as_ref().and_then(|params| params.get("workspace")).and_then(Value::as_str).is_some_and(|id| id.starts_with("plugin:")) {
-        return Some(WorkspaceStyle {
-            slug: "plugin",
-            description: if item.enabled { "ui.plugin_workspace.description" } else { "ui.plugin_workspace.unavailable" },
-            tabs: Some("ui.plugin_workspace.tabs"),
-            ramp: None,
-        });
+        return Some((
+            "plugin",
+            if item.enabled { "ui.plugin_workspace.description" } else { "ui.plugin_workspace.unavailable" },
+            Some("ui.plugin_workspace.tabs"),
+        ));
     }
-    Some(match item.label.as_str() {
-        "Design" => {
-            WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
-        }
-        "Render" => WorkspaceStyle {
-            slug: "render",
-            description: "ui.workspace_render_description",
-            tabs: Some("ui.workspace_render_tabs"),
-            ramp: Some(AccentRamp::Render),
-        },
-        "Drawing" => {
-            WorkspaceStyle { slug: "drawing", description: "ui.workspace_drawing_description", tabs: Some("ui.workspace_drawing_tabs"), ramp: None }
-        }
-        _ => return None,
-    })
-}
-
-/// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
-pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
-    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr("ui.workspace_footer") };
-    crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
+    match item.label.as_str() {
+        "Design" => Some(("design", "ui.workspace_design_description", Some("ui.workspace_design_tabs"))),
+        "Render" => Some(("render", "ui.workspace_render_description", Some("ui.workspace_render_tabs"))),
+        "Drawing" => Some(("drawing", "ui.workspace_drawing_description", Some("ui.workspace_drawing_tabs"))),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -4959,6 +4654,24 @@ mod tests {
     }
 
     #[test]
+    fn transform_face_menu_accepts_a_single_curved_or_planar_face() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.cylinder", json!({"diameter":30,"height":20})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let body = &state.bodies[0];
+        let offered = |app: &SolveApp| items(app, &Target::Viewport).iter().any(|i| i.id == "solid.transform_face" && i.enabled);
+        let mut all = Vec::new();
+        for f in body.body.faces(0.1).unwrap() {
+            let sel = Sel::Face { body: body.name.clone(), index: f.index, point: f.centroid };
+            all.push(sel.clone());
+            h.app.session.selection = vec![sel];
+            assert!(offered(&h.app));
+        }
+        h.app.session.selection = all;
+        assert!(!offered(&h.app));
+    }
+
+    #[test]
     fn solidworks_face_menu_runs_normal_to_selection_and_rejects_curved_faces() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -5108,10 +4821,12 @@ mod tests {
             ),
             (1.0, vec![]),
         ] {
-            let mut output = ctx.run_ui(egui::RawInput { time: Some(time), events, ..Default::default() }, |_| track_hold(&mut app, &ctx));
+            let mut output = ctx.run_ui(egui::RawInput { time: Some(time), events, ..Default::default() }, |_| {
+                assert!(Menu::marking_trigger(&ctx, egui::Id::unique("sc_context_menu"), false, true).is_none());
+            });
             output.textures_delta.clear();
         }
-        assert!(app.viewport.context_menu.is_none() && app.menu.press.is_none() && !app.menu.flick);
+        assert!(app.viewport.context_menu.is_none());
     }
 
     #[test]
@@ -5657,7 +5372,7 @@ mod workspace_menu_tests {
         let ctx = crate::fonts::test_context();
         let item = act("ui.workspace.plugin:manufacture/cam", "Machining", "ws_design").with(json!({"workspace":"plugin:manufacture/cam"}));
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            workspace_menu(ui, std::slice::from_ref(&item), None, 720.0);
+            Menu::items(ui, egui::Id::unique("plugin-workspace-test"), std::slice::from_ref(&item), false);
         });
         output.textures_delta.clear();
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Machining")));
@@ -5665,14 +5380,20 @@ mod workspace_menu_tests {
     }
 
     #[test]
-    fn workspace_titles_use_one_semibold_text_run() {
+    fn workspace_titles_use_one_shared_label_text_run() {
         let ctx = crate::fonts::test_context();
         let app = SolveApp::new(Default::default(), Default::default());
         let list = items(&app, &Target::Workspace);
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            workspace_menu(ui, &list, None, 1000.0);
-        });
-        output.textures_delta.clear();
+        let draw = |just_opened| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                Menu::popup(ui.ctx(), egui::Id::unique("workspace-test"), MenuAnchor::Point(pos2(0.0, 0.0)), &list, just_opened);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        // The shared popup measures its first frame before painting visible rows.
+        draw(true);
+        let output = draw(false);
         let titles: Vec<_> = output
             .shapes
             .iter()
@@ -5682,7 +5403,7 @@ mod workspace_menu_tests {
             })
             .collect();
         assert_eq!(titles.len(), 1, "workspace titles must never be drawn twice");
-        assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(14.0));
+        assert_eq!(titles[0].galley.job.sections[0].format.font_id, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label));
     }
 
     #[test]
@@ -5698,7 +5419,9 @@ mod workspace_menu_tests {
         let rows: Vec<_> = ["design", "drawing", "render"].iter().map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap()).collect();
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
-        assert_eq!(rows[0].width(), 450.0);
+        let menu = Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
+        let width = menu.width() - Menu::frame().total_margin().sum().x;
+        assert!(rows.iter().all(|row| (row.width() - width).abs() <= 1.0), "workspace rows use the shared measured menu width");
         assert_eq!(items(&h.app, &Target::Workspace).len(), 3, "only the workspaces there are");
         assert!(rect_of("workspace:menu:animation").is_none(), "a planned workspace has no row");
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
@@ -5743,5 +5466,27 @@ mod workspace_menu_tests {
         assert!(h.app.tool.is_some() || h.app.dialog.is_some());
         assert!(!render_row(&h.app), "a modelling operation still locks Render");
         assert!(crate::render_workspace::enter(&mut h.app, true).is_err());
+    }
+
+    /// #6455: the navigator's menu offers Set as with Front and Top.
+    #[test]
+    fn the_navigator_menu_offers_set_as_front_and_top() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        let faces: Vec<_> = set_as.children.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(faces, ["Front", "Top"]);
+        // Looking straight at a face Set as is on; midway between two faces (Home is one) it is off.
+        let mut face = h.app.cam;
+        face.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam = face;
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        assert!(set_as.children.iter().all(|c| c.enabled), "on at a face");
+        h.app.cam = solidcraft_viewport::Camera::default();
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        assert!(set_as.children.iter().all(|c| !c.enabled), "off midway between faces");
     }
 }

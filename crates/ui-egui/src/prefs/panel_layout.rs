@@ -25,6 +25,7 @@ struct State {
     escape: bool,
     view: Option<(crate::panel_runtime::PanelLayoutSnapshot, Arc<LayoutPreferencesView>)>,
     list_focus: Option<Id>,
+    restore_list_focus: bool,
     focus_name: Option<String>,
 }
 
@@ -73,6 +74,7 @@ pub(super) fn closed(ctx: &egui::Context) {
     let origin = ctx.data_mut(|data| {
         let state = data.get_temp_mut_or_default::<State>(key);
         state.escape = false;
+        state.restore_list_focus = false;
         state.confirm = None;
         state.popup.take().map(|popup| popup.origin)
     });
@@ -210,7 +212,14 @@ fn reset_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
             "undo",
             ink,
         );
-        ui.painter().text(pos2(rect.left() + t.space_24, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(t.font_label), ink);
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
+            pos2(rect.left() + t.space_24, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(t.font_label),
+            ink,
+        );
         if response.has_focus() {
             ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(1.0, t.form_primary), egui::StrokeKind::Inside);
         }
@@ -267,12 +276,22 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
             state.list_focus = Some(list_id);
             let bounds = Rect::from_min_size(ui.next_widget_position(), vec2(ui.available_width(), height));
             let list = ui.interact(bounds, list_id, Sense::focusable_noninteractive());
+            if state.restore_list_focus && state.popup.is_none() && state.confirm.is_none() && !ui_kit::Menu::any_open(ui.ctx()) {
+                // A just-dismissed native confirmation still owns the modal layer for a pass.
+                // Restore only after this actual list can register focus again.
+                if ui.memory(|memory| memory.allows_interaction(list.layer_id)) {
+                    list.request_focus();
+                    state.restore_list_focus = false;
+                } else {
+                    ui.ctx().request_repaint();
+                }
+            }
             list.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, ui.is_enabled(), &label));
             let mut activate = false;
             let mut menu = false;
             let mut delete = false;
             let previous_focus = state.focused;
-            if list.has_focus() && state.popup.is_none() && state.confirm.is_none() {
+            if list.has_focus() && state.popup.is_none() && state.confirm.is_none() && !ui_kit::Menu::any_open(ui.ctx()) {
                 ui.memory_mut(|memory| {
                     memory.set_focus_lock_filter(list_id, egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() })
                 });
@@ -358,6 +377,7 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                                     // The focused tile, or the one under the pointer: a click does not
                                     // always leave the keyboard focus on the list.
                                     let hovered_delete = !delete
+                                        && !ui_kit::Menu::any_open(ui.ctx())
                                         && state.popup.is_none()
                                         && state.confirm.is_none()
                                         && response.hovered()
@@ -479,51 +499,44 @@ fn dashed_border(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
 fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, entry: &LayoutPreferenceEntry, keyboard: bool) {
     let t = Tokens::get();
     let at = Rect::from_min_size(tile.rect.min + vec2(TILE_WIDTH - 24.0, 4.0), vec2(20.0, 20.0));
-    let id = tile.id.with("menu");
-    let popup = ui_kit::Menu::button_with(
-        ui,
-        |ui, _| {
-            let response = ui.interact(at, id, Sense::CLICK);
-            if keyboard {
-                egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
-            }
-            ui.painter().rect(at, 5, t.control_fill, Stroke::new(1.0, t.dialog_border), egui::StrokeKind::Inside);
-            for x in [-4.0, 0.0, 4.0] {
-                ui.painter().circle_filled(at.center() + vec2(x, 0.0), 1.0, t.form_dim);
-            }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.options")));
-            crate::scenario::publish_target(&format!("prefs:panel_layout:menu:{}", entry.name), at);
-            response
-        },
-        |ui| {
-            // The same rows as the app's other menus: icons, and Delete in the danger style
-            // after a separator (as the theme and drawing-sheet menus).
-            // The list-menu width, as `ui_kit::Menu::show` sets it inside its frame.
-            ui.set_width((ui_kit::LIST_W - Tokens::get().space_6 * 2.0 - 2.0).max(0.0));
-            ui_kit::Menu::heading(ui, &entry.name);
-            let action = ui_kit::MenuItem::new("replace_current", app.tr("ui.panel_layout.replace_current"), "save").show(ui);
-            if keyboard {
-                action.request_focus();
-            }
-            crate::scenario::publish_target("prefs:panel_layout:menu_replace", action.rect);
-            if action.clicked() {
+    let response = ui.interact(at, tile.id.with("menu"), Sense::CLICK);
+    ui.painter().rect(at, 5, t.control_fill, Stroke::new(1.0, t.dialog_border), egui::StrokeKind::Inside);
+    for x in [-4.0, 0.0, 4.0] {
+        ui.painter().circle_filled(at.center() + vec2(x, 0.0), 1.0, t.form_dim);
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.options")));
+    crate::scenario::publish_target(&format!("prefs:panel_layout:menu:{}", entry.name), at);
+    if !keyboard && !response.clicked() && !ui_kit::Menu::response_is_open(&response) {
+        return;
+    }
+    let mut replace = ui_kit::Item::action("replace_current", app.tr("ui.panel_layout.replace_current"), "save");
+    replace.aliases.push("prefs:panel_layout:menu_replace".into());
+    let mut delete = ui_kit::Item::action("delete", app.tr("ui.panel_layout.delete"), "delete");
+    delete.danger = true;
+    delete.aliases.push("prefs:panel_layout:delete".into());
+    let items = [ui_kit::Item::heading(&entry.name), replace, ui_kit::Item::sep(), delete];
+    if keyboard {
+        ui_kit::Menu::open_button(&response);
+        ui_kit::Menu::set_cursor(ui.ctx(), response.id.with("shared_menu"), 0, Some(1));
+    }
+    let output = ui_kit::Menu::button_items_output(&response, &items);
+    if output.open {
+        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
+    }
+    if output.close
+        && let Some(list) = state.list_focus
+    {
+        ui.memory_mut(|memory| memory.request_focus(list));
+    }
+    if let Some(item) = output.picked {
+        match item.id.as_str() {
+            "replace_current" => {
                 state.popup = None;
                 state.confirm = Some(Confirming::Replace(entry.name.clone()));
-                ui.close();
             }
-            ui_kit::Menu::separator(ui);
-            let mut delete = ui_kit::MenuItem::new("delete", app.tr("ui.panel_layout.delete"), "delete");
-            delete.danger = true;
-            let delete = delete.show(ui);
-            crate::scenario::publish_target("prefs:panel_layout:delete", delete.rect);
-            if delete.clicked() {
-                open_delete(ui.ctx(), state, entry);
-                ui.close();
-            }
-        },
-    );
-    if popup.inner.is_some() {
-        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
+            "delete" => open_delete(ui.ctx(), state, entry),
+            _ => {}
+        }
     }
 }
 
@@ -576,10 +589,9 @@ fn confirm(app: &mut SolveApp, ctx: &egui::Context, view: &LayoutPreferencesView
     } else if closed || escape || action == ui_kit::Action::Cancel {
         state.confirm = None;
     }
-    if state.confirm.is_none()
-        && let Some(list) = state.list_focus
-    {
-        ctx.memory_mut(|memory| memory.request_focus(list));
+    if state.confirm.is_none() && state.list_focus.is_some() {
+        state.restore_list_focus = true;
+        ctx.request_repaint();
     }
 }
 
@@ -642,7 +654,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
         .menu(&anchor)
         .open_memory(None)
         .anchor(anchor.rect)
-        .frame(ui_kit::Menu::frame())
+        .frame(Container::menu_frame())
         .width(width)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -777,7 +789,8 @@ fn save_field(
         }
         let count = name.trim().chars().count();
         let counter = Rect::from_min_max(pos2(response.rect.right() - t.space_24 * 2.0, response.rect.top()), response.rect.max);
-        ui.painter().text(
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
             counter.center(),
             Align2::CENTER_CENTER,
             format!("{count}/64"),

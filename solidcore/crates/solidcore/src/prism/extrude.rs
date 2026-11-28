@@ -15,6 +15,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{axes, curve_on_frame, gamma, halves, point_of, Region2, Seg2, H2};
@@ -281,8 +282,8 @@ pub fn slab_sides(travel: Vec3, from: &Frame, to: &Frame) -> Result<(bool, bool)
 fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Result<(f64, f64)> {
     let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
     // the angle of the sketch direction along which the level rises fastest
-    let rise =
-        (level.slope.x != 0.0 || level.slope.y != 0.0).then(|| level.slope.y.atan2(level.slope.x));
+    let rise = (level.slope.x != 0.0 || level.slope.y != 0.0)
+        .then(|| det::atan2(level.slope.y, level.slope.x));
     let mut range: Option<(f64, f64)> = None;
     let mut take = |v: f64| -> Result<()> {
         if !v.is_finite() {
@@ -313,7 +314,7 @@ fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Resul
                     let toward = if radius < 0.0 { angle + PI } else { angle };
                     let turn = (toward - start) * sweep.signum();
                     if turn.rem_euclid(TAU) <= sweep.abs() {
-                        take(level.at(center + Vec2::new(toward.cos(), toward.sin()) * radius))?;
+                        take(level.at(center + Vec2::new(det::cos(toward), det::sin(toward)) * radius))?;
                     }
                 }
             }

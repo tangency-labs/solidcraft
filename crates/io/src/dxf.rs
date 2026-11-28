@@ -13,6 +13,7 @@ use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
 use crate::{DxfEntityWeight, DxfFile, DxfLayerId, DxfLinetype, DxfShape, DxfStandardWeight, IoError, Result};
 
+mod binary;
 mod source_import;
 mod text_entity;
 mod text_value;
@@ -29,8 +30,9 @@ impl ParsedDxf {
         if text.len() > MAX_DRAWING_BYTES {
             return Err(IoError::Invalid("the DXF file is too large".into()));
         }
+        // A binary DXF is read from its bytes (`dxf_text_from_bytes`); its text alone has lost them.
         if text.starts_with("AutoCAD Binary DXF") {
-            return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
+            return Err(IoError::Invalid("a binary DXF is read from its file, not as text: give its path".into()));
         }
         // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
         if crate::is_dwg(text.as_bytes()) {
@@ -171,7 +173,7 @@ fn read_layered(parsed: ParsedDxf) -> Result<DxfFile<DxfShape>> {
     layered_array_integer_fields(&p, start)?;
     let k = layered_units_scale(&p)?;
     let mut work = 0;
-    let (mut file, handles) = if let Some(tables) = layered_section_start(&p, "TABLES")? {
+    let (mut file, handles, styles) = if let Some(tables) = layered_section_start(&p, "TABLES")? {
         layered_integer_fields(&p, tables, &[70, 71, 72, 73, 74, 75, 76, 77, 78])?;
         layered_neutral_viewport_underflow(layered_section_body(&p, tables)?)?;
         let records = section(&p, tables)?;
@@ -181,6 +183,7 @@ fn read_layered(parsed: ParsedDxf) -> Result<DxfFile<DxfShape>> {
         layered_tables(&[], k, &mut work)?
     };
     let mut geometry_bytes = 0;
+    let mut noted = std::collections::BTreeSet::new();
 
     for entity in section(&p, start)? {
         layered_work(&mut work)?;
@@ -208,6 +211,12 @@ fn read_layered(parsed: ParsedDxf) -> Result<DxfFile<DxfShape>> {
         }
         let layer = selected.ok_or_else(|| IoError::Invalid("DXF entity references an undeclared layer".into()))?;
         let geometry = if matches!(entity.kind.as_str(), "TEXT" | "MTEXT") {
+            let style = layered_text(&entity, 7)?;
+            if let Some((declared, font)) = styles.font_note(style)?
+                && noted.insert(declared.to_ascii_uppercase())
+            {
+                file.push_warning(format!("text style {declared} uses the font {font}, which is not carried over; its text keeps the default font"));
+            }
             text_entity::read_text_entity(&entity, k, MAX_DRAWING_BYTES, MAX_DRAWING_BYTES, &mut geometry_bytes, &mut work)?
         } else {
             layered_geometry(&entity, k, file.layer(layer)?.linetype(), &mut geometry_bytes, &mut work)?
@@ -1019,10 +1028,11 @@ fn layered_plot_styles(pairs: &[(i32, String)], layers: &[Ent], work: &mut usize
 
 /// Validate the real tables and resolve layer0 BEFORE constructing a file or
 /// minting its handles. No late setter or parallel layer representation.
-fn layered_tables(records: &[Ent], k: f64, work: &mut usize) -> Result<(DxfFile<DxfShape>, Vec<DxfLayerId>)> {
+fn layered_tables(records: &[Ent], k: f64, work: &mut usize) -> Result<(DxfFile<DxfShape>, Vec<DxfLayerId>, LayeredTextStyles)> {
     let mut table = None;
     let mut types = LayeredLinetypes::default();
     let mut neutral = std::collections::BTreeSet::new();
+    let mut styles = LayeredTextStyles::default();
     // Definitions may follow their layer references in the file. Validate
     // their real patterns first instead of guessing a style from its name.
     for record in records {
@@ -1040,7 +1050,7 @@ fn layered_tables(records: &[Ent], k: f64, work: &mut usize) -> Result<(DxfFile<
             }
             "LTYPE" if table == Some("LTYPE") => layered_linetype_definition(record, k, &mut types)?,
             "LAYER" if table == Some("LAYER") => {}
-            "STYLE" if table == Some("STYLE") => layered_neutral_table_record(record, "STYLE", &mut neutral, work)?,
+            "STYLE" if table == Some("STYLE") => styles.declare(record, work)?,
             "BLOCK_RECORD" if table == Some("BLOCK_RECORD") => {}
             "VPORT" if table == Some("VPORT") => layered_neutral_table_record(record, "VPORT", &mut neutral, work)?,
             "APPID" if table == Some("APPID") => layered_neutral_table_record(record, "APPID", &mut neutral, work)?,
@@ -1084,8 +1094,83 @@ fn layered_tables(records: &[Ent], k: f64, work: &mut usize) -> Result<(DxfFile<
         }
         layered_declare_layer(record, &types, &mut file, &mut handles)?;
     }
-    Ok((file, handles))
+    Ok((file, handles, styles))
 }
+
+/// The declared text styles. A style may name any font, but one whose fields would change the
+/// geometry (a fixed height, a width factor, an oblique angle, backwards or upside-down flags)
+/// is still refused, as ignoring it would move the text. The font is not carried: the text keeps
+/// the default one, and the file's warnings say so once per style.
+#[derive(Debug, Default)]
+struct LayeredTextStyles(std::collections::BTreeMap<String, (String, Option<String>)>);
+
+impl LayeredTextStyles {
+    fn declare(&mut self, record: &Ent, work: &mut usize) -> Result<()> {
+        let error = |why: &str| IoError::Invalid(format!("not supported yet: layered DXF STYLE: {why}"));
+        let fields = record.f.len().checked_add(record.s.len()).ok_or_else(|| error("field count overflow"))?;
+        *work = work.checked_add(fields).filter(|n| *n <= MAX_WORK).ok_or_else(|| error("work budget exceeded"))?;
+        let name = layered_text(record, 2)?
+            .filter(|n| !n.is_empty() && n.len() <= 255 && !n.chars().any(char::is_control))
+            .ok_or_else(|| error("invalid style name"))?;
+        if self.0.len() >= MAX_TEXT_STYLES || self.0.insert(name.to_ascii_uppercase(), (name.to_string(), None)).is_some() {
+            return Err(error("duplicate declaration or too many styles"));
+        }
+        if layered_number(record, 70)?.unwrap_or(0.0) != 0.0 {
+            return Err(error("nonzero record flags"));
+        }
+        for code in record.f.iter().map(|(code, _)| *code).chain(record.s.iter().map(|(code, _)| *code)) {
+            if !matches!(code, 2 | 3 | 4 | 5 | 40 | 41 | 42 | 50 | 70 | 71 | 100 | 330) {
+                return Err(error("unsupported record field"));
+            }
+        }
+        for code in [5, 330] {
+            if let Some(handle) = layered_text(record, code)?
+                && (handle.is_empty() || handle.len() > 16 || !handle.bytes().all(|b| b.is_ascii_hexdigit()))
+            {
+                return Err(error("invalid handle"));
+            }
+        }
+        let mut classes = record.s.iter().filter(|(code, _)| *code == 100).map(|(_, value)| value.as_str());
+        if let Some(first) = classes.next()
+            && (first != "AcDbSymbolTableRecord" || classes.next() != Some("AcDbTextStyleTableRecord") || classes.next().is_some())
+        {
+            return Err(error("unsupported subclass declarations"));
+        }
+        for (code, neutral) in [(40, 0.0), (41, 1.0), (50, 0.0), (71, 0.0)] {
+            if layered_number(record, code).map_err(|cause| error(&cause.to_string()))?.unwrap_or(neutral) != neutral {
+                return Err(error("nonneutral inherited text style field"));
+            }
+        }
+        if layered_number(record, 42)?.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err(error("invalid last-used text height"));
+        }
+        let font = layered_text(record, 3)?.unwrap_or("").trim();
+        let big = layered_text(record, 4)?.unwrap_or("").trim();
+        if font.len() > 1024 || big.len() > 1024 || font.chars().chain(big.chars()).any(char::is_control) {
+            return Err(error("invalid font file name"));
+        }
+        let named = !(font.is_empty() || font.eq_ignore_ascii_case("txt")) || !big.is_empty();
+        if named && let Some(entry) = self.0.get_mut(&name.to_ascii_uppercase()) {
+            entry.1 = Some(if big.is_empty() { font.to_string() } else { format!("{font} {big}") });
+        }
+        Ok(())
+    }
+
+    /// The warning for a text in `style`, or an error for a style that was never declared.
+    /// `None` for the default `Standard` style when no record declares it.
+    fn font_note(&self, style: Option<&str>) -> Result<Option<(&str, &str)>> {
+        let name = style.filter(|n| !n.is_empty()).unwrap_or("Standard");
+        match self.0.get(&name.to_ascii_uppercase()) {
+            Some((declared, Some(font))) => Ok(Some((declared, font))),
+            Some(_) => Ok(None),
+            None if name.eq_ignore_ascii_case("Standard") => Ok(None),
+            None => Err(IoError::Invalid("layered DXF text references an undeclared STYLE".into())),
+        }
+    }
+}
+
+/// How many text styles a file may declare.
+const MAX_TEXT_STYLES: usize = 4096;
 
 /// Explicit neutral declarations emitted by the current single Out backend.
 /// They do not change imported WCS geometry or introduce styles/defaults.
@@ -1107,7 +1192,6 @@ fn layered_neutral_table_record(
         "VPORT" => ("*Active", "AcDbViewportTableRecord"),
         "APPID" => ("ACAD", "AcDbRegAppTableRecord"),
         "DIMSTYLE" => ("Standard", "AcDbDimStyleTableRecord"),
-        "STYLE" => ("Standard", "AcDbTextStyleTableRecord"),
         _ => return Err(error("unknown record class")),
     };
     if !layered_text(record, 2)?.is_some_and(|actual| actual.eq_ignore_ascii_case(name)) {
@@ -1119,8 +1203,7 @@ fn layered_neutral_table_record(
     for code in record.f.iter().map(|(code, _)| *code).chain(record.s.iter().map(|(code, _)| *code)) {
         let metadata = matches!(code, 2 | 70 | 100 | 330) || (kind == "DIMSTYLE" && code == 105) || (kind != "DIMSTYLE" && code == 5);
         let viewport = kind == "VPORT" && matches!(code,10..=17|20..=27|36|37|40..=44|50|51|71..=78);
-        let style = kind == "STYLE" && matches!(code, 3 | 4 | 40 | 41 | 42 | 50 | 71);
-        if !metadata && !viewport && !style {
+        if !metadata && !viewport {
             return Err(error("unsupported record field"));
         }
     }
@@ -1138,27 +1221,6 @@ fn layered_neutral_table_record(
         && (first != "AcDbSymbolTableRecord" || classes.next() != Some(subclass) || classes.next().is_some())
     {
         return Err(error("unsupported subclass declarations"));
-    }
-    if kind == "STYLE" {
-        // An omitted TEXT group7 still uses STANDARD. Ignoring a nonneutral
-        // definition would therefore change geometry despite refusing explicit
-        // style references in text_entity. Only the current Out's neutral
-        // default style is admitted until styles become represented records.
-        for (code, neutral) in [(40, 0.0), (41, 1.0), (50, 0.0), (71, 0.0)] {
-            if layered_number(record, code).map_err(|cause| error(&cause.to_string()))?.unwrap_or(neutral) != neutral {
-                return Err(error("nonneutral inherited text style field"));
-            }
-        }
-        if layered_text(record, 3)? != Some("txt") || layered_text(record, 4)?.is_some_and(|font| !font.is_empty()) {
-            return Err(error("unrepresented font or bigfont definition"));
-        }
-        // Last-used height is display metadata, not a TEXT scale when the
-        // entity has its required positive height. Keep only its finite,
-        // positive neutral domain; do not apply it to authored geometry.
-        if layered_number(record, 42)?.is_some_and(|value| !value.is_finite() || value <= 0.0) {
-            return Err(error("invalid last-used text height"));
-        }
-        return Ok(());
     }
     if kind != "VPORT" {
         return Ok(());
@@ -1339,6 +1401,10 @@ fn layered_declare_layer(record: &Ent, types: &LayeredLinetypes, file: &mut DxfF
 pub fn read_dxf(text: &str) -> Result<Vec<Geom2>> {
     read_dxf_file_with_profile(text, DxfReadProfile::SketchImport)?.sketch_geometry()
 }
+
+/// The DXF file's bytes as text for [`read_dxf`] and [`read_dxf_file`]: a binary DXF read into
+/// its ASCII groups, any other file as text.
+pub use binary::dxf_text_from_bytes;
 
 /// Borrow record boundaries from the already admitted token stream. Both
 /// entity admission and serialization tests use these same boundaries.
@@ -3321,7 +3387,6 @@ mod tests {
             ("11\n1\n", ""),
             ("21\n2\n", "21\nnan\n"),
             ("40\n1\n", "40\n0\n"),
-            ("1\nA\n", "1\nA\n7\nSTANDARD\n"),
             ("1\nA\n", "1\nA\n7\nCustom\n"),
             ("1\nA\n", "1\nA\n6\nByLayer\n"),
             ("1\nA\n", "1\nA\n230\n-1\n"),
@@ -3932,6 +3997,50 @@ mod tests {
         assert!(layered_tables(&records, 1.0, &mut work).unwrap_err().to_string().contains("work budget exceeded"));
     }
 
+    /// A file whose texts name declared styles reads; a style's font is not carried, so each
+    /// such style is reported once, however many texts use it.
+    fn styled_text_file(style_fields: &str, text_style: &str, texts: usize) -> String {
+        let mut source = DxfFile::new().unwrap();
+        source.push(source.default_layer(), DxfShape::Text { at: Vec2::new(2.0, 3.0), height: 1.0, angle_deg: 0.0, text: "A".into() }, None).unwrap();
+        let original = crate::write_dxf_file(&source).unwrap();
+        let style_at = original.find("0\nSTYLE\n").unwrap();
+        let end = style_at + original[style_at..].find("0\nENDTAB\n").unwrap();
+        let mut text = format!("{}{}{}", &original[..end], style_fields, &original[end..]);
+        let entity_at = text.find("0\nTEXT\n").unwrap();
+        let entity_end = entity_at + text[entity_at..].find("0\nENDSEC\n").unwrap();
+        let entity = text[entity_at..entity_end].to_string();
+        let styled = format!("{}7\n{text_style}\n", entity);
+        text.replace_range(entity_at..entity_end, &styled.repeat(texts));
+        text
+    }
+
+    #[test]
+    fn texts_in_declared_styles_with_any_font_read_and_warn_once_per_style() {
+        let arial = "0\nSTYLE\n2\nArial\n70\n0\n40\n0.0\n41\n1.0\n50\n0.0\n71\n0\n3\narial.ttf\n4\n\n";
+        let file = read_dxf_file(&styled_text_file(arial, "Arial", 2)).unwrap();
+        assert_eq!(file.entities().len(), 2);
+        assert_eq!(file.warnings().len(), 1, "{:?}", file.warnings());
+        assert!(file.warnings()[0].contains("Arial") && file.warnings()[0].contains("arial.ttf"), "{:?}", file.warnings());
+        let plain = read_dxf_file(&styled_text_file("", "Standard", 1)).unwrap();
+        assert_eq!(plain.entities().len(), 1);
+        assert!(plain.warnings().is_empty());
+    }
+
+    #[test]
+    fn a_standard_style_with_another_font_and_a_style_nobody_declared() {
+        let mut source = DxfFile::new().unwrap();
+        source.push(source.default_layer(), DxfShape::Text { at: Vec2::new(2.0, 3.0), height: 1.0, angle_deg: 0.0, text: "A".into() }, None).unwrap();
+        let original = crate::write_dxf_file(&source).unwrap();
+        let changed = original.replacen("3\ntxt\n", "3\nOtherFont.ttf\n", 1);
+        let file = read_dxf_file(&changed).unwrap();
+        assert_eq!(file.entities().len(), 1);
+        assert_eq!(file.warnings().len(), 1);
+        let missing = styled_text_file("", "Nowhere", 1);
+        assert!(read_dxf_file(&missing).unwrap_err().to_string().contains("undeclared STYLE"));
+        let wide = "0\nSTYLE\n2\nArial\n70\n0\n40\n0.0\n41\n2.0\n50\n0.0\n71\n0\n3\narial.ttf\n4\n\n";
+        assert!(read_dxf_file(&styled_text_file(wide, "Arial", 1)).is_err(), "a width factor would move the text");
+    }
+
     /// TEXT without explicit group7 still inherits STANDARD. Exercise real Out
     /// bytes, not a synthetic metadata reader, and keep SketchImport's legacy
     /// projection unchanged while the strict profile refuses lost semantics.
@@ -3956,9 +4065,6 @@ mod tests {
             ("50\n0.0\n", "50\n15.0\n"),
             ("71\n0\n", "71\n2\n"),
             ("70\n0\n", "70\n1\n"),
-            ("3\ntxt\n", "3\nOtherFont.ttf\n"),
-            ("4\n\n", "4\nbigfont.shx\n"),
-            ("2\nStandard\n", "2\nCustom\n"),
             ("41\n1.0\n", "41\n1.0\n41\n1.0\n"),
             ("50\n0.0\n", "50\n1e-400\n"),
             ("40\n0.0\n", "40\n1e-400\n"),

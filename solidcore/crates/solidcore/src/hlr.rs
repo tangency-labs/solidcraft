@@ -42,6 +42,7 @@ pub(crate) mod surface;
 mod trim;
 mod vec;
 
+use crate::math::det;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use serde::Serialize;
@@ -1938,7 +1939,7 @@ fn screen_box(c: &C3, r: [f64; 2], p: &Placement, view: &View) -> ([f64; 2], [f6
                 };
                 // The peaks at base + k pi from the first one past the part's start, wherever
                 // its angles are counted from.
-                let (base, pi) = (vk.atan2(uk), std::f64::consts::PI);
+                let (base, pi) = (det::atan2(vk, uk), std::f64::consts::PI);
                 let first = ((r[0] - base) / pi).ceil();
                 for k in 0..8 {
                     let t = base + (first + k as f64) * pi;
@@ -2083,7 +2084,7 @@ fn depth_bound(c: &C3, r: [f64; 2], p: &Placement, d: Vec3) -> f64 {
             o, x, y, r: rad, ..
         } => {
             let dl = p.local_dir(d);
-            depth(*o) + (rad[0] * x.dot(dl)).hypot(rad[1] * y.dot(dl))
+            depth(*o) + det::hypot(rad[0] * x.dot(dl), rad[1] * y.dot(dl))
         }
         C3::Spline {
             degree,
@@ -2143,7 +2144,7 @@ fn box_gap(a: [f64; 2], b: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> f64 {
     let to_box = |p: [f64; 2]| {
         let dx = (lo[0] - p[0]).max(p[0] - hi[0]).max(0.);
         let dy = (lo[1] - p[1]).max(p[1] - hi[1]).max(0.);
-        dx.hypot(dy)
+        det::hypot(dx, dy)
     };
     let corner_gap = corners
         .iter()
@@ -2283,7 +2284,7 @@ fn piece_geometry(
                     return x;
                 }
                 let w = c.at(x) - o;
-                w.dot(v).atan2(w.dot(u))
+                det::atan2(w.dot(v), w.dot(u))
             };
             // The angle turned from the piece's start to its end: the way it turns, certified
             // all along it (C3::turn_sign; a piece that turns back, or one that cannot be
@@ -2317,7 +2318,7 @@ fn piece_geometry(
             let pieces = ((a1 - a0).abs() / std::f64::consts::FRAC_PI_2)
                 .ceil()
                 .max(1.) as usize;
-            let at = |a: f64| o + u * a.cos() + v * a.sin();
+            let at = |a: f64| o + u * det::cos(a) + v * det::sin(a);
             let mut out = Vec::new();
             for k in 0..pieces {
                 let (b0, b1) = (
@@ -2325,13 +2326,13 @@ fn piece_geometry(
                     a0 + (a1 - a0) * (k + 1) as f64 / pieces as f64,
                 );
                 let (m, h) = (0.5 * (b0 + b1), 0.5 * (b1 - b0));
-                let w = h.cos();
+                let w = det::cos(h);
                 if w <= 1e-12 {
                     return chords();
                 }
                 out.push(Seg2::Conic {
                     a: s(at(b0)),
-                    apex: s(o + (u * m.cos() + v * m.sin()) / w),
+                    apex: s(o + (u * det::cos(m) + v * det::sin(m)) / w),
                     b: s(at(b1)),
                     w,
                 });
@@ -2451,7 +2452,7 @@ fn crossings(tracks: &mut [Track], ctx: &Ctx) -> Result<usize, HlrError> {
     // coincident run starts or ends, one side differs and the meeting is kept.
     // The end (0 or 1) of a segment that fraction `f` along it lies at, to rounding.
     let end_at = |s: &Seg, f: f64| {
-        let len = (s.b[0] - s.a[0]).hypot(s.b[1] - s.a[1]);
+        let len = det::hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
         if f * len <= tol {
             Some(0.)
         } else if (1. - f) * len <= tol {
@@ -2828,7 +2829,7 @@ fn cover(lines: &mut [Line], tol: f64, step: f64, ctx: &Ctx) -> Result<(), HlrEr
                         return Err(HlrError::Cancelled);
                     }
                 }
-                let k = ((a[0] - b[0]).hypot(a[1] - b[1]) / step)
+                let k = (det::hypot(a[0] - b[0], a[1] - b[1]) / step)
                     .ceil()
                     .clamp(1., 1e6) as usize;
                 covered = covered
@@ -2879,7 +2880,7 @@ fn point_segment(q: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     } else {
         0.
     };
-    (a[0] + t * ex - q[0]).hypot(a[1] + t * ey - q[1])
+    det::hypot(a[0] + t * ex - q[0], a[1] + t * ey - q[1])
 }
 
 /// Smallest distance between two screen segments that do not cross.

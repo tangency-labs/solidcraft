@@ -138,8 +138,9 @@ fn read_keys<'de, D: Deserializer<'de>>(d: D) -> Result<InsertDrawingKeys, D::Er
     serde_path_to_error::deserialize(&value).map_err(|e| D::Error::custom(located(&e)))
 }
 
-/// Insert an ASCII DXF drawing into a sketch as curves: the active sketch, or a new one when none
-/// is being edited. Give the drawing as `path` or as `text`. Blocks are expanded. It can be
+/// Insert a DXF drawing into a sketch as curves: the active sketch, or a new one when none is
+/// being edited. Give the drawing as `path` (an ASCII or a binary DXF file) or as `text` (ASCII
+/// DXF). Blocks are expanded. It can be
 /// sized, turned and placed. Text in the drawing becomes sketch text. One undo step.
 #[derive(Debug)]
 pub struct InsertDxfParams(pub InsertDrawingKeys);
@@ -161,7 +162,7 @@ impl JsonSchema for InsertDxfParams {
     }
 }
 
-const INSERT_DXF: &str = "Insert an ASCII DXF drawing into a sketch as curves: the active sketch, or a new one when none is being edited. Give the drawing as `path` or as `text`. Blocks are expanded. It can be sized, turned and placed. Text in the drawing becomes sketch text. One undo step.";
+const INSERT_DXF: &str = "Insert a DXF drawing into a sketch as curves: the active sketch, or a new one when none is being edited. Give the drawing as `path` (an ASCII or a binary DXF file) or as `text` (ASCII DXF). Blocks are expanded. It can be sized, turned and placed. Text in the drawing becomes sketch text. One undo step.";
 
 /// Insert an SVG drawing into a sketch as curves: the active sketch, or a new one when none is
 /// being edited. Give the drawing as `path` or as `text`. It can be sized, turned and placed.

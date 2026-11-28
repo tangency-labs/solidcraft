@@ -856,6 +856,39 @@ fn dialog_layout_annotations_are_checked_at_load() {
 }
 
 #[test]
+fn icon_button_choices_are_checked_at_load_and_lists_of_them_take_distinct_options() {
+    let buttons = json!({"version":1,"style":"buttons"});
+    let options = json!([{"const":"a","x-solidcraft-icon":"a.svg"},{"const":"b","x-solidcraft-icon":"b.svg"}]);
+    let one = json!({"type":"string","oneOf":options,"x-solidcraft-choice":buttons});
+    let many = json!({"type":"array","uniqueItems":true,"items":{"type":"string","oneOf":options},"x-solidcraft-choice":buttons});
+    let load = |property: &Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"p":property}}}]);
+        parse(&value)
+    };
+    load(&one).unwrap();
+    load(&many).unwrap();
+    let refused = |property: Value| matches!(load(&property), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("properties.p.x-solidcraft-choice"));
+    for annotation in [json!({"version":2,"style":"buttons"}), json!({"version":1,"style":"tiles"}), json!({"version":1}), json!("buttons")] {
+        let mut property = one.clone();
+        property["x-solidcraft-choice"] = annotation.clone();
+        assert!(refused(property), "{annotation}");
+    }
+    let mut repeating = many.clone();
+    repeating["uniqueItems"] = json!(false);
+    assert!(refused(repeating), "a list of choices needs uniqueItems");
+    assert!(refused(json!({"type":"number","x-solidcraft-choice":buttons})));
+    assert!(refused(json!({"type":"array","uniqueItems":true,"items":{"type":"object"},"x-solidcraft-choice":buttons})));
+
+    // The pictures of a list's options are package images like a choice's.
+    let schema = json!({"type":"object","properties":{"p":many}});
+    assert_eq!(images::referenced(&schema), ["a.svg", "b.svg"]);
+    assert_eq!(images::annotations(&schema)[0].0, "properties.p.items.oneOf.0.x-solidcraft-icon");
+    assert!(check_input(&schema, &json!({"p":["b","a"]})).is_ok());
+    assert!(check_input(&schema, &json!({"p":["a","a"]})).is_err(), "uniqueItems refuses a repeated option");
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());

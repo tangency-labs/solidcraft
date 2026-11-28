@@ -2784,10 +2784,21 @@ fn copy_faces_named(
             all_ok = false;
             continue;
         };
+        // Not upstream (#22584): the copy keeps the face's edges, and the B-rep's check
+        // holds each edge and its vertices within half the edge's tolerance of the face
+        // (`SmBrep::UpdateAndValidateTolerances`), so an analytic surface in place of the
+        // face's B-spline must give its points within half the tightest of those
+        // tolerances. A drafted wall that a plane nearly fits otherwise becomes a plane
+        // that misses the wall's corner by more than that, though within the zone
+        // tolerance.
+        let mut within = f64::INFINITY;
+        for e in crate::topology::face::p4::edges(src, f, None, false, None)? {
+            within = within.min(0.5 * ed::tolerance(src, e)?);
+        }
         let s1 = fp2::surface(src, f)?.ok_or_else(|| null("face without surface"))?;
         // (status ignored upstream, which then dereferences the null copy; fork 60a8a51
         // passes it on)
-        let s2 = s1.copy_and_add_analytics(k)?;
+        let s2 = s1.copy_and_add_analytics_within(k, within)?;
         let dom = s2.natural_uv_domain_with_nurb(k)?;
         let input = FaceCurvesInput {
             loops: curves

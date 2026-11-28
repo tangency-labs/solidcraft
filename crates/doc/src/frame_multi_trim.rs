@@ -207,7 +207,9 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     let mut reach = Vec::new();
     for &tool in tools {
         let b = tool.body.exact_bounds()?;
-        // A cheap first look at the tool's box; fails closed on a non-finite distance.
+        // A tool reaches this end when its box comes within `out` of it. One farther off crosses the member
+        // somewhere else (where the crossings cut it), not at this end, though it may lie inside the deeper zone
+        // its crossing is cut over. Fails closed on a non-finite distance.
         if !(end_point.dist(end_point.max(b.min).min(b.max)) <= out) {
             continue;
         }

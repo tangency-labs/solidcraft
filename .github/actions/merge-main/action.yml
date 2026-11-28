@@ -5,8 +5,15 @@
 # the PR lands on (`cargo xtask app-geometry` judges HEAD against HEAD~1) and HEAD^2 the PR's head.
 # Pull requests only: merge groups and pushes already test what lands. Use it after the checkout:
 #   - uses: ./.github/actions/merge-main
+# A job that has to test the same merge as an earlier job (the kernel rig's shards grade the CLI
+# its build job compiled) passes that job's main commit as base-sha instead of today's tip.
 name: Merge today's main
 description: On a pull request, test the PR merged onto the current tip of its base branch.
+inputs:
+  base-sha:
+    description: Merge onto this commit of the base branch instead of its current tip.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -16,4 +23,5 @@ runs:
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
       run: bash "$GITHUB_ACTION_PATH/merge-main.sh"

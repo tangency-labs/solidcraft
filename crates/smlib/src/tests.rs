@@ -177,9 +177,11 @@ const ANSWERING: &[&str] = &[
     "blend_setback",
     "blend_setback_open",
     "fillet_variable",
+    "fillet_variable_chain",
     "chamfer_sides",
     "shell",
     "offset_faces",
+    "transform_face",
     "thicken",
     "offset_solid",
     "merge_faces",
@@ -323,9 +325,12 @@ fn every_entry_point_answers() {
     says("blend_setback", a.blend_setback(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("blend_setback_open", a.blend_setback_open(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("fillet_variable", a.fillet_variable(edge[0], 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
+    says("fillet_variable_chain", a.fillet_variable_chain(&edge, 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
     says("chamfer_sides", a.chamfer_sides(&edge, 0.1, 1.0, ChamferSecond::Distance(2.0), p(0.0, 0.0, 1.0)));
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
+    let lost_face = crate::PickedFace { index: usize::MAX, at: top[0], tolerance: 0.1 };
+    assert!(a.transform_face(lost_face, p(0.0, 0.0, 1.0), top[0], p(0.0, 0.0, 1.0), 0.0).is_err());
     says("thicken", a.thicken(1.0, false));
     says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));

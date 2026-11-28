@@ -50,6 +50,8 @@ macro_rules! path_shader {
             "\n",
             include_str!("aging.wgsl"),
             "\n",
+            include_str!("flakes.wgsl"),
+            "\n",
             include_str!("punctual.wgsl"),
             "\n",
             include_str!("glass.wgsl"),
@@ -66,7 +68,8 @@ const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
 const PATH_WORKGROUP_SIZE: u32 = 32;
 const SCENE_PIPELINE_CACHE_SLOTS: usize = 2;
 const CLAMPED_PIPELINE_CACHE_SLOTS: usize = SCENE_PIPELINE_CACHE_SLOTS + 1;
-const PARAMETER_BYTES: usize = 2096;
+// The paint flake table follows the aging layers.
+const PARAMETER_BYTES: usize = 2096 + scene::FLAKE_PARAMETER_BYTES;
 // Five vec4s per source; exact device+upload growth is additional to v2's budget.
 const PUNCTUAL_PARAMETER_BYTES: u64 = 8 * 80;
 // Eight inline 32-byte hard directions: device uniform plus host upload bytes.
@@ -204,6 +207,7 @@ struct PreparedScene {
     active_glass_model: bool,
     photon_guide: Option<[f32; 4]>,
     photon_bounds: Option<[f32; 6]>,
+    flakes: Vec<u8>,
 }
 
 struct Context {
@@ -751,6 +755,7 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
         + 1_048_576
         + 2 * DIRECTIONAL_PARAMETER_BYTES
         + 2 * PUNCTUAL_PARAMETER_BYTES
+        + 2 * scene::FLAKE_PARAMETER_BYTES as u64
         + 2 * PUNCTUAL_COUNTER_BYTES;
     // Optional material lane is retained in serialized/device geometry while
     // preparation also owns its serialization scratch. Legacy scenes add zero.
@@ -976,6 +981,7 @@ impl ImageExecutor for Executor {
             drop((texture_upload, environment));
         } else {
             let upload = scene::flatten_with_media(scene, request.camera.target, cancel, options.nested_media)?;
+            scene::flake_parameters(&upload.flakes, request.camera.target)?;
             photons::validate_punctual_origins(scene, request.camera.target, options, upload.epsilon, cancel)?;
             let environment = prepare_environment(request, cancel)?;
             photons::source_distribution(options, request, &upload.nodes, upload.photon_guide, environment.1)?;
@@ -1084,6 +1090,8 @@ struct Task {
     punctual_diagnostics: std::cell::Cell<solidcraft_render::job::PunctualDiagnostics>,
     volume: [[f32; 4]; 3],
     aging: [[f32; 20]; 8],
+    /// The shader's paint flake table, `scene::FLAKE_PARAMETER_BYTES` long.
+    flakes: Vec<u8>,
     photographic: Option<solidcraft_render::job::photographic::PhotographicTask>,
     offset: u32,
     epsilon: f32,
@@ -1143,14 +1151,23 @@ impl Task {
         request.textures = None; // GPU upload owns decoded pixels; release captured source bytes.
         let cache_key = scene::PreparedKey::from_scene(&scene, request.camera.target, options.nested_media, &cancel)?;
         let cached_scene = context.lookup_or_evict_prepared_scene(&cache_key);
-        let (fresh_upload, active_glass_model, epsilon, root_node, photon_guide, photon_bounds) = if let Some(prepared) = &cached_scene {
-            (None, prepared.active_glass_model, prepared.epsilon, prepared.root_node, prepared.photon_guide, prepared.photon_bounds)
+        let (fresh_upload, active_glass_model, epsilon, root_node, photon_guide, photon_bounds, flakes) = if let Some(prepared) = &cached_scene {
+            (
+                None,
+                prepared.active_glass_model,
+                prepared.epsilon,
+                prepared.root_node,
+                prepared.photon_guide,
+                prepared.photon_bounds,
+                prepared.flakes.clone(),
+            )
         } else {
             let upload = scene::flatten_with_media(&scene, request.camera.target, &cancel, options.nested_media)?;
+            let flakes = scene::flake_parameters(&upload.flakes, request.camera.target)?;
             let root_node: [u8; 32] =
                 upload.nodes.get(..32).and_then(|bytes| bytes.try_into().ok()).ok_or_else(|| gpu("prepared BVH is missing its root node"))?;
             let meta = (upload.active_glass_model, upload.epsilon, root_node, upload.photon_guide, upload.photon_bounds);
-            (Some(upload), meta.0, meta.1, meta.2, meta.3, meta.4)
+            (Some(upload), meta.0, meta.1, meta.2, meta.3, meta.4, flakes)
         };
         // This uniform lane was spare. Keep the material offset mask that the
         // mapped opaque shader has qualified on RADV.
@@ -1211,6 +1228,7 @@ impl Task {
                 let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE)?;
                 drop(upload);
                 let prepared = PreparedScene {
+                    flakes: flakes.clone(),
                     triangles: triangles.clone(),
                     nodes: nodes.clone(),
                     root_node,
@@ -1342,6 +1360,7 @@ impl Task {
             punctual_diagnostics: Default::default(),
             volume,
             aging,
+            flakes,
             photographic: None,
             offset: 0,
             epsilon,
@@ -1457,6 +1476,7 @@ impl Task {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
+        bytes.extend_from_slice(&self.flakes);
         for light in lighting.directional_lights.iter() {
             // Validation rejects zero/nonfinite input; scaled normalization preserves
             // every bounded CPU directional intent, including tiny finite vectors.

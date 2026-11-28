@@ -242,6 +242,24 @@ fn hidden_bodies_take_no_part() {
     assert_eq!(op(&mut h), NEW);
 }
 
+#[test]
+fn extrude_cut_dialog_omits_the_mesh_from_automatic_targets() {
+    let mut h = Harness::new();
+    let path = h.dir.join("scan.obj");
+    std::fs::write(&path, "v 0 0 0\nv 4 0 0\nv 0 4 0\nf 1 2 3\n").unwrap();
+    let scan = h.app.run("file.insert_mesh", json!({"path": path})).unwrap();
+    h.app.run("component.activate", json!({"component": scan["component"]})).unwrap();
+    for (name, x) in [("Block", 10), ("Hidden", 30)] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
+    }
+    h.app.run("browser.visibility", json!({"items": ["Hidden"], "visible": false})).unwrap();
+    rect_sketch(&mut h, [0.0, 0.0], [15.0, 5.0]);
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    pick(&mut h, CUT);
+    let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds[0].1["targets"], json!(["Block"]));
+}
+
 /// Pipe and Thicken don't choose their operation, yet a Cut from their windows leaves a hidden
 /// body alone too: two 20 mm boxes, the second hidden, a path through both at half height.
 #[test]

@@ -187,14 +187,9 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 action = Some("import");
             }
             #[cfg(not(target_arch = "wasm32"))]
-            ui_kit::Menu::context(&button, |ui| {
-                ui_kit::Menu::show(ui, t.form_card_width, |ui| {
-                    if ui_kit::MenuItem::new("theme_paste", app.tr("prefs.theme_paste"), "paste").show(ui).clicked() {
-                        action = Some("paste");
-                        ui.close();
-                    }
-                });
-            });
+            if ui_kit::Menu::context_items(&button, &[ui_kit::Item::action("theme_paste", app.tr("prefs.theme_paste"), "paste")]).is_some() {
+                action = Some("paste");
+            }
             button.rect
         },
     );
@@ -352,24 +347,20 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
         if response.clicked() {
             chosen = Some(e.id.clone());
         }
-        ui_kit::Menu::context(&response, |ui| {
-            ui_kit::Menu::show(ui, t.form_card_width, |ui| {
-                if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
-                    action = Some("export");
-                    action_theme = Some(e.id.clone());
-                    ui.close();
-                }
-                if e.imported {
-                    let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
-                    remove.danger = true;
-                    if remove.show(ui).clicked() {
-                        action = Some("remove");
-                        action_theme = Some(e.id.clone());
-                        ui.close();
-                    }
-                }
-            });
-        });
+        let mut menu = vec![ui_kit::Item::action("theme_export", app.tr_label("Export…"), "export")];
+        if e.imported {
+            let mut remove = ui_kit::Item::action("theme_remove", app.tr_label("Remove"), "delete");
+            remove.danger = true;
+            menu.push(remove);
+        }
+        if let Some(picked) = ui_kit::Menu::context_items(&response, &menu) {
+            action = match picked.id.as_str() {
+                "theme_export" => Some("export"),
+                "theme_remove" => Some("remove"),
+                _ => None,
+            };
+            action_theme = Some(e.id.clone());
+        }
     };
     if search {
         for index in 0..visible.len() {

@@ -139,3 +139,14 @@ fn procedural_roughness_preserves_the_captured_clear_coat() {
     let expected = OpaqueSurface::new(original.base_color(), original.metallic(), 0.6, original.dielectric_ior()).unwrap().with_clear_coat(coat);
     assert!((changed.surface.brdf(Vec3::Z, Vec3::Z, Vec3::Z).unwrap() - expected.brdf(Vec3::Z, Vec3::Z, Vec3::Z).unwrap()).len() < 1.0e-12);
 }
+
+#[test]
+fn procedural_roughness_preserves_the_paint_flakes_under_the_coat() {
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
+    let flakes = solidcraft_viewport::flakes::FlakeLayer::new(0.6, 0.05, 0.8, 0.3, Vec3::new(0.9, 0.9, 0.9), 1.0, 0.2).unwrap();
+    let original = surface().with_clear_coat(coat).with_flakes(flakes);
+    let mut input = effect();
+    input.roughness_amplitude = 0.2;
+    let changed = input.prepare().unwrap().apply(original, Vec3::Z, Vec3::Z, Vec3::ZERO).unwrap();
+    assert_eq!((changed.surface.clear_coat(), changed.surface.flakes()), (Some(coat), Some(flakes)));
+}

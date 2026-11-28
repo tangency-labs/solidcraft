@@ -313,6 +313,9 @@ pub struct Exchange {
     pub entities: BTreeMap<u64, Entity>,
     /// Ids defined more than once (the first definition is kept).
     pub duplicates: Vec<u64>,
+    /// Length of the text this exchange was parsed from, in bytes, counted before a leading
+    /// byte order mark is stripped. Zero from [`Default`].
+    pub source_bytes: usize,
 }
 
 impl Exchange {
@@ -914,9 +917,11 @@ fn parse_limited(
     watch: Option<&dyn Progress>,
     limits: Limits,
 ) -> Result<Exchange, Error> {
-    if text.len() > limits.bytes {
+    // Before the byte order mark is stripped, so a marked file still counts those bytes.
+    let source_bytes = text.len();
+    if source_bytes > limits.bytes {
         return Err(Error::TooLarge {
-            bytes: text.len(),
+            bytes: source_bytes,
             limit: limits.bytes,
         });
     }
@@ -938,7 +943,10 @@ fn parse_limited(
         return Err(Error::NotStep);
     }
     lx.expect(b';')?;
-    let mut ex = Exchange::default();
+    let mut ex = Exchange {
+        source_bytes,
+        ..Exchange::default()
+    };
     loop {
         lx.ws()?;
         if lx.peek().is_none() {
@@ -1087,7 +1095,7 @@ fn parse_limited(
                         vec![lx.record()?]
                     };
                     lx.expect(b';')?;
-                    if ex.entities.len() % 4096 == 0
+                    if ex.entities.len().is_multiple_of(4096)
                         && let Some(w) = watch
                     {
                         if w.cancelled() {
@@ -1189,6 +1197,7 @@ ENDSEC;END-ISO-10303-21;",
     fn parses_simple_and_complex() {
         let t = "ISO-10303-21;\nHEADER;FILE_DESCRIPTION((''),'2;1');\nFILE_NAME('a','',(''),(''),'','sys','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));ENDSEC;\nDATA;\n#1=CARTESIAN_POINT('p',(0.,1.5E1,-2));\n/* c */ #2=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#3=X('it''s','\\X2\\00E9\\X0\\',$,#1,LENGTH_MEASURE(1.E-3),\"0F\");\nENDSEC;\nEND-ISO-10303-21;\n";
         let ex = parse(t).unwrap();
+        assert_eq!(ex.source_bytes, t.len());
         assert_eq!(ex.schemas, vec!["AUTOMOTIVE_DESIGN"]);
         assert_eq!(ex.originating_system, "sys");
         let p = ex.get(1).unwrap();

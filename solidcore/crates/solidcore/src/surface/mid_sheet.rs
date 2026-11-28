@@ -222,6 +222,7 @@ pub fn from_frame(frame: &Frame, uv: [f64; 2]) -> Result<Point3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)
@@ -354,7 +355,7 @@ mod tests {
         assert_eq!(polygon_area(&rect[..2]).unwrap(), 0.0);
         assert_eq!(polygon_area(&[]).unwrap(), 0.0);
         // A unit square 2^27 from the origin has area 1, as it has at the origin.
-        let far = 2.0_f64.powi(27);
+        let far = det::powi(2.0_f64, 27);
         let square = |l: f64| {
             [
                 v(l, l, 0.0),

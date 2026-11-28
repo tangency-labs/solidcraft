@@ -162,6 +162,7 @@ pub mod thread_forms;
 pub mod tolerance;
 pub mod weld_fusion;
 pub mod weld_groove;
+pub mod weld_plug;
 pub mod weld_projection;
 pub mod weld_seam;
 pub mod weld_spot;
@@ -214,6 +215,8 @@ pub use eval::RevolveExtent;
 pub use eval::SavedModel;
 pub use eval::SketchCopy;
 pub use eval::SolvedSketch;
+pub use eval::THREAD_OFFSET_NEGATIVE;
+pub use eval::THREAD_OFFSET_WITH_TIP;
 pub use eval::ThreadInfo;
 pub use eval::blend_target;
 pub use eval::cell_grid::MAX_CUT_CELLS;
@@ -223,6 +226,8 @@ pub use eval::curve_pick_error;
 pub use eval::draft_corner_options;
 pub use eval::edge_names_for;
 pub use eval::edge_refs;
+pub use eval::emboss_box;
+pub use eval::emboss_middle;
 pub use eval::emboss_placement;
 pub use eval::face_point_names;
 pub use eval::face_point_state;
@@ -271,6 +276,7 @@ pub use names::FeatureId;
 pub use names::FeatureName;
 pub use names::SketchId;
 pub use names::copy_name;
+pub use params::DrivenParam;
 pub use params::ParamRow;
 pub use params::ParamUser;
 pub use params::cycles;
@@ -297,6 +303,8 @@ pub enum DocError {
     Expr(String),
     #[error("{0}")]
     Invalid(String),
+    #[error("the {axis} axis does not lie in the sketch plane")]
+    WorldRevolveAxisOutsideSketchPlane { axis: &'static str },
     #[error("unknown {0}")]
     Unknown(String),
     #[error(transparent)]

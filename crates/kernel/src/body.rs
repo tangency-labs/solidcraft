@@ -622,7 +622,12 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    solidcore_ops::record_check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
+    // The record validator exposes its reason as a static string. Identify the
+    // ceiling check here so pattern evaluation can give advice for that failure.
+    solidcore_ops::record_check::validate_built(&record).map_err(|e| match e.0 {
+        crate::BREP_COORDINATE_CEILING => KernelError::CoordinateCeiling,
+        _ => KernelError::Invalid(e.to_string()),
+    })?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -746,7 +751,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } | S::Sweep { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -1036,6 +1041,17 @@ impl Body {
     /// operands (see [`crate::history`]); `None` when the operation does not report one.
     pub fn history(&self) -> Option<&crate::history::History> {
         self.history.as_deref()
+    }
+
+    /// The identity step over this body, shared by its unchanged and rigidly moved copies.
+    fn kept_identity(&self) -> std::sync::Arc<crate::history::History> {
+        self.placing.identity.get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self))).clone()
+    }
+
+    /// A proved no-op: keep the geometry with identity history over this step's input.
+    /// The preceding fillet's rounds refer to its own input, not to this one.
+    pub(crate) fn unchanged_step(&self) -> Body {
+        Body { history: Some(self.kept_identity()), rounds: None, ..self.clone() }
     }
 
     /// Attach the history of the operation that made this body from `operands`, after checking
@@ -1617,7 +1633,10 @@ impl Body {
             let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
             let source = self.record.lazy().map_or_else(|| self.record.arc().clone(), |m| m.source().clone());
             let moves = crate::placement::Rigid::of_matrix(&identity).and_then(|id| crate::placement::moved(&source, &id)).is_some();
-            let blended = source.faces.iter().any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }));
+            let blended = source
+                .faces
+                .iter()
+                .any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. } | solidcore_record::brep::Surface::Sweep { .. }));
             match (moves, blended) {
                 (false, _) => Movable::No,
                 (true, true) => Movable::Exactly,
@@ -1639,6 +1658,11 @@ impl Body {
             None => (self.record.arc().clone(), matrix),
         };
         let motion = crate::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
+        // Past the ceiling the copy is moved now, so `validate_built` refuses it. A lazy record
+        // would store the vertex before that check. `source` is the unmoved record.
+        if !crate::placement::within_coordinate_ceiling(&source, &motion) {
+            return None;
+        }
         Some(Body {
             record: RecordCell::Moved(std::sync::Arc::new(LazyMove::new(source, motion, matrix))),
             placing: self.placing.clone(),
@@ -1657,12 +1681,7 @@ impl Body {
             face_sources: None,
             regularization_protected: self.regularization_protected,
             // A move keeps every face and edge where it was: one history for every placement.
-            history: Some(
-                self.placing
-                    .identity
-                    .get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self)))
-                    .clone(),
-            ),
+            history: Some(self.kept_identity()),
             display_of,
             meshes: None,
             unchecked: None,

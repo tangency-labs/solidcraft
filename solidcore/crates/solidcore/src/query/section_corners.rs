@@ -9,6 +9,7 @@
 //! |--------------------------|----------|
 //! | [`measure_corner_turns`] | (none)   |
 //! | [`exit_through_box`]     | (none)   |
+//! | [`reach_through_box`]    | (none)   |
 //! | [`exit_through_round`]   | (none)   |
 //! | [`reach_through_rounds`] | (none)   |
 //! | [`square_axes`]          | (none)   |
@@ -78,22 +79,83 @@ pub fn measure_corner_turns(outline: &Loop2) -> CornerTurns {
 ///
 /// [`crate::error::SolidError::InvalidInput`] for a zero or non-finite `toward`.
 pub fn exit_through_box(end: Point3, toward: Vec3, rect: &[Point3; 4]) -> Result<Option<f64>> {
-    const PARALLEL: f64 = 1e-9;
     let t = toward.unitize()?;
+    Ok(slab_exits(end, t, rect).and_then(nearest))
+}
+
+/// The exit of the slab between each pair of opposite sides of the box round `rect`
+/// ([`exit_through_box`]), for unit `t`: `None` for a degenerate `rect`, and a slab's `None`
+/// where the line runs along it. Each is affine in `end`.
+fn slab_exits(end: Point3, t: Vec3, rect: &[Point3; 4]) -> Option<[Option<f64>; 2]> {
+    const PARALLEL: f64 = 1e-9;
     let [a, b, _, d] = *rect;
-    let mut exit: Option<f64> = None;
-    for (near, far) in [(a, b), (a, d)] {
-        let Ok(n) = (far - near).unitize() else {
-            return Ok(None);
-        };
+    let mut slabs = [None; 2];
+    for (slab, (near, far)) in slabs.iter_mut().zip([(a, b), (a, d)]) {
+        let n = (far - near).unitize().ok()?;
         let tn = t.dot(n);
-        if tn.abs() <= PARALLEL {
-            continue;
+        if tn.abs() > PARALLEL {
+            *slab = Some(((near - end).dot(n) / tn).max((far - end).dot(n) / tn));
         }
-        let out = ((near - end).dot(n) / tn).max((far - end).dot(n) / tn);
-        exit = Some(exit.map_or(out, |e| e.min(out)));
     }
-    Ok(exit)
+    Some(slabs)
+}
+
+/// The nearer of two slab exits, `None` where the line runs along both.
+fn nearest([x, y]: [Option<f64>; 2]) -> Option<f64> {
+    match (x, y) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (one, None) | (None, one) => one,
+    }
+}
+
+/// The farthest any point of a member's end leaves the box round `rect` ([`exit_through_box`])
+/// along `toward`: over `end` and the rectangles `sections` (each one's corners in order, placed
+/// square to the line at `end`). A point's exit is the nearer of two slab exits, each affine in
+/// the point, so over a rectangle it is concave and piecewise affine: greatest at a corner or
+/// where an edge crosses the line on which the two slab exits are equal, and both are looked at.
+/// `None` where every point's line runs along the box, or `rect` is degenerate.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite `end`, section corner or `rect` corner, and a
+/// zero or non-finite `toward`.
+pub fn reach_through_box(
+    end: Point3,
+    toward: Vec3,
+    sections: &[[Point3; 4]],
+    rect: &[Point3; 4],
+) -> Result<Option<f64>> {
+    let finite = |p: &Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(finite(&end) && sections.iter().flatten().all(finite) && rect.iter().all(finite)) {
+        return Err(SolidError::InvalidInput {
+            operation: "reach_through_box",
+            reason: "the end and the corners must be finite points",
+        });
+    }
+    let t = toward.unitize()?;
+    let exit = |p: Point3| slab_exits(p, t, rect).and_then(nearest);
+    let mut reach = exit(end);
+    let mut take = |s: Option<f64>| {
+        if let Some(s) = s.filter(|s| s.is_finite()) {
+            reach = Some(reach.map_or(s, |r: f64| r.max(s)));
+        }
+    };
+    for section in sections {
+        for (&p, &q) in section.iter().zip(section.iter().cycle().skip(1)) {
+            take(exit(p));
+            // Where the two slab exits are equal along the edge `p + u (q − p)`.
+            if let (Some([Some(p1), Some(p2)]), Some([Some(q1), Some(q2)])) =
+                (slab_exits(p, t, rect), slab_exits(q, t, rect))
+            {
+                let slope = (q1 - p1) - (q2 - p2);
+                let u = (p2 - p1) / slope;
+                if u > 0.0 && u < 1.0 {
+                    take(exit(p + (q - p) * u));
+                }
+            }
+        }
+    }
+    Ok(reach)
 }
 
 /// How far along `toward` from `start` its line leaves the round bar of `radius` about the line
@@ -167,7 +229,8 @@ pub fn exit_through_round(
 /// plane that reach the bar's surface form a convex set unbounded only along one direction, so
 /// its highest `s` lies on the rectangle's boundary. Along an edge `p(u) = P + u E` the exit is
 /// concave in `u`, greatest at an end of the edge, where its derivative is zero, or where the
-/// line just touches the bar; each is a root of a quadratic in `u`, so the farthest exit is exact.
+/// line just touches the bar; each is a root of a quadratic in `u`, so the farthest exit is exact. A
+/// double root is taken at the quadratic's vertex, which rounding can't push off the real line.
 ///
 /// # Errors
 ///
@@ -239,8 +302,12 @@ pub fn reach_through_rounds(
                 let (m0, k, beta) = (c.cross(q0), c.cross(e), c.dot(e));
                 let (kk, mk, m0m0) = (k.dot(k), m0.dot(k), m0.dot(m0));
                 let mut us = vec![0.0, 1.0];
+                // Each quadratic's roots and its vertex `-qb / 2qa`: a double root computes a discriminant just
+                // below 0 as often as just above, and the vertex is where it lies. Every candidate is a point of
+                // the edge, so an extra one never makes the reach too far.
                 let mut roots = |qa: f64, qb: f64, qc: f64| {
                     if qa.abs() > 1e-300 {
+                        us.push(-qb / (2.0 * qa));
                         let disc = qb * qb - 4.0 * qa * qc;
                         if disc >= 0.0 {
                             let r = disc.sqrt();
@@ -458,5 +525,76 @@ mod tests {
         assert!((n - d * (1.0 / 3.0)).length() < 1e-12, "{n:?}");
         assert!(x.dot(d).abs() < 1e-12 && y.dot(d).abs() < 1e-12);
         assert!(square_axes(Vec3::new(0.0, 0.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn an_edge_whose_middle_leaves_a_bar_last_reaches_its_full_radius() {
+        // The bar of radius 10 about the line y = 0.5, z = 0, an end at the origin heading +Z and
+        // a section x in [-1, 1], y in [-9.4, 2.1]: the points at y = 0.5 leave at z = 10. Along the
+        // x = ±1 edges the exit's turning point is a double root, whose discriminant rounds below 0.
+        let end = Point3::new(0.0, 0.0, 0.0);
+        let rect = [
+            Point3::new(-1.0, -9.4, 0.0),
+            Point3::new(1.0, -9.4, 0.0),
+            Point3::new(1.0, 2.1, 0.0),
+            Point3::new(-1.0, 2.1, 0.0),
+        ];
+        let bar = (
+            Point3::new(-100.0, 0.5, 0.0),
+            Point3::new(100.0, 0.5, 0.0),
+            10.0,
+        );
+        let reach =
+            reach_through_rounds(end, Vec3::new(0.0, 0.0, 1.0), &[rect], &[bar], 1000.0).unwrap();
+        assert!((reach - 10.0).abs() < 1e-12, "{reach}");
+    }
+
+    #[test]
+    fn an_end_heading_into_a_box_corner_reaches_farthest_between_its_corners() {
+        // The box x < 10, y < 16 (along Z without end), an end at the origin heading (1, 1, 0)/√2 and a
+        // section 16√2 across along (1, -1, 0) and 2 along Z. A point's exit is the nearer of
+        // (10 − x)√2 and (16 − y)√2: equal at (−3, 3), 13√2, where the edge crosses y = x + 6. The
+        // corners leave at 8√2 and 2√2, the end at 10√2.
+        let end = Point3::new(0.0, 0.0, 0.0);
+        let r2 = std::f64::consts::SQRT_2;
+        let rect = [
+            Point3::new(-100.0, -100.0, 0.0),
+            Point3::new(10.0, -100.0, 0.0),
+            Point3::new(10.0, 16.0, 0.0),
+            Point3::new(-100.0, 16.0, 0.0),
+        ];
+        let section = [
+            Point3::new(-8.0, 8.0, -1.0),
+            Point3::new(8.0, -8.0, -1.0),
+            Point3::new(8.0, -8.0, 1.0),
+            Point3::new(-8.0, 8.0, 1.0),
+        ];
+        let toward = Vec3::new(1.0, 1.0, 0.0);
+        let reach = reach_through_box(end, toward, &[section], &rect)
+            .unwrap()
+            .unwrap();
+        assert!((reach - 13.0 * r2).abs() < 1e-9, "{reach}");
+        let corners = section
+            .iter()
+            .filter_map(|p| exit_through_box(*p, toward, &rect).unwrap())
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((corners - 8.0 * r2).abs() < 1e-9, "{corners}");
+        // Without a section, the end alone; along the box, nothing; a zero direction is refused.
+        let alone = reach_through_box(end, toward, &[], &rect).unwrap().unwrap();
+        assert!((alone - 10.0 * r2).abs() < 1e-9, "{alone}");
+        let along = Vec3::new(0.0, 0.0, 1.0);
+        assert_eq!(
+            reach_through_box(end, along, &[section], &rect).unwrap(),
+            None
+        );
+        assert!(reach_through_box(end, Vec3::new(0.0, 0.0, 0.0), &[section], &rect).is_err());
+        // A non-finite point is refused, not measured.
+        let far = Point3::new(f64::INFINITY, 0.0, 0.0);
+        assert!(reach_through_box(far, toward, &[], &rect).is_err());
+        let bad = [section[0], section[1], section[2], far];
+        assert!(reach_through_box(end, toward, &[bad], &rect).is_err());
+        assert!(
+            reach_through_box(end, toward, &[section], &[rect[0], rect[1], rect[2], far]).is_err()
+        );
     }
 }

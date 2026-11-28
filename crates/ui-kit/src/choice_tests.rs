@@ -483,3 +483,30 @@ fn a_checkbox_grid_gives_up_columns_for_labels_that_do_not_fit() {
     assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 1), 1, "a single column stays one");
     assert_eq!(fits(&[], 300.0, 2), 2, "no labels, no change");
 }
+
+/// A click reports its button and marks the row changed; a row wider than the space draws nothing,
+/// so the caller can draw its dropdown instead.
+#[test]
+fn icon_choices_report_the_clicked_button_and_refuse_a_row_that_does_not_fit() {
+    let ctx = context();
+    let keys = ["icons:a", "icons:b", "icons:c"];
+    let options: Vec<_> = keys.iter().map(|key| IconChoice { key, icon: "normal", tip: key }).collect();
+    let mut last = None;
+    let mut draw = |ui: &mut Ui| {
+        if let Some((response, clicked)) = icon_choices(ui, &options, &[true, false, false])
+            && clicked.is_some()
+        {
+            last = Some((clicked, response.changed()));
+        }
+    };
+    frame(&ctx, vec![], &mut draw);
+    let b = registry::handle_at("icons:b").unwrap();
+    frame(&ctx, pointer(b, true), &mut draw);
+    frame(&ctx, pointer(b, false), &mut draw);
+    assert_eq!(last, Some((Some(1), true)));
+
+    let many: Vec<_> = (0..20).map(|_| IconChoice { key: "icons:many", icon: "normal", tip: "Many" }).collect();
+    let mut drawn = true;
+    frame(&ctx, vec![], |ui: &mut Ui| drawn = icon_choices(ui, &many, &[]).is_some());
+    assert!(!drawn, "twenty buttons do not fit a dialog row");
+}

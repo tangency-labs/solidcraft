@@ -118,8 +118,8 @@ pub trait LocaleNames {
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
     /// another component, a feature's request to reselect a reference it lost, an open Stitch
-    /// result and a profile pick with too many curves are translated where they are shown. Other
-    /// text is returned unchanged.
+    /// result, a revolve axis hint, a profile pick with too many curves and a pattern's coordinate
+    /// range refusal are translated where they are shown. Other text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -142,12 +142,31 @@ fn default_name(locale: Locale, text: &str) -> Option<String> {
     None
 }
 
+/// A revolve can report the same axis hint in a command error or a timeline diagnostic.
+fn revolve_axis_hint(locale: Locale, text: &str) -> Option<String> {
+    if !text.ends_with('?') {
+        return None;
+    }
+    let id = "diagnostic.revolve_sketch_axis";
+    for (world, sketch) in [("X", "x"), ("Y", "y")] {
+        let args = [("world", world), ("sketch", sketch)];
+        let english = Locale::new(&ENGLISH).format(id, &args);
+        if let Some(before) = text.strip_suffix(&english) {
+            return Some(format!("{before}{}", locale.format(id, &args)));
+        }
+    }
+    None
+}
+
 impl LocaleNames for Locale {
     fn given_name(self, text: &str) -> String {
         default_name(self, text).unwrap_or_else(|| solidcraft_ui_text::bidi::visual(text).into_owned())
     }
 
     fn diagnostic(self, text: &str) -> String {
+        if let Some(message) = revolve_axis_hint(self, text) {
+            return message;
+        }
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
             return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
         }
@@ -177,6 +196,12 @@ impl LocaleNames for Locale {
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
             return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+        }
+        for id in ["diagnostic.pattern_circular_coordinate_range", "diagnostic.pattern_spacing_coordinate_range"] {
+            let english = Locale::new(&ENGLISH).text(id);
+            if let Some((before, after)) = text.split_once(english) {
+                return format!("{before}{}{after}", self.text(id));
+            }
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -249,6 +274,9 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if let Some(message) = revolve_axis_hint(solidcraft_ui_text::locale(), text) {
+        return message;
+    }
     for (english, id) in [
         ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
         ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
@@ -372,6 +400,28 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn revolve_axis_hint_in_bad_params_is_translated_without_the_command_prefix() {
+        install();
+        let _scope = scope("de");
+        let english = r#"the Y axis does not lie in the sketch plane. Did you mean "y", the sketch's own axis?"#;
+        let german = "Die Achse Y liegt nicht in der Skizzenebene. Meinten Sie „y“, die skizzeneigene Achse?";
+        assert_eq!(super::tr_engine_error(english), german);
+        assert_eq!(super::tr_engine_error(&format!("invalid parameters for `solid.revolve`: {english}")), german);
+    }
+
+    #[test]
+    fn revolve_axis_hint_in_a_timeline_diagnostic_retains_its_context() {
+        use super::LocaleNames;
+
+        install();
+        let english = r#"the X axis does not lie in the sketch plane. Did you mean "x", the sketch's own axis?"#;
+        let german = "Die Achse X liegt nicht in der Skizzenebene. Meinten Sie „x“, die skizzeneigene Achse?";
+        assert_eq!(Locale::for_language("de").diagnostic(english), german);
+        let prefix = "Turn: ";
+        assert_eq!(Locale::for_language("de").diagnostic(&format!("{prefix}{english}")), format!("{prefix}{german}"));
     }
 
     #[test]

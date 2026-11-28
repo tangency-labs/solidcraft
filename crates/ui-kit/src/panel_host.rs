@@ -526,26 +526,3 @@ pub fn panel_host_tab_insertion(ui: &egui::Ui, bounds: egui::Rect, opacity: f32)
         ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("panel_preview"))).with_clip_rect(ui.clip_rect());
     painter.rect_filled(bounds, 0, Tokens::get().form_primary.gamma_multiply(opacity));
 }
-
-/// Menus own only their measured bounded rectangle; there is no viewport shield.
-pub fn panel_host_popup<R>(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let container = Container::new(ui.ctx(), Surface::Popup);
-    let frame = Container::menu_frame();
-    let clip = ui.clip_rect().intersect(bounds);
-    container
-        .area(id)
-        .order(egui::Order::Foreground)
-        .fixed_pos(bounds.min)
-        .movable(false)
-        .fade_in(false)
-        .show(ui.ctx(), |ui| {
-            ui.set_clip_rect(clip);
-            ui.set_min_size(bounds.size());
-            Container::paint_frame(ui.painter(), frame, bounds - frame.total_margin());
-            let inner = bounds.shrink(Tokens::get().space_6);
-            let mut content = ui.new_child(egui::UiBuilder::new().id_salt("content").max_rect(inner).accessibility_role(egui::accesskit::Role::Menu));
-            content.set_clip_rect(inner.intersect(clip));
-            body(&mut content)
-        })
-        .inner
-}

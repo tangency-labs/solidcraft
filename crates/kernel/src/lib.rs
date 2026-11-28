@@ -41,6 +41,7 @@ mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
+pub mod exact;
 mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
@@ -201,6 +202,7 @@ pub use blend::chamfer_sides_max_why;
 pub use blend::fillet_g2;
 pub use blend::fillet_g2_corners;
 pub use blend::fillet_g2_with_g2_corners;
+pub use blend::fillet_keep_edge;
 pub use blend::fillet_least_setback;
 pub use blend::fillet_max;
 pub use blend::fillet_max_each;
@@ -213,6 +215,7 @@ pub use blend::scale_fit_note;
 pub use blend::smooth_picks;
 pub use blend::tangent_chain;
 pub use blend::tangent_chain_beyond_points;
+pub use blend::tangent_chain_closes;
 pub use blend::tangent_chain_edges;
 pub use blend::with_fit_note;
 pub use blend::without_fit_note;
@@ -224,6 +227,7 @@ pub use blend_variable::fillet_tapered;
 pub use blend_variable::fillet_variable;
 pub use blend_variable::fillet_variable_points;
 pub use blend_variable::fillet_variable_spline;
+pub use blend_variable::fillet_variable_spline_chain;
 pub use blend_variable::taper;
 pub use body::Body;
 pub use body::COLOUR_NAME_MAX;
@@ -524,6 +528,7 @@ pub use route::sweep_with;
 pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
+pub use route::transform_face;
 pub use route::trim_member;
 pub use route::tube_cope;
 pub use route::which;
@@ -571,6 +576,7 @@ pub use route::trim_keep;
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
@@ -625,12 +631,14 @@ pub use step_out::step_export_products;
 pub use surface_extend::ExtendLimit;
 pub use surface_extend::ExtendMode;
 pub use surface_extend::ExtendOptions;
+pub use surface_extend::LAW_ANGLE_LIMIT;
 pub use surface_extend::extend_surface;
 pub use surface_kind::AxialPiece;
 pub use surface_kind::EdgeCircle;
 pub use surface_kind::FaceSurface;
 pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
 pub use surface_kind::same_face_record_surface;
@@ -661,6 +669,7 @@ pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
+pub use surfaces::morph_surface;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;
@@ -716,6 +725,9 @@ pub use validity::validity;
 pub enum KernelError {
     #[error("invalid input: {0}")]
     Invalid(String),
+    /// A stored B-rep number failed the coordinate ceiling check.
+    #[error("invalid input: {cause}", cause = solidcore_record::brep::Invalid(BREP_COORDINATE_CEILING))]
+    CoordinateCeiling,
     #[error("the operation failed: {0}")]
     Failed(String),
     /// A blend or other size too large for the geometry around it (a smaller size may work);
@@ -742,6 +754,8 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+const BREP_COORDINATE_CEILING: &str = "non-finite or excessive coordinate";
 
 /// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
 /// the kernel does not depend on solidcore, so the number is repeated here.

@@ -11,7 +11,7 @@ use solidcraft_doc::BrowserEntry;
 
 use super::canvas::CanvasPlane;
 use super::check::{located, whole};
-use super::types::{FeatureCommon, LengthExpr, feature_common, present};
+use super::types::{CameraParam, FeatureCommon, LengthExpr, feature_common, present};
 use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern, Search};
 
 /// Repair a part the modelling kernel refuses, or an open part that should be a solid: faces
@@ -1077,8 +1077,9 @@ pub struct BrowserVisibilityParams {
     #[serde(default)]
     pub isolate: Option<bool>,
     /// With `visible: true` and no target: put back what the Isolates since the last Unisolate
-    /// hid, leaving changes made since alone; with none in effect, show everything. Default:
-    /// false.
+    /// hid, leaving changes made since alone; with none in effect, show every body and placement
+    /// (as `folder: bodies`), leaving sketches, construction items and joints as they are.
+    /// Default: false.
     #[serde(default)]
     pub unisolate: Option<bool>,
 }
@@ -1352,7 +1353,7 @@ impl JsonSchema for ViewCamera {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "An orbit camera. Angles are in radians, about the up axis.",
+            "description": "An orbit camera. Angles are in radians, about the frame the camera is in: the design's own FRONT and TOP when it has them, else its up axis.",
             "type": "object",
             "properties": {
                 "target": target_schema(),
@@ -1361,7 +1362,8 @@ impl JsonSchema for ViewCamera {
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
                 "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0},
                 "roll": {"description": "Rotation about the view direction, in radians. Default: 0.", "type": "number", "default": 0.0},
-                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"}
+                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"},
+                "frame": {"description": "The design frame the angles are in, as `ui.camera` and the view commands give it: {front, top}, two world axes. Omitted or null: the design's current frame.", "type": ["object", "null"]}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -1554,7 +1556,7 @@ impl JsonSchema for ApplyCamera {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "An orbit camera. Angles are in radians, about the up axis, which comes from the design settings.",
+            "description": "An orbit camera. Angles are in radians, about the frame the camera is in: the design's own FRONT and TOP when it has them, else the up axis from the design settings.",
             "type": "object",
             "properties": {
                 "target": target_schema(),
@@ -1562,7 +1564,8 @@ impl JsonSchema for ApplyCamera {
                 "pitch": {"description": "Elevation of the eye above the ground plane, within ±π/2; π/2 is Top.", "type": "number", "minimum": -std::f64::consts::FRAC_PI_2, "maximum": std::f64::consts::FRAC_PI_2},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
                 "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "default": 0.0},
-                "roll": {"description": "Turn about the viewing direction, clockwise; a finite number, clamped to ±π. Default: 0.", "type": "number", "default": 0.0}
+                "roll": {"description": "Turn about the viewing direction, clockwise; a finite number, clamped to ±π. Default: 0.", "type": "number", "default": 0.0},
+                "frame": {"description": "The design frame the angles are in, as `ui.camera` and the view commands give it: {front, top}, two world axes. Omitted or null: the design's current frame.", "type": ["object", "null"]}
             },
             "required": ["target", "yaw", "pitch", "distance"],
             "not": {"required": ["up"]}
@@ -1618,6 +1621,100 @@ impl JsonSchema for ViewApplyParams {
         schema.insert("not".into(), json!({"required": ["view", "camera"]}));
         schema
     }
+}
+
+/// Which face `view.frame` sets: `front` or `top`, in lower case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameFaceParam(pub solidcraft_viewport::FrameFace);
+
+impl<'de> Deserialize<'de> for FrameFaceParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str() {
+            Some("front") => Ok(FrameFaceParam(solidcraft_viewport::FrameFace::Front)),
+            Some("top") => Ok(FrameFaceParam(solidcraft_viewport::FrameFace::Top)),
+            _ => Err(D::Error::custom("must be front or top")),
+        }
+    }
+}
+
+impl JsonSchema for FrameFaceParam {
+    fn schema_name() -> Cow<'static, str> {
+        "FrameFace".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "The face to set: front or top.", "type": "string", "enum": ["front", "top"]})
+    }
+}
+
+/// The current view `view.frame` reads (`cmd::browser::frame_camera_form`): a camera of finite
+/// numbers with a positive distance, and whether it says which frame its angles are in (a `frame`
+/// that is there and not null).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameCamera {
+    pub camera: solidcraft_viewport::Camera,
+    pub framed: bool,
+}
+
+impl<'de> Deserialize<'de> for FrameCamera {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::browser::frame_camera_form(&Value::deserialize(d)?)
+            .map(|(camera, framed)| FrameCamera { camera, framed })
+            .map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+/// Give the design its own FRONT and TOP, or go back to the up axis preference. The principal
+/// axis nearest the view becomes the face that is set; the other face stays where it was when it
+/// is at right angles to it, else it becomes the axis nearest the screen's up. The standard views,
+/// Home and the orbit follow the design's frame; geometry doesn't move. Saved with the design; one
+/// undo step. The viewport turns to the face that was set (Home after a reset). Give `set` or
+/// `reset: true`, not both.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewFrameParams {
+    /// The face the view becomes: front or top. Needs `camera`. Refused while the view is midway
+    /// between two principal axes.
+    #[serde(default)]
+    pub set: Option<FrameFaceParam>,
+    /// The current view, as `ui.camera` and the view commands give it. Required with `set`. With
+    /// `reset`, the viewport keeps its projection; without one, it starts from Home.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewCamera")]
+    pub camera: Option<FrameCamera>,
+    /// true: the design drops its own frame and follows the up axis preference again. Default:
+    /// false.
+    #[serde(default)]
+    pub reset: Option<bool>,
+}
+
+/// What `view.frame` returns: the design's frame now, and the camera the viewport turned to.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ViewFrameResult {
+    /// After `set`: the design's own frame.
+    Set {
+        /// Out of the FRONT face, a world axis: [x, y, z].
+        front: [f64; 3],
+        /// Out of the TOP face, a world axis: [x, y, z].
+        top: [f64; 3],
+        /// The camera now, looking at the face that was set.
+        #[schemars(with = "CameraParam")]
+        camera: solidcraft_viewport::Camera,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+    /// After `reset`: no frame of its own.
+    Reset {
+        /// Always null: the design follows the up axis preference.
+        frame: (),
+        /// The camera now, at Home.
+        #[schemars(with = "CameraParam")]
+        camera: solidcraft_viewport::Camera,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
 }
 
 /// A sketch by id or name, as `sketch.redefine` reads `sketch`.

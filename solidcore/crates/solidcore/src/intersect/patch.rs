@@ -11,6 +11,7 @@
 //! Upstream: the SolidCraft fork's `capi/src/smlib_ssi.cpp` (`construct`, `nurbs`, `start`,
 //! `smlib_ssi`), on `SmSurface::GlobalSurfaceIntersect` and `SmAdvSurfaceIntersector`.
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::curve::curve::Curve;
@@ -241,7 +242,7 @@ impl Patch {
             } => {
                 let (x, y) = (v3(*xaxis), v3(*yaxis));
                 let (h0, h1) = (height[0], height[1]);
-                let t = half_angle_deg.to_radians().tan();
+                let t = det::tan(half_angle_deg.to_radians());
                 let o = v3(*apex) + unit_cross(x, y) * h0;
                 let pl = Axis2Placement::new(o, x, y);
                 Surface::from(Cone::create_canonical(

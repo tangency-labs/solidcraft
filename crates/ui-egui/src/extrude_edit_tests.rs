@@ -197,6 +197,9 @@ fn unchanged_actual_editor_preserves_all_extents_and_parameter_identities() {
         json!({"to":[0,0,10],"to_offset":"3 mm"}),
         json!({"to":[0,0,-10],"to_offset":"-2 mm"}),
         json!({"taper":"0 deg"}),
+        // Tapers on both sides (#22419): the window shows them, so OK keeps them.
+        json!({"distance":"10 mm","distance2":"3 mm","taper":"6 deg","taper2":"-3 deg"}),
+        json!({"direction":"symmetric","distance":"10 mm","taper":"6 deg"}),
     ] {
         let mut h = make(p.clone());
         let original = extent(&h);
@@ -932,6 +935,28 @@ fn two_sides_second_side_has_its_own_extent_type() {
     }
 }
 
+/// Taper Angle 2 is a Distance second side's: with the second side All or To Object it is hidden,
+/// and text left in it is not sent (the build refuses a taper there, #22420).
+#[test]
+fn taper_angle_2_is_hidden_and_not_sent_for_an_all_or_to_object_second_side() {
+    for second in [json!({"through_all2":true}), json!({"to2":[5,5,-20]})] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Taper Angle").is_some(), "{second}: the first side's taper row stays");
+        assert!(h.widget("ui.taper_angle_2").is_none() && h.widget("Taper Angle 2").is_none(), "{second}: Taper Angle 2 is hidden");
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { taper2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *taper2 = "3 deg".into();
+        let (_, p) = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        assert!(p.get("taper2").is_none(), "{second}: {p}");
+    }
+}
+
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
 /// `-` typed first can be finished there.
 #[test]
@@ -1275,6 +1300,25 @@ fn taper_angle_steps_by_one_degree() {
     assert_eq!(taper(&h), "1 deg");
     h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
     assert_eq!(taper(&h), "0 deg");
+}
+
+/// Taper Angle 2 (#22419) shows with Two Sides only. Empty, it shows the first side's taper
+/// and the second side takes that one; its step arrows start from it.
+#[test]
+fn taper_angle_2_starts_from_the_first_sides_taper() {
+    let mut h = make(json!({"distance":"10 mm","distance2":"3 mm","taper":"4 deg"}));
+    // A saved taper opens Advanced.
+    open(&mut h);
+    let taper2 = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper2, .. } => taper2.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    assert_eq!(taper2(&h), "");
+    h.step(&json!({"click":{"handle":"dialog:ui.taper_angle_2 up"}})).unwrap();
+    assert_eq!(taper2(&h), "5 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).taper2.as_deref(), Some("5 deg"));
 }
 
 /// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object
@@ -1837,6 +1881,76 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     assert!(extent(&h).symmetric_offset);
+}
+
+/// Clearing a moved command window must leave both real Extrude arrow grips accessible,
+/// including the primary arrow that is drawn after Distance 2's floating box.
+#[test]
+fn floating_extrude_fields_clear_both_arrow_grips_beside_the_window() {
+    for secondary in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+        let mut h = make_in(h, json!({"distance":"2 mm","distance2":"1 mm"}));
+        h.call("ui.view", json!({"view":"iso"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        open(&mut h);
+        h.app.cam = h.app.cam.looking_from(solidcore_record::Vec3::new(1.0, -1.0, 0.8));
+        h.app.cam.target += solidcore_record::Vec3::new(3.0, -2.0, 0.0);
+        h.frames(4);
+        let name = if secondary { "arrow2" } else { "arrow" };
+        let tip = crate::scenario::handle_at(name).expect("the drawn Extrude arrow");
+        let window = h.app.viewport.dialog_rect.unwrap();
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+        h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+        h.frames(24);
+        let tip = crate::scenario::handle_at(name).unwrap();
+        let window = h.app.viewport.dialog_rect.unwrap();
+        assert!((window.left() - tip.x - 30.0).abs() < 3.0 && window.y_range().contains(tip.y), "window beside {name}: {window:?}, {tip:?}");
+        let fields: Vec<_> = ["sc_canvas_area", "sc_canvas_area2"]
+            .into_iter()
+            .map(|id| h.ctx.memory(|m| m.area_rect(egui::Id::unique(id))).expect("each actual floating box"))
+            .collect();
+        let grabs: Vec<_> = ["arrow", "arrow2"]
+            .into_iter()
+            .map(|id| egui::Rect::from_center_size(crate::scenario::handle_at(id).unwrap(), egui::vec2(20.0, 20.0)))
+            .collect();
+        let design = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let to = base + dir.unwrap() * if secondary { -6.0 } else { 6.0 };
+        h.step(&json!({"drag":[{"handle":name},{"world":[to.x,to.y,to.z]}],"ctrl":true})).unwrap();
+        h.frames(4);
+        for field in fields {
+            for grab in &grabs {
+                assert!(!field.intersects(*grab), "{name}: floating field {field:?} covers real arrow grip {grab:?}");
+            }
+        }
+        let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+        let eval = |text: &str| h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        let (first, second) = (eval(distance), eval(distance2));
+        let (changed, kept, original) = if secondary { (second, first, 2.0) } else { (first, second, 1.0) };
+        assert!((changed - 6.0).abs() < 0.3, "{name}: Distance={first}, Distance2={second}");
+        assert!((kept - original).abs() < 1e-9, "the other distance stays unchanged");
+        assert_eq!(h.app.session.doc.to_json(), design, "a preview drag does not commit the feature");
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+/// Deferring Distance 2's box until the arrows are known keeps its own text and keyboard target.
+#[test]
+fn floating_extrude_second_field_types_into_its_own_distance() {
+    let mut h = make(json!({"distance":"5 mm","distance2":"3 mm"}));
+    open(&mut h);
+    let field = h.ctx.read_response(egui::Id::unique("sc_canvas_value2")).expect("Distance 2's actual input").rect;
+    h.step(&json!({"click":[field.center().x,field.center().y]})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7 mm"})).unwrap();
+    h.frames(3);
+    let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+    assert_eq!((distance.as_str(), distance2.as_str()), ("5 mm", "7 mm"));
 }
 
 #[test]

@@ -33,6 +33,7 @@ mod skills;
 mod solidcore_paths;
 mod test;
 mod test_nextest;
+mod typescript;
 mod ui_containers;
 mod web_offline;
 mod web_offline_test;
@@ -62,6 +63,7 @@ commands:
                   and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
   python          the Python client's generated bindings in python/src/solidcraft/_generated/ [--cli PATH] [--out DIR]
+  typescript      the TypeScript client's generated bindings in typescript/src/generated/ [--cli PATH] [--out DIR]
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
@@ -198,6 +200,7 @@ fn main() -> ExitCode {
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
         Some("python") => python::run(&root(), &rest),
+        Some("typescript") => typescript::run(&root(), &rest),
         Some("i18n") => i18n::run(&root(), &rest),
         Some("kernel-cases") => kernel_cases::run(&rest),
         Some("known-failing") => known_failing::run(&root(), &rest),

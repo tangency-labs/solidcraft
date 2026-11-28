@@ -35,8 +35,8 @@ includes every profile and fills those holes; explicit profile picks select only
 Contour: `sketch`, `curves` (an open chain of lines and tangent arcs), `distance`, `rule?`, `flip?`, `reverse?`.
 Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's), `height_from?`
 (`outer`|`inner`|`tangent`), `position?` (`inside`|`outside`|`middle`|`material_outside`|
-`tangent`), `flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`, `then?`, `name?`,
-`body_name?`.
+`tangent`), `offset?` (a length: the bend moves that far out past its position, in where negative),
+`flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`, `then?`, `name?`, `body_name?`.
 
 An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 `{point:[x,y,z], angle?, height?, segments?}` for an edge with its own values. `then` lists up to
@@ -217,6 +217,7 @@ With bend angle θ (radians), inner radius R, thickness T and K-factor k:
 - setback from the edge for `position` `inside` (default): `(R + T) · tan(θ/2)`. `outside`: 0;
   `middle`: half of inside; `material_outside`: `R · tan(θ/2)`; `tangent`: `R + T` at 90° and
   above, `(R + T) · sin θ` below.
+  An `offset` d takes d off whichever setback the position gives (the base grows by d).
 - leg (the flat panel past the bend): the height less what sits before it, which is
   `(R + T) · tan(θ/2)` for `height_from` `outer`, `R · tan(θ/2)` for `inner`, and `R + T` for
   `tangent` past 90°.

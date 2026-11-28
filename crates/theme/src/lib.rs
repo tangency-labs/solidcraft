@@ -1878,6 +1878,12 @@ pub fn apply(ctx: &egui::Context) {
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
         s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
+        // Tooltips show after a short wait and while the pointer is still moving (#7679): the
+        // egui defaults (still pointer only, half a second) made the first tooltip feel broken
+        // and kept it from appearing while the mouse travelled across a toolbar. The grace
+        // time between tooltips stays, so the following ones still appear without a wait.
+        s.interaction.show_tooltips_only_when_still = false;
+        s.interaction.tooltip_delay = 0.3;
     });
     // The new visuals are painted on the next pass: without a repaint request the widgets
     // keep the previous theme's colours until some other event schedules a pass (#5802).
@@ -2333,5 +2339,28 @@ mod tests {
         }
         assert_eq!(Tokens::get(), Tokens::dark());
         assert_eq!(TabAccent::current(&egui::Context::default()), TabAccent::for_ramp(&Tokens::dark(), super::AccentRamp::Main));
+    }
+
+    /// Tooltips show while the pointer is still moving and after a short wait (#7679): the egui
+    /// defaults (still pointer only, half a second) kept the first tooltip from appearing while
+    /// the mouse travelled across a toolbar. The grace time between tooltips stays, so the next
+    /// one after a shown tooltip is instant.
+    #[test]
+    fn tooltips_show_while_moving_and_after_a_short_wait() {
+        for dark in [false, true] {
+            set_dark(dark);
+            let ctx = egui::Context::default();
+            let interaction = |ctx: &egui::Context| {
+                let i = &ctx.global_style().interaction;
+                (i.show_tooltips_only_when_still, i.tooltip_delay, i.tooltip_grace_time)
+            };
+            let (_before_still, before_delay, before_grace) = interaction(&ctx);
+            apply(&ctx);
+            let (still, delay, grace) = interaction(&ctx);
+            assert!(!still, "{dark}: a moving pointer still gets its tooltip");
+            assert!(delay < before_delay, "{dark}: quicker than the egui default");
+            assert_eq!(grace, before_grace, "{dark}: the next tooltip stays instant");
+        }
+        set_dark(true);
     }
 }

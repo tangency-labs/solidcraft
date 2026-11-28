@@ -581,6 +581,81 @@ fn body_volume(s: &mut Session, name: &str) -> f64 {
     solidcraft_kernel::measure(&b.body).unwrap().volume
 }
 
+#[test]
+fn transform_face_raises_one_named_cap_and_survives_undo_redo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+    let before = s.model.state();
+    let block = before.body("Block").unwrap();
+    let top = block.body.face_at_point(Vec3::new(5., 5., 10.)).unwrap().unwrap();
+    let name = &solidcraft_doc::naming::face_names(block)[top];
+    for pick in [json!([5, 5, 10]), json!(name)] {
+        let mut s = Session::new(s.doc.as_ref().clone());
+        let out = run(&mut s, "solid.transform_face", json!({"body":"Block","face":pick,"translate":[0,0,2]}));
+        assert!(out["error"].is_null(), "{out}");
+        let f = s.doc.feature(out["feature"].as_u64().unwrap()).unwrap();
+        assert_eq!(f.face_names.as_slice(), std::slice::from_ref(name));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!((body_volume(&mut s, "Block") - 1200.).abs() < 1e-6);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((body_volume(&mut s, "Block") - 1000.).abs() < 1e-6);
+        run(&mut s, "edit.redo", json!({}));
+        assert!((body_volume(&mut s, "Block") - 1200.).abs() < 1e-6);
+        let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((body_volume(&mut reopened, "Block") - 1200.).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn transform_face_noop_on_a_fillet_reopens_from_the_saved_model() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[5,10,10]],"radius":1}));
+    let rounded = s.model.state();
+    let block = rounded.body("Block").unwrap();
+    let (before, edges) = block.body.rounds().expect("fillet over the box");
+    let names = solidcraft_doc::naming::face_names(block);
+    let cap = block.body.face_at_point(Vec3::new(5., 5., 10.)).unwrap().unwrap();
+    let out = run(&mut s, "solid.transform_face", json!({"body":"Block","face":names[cap],"translate":[2,0,0]}));
+    assert!(out["error"].is_null(), "{out}");
+
+    let saved = s.model.saved(&s.doc).unwrap();
+    let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+    let (doc, cache) = solidcraft_io::read_design_with_model(&bytes).unwrap();
+    let model = solidcraft_doc::Model::adopt(&doc, &cache.expect("evaluated bodies in the design")).unwrap();
+    let reopened = model.state();
+    let after = reopened.body("Block").unwrap();
+    assert_eq!(after.body.record(), block.body.record());
+    assert_eq!(solidcraft_doc::naming::face_names(after), names);
+    // The evaluator passes the original fillet through on a no-op. Its rounds still have
+    // the fillet history over the sharp box, not identity history over the rounded one.
+    let (sharp, restored_edges) = after.body.rounds().unwrap();
+    assert_eq!(sharp.record(), before.record());
+    assert_eq!(restored_edges, edges);
+    assert_eq!(after.body.history(), block.body.history());
+}
+
+#[test]
+fn transform_face_requires_an_unambiguous_owner() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    let before = s.doc.to_json();
+    for p in [json!({"face":[15,0,7.5],"translate":[0,2,0]}), json!({"face":[5,5,20],"body":"Small","translate":[0,0,2]})] {
+        let err = s.execute("solid.transform_face", &p).expect_err("missing or wrong owner");
+        assert_eq!(s.doc.to_json(), before, "{p}: {err}");
+    }
+    let out = run(&mut s, "solid.transform_face", json!({"body":"Small","face":[15,0,7.5],"translate":[0,2,0]}));
+    assert!(out["error"].is_null(), "{out}");
+    assert!((body_volume(&mut s, "Small") - 600.).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.).abs() < 1e-6);
+
+    // A refused retrim keeps the input to that step, not the original 500 mm³ box.
+    let error = s.execute("solid.transform_face", &json!({"body":"Small","face":[15,2,7.5],"translate":[0,-13,0]})).unwrap_err();
+    assert!(error.to_string().contains("edge"), "{error}");
+    assert!((body_volume(&mut s, "Small") - 600.).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.).abs() < 1e-6);
+}
+
 /// A 3.5 mm boss on a plate with a coaxial 1.75 mm through bore. The plate makes the display
 /// chord tolerance large compared with a pick 0.05 mm from either circular rim of its end.
 fn annular_boss(s: &mut Session) {
@@ -906,4 +981,85 @@ fn extruding_a_curved_face_points_to_offset_face() {
     let error = s.execute("solid.extrude", &json!({"face": [10, 0, 10], "distance": 2})).unwrap_err();
     assert!(error.to_string().contains("use Offset Face"), "{error}");
     assert_eq!(s.doc.features.len(), features);
+}
+
+/// #22804: moving the flat annular face of a half-torus outward across the torus's tube seam
+/// succeeds at the exact cut volume; inward continues to succeed; moving past the minor radius
+/// is refused cleanly.
+#[test]
+fn offset_face_half_torus_flat_face_outward_inward_and_past_minor_radius() {
+    let make_half_torus = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.torus", json!({"center": [0, 0, 0], "major": 15, "minor": 4, "operation": "new", "body_name": "Part"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [-20, -20, -5], "operation": "cut", "targets": ["Part"]}));
+        s
+    };
+
+    // Outward (distance: 2 -> z = -2): 1 body, 2 faces, volume ≈ 3811.2411795 mm³.
+    let mut outward = make_half_torus();
+    run(&mut outward, "solid.offset_face", json!({"faces": [[15, 0, 0]], "distance": 2}));
+    outward.refresh();
+    assert!(outward.model.results.iter().all(|r| r.error.is_none()), "{:?}", outward.model.results);
+    let state = outward.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Part").unwrap().body;
+    assert_eq!(body.face_count(), 2);
+    let measured = solidcraft_kernel::measure(body).unwrap();
+    assert!((measured.volume - 3811.2411795).abs() < 1e-3, "outward volume: {}", measured.volume);
+
+    // Inward (distance: -2 -> z = +2): 1 body, 2 faces, volume ≈ 926.1689330 mm³.
+    let mut inward = make_half_torus();
+    run(&mut inward, "solid.offset_face", json!({"faces": [[15, 0, 0]], "distance": -2}));
+    inward.refresh();
+    assert!(inward.model.results.iter().all(|r| r.error.is_none()), "{:?}", inward.model.results);
+    let state = inward.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Part").unwrap().body;
+    assert_eq!(body.face_count(), 2);
+    let measured = solidcraft_kernel::measure(body).unwrap();
+    assert!((measured.volume - 926.1689330).abs() < 1e-3, "inward volume: {}", measured.volume);
+
+    // Past the minor radius (distance: 5 > 4): refused cleanly.
+    let mut past = make_half_torus();
+    let err = past.execute("solid.offset_face", &json!({"faces": [[15, 0, 0]], "distance": 5})).unwrap_err();
+    assert!(!err.to_string().is_empty(), "expected refusal for distance past minor radius");
+}
+
+/// #22808: timing benchmark for moving the top face of a periodic spline extrusion with a
+/// rounded top edge (`cargo test --release -p solidcraft-engine bench_issue_22808_offset_face_rounded_spline -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing benchmark for #22808"]
+fn bench_issue_22808_offset_face_rounded_spline() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(
+        &mut s,
+        "sketch.spline.fit_point",
+        json!({
+            "points": [[30, 0], [20, 15], [0, 20], [-20, 15], [-30, 0], [-20, -15], [0, -20], [20, -15]],
+            "periodic": true
+        }),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 20, "operation": "new", "body_name": "Part"}));
+    let (v_extrude, top_extrude) = volume_and_top(&mut s);
+    assert!((top_extrude - 20.0).abs() < 1e-4, "extrude top {top_extrude}");
+    let base_area = v_extrude / 20.0;
+
+    let t_fillet = std::time::Instant::now();
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -20, 20]], "radius": 2}));
+    let fillet_ms = t_fillet.elapsed().as_secs_f64() * 1000.0;
+    let (v_fillet, top_fillet) = volume_and_top(&mut s);
+    assert!((top_fillet - 20.0).abs() < 1e-4, "fillet top {top_fillet}");
+
+    let t_offset = std::time::Instant::now();
+    run(&mut s, "solid.offset_face", json!({"faces": [[0, 0, 20]], "distance": 2}));
+    let offset_ms = t_offset.elapsed().as_secs_f64() * 1000.0;
+    let (v_offset, top_offset) = volume_and_top(&mut s);
+
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((top_offset - 22.0).abs() < 1e-4, "offset top {top_offset}");
+    let expected_vol = v_fillet + 2.0 * base_area;
+    assert!((v_offset - expected_vol).abs() < expected_vol * 1e-4, "volume {v_offset} vs expected {expected_vol}");
+    eprintln!("issue #22808 rounded periodic spline: fillet={fillet_ms:.1} ms, offset_face={offset_ms:.1} ms, vol={v_offset:.3}");
 }

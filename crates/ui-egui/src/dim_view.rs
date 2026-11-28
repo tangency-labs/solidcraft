@@ -93,6 +93,15 @@ struct Edit {
     sheet: Option<SheetText>,
     /// Only after a refused unknown name: a one-click, explicit variable definition.
     create_variable: Option<VariableOffer>,
+    /// Which opening of the box or window this is, new each time one opens (a refused value
+    /// keeps it): where it was dragged belongs to this opening only (#22388).
+    opened: u64,
+}
+
+/// A new [`Edit::opened`].
+fn next_opened() -> u64 {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug)]
@@ -343,6 +352,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -387,6 +397,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -655,6 +666,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     true
@@ -761,6 +773,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     true
@@ -790,6 +803,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             params: Default::default(),
             sheet: Some(target),
             create_variable: None,
+            opened: next_opened(),
         })
     });
 }
@@ -1377,6 +1391,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
 }
@@ -1581,6 +1596,18 @@ pub(crate) fn moved(ctx: &egui::Context) -> egui::Vec2 {
     ctx.data(|d| d.get_temp::<egui::Vec2>(moved_id())).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
 }
 
+/// The box or window open now is opening `opened` ([`Edit::opened`]): where another opening was
+/// dragged is forgotten, even when it closed only the frame before (#22388).
+pub(crate) fn own_moved(ctx: &egui::Context, opened: u64) {
+    let owner = moved_id().with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| {
+            d.insert_temp(owner, opened);
+            d.insert_temp(moved_id(), egui::Vec2::ZERO);
+        });
+    }
+}
+
 fn set_moved(ctx: &egui::Context, by: egui::Vec2) {
     if by.is_finite() {
         ctx.data_mut(|d| d.insert_temp(moved_id(), by));
@@ -1659,6 +1686,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let drawn = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_dim_edit_area"))).map(|r| r.size()).filter(|s| s.is_finite());
     let size = drawn.map_or(vec2(popup_width, EDIT_HEIGHT), |s| s.max(vec2(popup_width, EDIT_HEIGHT)));
     let opens = edit_anchor(at, drawable, size);
+    own_moved(ctx, e.opened);
     let anchor = if e.live.is_some() {
         set_moved(ctx, egui::Vec2::ZERO);
         opens

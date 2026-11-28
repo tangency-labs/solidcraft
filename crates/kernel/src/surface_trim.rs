@@ -363,7 +363,7 @@ fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) 
         return Err(KernelError::Invalid(format!("the {name} surface does not reach the other one: extend it to meet")));
     }
     let edge = nearest_boundary_edge(x, &side)?;
-    let opts = ExtendOptions { mode: ExtendMode::Natural, limit: ExtendLimit::UpTo(tool), neighbours: true };
+    let opts = ExtendOptions { mode: ExtendMode::Natural, limit: ExtendLimit::UpTo(tool), neighbours: true, angle: 0.0 };
     crate::extend_surface(x, &[edge], &opts)
 }
 

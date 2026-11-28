@@ -8,6 +8,7 @@
 //! Arc degree conversion is bounded by canonical one-turn arithmetic roundoff before the
 //! caller's scalar encoding; an unreduced phase cannot enlarge that error budget.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{Loop2, Seg2, MAX_BEZIER_DEGREE};
@@ -637,6 +638,42 @@ fn push_shape(shapes: &mut Vec<Shape>, shape: Shape) -> Result<()> {
 struct Run {
     vertices: Vec<Vertex2>,
     end: Option<Vec2>,
+    /// Start index in `vertices` of the contiguous trailing suffix of zero-length straight
+    /// vertices whose stored position tracks `end`.
+    ///
+    /// Invariant: whenever `end` is `Some(end)`, every vertex in `vertices[zero_suffix_start..]`
+    /// has `bulge == 0.0` and logically lies at `end` (written lazily when `zero_suffix_dirty`).
+    /// No earlier vertex `vertices[zero_suffix_start - 1]` can satisfy `at == end && bulge == 0.0`
+    /// when `Polylines::point(a, b)` runs with `end == a`:
+    /// - Packed arc edges always have `bulge != 0.0` (`arc_bulge` rejects `0.0`).
+    /// - Non-zero-length straight edges (`a != b`, `bulge == 0.0`) passed `exact()`, so
+    ///   `encoded_point(a) != encoded_point(b)`. Subsequent trailing zero-length straight edges
+    ///   preserve `end` under coordinate equality (`a == b`, including `-0.0 == +0.0`), and
+    ///   subsequent slivers accepted by `written_as_one_point()` preserve `encoded_point(end)`
+    ///   (including curved slivers with `a == b`), so `encoded_point(end)` stays distinct from
+    ///   that preceding vertex's encoded point.
+    zero_suffix_start: usize,
+    /// True when one or more `Polylines::point` shifts moved `end` after the trailing zero-length
+    /// straight suffix vertices were pushed.
+    zero_suffix_dirty: bool,
+}
+
+impl Run {
+    /// Apply any deferred `Polylines::point` endpoint shifts to the trailing zero-length
+    /// straight suffix in one pass.
+    fn materialize_zero_suffix(&mut self) {
+        if !self.zero_suffix_dirty {
+            return;
+        }
+        if let (Some(end), Some(suffix)) =
+            (self.end, self.vertices.get_mut(self.zero_suffix_start..))
+        {
+            for vertex in suffix {
+                vertex.at = end;
+            }
+        }
+        self.zero_suffix_dirty = false;
+    }
 }
 
 struct Polylines {
@@ -644,8 +681,9 @@ struct Polylines {
     run: Run,
     vertices: usize,
     uninterrupted: bool,
-    /// Pieces written as one point before the first vertex of an uninterrupted path: the first
-    /// one's start and the last one's end. A closed path may close through them.
+    /// Pieces written as one point before the first non-zero-length edge of an uninterrupted path:
+    /// the original start and the current first vertex's position. A closed path may close
+    /// through them.
     lead: Option<(Vec2, Vec2)>,
 }
 
@@ -684,8 +722,17 @@ impl Polylines {
         if !(a.is_finite() && b.is_finite() && bulge.is_finite()) {
             return Err(piece.invalid("non-finite polyline vertex or bulge"));
         }
+        let zero_straight = a == b && bulge == 0.0;
+        if !zero_straight {
+            // Finalize any deferred trailing zero-length shifts before advancing the suffix
+            // boundary past this non-zero-length or curved edge.
+            self.run.materialize_zero_suffix();
+        }
         self.vertex(Vertex2 { at: a, bulge })?;
         self.run.end = Some(b);
+        if !zero_straight {
+            self.run.zero_suffix_start = self.run.vertices.len();
+        }
         Ok(())
     }
 
@@ -693,6 +740,7 @@ impl Polylines {
         let Some(end) = self.run.end else {
             return Ok(());
         };
+        self.run.materialize_zero_suffix();
         if !closed {
             self.vertex(Vertex2 {
                 at: end,
@@ -701,6 +749,8 @@ impl Polylines {
         }
         let vertices = std::mem::take(&mut self.run.vertices);
         self.run.end = None;
+        self.run.zero_suffix_start = 0;
+        self.run.zero_suffix_dirty = false;
         push_shape(&mut self.shapes, Shape::BulgedPolyline { vertices, closed })
     }
 
@@ -710,24 +760,50 @@ impl Polylines {
         push_shape(&mut self.shapes, shape)
     }
 
+    fn extend_lead(&mut self, a: Vec2, b: Vec2) {
+        self.lead = match self.lead {
+            None => Some((a, b)),
+            Some((start, end)) if end == a => Some((start, b)),
+            Some(_) => {
+                self.uninterrupted = false;
+                None
+            }
+        };
+    }
+
     /// A piece from `a` to `b` that is written as one point ([`written_as_one_point`]). It adds
     /// no vertex: a run ending at `a` goes on from `b`, which is written where `a` is, so the
-    /// file holds the same polyline without two vertices on one written point.
+    /// file holds the same polyline without two vertices on one written point. Trailing stored
+    /// zero-length straight vertices at `a` move to `b` with the run's end so adjacent vertices
+    /// never differ in storage while encoding to the same point; if that shifts vertex 0 of an
+    /// uninterrupted first run, `lead` records the shift so a closed path can still close to it.
     fn point(&mut self, a: Vec2, b: Vec2) {
         match self.run.end {
-            Some(end) if end == a => self.run.end = Some(b),
+            Some(end) if end == a => {
+                // Defer shifting the trailing zero-length straight suffix until a non-zero/curved
+                // edge, flush, or loop-close check so chained and interleaved slivers stay O(1).
+                let shifted = self
+                    .run
+                    .vertices
+                    .len()
+                    .saturating_sub(self.run.zero_suffix_start);
+                if shifted > 0 {
+                    self.run.zero_suffix_dirty = true;
+                }
+                self.run.end = Some(b);
+                if shifted > 0
+                    && shifted == self.run.vertices.len()
+                    && self.uninterrupted
+                    && self.shapes.is_empty()
+                {
+                    self.extend_lead(a, b);
+                }
+            }
             None if self.uninterrupted
                 && self.run.vertices.is_empty()
                 && self.shapes.is_empty() =>
             {
-                self.lead = match self.lead {
-                    None => Some((a, b)),
-                    Some((start, end)) if end == a => Some((start, b)),
-                    Some(_) => {
-                        self.uninterrupted = false;
-                        None
-                    }
-                };
+                self.extend_lead(a, b);
             }
             // Apart from the run or after another entity: nothing to draw, but the path is no
             // longer one run.
@@ -847,21 +923,32 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
             _ => out.exact(exact(seg, piece, encoding)?)?,
         }
     }
+    // Materialize any deferred trailing zero-length shifts before reading `first.at` / `last.at`.
+    out.run.materialize_zero_suffix();
     // Only a run that covers the entire closed path can receive the closing flag. Its last
     // outgoing bulge stays on the final vertex; the first vertex is not appended a second time.
-    // A single authored zero-length line stays an open two-vertex entity; it cannot form a
-    // writable one-vertex closed polyline. Exact preserves the original LINE unchanged.
-    // Pieces written as one point before the first vertex close the loop when they lead from
-    // the run's end to its first vertex.
+    // A single authored zero-length line, or a loop whose last vertex encodes to the same point
+    // as its first (such as one ending with a zero-length line), stays an open entity: a closed
+    // polyline cannot repeat or collapse its closing edge. Exact preserves the original LINE
+    // unchanged. Pieces written as one point before the first non-zero-length edge close the
+    // loop when they lead from the run's end to its first vertex.
     let close = closed
         && out.uninterrupted
         && out.run.vertices.len() >= 2
-        && out.run.vertices.first().is_some_and(|first| {
-            Some(first.at) == out.run.end
-                || out
-                    .lead
-                    .is_some_and(|(start, end)| end == first.at && Some(start) == out.run.end)
-        });
+        && out
+            .run
+            .vertices
+            .first()
+            .zip(out.run.vertices.last())
+            .is_some_and(|(first, last)| {
+                (Some(first.at) == out.run.end
+                    || out
+                        .lead
+                        .is_some_and(|(start, end)| end == first.at && Some(start) == out.run.end))
+                    && encoded_point(first.at, encoding)
+                        .zip(encoded_point(last.at, encoding))
+                        .is_some_and(|(a, b)| a != b)
+            });
     out.flush(close)?;
     Ok(out.shapes)
 }
@@ -879,7 +966,7 @@ fn arc_bulge(sweep: f64) -> Option<f64> {
     let bulge = if sweep.abs() == PI {
         sweep.signum()
     } else {
-        (sweep * 0.25).tan()
+        det::tan(sweep * 0.25)
     };
     (bulge.is_finite() && bulge != 0.0 && bulge.abs() <= 1.0).then_some(bulge)
 }
@@ -1252,7 +1339,7 @@ pub fn bulge_arc(from: Vertex2, to: Vec2) -> Option<Seg2> {
         return None;
     }
     let start = radial.angle();
-    let sweep = 4.0 * b.atan();
+    let sweep = 4.0 * det::atan(b);
     (start.is_finite() && sweep.is_finite() && sweep != 0.0).then_some(Seg2::Arc {
         center,
         radius,
@@ -1266,7 +1353,7 @@ fn divide(value: Vec2, divisor: f64) -> Vec2 {
 }
 
 fn unit(angle: f64) -> Vec2 {
-    Vec2::new(angle.cos(), angle.sin())
+    Vec2::new(det::cos(angle), det::sin(angle))
 }
 fn wrap(t: f64, turn_snap_radians: f64) -> f64 {
     let r = t.rem_euclid(TAU);
@@ -1365,7 +1452,7 @@ pub enum EllipseSupport {
 }
 /// Admit the original major/minor support without repairing a collapsed axis.
 pub fn ellipse_support(center: Vec2, major: Vec2, ratio: f64) -> EllipseSupport {
-    let radius = major.x.hypot(major.y);
+    let radius = det::hypot(major.x, major.y);
     let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
     if !finite(center)
         || !finite(major)

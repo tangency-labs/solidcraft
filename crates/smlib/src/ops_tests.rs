@@ -281,11 +281,15 @@ fn hostile_inputs_are_errors() {
 
 /// A cone (Ø6 to Ø1, 10 tall) with a 0.12 mm square pad on its top, turned 45°, whose corner
 /// is `inset` inside the top's rim on the cone's seam, shelled 0.05 inward open at the top
-/// (#18568). 0.00002 in, the join merges the corner with the rim's seam vertex, and the shell
-/// fails; refused as a face whose outline touches itself, at the corner. 0.0001 in, the
-/// corner is its own vertex, and the pad shells.
+/// (#18568, #22791). 0.00002 in, the join merges the corner with the rim's seam vertex, so the
+/// top's outline touches itself there; 0.0001 in, the corner is its own vertex. Both shell to
+/// the same hollow: the cone and the pad, (π 10 / 3)(3² + 3 · 0.5 + 0.5²) + 0.12³, less the
+/// cone's inset, a frustum from z = 0.05 to the open top, its radii 3 - 0.25 · 0.05 - δ and
+/// 0.5 - δ (δ = 0.05 √(1 + 0.25²), the side's slope 0.25), and the pad's, a 0.02 square column
+/// from the open top to 0.05 under the pad's top. The merge moves the corner by its 0.00002
+/// tolerance, a few 1e-8 of the volume.
 #[test]
-fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
+fn a_shell_of_a_face_whose_outline_touches_itself_builds_its_hollow() {
     let padded = |inset: f64| {
         let cone = Brep::make_cone([0.0; 3], 3.0, 0.5, 10.0).unwrap();
         let (x, h) = (0.5 - inset, 0.12 / 2f64.sqrt());
@@ -295,13 +299,17 @@ fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
         cone.boolean(&pad, BooleanOp::Union).unwrap().unwrap()
     };
     let top = [[0.15, -0.25, 10.0]];
-    match padded(2e-5).shell(&top, 0.01, -0.05).unwrap_err() {
-        Error::OutlineTouches { at, .. } => {
-            assert!((at[0] - 0.5).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 10.0).abs() < 1e-9, "at {at:?}");
-        }
-        e => panic!("refused as {e}"),
+    let d = 0.05 * (1.0f64 + 0.0625).sqrt();
+    let (a, b, h) = (3.0 - 0.25 * 0.05 - d, 0.5 - d, 9.95);
+    let want = std::f64::consts::PI * 10.0 / 3.0 * (9.0 + 1.5 + 0.25) + 0.12f64.powi(3)
+        - std::f64::consts::PI * h / 3.0 * (a * a + a * b + b * b)
+        - 0.02f64.powi(2) * 0.07;
+    for (inset, rel) in [(2e-5, 1e-6), (1e-4, 1e-7)] {
+        let hollow = padded(inset).shell(&top, 0.01, -0.05).unwrap();
+        assert_eq!(hollow.solid_count().unwrap(), 1, "inset {inset}");
+        assert_close(volume(&hollow), want, rel, &format!("inset {inset}"));
+        shot(&hollow, &format!("shell-pad-{inset}-inside-the-rim"));
     }
-    shot(&padded(1e-4).shell(&top, 0.01, -0.05).unwrap(), "shell-pad-clear-of-the-rim");
 }
 
 /// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
@@ -361,6 +369,30 @@ fn blends_take_a_size_per_edge() {
     let chord = c.blend(Blend::Chord, &tops[..1], &[2.0 * 2f64.sqrt()], 0.1).unwrap();
     assert_close(volume(&chord), 8000.0 - q * 4.0 * 20.0, 2e-6, "chord");
     assert!(c.blend(Blend::Round, &tops, &[2.0], 0.1).is_err());
+}
+
+/// A chain of one edge takes the whole law along that edge: the round of [`Brep::fillet_variable`],
+/// from either end. Edges that are not one chain (two of the cube's parallel top edges) are refused.
+#[test]
+fn a_variable_round_along_a_chain_of_one_edge_is_the_edge_round() {
+    let c = cube(20.0);
+    let knots = [0.0, 0.0, 1.0, 1.0];
+    for start in [[0.0, 20.0, 20.0], [20.0, 20.0, 20.0]] {
+        let one = c.fillet_variable([10.0, 20.0, 20.0], 0.1, start, 1, &knots, &[3.0, 1.0]).unwrap();
+        let chain = c.fillet_variable_chain(&[[10.0, 20.0, 20.0]], 0.1, start, 1, &knots, &[3.0, 1.0]).unwrap();
+        assert_close(volume(&chain), volume(&one), 1e-9, "a chain of one edge");
+        // At 0.5 mm inward from both faces, R3 removes the point and R1
+        // retains it: (R - 0.5) sqrt(2) exceeds R only for R > 1.707.
+        // Sample well away from the ends; the law still clearly separates them.
+        for x in [2.0, 18.0] {
+            let expected = if (x - start[0]).abs() < 10.0 { crate::PointClass::Outside } else { crate::PointClass::Inside };
+            let point = [x, 19.5, 19.5];
+            assert_eq!(one.classify_point(point).unwrap(), expected);
+            assert_eq!(chain.classify_point(point).unwrap(), expected);
+        }
+    }
+    let apart = c.fillet_variable_chain(&[[10.0, 20.0, 20.0], [10.0, 0.0, 20.0]], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[3.0, 1.0]);
+    assert!(matches!(apart, Err(Error::Unported(_))), "{:?}", apart.err());
 }
 
 /// A variable round is the union of its balls: in each plane square to the edge, the corner cut off

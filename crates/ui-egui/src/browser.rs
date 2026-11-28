@@ -198,6 +198,20 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     }
     let (component, sel) = (f.component, solidcraft_engine::browser_find::construction_sel(f));
     let _ = app.run("select.set", json!({ "items": [sel] }));
+    // With the Construction folder hidden ("Hide the Construction folder"), the History lists it:
+    // in the Browser, or in its own panel, as Find in History goes.
+    if folder_hidden_by_preference(app, "construction") {
+        app.tree.reveal_construction = None;
+        if app.preferences.history_in_browser {
+            reveal_in_history(app, id);
+        } else {
+            app.ui.show_timeline = true;
+            crate::timeline_left::reveal_feature(app, id);
+            request_timeline_reveal(app, id);
+            reveal_shared_panel(app, "history");
+        }
+        return;
+    }
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
@@ -386,6 +400,9 @@ pub struct TreeState {
     cache: Option<cache::Cache>,
     /// The tree key of each item row the panel has seen, by its id: a Shift range comes back as ids.
     node_keys: std::collections::HashMap<NodeId, String>,
+    /// The session, active component and active placement the Browser last saw, so "Fold other
+    /// components on activate" folds once per change ([`fold_other_components`]).
+    seen_active: Option<(u64, u64, Option<Vec<u64>>)>,
 }
 
 struct FolderPick {
@@ -1628,6 +1645,7 @@ impl Actions {
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    fold_other_components(app);
     // The rows above a hovered or selected body are marked from its placement's path: a large
     // assembly names its placements beside the window, so the first hover never waits for them.
     if follows_view(app) {
@@ -1656,6 +1674,43 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// "Fold other components on activate": when the active component changes, every placement row
+/// that is not on the way down to the active one folds, and the rows down to it open. However the
+/// component was made active (its radio, Edit in Place, a command, undo), the Browser sees the
+/// change the next time it draws. The first look at a session only remembers what is active, so
+/// opening or switching designs leaves the rows as they were.
+pub(crate) fn fold_other_components(app: &mut SolveApp) {
+    let session = &app.session;
+    let unchanged = app.tree.seen_active.as_ref().is_some_and(|(uid, component, path)| {
+        *uid == session.uid && *component == session.active_component && *path == session.active_occurrence_path
+    });
+    if unchanged {
+        return;
+    }
+    let before = app.tree.seen_active.replace((session.uid, session.active_component, session.active_occurrence_path.clone()));
+    if !app.preferences.browser_fold_other_components || before.is_none_or(|(uid, ..)| uid != app.session.uid) {
+        return;
+    }
+    let placements = app.session.doc.placements();
+    let active = app.session.active_occurrence_path.clone().or_else(|| {
+        let component = app.session.active_component;
+        (component != 0).then(|| placements.iter().find(|(c, ..)| *c == component).map(|(_, path, _)| path.clone())).flatten()
+    });
+    for (_, path, _) in &placements {
+        if active.as_ref().is_some_and(|active| active.starts_with(path)) {
+            continue;
+        }
+        let key = occurrence_key(path);
+        if fold_open(app, &key, true) {
+            app.tree.found_rows.retain(|(row, _)| *row != key);
+            set_open(app, &key, true, false);
+        }
+    }
+    if let Some(active) = active {
+        open_path(app, &active);
+    }
+}
+
 /// Gives the search's field the keyboard, showing its bar and opening and unfolding the Browser's
 /// panel ([`reveal_shared_panel`]).
 fn show_search(app: &mut SolveApp) {
@@ -1670,6 +1725,32 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     } else {
         show_search(app);
     }
+}
+
+/// The Browser's view options, as on/off rows of its panel's ⋯ menu: (action id, label id, on).
+/// Each is a saved setting, off by default.
+pub(crate) fn menu_toggles(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)> {
+    vec![
+        ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", app.preferences.browser_hide_sketches_folder),
+        ("hide-construction-folder", "prefs.browser_hide_construction_folder", app.preferences.browser_hide_construction_folder),
+        ("fold-other-components", "prefs.browser_fold_other_components", app.preferences.browser_fold_other_components),
+    ]
+}
+
+/// A row of the Browser panel's header or ⋯ menu: the search's magnifier, or one of
+/// [`menu_toggles`], which turns its setting over.
+pub(crate) fn menu_action(app: &mut SolveApp, action: &str) -> Result<(), String> {
+    let setting = match action {
+        "hide-sketches-folder" => "browser_hide_sketches_folder",
+        "hide-construction-folder" => "browser_hide_construction_folder",
+        "fold-other-components" => "browser_fold_other_components",
+        _ => {
+            magnifier(app);
+            return Ok(());
+        }
+    };
+    let on = menu_toggles(app).iter().any(|(id, _, on)| *id == action && *on);
+    crate::prefs::set(app, &json!({ setting: !on })).map(|_| ())
 }
 
 /// In the compact layout with the History shown in the Browser, the Browser is the only side panel
@@ -3325,6 +3406,18 @@ fn folder_static(folder: &str) -> &'static str {
 /// under the component or placement row (Preferences › Interface › Bodies folders, #4217).
 /// `scope` is that row's tree key (`c{id}`, `o:{path}`) and `bodies` how many items the folder
 /// holds. The design's own folder always stays, and so does a hidden one: its eye is the way back.
+/// Whether this folder is left out because "Hide the Sketches folder" or "Hide the Construction
+/// folder" is on: the History lists those items. A search still lists the folder, so an item can be
+/// found by name.
+fn folder_hidden_by_preference(app: &SolveApp, folder: &str) -> bool {
+    let hidden = match folder {
+        "sketches" => app.preferences.browser_hide_sketches_folder,
+        "construction" => app.preferences.browser_hide_construction_folder,
+        _ => false,
+    };
+    hidden && !app.tree.search.on()
+}
+
 fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool {
     use crate::prefs::BodiesFolders;
     if comp == 0 || bodies == 0 || app.session.folder_hidden(&format!("{scope}/bodies")) {
@@ -3355,6 +3448,10 @@ fn folder_rows_at(
     }
     // A search lists the folders that hold a match (`folder_level` lists the matches).
     let searching = app.tree.search.on();
+    // A folder hidden by its own eye stays listed, so that eye can show its items again.
+    if folder_hidden_by_preference(app, folder) && !app.session.folder_hidden(&data.key) {
+        return;
+    }
     if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
         return;
     }

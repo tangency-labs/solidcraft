@@ -35,10 +35,30 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 fn primitive(p: &Primitive) -> Result<Body> {
     #[cfg(feature = "backend-occt")]
     if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::of_primitive(p), &[], |k, _| k.primitive(p).map(Some)) {
-        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the primitive is empty".into())));
+        let named =
+            made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the primitive is empty".into()))).and_then(|b| named_primitive(p, b));
+        match named {
+            Ok(b) => return Ok(b),
+            Err(e) => log::warn!("{}: Open CASCADE's faces don't name as solidcore's do ({e}); solidcore runs it", OpKind::of_primitive(p).name()),
+        }
     }
     match which(OpKind::of_primitive(p)) {
         Which::Solidcore => Solidcore.primitive(p),
+    }
+}
+
+/// Another kernel's primitive with the history and construction sources solidcore gives its own:
+/// a cylinder's wall and caps, a sphere's or torus's faces swept from its one profile segment. A
+/// box keeps what came back.
+#[cfg(feature = "backend-occt")]
+fn named_primitive(p: &Primitive, body: Body) -> Result<Body> {
+    match *p {
+        Primitive::Cylinder { base, axis, radius, height } => {
+            let c = crate::build::cylinder_plan(base, axis, radius, height)?;
+            crate::smlib_sweeps::name_cylinder(body, &c.plane, c.lo, c.hi, &c.region)
+        }
+        Primitive::Sphere { .. } | Primitive::Torus { .. } => crate::smlib_sweeps::name_revolved_primitive(body),
+        Primitive::Box { .. } => Ok(body),
     }
 }
 
@@ -213,6 +233,19 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 /// them removes whole is not rounded; a single concave round running off the flat face it rolls
 /// on carries that face on.
 pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    #[cfg(feature = "backend-occt")]
+    {
+        let mut gone = Vec::new();
+        if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Fillet, &[body], |k, f| match f {
+            [fb] => k.fillet_removing(fb, edges, radius, turn).map(|(s, g)| {
+                gone = g;
+                Some(s)
+            }),
+            _ => Err(solidcraft_kernel_api::BackendError::Invalid("a fillet takes one body".into())),
+        }) {
+            return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the fillet is empty".into()))).map(|b| (b, gone));
+        }
+    }
     match which(OpKind::Fillet) {
         Which::Solidcore => Solidcore.fillet_removing(body, edges, radius, turn),
     }
@@ -220,6 +253,13 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), in one blend.
 pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Fillet, &[body], |k, f| match f {
+        [fb] => k.fillet_each(fb, edges, radii, turn).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a fillet takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the fillet is empty".into())));
+    }
     match which(OpKind::Fillet) {
         Which::Solidcore => Solidcore.fillet_each(body, edges, radii, turn),
     }
@@ -236,6 +276,13 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
 /// [`chamfer`], and where a single concave chamfer runs off the flat face it rolls on, that face
 /// carried on.
 pub fn chamfer_carrying_face(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Chamfer, &[body], |k, f| match f {
+        [fb] => k.chamfer_carrying_face(fb, edges, distance).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a chamfer takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the chamfer is empty".into())));
+    }
     match which(OpKind::Chamfer) {
         Which::Solidcore => Solidcore.chamfer_carrying_face(body, edges, distance),
     }
@@ -312,9 +359,24 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     }
 }
 
+/// Rotate one face's support about `axis` through `origin` by `angle` radians, then translate
+/// it. The neighbouring faces extend or trim to meet it.
+pub fn transform_face(b: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    match which(OpKind::TransformFace) {
+        Which::Solidcore => Solidcore.transform_face(b, at, translate, origin, axis, angle),
+    }
+}
+
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull`.
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Draft, &[b], |k, f| match f {
+        [fb] => k.draft(fb, faces, neutral, pull, angle).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::Draft) {
         Which::Solidcore => Solidcore.draft(b, faces, neutral, pull, angle),
     }
@@ -337,8 +399,43 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
 /// Split a body into the closed parts on either side of a tool, those on its back first; a body
 /// the tool misses or only nicks comes back whole. Each part's history is over `[body]`.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
+    #[cfg(feature = "backend-occt")]
+    if let SplitTool::Plane(plane) = tool
+        && let Some(made) = super::foreign::run_parts(
+            &crate::backend::Occt,
+            OpKind::Split,
+            &[body],
+            |k, f| match f {
+                [fb] => k.split_body(fb, &solidcraft_kernel_api::SplitTool::Plane(*plane)),
+                _ => Err(solidcraft_kernel_api::BackendError::Invalid("a split takes one body".into())),
+            },
+            |parts| back_then_front(plane, parts),
+        )
+    {
+        return made;
+    }
     match which(OpKind::Split) {
         Which::Solidcore => Solidcore.split_body(body, tool),
+    }
+}
+
+/// Another kernel's pieces of a body split by `plane` in solidcore's order, the one on the
+/// plane's back first: refused unless there is one piece on each side (solidcore's whole body
+/// where the plane misses or nicks it, and its order of several pieces a side, are its own).
+#[cfg(feature = "backend-occt")]
+fn back_then_front(plane: &Plane, parts: Vec<Body>) -> std::result::Result<Vec<Body>, solidcraft_kernel_api::BackendError> {
+    use solidcraft_geom::PlaneGeom as _;
+    use solidcraft_kernel_api::BackendError;
+    let mut sided = Vec::with_capacity(parts.len());
+    for part in parts {
+        let at = crate::measure(&part).map_err(|e| BackendError::Exchange(format!("a piece can't be measured ({e})")))?.centroid;
+        sided.push((plane.height(at), part));
+    }
+    match <[_; 2]>::try_from(sided) {
+        Ok([(a, back), (b, front)]) if a < 0.0 && b > 0.0 => Ok(vec![back, front]),
+        Ok([(a, front), (b, back)]) if a > 0.0 && b < 0.0 => Ok(vec![back, front]),
+        Ok(_) => Err(BackendError::Unsupported("a split that leaves both pieces on one side".into())),
+        Err(sided) => Err(BackendError::Unsupported(format!("a split into {} pieces", sided.len()))),
     }
 }
 
@@ -362,6 +459,16 @@ pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize)
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let SplitTool::Plane(plane) = tool
+        && body.is_surface()
+        && let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Split, &[body], |k, f| match f {
+            [fb] => k.trim_keep(fb, &solidcraft_kernel_api::SplitTool::Plane(*plane), keep).map(Some),
+            _ => Err(solidcraft_kernel_api::BackendError::Invalid("a trim takes one body".into())),
+        })
+    {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the trim is empty".into())));
+    }
     match which(OpKind::Split) {
         Which::Solidcore => Solidcore.trim_keep(body, tool, keep),
     }
@@ -430,6 +537,18 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// every section's curve), `fit` saying how they reshape the sections between. Without rails,
 /// the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run_each(
+        &crate::backend::Occt,
+        OpKind::Loft,
+        |k| k.loft(sections, rails, fit).map(|s| vec![s]),
+        |bodies| {
+            let (pieces, first) = crate::build::loft_plan(sections)?;
+            bodies.into_iter().map(|b| crate::smlib_sweeps::name_loft(b, &pieces, first)).collect()
+        },
+    ) {
+        return made.and_then(|mut b| b.pop().ok_or_else(|| crate::KernelError::Failed("the loft is empty".into())));
+    }
     match which(OpKind::Loft) {
         Which::Solidcore => Solidcore.loft(sections, rails, fit),
     }
@@ -451,6 +570,20 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
 /// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
 /// `fit` saying how they reshape the section on the way. Without rails, the plain loft to a point.
 pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if rails.is_empty()
+        && let Some(made) = super::foreign::run_each(
+            &crate::backend::Occt,
+            OpKind::Loft,
+            |k| k.loft_to_point(plane, lp, apex, rails, fit).map(|s| vec![s]),
+            |bodies| {
+                let pieces = crate::helix::loft_to_point_plan(plane, lp, apex)?;
+                bodies.into_iter().map(|b| crate::smlib_sweeps::name_loft_to_point(b, plane, &pieces)).collect()
+            },
+        )
+    {
+        return made.and_then(|mut b| b.pop().ok_or_else(|| crate::KernelError::Failed("the loft is empty".into())));
+    }
     match which(OpKind::Loft) {
         Which::Solidcore => Solidcore.loft_to_point(plane, lp, apex, rails, fit),
     }

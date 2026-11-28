@@ -10,6 +10,7 @@
 //! for a meeting `b` from the join, which a large radius makes larger than the near-miss
 //! tolerance.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::math::{Point2, Vec2};
@@ -157,7 +158,7 @@ pub(crate) fn on_arc(s: &Seg2, p: Point2, tol: f64) -> bool {
         return false;
     };
     let d = p - center;
-    let ang = d.y.atan2(d.x);
+    let ang = det::atan2(d.y, d.x);
     let t = if sweep >= 0.0 {
         (ang - start).rem_euclid(TAU)
     } else {

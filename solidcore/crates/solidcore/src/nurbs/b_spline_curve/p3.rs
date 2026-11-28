@@ -148,6 +148,7 @@ use crate::geom::tol::{
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::analysis::analysis_key;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
@@ -849,7 +850,7 @@ fn stretch_clears_on_surface(
     let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
     let quarter = 0.25 * length;
     let sliver = 2.0 * quarter / (speed + (speed * speed + 2.0 * accel * quarter).sqrt());
-    let wanted = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
+    let wanted = max3(ulp, stretch * det::powi(2f64, -STRETCH_PIECES), sliver);
     // (written to accept: a NaN or infinite stretch, end, sliver or knot certifies nothing)
     let finite = stretch > 0.0
         && stretch.is_finite()
@@ -878,11 +879,11 @@ fn stretch_clears_on_surface(
         return Ok(false);
     }
     for j in 0..STRETCH_PIECES {
-        let far = stretch * 2f64.powi(-j);
+        let far = stretch * det::powi(2f64, -j);
         if far <= cut {
             break;
         }
-        let dyadic = stretch * 2f64.powi(-(j + 1));
+        let dyadic = stretch * det::powi(2f64, -(j + 1));
         let last = dyadic <= cut;
         let near = if last { cut } else { dyadic };
         let (near_t, far_t) = match (last, end) {
@@ -1156,7 +1157,7 @@ pub(crate) fn span_bounds(cur: &crate::nurbs::crv_basic::Curve) -> Option<SpanBo
             let w_min = w0.min(w1).min(w2);
             let turn = (p1 - p0).cross(p2 - p1).length();
             let radius = if turn > 0.0 {
-                h.powi(3) * w_min.powi(3) / (4.0 * w0 * w1 * w2 * turn)
+                det::powi(h, 3) * det::powi(w_min, 3) / (4.0 * w0 * w1 * w2 * turn)
             } else {
                 f64::INFINITY
             };
@@ -3364,8 +3365,8 @@ mod tests {
                 let t = f64::from(i) * PI / 4.0;
                 let scale = if i % 2 == 1 { s } else { 1.0 };
                 Vec3::new(
-                    (cx + scale * r * t.cos()) / sx,
-                    (cy + scale * r * t.sin()) / sy,
+                    (cx + scale * r * det::cos(t)) / sx,
+                    (cy + scale * r * det::sin(t)) / sy,
                     0.0,
                 )
             })
@@ -3636,7 +3637,7 @@ mod tests {
         (
             speed,
             if turn > 0.0 {
-                speed.powi(3) / turn
+                det::powi(speed, 3) / turn
             } else {
                 f64::INFINITY
             },
@@ -4037,7 +4038,9 @@ mod tests {
         ] {
             let pts = [[u, v], [u, v], [u, v + dv], [u, v + 2.0 * dv]];
             let trim = uv_bezier(&pts);
-            let p_max = pts.iter().fold(0.0_f64, |m, p| m.max(p[0].hypot(p[1])));
+            let p_max = pts
+                .iter()
+                .fold(0.0_f64, |m, p| m.max(det::hypot(p[0], p[1])));
             let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
             let sliver = |hi| sliver_within(&k, &trim, &surface, 0.0, hi, length);
             assert!(sliver(1e-7).unwrap(), "{what}");
@@ -4258,8 +4261,8 @@ mod tests {
                 [0.2, 0.2],
                 [0.3, 0.2],
                 [0.4, 0.2],
-                [0.4 + 0.1 * bend.cos(), 0.2 + 0.1 * bend.sin()],
-                [0.4 + 0.2 * bend.cos(), 0.2 + 0.2 * bend.sin()],
+                [0.4 + 0.1 * det::cos(bend), 0.2 + 0.1 * det::sin(bend)],
+                [0.4 + 0.2 * det::cos(bend), 0.2 + 0.2 * det::sin(bend)],
             ],
             &[0.0, 0.5, 1.0],
             &[3, 2, 3],
@@ -4312,7 +4315,7 @@ mod tests {
         );
         let h = 1e-4;
         for a in [0.3f64, 0.7, 1.1, 2.0, 2.9] {
-            let (sn, cs) = a.sin_cos();
+            let (sn, cs) = det::sin_cos(a);
             let at = |i: f64| [0.7 + i * h * cs, 0.4 + i * h * sn];
             let run = uv_quadratic(
                 &[at(0.0), at(1.0), at(2.0), at(3.0), at(4.0)],
@@ -4425,7 +4428,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let lo = 2f64.powi(33);
+        let lo = det::powi(2f64, 33);
         let cubic = uv_cubic_on(&[[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]], lo);
         let tol = 1e-3;
         let stretch = tol / 4.8;
@@ -4903,7 +4906,7 @@ mod tests {
     /// 1.18e-4 for leg 0.05.
     fn sharp_cubic(leg: f64) -> BSplineCurve {
         let ang = 225.0_f64.to_radians();
-        issue_22184_cubic([30.0 + leg * ang.cos(), 15.0 + leg * ang.sin()])
+        issue_22184_cubic([30.0 + leg * det::cos(ang), 15.0 + leg * det::sin(ang)])
     }
 
     /// `pieces` are `c` cut exactly: they start and end where it does, meet consecutively
@@ -4958,7 +4961,7 @@ mod tests {
         let ang = 225.0_f64.to_radians();
         let pts = [
             [30.0, 15.0],
-            [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()],
+            [30.0 + 0.05 * det::cos(ang), 15.0 + 0.05 * det::sin(ang)],
             [-10.0, 20.0],
             [-30.0, -20.0],
         ]

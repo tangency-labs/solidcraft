@@ -12,6 +12,16 @@ For implementation details, see [the in-app agent chat design](design/in-app-age
 
 Desktop app only.
 
+## Choosing an AI workflow
+
+SolidCraft supports three ways to work with AI agents and models. Pick the one that fits how you work:
+
+| Workflow | Best for | Setup | Tools & isolation |
+|---|---|---|---|
+| **In-app Assistant + coding agent (ACP)** | Interactive modelling inside SolidCraft with Claude Code, Codex, OpenCode, Mistral Vibe, XAI Grok, Google Antigravity, etc. | Install the agent's ACP adapter; SolidCraft detects it automatically (see [Agents](#agents)). | Uses SolidCraft's built-in `solidcraft-app` MCP server, **Attach selection** / **Pick context** pills, **Attach view**, one undo step per message, and per-agent **Ask / Edits / All** approvals. Agent shell/file tools stay off where supported. |
+| **In-app Assistant + API / local model** | Running a local model (Ollama, LM Studio) or calling an OpenAI- or Anthropic-compatible API directly without installing a coding agent CLI. | **Preferences → Assistant → Add agent…**; API keys are stored in your system keychain. | Same panel, selection pills, undo grouping, and approval policy as ACP agents. Requires a model with native tool calling. |
+| **External MCP client (bridged or headless)** | Driving SolidCraft from a coding agent in your terminal or IDE alongside your own repo/shell tools, or running repeatable headless scripts and CI pipelines. | `uvx solidcraft mcp` or `solidcraft-cli mcp setup` (see [Driving SolidCraft with an AI agent (MCP)](mcp.md)). | Bridged mode connects to the open desktop app (live viewport, selection, desktop management tools); `--headless` runs with no window for scripted batch jobs. |
+
 ## Turning it on and off
 
 Everything about it is on one page: **Preferences → AI**.
@@ -147,10 +157,13 @@ turn limit. Queue, Send now and Stop keep their existing behavior.
 ## Files and pictures
 
 A message can carry up to eight files, to show the agent what you mean: a concept picture, a
-sketch, a brief, a part to fit around.
+sketch, a brief, a part to fit around. That is for an OpenAI- or Anthropic-compatible endpoint,
+which has only SolidCraft's tools, so the files go in the message as below. A coding agent reads
+files with its own tools: it gets every file and folder by its path instead
+([To a coding agent](#to-a-coding-agent)).
 
-- **+** next to **Send** has **Choose a file…** (a file dialog for the types below) and **Paste a
-  picture** (the picture on the clipboard).
+- **+** next to **Send** has **Choose files…** (a file dialog for the types below, several at
+  once) and **Paste a picture** (the picture on the clipboard).
 - **Drop files on the chat.** Files dropped on the panel (or its folded strip) attach to the
   next message, and the app doesn't open them too. While files are dragged over the chat, it says
   so. The window gives no position while something is dragged, so the drop is the chat's when the
@@ -172,6 +185,16 @@ sketch, a brief, a part to fit around.
   shows a spinner meanwhile, and **Send** waits), and the message tells the agent it was added; a
   failed import says why and the agent is told nothing of it. Taking a part's chip off the message
   leaves the part in the design (Undo removes it).
+- **PDFs** (up to 12 MB) go whole as documents, so the model sees their pages, drawings and
+  scans included. **Any other file** (a ZIP, a DXF) is refused: an endpoint has no tool that opens
+  a file. Drop a DXF on the design instead to bring it in as a sketch.
+- The conversation keeps every picture and PDF of the newest message, and two of each from the
+  messages before it; older ones are swapped for a short note, as every request carries the
+  whole conversation. One request carries at most 18 MB of pictures and PDFs: older ones go first,
+  and a message whose own come to more isn't sent (the chat says how much it holds). An endpoint
+  that doesn't take PDFs, such as some OpenAI-compatible servers, refuses the message.
+- A message with pictures or PDFs that the endpoint refuses before it answers is taken out of the
+  conversation, so the next message doesn't send them again; send it again to retry.
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
@@ -182,8 +205,31 @@ sketch, a brief, a part to fit around.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
-files go with it, at most eight; the rest are named in the chat and not sent. **New chat**
-clears the files waiting on the chips too.
+files go with it, at most eight (200 to a coding agent); the rest are named in the chat and not
+sent. **New chat** clears the files waiting on the chips too.
+
+### To a coding agent
+
+A coding agent (Claude Code, Codex, Gemini CLI…) reads files with its own tools, so it gets every
+file and folder by its path, up to 200 on one message, whatever their type:
+
+- **+** has **Choose files…** (any type) and **Choose folders…**, several at once; on macOS, whose
+  file dialog chooses both together, one **Choose files or folders…**. Files and folders dropped
+  on the chat attach the same way.
+- SolidCraft reads nothing of them: no picture is scaled down, no text is cut, no CAD file is
+  imported (drop it on the design for that). The message tells the agent each file's name, type,
+  size and path, and each folder's path, so a batch of photos reaches the agent whole however
+  many there are. Nothing in a folder is listed or counted (on a network share that would keep
+  the message waiting); the agent lists it itself.
+- Their chips show the file's type, or a folder; holding the pointer over one shows its path. The
+  chips scroll past about three rows, so the text box and the conversation stay in view.
+- A pasted picture has no path, so it still goes in the message, at most eight.
+- Each path is a line in the message's text, which stops at 100,000 characters. A file or folder
+  whose line falls past that isn't named to the agent and doesn't count as sent: shorten the
+  message, or send the rest in another message.
+- Claude Code reads what you sent by path without asking (*Auto-allowed* in the chat), and the
+  chat declines any other read of its own (see [What it can't do](#what-it-cant-do)). Another
+  coding agent reads with its own tools and asks as its own mode says.
 
 ## Typing while the agent works
 
@@ -358,7 +404,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, LLMTR
+  `https://llmtr.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue
@@ -571,9 +618,12 @@ These settings cover SolidCraft's tools. A coding agent's own tools (its shell, 
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
-and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
-a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to an agent
-other than Claude Code yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+and notes it in the chat as *Auto-allowed*. So it does when Claude Code reads something you sent
+by path in this conversation, or writes its plan or reads it back, and it declines any other
+read or write of Claude Code's whatever the mode (see below). Any other question appears in the
+panel, including a SolidCraft tool an agent words differently and a SolidCraft MCP server you
+added to an agent other than Claude Code yourself. With **Allow everything**, or after
+**Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -599,9 +649,29 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter for a session with none of its own tools but the one that ends plan mode, and with
-  SolidCraft's MCP server as its only one. Your claude.ai connectors, your own MCP servers, and
-  Claude Code's shell, file, web, scheduling and messaging tools aren't there.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, its read
+  tools and the file-writing tools it writes only its plan with (below), and with SolidCraft's
+  MCP server as its only one. Your claude.ai connectors, your own MCP servers, and Claude Code's
+  shell, web, scheduling and messaging tools aren't there.
+- **Claude Code reads only what you sent.** Its read tools (Read, Glob, Grep) are on, but they ask
+  before every read. The chat allows a read inside a file or folder you sent by path in this
+  conversation, and of its own plan (below), and declines any other without asking you, whatever
+  the mode and even after **Always allow**: a file you didn't send, a search whose pattern starts
+  at a root or your home folder or steps up with `..`, or a link in a folder you sent that leads
+  out of it (a path counts once links are followed). To let it read another file, attach it.
+  **New chat** starts with nothing sent.
+- **Claude Code writes only its plan.** In plan mode (the **Plan** choice in the panel's header)
+  Claude Code writes its plan to a file, then asks you to approve it: the plan is shown in that
+  question, so you see what you approve, and again after you ask for a change. That question
+  always waits for you, even with **Allow everything**. Its Write and Edit
+  tools are on for that and ask before every write. The chat allows a Markdown file right in
+  Claude Code's plan folder (`plans` in the chat's working folder, not `~/.claude/plans`) and
+  declines any other write without asking you, even with **Allow everything**. Plans not changed
+  for a week are deleted when the agent next starts.
+- Its read and write tools are on only when the agent's command names the Claude Code adapter
+  (`claude-agent-acp`, or the older `claude-code-acp`); started any other way, through a script
+  of your own say, it can neither read nor write. If it ever reads or writes without asking
+  first, the chat stops the message and says so.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.
@@ -616,6 +686,14 @@ never sees, stores or passes on a coding agent's password, token or key. An endp
 kept in the system keychain and sent only to that endpoint. SolidCraft's own connection to the
 agent's tools uses a random per-launch token in a file only you can read, which never passes
 through the agent.
+
+## Troubleshooting
+
+- **An installed agent is missing or marked *does not start*.** Run the agent's own `--version` command in a terminal to verify its installation finished cleanly, then click **Refresh** under **Preferences → Assistant → Agents**. If a Node-based adapter fails with `SyntaxError: Unexpected token 'with'`, install a newer Node (for example via nvm) and click **Refresh**. On Linux Flatpak, apply the `flatpak override` permissions under [Flatpak](#flatpak) and restart SolidCraft completely.
+- **The agent reports it is not signed in.** A cached login file can expire. Click **Test** in **Preferences → Assistant → Agents** or follow the **Sign in to the agent** card in the panel (run the shown CLI command in a terminal or complete browser sign-in), then press **I've signed in: connect again**.
+- **Saving, exporting, or opening a linked design is refused.** File actions wait for approval unless permissions are set to **Allow everything**, and the [MCP folder limits](mcp.md#which-files-the-agent-can-reach) still apply after approval. Add extra directories under **Preferences → Assistant → Allowed folders**, then reconnect or start a **New chat** so the bridged CLI server picks up the new `--allow-path` list.
+- **A turn looks stalled.** Check the panel for a pending **Allow / Deny** approval card (unanswered approvals time out after four minutes). Press **Stop** (or **Esc** in the input) to cancel; an ACP agent that does not finish cancelling within five seconds is disconnected in the background while keeping completed changes undoable.
+- **You also need the agent's shell, git, or workspace file tools.** The in-app Assistant intentionally withholds file-system and terminal capabilities and isolates Claude Code to `solidcraft-app`. To let a coding agent combine CAD edits with repository files or scripts, connect it externally through the [MCP server](mcp.md).
 
 ## Trying it without an account
 

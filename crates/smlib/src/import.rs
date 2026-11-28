@@ -251,8 +251,11 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         // parameterised on, whose range and trims these are (FACE_NURBS_FORM). A revolution
         // (SMLib has no class for one) is that form alone, a NURBS face. A ball patch is its form
         // too, as a NURBS face's block under its own kind, with its sphere as its definition.
-        let form_is_face =
-            f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. } | b::Surface::Blend { .. });
+        let form_is_face = f.nurbs.is_some()
+            && matches!(
+                f.surface,
+                b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. } | b::Surface::Blend { .. } | b::Surface::Sweep { .. }
+            );
         let spline = match (&f.nurbs, &f.surface) {
             (Some(n), b::Surface::BallPatch { center, radius }) => ball_patch(&mut a, n, *center, *radius, f.domain)?,
             (Some(n), _) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
@@ -466,6 +469,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
         b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
         b::Surface::Blend { .. } => return Err(Unsupported::Invalid("a blend without its NURBS form")),
+        b::Surface::Sweep { .. } => return Err(Unsupported::Invalid("a sweep without its NURBS form")),
     }
     Ok(false)
 }
@@ -754,13 +758,32 @@ impl crate::Brep {
                 _ => None,
             })
             .collect();
-        if faces.is_empty() {
+        let sweeps: Vec<(usize, &solidcore_record::brep::sweep::SweepDefinition)> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| match &f.surface {
+                b::Surface::Sweep { definition } => Some((i, definition.as_ref())),
+                _ => None,
+            })
+            .collect();
+        if faces.is_empty() && sweeps.is_empty() {
             return Ok(self);
         }
         if crate::core::counts(self.core())?[0] != record.faces.len() {
+            // A sweep's definition is only its label: a body whose faces the build changed (a
+            // healed record) goes on without them, as it did before records kept them.
+            if faces.is_empty() {
+                return Ok(self);
+            }
             return Err(crate::Error::Record(Unsupported::Invalid("the body built has another number of faces than its record")));
         }
-        crate::core::definition::adopt(self.core(), &faces)?;
+        if !faces.is_empty() {
+            crate::core::definition::adopt(self.core(), &faces)?;
+        }
+        if !sweeps.is_empty() {
+            crate::core::definition::adopt_sweeps(self.core(), &sweeps)?;
+        }
         Ok(self)
     }
 

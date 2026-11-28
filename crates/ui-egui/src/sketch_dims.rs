@@ -1137,7 +1137,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     }
                     // `Response::has_focus` is false while the window is not the focused one, which
                     // would drop a script's Enter (`ui.key`) sent from another window.
-                    any_focused |= ui.memory(|m| m.has_focus(r.id)) || r.lost_focus();
+                    any_focused |= ui.memory(|m| m.has_focus(r.id)) || r.has_focus() || r.lost_focus() || focus;
                     if has_focus && ui.is_sizing_pass() {
                         ui.ctx().data_mut(|d| d.insert_temp(refocus, Some(id)));
                     }
@@ -1163,7 +1163,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
-    (enter && (any_focused || nothing)).then_some(e)
+    let other_focused = ui.ctx().memory(|m| m.focused().is_some_and(|id| !(0..t.dims.len()).any(|i| id == egui::Id::unique(("sc_dim", i)))));
+    let eligible = any_focused || nothing || (!t.pts.is_empty() && !other_focused);
+    if enter && eligible {
+        let hover = t.hover.clone().or_else(|| t.pts.last().map(|(p, id)| (*p + Vec2::X, id.clone())));
+        hover.map(|h| shown(app, t, &h))
+    } else {
+        None
+    }
 }
 
 /// Place measured rectangle fields nearest their edge anchors, keeping the pointer and

@@ -342,10 +342,7 @@ fn input_only_command(id: &str) -> bool {
     )
 }
 
-/// Both the manifest and the user must approve a folder for the intended access.
-/// Writers retain the existing requirement that both read and write are approved.
-/// Whether a plugin run's scratch session `computed` changed what [`Session::accept_computed`]
-/// takes into `live`: the design, the sketch being edited, pending moves or what is shown (#22153).
+/// Whether a plugin changed the design, sketch being edited, pending moves or visibility.
 fn changed_by(live: &Session, computed: &Session) -> bool {
     !std::sync::Arc::ptr_eq(&live.doc, &computed.doc)
         || live.active_sketch != computed.active_sketch
@@ -356,6 +353,27 @@ fn changed_by(live: &Session, computed: &Session) -> bool {
         || live.visibility != computed.visibility
 }
 
+/// Publish a successful plugin transaction. Selection-only runs need a redraw and keep the live model.
+fn accept_plugin_session(live: &mut Session, computed: Session) -> Result<()> {
+    live.plugin_state.panels.clone_from(&computed.plugin_state.panels);
+    if changed_by(live, &computed) {
+        return live.accept_computed(computed);
+    }
+    if live.selection != computed.selection || live.selection_all_bodies != computed.selection_all_bodies {
+        live.selection = computed.selection;
+        live.selection_all_bodies = computed.selection_all_bodies;
+        live.refresh_display();
+    }
+    live.plugin_state.link_changes = computed.plugin_state.link_changes;
+    std::sync::Arc::make_mut(&mut live.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
+    for message in computed.log {
+        live.echo(message);
+    }
+    Ok(())
+}
+
+/// Both the manifest and the user must approve a folder for the intended access.
+/// Writers retain the existing requirement that both read and write are approved.
 fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
     granted
         .iter()
@@ -811,16 +829,7 @@ fn run_package(
         };
         let value = result?;
         session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
-        session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
-        if changed_by(session, &host.session) {
-            session.accept_computed(host.session)?;
-        } else {
-            session.plugin_state.link_changes = host.session.plugin_state.link_changes;
-            std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
-            for message in host.session.log {
-                session.echo(message);
-            }
-        }
+        accept_plugin_session(session, host.session)?;
         Ok(crate::schema::plugin::RunResult {
             result: value,
             forms: host.forms,
@@ -1157,20 +1166,9 @@ impl PluginHost for SolidCraftHost {
         computed.plugin_state.user.pending_user_settings = merged;
         computed.undo.clear();
         computed.redo.clear();
-        self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
-        if changed_by(&self.session, &computed) {
-            self.session
-                .accept_computed(computed)
-                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
-        } else {
-            self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
-            std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
-            for message in computed.log {
-                self.session.echo(message);
-            }
-        }
-        Ok(())
+        accept_plugin_session(&mut self.session, computed)
+            .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })
     }
     fn publish_committed(&mut self) -> craft_plugin::Result<()> {
         if let Some(data) = self.user_data.take() {

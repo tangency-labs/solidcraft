@@ -17,6 +17,7 @@ pub mod check_memo;
 pub mod content;
 pub mod context;
 pub(crate) mod expansion;
+pub mod extended_levels;
 pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;

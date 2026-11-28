@@ -448,7 +448,15 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
             CommandGroup {
                 label: "Faces",
-                ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
+                ids: &[
+                    "solid.press_pull",
+                    "solid.draft",
+                    "solid.offset_face",
+                    "solid.transform_face",
+                    "solid.replace_face",
+                    "solid.split_face",
+                    "face.delete",
+                ],
             },
             CommandGroup {
                 label: "Bodies",
@@ -531,7 +539,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &[
             "drawing.dimension",
             "drawing.dimension.from_model.planned",
-            "drawing.hole_callout",
+            "drawing.hole_callout.planned",
             "drawing.dimension.chain",
             "drawing.dimension.suggest",
         ],
@@ -955,7 +963,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.dimension", "Dimension"),
     ("drawing.dimension.from_model.planned", "Model Dims."),
     ("drawing.export", "Export"),
-    ("drawing.hole_callout", "Hole Callout"),
+    ("drawing.hole_callout.planned", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
@@ -2069,6 +2077,7 @@ mod tests {
                 "solid.press_pull",
                 "solid.draft",
                 "solid.offset_face",
+                "solid.transform_face",
                 "solid.replace_face",
                 "solid.split_face",
                 "face.delete",

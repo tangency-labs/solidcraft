@@ -7082,7 +7082,7 @@
   "ui.drawing_dimension_tool.overall": "部品の全体寸法(角を含む)",
   "ui.drawing_dimension_tool.overall_hint": "ダブルクリック: パネルの「部品の全体寸法」をオンにすると部品の全幅または全高になります",
   "ui.drawing_dimension_tool.pick": "図面ビューのエッジをクリックします。",
-  "ui.drawing_dimension_tool.place": "シートをクリックして寸法を配置します。",
+  "ui.drawing_dimension_tool.place": "シートをクリックするか Enter を押して寸法を配置します。",
   "ui.drawing_dimension_tool.refused": "ここには寸法を配置できません: {reason}",
   "ui.drawing_export.all_sheets": "すべてのシート",
   "ui.drawing_export.dxf": "DXF（線）",

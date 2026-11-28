@@ -241,6 +241,7 @@ use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
 use crate::error::{Result, SolidError};
 use crate::geom::interval_vector::{cross, dot, norm, square};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -1343,7 +1344,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
         return None;
     }
     // acos and asin within 2 ulps (the platform's): 8 u of the angle covers each
-    let by_cos = cos.lo.acos() * (1.0 + 8.0 * UNIT);
+    let by_cos = det::acos(cos.lo) * (1.0 + 8.0 * UNIT);
     // the sine form only where both lengths are proved positive; its argument is the upper
     // end of an outward-rounded quotient (so rounded up), clamped at 1 (asin 1 = pi / 2, no
     // tighter than the cosine's acute bound, which is then kept)
@@ -1352,7 +1353,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
         return Some(by_cos);
     }
     let sin = (norm(cross(d, b)) / (nd * nb)).hi.min(1.0);
-    let by_sin = sin.asin() * (1.0 + 8.0 * UNIT);
+    let by_sin = det::asin(sin) * (1.0 + 8.0 * UNIT);
     Some(by_sin.min(by_cos))
 }
 
@@ -1362,7 +1363,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
 fn obtuse_bound(p_lo: f64, q_lo: f64) -> Option<f64> {
     let bounded = p_lo > 0.0 && p_lo.is_finite() && q_lo <= 0.0 && q_lo.is_finite();
     // atan2 within 2 ulps (the platform's)
-    bounded.then(|| p_lo.atan2(q_lo) * (1.0 + 8.0 * UNIT))
+    bounded.then(|| det::atan2(p_lo, q_lo) * (1.0 + 8.0 * UNIT))
 }
 
 /// The bound on the angle between the nets' normals from enclosures of `P` and `Q` over a
@@ -1374,7 +1375,7 @@ fn box_bound(p: I3, q: Ivl) -> Option<f64> {
     }
     let ratio = norm(p) / q;
     // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The pieces between consecutive `breaks` of some length.
@@ -1414,7 +1415,7 @@ fn crossing_cut(s0: f64, s1: f64, at: f64) -> Option<f64> {
 /// An upper bound of the Lebesgue constant of `n` Chebyshev points, `1 + (2/pi) ln n`
 /// (module docs), rounded up.
 fn lebesgue(n: usize) -> f64 {
-    let bound = 1.0 + 2.0 / std::f64::consts::PI * (n as f64).ln();
+    let bound = 1.0 + 2.0 / std::f64::consts::PI * det::ln(n as f64);
     // ln within 2 ulps (4 u, the platform's), the quotient, product and sum: gamma_4 more,
     // under the 16 u taken
     bound * (1.0 + 16.0 * UNIT)
@@ -1500,7 +1501,7 @@ fn piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
     }
     let ratio = p_norm / floor;
     // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// A bound on the angle all over a piece where `Q` is bounded away from 0, from its enclosed
@@ -1546,7 +1547,7 @@ fn acute_piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
     // atan within 2 ulps (the platform's)
     tan.hi
         .is_finite()
-        .then(|| tan.hi.atan() * (1.0 + 8.0 * UNIT))
+        .then(|| det::atan(tan.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The bound the decision takes on the angle all over a piece: [`piece_bound`], or
@@ -1561,7 +1562,7 @@ fn chebyshev(s0: f64, s1: f64, n: usize) -> impl Iterator<Item = f64> {
     let (m, h) = (0.5 * (s0 + s1), 0.5 * (s1 - s0));
     (0..n).map(move |j| {
         let angle = (2 * j + 1) as f64 * std::f64::consts::PI / (2 * n) as f64;
-        m + h * angle.cos()
+        m + h * det::cos(angle)
     })
 }
 
@@ -1631,7 +1632,7 @@ impl Pair {
         let defined = norm(fa).is_positive() && norm(fc).is_positive();
         let angle_lo = defined.then(|| {
             // atan2(y, x) grows with y >= 0 and falls with x: its lower end at (|P|_lo, Q_hi)
-            let a = norm(p).lo.atan2(q.hi);
+            let a = det::atan2(norm(p).lo, q.hi);
             // atan2 within 2 ulps (the platform's)
             a - 8.0 * UNIT * a.abs()
         });
@@ -2963,7 +2964,7 @@ pub fn tube_regularity(
     let mut largest = None;
     if upper.is_finite() && upper > 0.0 {
         for j in (1..=8).rev() {
-            let r = upper * (1.0 - (-f64::from(j)).exp2());
+            let r = upper * (1.0 - det::exp2(-f64::from(j)));
             if r < d && matches!(tube_run(k, &cn, &pair, sigma, r, true)?, TubeRun::Regular) {
                 largest = Some(r);
                 break;
@@ -3370,7 +3371,7 @@ mod tests {
         let phi = 4.0_f64.to_radians();
         let place = Axis2Placement::new(
             Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
             Vec3::new(0.0, 1.0, 0.0),
         );
         crate::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
@@ -3592,12 +3593,12 @@ mod tests {
         let (eps, delta) = (1e-3_f64, 1e-9_f64);
         let w = |x: f64| Ivl::new(x - delta, x + delta);
         let d = [w(1.0), w(0.0), w(0.0)];
-        let b = [w(eps.cos()), w(eps.sin()), w(0.0)];
+        let b = [w(det::cos(eps)), w(det::sin(eps)), w(0.0)];
         let got = angle_between(d, b).expect("acute");
         assert!(got >= eps, "{got} below the true angle {eps}");
         assert!(got <= eps + 4.0 * delta + 1e-12, "{got}");
         let cos = dot(d, b) / (norm(d) * norm(b));
-        let by_cos = cos.lo.acos();
+        let by_cos = det::acos(cos.lo);
         assert!(by_cos > got, "the cosine form {by_cos} is the looser");
         assert!(angle_between([w(1.0), w(0.0), w(0.0)], [w(-1.0), w(0.0), w(0.0)]).is_none());
     }
@@ -3698,7 +3699,7 @@ mod tests {
                 Node {
                     p: i3([p, 0.0, 0.0]),
                     q: Ivl::from(1.0),
-                    angle_lo: Some(p.abs().atan2(1.0)),
+                    angle_lo: Some(det::atan2(p.abs(), 1.0)),
                 }
             })
             .collect();
@@ -3707,7 +3708,7 @@ mod tests {
             (at_points - std::f64::consts::FRAC_PI_4).abs() < 1e-12,
             "{at_points}"
         );
-        let between = (5.0_f64 / 3.0).atan();
+        let between = det::atan(5.0_f64 / 3.0);
         let bound = piece_bound(&nodes, lebesgue(n), 0.0).unwrap();
         assert!(bound >= between, "{bound} under {between}");
         assert!(bound > 50.0_f64.to_radians(), "{bound}");
@@ -3715,7 +3716,7 @@ mod tests {
         // atan(L) with the bound's own factors: L's 16 u (atan grows by at most its argument's
         // relative change), the atan's 8 u and the interval quotient's outward rounding, under
         // 32 u; 64 u takes it
-        let most = lebesgue(n).atan() * (1.0 + 64.0 * UNIT);
+        let most = det::atan(lebesgue(n)) * (1.0 + 64.0 * UNIT);
         assert!(bound <= most, "{bound} over {most}");
     }
 
@@ -3736,7 +3737,7 @@ mod tests {
         let eta = 0.05;
         let room = 1.0 - lam * eta;
         let (p_norm, q_norm) = (lam / room, lam / room);
-        let want = (p_norm / (1.0 - lam * eta * q_norm)).atan();
+        let want = det::atan(p_norm / (1.0 - lam * eta * q_norm));
         let got = piece_bound(&nodes, lam, eta).unwrap();
         assert!(
             got >= want && got <= want * (1.0 + 1e-12),
@@ -3760,7 +3761,7 @@ mod tests {
             })
             .collect();
         let floor = 1.1875 - lam * 0.1875;
-        let want = (lam * 0.1 / floor).atan();
+        let want = det::atan(lam * 0.1 / floor);
         let got = piece_bound(&nodes, lam, 0.0).unwrap();
         assert!((got - want).abs() <= 1e-12 * want, "{got} vs {want}");
     }
@@ -3873,7 +3874,7 @@ mod tests {
             let room = 1.0 - lam * eta;
             let under = lam * (0.25 + eta * lam * 0.5 / room) - 0.25;
             let e_lo = 1.0 - lam * (eta * lam / room);
-            let want = 1.0_f64.atan2(-(1.0 + under / e_lo));
+            let want = det::atan2(1.0_f64, -(1.0 + under / e_lo));
             let got = bound(eta);
             assert!(
                 got >= want && got <= want * (1.0 + 1e-12),
@@ -3899,11 +3900,11 @@ mod tests {
                 angle_lo: None,
             })
             .collect();
-        let between = (1.0_f64 / 3.0).atan2(-1.0);
+        let between = det::atan2(1.0_f64 / 3.0, -1.0);
         assert!(between > 0.75 * std::f64::consts::PI + 0.4);
         let bound = piece_bound(&nodes, lam, 0.0).unwrap();
         assert!(bound >= between, "{bound} under {between}");
-        let floor = (2.0 - lam).atan2(-1.0);
+        let floor = det::atan2(2.0 - lam, -1.0);
         assert!((bound - floor).abs() <= 1e-12, "{bound} against {floor}");
     }
 
@@ -3954,7 +3955,7 @@ mod tests {
                 .fold(Ivl::from(0.0), |v, &x| v * Ivl::from(t) + Ivl::from(x))
         };
         let angle_lo = |p: I3, q: Ivl| {
-            let a = norm(p).lo.atan2(q.hi);
+            let a = det::atan2(norm(p).lo, q.hi);
             a - 8.0 * UNIT * a.abs()
         };
         let (mut obtuse, mut between, mut acute, mut tighter) = (0, 0, 0, 0);
@@ -4038,7 +4039,7 @@ mod tests {
         let mut seen = 0;
         for (mut b, want, overs) in [
             (cylinder, FRAC_PI_2, [1e-9, 1e-6, 1e-3]),
-            (frustum, (-0.6_f64).acos(), [1e-6, 1e-4, 1e-2]),
+            (frustum, det::acos(-0.6_f64), [1e-6, 1e-4, 1e-2]),
         ] {
             for e in get_edges(&b).unwrap() {
                 let below = tangent_all_along(&k, &mut b, e, want - 1e-9).unwrap();
@@ -4071,7 +4072,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn p_and_q_in_proportion_are_bounded_by_their_acute_angle() {
-        let want = 0.5_f64.atan();
+        let want = det::atan(0.5_f64);
         for n in [2, 3, 11] {
             let lam = lebesgue(n);
             for eta in [0.0, 0.01] {
@@ -4082,7 +4083,7 @@ mod tests {
                     "{n} {eta}: {got} vs {want}"
                 );
                 let alone = piece_bound(&nodes, lam, eta).unwrap();
-                assert!(alone >= (0.5 * lam).atan(), "{n} {eta}: {alone}");
+                assert!(alone >= det::atan(0.5 * lam), "{n} {eta}: {alone}");
             }
         }
     }
@@ -4107,10 +4108,10 @@ mod tests {
         for eta in [0.0, 0.01] {
             let room = 1.0 - lam * eta;
             let r = lam * a * 0.75_f64.sqrt() / room / (1.0 - lam * eta * lam / room);
-            let want = (1.0 + r * r).sqrt().atan();
+            let want = det::atan((1.0 + r * r).sqrt());
             let got = part_bound(&nodes, lam, eta).unwrap();
             assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
-            assert!(got >= (1.0 + a * a).sqrt().atan());
+            assert!(got >= det::atan((1.0 + a * a).sqrt()));
         }
     }
 
@@ -4133,10 +4134,10 @@ mod tests {
         for eta in [0.0, 0.01] {
             let room = 1.0 - lam * eta;
             let against = 0.275 + lam * (0.375 + eta * lam * 0.65 / room);
-            let want = (against / (1.0 - lam * eta * lam / room)).atan();
+            let want = det::atan(against / (1.0 - lam * eta * lam / room));
             let got = part_bound(&nodes, lam, eta).unwrap();
             assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
-            assert!(got >= 0.9_f64.atan(), "{eta}: {got}");
+            assert!(got >= det::atan(0.9_f64), "{eta}: {got}");
         }
     }
 
@@ -4157,7 +4158,7 @@ mod tests {
             let room = 1.0 - lam * eta;
             let under = lam * (0.25 + eta * lam * 0.5 / room) - 0.25;
             let q_lo = 1.5 - lam * (0.5 + eta * lam * 2.0 / room);
-            let want = (0.5 + under / q_lo).atan();
+            let want = det::atan(0.5 + under / q_lo);
             let got = bound(eta);
             assert!(
                 got >= want && got <= want * (1.0 + 1e-12),
@@ -4195,7 +4196,7 @@ mod tests {
         use crate::primitive::api_primitives::create_cone;
         use crate::query::api_queries::{edge_closest_point, get_edges};
         let half = 0.5_f64.to_radians();
-        let steep = 0.6_f64.acos();
+        let steep = det::acos(0.6_f64);
         let mut k = Kernel::default();
         // (the true angle, the angle asked)
         let mut rows: Vec<(f64, f64)> = [0.25_f64, 0.3, 0.4, 0.49, 0.499]
@@ -4203,7 +4204,7 @@ mod tests {
             .to_vec();
         rows.extend([1e-1, 1e-2, 1e-4].map(|over| (steep, steep + over)));
         for (angle, asked) in rows {
-            let h = 3.0 * angle.tan();
+            let h = 3.0 * det::tan(angle);
             let o = Point3::new(0.0, 0.0, 0.0);
             let mut b = create_cone(&mut k, o, 5.0, 2.0, h).unwrap();
             let top = Point3::new(0.0, 2.0, h);
@@ -4300,9 +4301,9 @@ mod g2_tests {
         let i3 = |v: [f64; 3]| v.map(Ivl::from);
         let st = Starred {
             s: [
-                i3([-r * u.sin(), r * u.cos(), 0.0]),
+                i3([-r * det::sin(u), r * det::cos(u), 0.0]),
                 i3([0.0, 0.0, 1.0]),
-                i3([-r * u.cos(), -r * u.sin(), 0.0]),
+                i3([-r * det::cos(u), -r * det::sin(u), 0.0]),
                 i3([0.0; 3]),
                 i3([0.0; 3]),
             ],

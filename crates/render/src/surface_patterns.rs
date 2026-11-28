@@ -211,7 +211,9 @@ impl PreparedEffect {
             .with_metal_energy_compensation(surface.metal_energy_compensation());
             // GPU2 shares this surface type. Changing the substrate roughness
             // must retain an already captured coat for direct-light evaluation.
-            surface.clear_coat().map_or(changed, |coat| changed.with_clear_coat(coat))
+            let changed = surface.clear_coat().map_or(changed, |coat| changed.with_clear_coat(coat));
+            // The flakes sit in the paint under the coat; a rougher base keeps them.
+            surface.flakes().map_or(changed, |flakes| changed.with_flakes(flakes))
         };
         Ok(ShadingSurface { surface, shading_normal: changed })
     }

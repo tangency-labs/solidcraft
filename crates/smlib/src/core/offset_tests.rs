@@ -24,12 +24,33 @@ use crate::{BooleanOp, Error};
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Stress corpus S0790 (#18802): the rim hole leaves a 0.00002 mm web at the
-/// frustum's top. Inward shelling preserves that web. Moving the drill to x = 8.8
-/// makes its rim touch the top boundary at (10, 0, 50), which keeps the diagnosed
-/// outline-touch refusal and its nested kernel cause (#18568).
 #[test]
-fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
+fn transform_face_maps_a_reordered_pick_and_preserves_its_original_tag() {
+    let body = super::history::tag(&make_box([0.; 3], [10.; 3]).unwrap(), 0).unwrap();
+    let pick = |b: &Body, point| solidcore_ops::pick::faces(b, &[point], 1e-6).unwrap().unwrap()[0];
+    let top = [5., 5., 10.];
+    let floor = [5., 5., 0.];
+    let (top_tag, floor_tag) = (pick(&body, top), pick(&body, floor));
+    {
+        let mut b = body.kernel();
+        let reversed = b.face_list().iter().rev().copied().collect();
+        b.set_face_list(reversed).unwrap();
+    }
+    let selected = pick(&body, top);
+    assert_ne!(selected, top_tag, "a pick in the new order must not be used as a history tag");
+    let (raised, changed) = super::offset::transform_face(&body, selected, [0., 0., 2.], top, [0., 0., 1.], 0.).unwrap();
+    assert!(changed);
+    let history = super::history::read(&raised).unwrap();
+    assert_eq!(history.faces[pick(&raised, [5., 5., 12.])].origins, [(0, top_tag)]);
+    assert_eq!(history.faces[pick(&raised, floor)].origins, [(0, floor_tag)]);
+}
+
+/// Stress corpus S0790 (#18802): the rim hole leaves a 0.00002 mm web at the
+/// frustum's top. Inward shelling preserves that web. Moved to x = 8.8, the drill's
+/// rim touches the top boundary at (10, 0, 50), and the shell builds the same hollow
+/// (#22791; refused as an outline touching itself before, #18568).
+#[test]
+fn shell_of_a_drilled_frustum_builds_with_or_without_its_web() {
     let shelled = |x| {
         timed("S0790", move || {
             let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
@@ -68,13 +89,16 @@ fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
     let got = volume(&body, 1e-8).unwrap();
     assert!(rel(got, want) < 1e-9, "volume {got}, independently derived {want}");
 
-    let error = shelled(8.8).expect_err("the hole actually touches the top outline");
-    let words = error.to_string();
-    let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
-    assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
-    assert!(!words.contains("upstream status"), "{words}");
-    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
-    eprintln!("{words}");
+    // 8.8 from the axis the eccentric hole touches the top's rim (r 10) at (10, 0, 50), so the
+    // top's outline touches itself there (#22791). It shells to the same sections with the
+    // hole's centre at 8.8: 9243.77979518797.
+    let body = shelled(8.8).expect("the hole touching the top's outline shells");
+    let check = super::check(&body, crate::check::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    assert_eq!(super::solid_count(&body).unwrap(), 1);
+    let want = 9243.77979518797;
+    let got = volume(&body, 1e-8).unwrap();
+    assert!(rel(got, want) < 1e-9, "volume {got}, independently derived {want}");
 }
 
 #[test]

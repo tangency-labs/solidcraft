@@ -99,7 +99,6 @@ quote = { workspace = true }
 solidcraft-window-gpu = { workspace = true }
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 fontdb = { workspace = true }
-lopdf = { version = "0.45", default-features = false }
 # Waits for wgpu error scopes when a plugin background effect is built.
 pollster = { workspace = true }
 

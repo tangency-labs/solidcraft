@@ -379,7 +379,7 @@ impl JsonSchema for CoilAxis {
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, a flat end face (`{face: [x, y, z]}`: the coil starts at its centre and grows along its outward normal), or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [{
                 "type": "object",
                 "properties": {
@@ -422,7 +422,7 @@ impl JsonSchema for CameraParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A camera orbiting a target point, as the view commands give it back. Angles are in radians, measured in the frame of the up axis.",
+            "description": "A camera orbiting a target point, as the view commands give it back. Angles are in radians, about the design frame in `frame` when there is one, else about the up axis.",
             "type": "object",
             "properties": {
                 "target": {"description": "The point the camera looks at, in mm: [x, y, z].", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
@@ -431,7 +431,8 @@ impl JsonSchema for CameraParam {
                 "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
                 "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI, "default": 0.0},
-                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
+                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"},
+                "frame": {"description": "The design's own frame the angles are in (#6455): {front, top}, two world axes at right angles. Omitted or null: the up axis. A frame that is not two principal axes at right angles reads as none.", "type": ["object", "null"]}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -759,9 +760,9 @@ keyword_param!(
     /// `solid.coil`'s `section`.
     CoilSectionParam,
     "section",
-    &["circular", "circle", "square"],
-    "circular or square",
-    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+    &["circular", "circle", "square", "triangle", "triangular"],
+    "circular, square or triangle",
+    "The shape swept along the helix: circular (the default; circle is an alias), square, or triangle (triangular is an alias): an equilateral triangle pointing at the axis, for a thread-like groove or thread. Any case."
 );
 keyword_param!(
     /// `solid.coil`'s `section_position`.
@@ -831,9 +832,9 @@ keyword_param!(
     /// `solid.fillet`'s `fit`.
     FilletFitParam,
     "fit",
-    &["exact", "reduce", "taper"],
-    "exact, reduce or taper",
-    "What a radius too large for the geometry around the edges does: exact (the default) refuses it naming the largest that fits, reduce reduces it where it doesn't fit, taper follows the room along straight edges between planar faces. reduce and taper take type: constant. Matching ignores case."
+    &["exact", "reduce", "taper", "keep_edge"],
+    "exact, reduce, taper or keep_edge",
+    "What a radius too large for the geometry around the edges does: exact (the default) refuses it naming the largest that fits, reduce reduces it where it doesn't fit, taper follows the room along straight edges between planar faces, keep_edge rounds a concave edge whose wall is lower than the radius with a round tangent to the floor only that ends on the wall's top edge (the top face and its edge stay as they are; the wall must be flat with a straight top edge parallel to the edge, its ends square to the edge or upright faces bounding the floor; other edges are rounded as usual). reduce, taper and keep_edge take type: constant. Matching ignores case."
 );
 keyword_param!(
     /// `solid.fillet`'s `corner`.

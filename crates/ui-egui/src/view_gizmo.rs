@@ -825,7 +825,12 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Custom", "", "Set Current View as Home", "Reset Home View"], "the two types, then Home");
+            // Test change: Set as (#6455) and its separator now open the navigator's menu.
+            assert_eq!(
+                labels,
+                ["Set as", "", "Axes", "Custom", "", "Set Current View as Home", "Reset Home View"],
+                "Set as, the two types, then Home"
+            );
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));

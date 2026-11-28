@@ -1882,6 +1882,18 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
     assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // The completed record is the kernel's own, so it is not held to the item cap for input:
+    // the budget is the file's, set where the file is read. A record past that cap may still
+    // disagree with its geometry, but its size is not the reason it is refused.
+    let mut large = completed.clone();
+    large.edges[0].curve = Curve::Polyline {
+        points: (0..solidcore_record::brep::MAX_ITEMS)
+            .map(|i| [i as f64 * 1e-6, 0., 0.])
+            .collect(),
+    };
+    assert_eq!(large.validate().map_err(|e| e.0), Err("item budget"));
+    let why = crate::pcurve::import_check_failure(&large).unwrap_or_default();
+    assert!(!why.contains("the completed record is invalid"), "{why}");
     // A completion that leaves a trim over only the first half of its edge's interval, as
     // rebuilding a split edge's trim by sampling did for a real model, is refused by the
     // record's validity check, so the import keeps the record it had.

@@ -104,48 +104,87 @@ fn crash_card_has_no_horizontal_bar_but_long_reports_still_scroll_vertically() {
             for long in [false, true] {
                 let mut h = setup(dark, ppp);
                 let folder = h.dir.join("crashes");
-                for (id, message) in [
-                    (REPORT, "The radius produced a degenerate face while rebuilding Fillet2.".to_owned()),
-                    ("20261017-210412-bb60791ed6692f1d", "Long report line.\n".repeat(800)),
-                ]
-                .into_iter()
-                .take(if long { 2 } else { 1 })
-                {
-                    std::fs::create_dir_all(folder.join(id)).unwrap();
-                    std::fs::write(folder.join(id).join("report.json"), json!({"format":"solidcraft-crash/1", "id":id, "kind":"command_panic", "count":3,
-                        "first_seen":"2026-10-18T21:04:12Z", "message":message,"command":{"command":"solid.fillet","params":{"radius":2}}, "backtrace":[], "app":{"version":"0.16.1"}, "system":{}}).to_string()).unwrap();
+                // Diagnostic previews are bounded now. Overflow comes from several cards,
+                // including one with a long line and hundreds of diagnostic lines.
+                for index in 0..if long { 12 } else { 1 } {
+                    let id = if index == 0 { REPORT.to_owned() } else { format!("202610{:02}-210412-bb60791ed6692f1d", 18 - index) };
+                    let message = if long && index == 0 {
+                        format!("{}\n{}", "Long report line. ".repeat(100), "Diagnostic frame.\n".repeat(800))
+                    } else {
+                        "The radius produced a degenerate face while rebuilding Fillet2.".to_owned()
+                    };
+                    std::fs::create_dir_all(folder.join(&id)).unwrap();
+                    std::fs::write(
+                        folder.join(&id).join("report.json"),
+                        json!({"format":"solidcraft-crash/1", "id":id, "kind":"command_panic", "count":3,
+                            "first_seen":format!("2026-10-{:02}T21:04:12Z", 18 - index), "message":message,
+                            "command":{"command":"solid.fillet","params":{"radius":2}}, "backtrace":[],
+                            "app":{"version":"0.16.1"}, "system":{}})
+                        .to_string(),
+                    )
+                    .unwrap();
                 }
                 h.app.crashes.folder = Some(folder);
                 h.call("ui.help", json!({"item":"crashes"}));
-                let (image, _) = capture(&mut h, &format!("crash-{dark}-{ppp}x-long-{long}"));
-                let viewport = scenario::rect_of("dialog:list:reports:viewport")
-                    .unwrap()
-                    .intersect(scenario::rect_of("dialog:list:reports").unwrap().shrink(1.0));
-                let message = scenario::rect_of(&format!("dialog:report:message:{REPORT}")).unwrap();
-                let below = Rect::from_min_max(
-                    pos2(viewport.left() + 2.0, message.bottom() + 1.0),
-                    pos2(viewport.right() - 12.0, (message.bottom() + 20.0).min(viewport.bottom())),
-                );
-                let divider = scenario::rect_of(&format!("dialog:divider:end:{REPORT}"));
-                if long {
-                    // A divider separates reports only; it is a full-width hairline.
-                    let divider = divider.unwrap();
-                    let frame = scenario::rect_of("dialog:list:reports").unwrap();
-                    assert!((divider.left() - frame.left() - 1.0).abs() <= 1.0 / ppp);
-                    assert!((frame.right() - divider.right() - 1.0).abs() <= 1.0 / ppp);
-                    assert_eq!(divider.height(), 1.0);
-                } else {
-                    assert!(divider.is_none(), "no divider after the last report");
+                for expanded in [false, true] {
+                    if expanded {
+                        h.step(&json!({"click":{"handle":format!("dialog:card:{REPORT}:toggle")}})).unwrap();
+                    }
+                    let (image, out) = capture(&mut h, &format!("crash-{dark}-{ppp}x-expanded-{expanded}-long-{long}"));
+                    let viewport = scenario::rect_of("dialog:list:reports:viewport").unwrap();
+                    let card = scenario::rect_of(&format!("dialog:card:{REPORT}")).unwrap();
+                    let toggle = scenario::rect_of(&format!("dialog:card:{REPORT}:toggle")).unwrap();
+                    let t = Tokens::get();
+                    assert!(card.left() >= viewport.left() - 1.0 && card.right() <= viewport.right() + 1.0);
+                    assert!(scenario::count_of("dialog:list:reports:content_width").unwrap() <= f64::from(viewport.width().ceil()));
+                    for action in ["report", "delete"] {
+                        let rect = scenario::rect_of(&format!("dialog:card:{REPORT}:{action}")).unwrap();
+                        assert!(card.contains_rect(rect));
+                        assert!(!toggle.intersects(rect), "actions stay outside the disclosure target");
+                    }
+                    if expanded {
+                        for field in ["version", "command", "code", "copy", "copy_details"] {
+                            assert!(card.contains_rect(scenario::rect_of(&format!("dialog:card:{REPORT}:{field}")).unwrap()), "{field}");
+                        }
+                        let code = scenario::rect_of(&format!("dialog:card:{REPORT}:code")).unwrap();
+                        assert!(code.height() < t.control_height * 3.0, "long diagnostics stay a bounded preview");
+                    } else {
+                        assert!(scenario::rect_of(&format!("dialog:card:{REPORT}:code")).is_none());
+                        assert!(card.height() < t.control_height * 2.0, "collapsed cards stay compact");
+                    }
+                    if long {
+                        let next = scenario::rect_of("dialog:card:20261017-210412-bb60791ed6692f1d").unwrap();
+                        assert!((next.top() - card.bottom() - t.space_8).abs() <= 1.0);
+                    }
+                    // Check the scrollbar primitive rather than glyph pixels in the new
+                    // summary's second line: labels and action icons may also use form_ink.
+                    assert!(
+                        !out.shapes.iter().any(|shape| matches!(&shape.shape,
+                            egui::Shape::Rect(rect) if rect.fill == t.form_ink
+                                && viewport.intersects(rect.rect) && rect.rect.width() > rect.rect.height()
+                                && rect.rect.width() > t.control_height
+                        )),
+                        "no horizontal scrollbar: dark={dark}, ppp={ppp}, long={long}, expanded={expanded}"
+                    );
+                    let right =
+                        Rect::from_min_max(pos2(viewport.right() - 4.0, viewport.top() + 2.0), pos2(viewport.right(), viewport.bottom() - 2.0));
+                    let bar_pixels = crop(&image, right, ppp).pixels().filter(|p| p.0 == t.form_ink.to_array()).count();
+                    assert_eq!(
+                        bar_pixels > 0,
+                        long,
+                        "vertical scrollbar pixels: {bar_pixels}, long={long}, dark={dark}, ppp={ppp}, expanded={expanded}"
+                    );
+                    if expanded {
+                        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-120}));
+                        h.frames(30);
+                        let moved = scenario::rect_of(&format!("dialog:card:{REPORT}")).unwrap();
+                        if long {
+                            assert!(moved.top() < card.top() - 1.0, "the card list responds to vertical scrolling");
+                        } else {
+                            assert!((moved.top() - card.top()).abs() <= 1.0, "a fitting card does not scroll");
+                        }
+                    }
                 }
-                let bar = Tokens::get().form_ink.to_array();
-                assert_eq!(
-                    crop(&image, below, ppp).pixels().filter(|p| p.0 == bar).count(),
-                    0,
-                    "no scrollbar pixels below the message: dark={dark}, ppp={ppp}, long={long}"
-                );
-                let right = Rect::from_min_max(pos2(viewport.right() - 4.0, viewport.top() + 2.0), pos2(viewport.right(), viewport.bottom() - 2.0));
-                let bar_pixels = crop(&image, right, ppp).pixels().filter(|p| p.0 == bar).count();
-                assert_eq!(bar_pixels > 0, long, "vertical scrollbar pixels: {bar_pixels}, long={long}, dark={dark}, ppp={ppp}");
             }
         }
     }

@@ -54,6 +54,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent3d::Extent3d;
+use crate::math::det;
 use crate::nurbs::math::gamma;
 use crate::surface::surface::p8::{balls_agree, coaxial_cones_agree, tori_agree};
 use crate::Vec3;
@@ -252,7 +253,7 @@ fn kind(s: &Analytic, tol: f64) -> Result<Kind> {
                     "a cone's half-angle of a right angle or more",
                 ));
             }
-            Kind::Cone(line(apex, axis)?, 0.0, half_angle.tan())
+            Kind::Cone(line(apex, axis)?, 0.0, det::tan(half_angle))
         }
         Analytic::Sphere { centre, radius } => Kind::Ball(at(centre)?, num(radius)?),
         Analytic::Torus {
@@ -454,7 +455,7 @@ mod tests {
             &region
         ));
         // a half-angle whose tangent is 1e-7 larger: radii 1e-6 apart at the box's ends
-        let k = (half.tan() + 1e-7).atan();
+        let k = det::atan(det::tan(half) + 1e-7);
         let wider = cone(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), k);
         assert!(same(c, wider, 1.01e-6, &region));
         assert!(!same(c, wider, 0.99e-6, &region));

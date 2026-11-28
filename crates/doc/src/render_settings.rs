@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_render::{BackendId, RenderFormat, RenderLimits, RenderMode};
-use solidcraft_viewport::{Camera, UpAxis};
+use solidcraft_viewport::{Camera, UpAxis, ViewFrame};
 
 pub use crate::render_job::{CpuJob, GpuJob, RenderJob, SkyEnvironment};
 use crate::{DocError, Result};
@@ -63,6 +63,8 @@ struct SavedCamera {
     fov: f64,
     #[serde(default)]
     up: UpAxis,
+    #[serde(default, deserialize_with = "solidcraft_viewport::frame_or_none")]
+    frame: Option<ViewFrame>,
 }
 
 impl Default for RenderSetup {
@@ -1310,7 +1312,7 @@ mod saved_coat_tests {
             let old_value: Value = serde_json::from_str(&old).unwrap();
             assert!(old_value["render"]["setups"]["Coated"].get("coats").is_none());
             assert_eq!(Document::from_json(&old).unwrap().to_json(), old);
-            let coat = CoatMaterial { weight: -0.0, roughness: 0.22, ior: 1.74 };
+            let coat = CoatMaterial { weight: -0.0, roughness: 0.22, ior: 1.74, flakes: None };
             Arc::make_mut(&mut doc.render).setups.get_mut("Coated").unwrap().coats.set(SavedCoat { target: target(1), coat }, false).unwrap();
             let encoded = doc.to_json();
             let loaded = Document::from_json(&encoded).unwrap();
@@ -1329,6 +1331,54 @@ mod saved_coat_tests {
             assert!(setup.coats.remove(&target(1)));
             assert_eq!(doc.to_json(), old, "removing the only coat restores exact legacy document bytes");
         }
+    }
+    #[test]
+    fn saved_coat_flakes_roundtrip_refuse_bad_numbers_and_leave_flakeless_coats_unchanged() {
+        use crate::render_coat::FlakeMaterial;
+        let mut doc = document(true);
+        Arc::make_mut(&mut doc.render)
+            .setups
+            .get_mut("Coated")
+            .unwrap()
+            .coats
+            .set(SavedCoat { target: target(1), coat: Default::default() }, false)
+            .unwrap();
+        let plain = doc.to_json();
+        let plain_value: Value = serde_json::from_str(&plain).unwrap();
+        assert!(plain_value["render"]["setups"]["Coated"]["coats"][0]["coat"].get("flakes").is_none(), "a coat without flakes saves as before");
+        let flakes = FlakeMaterial { coverage: 0.35, size_mm: 0.08, spread: 0.6, depth: 0.25, color: [240, 220, 200], metallic: 1.0, roughness: 0.2 };
+        let coat = CoatMaterial { flakes: Some(flakes), ..Default::default() };
+        Arc::make_mut(&mut doc.render).setups.get_mut("Coated").unwrap().coats.set(SavedCoat { target: target(1), coat }, true).unwrap();
+        let encoded = doc.to_json();
+        let loaded = Document::from_json(&encoded).unwrap();
+        assert_eq!(loaded.render.setups["Coated"].coats.iter().next().unwrap().coat, coat);
+        let layer = coat.flake_layer().unwrap().unwrap();
+        assert!((layer.coverage() - 0.35).abs() < 1e-4 && (layer.size_mm() - 0.08).abs() < 1e-6);
+        assert_eq!(CoatMaterial { flakes: Some(FlakeMaterial { coverage: 0.0, ..flakes }), ..coat }.flake_layer().unwrap(), None);
+        let base: Value = serde_json::from_str(&encoded).unwrap();
+        for (key, value) in [
+            ("coverage", json!(1.01)),
+            ("size_mm", json!(0.001)),
+            ("size_mm", json!(10.5)),
+            ("spread", json!(-0.1)),
+            ("depth", json!(2)),
+            ("metallic", json!(1.5)),
+            ("roughness", json!(0.01)),
+            ("color", json!([300, 0, 0])),
+            ("unknown", json!(true)),
+        ] {
+            let mut bad = base.clone();
+            bad["render"]["setups"]["Coated"]["coats"][0]["coat"]["flakes"][key] = value;
+            assert!(Document::from_json(&bad.to_string()).is_err(), "invalid flake {key}");
+        }
+        Arc::make_mut(&mut doc.render)
+            .setups
+            .get_mut("Coated")
+            .unwrap()
+            .coats
+            .set(SavedCoat { target: target(1), coat: Default::default() }, true)
+            .unwrap();
+        assert_eq!(doc.to_json(), plain, "removing the flakes restores the coat's earlier bytes");
     }
     #[test]
     fn malformed_saved_coats_refuse_through_the_full_document_loader() {

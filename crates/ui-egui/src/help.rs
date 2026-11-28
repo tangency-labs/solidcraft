@@ -6,7 +6,6 @@
 use crate::SolveApp;
 use crate::ui_kit;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{Container, Surface};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("SOLIDCRAFT_COMMIT");
@@ -144,62 +143,45 @@ fn connect(app: &mut SolveApp, ctx: &egui::Context) {
 /// The Help menu under the ? button, and the About window.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
-        let mut pick: Option<&str> = None;
-        let mut plugin_picked = false;
-        let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::unique("sc_help_menu"))
-            .fixed_pos(anchor)
-            .constrain(true)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                crate::ui_kit::menu::menu_frame(ui, |ui| {
-                    for (id, label, icon) in [
-                        ("docs", "Documentation", "library"),
-                        ("about", "About SolidCraft", "help"),
-                        ("updates", solidcraft_ui_text::tr("update.check_for_updates"), "update"),
-                        ("shortcuts", "Keyboard Shortcuts", "list"),
-                        ("messages", "Messages…", "list"),
-                        ("report", "Report an Issue…", "bug_report"),
-                        ("crashes", "Crash Reports…", "status_error"),
-                        ("connect", "Connect AI assistants…", "settings"),
-                        ("install_cli", "Install solidcraft-cli command", "settings"),
-                    ]
-                    .into_iter()
-                    .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
-                    {
-                        let item = crate::ui_kit::Item::action(id, label, icon).on_if(available(app, id));
-                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
-                            pick = Some(id);
-                        }
-                        // A layout without the version in the application bar lists it here.
-                        if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
-                            let label = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
-                            if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
-                                pick = Some("version");
-                            }
-                        }
-                    }
-                    // Support and community: always here, whether or not the status bar shows their buttons.
-                    crate::ui_kit::Menu::separator(ui);
-                    for link in crate::links::LINKS {
-                        let item = crate::ui_kit::Item::action(link.id, solidcraft_ui_text::tr(link.menu), link.icon);
-                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
-                            pick = Some(link.id);
-                        }
-                    }
-
-                    plugin_picked = crate::plugin_slots::menu_rows(app, ui, "Help");
-                })
-            });
-        if plugin_picked {
+        use crate::ui_kit::{Item, Menu, MenuAnchor};
+        let mut items = Vec::new();
+        for (id, label, icon) in [
+            ("docs", "Documentation", "library"),
+            ("about", "About SolidCraft", "help"),
+            ("updates", solidcraft_ui_text::tr("update.check_for_updates"), "update"),
+            ("shortcuts", "Keyboard Shortcuts", "list"),
+            ("messages", "Messages…", "list"),
+            ("report", "Report an Issue…", "bug_report"),
+            ("crashes", "Crash Reports…", "status_error"),
+            ("connect", "Connect AI assistants…", "settings"),
+            ("install_cli", "Install solidcraft-cli command", "settings"),
+        ]
+        .into_iter()
+        .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
+        {
+            items.push(Item::action(id, label, icon).on_if(available(app, id)));
+            if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
+                let label = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
+                items.push(Item::action("version", &label, "update"));
+            }
+        }
+        items.push(Item::sep());
+        items.extend(crate::links::LINKS.iter().map(|link| Item::action(link.id, solidcraft_ui_text::tr(link.menu), link.icon)));
+        let plugins = crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("Help"));
+        if !plugins.is_empty() {
+            items.push(Item::sep());
+        }
+        items.extend(plugins.iter().map(|entry| Item::action(&entry.command, &entry.label, &entry.icon)));
+        let just_opened = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_help_opened")).unwrap_or(false));
+        let out = Menu::popup(ctx, egui::Id::unique("sc_help_menu"), MenuAnchor::Point(anchor), &items, just_opened);
+        if out.close {
             app.help.menu = false;
         }
-        if let Some(p) = pick {
-            run(app, ctx, p);
-        } else if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer() {
-            // Pressed elsewhere (the ? button toggles it itself).
-            if !ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_help_opened")).unwrap_or(false)) {
-                app.help.menu = false;
+        if let Some(picked) = out.picked {
+            if plugins.iter().any(|entry| entry.command == picked.id) {
+                crate::plugin_slots::begin(app, &picked.id);
+            } else {
+                run(app, ctx, &picked.id);
             }
         }
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_help_opened"), false));

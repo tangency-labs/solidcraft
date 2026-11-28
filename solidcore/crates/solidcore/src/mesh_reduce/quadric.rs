@@ -12,6 +12,8 @@
 //! offsets and the expanded polynomial. It cannot recover precision already
 //! lost in the input coordinates. The score is a heuristic, not an error bound.
 
+use crate::math::det;
+
 /// The upper triangle of the symmetric homogeneous error matrix, in the
 /// order xx, xy, xz, xw, yy, yz, yw, zz, zw, ww.
 #[derive(Clone, Copy, Debug, Default)]
@@ -30,7 +32,7 @@ impl Quadric {
         let [ux, uy, uz] = [bx - ax, by - ay, bz - az];
         let [vx, vy, vz] = [cx - ax, cy - ay, cz - az];
         let [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
-        let length = nx.hypot(ny).hypot(nz);
+        let length = det::hypot(det::hypot(nx, ny), nz);
         let area = length * 0.5;
         if !length.is_finite() || !area.is_normal() {
             return None;
