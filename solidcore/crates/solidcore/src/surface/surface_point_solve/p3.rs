@@ -271,7 +271,7 @@ impl SurfPtSolveStepper<'_> {
     pub fn leave_saddle(&mut self, k: &Kernel) -> Result<bool> {
         let tight = self.base.tight_tol();
         let distance = self.gap_length()?;
-        if !(distance > tight) {
+        if distance.is_nan() || distance <= tight {
             return Ok(false);
         }
         let g = self.gap()?;
@@ -283,7 +283,7 @@ impl SurfPtSolveStepper<'_> {
         // the smaller eigenvalue of [[a, b], [b, c]] and its eigenvector, the longer of the
         // two rows of the matrix less it, turned a quarter
         let low = 0.5 * (a + c) - (0.25 * (a - c) * (a - c) + b * b).sqrt();
-        if !(low < 0.0) {
+        if low.is_nan() || low >= 0.0 {
             return Ok(false);
         }
         let (e1, e2) = (Point2::new(b, low - a), Point2::new(low - c, b));
@@ -294,7 +294,7 @@ impl SurfPtSolveStepper<'_> {
         };
         let len = e.x.hypot(e.y);
         let reach = (su * (e.x / len) + sv * (e.y / len)).length();
-        if !(len > 0.0 && reach > 0.0) {
+        if len.is_nan() || reach.is_nan() || len <= 0.0 || reach <= 0.0 {
             return Ok(false);
         }
         let e = Point2::new(e.x / len, e.y / len);
@@ -315,7 +315,7 @@ impl SurfPtSolveStepper<'_> {
                     far = far.min((lo - x) / step);
                 }
             }
-            if !(far > 0.0) {
+            if far.is_nan() || far <= 0.0 {
                 continue;
             }
             let at = |s: f64| Point2::new(uv.x + s * d.x, uv.y + s * d.y);
