@@ -159,6 +159,108 @@ fn unified_threads_refuse_mismatched_shafts_and_suggest_a_catalogued_size() {
     }
 }
 
+/// The two places an ISO metric thread is tried with a class: an 8 mm shaft 6 mm long, and a 6.8
+/// mm hole (the tap maker's M8 drill) through a 6 mm plate. The point on the face, the face's side.
+fn metric_class_stock(s: &mut Session, hole: bool) -> ([f64; 3], bool) {
+    if hole {
+        run(s, "solid.box", json!({"length":20,"width":20,"height":6}));
+        run(s, "solid.hole", json!({"position":[10,10,6],"diameter":6.8}));
+        ([13.4, 10.0, 3.0], true)
+    } else {
+        run(s, "solid.cylinder", json!({"radius":4,"height":6}));
+        ([4.0, 0.0, 3.0], false)
+    }
+}
+
+/// An ISO metric designation keeps its ISO 965-1 tolerance class in the callout, through a save
+/// and reopen, under either parameter check; the size is the designation's without the class.
+#[test]
+fn metric_shaft_and_hole_threads_keep_their_class_after_reopen() {
+    for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        for (hole, given, shown, major, pitch) in [
+            (false, "M8-6g", "M8-6g", 8.0, 1.25),
+            (false, "M8x1.25-5g6g", "M8-5g6g", 8.0, 1.25),
+            (false, "M8 – 4h", "M8-4h", 8.0, 1.25),
+            (true, "M8-6H", "M8-6H", 8.0, 1.25),
+            (true, "M8x1-5H6H", "M8x1-5H6H", 8.0, 1.0),
+        ] {
+            let mut s = Session { param_check: check, ..Session::default() };
+            let (face, internal) = metric_class_stock(&mut s, hole);
+            let reply = run(&mut s, "solid.thread", json!({"face":face,"designation":given}));
+            assert_eq!(reply["thread"]["designation"], shown, "{given}");
+            assert_eq!(run(&mut s, "model.threads", json!({}))["threads"][0]["designation"], shown);
+            let assert_thread = |session: &Session| {
+                assert!(session.model.results.iter().all(|r| r.error.is_none()), "{given}");
+                let state = session.model.state();
+                let thread = &state.threads[0];
+                assert_eq!(thread.designation, shown);
+                assert_eq!((thread.major_diameter, thread.pitch, thread.internal), (major, pitch, internal), "{given}");
+            };
+            assert_thread(&s);
+            let saved = s.doc.to_json();
+            let value: Value = serde_json::from_str(&saved).unwrap();
+            assert_eq!(value["features"].as_array().unwrap().last().unwrap()["designation"], given, "saved as given");
+            // The class is part of format 73 since the 0.51.1 release, so it is never pending,
+            // whatever other changes are.
+            if let Some(pending) = value.get("format_pending").and_then(Value::as_array) {
+                assert!(!pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
+            }
+            assert_thread(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
+        }
+    }
+}
+
+/// A lowercase class is a shaft's and an uppercase one a hole's (ISO 965-1); the other side's is
+/// refused, cosmetic or modelled, and the design is left as it was.
+#[test]
+fn a_metric_class_for_the_other_side_is_refused() {
+    for (hole, given, wants) in [(false, "M8-6H", "this shaft needs e, f, g or h"), (true, "M8-6g", "this hole needs G or H")] {
+        for modeled in [false, true] {
+            let mut s = Session::default();
+            let (face, _) = metric_class_stock(&mut s, hole);
+            let before = s.doc.to_json();
+            let error = s.execute("solid.thread", &json!({"face":face,"designation":given,"modeled":modeled})).unwrap_err().to_string();
+            assert!(error.contains(&format!("class {}", &given[3..])) && error.contains(wants), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+    // A size that doesn't fit is refused with the size that does, not with the class added.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10}));
+    let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"M8-6g"})).unwrap_err().to_string();
+    assert!(error.contains("an M8-6g thread does not fit a 10.00 mm shaft; this shaft takes M10"), "{error}");
+}
+
+/// The class is an annotation: a modelled thread with it is the thread without it, record for
+/// record (the native B-rep encoding, compared byte for byte, two sessions without a class first
+/// to show the build is repeatable), and a cosmetic one has the same numbers, bit for bit.
+#[test]
+fn a_metric_class_changes_no_geometry() {
+    let build = |hole: bool, designation: &str, modeled: bool| {
+        let mut s = Session::default();
+        let (face, _) = metric_class_stock(&mut s, hole);
+        run(&mut s, "solid.thread", json!({"face":face,"designation":designation,"modeled":modeled}));
+        let state = s.model.state();
+        let body = solidcraft_kernel::encode_native_body(&state.bodies[0].body).unwrap();
+        // A modelled thread is the groove itself and leaves no cosmetic marking.
+        assert_eq!(state.threads.len(), usize::from(!modeled));
+        let marking = state.threads.first().map(|t| {
+            let numbers =
+                [t.major_diameter, t.radius, t.pitch, t.axis_point.x, t.axis_point.y, t.axis_point.z, t.axis.x, t.axis.y, t.axis.z, t.start, t.end]
+                    .map(f64::to_bits);
+            (numbers, t.internal, t.form, t.hand, t.starts)
+        });
+        (body, marking)
+    };
+    for (hole, class) in [(false, "M8-6g"), (true, "M8-6H")] {
+        for modeled in [false, true] {
+            let plain = build(hole, "M8", modeled);
+            assert!(build(hole, "M8", modeled) == plain, "the build repeats (hole {hole}, modelled {modeled})");
+            assert!(build(hole, class, modeled) == plain, "{class} (modelled {modeled}) changed the geometry");
+        }
+    }
+}
+
 #[test]
 fn automatic_thread_sizing_stays_metric_until_unified_is_selected() {
     for (form, designation, major, pitch) in [(None, "M6", 6.0, 1.0), (Some("metric"), "M6", 6.0, 1.0), (Some("unified"), "1/4-20 UNC", 6.35, 1.27)] {
@@ -1000,6 +1102,11 @@ fn every_form_cuts_its_standard_profile() {
             (7.0, 45.0),
             0.75 * inch - 0.6 * inch / 8.0,
         ),
+        // The 90° custom profile: H = P / (2 tan 45°) = P/2, depth 5H/8 = 0.3125 P, flat P/8 at
+        // the crest, so g(r) = P/4 + 2 (r - r3) from the root r3 = 5 - 0.46875 = 4.53125. One turn
+        // is 2π∫ r g(r) dr from r3 to 5 = 2π [a r²/2 + 2 r³/3] with a = P/4 - 2 r3 = -8.6875:
+        // 2π (1.9020081 mm³) = 11.950669 mm³; six turns 71.704 mm³.
+        ("custom", "C10x1.5x90", 10.0, 1.5, 1.5 / 8.0, (45.0, 45.0), 5.0 - 0.3125 * 1.5),
     ];
     for (form, designation, d, p, flat, (a, b), r3) in cases {
         let mut volumes = Vec::new();
@@ -1135,6 +1242,8 @@ fn a_tapped_holes_class_is_saved_and_kept_through_an_edit() {
     for (params, why) in [
         (json!({"position": [40, 30, 12], "depth": 10, "diameter": 6, "thread_class": "6H"}), "`thread_class` needs `thread` (a tapped hole)"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8", "thread_class": "6g"}), "an ISO metric tapped hole's class is"),
+        // The class goes in `thread_class`, not after the hole's thread size (as before).
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8-6H"}), "unknown tapped thread `M8-6H`"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "1/4-20 UNC", "thread_class": "2A"}), "class is 1B, 2B or 3B"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "G 1/4", "thread_class": "2B"}), "has no tolerance class"),
     ] {
@@ -1175,6 +1284,21 @@ fn a_square_thread_is_refused() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
+}
+
+/// A custom thread keeps its designation in the callout and stores its form; it refuses a
+/// chamfered tip and an angle past 90°. Its groove's volume: `every_form_cuts_its_standard_profile`.
+#[test]
+fn a_custom_thread_keeps_its_designation_and_refuses_a_tip() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Shaft"}));
+    let th = run(&mut s, "solid.thread", json!({"face": [5, 0, 10], "designation": "c10x1.5x90"}));
+    assert_eq!(th["thread"]["designation"], "C10x1.5x90", "{th}");
+    assert_eq!(th["thread"]["form"], "custom", "{th}");
+    let tip = s.execute("solid.thread", &json!({"face": [5, 0, 10], "designation": "C10x1.5x90", "modeled": true, "tip": "both"}));
+    assert!(tip.err().map(|e| e.to_string()).unwrap_or_default().contains("not offered for a custom thread"));
+    let wide = s.execute("solid.thread", &json!({"face": [5, 0, 10], "form": "custom", "designation": "C10x1.5x95"}));
+    assert!(wide.err().map(|e| e.to_string()).unwrap_or_default().contains("must be 20° to 90°"));
 }
 
 /// Ladder 06/008: n starts are n grooves of lead n P, each a turn's n-th further round: over the

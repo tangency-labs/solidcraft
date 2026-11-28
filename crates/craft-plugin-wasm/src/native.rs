@@ -562,7 +562,12 @@ impl<H: PluginHost> files::Host for State<H> {
         let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+            // Reject named pipes without waiting for a writer before checking the opened handle.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let file = match folder.dir.open_with(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)), &options) {
                 Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 opened => opened?,
             };
@@ -749,34 +754,37 @@ impl<H: PluginHost> source::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
-        if import.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
-            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
-        }
-        // The one file in that folder whose name matches ignoring case: a part an assembly
-        // spelled differently from the disk (made on a case-insensitive system).
-        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
-            return Ok(None);
+        // The listing decides the spelling, because a disk that ignores case opens a file under any
+        // spelling: the entry spelled as typed, else the one file whose name matches ignoring case
+        // (a part an assembly spelled differently from the disk). The path as typed is the answer
+        // only when it opens a file and the listing cannot tell.
+        let typed = import.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
+        let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+            return Ok(typed);
         };
+        let wanted = typed_name.to_lowercase();
         let listing = if parent.as_os_str().is_empty() { import.dir.entries() } else { import.dir.read_dir(parent) };
-        let Ok(listing) = listing else { return Ok(None) };
+        let Ok(listing) = listing else { return Ok(typed) };
         let mut found = None;
+        let mut matches = 0;
         let mut scanned = 0;
         for entry in listing.flatten() {
             scanned += 1;
             if scanned > MAX_IMPORT_FILES {
                 // A partial scan cannot show the match is the only one.
-                return Ok(None);
+                return Ok(typed);
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if found.is_some() {
-                return Ok(None);
+            if name == typed_name {
+                return Ok(Some(target.to_string_lossy().replace('\\', "/")));
             }
+            matches += 1;
             found = Some(parent.join(name).to_string_lossy().replace('\\', "/"));
         }
-        Ok(found)
+        Ok(if matches == 1 { found } else { typed })
     }
 }
 impl<H: PluginHost> design::Host for State<H> {
@@ -1596,8 +1604,13 @@ thread_local! {
 /// it, so the first call waits about a second rather than the tens of seconds Cranelift takes for a
 /// large importer, and [`optimize_in_background`] later swaps in Cranelift's code and caches it.
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    compile_reporting(bytes, stack_bytes, || {})
+}
+
+fn compile_reporting(bytes: &[u8], stack_bytes: usize, preparing: impl FnOnce()) -> Result<(Engine, Component)> {
     #[cfg(test)]
     if let Some(tier) = FORCED_TIER.with(std::cell::Cell::get) {
+        preparing();
         return compile_with(bytes, stack_bytes, tier);
     }
     let cache = cache();
@@ -1608,7 +1621,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((cached.engine.clone(), cached.component.clone()));
     }
-    let (engine, component, tier) = compile_fresh(bytes, stack_bytes, cache.disk())?;
+    let (engine, component, tier) = compile_fresh_reporting(bytes, stack_bytes, cache.disk(), preparing)?;
     if let Ok(mut compiled) = cache.compiled.lock() {
         *compiled = Some(Compiled { bytes: Arc::from(bytes), stack_bytes, engine: engine.clone(), component: component.clone(), tier });
     }
@@ -1619,6 +1632,15 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
 /// Winch's; else, when Winch refuses the component (a WebAssembly feature it lacks on this
 /// processor) or anything else goes wrong, Cranelift's, as before Winch, and cached.
 fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>) -> Result<(Engine, Component, Tier)> {
+    compile_fresh_reporting(bytes, stack_bytes, disk, || {})
+}
+
+fn compile_fresh_reporting(
+    bytes: &[u8],
+    stack_bytes: usize,
+    disk: Option<wasmtime::Cache>,
+    preparing: impl FnOnce(),
+) -> Result<(Engine, Component, Tier)> {
     if let Some(disk) = &disk
         && let Ok(engine) = engine_for(stack_bytes, Tier::Optimized, true, Some(disk.clone()))
         && optimized_marker(disk, &engine, bytes).is_some_and(|marker| marker.is_file())
@@ -1628,6 +1650,7 @@ fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>
         let component = compile_component(&engine, bytes)?;
         return Ok((engine, component, Tier::Optimized));
     }
+    preparing();
     match compile_on(bytes, stack_bytes, Tier::Baseline, true, None) {
         Ok((engine, component)) => Ok((engine, component, Tier::Baseline)),
         Err(error) => {
@@ -1899,7 +1922,14 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         }
         let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
-        let (engine, component) = compile(bytes, stack)?;
+        let (engine, component) = compile_reporting(bytes, stack, || {
+            if !dialog {
+                host.importer_stage(&manifest.name, true);
+            }
+        })?;
+        if !dialog {
+            host.importer_stage(&manifest.name, false);
+        }
         check_dialog_export(manifest, &engine, &component)?;
         // Compilation is cached and happens outside the execution budget. Every source I/O
         // operation and guest execution share one deadline, including open/stat on a slow mount.

@@ -1087,6 +1087,191 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     assert!(arc_before_line(&[span], 1e-5));
 }
 
+/// #22818: a 2.9 mm trimmed piece at the flattest spot `(0, 720)` of a 2400 mm polynomial cubic
+/// spline bends ~1e-4 to ~4e-4 mm off its chord — well above the 1e-5 zone tolerance, yet under
+/// the body-scaled tolerances used by `planar_edges` (~2.88e-3) and `sheet_regions` (~2.88e-4).
+/// It must stay the exact cubic spline it is (never flattened to a line or refitted to an arc),
+/// so a crescent between the spline and its chord reads back with its exact curve and nonzero
+/// signed area instead of collapsing to `[Line(a, b), Line(b, a)]`.
+#[test]
+fn a_short_piece_of_a_large_polynomial_spline_stays_free_form() {
+    let mut k = Kernel::default();
+    let r = 3553.0_f64;
+    let half = 1.45_f64;
+    let sag = half * half / (2.0 * r);
+    // Symmetric cubic matching y(±1.45) = 720 - sag and y(0) = 720 (off_chord = 4/3 sag ≈ 3.95e-4).
+    let p0 = p(-half, 720.0 - sag);
+    let p1 = p(-half / 3.0, 720.0 + sag / 3.0);
+    let p2 = p(half / 3.0, 720.0 + sag / 3.0);
+    let p3 = p(half, 720.0 - sag);
+    let h = |q: Point2| [q.x, q.y, 0.0, 1.0];
+    let (single, single_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(p1), h(p2), h(p3)],
+    );
+    // Exact de Casteljau split at t = 0.5: two 1.45 mm spans meeting at (0, 720), each with
+    // off_chord = sag / 3 ≈ 9.86e-5 (below 2.88e-4, above zone_tol_3d = 1e-5).
+    let q0 = p(-2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let r0 = p(-half / 3.0, 720.0);
+    let mid = p(0.0, 720.0);
+    let r1 = p(half / 3.0, 720.0);
+    let q2 = p(2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let (two_span, two_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(q0), h(r0), h(mid), h(r1), h(q2), h(p3)],
+    );
+    for tol in [2.88e-3, 2.88e-4] {
+        for forward in [true, false] {
+            let one = planar_pieces(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert!(
+                matches!(one.as_slice(), [Seg2::Cubic { .. }]),
+                "single span tol={tol} forward={forward}: {one:?}"
+            );
+            let projected_one = planar_curves(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_one.as_slice(), [PlanarPiece::Spline(_)]),
+                "single projected tol={tol} forward={forward}: {projected_one:?}"
+            );
+            let two = planar_pieces(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert_eq!(
+                two.len(),
+                2,
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            assert!(
+                two.iter().all(|s| matches!(s, Seg2::Cubic { .. })),
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            let projected_two = planar_curves(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_two.as_slice(), [PlanarPiece::Spline(_)]),
+                "two projected tol={tol} forward={forward}: {projected_two:?}"
+            );
+        }
+    }
+    // A collinear polynomial cubic still reads as a straight line.
+    let (flat, flat_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![
+            [0.0, 720.0, 0.0, 1.0],
+            [1.0, 720.0, 0.0, 1.0],
+            [2.0, 720.0, 0.0, 1.0],
+            [3.0, 720.0, 0.0, 1.0],
+        ],
+    );
+    let flat_segs = read(&k, &flat, flat_iv, true, &xy(), 2.88e-3).unwrap();
+    assert!(
+        matches!(flat_segs.as_slice(), [Seg2::Line { .. }]),
+        "{flat_segs:?}"
+    );
+    // A 1.45 mm half-span crescent (off_chord ≈ 9.86e-5 < tol = 2.88e-4) survives a 2D boolean
+    // difference and `sheet_regions` readback with its exact cubic and positive signed area.
+    let tol = 2.88e-4;
+    let half_cubic = Seg2::Cubic {
+        p0,
+        p1: q0,
+        p2: r0,
+        p3: mid,
+    };
+    let floor_y = 718.55;
+    let curved_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                half_cubic.reversed(),
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let chord_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                Seg2::Line { a: mid, b: p0 },
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let want_crescent = curved_notch.outer.signed_area().unwrap().value
+        - chord_notch.outer.signed_area().unwrap().value;
+    let sa = sheet(&mut k, &curved_notch, tol);
+    let sb = sheet(&mut k, &chord_notch, tol);
+    let diff = combine(&mut k, sa, sb, Boolean2d::Difference).unwrap();
+    let got = sheet_regions(&k, &diff, &xy(), tol).unwrap();
+    assert_eq!(got.regions.len(), 1, "{got:?}");
+    assert!(
+        got.regions[0]
+            .outer
+            .segs
+            .iter()
+            .any(|s| matches!(s, Seg2::Cubic { .. })),
+        "crescent must keep its cubic: {:?}",
+        got.regions[0]
+    );
+    let got_area = got.regions[0].outer.signed_area().unwrap();
+    assert_eq!(got_area.sign(), Some(true), "{got_area:?}");
+    assert!(
+        (got_area.value - want_crescent).abs() < 1e-8,
+        "{} vs {want_crescent}",
+        got_area.value
+    );
+}
+
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
 /// off it in its first span is no line; a cubic retracing its line is none; a curve twice round
 /// a circle is no arc.
@@ -1681,6 +1866,228 @@ mod recognition {
                             assert!((x * x + y * y - 1.0).abs() < 1e-12);
                         }
                     }
+                    path.segs.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    /// The four quarters a sketch ellipse with centre `c`, major end `m` and minor radius
+    /// `r` exports, in the sketch's own arithmetic: `v = perp(u) / hypot(u) * r` and each
+    /// apex `a + b - c`.
+    fn sketch_ellipse_quarters(c: Vec2, m: Vec2, r: f64) -> Loop2 {
+        let u = m - c;
+        let v = Vec2::new(-u.y, u.x) / u.x.hypot(u.y) * r;
+        let corners = [c + u, c + v, c - u, c - v];
+        Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    // #18399: a turned ellipse's quarters carry rounded cos/sin products, so exact
+    // parallelogram equalities fail; the loop is still one ellipse.
+    #[test]
+    fn profile_ellipse_recognition_accepts_turned_sketch_quarters() {
+        // The issue's ellipse at (40, 20), and the same shapes at (1000, 1000), where each
+        // corner's world rounding is 64 times the local cell.
+        for center in [Vec2::new(40.0, 20.0), Vec2::new(1000.0, 1000.0)] {
+            let mut ends = vec![
+                center + Vec2::new(-25.0, -20.0),
+                center + Vec2::new(10.0, 10.0),
+            ];
+            ends.extend((0..48).map(|i| {
+                let angle = f64::from(i) * TAU / 48.0 + 0.1;
+                center + Vec2::new(angle.cos(), angle.sin()) * 32.0
+            }));
+            for end in ends {
+                assert_turned_sketch_quarters_are_one_ellipse(center, end, 8.0);
+            }
+            // An axis-aligned sketch ellipse keeps its exact answer.
+            let aligned = sketch_ellipse_quarters(center, center + Vec2::new(15.0, 0.0), 8.0);
+            assert_eq!(
+                aligned.as_ellipse(),
+                Some((center, Vec2::new(15.0, 0.0), 8.0 / 15.0))
+            );
+        }
+        assert_turned_sketch_quarters_are_one_ellipse(
+            Vec2::new(-4.0, -17.0),
+            Vec2::new(0.0, -14.0),
+            1.4,
+        );
+        // The control a + b - c also rounds the sum a + b. Here the corners are exact and
+        // the first control is 3 * 2^-43 off, more than the corners' and its own rounding.
+        let c = Vec2::new(1020.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let u = Vec2::new(12.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let v = Vec2::new(12.0 + 2.0_f64.powi(-43), 8.0);
+        let corners = [c + u, c + v, c - u, c - v];
+        let rounded = Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        };
+        let (center, _, _) = rounded.as_ellipse().expect("controls rounded as a + b - c");
+        assert_eq!(center, c);
+    }
+
+    fn assert_turned_sketch_quarters_are_one_ellipse(center: Vec2, end: Vec2, minor: f64) {
+        let u = end - center;
+        let ellipse = sketch_ellipse_quarters(center, end, minor);
+        for mut path in [ellipse.clone(), ellipse.reversed()] {
+            for _ in 0..4 {
+                let (c, major, ratio) = path
+                    .as_ellipse()
+                    .unwrap_or_else(|| panic!("major end {end:?}: {path:?}"));
+                assert!(c.dist(center) < 1e-12, "{c:?}");
+                assert!(
+                    (major.length_hypot() - u.length_hypot()).abs() < 1e-12,
+                    "{major:?}"
+                );
+                assert!(major.cross(u).abs() < 1e-9, "{major:?} {u:?}");
+                assert!((ratio - minor / u.length_hypot()).abs() < 1e-12, "{ratio}");
+                for seg in &path.segs {
+                    for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                        let d = seg.point_at(t) - c;
+                        let x = d.dot(major) / major.length_squared();
+                        let y = d.dot(major.perp()) / (major.length_squared() * ratio);
+                        assert!((x * x + y * y - 1.0).abs() < 1e-12);
+                    }
+                }
+                path.segs.rotate_left(1);
+            }
+        }
+        // A control or a corner moved by 16 EPSILON of the largest coordinate (8 to 16
+        // ULPs, several times its cell) is not one ellipse; neither is a gap.
+        let size = ellipse.segs.iter().fold(0.0_f64, |size, seg| match *seg {
+            Seg2::Conic { a, apex, .. } => {
+                size.max(a.x.abs().max(a.y.abs()).max(apex.x.abs()).max(apex.y.abs()))
+            }
+            _ => size,
+        });
+        let step = 16.0 * f64::EPSILON * size;
+        for (index, delta) in [(1, Vec2::new(step, 0.0)), (2, Vec2::new(0.0, -step))] {
+            let mut moved_apex = ellipse.clone();
+            if let Seg2::Conic { apex, .. } = &mut moved_apex.segs[index] {
+                *apex += delta;
+            }
+            assert_eq!(moved_apex.as_ellipse(), None, "{end:?}");
+            // The corner moves in both quarters that share it, so the join stays closed.
+            let mut moved_corner = ellipse.clone();
+            if let Seg2::Conic { a, .. } = &mut moved_corner.segs[index] {
+                *a += delta;
+            }
+            if let Seg2::Conic { b, .. } = &mut moved_corner.segs[index - 1] {
+                *b += delta;
+            }
+            assert!(moved_corner.is_closed(0.0));
+            assert_eq!(moved_corner.as_ellipse(), None, "{end:?}");
+            let mut gap = ellipse.clone();
+            if let Seg2::Conic { a, .. } = &mut gap.segs[index] {
+                *a += delta;
+            }
+            assert_eq!(gap.as_ellipse(), None, "{end:?}");
+        }
+    }
+
+    // Inside their cells, the stored quarter points must also lie within sqrt(EPSILON) of
+    // each semi-axis from the construction, so a loop whose shape the world spacing
+    // decides stays four arcs, and an exact one is never refused for its size.
+    #[test]
+    fn profile_ellipse_quarters_need_points_the_ellipse_resolves() {
+        // At (2^40, 2^40) the corners are rounded to 2^-12, far above sqrt(EPSILON) * 8.
+        let far = Vec2::new(2.0_f64.powi(40), 2.0_f64.powi(40));
+        let turned = sketch_ellipse_quarters(far, far + Vec2::new(-25.0, -20.0), 8.0);
+        assert_eq!(turned.as_ellipse(), None);
+        // An exact turned ellipse thinner than sqrt(EPSILON) keeps its answer.
+        let u = Vec2::new(2.0_f64.powi(26), 2.0_f64.powi(26));
+        let thin = ellipse_quarters(Vec2::ZERO, u, Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            thin.as_ellipse(),
+            Some((Vec2::ZERO, u, 2.0_f64.powi(-26))),
+            "{thin:?}"
+        );
+        // An exact turned circle at 2^52 keeps its answer: its points need no widening.
+        let c = Vec2::new(2.0_f64.powi(52) + 2.0, 0.0);
+        let circle = ellipse_quarters(c, Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            circle.as_ellipse(),
+            Some((c, Vec2::new(1.0, 1.0), 1.0)),
+            "{circle:?}"
+        );
+        let quarters = |c: Vec2, corners: [Vec2; 4], controls: [Vec2; 4]| Loop2 {
+            segs: (0..4)
+                .map(|i| Seg2::Conic {
+                    a: c + corners[i],
+                    apex: c + controls[i],
+                    b: c + corners[(i + 1) % 4],
+                    w: FRAC_1_SQRT_2,
+                })
+                .collect(),
+        };
+        // A sliver one ULP wide at 2^28, every control at its parallelogram corner.
+        let c = Vec2::new(2.0_f64.powi(28) + 64.0, 2.0_f64.powi(28) + 64.0);
+        let q = 2.0_f64.powi(-24);
+        let corners = [
+            Vec2::new(32.0, 32.0),
+            Vec2::new(16.0, 16.0),
+            Vec2::new(-32.0, -32.0),
+            Vec2::new(-16.0, -16.0 - q),
+        ];
+        let controls = [0, 1, 2, 3].map(|i| corners[i] + corners[(i + 1) % 4]);
+        // A spike: the first quarter starts and ends at the same corner.
+        let c2 = Vec2::new(2.0_f64.powi(27) + 10.0, 2.0_f64.powi(27) + 10.0);
+        let spike = [
+            Vec2::new(4.0, 4.0),
+            Vec2::new(4.0, 4.0),
+            Vec2::new(-4.0, -4.0),
+            Vec2::new(-4.0, -4.0 + 2.0_f64.powi(-25)),
+        ];
+        let spike_controls = [
+            Vec2::new(8.0, 8.0),
+            Vec2::ZERO,
+            Vec2::new(-8.0, -8.0),
+            Vec2::ZERO,
+        ];
+        // A first quarter that goes out and back near the origin, thinner than even the
+        // local cell resolves.
+        let q = 3.0 * 2.0_f64.powi(-55);
+        let fold = [
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::ZERO,
+            Vec2::new(0.0, q),
+        ];
+        let fold_controls = [
+            Vec2::new(1.5, 1.5),
+            Vec2::new(0.5, 0.5),
+            Vec2::new(-0.5, -0.5 + 2.0_f64.powi(-54)),
+            Vec2::new(0.5, 0.5),
+        ];
+        for ellipse in [
+            quarters(c, corners, controls),
+            quarters(c2, spike, spike_controls),
+            quarters(Vec2::ZERO, fold, fold_controls),
+        ] {
+            for mut path in [ellipse.clone(), ellipse.reversed()] {
+                for _ in 0..4 {
+                    assert_eq!(path.as_ellipse(), None, "{path:?}");
                     path.segs.rotate_left(1);
                 }
             }

@@ -1084,6 +1084,12 @@ A `ui.drag` from `measure:label` or one of the axis labels moves that label (scr
 while the measured items stay the same; a double-click puts it back). It picks nothing and starts
 no box selection.
 
+The Measure panel's **Spacing of several holes** option (handle `measure:spacing`, off by default)
+lets picks add up past two: three or more round edges or holes then measure as a row or a bolt
+circle (`inspect.measure`'s `spacing`). The view draws each gap between neighbouring centres with
+its length, handles `measure:gap:1`, `measure:gap:2`, … in order along the row (dragged as
+`measure:label` is), and numbers each centre as the panel lists the items (`measure:item:N`).
+
 ## UI
 
 | Method | Params | Notes |
@@ -1200,7 +1206,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
-- `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed, folded into its tab if they were)
+- `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed, folded into its tab if they were, each with its camera as it was left. They are kept for the user, never in the design file: the desktop app keeps them in its data folder, the web app in the browser's storage, where a page closed or reloaded keeps them too)
 - `design_reuse_views` (default true: opening a sheet or workspace that a view already shows activates that view; false makes a new view each time)
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
 - `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
@@ -1225,6 +1231,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `forget_stand_up: true` (action: forget all remembered stand-up answers; also available beside the memory checkbox in Preferences › Design)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `free_orbit_key` (`none` (default), `alt`, `ctrl`: holding this key when a mouse orbit drag starts makes that drag the other orbit style, free where the orbit is turntable and turntable where `free_orbit` is on, for the whole drag while `nav_drag_keeps_mode` is on (off: the keys held at each moment decide); a key the mouse mapping already needs for the orbit, such as Alt in the Maya mapping, does nothing; #20917)
+- `roll_key` (`none` (default), `alt`, `ctrl`: holding this key when a mouse orbit drag starts makes that drag roll the view about the line of sight through the orbit point, as far as the pointer goes around that point, like a dial, for the whole drag while `nav_drag_keeps_mode` is on; a key the mouse mapping already needs for the orbit does nothing; while it is the same key as `free_orbit_key`, the free-orbit key wins and this does nothing; #22691)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
 - `graphics_backend` (native Graphics API: `auto` by default; Windows: `dx12`, `vulkan`, `gl`; macOS: `metal`; Linux: `vulkan`, `gl`. Saved before graphics initialization and applied on restart. Existing manual comma lists are preserved until an explicit API change. `{"button":"restart_graphics"}` asks about unsaved designs, then restarts with the saved API; unavailable in the browser or under an explicit launch override.)
 - `ground_shadow_follows_model` (Graphics, default false): raised models cast their ground shadow on the origin ground plane; true restores the shadow below the lowest visible body. Both modes keep the shadow below bodies extending beneath the origin, and follow the selected up axis.
@@ -1245,6 +1252,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)
 - `keep_unsaved_in_browser` (default false; web app: each open design's unsaved changes are kept current in the browser's private storage, and the next visit offers them back in a "Restore unsaved design?" window with Restore, Open saved version and Discard; off, nothing is kept, #10220)
 - `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and `remember_toolbar_tab` decides the toolbar tab, #9360)
+- `keyboard_profile` (`solidcraft` (default), `fusion`, `inventor`, `nx`, `onshape`, `solidworks`: the keys of another CAD tool under the user's own; a name this version doesn't know keeps SolidCraft's keys; [keyboard profiles](book/src/guide/shortcuts.md#keyboard-profiles), #15302)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
 - `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
@@ -1259,7 +1267,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
-- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
+- `nav` (`fusion`, `right-drag-orbit`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
 - `navigator_arrows` (default true: the custom view navigator has orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on a view navigator also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
@@ -1322,6 +1330,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
+- `slicer_file_name` (string, default empty: Send to Slicer names its file after the design, followed by a code, as before; otherwise the name of the file Send to Slicer writes, with the placeholders of `export_name` replaced, #16440; [export file names](book/src/guide/files.md#export-file-names))
 - `smooth_wheel_zoom` (default true)
 - `space_mouse_horizon_lock` (default false: the cap's twist rolls the view; true keeps the horizon level, so Tilt turns the view up and down, Roll and Spin turn it about the world's up axis, and a view already rolled is eased level; with `free_orbit` too the tilt goes on over the poles, the horizon still level)
 - `space_mouse_model_pivot` (default false: Classic orbit around the view's centre; true opts into Traced orbit around the model for the 3D mouse and navigation bridge)
@@ -1337,7 +1346,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
-- `timeline_2d` (default false: the History at the bottom is the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false keeps the 1D timeline)
+- `timeline_2d` (default false: the History at the bottom is raised to the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false lowers it to the 1D strip. It follows the row's height, so dragging the row or the header chevron changes it too)
 - `timeline_2d_cell_dots` (default true: empty cells in the 2D Timeline show a small alignment dot)
 - `timeline_2d_component_activation` (default true: a click on a component's row label or radio dot in the 2D Timeline makes that component active)
 - `timeline_2d_unsuppress_mode` (`restore_state` (default), `unsuppress_all`: unsuppressing a feature in the 2D Timeline keeps the dependents suppressed separately there in this session suppressed, or unsuppresses all dependents)
@@ -1394,7 +1403,10 @@ Other `ui.prefs` parameters:
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`
 
-`ui.workspace {workspace?: "design" | "render" | "drawing"}` reads or changes the active workspace.
+`ui.workspace {workspace?: "design" | "render" | "drawing" | "plugin:<plugin-id>/<workspace-id>"}`
+reads or changes the active workspace. Enabled plugins that declare `runtime.ui.workspaces` add their own
+workspaces to the same switcher. Unknown, disabled or inapplicable workspaces return an error;
+programmatic switching opens no dialogs. See [Plugin workspaces](plugins.md#plugin-workspaces).
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
 Drawing currently exposes the native UI scaffold with a blank canvas. Planned

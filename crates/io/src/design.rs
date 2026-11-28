@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
+// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
+// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
+// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
+// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
@@ -445,7 +450,14 @@ fn write_container(
         return Err(cancelled());
     }
     native_cache::take_last_cache_refusal();
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
+    let cache = match geometry {
+        Some(g) => match native_cache::encode_model_with_budget(g, &metadata, writer.file_space(2, budget), writer.expanded_space(2)) {
+            Ok(cache) => Some(cache),
+            Err(_) if crate::safe_write::cancelled() => return Err(cancelled()),
+            Err(_) => None,
+        },
+        None => None,
+    };
     if let Some((manifest, data)) = cache {
         native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
@@ -2254,8 +2266,14 @@ mod tests {
             fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
             // A change outside what computes models keeps the commit's digest, as a commit of it does.
             write(&root, "solidcore/docs/reference.md", "# changed\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() { edited }\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() { edited }\n");
             write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
-            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the interface and the notes compute no model");
+            assert_eq!(
+                build_script::evaluation_source(&root).as_deref(),
+                Some(clean.as_str()),
+                "the interface, notes, tests and goldens compute no model"
+            );
             let _ = fs::remove_dir_all(&root);
         }
 
@@ -2480,8 +2498,12 @@ mod tests {
         use solidcore_record::Vec3;
         let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         let faces = vec![solidcraft_kernel::FacePaint { face: 0, color: [0., 0., 1.], opacity: 1., name: Some("Accent".into()) }];
-        let named =
-            part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
+        let named = part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint {
+            opacity: 1.,
+            faces,
+            name: Some("Body grey".into()),
+            layer: None,
+        }));
         let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
         let mut doc = Document::new("Named colours");
         doc.add_feature(
@@ -2513,7 +2535,7 @@ mod tests {
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
             .with_color(Some([0.25, 0.5, 0.75]))
-            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None }));
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None, layer: None }));
         let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
         let model = saved_model(vec![block, tetra.clone()]);
         let doc = document();
@@ -2622,6 +2644,7 @@ mod tests {
             opacity: 1.0,
             faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
             name: None,
+            layer: None,
         }));
         let mut model = saved_model(vec![broken]);
         model.records["model_bodies"][0]["name"] = json!("CoolingFin");
@@ -2715,6 +2738,58 @@ mod tests {
             let _ = reader.geometry_before_document();
             assert_eq!(reader.read_document().unwrap_err().to_string(), expected);
         }
+    }
+
+    #[test]
+    fn native_cache_prededup_encodes_unique_bodies_once_and_preserves_metadata() -> Result<()> {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel::{DisplayShare, FacePaint, Paint};
+
+        let base = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))?;
+        let share = DisplayShare::new(base.clone());
+        let shared_placed = base.clone().with_display_share(&share, solidcraft_doc::IDENTITY);
+        let colored = base.clone().with_color(Some([0.2, 0.4, 0.6]));
+        let painted = base.clone().with_paint(Some(Paint {
+            opacity: 0.5,
+            faces: vec![FacePaint { face: 0, color: [1.0, 0.0, 0.0], opacity: 0.8, name: None }],
+            name: None,
+            layer: None,
+        }));
+        // Clearing face paint keeps inherited `regularization_protected = true`, so this body
+        // shares `base`'s record and has `color == None, paint == None` yet encodes differently.
+        let protected = painted.clone().with_paint(None);
+
+        let model =
+            saved_model(vec![base.clone(), base.clone(), base.clone(), base.clone(), base.clone(), shared_placed, colored, painted, protected]);
+
+        let before = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get);
+        let (manifest_bytes, payload_bytes) = native_cache::encode_model(&model, b"{}", usize::MAX)?;
+        let encoded_unique = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get) - before;
+        assert_eq!(encoded_unique, 4, "9 bodies + 1 share with 4 distinct encodings must encode only 4 times");
+
+        let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(invalid)?;
+        assert_eq!(manifest["slices"].as_array().map(Vec::len), Some(4));
+        let body_entries = manifest["bodies"].as_array().ok_or_else(|| invalid("bodies"))?;
+        assert_eq!(body_entries.len(), 9);
+        for entry in &body_entries[..6] {
+            assert_eq!(entry[0], json!(0), "identical body copies must map to slice 0");
+        }
+        assert_eq!(manifest["shares"], json!([0]), "display share of base must reuse slice 0");
+        assert_ne!(body_entries[6][0], json!(0), "colored body must keep its own slice");
+        assert_ne!(body_entries[7][0], json!(0), "painted body must keep its own slice");
+        assert_ne!(body_entries[8][0], json!(0), "boundary-protected body must not collapse into base's slice");
+        assert!(!payload_bytes.is_empty());
+
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        let round_tripped = DesignContainerReader::new(Cursor::new(&bytes))?.geometry().ok_or_else(|| invalid("missing cache"))?;
+        assert_eq!(round_tripped.bodies.len(), 9);
+        assert_eq!(round_tripped.bodies[0].color(), None);
+        assert!(round_tripped.bodies[5].display_share().is_some());
+        assert_eq!(round_tripped.bodies[6].color(), Some([0.2, 0.4, 0.6]));
+        assert_eq!(round_tripped.bodies[7].paint().map(|p| p.faces.len()), Some(1));
+        assert_eq!(round_tripped.bodies[8].paint(), None);
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2918,6 +2993,67 @@ mod tests {
         assert!(all > space);
         let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
         assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
+    }
+
+    /// #18815: the design file budget is checked against the Deflate-compressed cache size, while
+    /// still enforcing the reader's unpacked expanded-package budget so opening never fails with
+    /// `expanded package too large`.
+    #[test]
+    fn model_cache_budget_uses_compressed_size_while_enforcing_expanded_limit() {
+        // Part 1: multi-state B-rep cache whose uncompressed size exceeds `file_space`, while its
+        // Deflate-compressed size fits cleanly within `file_space` and unpacked fits `expanded_space`.
+        let model = timeline_model();
+        let doc_bytes = b"{}";
+        let (full_manifest, full_payload) = native_cache::encode_model(&model, doc_bytes, usize::MAX).unwrap();
+        let raw = full_manifest.len() + full_payload.len();
+        let [manifest_entry, payload_entry] = native_cache::ENTRIES;
+        let compressed =
+            native_cache::deflated_len(&full_manifest, manifest_entry).unwrap() + native_cache::deflated_len(&full_payload, payload_entry).unwrap();
+        assert!(compressed * 2 < raw, "B-rep cache compresses significantly: {compressed} vs {raw}");
+
+        let file_space = compressed + (raw - compressed) / 2;
+        assert!(compressed < file_space && file_space < raw);
+        let (kept_manifest, kept_payload) = native_cache::encode_model_with_budget(&model, doc_bytes, file_space, raw).unwrap();
+        assert_eq!(kept_manifest.len() + kept_payload.len(), raw, "all states fit once compressed");
+        assert_eq!(kept_states(&serde_json::from_slice::<Value>(&kept_manifest).unwrap()["model"]), vec![true; 4]);
+
+        // When even the compressed final state exceeds `file_space`, it is dropped with a clear refusal.
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, 1, raw).is_err());
+        let refusal = take_last_cache_refusal().expect("compressed-size refusal recorded");
+        assert!(refusal.contains("compressed"), "{refusal}");
+
+        // When the unpacked size exceeds `expanded_space`, the reader's unpacked limit still wins.
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let (last_only, _, _) = model.thinned(&pieces, 16 * BODY + BODY / 2).unwrap();
+        let (one_manifest, one_payload) = native_cache::encode_model(&last_only, doc_bytes, usize::MAX).unwrap();
+        let one_raw = one_manifest.len() + one_payload.len();
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, raw, one_raw - 1).is_err());
+        let refusal = take_last_cache_refusal().expect("unpacked-size refusal recorded");
+        assert!(refusal.contains("unpacked"), "{refusal}");
+
+        // Part 2: end-to-end `write_container` keeps a compressible cache whose raw bytes exceed
+        // the remaining file budget (`file_space`), and `read_design_with_model` reads it back.
+        let doc = document();
+        let mut compressible = native_geometry();
+        compressible.records["model_bodies"][0]["name"] = json!("x".repeat(2 << 20));
+        // `file_space` deducts ~1 MiB + directory overhead (~66 KiB), leaving ~384 KiB of compressed
+        // budget for a 1.5 MiB container budget — far below the ~2 MiB raw cache, well above its
+        // ~10 KiB compressed size.
+        let budget = 1_500_000;
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, budget, None, None).unwrap();
+        assert!(bytes.len() <= budget, "written container ({} bytes) fits within budget ({budget})", bytes.len());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        let (opened, cached) = read_design_with_model(&bytes).unwrap();
+        assert_eq!(opened.to_json(), doc.to_json());
+        assert!(cached.is_some(), "reader accepts the compressed cache cleanly");
+
+        // Truly over budget even compressed: omitted with a clear refusal reason.
+        take_last_cache_refusal();
+        let dropped = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, 70_000, None, None).unwrap();
+        assert!(!DesignContainerReader::new(Cursor::new(&dropped)).unwrap().has_model_cache());
+        assert!(take_last_cache_refusal().is_some());
     }
 
     #[test]

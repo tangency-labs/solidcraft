@@ -15,6 +15,50 @@ use solidcraft_geom::prelude::*;
 use crate::body::Body;
 use crate::{KernelError, PathSeg, Result, SweepControl};
 
+/// The point `t` of the way along polyline `line` (0 its first point, 1 its last), by length; `None`
+/// for a line of no length. A drawing leader's end on an edge (#22195).
+pub fn polyline_point_at(line: &[Vec3], t: f64) -> Option<Vec3> {
+    let total: f64 = line.windows(2).map(|w| w[0].dist(w[1])).sum();
+    if !(total > 0.0 && t.is_finite()) {
+        return None;
+    }
+    let goal = total * t.clamp(0.0, 1.0);
+    let mut acc = 0.0;
+    for w in line.windows(2) {
+        let l = w[0].dist(w[1]);
+        if l > 0.0 && acc + l >= goal {
+            return Some(w[0] + (w[1] - w[0]) * ((goal - acc) / l));
+        }
+        acc += l;
+    }
+    line.last().copied()
+}
+
+/// How far along polyline `line` its point nearest `at` lies, as a part of its length (0 to 1);
+/// `None` when the polyline has no length. A drawing leader picked on an edge keeps this fraction
+/// so it follows the edge when the model changes (#22195).
+pub fn polyline_fraction_at(line: &[Vec3], at: Vec3) -> Option<f64> {
+    let total: f64 = line.windows(2).map(|w| w[0].dist(w[1])).sum();
+    if !(total > 0.0) {
+        return None;
+    }
+    let (mut acc, mut best) = (0.0, None::<(f64, f64)>);
+    for w in line.windows(2) {
+        let (a, d) = (w[0], w[1] - w[0]);
+        let l = a.dist(w[1]);
+        if l > 0.0 {
+            // How far along the segment the pick's foot is, by solidcore's projection.
+            let s = (crate::affine::distance_along(a.into(), d.into(), at.into()) / (l * l)).clamp(0.0, 1.0);
+            let gap = (a + d * s).dist(at);
+            if best.is_none_or(|(g, _)| gap < g) {
+                best = Some((gap, (acc + s * l) / total));
+            }
+        }
+        acc += l;
+    }
+    best.map(|(_, f)| f.clamp(0.0, 1.0))
+}
+
 /// One curve of a [`PointPath`], in the path's direction of travel.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PathPiece {

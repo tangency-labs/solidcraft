@@ -49,16 +49,18 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::MeshReduce { .. } => Some("mesh.reduce"),
+        Kind::MeshSectionStack { .. } => Some("mesh.section_stack"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split { .. } => Some("solid.split_body"),
-        Kind::DeleteFaces => Some("face.delete"),
+        Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
+        Kind::ScanAlign(_) => Some("scan.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
@@ -83,6 +85,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         }),
         Kind::Sheet(k) => match k {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
+            crate::dialogs_sheet::Sm::CornerJoin { .. } => Some("sheet.corner_join"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
@@ -94,7 +97,9 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::Dogbone(_) => Some("solid.dogbone"),
         Kind::CellGrid(_) => Some("solid.cell_grid"),
+        Kind::Weld(_) => Some("weld.create"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
@@ -112,7 +117,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),
-            crate::dialogs_assembly::Asm::RigidGroup => Some("joint.rigid_group"),
+            crate::dialogs_assembly::Asm::RigidGroup { .. } => Some("joint.rigid_group"),
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
@@ -723,6 +728,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if ext == 1 {
                 enter |= expr_row(ui, "To Offset", to_offset);
+                // A profile wider than the To face ends on the face's surface carried on past it.
+                let row = ui.scope(|ui| form_row(ui, "ui.extend_to_face", |ui| extra_check(ui, &mut d.extra, "extend_to_face")));
+                row.response.backing_on_hover_text(tr("ui.extrude_extend_to_face_tip"));
+            } else {
+                d.extra.remove("extend_to_face");
             }
             if two_sided(*direction) {
                 // The second side takes the extent types of the first (#18691).
@@ -1267,8 +1277,16 @@ fn degrees(text: &str) -> Option<f64> {
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::fields(ui, app, d);
+        return false;
+    }
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    if crate::dialogs_move::several_destinations(d) {
+        // Several To points copy to each (#22900): Create Copy ticks itself.
+        d.extra.insert("copy".into(), json!(true));
+    }
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
     let placing = !crate::dialogs_move::placements(d).is_empty();
     let shared = placing && crate::dialogs_move::moves_shared(app, d);
@@ -1361,9 +1379,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            let was = (*through_axis, *direction_only);
+            // One column: both labels are long and would be cut short side by side.
+            ui_kit::section(ui, "plane_angle_options", "Options", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)], 1)
+            });
+            // The two exclude each other (#6180): the one just turned on wins.
+            if *through_axis && !was.0 {
+                *direction_only = false;
+            } else if *direction_only && !was.1 {
+                *through_axis = false;
+            }
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
@@ -1409,10 +1437,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
             }
         }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            form_row(ui, "Spacing", |ui| enter |= field(ui, spacing));
+            form_row(ui, "From", |ui| enter |= field(ui, from));
+            form_row(ui, "To", |ui| enter |= field(ui, to));
+            ui_kit::options(ui, "section_stack_options", &mut [("Extrude slabs", extrude)]);
+        }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
+        Kind::DeleteFaces { heal } => {
+            ui_kit::options(ui, "delete_face_options", &mut [("ui.delete_face_heal", heal)]);
+        }
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1617,7 +1654,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
-            let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            let from_sketch =
+                *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.items.iter().any(|item| matches!(item, Sel::Profile { .. })));
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
@@ -1643,7 +1681,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if *cmd == "solid.coil" {
                 let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
-                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
+                let placed_axis = d.inputs.first().and_then(|input| input.items.first()).and_then(|sel| match sel {
+                    Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name).map(|plane| plane.normal()),
+                    _ => None,
+                });
+                enter |= coil_rows(ui, &mut d.extra, placed_axis.or(at.and_then(|(_, normal)| normal)), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
@@ -1713,10 +1755,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 d.extra.insert("up_to".into(), Value::Null);
             }
         }
-        Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+        Kind::Sheet(_) => {
+            crate::dialogs_sheet::discover_flange_corners(app, d);
+            if let Kind::Sheet(k) = &mut d.kind {
+                enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs, &d.extra);
+            }
+        }
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Dogbone(k) => enter |= crate::dialogs_dogbone::rows(app, ui, k, &mut d.extra),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
@@ -1725,7 +1773,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::CapturePosition(k) => enter |= crate::dialogs_capture::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
-        Kind::Measure { result, show, dual_units, .. } => measure_rows(app, ui, result.as_ref(), show, dual_units),
+        Kind::Measure { result, show, dual_units, spacing, .. } => measure_rows(app, ui, result.as_ref(), show, dual_units, spacing),
         Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
@@ -1834,17 +1882,73 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     ui.data_mut(|data| data.insert_temp(id, draft));
 }
 
+/// The spacing of three or more round items in the Measure panel (#10170): what their centres
+/// lie on, each neighbouring pair's gap in order (the items numbered as the panel lists them),
+/// the span or the pitch circle, and whether the gaps are even.
+fn measure_spacing_rows(app: &SolveApp, ui: &mut egui::Ui, sp: &Value, dual: bool) {
+    let format = solidcraft_ui_text::format;
+    let mm = |x: f64| crate::prefs::show_measure(app, x, 1, dual);
+    let line = |ui: &mut egui::Ui, id: &str, text: String| ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_spacing_{id}"), false));
+    let order: Vec<usize> = sp["order"].as_array().into_iter().flatten().filter_map(|v| v.as_u64()).map(|i| i as usize).collect();
+    let circle = sp["pattern"].as_str() == Some("circle");
+    let pattern = match sp["pattern"].as_str() {
+        Some("line") => "measure.spacing_row",
+        Some("circle") => "measure.spacing_circle",
+        _ => "measure.spacing_none",
+    };
+    line(ui, "pattern", format(pattern, &[("count", &order.len().to_string())]));
+    let odd = |g: usize| sp["odd_gaps"].as_array().is_some_and(|o| o.iter().any(|v| v.as_u64() == Some(g as u64)));
+    for (g, gap) in sp["gaps"].as_array().into_iter().flatten().filter_map(Value::as_f64).enumerate() {
+        // The panel numbers the items from 1, in the order they were picked.
+        let number = |k: usize| order.get(k % order.len().max(1)).map(|i| (i + 1).to_string()).unwrap_or_default();
+        let id = if odd(g) { "measure.spacing_gap_odd" } else { "measure.spacing_gap" };
+        let mut text = format!("{}  {}", format(id, &[("from", &number(g)), ("to", &number(g + 1))]), mm(gap));
+        if let Some(a) = sp["angle_deg"].get(g).and_then(Value::as_f64) {
+            text.push_str(&format!("  {a:.3}°"));
+        }
+        line(ui, &format!("gap_{g}"), text);
+    }
+    if let (true, Some(d)) = (circle, sp["pcd"].as_f64()) {
+        line(ui, "pcd", format!("{}  {}", tr("measure.spacing_pcd"), mm(d)));
+    } else if let Some(span) = sp["span"].as_f64() {
+        line(ui, "span", format!("{}  {}", tr("measure.spacing_span"), mm(span)));
+    }
+    let pitch = sp["pitch"].as_f64();
+    match (sp["even"].as_bool() == Some(true), pitch) {
+        (true, Some(p)) => line(ui, "even", format!("{}  {}", tr("measure.spacing_even"), mm(p))),
+        (_, Some(p)) => line(ui, "even", format!("{}  {}", tr("measure.spacing_uneven_most"), mm(p))),
+        _ => line(ui, "even", tr("measure.spacing_uneven").to_string()),
+    };
+    if let Some(a) = sp["angle_pitch_deg"].as_f64() {
+        line(ui, "angle", format!("{}  {a:.3}°", tr("measure.spacing_angle")));
+    }
+}
+
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
-/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
-fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool) {
+/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items;
+/// for three or more round items, their spacing ([`measure_spacing_rows`]).
+fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool, spacing: &mut bool) {
     let toggle = ui_kit::checkbox(ui, tr("measure.dual_units"), dual);
     crate::scenario::publish_handle("measure:dual_units", toggle.rect.center());
+    let toggle = ui_kit::checkbox(ui, tr("measure.spacing_option"), spacing);
+    crate::scenario::publish_handle("measure:spacing", toggle.rect.center());
     let Some(r) = r else {
-        ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
+        let hint = if *spacing { tr("measure.spacing_hint") } else { tr("pick one or two vertices, edges or faces") };
+        ui_kit::text(ui, hint, ui_kit::Text::Hint("measure"));
         return;
     };
     if let Some(e) = r.get("error").and_then(Value::as_str) {
         ui_kit::text(ui, e, ui_kit::Text::Report("measure_error", true));
+        return;
+    }
+    if let Some(sp) = r.get("spacing").filter(|sp| sp.is_object()) {
+        // Each item's diameter only: a row's own figures follow.
+        for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
+            let label = solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]);
+            let size = crate::quick_measure::item_lines_with_units(app, it, *dual).into_iter().next().unwrap_or_default();
+            ui_kit::text(ui, &format!("{label}  {size}"), ui_kit::Text::Report(&format!("measure_item_{i}_0"), false));
+        }
+        measure_spacing_rows(app, ui, sp, *dual);
         return;
     }
     let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_measure(app, x, 1, *dual)).unwrap_or_default();
@@ -1967,7 +2071,7 @@ mod tests {
                             time: Some(frame as f64 / 60.0),
                             ..Default::default()
                         },
-                        |ui| measure_rows(&h.app, ui, Some(&r), &mut None, &mut true),
+                        |ui| measure_rows(&h.app, ui, Some(&r), &mut None, &mut true, &mut false),
                     );
                     if frame != 2 {
                         continue;
@@ -2896,6 +3000,70 @@ mod tests {
             crate::dialogs::fillet_plain_error(none, false),
             Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
         );
+    }
+
+    /// #10849: an oversized fillet refusal carrying SMLib's largest fitting size names that size
+    /// in the Fillet dialog and offers a button to use it; clicking the button updates the radius
+    /// field, clears the refusal, and applying the resulting command builds cleanly.
+    #[test]
+    fn a_too_large_fillet_names_smlibs_fit_size_and_asks_whether_to_use_it() {
+        crate::i18n::install();
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 3 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 3.0 })
+        );
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "not supported yet: the chord fillet is larger than the faces beside its edges allow; the largest chord width that fits is 1.5 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 1.5 })
+        );
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "the round of radius 7 mm on the edge at (0.000, 32.000, 42.000) would cut through the material behind it into the hollow at (0.000, 30.000, 40.000) and open the part; the largest radius that fits is 6.828427 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 6.828427 })
+        );
+
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 14, "width": 6, "height": 10, "corner": [14, 0, 0], "body_name": "Bar"})).unwrap();
+        let picks = [
+            edge_sel(&h.app.session, Vec3::new(14.0, 0.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(28.0, 0.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(14.0, 6.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(28.0, 6.0, 5.0)).unwrap(),
+        ];
+        h.app.session.selection = picks.to_vec();
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        h.frames(3);
+        if let Some(Dialog { kind: Kind::Fillet { radius, .. }, .. }) = h.app.dialog.as_mut() {
+            *radius = "3.5 mm".into();
+        }
+        let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        let refused = copy.execute("solid.fillet", &parameters(&h)).unwrap_err().to_string();
+        assert!(refused.contains("the largest radius that fits is 3 mm"), "{refused}");
+        let mut dialog = h.app.dialog.take().unwrap();
+        dialog.refuse(&h.app, refused);
+        h.app.dialog = Some(dialog);
+        h.frames(3);
+
+        assert!(scenario::handle_at("dialog:use_fit_size").is_some(), "Fillet dialog should offer a button to use SMLib's fit size");
+        h.step(&json!({"click": {"handle": "dialog:use_fit_size"}})).unwrap();
+        h.frames(3);
+
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(matches!(&d.kind, Kind::Fillet { radius, .. } if radius == "3 mm"), "{:?}", d.kind);
+        assert!(d.error.is_none(), "clicking Use 3 mm should clear the refusal: {:?}", d.error);
+        for (command, params) in apply_commands(&h.app, d).unwrap() {
+            h.app.run(&command, params).unwrap();
+        }
+        let st = crate::open_meshing::session_world(&h.app.session);
+        assert!(st.bodies.iter().all(|b| b.body.validity().is_empty()), "applying the offered fit size builds a valid body");
     }
 
     #[test]

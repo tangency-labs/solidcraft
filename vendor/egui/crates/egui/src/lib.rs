@@ -536,9 +536,11 @@ pub use self::{
         DragValue, DragValueSettings, FrameDurations, Hyperlink, Image, ImageFit, ImageOptions,
         ImageSize, ImageSource, Label, Link, NumFormatter, NumParser, ProgressBar, RadioButton,
         RangeSlider, Separator, Slider, SliderClamping, SliderOrientation, SliderSpec, Spinner,
-        Suggestion, TextBuffer, TextEdit, ValueFormat, Widget, WidgetWithState, color_picker,
-        decode_animated_image_uri, global_theme_preference_buttons, has_gif_magic_header,
-        has_webp_header, paint_texture_at, reset_button, reset_button_with, text_edit,
+        Suggestion, TextBuffer, TextEdit, ValueFormat, Widget, WidgetWithState, cap_ink_rise,
+        galley_cap_ink_rise,
+        color_picker, decode_animated_image_uri, global_theme_preference_buttons,
+        has_gif_magic_header, has_webp_header, paint_texture_at, reset_button, reset_button_with,
+        text_edit,
     },
 };
 

@@ -2354,6 +2354,14 @@ pub(crate) fn refresh_sketch_links_with(
                     crate::naming::face_on_body(target, name, *at)
                 }
             });
+            let found = found.or_else(|| {
+                if !crate::name_lookup::refound_at_saved_point(name, st.body(body)) {
+                    return None;
+                }
+                let hit = unchanged_face_at_saved_point(st, plane, l, sk, body, *at)?;
+                warn.push(format!("projected face `{name}` has a new name; it was found again at its saved point, with the same edges"));
+                Some(hit)
+            });
             let Some((index, p)) = found else {
                 lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
@@ -2523,6 +2531,36 @@ pub(crate) fn refresh_sketch_links_with(
     }
     warn.extend(refresh_wire_targets(doc, vals, st, plane, sk, frame));
     Ok(warn)
+}
+
+/// A face link whose stored `name` finds no face of `body` now, found again as the one face its
+/// saved point `at` lies on, when projecting that face gives exactly the geometry the link holds
+/// (#22919). A name worked out from geometry when the design was saved (an Align that kept no
+/// history named the faces it moved by guesswork, #20308) finds nothing once the same face has
+/// its exact name, although nothing about the face changed. The projected edges being the same
+/// curves at the same places is what proves it the same face: a face that changed shape, moved,
+/// or is not the only face under the point is still lost, and the sketch fails as before. A link
+/// with members left out (`omit_edges`) keeps them by edge names, so it is not re-found this way.
+fn unchanged_face_at_saved_point(st: &ModelState, plane: &Plane, l: &Link, sk: &Sketch, body: &str, at: Vec3) -> Option<(usize, Vec3)> {
+    if !l.omit_edges.is_empty() || l.kind == LinkKind::Intersect {
+        return None;
+    }
+    let target = st.body(body)?;
+    let tolerance = (target.body.size() * 1e-6).max(1e-6);
+    let held: Vec<Vec2> = sk.link_points(&l.id).iter().filter_map(|i| sk.points.get(*i).map(|p| p.pos)).collect();
+    if held.is_empty() {
+        return None;
+    }
+    let unchanged = |index: usize, p: Vec3| {
+        let Ok(r) = resolve_named_face(st, plane, l.kind, body, index, p, &std::collections::BTreeSet::new()) else { return false };
+        let mut probe = sk.clone();
+        let Ok(update) = probe.update_link_detail(&l.id, &r.geom) else { return false };
+        let now: Vec<Vec2> = probe.link_points(&l.id).iter().filter_map(|i| probe.points.get(*i).map(|p| p.pos)).collect();
+        !update.rebuilt && now.len() == held.len() && now.iter().zip(&held).all(|(a, b)| a.dist(*b) <= tolerance)
+    };
+    let mut same = crate::name_lookup::faces_at_saved_point(target, at).into_iter().filter(|(index, p)| unchanged(*index, *p));
+    let found = same.next()?;
+    same.next().is_none().then_some(found)
 }
 
 /// A link whose face or edge `name` finds nothing, keeping its geometry. The sketch fails naming

@@ -560,6 +560,30 @@ impl Transform {
         Some([x, y])
     }
 
+    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `x` is the unit
+    /// cross product of `v`'s part square to `d` with `d`, and `y = d × x`; so `x`, `y` and `d` are
+    /// unit and square to each other within a few ulps for any `v` taken, `x × y` runs along `d`,
+    /// and `y` runs along `v`'s part square to `d`. `d` and `v` are made unit first, at any finite
+    /// length (nothing is squared before it is scaled). `None` when a coordinate is not finite, `d`
+    /// or `v` has no length, or `v`'s part square to `d` is no longer than its own rounding
+    /// ([`FRAME_LEAN`]): `y` would then follow the rounding, not `v`. Otherwise `y`'s direction is
+    /// off `v`'s part square to `d` by about `4ε / sin`, `sin` the sine of the angle between `v`
+    /// and `d`; a caller that needs it closer compares that sine itself.
+    #[must_use]
+    pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
+        if !(finite3(d) && finite3(v)) {
+            return None;
+        }
+        let (_, d) = d.length_and_unit()?;
+        let (_, v) = v.length_and_unit()?;
+        let (square, y) = (v - d * v.dot(d)).length_and_unit()?;
+        if square <= FRAME_LEAN {
+            return None;
+        }
+        let (_, x) = y.cross(d).length_and_unit()?;
+        Some([x, d.cross(x)])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their
@@ -676,9 +700,58 @@ impl Transform {
 /// The operation name of the refusals of the maps built from their numbers.
 const OP_MAPS: &str = "math::Transform";
 
+/// The remainder [`Transform::frame_axes`] refuses: taking the unit `v`'s part along the unit `d`
+/// out leaves a remainder of length `sin` (the sine of the angle between them) but for its
+/// rounding. For a `v` along `d` (or against it) the computed remainder is at most about 10 ulps:
+/// `|1 - |d|²|` for `d` unit within 2 ulps (4), the three-term `v · d` (`γ₃`, 3), and the product,
+/// the difference and the length (an ulp each). So a remainder no longer than 16 ulps is
+/// rounding, not `v`, and gives no direction (brett19 on #22066).
+pub const FRAME_LEAN: f64 = 16.0 * f64::EPSILON;
+
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// The sine of the angle to a plane's normal below which [`plane_onto_line`] takes a line as
+/// square to the plane: nearer than that, which way the plane tilts would come from rounding in
+/// the line's direction.
+pub const PLANE_ONTO_LINE_SQUARE_SIN: f64 = 1e-6;
+
+/// Not upstream: the plane through `origin` with the unit, square axes `x` and `y` brought onto
+/// the line through `at` along the unit direction `dir`, as a plane at an angle through an axis
+/// starts from its base: tilted by the least turn that makes it parallel to the line (about the
+/// axis square to both its normal `x × y` and the line), then moved along its normal until it
+/// holds the line. A plane that already holds the line comes back unchanged. Returns the new
+/// origin and axes; `None` for a number not finite or a line within
+/// [`PLANE_ONTO_LINE_SQUARE_SIN`] of the normal, which no tilt makes the plane hold.
+#[must_use]
+pub fn plane_onto_line(
+    origin: Point3,
+    x: Vec3,
+    y: Vec3,
+    at: Point3,
+    dir: Vec3,
+) -> Option<(Point3, Vec3, Vec3)> {
+    if ![origin, x, y, at, dir].into_iter().all(finite3) {
+        return None;
+    }
+    let n = x.cross(y);
+    let along = n - dir * dir.dot(n);
+    if along.length() <= PLANE_ONTO_LINE_SQUARE_SIN {
+        return None;
+    }
+    let to = along.unitize().ok()?;
+    let k = n.cross(to);
+    let (sin, cos) = (k.length(), n.dot(to));
+    let (x, y) = match k.unitize() {
+        Ok(k) if sin > 1e-12 => {
+            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
+            (tilt(x), tilt(y))
+        }
+        _ => (x, y),
+    };
+    Some((origin - to * to.dot(origin - at), x, y))
 }
 
 /// Not upstream: the corners of a parallelogram on a plane, such as a reference image pinned to
@@ -1197,6 +1270,13 @@ pub fn is_square_to_radius_2d(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> b
     unit_between_2d(centre, p).is_some_and(|radial| dot_2d(dir, radial).abs() <= 1e-6)
 }
 
+/// Not upstream: whether `p` lies on the line through `origin` along `dir`, within `tol` of it.
+/// `false` where `dir` is of no length or not finite.
+#[must_use]
+pub fn on_line_2d(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    unit_2d(dir).is_some_and(|u| dot_2d(left_2d(u), sub_2d(p, origin)).abs() <= tol)
+}
+
 /// Not upstream: the centre of the circle through `a`, `b` and `c`. `None` for points on one
 /// line (or not finite).
 #[must_use]
@@ -1684,6 +1764,53 @@ mod tests {
             ));
             assert!(t.is_regular(0.0).is_yes());
         }
+    }
+
+    /// Onto a line: the top plane brought onto a line 30° above it through (1, 2, 3) along
+    /// (0, cos 30°, sin 30°) tilts 30° about X (its x axis stays) and holds the line; onto a
+    /// line it lies parallel to it only moves; a line square to it, or within
+    /// [`PLANE_ONTO_LINE_SQUARE_SIN`] of square, and numbers not finite are refused.
+    #[test]
+    fn a_plane_brought_onto_a_line_tilts_the_least_and_holds_it() {
+        let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-12;
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let (at, dir) = (Point3::new(1.0, 2.0, 3.0), Vec3::new(0.0, c, s));
+        let (o, x, y) = plane_onto_line(Point3::ZERO, Vec3::X, Vec3::Y, at, dir).unwrap();
+        let n = x.cross(y);
+        assert!(near(x, Vec3::X), "{x:?}");
+        assert!(near(y, dir), "{y:?}");
+        assert!((n.dot(Vec3::Z) - c).abs() < 1e-12 && n.dot(dir).abs() < 1e-12);
+        assert!((at - o).dot(n).abs() < 1e-12 && (at + dir * 7.0 - o).dot(n).abs() < 1e-12);
+
+        let (o, x, y) = plane_onto_line(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Point3::new(0.0, 3.0, 2.0),
+            Vec3::X,
+        )
+        .unwrap();
+        assert_eq!((x, y), (Vec3::X, Vec3::Y));
+        assert!(near(o, Point3::new(0.0, 0.0, 2.0)), "{o:?}");
+
+        let tilt = 1e-8;
+        let steep = Vec3::new(0.0, tilt, (1.0 - tilt * tilt).sqrt());
+        for dir in [Vec3::Z, -Vec3::Z, steep] {
+            assert_eq!(
+                plane_onto_line(Point3::ZERO, Vec3::X, Vec3::Y, at, dir),
+                None
+            );
+        }
+        assert_eq!(
+            plane_onto_line(
+                Point3::new(f64::NAN, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                at,
+                Vec3::X
+            ),
+            None
+        );
     }
 
     #[test]

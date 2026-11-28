@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.drawing_export.saved_outside_one": "Saved {path}. 1 object lies outside the sheet.",
+    "ui.drawing_export.saved_outside_other": "Saved {path}. {count} objects lie outside the sheet.",
+    "ui.drawing_print.opened_outside_one": "Opened in your PDF viewer. Print at 100% (Actual size). 1 object lies outside the sheet.",
+    "ui.drawing_print.opened_outside_other": "Opened in your PDF viewer. Print at 100% (Actual size). {count} objects lie outside the sheet."
+  },
+  "ar": {
+    "ui.drawing_export.saved_outside_one": "تم الحفظ في {path}. يقع عنصر واحد خارج الورقة.",
+    "ui.drawing_export.saved_outside_other": "تم الحفظ في {path}. يقع {count} من العناصر خارج الورقة.",
+    "ui.drawing_print.opened_outside_one": "فُتح في عارض PDF لديك. اطبع بنسبة 100% (الحجم الفعلي). يقع عنصر واحد خارج الورقة.",
+    "ui.drawing_print.opened_outside_other": "فُتح في عارض PDF لديك. اطبع بنسبة 100% (الحجم الفعلي). يقع {count} من العناصر خارج الورقة."
+  },
+  "de": {
+    "ui.drawing_export.saved_outside_one": "Gespeichert: {path}. 1 Objekt liegt außerhalb des Blatts.",
+    "ui.drawing_export.saved_outside_other": "Gespeichert: {path}. {count} Objekte liegen außerhalb des Blatts.",
+    "ui.drawing_print.opened_outside_one": "In Ihrem PDF-Betrachter geöffnet. Mit 100 % (Originalgröße) drucken. 1 Objekt liegt außerhalb des Blatts.",
+    "ui.drawing_print.opened_outside_other": "In Ihrem PDF-Betrachter geöffnet. Mit 100 % (Originalgröße) drucken. {count} Objekte liegen außerhalb des Blatts."
+  },
+  "he": {
+    "ui.drawing_export.saved_outside_one": "נשמר: {path}. אובייקט אחד נמצא מחוץ לגיליון.",
+    "ui.drawing_export.saved_outside_other": "נשמר: {path}. {count} אובייקטים נמצאים מחוץ לגיליון.",
+    "ui.drawing_print.opened_outside_one": "נפתח במציג ה-PDF שלך. הדפיסו ב-100% (גודל אמיתי). אובייקט אחד נמצא מחוץ לגיליון.",
+    "ui.drawing_print.opened_outside_other": "נפתח במציג ה-PDF שלך. הדפיסו ב-100% (גודל אמיתי). {count} אובייקטים נמצאים מחוץ לגיליון."
+  },
+  "ja": {
+    "ui.drawing_export.saved_outside_one": "保存しました: {path}。1 個のオブジェクトがシートの外にあります。",
+    "ui.drawing_export.saved_outside_other": "保存しました: {path}。{count} 個のオブジェクトがシートの外にあります。",
+    "ui.drawing_print.opened_outside_one": "PDFビューアで開きました。100%（実際のサイズ）で印刷してください。1 個のオブジェクトがシートの外にあります。",
+    "ui.drawing_print.opened_outside_other": "PDFビューアで開きました。100%（実際のサイズ）で印刷してください。{count} 個のオブジェクトがシートの外にあります。"
+  },
+  "ko": {
+    "ui.drawing_export.saved_outside_one": "저장됨: {path}. 객체 1개가 시트 밖에 있습니다.",
+    "ui.drawing_export.saved_outside_other": "저장됨: {path}. 객체 {count}개가 시트 밖에 있습니다.",
+    "ui.drawing_print.opened_outside_one": "PDF 뷰어에서 열었습니다. 100%(실제 크기)로 인쇄하세요. 객체 1개가 시트 밖에 있습니다.",
+    "ui.drawing_print.opened_outside_other": "PDF 뷰어에서 열었습니다. 100%(실제 크기)로 인쇄하세요. 객체 {count}개가 시트 밖에 있습니다."
+  },
+  "vi": {
+    "ui.drawing_export.saved_outside_one": "Đã lưu {path}. 1 đối tượng nằm ngoài tờ bản vẽ.",
+    "ui.drawing_export.saved_outside_other": "Đã lưu {path}. {count} đối tượng nằm ngoài tờ bản vẽ.",
+    "ui.drawing_print.opened_outside_one": "Đã mở trong trình xem PDF. Hãy in ở 100% (Kích thước thật). 1 đối tượng nằm ngoài tờ bản vẽ.",
+    "ui.drawing_print.opened_outside_other": "Đã mở trong trình xem PDF. Hãy in ở 100% (Kích thước thật). {count} đối tượng nằm ngoài tờ bản vẽ."
+  },
+  "zh": {
+    "ui.drawing_export.saved_outside_one": "已保存：{path}。有 1 个对象位于图纸之外。",
+    "ui.drawing_export.saved_outside_other": "已保存：{path}。有 {count} 个对象位于图纸之外。",
+    "ui.drawing_print.opened_outside_one": "已在 PDF 查看器中打开。请以 100%（实际大小）打印。有 1 个对象位于图纸之外。",
+    "ui.drawing_print.opened_outside_other": "已在 PDF 查看器中打开。请以 100%（实际大小）打印。有 {count} 个对象位于图纸之外。"
+  }
+}

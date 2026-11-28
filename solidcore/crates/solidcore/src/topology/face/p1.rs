@@ -4797,4 +4797,34 @@ mod seam_completion_fault_tests {
         FAULTS.set(SeamFaults::default());
         assert_eq!(r.unwrap(), Some(vec![wall]));
     }
+
+    /// #21218: when every internal seam of a single-face doubly-periodic body is marked for
+    /// replacement, seam completion must not destroy the face and fail with `face 0 not found`.
+    #[test]
+    fn complete_imported_face_seams_on_a_torus_with_all_seams_redundant_keeps_the_face() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 10.0, 3.0)
+            .unwrap();
+        let face = b.face_list()[0];
+        FAULTS.set(SeamFaults {
+            force_redundant: true,
+            first_inserts_nothing: false,
+            retained_cancelled: false,
+        });
+        let r = complete_imported_face_seams(&mut k, &mut b, face);
+        FAULTS.set(SeamFaults::default());
+        assert_eq!(r.unwrap(), Some(vec![face]));
+        assert_eq!(b.face_list(), &[face]);
+        assert!(b.face(face).is_ok());
+        assert_eq!(b.edge_list().len(), 2);
+        assert_eq!(
+            crate::topology::face::p4::upward_edgeuses(&b, face, false, None)
+                .unwrap()
+                .len(),
+            4
+        );
+        for e in b.edge_list().to_vec() {
+            assert!(crate::topology::edge::is_manifold(&b, e).unwrap());
+        }
+    }
 }

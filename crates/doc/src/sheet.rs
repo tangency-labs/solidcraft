@@ -21,7 +21,7 @@ use crate::{DocError, Document, Result};
 #[path = "sheet_face_names.rs"]
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, carried_from, ranked};
+pub(crate) use face_names::{FOLD_ROLE, FaceNamer, FaceRole, carried, carried_from, fold_cap_roles, ranked};
 
 /// The most work one sheet's flat may take (see [`FlatWork`]).
 const MAX_FLAT_WORK: usize = 500_000_000;
@@ -464,7 +464,7 @@ pub struct RuleValues {
 const MAX_SHEET_THICKNESS: f64 = 1e4;
 
 /// The smallest gap closed corners are given: closer than this the flanges' ends would touch.
-const MIN_CORNER_GAP: f64 = 0.01;
+pub(crate) const MIN_CORNER_GAP: f64 = 0.01;
 
 impl Document {
     /// A rule by name, the active one, or the default steel rule.

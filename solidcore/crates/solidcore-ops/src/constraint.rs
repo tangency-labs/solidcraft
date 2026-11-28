@@ -6,7 +6,7 @@ use solidcore_record::{Plane, Vec2, Vec3};
 
 pub use k::{
     circumcenter, circumradius, plane_angle, plane_angle_residual, plane_distance, plane_reversed,
-    size, unit, weight, Dual, Num, N, V,
+    size, unit, weight, Dual, NoCorner, Num, N, V,
 };
 
 /// A constant solver vector from a record point or direction.
@@ -27,6 +27,19 @@ pub fn point_on_curve<T: Num>(p: V<T>, curve: &[V<T>]) -> Vec<T> {
 /// The three solver operands of a circle in the given orthonormal frame.
 pub fn circle_points(c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
     k::circle_points(of(c), of(x), of(y), radius, from).map(|[x, y, z]| Vec3::new(x, y, z))
+}
+
+/// The arc of radius `radius` that rounds the corner at `corner` between the segments running to
+/// `far_a` and `far_b`, tangent to both: its end on the first segment, its middle point and its
+/// end on the second, and the length each segment loses.
+pub fn corner_round(
+    corner: Vec3,
+    far_a: Vec3,
+    far_b: Vec3,
+    radius: f64,
+) -> Result<([Vec3; 3], f64), NoCorner> {
+    let (arc, setback) = k::corner_round(of(corner), of(far_a), of(far_b), radius)?;
+    Ok((arc.map(|[x, y, z]| Vec3::new(x, y, z)), setback))
 }
 
 /// The three solver operands of a 2D arc's circle through its sketch frame.

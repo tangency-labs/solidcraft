@@ -49,7 +49,6 @@ topology.brep_mirror	mat0019	record	346	trim	0
 topology.brep_mirror	mat0019	record	347	trim	0
 topology.brep_mirror	mat0019	record	354	trim	0
 topology.brep_mirror	mat0019	record	355	trim	0
-topology.brep_mirror	mat0019	record	495	rounding	0
 topology.brep_mirror	mat0019	record	634	trim	0
 topology.brep_mirror	mat0019	record	635	trim	0
 topology.brep_mirror	mat0019	record	638	trim	0
@@ -60,7 +59,7 @@ topology.brep_mirror	mat0019	record	854	trim	0
 topology.brep_mirror	mat0019	record	855	trim	0
 topology.brep_mirror	mat0019	record	858	trim	0
 topology.brep_mirror	mat0019	record	859	trim	0
-topology.brep_mirror	mat0019	record	927	rounding	0
+topology.brep_mirror	mat0019	record	927	trim	0
 topology.brep_mirror	mat0032	record	1618	rounding	0
 topology.brep_mirror	mat0032	record	1619	rounding	0
 topology.brep_mirror	mat0032	record	3378	trim	0
@@ -78,11 +77,10 @@ topology.brep_mirror	mat0032	record	854	trim	0
 topology.brep_mirror	mat0032	record	855	trim	0
 topology.brep_mirror	mat0032	record	858	trim	0
 topology.brep_mirror	mat0032	record	859	trim	0
-topology.brep_mirror	mat0032	record	926	rounding	0
-topology.brep_mirror	mat0032	record	927	rounding	0
+topology.brep_mirror	mat0032	record	926	trim	0
+topology.brep_mirror	mat0032	record	927	trim	0
 topology.brep_mirror	mat0049	record	311	trim	0
 topology.brep_mirror	mat0049	record	312	trim	0
-topology.brep_mirror	mat0049	record	452	rounding	0
 topology.brep_mirror	mat0049	record	591	trim	0
 topology.brep_mirror	mat0049	record	592	trim	0
 topology.brep_mirror	mat0049	record	595	trim	0
@@ -91,7 +89,7 @@ topology.brep_mirror	mat0049	record	811	trim	0
 topology.brep_mirror	mat0049	record	812	trim	0
 topology.brep_mirror	mat0049	record	815	trim	0
 topology.brep_mirror	mat0049	record	816	trim	0
-topology.brep_mirror	mat0049	record	883	rounding	0
+topology.brep_mirror	mat0049	record	883	trim	0
 topology.brep_mirror	mat0059	record	639	trim	0
 topology.brep_mirror	mat0059	record	640	trim	0
 topology.brep_mirror	mat0076	record	1002	trim	0
