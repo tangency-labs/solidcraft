@@ -2228,6 +2228,51 @@ fn fold_through_cut_outs() {
     assert!((volume(&mut c) - want).abs() < 0.05, "{} vs {want}", volume(&mut c));
 }
 
+/// A construction line drawn first in line with an edge of the base (a guide past both its
+/// ends, as a projected layout line is) names no rim: the edge is the drawn line's, so a
+/// flange on it is saved and found again by the drawn line. Before, the rim took the guide's
+/// name, and a design that named the edge after its drawn line lost the flange.
+#[test]
+fn a_construction_line_in_line_with_a_base_edge_does_not_name_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [120, 0]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "name": "Front"}));
+    let front = s.doc.find_feature("Front").cloned().unwrap();
+    assert_eq!(front.edge_names, vec![format!("F{base}:side:l1|F{base}:top")]);
+}
+
+/// A design saved while the guide still named the edge (its flange on `F<b>:side:guide`) opens
+/// with the base as it was and the flange asking for its edge to be picked again, naming the
+/// reference it lost; picked again, the flange is back as before.
+#[test]
+fn a_flange_saved_on_a_guide_lines_name_asks_for_its_edge_again() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [120, 0]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "name": "Front"}));
+    let flanged = volume(&mut s);
+    let saved = s.doc.to_json().replace(&format!("F{base}:side:l1|F{base}:top"), &format!("F{base}:side:guide|F{base}:top"));
+    assert!(saved.contains(":side:guide|"), "the guide's name is in the saved design");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let plate = volume(&mut reopened);
+    assert!(plate > 0.0 && plate < flanged, "the base stays, without the flange: {plate} vs {flanged}");
+    let front = reopened.doc.features.last().map_or(0, |f| f.id);
+    let error = reopened.model.results.iter().find(|r| r.id == front).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains(&format!("`F{base}:side:guide|F{base}:top`")) && error.contains("reselect"), "{error}");
+    // Picked again (anywhere on the edge), the edge takes its name now.
+    run(&mut reopened, "timeline.edit", json!({"feature": front, "set": {"edges": [[40, 0, 2.5]]}}));
+    assert!((volume(&mut reopened) - flanged).abs() < 1e-6 * flanged, "picked again: {} vs {flanged}", volume(&mut reopened));
+}
+
 #[test]
 fn flange_edges_are_named_and_follow_the_base_sketch() {
     let mut s = Session::default();

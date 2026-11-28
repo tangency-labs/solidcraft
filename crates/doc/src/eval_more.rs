@@ -1248,8 +1248,9 @@ pub(super) fn sheet_eval(
             let r = doc.sheet_rule(rule.as_deref());
             let rule = convert_rule(&doc.rule_values(vals, &r)?);
             // The sketch's lines, in the sheet's plane: the rims of the panel it makes are named after them.
+            // A construction line makes no rim: an edge along one in line with it is the drawn line's.
             let mut curves: Vec<(String, Vec2, Vec2)> = Vec::new();
-            for (ci, c) in ss.sketch.curves.iter().enumerate() {
+            for (ci, c) in ss.sketch.curves.iter().enumerate().filter(|(_, c)| !c.construction) {
                 for s in ss.sketch.segs(ci) {
                     if let Seg2::Line { a, b } = s {
                         let f = |p: Vec2| if *flip { Vec2::new(p.x, -p.y) } else { p };
