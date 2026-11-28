@@ -19,13 +19,15 @@
 //! | [`Stretch`]       | A stretch of the joint that keeps one section                       |
 //! | [`GrooveWeld`]    | What [`groove_weld`] gives                                          |
 //! | [`WeldNote`]      | What the weld tool tells the user about a weld that built           |
+//! | [`NoGroove`]      | A joint with no groove modelled: its seams, and the mark on one     |
+//! | [`Seam`]          | Where the seam runs on one welded side                              |
 //! | [`GrooveRefusal`] | Why a joint is refused                                              |
 //!
 //! # Not covered
 //!
 //! A T joint's through part has no toe edge: its outer face is its only groove face, and its
-//! toe is where the stem's outer face meets it ([`groove_weld`]). The seam mark for a joint
-//! with no groove modelled comes later (brett19 on #18500). A joint whose section
+//! toe is where the stem's outer face meets it ([`groove_weld`]). A joint with no groove modelled
+//! gets a seam and a flat mark ([`NoGroove`]) only between butt plates. A joint whose section
 //! changes along it, or whose parts do not run alongside each other all along it, is refused
 //! with the stretches that keep one section ([`GrooveRefusal::SectionChanges`], brett19 on
 //! #18500, Q56); each one builds on its own ([`groove_weld_over`]). Building them all at once
@@ -43,7 +45,7 @@
 //! plate's end comes later. A J or U face reads its arc from an end square to the joint: one whose
 //! ends are both cut at an angle gives no section.
 
-use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
 use solidcraft_kernel::api::UnitNormal;
 use solidcraft_kernel::{
@@ -136,6 +138,15 @@ pub enum GrooveRefusal {
     /// builds, where there is one.
     #[error("{}", fill_text(why, *fit))]
     Fill { why: FillFailure, fit: Option<f64> },
+    /// No groove is modelled: the two walls coincide within the zone tolerance (brett19 on
+    /// #18500). Its own outcome, not a failure: the weld tool draws a seam line and a flat mark
+    /// ([`NoGroove::mark`]) instead of a body that fills a groove.
+    #[error("no groove is modelled between the parts: a seam and a mark, no fill")]
+    NoGroove(Box<NoGroove>),
+    /// The walls are apart, but nowhere by more than `gap` (mm), within the zone tolerance plus
+    /// the fill's depth margin: a sliver too thin to fill or to call no groove (brett19 on #18500).
+    #[error("the groove is a sliver {gap:.6} mm wide: too thin to fill")]
+    Sliver { gap: f64 },
     /// The search for a direction the faces all run straight along was not decided (the kernel's
     /// [`Straight::Undecided`]: too many faces for its budget, or bands it cannot reach): the
     /// joint may run straight, but no direction is proved. Not a fault of the picks.
@@ -463,7 +474,9 @@ pub struct Stretch {
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
 /// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceInterrupted`];
 /// [`GrooveRefusal::GrooveFaceNotProved`];
-/// [`GrooveRefusal::Fill`] with the size that builds. The errors of the kernel calls otherwise, a
+/// [`GrooveRefusal::Fill`] with the size that builds; [`GrooveRefusal::NoGroove`] (an outcome:
+/// a seam and a mark, [`NoGroove::mark`]) where the walls coincide between butt plates;
+/// [`GrooveRefusal::Sliver`] where they are only just apart. The errors of the kernel calls otherwise, a
 /// fill's input the kernel refuses among them.
 pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result<GrooveWeld> {
     let zone = zone_tolerance()?;
@@ -794,12 +807,122 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
     let butt = right.part.face_square_level(right.outer, frame.y, frame.origin)?.is_some();
     let depth_normal = butt.then_some(Vec2::new(0.0, 1.0));
     let [left_wall, right_wall] = walls;
+    let along = [joint.start + over.from, joint.start + over.to];
+    // shortcut: no groove only between butt plates (the far side's seam faces -y); coincident
+    // walls elsewhere get the fill's own refusal until a corner or T without a groove is asked for
+    if let Some(gap) = apart(left_wall, right_wall) {
+        if gap <= zone {
+            if let (true, Some(first), Some(last)) = (butt, left_wall.first(), left_wall.last()) {
+                let (toe, root) = (ends(first).0, ends(last).1);
+                let thickness = toe.y - root.y;
+                let seams = [Seam { at: toe, normal: Vec2::new(0.0, 1.0), thickness }, Seam { at: root, normal: Vec2::new(0.0, -1.0), thickness }];
+                return Err(GrooveRefusal::NoGroove(Box::new(NoGroove { frame, along, seams })));
+            }
+        } else if gap <= zone + zone.max(1e-9 * size(left_wall.iter().chain(right_wall))) {
+            // within the zone tolerance plus the fill's depth margin (the larger of the
+            // section's allowance and the zone tolerance)
+            return Err(GrooveRefusal::Sliver { gap });
+        }
+    }
     let fill = match fill_channel(left_wall, right_wall, depth_normal, options)? {
         Ok(fill) => fill,
         Err(refusal) => return Err(GrooveRefusal::Fill { why: refusal.why, fit: refusal.fit }),
     };
-    let body = extrude_planar_regions(&frame, std::slice::from_ref(&fill.region), joint.start + over.from, joint.start + over.to)?;
+    let body = extrude_planar_regions(&frame, std::slice::from_ref(&fill.region), along[0], along[1])?;
     Ok(GrooveWeld { body, frame, fill, zone })
+}
+
+/// A joint (or a stretch of one) with no groove modelled ([`GrooveRefusal::NoGroove`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoGroove {
+    /// The joint's frame: the seams lie in its plane.
+    pub frame: Plane,
+    /// Where the joint (or the stretch) starts and ends along the frame's normal, from its
+    /// origin (mm).
+    pub along: [f64; 2],
+    /// The seam on each welded side: the arrow side (the outer faces' side), then the other.
+    pub seams: [Seam; 2],
+}
+
+/// Where the seam runs on one welded side of a joint with no groove: along the joint through
+/// `at`, from [`NoGroove::along`]'s start to its end.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Seam {
+    /// The seam's point in the frame's plane (along its `x` and `y`).
+    pub at: Vec2,
+    /// The outward normal of that side's surface in the frame's plane: the frame's `y`, or its
+    /// opposite on the other side.
+    pub normal: Vec2,
+    /// The plate's thickness there, from this side's surface to the other's (mm).
+    pub thickness: f64,
+}
+
+/// The mark's default height above the surface (mm, Q98).
+pub const MARK_HEIGHT: f64 = 0.2;
+
+impl Seam {
+    /// The mark's default width (Q98): the plate's thickness, but 5 mm on plates thicker than
+    /// 10 mm.
+    #[must_use]
+    pub fn mark_width(&self) -> f64 {
+        if self.thickness > 10.0 { 5.0 } else { self.thickness }
+    }
+}
+
+impl NoGroove {
+    /// The flat mark on `seam`: a strip `width` wide, centred on the seam, standing `height`
+    /// off the surface, along the whole joint (or stretch). Defaults: [`Seam::mark_width`],
+    /// [`MARK_HEIGHT`].
+    ///
+    /// # Errors
+    /// [`GrooveRefusal::Invalid`] for a width or height that is not finite and positive; the
+    /// errors of the kernel call.
+    pub fn mark(&self, seam: &Seam, width: f64, height: f64) -> Result<Body> {
+        if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+            return Err(GrooveRefusal::Invalid("a mark's width and height must be finite and positive"));
+        }
+        // the seam's normal is the frame's y or its opposite: the strip is square to the frame
+        let (x, y) = (seam.at.x, seam.at.y);
+        let (lo, hi) = if seam.normal.y > 0.0 { (y, y + height) } else { (y - height, y) };
+        let corners =
+            [Vec2::new(x - width / 2.0, lo), Vec2::new(x + width / 2.0, lo), Vec2::new(x + width / 2.0, hi), Vec2::new(x - width / 2.0, hi)];
+        let region = Region2 { outer: Loop2::polygon(&corners), holes: Vec::new() };
+        Ok(extrude_planar_regions(&self.frame, &[region], self.along[0], self.along[1])?)
+    }
+}
+
+/// How far apart two walls are where they are the same number of lines and arcs of the same
+/// kinds, in order: the largest difference along `x` or `y` between their ends (and between
+/// arcs' centres and radii); `None` for walls of other shapes. shortcut: ends, not the walls'
+/// full distance, and only walls read with the same pieces; enough to tell walls that coincide
+/// or nearly do.
+fn apart(left: &[Seg2], right: &[Seg2]) -> Option<f64> {
+    if left.len() != right.len() {
+        return None;
+    }
+    let off = |p: Vec2, q: Vec2| (p.x - q.x).abs().max((p.y - q.y).abs());
+    let mut gap: f64 = 0.0;
+    for (a, b) in left.iter().zip(right) {
+        let ((a0, a1), (b0, b1)) = (ends(a), ends(b));
+        gap = gap.max(off(a0, b0)).max(off(a1, b1));
+        match (a, b) {
+            (Seg2::Line { .. }, Seg2::Line { .. }) => {}
+            (Seg2::Arc { center: c, radius: r, .. }, Seg2::Arc { center: k, radius: q, .. }) => gap = gap.max(off(*c, *k)).max((r - q).abs()),
+            _ => return None,
+        }
+    }
+    Some(gap)
+}
+
+/// The largest coordinate of the walls' ends: the section's size, as the fill takes it for its
+/// allowance.
+fn size<'s>(walls: impl Iterator<Item = &'s Seg2>) -> f64 {
+    walls
+        .flat_map(|s| {
+            let (a, b) = ends(s);
+            [a.x.abs(), a.y.abs(), b.x.abs(), b.y.abs()]
+        })
+        .fold(0.0, f64::max)
 }
 
 /// The first edge a groove face of `pick` (in the order of `faces`) shares with its outer face.

@@ -812,3 +812,47 @@ fn two_halves_of_one_circle_are_not_one_section() {
     assert!(!same(&upper, &lower, 1e-9));
     assert!(same(&upper, &upper, 1e-9) && same(&upper, &reversed(&upper), 1e-9));
 }
+
+// ---- no groove modelled ----
+
+/// Two plates 6 thick edge to edge, the right one `gap` off the left, and each one's square end.
+fn square_butt(gap: f64) -> ([Body; 2], [Vec<usize>; 2]) {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(gap, 0.0), (gap, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let faces = [facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0])];
+    ([left, right], faces)
+}
+
+#[test]
+fn plates_edge_to_edge_have_no_groove_and_a_seam_mark_on_each_side() {
+    let (parts, faces) = square_butt(0.0);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    let GrooveRefusal::NoGroove(no) = got else {
+        panic!("not NoGroove: {got:?}");
+    };
+    let [top, under] = no.seams;
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // the seam on the surface at the left toe, and under the plates 6 below it
+    assert!(close(top.at.x, 0.0) && close(top.at.y, 0.0) && close(top.normal.y, 1.0) && close(top.thickness, 6.0), "{top:?}");
+    assert!(close(under.at.x, 0.0) && close(under.at.y, -6.0) && close(under.normal.y, -1.0) && close(under.thickness, 6.0), "{under:?}");
+    // the default marks: 6 wide (the plates' thickness), 0.2 high, along the whole joint
+    for (seam, [y0, y1]) in [(top, [0.0, MARK_HEIGHT]), (under, [-6.0 - MARK_HEIGHT, -6.0])] {
+        let mark = no.mark(&seam, seam.mark_width(), MARK_HEIGHT).unwrap();
+        let volume = mark.volume_at(1e-9).unwrap();
+        assert!((volume - 6.0 * MARK_HEIGHT * 120.0).abs() <= 1e-6 * volume, "{volume}");
+        let (lo, hi) = bounds(&mark);
+        let want = ([-3.0, y0, 0.0], [3.0, y1, 120.0]);
+        assert!(lo.iter().zip(want.0).chain(hi.iter().zip(want.1)).all(|(&a, b)| (a - b).abs() < 1e-6), "{lo:?} {hi:?}");
+    }
+    // plates over 10 thick get a mark 5 wide; a mark of no width is refused
+    assert!(close(Seam { thickness: 12.0, ..top }.mark_width(), 5.0));
+    assert!(matches!(no.mark(&top, 0.0, MARK_HEIGHT), Err(GrooveRefusal::Invalid(_))));
+}
+
+#[test]
+fn plates_just_apart_are_a_sliver() {
+    let zone = zone();
+    let (parts, faces) = square_butt(1.5 * zone);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    assert!(matches!(got, GrooveRefusal::Sliver { gap } if (gap - 1.5 * zone).abs() <= 0.01 * zone), "{got:?} (zone {zone})");
+}
