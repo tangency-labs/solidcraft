@@ -485,7 +485,7 @@ fn override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsStri
     }
 }
 
-/// The folders and registry-named files searched for installed fonts, in order: none in the browser, which has only the
+/// The folders and system-registered files searched for installed fonts, in order: none in the browser, which has only the
 /// font the web app fetches ([`fallback::provide_web_font`]).
 pub fn font_dirs() -> Vec<PathBuf> {
     if cfg!(target_arch = "wasm32") {
@@ -518,11 +518,77 @@ pub fn font_dirs() -> Vec<PathBuf> {
         {
             dirs.push(PathBuf::from("/run/host/fonts"));
             dirs.push(PathBuf::from("/run/host/user-fonts"));
+            dirs.push(fontconfig_source());
         }
     }
     #[cfg(windows)]
     dirs.extend(registry_font_files().iter().cloned());
     dirs
+}
+
+/// Expand the system registration only when enumerating files. The search locations also
+/// form the cache key for each missing character on a drawing.
+#[cfg(target_os = "linux")]
+fn fontconfig_source() -> PathBuf {
+    std::env::var_os("FONTCONFIG_FILE").filter(|file| !file.is_empty()).map_or_else(|| PathBuf::from("/etc/fonts/fonts.conf"), PathBuf::from)
+}
+
+/// Fontconfig can register individual files outside the usual folders, including Nix store packages.
+#[cfg(target_os = "linux")]
+fn fontconfig_files() -> &'static [PathBuf] {
+    use std::collections::BTreeSet;
+    use std::io::{BufReader, Read};
+    use std::os::unix::ffi::OsStringExt;
+    use std::process::{Command, Stdio};
+
+    static FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    FILES.get_or_init(|| {
+        let Ok(mut child) = Command::new("fc-list")
+            .args(["--format", r#"%{file|cescape}""#, ":", "file"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            return Vec::new();
+        };
+        let mut files = BTreeSet::new();
+        let mut truncated = false;
+        if let Some(stdout) = child.stdout.take() {
+            // Fontconfig escapes quotes and backslashes in each path. Only the unescaped
+            // quote ends a record, so a Linux file name can contain a newline.
+            let mut bytes = BufReader::new(stdout).bytes();
+            let mut path = Vec::new();
+            let mut records = 0;
+            while let Some(Ok(byte)) = bytes.next() {
+                match byte {
+                    b'"' => {
+                        let file = PathBuf::from(std::ffi::OsString::from_vec(std::mem::take(&mut path)));
+                        if file.is_absolute() && has_font_extension(&file.to_string_lossy()) {
+                            files.insert(file);
+                        }
+                        records += 1;
+                    }
+                    b'\\' => match bytes.next() {
+                        Some(Ok(escaped)) => path.push(escaped),
+                        _ => break,
+                    },
+                    _ => path.push(byte),
+                }
+                if records == MAX_FONT_FILES || path.len() > MAX_FONT_PATH {
+                    truncated = true;
+                    break;
+                }
+            }
+        }
+        if truncated {
+            let _ = child.kill();
+        }
+        if !child.wait().is_ok_and(|status| status.success() || truncated) {
+            return Vec::new();
+        }
+        files.into_iter().collect()
+    })
 }
 
 /// Interpret Windows registry text without relying on the host platform's path syntax, so the
@@ -591,7 +657,18 @@ fn font_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut todo: Vec<(PathBuf, usize)> = dirs.iter().rev().map(|d| (d.clone(), 0)).collect();
+    #[cfg(target_os = "linux")]
+    let config = fontconfig_source();
     while let Some((dir, depth)) = todo.pop() {
+        #[cfg(target_os = "linux")]
+        if depth == 0 && dir == config {
+            let remaining = MAX_FONT_FILES - out.len();
+            out.extend(fontconfig_files().iter().filter(|p| seen.insert((*p).clone())).take(remaining).cloned());
+            if out.len() == MAX_FONT_FILES {
+                return out;
+            }
+            continue;
+        }
         if dir.is_file() {
             if has_font_extension(&dir.to_string_lossy()) && seen.insert(dir.clone()) {
                 out.push(dir);
