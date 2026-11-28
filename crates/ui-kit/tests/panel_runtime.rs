@@ -162,7 +162,7 @@ impl PanelController for StubController {
     }
 
     fn presentation(&self) -> PanelPresentation {
-        PanelPresentation { title: self.title.clone(), icon: "list".into(), status: None, attention: false, actions: Vec::new() }
+        PanelPresentation { title: self.title.clone(), icon: "list".into(), status: None, attention: false, actions: Vec::new(), menu_heading: None }
     }
 
     fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {
