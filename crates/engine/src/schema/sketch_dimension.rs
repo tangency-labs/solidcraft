@@ -135,11 +135,16 @@ pub struct SketchDimensionParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub text_at: Option<Point2>,
-    /// True to place a driven (reference) dimension: it measures, has no parameter and does not
-    /// constrain. Default: false.
+    /// True to place a driven (reference) dimension: it measures and does not constrain. With
+    /// `name`, exposes its measured value as a read-only parameter (#14426). Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub driven: Option<bool>,
+    /// Optional read-only parameter name for a driven dimension (e.g. `"diag"`, #14426): exposes
+    /// its measured value to downstream features, sketches and expressions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub name: Option<String>,
     /// When this is the sketch's first length dimension and nothing in the sketch fixes a size
     /// (no other driving length dimension, nothing fixed or projected), scale the whole sketch
     /// to the value instead of distorting it (the reply's `scaled` is the factor). A free
@@ -217,6 +222,7 @@ impl SketchDimensionParams {
         let orientation = text(o, "orientation")?;
         let text_at = typed::<Point2>(o, "text_at")?;
         let driven = flag(o, "driven", None)?;
+        let name = text(o, "name")?;
         let previous_axis = text(o, "previous_axis")?;
         let half_axes = flag(o, "half_axes", Some("`half_axes` must be true or false"))?;
         // The sketch is read after the entities; a model reference among them is left to the
@@ -239,6 +245,7 @@ impl SketchDimensionParams {
             value,
             text_at,
             driven,
+            name,
             scale_sketch,
             scale_about_origin,
             previous_axis,

@@ -47,8 +47,10 @@ body. For example, a rectangle extruded 20 mm becomes a rectangular block.
 - **Don't** assume a symmetric distance is the distance on each side. New
   symmetric extrusions use the total distance; older saved designs can retain
   their earlier convention.
-- Taper with a two-sided or symmetric extent is not supported. A very steep
-  taper can also be refused rather than creating an invalid result.
+- A taper drafts both sides of a two-sided or symmetric extrude from the start
+  plane; Taper Angle 2 gives the second of two sides its own. A thin wall on two
+  sides or a Symmetric Offset is not tapered yet. A very steep taper can also be
+  refused rather than creating an invalid result.
 
 #### Examples and community resources
 

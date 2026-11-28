@@ -2236,6 +2236,26 @@ fn fins_meeting_at_the_axis_join_into_their_hub() {
     assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
 
+/// #22146, second case: Pipe1, a 5 mm pipe along lines and arcs, and Pipe2 joined to it. Each pipe
+/// builds alone with its volume (Pappus), and the join must give one valid body of both volumes:
+/// the pipes touch without overlapping. The join failed SMLib's check on a torus face of Pipe1 read
+/// back through the flat arrays ("SmSurfOfRevolution::Test #3 Midpoint").
+#[test]
+fn a_pipe_joined_to_a_pipe_of_lines_and_arcs_builds_one_body_of_both_volumes() {
+    let s = replay(include_str!("../../../examples/regressions/pipe_join_second_case.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1"], "Pipe2 joins Pipe1's body");
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Pipe1 10170.259935237927 and Pipe2 1002.8772940460799 mm^3, touching
+    let want = 11173.137229284;
+    let v = volume(&s, "Body1");
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, the two pipes' {want}");
+}
+
 /// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
 /// surfaces of revolution) could not be read back into the kernel, so every later operation on it
 /// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The
@@ -2659,6 +2679,43 @@ fn a_hole_in_a_notched_cross_cut_large_half_torus_is_cut() {
     let want = half_torus - cross - holes - notch;
     let got = volume(&s, "Part");
     assert!((got - want).abs() < 5e-5, "volume {got}, want {want} (notch {notch}, cross {cross}, holes {holes})");
+}
+
+/// A through-all cut whose joints are rounded to 9 decimals, the straight edge lying on
+/// the tube's end face. Those literals are the rounded input, not a stand-in for `SQRT_2`.
+/// The same notch with √2 at full precision builds the same solid. Tube R 10, r 9, height 12
+/// (z from −6 to 6). The volume is the issue's integral of the notch through the wall; the
+/// uncut tube, 228π, is not that volume.
+#[test]
+#[allow(clippy::approx_constant)]
+fn rounded_profile_joints_cut_through_coincident_end_face() {
+    let notch = |which: &str, inner: f64, outer: f64| {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.circle.center", json!({"center": [0, 0], "radius": 10})),
+            ("sketch.circle.center", json!({"center": [0, 0], "radius": 9})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 12, "direction": "symmetric"})),
+            ("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 0, -1], "y_dir": [0, 1, 0]}})),
+            ("sketch.arc.center_point", json!({"center": [5.5, 0], "start": [5.0, inner], "end": [5.0, -inner], "clockwise": false})),
+            ("sketch.arc.center_point", json!({"center": [4.5, outer], "start": [5.0, inner], "end": [6, outer], "clockwise": false})),
+            ("sketch.arc.center_point", json!({"center": [4.5, -outer], "start": [5.0, -inner], "end": [6, -outer], "clockwise": true})),
+            ("sketch.line", json!({"points": [[6, outer], [6, -outer]], "infer": false})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"through_all": true, "operation": "cut", "direction": "negative"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{which} {command}: {e}"));
+        }
+        let body = s.model.state().body("Body1").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{which}: {:?}", body.validity());
+        volume(&s, "Body1")
+    };
+    let u = notch("unrounded", 2.0_f64.sqrt(), 2.0 * 2.0_f64.sqrt());
+    println!("unrounded coincident-end-face notch: {u:.12} mm³");
+    assert!((u - 710.5969315245).abs() < 1e-3, "unrounded volume {u:.12}");
+    let rounded = notch("rounded", 1.414213562, 2.828427125);
+    assert!((rounded - u).abs() < 1e-6, "rounded {rounded:.12} vs unrounded {u:.12}");
 }
 
 /// #23062: the upper half of a torus (centre circle Ø1000, tube Ø1) with both edges of its flat

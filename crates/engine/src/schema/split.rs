@@ -18,17 +18,17 @@ use serde_json::Value;
 use super::check::whole;
 use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, ToolFace, feature_common};
 
-/// Cut a body into pieces along a plane, a face of another body (its surface extended), or a
-/// straight sketch line (along the sketch's normal). Each piece becomes a body. A surface body
-/// split with `tool_sheet` `body` is cut into its connected regions, each a surface body.
+/// Cut a body into pieces along a plane, a face of another body (its surface extended), or sketch
+/// curves (along the sketch's normal). Each piece becomes a body. A surface body split with
+/// `tool_sheet` `body` is cut into its connected regions, each a surface body.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SplitBodyParams {
     /// The body to split, by name.
     #[serde(deserialize_with = "body")]
     pub body: String,
-    /// A face of a body to split along, its surface extended. Read when neither `sketch` nor
-    /// `line` is given.
+    /// A face of a body to split along, its surface extended. Read when none of `sketch`, `line`
+    /// and `curves` is given.
     #[serde(default)]
     pub tool: Option<ToolFace>,
     /// With `tool`: use only the face's infinite plane, which follows the face. The face must
@@ -48,15 +48,27 @@ pub struct SplitBodyParams {
     /// each whole and exactly as it is. Each cuts the pieces it crosses through and must cut one.
     #[serde(default)]
     pub tool_bodies: Option<Vec<String>>,
-    /// With `line`: the sketch, by feature id (not its name), whose line splits the body.
+    /// With `line` or `curves`: the sketch, by feature id (not its name), whose curves split the
+    /// body.
     #[serde(default)]
     pub sketch: Option<SketchFeatureId>,
-    /// With `sketch`: a straight line's id; the body is split by the plane through it along the
-    /// sketch's normal, which follows the line when the sketch changes.
+    /// With `sketch`: a curve's id. A straight line splits the body by the plane through it along
+    /// the sketch's normal; any other curve (an arc, a spline) by the sheet it sweeps along the
+    /// normal through the body, its open ends continued along their tangents past the body. The
+    /// split follows the curve when the sketch changes.
     #[serde(default, deserialize_with = "line")]
     pub line: Option<String>,
-    /// The plane to split across. Read when none of `tool`, `sketch` and `line` is given; then it
-    /// is required.
+    /// With `sketch`: more curve ids, joined end to end with `line` (when given) into one chain
+    /// that splits the body as the sheet it sweeps, as for a single curve.
+    #[serde(default, deserialize_with = "curves")]
+    pub curves: Option<Vec<String>>,
+    /// With `sketch`: true (the default) continues an open chain's ends along their tangents past
+    /// the body; false cuts with the curves exactly as drawn, refused where they do not cut the
+    /// body through.
+    #[serde(default, deserialize_with = "extend")]
+    pub extend: Option<bool>,
+    /// The plane to split across. Read when none of `tool`, `sketch`, `line` and `curves` is given;
+    /// then it is required.
     #[serde(default)]
     pub plane: Option<PlaneParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -121,7 +133,28 @@ fn line<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
         Value::String(s) => Ok(Some(s)),
-        _ => Err(D::Error::custom(whole("`line` must name a line of the sketch"))),
+        _ => Err(D::Error::custom(whole("`line` must name a curve of the sketch"))),
+    }
+}
+
+/// Split Body's `extend`, with the handler's message for anything that isn't true or false. `null`
+/// is the default, as the handler reads it.
+fn extend<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole("`extend` must be true or false"))),
+    }
+}
+
+/// Split Body's `curves`, with the handler's message for anything that isn't a list of text.
+/// `null` is no curves, as the handler reads it.
+fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    let bad = || D::Error::custom(whole("`curves` must be a list of curve ids of the sketch"));
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Array(list) => list.into_iter().map(|c| c.as_str().map(str::to_string).ok_or_else(bad)).collect::<Result<_, _>>().map(Some),
+        _ => Err(bad()),
     }
 }
 

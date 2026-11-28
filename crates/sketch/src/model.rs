@@ -812,6 +812,9 @@ pub struct Constraint {
     /// A driven (reference) dimension: it measures, it does not constrain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub driven: bool,
+    /// For a driven dimension: the read-only parameter name exposing its measured value (#14426).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driven_param: Option<String>,
     /// For dimensions: where the value text was placed, relative to the dimension's frame
     /// (see [`crate::dim_frame`]); None for the default place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1257,7 +1260,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
-        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, text: None });
+        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, driven_param: None, text: None });
         Ok(id)
     }
 

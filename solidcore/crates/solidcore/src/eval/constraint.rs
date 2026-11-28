@@ -3,6 +3,7 @@
 //! and their exact Jacobian ([`Dual`]). Numerical differences lose their digits at large
 //! coordinates, and the freedom count read from them goes wrong there (#10608).
 
+use crate::math::det;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Most unknowns one constraint reads: three coordinates of each of its points.
@@ -40,7 +41,7 @@ impl Num for f64 {
         f64::sqrt(self)
     }
     fn atan2(self, x: f64) -> f64 {
-        f64::atan2(self, x)
+        det::atan2(self, x)
     }
 }
 
@@ -145,7 +146,7 @@ impl Num for Dual {
                 .for_each(|(o, (dy, dx))| *o = (x.v * dy - self.v * dx) / r2);
         }
         Dual {
-            v: self.v.atan2(x.v),
+            v: det::atan2(self.v, x.v),
             d,
         }
     }
@@ -383,7 +384,7 @@ pub fn corner_round(
 pub fn circle_points(c: V<f64>, x: V<f64>, y: V<f64>, radius: f64, from: f64) -> [[f64; 3]; 3] {
     [0.0, 1.0, 2.0].map(|k| {
         let t = from + k * std::f64::consts::TAU / 3.0;
-        (c + x.scale(radius * t.cos()) + y.scale(radius * t.sin())).xyz()
+        (c + x.scale(radius * det::cos(t)) + y.scale(radius * det::sin(t))).xyz()
     })
 }
 
@@ -398,7 +399,7 @@ pub fn arc_circle_points(c: [f64; 2], start: [f64; 2], frame: &super::Frame) -> 
         V::of(frame.x_axis),
         V::of(frame.y_axis),
         radius,
-        dy.atan2(dx),
+        det::atan2(dy, dx),
     )
 }
 

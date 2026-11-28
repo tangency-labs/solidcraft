@@ -143,8 +143,8 @@ fn a_press_off_centre_does_not_jump_the_pad() {
     assert!((end[1] - (start[1] + dy)).abs() < 6.0, "y jumped: start {start:?} end {end:?}");
 }
 
-/// The value box opens edge to edge with the marker's reach; though the box drags, a press on
-/// that edge still takes the marker, not the box.
+/// A value box deliberately dropped against the marker still leaves its edge to the marker.
+/// The box's grip must not take a press that belongs to the marker.
 #[test]
 fn a_press_on_the_value_box_edge_by_the_marker_takes_the_marker() {
     let mut h = plate();
@@ -152,9 +152,19 @@ fn a_press_on_the_value_box_edge_by_the_marker_takes_the_marker() {
     h.step(&json!({"click": {"world": [40, 25, 10]}})).unwrap();
     h.settle();
     let start = h.at(&json!({"handle": "rest:position"})).unwrap();
+    // Automatic placement now keeps the box off every marker. Recreate the intentional
+    // contact by pinning a user-dropped box, which keeps its place beside the marker.
+    let shown = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box");
+    let marker = egui::pos2(start[0] as f32, start[1] as f32);
+    assert!(!shown.intersects(super::super::hit_area(marker)), "the automatic value box clears the position marker: {shown:?} {marker:?}");
+    let pinned = egui::pos2(marker.x + super::super::REACH - 1.0, marker.y - shown.height() * 0.5);
+    h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_canvas_box_dropped"), Some(pinned)));
+    h.settle();
     let edge = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box");
     let from = egui::pos2(edge.left(), (start[1] as f32).clamp(edge.top(), edge.bottom()));
     assert!(edge.contains(from), "the press is on the box: {edge:?} {from:?}");
+    assert!(from.distance(marker) <= super::super::REACH, "the press reaches this position marker: {marker:?} {from:?}");
+    assert!(super::super::contains_pointer(&h.app, from), "the press reaches the actual marker: {start:?} {from:?}");
     let (dx, dy) = (60.0, 30.0);
     h.step(&json!({"drag": [[from.x, from.y], [from.x + dx, from.y + dy]], "steps": 10})).unwrap();
     h.settle();

@@ -2699,6 +2699,7 @@ fn surface_bound(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> Result
 mod tests {
     use super::*;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::crv_basic::Curve as NlCurve;
@@ -3578,7 +3579,7 @@ mod tests {
         // the arc runs from its `from` end to its `to` end
         for (t, deg) in [(interval.min(), from), (interval.max(), to)] {
             let end = probe.evaluate_point(&k, t).unwrap();
-            let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let (cos, sin) = (det::cos(deg.to_radians()), det::sin(deg.to_radians()));
             let want = center + Vec3::new(radius * cos, radius * sin, 0.0);
             assert!(end.distance(want) <= 1e-9, "{end:?} {want:?}");
         }
@@ -3602,7 +3603,7 @@ mod tests {
     fn closest_to_members_of_concentric_circles_is_their_radii_apart() {
         let c = arc_to_circle(Point3::new(0.0, 0.0, 5.0), 35.0, [0.0, 180.0], 20.0, 5.0);
         assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
-        let radius = |p: Point3| p.x.hypot(p.y);
+        let radius = |p: Point3| det::hypot(p.x, p.y);
         assert!((radius(c.on_probe) - 35.0).abs() <= 1e-9, "{c:?}");
         assert!((radius(c.on_members) - 20.0).abs() <= 1e-9, "{c:?}");
         assert!(c.on_probe.y >= -1e-9, "{c:?}");
@@ -3633,8 +3634,8 @@ mod tests {
     fn closest_to_members_of_an_arc_past_its_end_is_at_the_end() {
         let end = 170f64.to_radians();
         let c = arc_to_circle(Point3::new(40.0, 0.0, 0.0), 10.0, [0.0, 170.0], 10.0, 0.0);
-        let e = Point3::new(40.0 + 10.0 * end.cos(), 10.0 * end.sin(), 0.0);
-        let reach = (1700.0 + 800.0 * end.cos()).sqrt();
+        let e = Point3::new(40.0 + 10.0 * det::cos(end), 10.0 * det::sin(end), 0.0);
+        let reach = (1700.0 + 800.0 * det::cos(end)).sqrt();
         assert!((c.distance - (reach - 10.0)).abs() <= 1e-9, "{c:?}");
         assert!(c.on_probe.distance(e) <= 1e-9, "{c:?}");
         let near = Point3::new(e.x * 10.0 / reach, e.y * 10.0 / reach, 0.0);
@@ -3813,7 +3814,7 @@ mod tests {
         let h = 0.3_f64;
         let (x_peak, y_peak) = (
             0.5 - h / 3.0_f64.sqrt(),
-            20.0 * h.powi(3) / (3.0 * 3.0_f64.sqrt()),
+            20.0 * det::powi(h, 3) / (3.0 * 3.0_f64.sqrt()),
         );
         let mut k = Kernel::default();
         let crossings = |k: &mut Kernel, tolerance: f64, above: f64| {

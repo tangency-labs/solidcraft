@@ -114,6 +114,7 @@
 //!   (B-spline, ellipse, circle, line, parabola, hyperbola), others are
 //!   [`SolidError::InvalidInput`]. The ignored `EvaluatePoint` status propagates.
 
+use crate::math::det;
 use core::ops::Div;
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -1690,9 +1691,9 @@ impl Ellipse {
                     "extremal radius quadratic without a root",
                 ));
             };
-            let theta_x_rad = first_root.atan();
+            let theta_x_rad = det::atan(first_root);
             let theta_y_rad = if let Some(&second_root) = sols.get(1) {
-                let mut ty = second_root.atan();
+                let mut ty = det::atan(second_root);
                 if ty < theta_x_rad {
                     ty += PI;
                 }
@@ -1702,8 +1703,8 @@ impl Ellipse {
             };
 
             // get max vectors for each angle
-            let v = rx * theta_x_rad.cos() * x_axis + ry * theta_x_rad.sin() * y_axis;
-            let w = rx * theta_y_rad.cos() * x_axis + ry * theta_y_rad.sin() * y_axis;
+            let v = rx * det::cos(theta_x_rad) * x_axis + ry * det::sin(theta_x_rad) * y_axis;
+            let w = rx * det::cos(theta_y_rad) * x_axis + ry * det::sin(theta_y_rad) * y_axis;
             (v, w)
         };
 
@@ -3015,8 +3016,8 @@ mod tests {
     fn tilted_axes(rot_z_deg: f64, tilt_x_deg: f64, flip_z: bool) -> (Vec3, Vec3) {
         let a = rot_z_deg.to_radians();
         let b = tilt_x_deg.to_radians();
-        let (sa, ca) = (a.sin(), a.cos());
-        let (sb, cb) = (b.sin(), b.cos());
+        let (sa, ca) = (det::sin(a), det::cos(a));
+        let (sb, cb) = (det::sin(b), det::cos(b));
         let ux = Vec3::new(ca, sa * cb, sa * sb);
         let mut uy = Vec3::new(-sa, ca * cb, ca * sb);
         if flip_z {
@@ -3425,7 +3426,7 @@ mod tests {
         e.trim(k, &mut piece, TrimMode::Notify).unwrap();
         let (nurb, step) = (e.base.natural_interval(), e.step_interval());
         let d = e.base.evaluate_point(nurb.max()).unwrap() - o;
-        let mut angle = (rx / ry * d.dot(y)).atan2(d.dot(x)) * 180.0 / PI;
+        let mut angle = det::atan2(rx / ry * d.dot(y), d.dot(x)) * 180.0 / PI;
         if angle < 0.0 {
             angle += 360.0;
         }

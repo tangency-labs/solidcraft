@@ -27,7 +27,8 @@ const APP_ELEMENTS: &[Element] = &[
     }),
     element!("workspace_menu", |ui, _| {
         let app = crate::test_support::sample_app();
-        crate::context_menu::workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
+        let id = ui.scope_id().with("workspace-menu");
+        Menu::items(ui, id, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), false);
     }),
     element!("continuity_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         let mut order = Continuity::G1;

@@ -30,13 +30,20 @@ pub fn is_open(outline: &Loop2) -> bool {
     m.inward_arcs.iter().any(|a| *a) || m.sharpest_turn < INWARD
 }
 
-/// How far along `toward` from `end` its line leaves the box round a section, `rect` its
-/// rectangle's corners in order (mm): the nearest side it crosses, its sides square to the
-/// rectangle's plane without end. `None` for a zero `toward`, a degenerate `rect` or a
-/// line along the box.
+/// How far past `end` along `toward` any point of a member's end leaves the box round a
+/// section, `rect` its rectangle's corners in order, its sides square to the rectangle's plane
+/// without end: the farthest over `end` and the rectangles `sections` placed square to the line
+/// at `end` (mm, [`k::reach_through_box`]). `None` for a zero `toward`, a degenerate `rect` or
+/// every line along the box.
 #[must_use]
-pub fn exit_through_box(end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64> {
-    k::exit_through_box(vec3(end), vec3(toward), &rect.map(vec3))
+pub fn reach_through_box(
+    end: Vec3,
+    toward: Vec3,
+    sections: &[[Vec3; 4]],
+    rect: [Vec3; 4],
+) -> Option<f64> {
+    let sections: Vec<_> = sections.iter().map(|r| r.map(vec3)).collect();
+    k::reach_through_box(vec3(end), vec3(toward), &sections, &rect.map(vec3))
         .ok()
         .flatten()
 }

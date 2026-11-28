@@ -3298,6 +3298,7 @@ mod glyph_zoom_tests {
                 kind: ConstraintKind::Midpoint { p: mid, l: line },
                 param: None,
                 driven: false,
+                driven_param: None,
                 text: None,
             });
         }

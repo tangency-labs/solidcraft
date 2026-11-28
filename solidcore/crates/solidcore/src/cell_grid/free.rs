@@ -7,6 +7,7 @@
 //! stays when both run the same way. The kept pieces chain into loops: outer loops counter-clockwise,
 //! holes clockwise.
 
+use crate::math::det;
 use crate::math::Vec2;
 
 use super::vec::ring_next;
@@ -89,7 +90,7 @@ fn fraction(p: &Prim, x: Vec2) -> f64 {
             }
         }
         Prim::Arc { c, a0, sweep, .. } => {
-            let a = (x.y - c.y).atan2(x.x - c.x);
+            let a = det::atan2(x.y - c.y, x.x - c.x);
             let along = if sweep >= 0.0 {
                 (a - a0).rem_euclid(std::f64::consts::TAU)
             } else {
@@ -134,7 +135,7 @@ pub(super) fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
             let arc = if matches!(a, Prim::Arc { .. }) { a } else { b };
             let (pts, n) = circle_segment_points(c, r, p, q);
             for &x in pts.iter().take(n) {
-                if arc.contains_angle((x.y - c.y).atan2(x.x - c.x), 1e-9) {
+                if arc.contains_angle(det::atan2(x.y - c.y, x.x - c.x), 1e-9) {
                     out.push(x);
                 }
             }
@@ -160,7 +161,7 @@ pub(super) fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
                 if (r1 - r2).abs() < 1e-9 {
                     for (pt, host) in [(b0, a), (b1, a), (a0, b), (a1, b)] {
                         if host.contains_angle(
-                            (pt.y - host_center(host).y).atan2(pt.x - host_center(host).x),
+                            det::atan2(pt.y - host_center(host).y, pt.x - host_center(host).x),
                             1e-9,
                         ) {
                             out.push(pt);
@@ -174,8 +175,8 @@ pub(super) fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
                 let mid = c1 + u * along;
                 let perp = Vec2::new(-u.y, u.x);
                 for x in [mid + perp * h, mid - perp * h] {
-                    let on_a = a.contains_angle((x.y - c1.y).atan2(x.x - c1.x), 1e-9);
-                    let on_b = b.contains_angle((x.y - c2.y).atan2(x.x - c2.x), 1e-9);
+                    let on_a = a.contains_angle(det::atan2(x.y - c1.y, x.x - c1.x), 1e-9);
+                    let on_b = b.contains_angle(det::atan2(x.y - c2.y, x.x - c2.x), 1e-9);
                     if on_a && on_b && !out.iter().any(|q: &Vec2| q.distance(x) < 1e-9) {
                         out.push(x);
                     }

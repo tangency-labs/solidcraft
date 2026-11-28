@@ -15,6 +15,17 @@ pub fn validate(b: &Brep) -> Result<()> {
     geometry(b)
 }
 
+/// [`Brep::validate_file`] for a file of `file_bytes`, then [`geometry`].
+///
+/// # Errors
+/// The first check the record fails, as text. Past the file's item cap the message says the
+/// file is valid but too large and names the count and the cap. A geometric record the kernel
+/// refuses is that error's message (`to_string`).
+pub fn validate_file(b: &Brep, file_bytes: u64) -> std::result::Result<(), String> {
+    b.validate_file(file_bytes)?;
+    geometry(b).map_err(|e| e.to_string())
+}
+
 /// [`Brep::validate_built`] (a record the kernel built), then [`geometry`].
 ///
 /// # Errors
@@ -39,7 +50,7 @@ pub fn geometry(b: &Brep) -> Result<()> {
     for f in &b.faces {
         // (a blend's label is its definition, which its structural validation checks and the
         // kernel certifies its net against when the face is built; its geometry is its form)
-        if !matches!(f.surface, Surface::Blend { .. }) {
+        if !matches!(f.surface, Surface::Blend { .. } | Surface::Sweep { .. }) {
             surface(&f.surface)?;
         }
         if let Some(n) = &f.nurbs {
