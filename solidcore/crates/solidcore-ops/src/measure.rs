@@ -26,7 +26,9 @@ use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
     edge_face_gap_samples, edge_trim_gap_bound, face_internal_point, face_normal_at_edge,
 };
-use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
+use solidcore::query::brep::{
+    calculate_tight_bounding_box_prepared, BrepClassifier, BrepQuery, LiveBrepObjects, Ray,
+};
 use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
@@ -845,7 +847,18 @@ impl Body {
     /// The kernel's error; [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box (not finite, or
     /// its corners out of order).
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        let x = read_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
+        // read only where the body has what its classifications would make (decided by the
+        // kernel before any work); otherwise on a private copy of it, as before
+        let x = read_body(
+            "bounds",
+            self,
+            |k, b| match calculate_tight_bounding_box_prepared(k, b) {
+                Err(solidcore::SolidError::PreparationRequired { .. }) => {
+                    brep_bounding_box(k, b, true)
+                }
+                r => r,
+            },
+        )?;
         let (lo, hi) = (array(x.min()), array(x.max()));
         let finite = lo.iter().chain(&hi).all(|v| v.is_finite());
         if !finite || lo.iter().zip(&hi).any(|(a, b)| a > b) {
