@@ -242,6 +242,24 @@ fn hidden_bodies_take_no_part() {
     assert_eq!(op(&mut h), NEW);
 }
 
+#[test]
+fn extrude_cut_dialog_omits_the_mesh_from_automatic_targets() {
+    let mut h = Harness::new();
+    let path = h.dir.join("scan.obj");
+    std::fs::write(&path, "v 0 0 0\nv 4 0 0\nv 0 4 0\nf 1 2 3\n").unwrap();
+    let scan = h.app.run("file.insert_mesh", json!({"path": path})).unwrap();
+    h.app.run("component.activate", json!({"component": scan["component"]})).unwrap();
+    for (name, x) in [("Block", 10), ("Hidden", 30)] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
+    }
+    h.app.run("browser.visibility", json!({"items": ["Hidden"], "visible": false})).unwrap();
+    rect_sketch(&mut h, [0.0, 0.0], [15.0, 5.0]);
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    pick(&mut h, CUT);
+    let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds[0].1["targets"], json!(["Block"]));
+}
+
 /// Pipe and Thicken don't choose their operation, yet a Cut from their windows leaves a hidden
 /// body alone too: two 20 mm boxes, the second hidden, a path through both at half height.
 #[test]
@@ -290,6 +308,78 @@ fn a_pipe_or_thicken_cut_from_its_window_leaves_hidden_bodies_alone() {
             "the shown box A is cut, the hidden B untouched, an edit keeps A as the target: {found:?}"
         );
     }
+}
+
+/// An Emboss or Deboss with no Target Face joins or cuts every body its profile reaches; from its
+/// window it leaves a hidden body alone too: two 20 mm boxes, the second hidden, a 10 mm square
+/// over each on the plane of their tops. With every body hidden it is refused. An Emboss with a
+/// Target Face keeps that face's body as its one target.
+#[test]
+fn an_emboss_with_no_target_face_from_its_window_leaves_hidden_bodies_alone() {
+    let volume = |h: &Harness, name: &str| {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        st.body(name).and_then(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume)
+    };
+    let setup = |hide: &[&str]| {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "body_name": "B"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [80, 0, 0], "body_name": "C"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Lid"})).unwrap();
+        let sketch = h.app.run("sketch.create", json!({"plane": "Lid"})).unwrap()["sketch"].as_u64().unwrap_or_default();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [45, 5], "p1": [55, 15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("browser.visibility", json!({"items": hide, "visible": false})).unwrap();
+        h.app.session.selection = (0..2).map(|index| solidcraft_engine::Sel::Profile { sketch, index }).collect();
+        h.app.start("solid.emboss");
+        h
+    };
+    let mut found = Vec::new();
+    for (deboss, hide) in [(false, &["B"][..]), (true, &["B"][..]), (false, &["A", "B", "C"][..])] {
+        let mut h = setup(hide);
+        let Some(mut d) = h.app.dialog.clone() else { panic!("no Emboss window") };
+        let Kind::Emboss { deboss: mode, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+        *mode = deboss;
+        let cmds = match crate::dialogs::apply_commands(&h.app, &d) {
+            Ok(cmds) => cmds,
+            Err(e) => {
+                found.push((deboss, hide.len(), volume(&h, "B").unwrap_or_default(), Some(json!(e)), None));
+                continue;
+            }
+        };
+        let sent = cmds.first().map(|(_, p)| p["targets"].clone());
+        for (cmd, p) in cmds {
+            h.app.run(&cmd, p).unwrap();
+        }
+        // Editing it keeps the shown boxes as its targets.
+        let id = h.app.session.doc.features.last().map(|f| f.id);
+        let edit = id.and_then(|id| crate::dialogs::for_feature(&h.app, id, None)).and_then(|d| crate::dialogs::apply_commands(&h.app, &d).ok());
+        let kept = edit.as_ref().and_then(|c| c.first()).map(|(_, p)| p["params"]["targets"].clone());
+        found.push((deboss, hide.len(), volume(&h, "B").unwrap_or_default(), sent, kept));
+    }
+    // The square over the hidden B meets no shown body. Joined, it goes into A as a separate
+    // piece, as any Join tool that meets none of its targets does; that rule is not this test's.
+    let refusal = json!(solidcraft_ui_text::tr("dialog.no_shown_body_show_one").to_string());
+    for (deboss, hidden, b, sent, kept) in &found {
+        let ok = if *hidden == 1 {
+            let shown = Some(json!(["A", "C"]));
+            (b - 8000.0).abs() < 1e-6 && *sent == shown && *kept == shown
+        } else {
+            (b - 8000.0).abs() < 1e-6 && *sent == Some(refusal.clone())
+        };
+        assert!(ok, "deboss={deboss}: the hidden B untouched, the shown boxes are the targets and stay so, nothing shown is refused: {found:?}");
+    }
+    // A Target Face on A, with B hidden: A stays the one target, not every shown box.
+    let mut h = setup(&["B"]);
+    if let Some(d) = h.app.dialog.as_mut()
+        && let Some(input) = d.inputs.get_mut(1)
+    {
+        input.items = vec![solidcraft_engine::Sel::Face { body: "A".into(), index: 0, point: Vec3::new(10.0, 10.0, 20.0) }];
+    }
+    let cmds = h.app.dialog.as_ref().map(|d| crate::dialogs::apply_commands(&h.app, d));
+    let targets = cmds.as_ref().and_then(|c| c.as_ref().ok()).and_then(|c| c.first()).map(|(_, p)| p["targets"].clone());
+    assert_eq!(targets, Some(json!(["A"])), "a Target Face keeps its body as the one target: {cmds:?}");
 }
 
 /// A saved New Body feature changed to Cut in its edit window leaves a hidden body alone, as a

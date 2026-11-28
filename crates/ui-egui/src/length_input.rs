@@ -214,7 +214,15 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
-        D::Thread { length, .. } => vec![length],
+        D::MeshSectionStack { from, to, spacing, .. } => vec![spacing, from, to],
+        D::Thread { length, options, .. } => {
+            // An offset not typed (or emptied) stays so: the command leaves it out.
+            let mut lengths = vec![length];
+            if !options.offset.trim().is_empty() {
+                lengths.push(&mut options.offset);
+            }
+            lengths
+        }
         D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
         D::CellGrid(c) => vec![&mut c.size, &mut c.web, &mut c.depth, &mut c.margin],

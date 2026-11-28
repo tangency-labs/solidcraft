@@ -27,6 +27,7 @@ pub mod cell_grid;
 pub mod curves;
 pub mod develop;
 pub mod dxf;
+pub mod exact;
 pub mod exchange;
 pub mod frames;
 pub mod hatch;
@@ -41,6 +42,7 @@ pub mod query;
 pub mod runtime;
 pub mod sections;
 pub mod shaft_spline;
+pub mod sweep;
 pub mod tessellate;
 pub mod tube_cope;
 
@@ -48,11 +50,14 @@ pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareF
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, CurveSample, Curves};
 pub use dxf::Dxf;
+pub use exact::{ExactAssembled, ExactBody, ExactBound, ExactEdge, ExactExported, ExactFace, ExactHistory, ExactKind, ExactUse};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
-pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use modelling::{
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, SplitTool, Taper, TrimKeep,
+};
 pub use planar::{Planar, PlanarRefused};
 pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
 pub use profiles::{ProfileCurve, ProfileRefused, Profiles};
@@ -61,6 +66,7 @@ pub use query::{FaceHit, MembersClosest, OutlineStretch, Queries, QueryRefused, 
 pub use runtime::{ErrorClass, FailureCode, Runtime};
 pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
 pub use shaft_spline::ShaftSplines;
+pub use sweep::{Helix, PathSpan, PointPath, PointPiece, RailFit, SpaceSpan, SweepOptions, SweepOrientation};
 pub use tessellate::{PlanarFill, TessRefused, Tessellate};
 pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
@@ -105,6 +111,15 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// Faces tilted about a neutral plane ([`Modelling::draft`]).
+    Draft,
+    /// Faces and bodies split by a tool, and surface bodies trimmed ([`Modelling::split_body`],
+    /// [`Modelling::split_faces`], [`Modelling::trim_keep`]).
+    Split,
+    /// A profile swept along a path or a helix ([`Modelling::sweep`], [`Modelling::sweep_helix`]).
+    Sweep,
+    /// Sections lofted into a solid ([`Modelling::loft`]).
+    Loft,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
@@ -166,6 +181,10 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::Draft,
+        OpKind::Split,
+        OpKind::Sweep,
+        OpKind::Loft,
         OpKind::CellGrid,
         OpKind::Exchange,
         OpKind::Develop,
@@ -203,6 +222,10 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::Draft => "draft",
+            OpKind::Split => "split",
+            OpKind::Sweep => "sweep",
+            OpKind::Loft => "loft",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
             OpKind::Develop => "develop",
@@ -313,7 +336,10 @@ pub enum BackendError {
 /// makes exactly the call it would make without the router.
 ///
 /// A body is the kernel's own form ([`Backend::Form`]); it enters as the record
-/// ([`Backend::import`]) and leaves as the record with its history ([`Backend::export`]).
+/// ([`Backend::import`]) and leaves as the record with its history ([`Backend::export`]). A
+/// kernel that can't write the record's canonical order itself takes and gives bodies in memory
+/// as exact bodies instead ([`Backend::import_exact`], [`Backend::export_exact`]), which solidcore
+/// assembles into the record: no body crosses as a file.
 ///
 /// What a kernel does is in families, one trait over this one for each, in its own module:
 /// [`Modelling`], the body-making operations. A family names its operations in [`OpKind`], so
@@ -337,6 +363,22 @@ pub trait Backend: Send + Sync + 'static {
     fn import(&self, record: &Brep) -> Result<Self::Form, Self::Error>;
     /// The form as a record in canonical order, with the history that made it.
     fn export(&self, form: &Self::Form) -> Result<Exported, Self::Error>;
+
+    /// Whether the router hands this kernel bodies as exact bodies ([`Backend::import_exact`])
+    /// rather than as the record ([`Backend::import`]).
+    fn takes_exact(&self) -> bool {
+        false
+    }
+    /// The exact body as the kernel's form, for a kernel that takes bodies that way
+    /// ([`Backend::takes_exact`]): `None` for one that takes the record.
+    fn import_exact(&self, _body: &ExactBody) -> Option<Result<Self::Form, Self::Error>> {
+        None
+    }
+    /// The form as an exact body with the history that made it, which the router assembles into
+    /// the record: `None` for a kernel that gives the record itself ([`Backend::export`]).
+    fn export_exact(&self, _form: &Self::Form) -> Option<Result<ExactExported, Self::Error>> {
+        None
+    }
 }
 
 #[cfg(test)]

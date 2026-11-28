@@ -47,9 +47,16 @@ pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64,
         return Ok(nf);
     }
     // On none of them (the face's body has gone to another component since): wherever the name
-    // is now.
+    // is now. Never silently resolve onto a different linked component's own bodies (e.g. after
+    // single-placement `component.relink` when a face was not matched onto the new source).
     let hit = crate::name_lookup::locate_face(st, name, pick).ok_or_else(|| gone(name))?;
     let body = st.bodies.get(hit.body).ok_or_else(|| gone(name))?;
+    if body.component != component
+        && doc.model_body_component(body) == body.component
+        && doc.links.get(&body.component).is_some_and(|l| l.feature == body.feature)
+    {
+        return Err(gone(name));
+    }
     let Some(offset) = doc.model_body_offset(body).copied() else {
         return Ok(NamedFace { body, face: hit.face, point: hit.point, offset: IDENTITY });
     };

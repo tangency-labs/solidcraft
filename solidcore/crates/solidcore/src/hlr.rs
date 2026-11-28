@@ -42,6 +42,7 @@ pub(crate) mod surface;
 mod trim;
 mod vec;
 
+use crate::math::det;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use serde::Serialize;
@@ -1741,6 +1742,70 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
     let p = scene
         .get(t.placement)
         .ok_or(HlrError::Invalid("placement"))?;
+    // Two screen places closer than the coverage tolerance are already one place (`cover`).
+    // A cut just short of a silhouette turn stays above the parameter and 3D merge, because
+    // the screen gap is only the square of that parameter gap. Consecutive pieces that small
+    // are one run. A run whose own screen box is still within the tolerance joins a neighbour
+    // of the same visibility, or, when that would flip visibility, the piece before it (else the
+    // piece after it) runs on over it, so the pieces still meet end to end and no end moves by
+    // more than that box, not by one tolerance per piece. A
+    // run that is larger than the tolerance is kept, and so is a track of only such pieces:
+    // that is a short edge.
+    let tol = 1e-7 + 1e-9 * scale;
+    // The box includes an arc's extremes, so a fold whose ends meet is not small. A non-finite
+    // box is not small.
+    let screen_span = |range: [f64; 2]| {
+        let (lo, hi) = screen_box(c, range, p, view);
+        let d = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+        d.is_finite().then_some(d)
+    };
+    let tiny = |range: [f64; 2]| screen_span(range).is_some_and(|d| d <= tol);
+    if !pieces.is_empty() && !pieces.iter().all(|piece| tiny(piece.t)) {
+        let mut merged: Vec<Piece> = Vec::new();
+        let mut pending: Option<f64> = None;
+        let mut rest = pieces.into_iter().peekable();
+        while let Some(mut piece) = rest.next() {
+            if let Some(t0) = pending.take() {
+                piece.t[0] = t0.min(piece.t[0]);
+            }
+            if !tiny(piece.t) {
+                merged.push(piece);
+                continue;
+            }
+            let mut run = Vec::new();
+            run.push(piece);
+            while rest.peek().is_some_and(|next| tiny(next.t)) {
+                if let Some(next) = rest.next() {
+                    run.push(next);
+                }
+            }
+            let (Some(first), Some(last)) = (run.first(), run.last()) else {
+                continue;
+            };
+            let span = [first.t[0], last.t[1]];
+            let vis = first.visibility;
+            let one_vis = run.iter().all(|item| item.visibility == vis);
+            if !tiny(span) {
+                merged.extend(run);
+                continue;
+            }
+            if one_vis && merged.last().is_some_and(|prev| prev.visibility == vis) {
+                if let Some(prev) = merged.last_mut() {
+                    prev.t[0] = prev.t[0].min(span[0]);
+                    prev.t[1] = prev.t[1].max(span[1]);
+                }
+            } else if one_vis && rest.peek().is_some_and(|next| next.visibility == vis) {
+                pending = Some(span[0]);
+            } else if let Some(prev) = merged.last_mut() {
+                // Left out: the neighbour before it runs on over it, so the pieces still meet end
+                // to end, with at most the run's own box (inside the tolerance) painted by it.
+                prev.t[1] = prev.t[1].max(span[1]);
+            } else {
+                pending = Some(span[0]);
+            }
+        }
+        pieces = merged;
+    }
     for piece in &mut pieces {
         let mut pts = vec![view.screen(p.apply(c.at(piece.t[0])))];
         pts.extend(
@@ -1874,7 +1939,7 @@ fn screen_box(c: &C3, r: [f64; 2], p: &Placement, view: &View) -> ([f64; 2], [f6
                 };
                 // The peaks at base + k pi from the first one past the part's start, wherever
                 // its angles are counted from.
-                let (base, pi) = (vk.atan2(uk), std::f64::consts::PI);
+                let (base, pi) = (det::atan2(vk, uk), std::f64::consts::PI);
                 let first = ((r[0] - base) / pi).ceil();
                 for k in 0..8 {
                     let t = base + (first + k as f64) * pi;
@@ -2019,7 +2084,7 @@ fn depth_bound(c: &C3, r: [f64; 2], p: &Placement, d: Vec3) -> f64 {
             o, x, y, r: rad, ..
         } => {
             let dl = p.local_dir(d);
-            depth(*o) + (rad[0] * x.dot(dl)).hypot(rad[1] * y.dot(dl))
+            depth(*o) + det::hypot(rad[0] * x.dot(dl), rad[1] * y.dot(dl))
         }
         C3::Spline {
             degree,
@@ -2079,7 +2144,7 @@ fn box_gap(a: [f64; 2], b: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> f64 {
     let to_box = |p: [f64; 2]| {
         let dx = (lo[0] - p[0]).max(p[0] - hi[0]).max(0.);
         let dy = (lo[1] - p[1]).max(p[1] - hi[1]).max(0.);
-        dx.hypot(dy)
+        det::hypot(dx, dy)
     };
     let corner_gap = corners
         .iter()
@@ -2219,7 +2284,7 @@ fn piece_geometry(
                     return x;
                 }
                 let w = c.at(x) - o;
-                w.dot(v).atan2(w.dot(u))
+                det::atan2(w.dot(v), w.dot(u))
             };
             // The angle turned from the piece's start to its end: the way it turns, certified
             // all along it (C3::turn_sign; a piece that turns back, or one that cannot be
@@ -2253,7 +2318,7 @@ fn piece_geometry(
             let pieces = ((a1 - a0).abs() / std::f64::consts::FRAC_PI_2)
                 .ceil()
                 .max(1.) as usize;
-            let at = |a: f64| o + u * a.cos() + v * a.sin();
+            let at = |a: f64| o + u * det::cos(a) + v * det::sin(a);
             let mut out = Vec::new();
             for k in 0..pieces {
                 let (b0, b1) = (
@@ -2261,13 +2326,13 @@ fn piece_geometry(
                     a0 + (a1 - a0) * (k + 1) as f64 / pieces as f64,
                 );
                 let (m, h) = (0.5 * (b0 + b1), 0.5 * (b1 - b0));
-                let w = h.cos();
+                let w = det::cos(h);
                 if w <= 1e-12 {
                     return chords();
                 }
                 out.push(Seg2::Conic {
                     a: s(at(b0)),
-                    apex: s(o + (u * m.cos() + v * m.sin()) / w),
+                    apex: s(o + (u * det::cos(m) + v * det::sin(m)) / w),
                     b: s(at(b1)),
                     w,
                 });
@@ -2387,7 +2452,7 @@ fn crossings(tracks: &mut [Track], ctx: &Ctx) -> Result<usize, HlrError> {
     // coincident run starts or ends, one side differs and the meeting is kept.
     // The end (0 or 1) of a segment that fraction `f` along it lies at, to rounding.
     let end_at = |s: &Seg, f: f64| {
-        let len = (s.b[0] - s.a[0]).hypot(s.b[1] - s.a[1]);
+        let len = det::hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
         if f * len <= tol {
             Some(0.)
         } else if (1. - f) * len <= tol {
@@ -2764,7 +2829,7 @@ fn cover(lines: &mut [Line], tol: f64, step: f64, ctx: &Ctx) -> Result<(), HlrEr
                         return Err(HlrError::Cancelled);
                     }
                 }
-                let k = ((a[0] - b[0]).hypot(a[1] - b[1]) / step)
+                let k = (det::hypot(a[0] - b[0], a[1] - b[1]) / step)
                     .ceil()
                     .clamp(1., 1e6) as usize;
                 covered = covered
@@ -2815,7 +2880,7 @@ fn point_segment(q: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     } else {
         0.
     };
-    (a[0] + t * ex - q[0]).hypot(a[1] + t * ey - q[1])
+    det::hypot(a[0] + t * ex - q[0], a[1] + t * ey - q[1])
 }
 
 /// Smallest distance between two screen segments that do not cross.
