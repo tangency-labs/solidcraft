@@ -172,6 +172,14 @@ pub struct Caches {
     /// their domains. A [`Cell`] so that test can set it through the `&Kernel` it takes.
     /// Crate-private: not a kernel option.
     pub(crate) refit_raising_trims: Cell<bool>,
+    /// Not upstream (#23441): whether two faces on one cone, torus or surface of revolution
+    /// with a planar generator cover each other past their own sweeps
+    /// (`surface::surface::p3::sweep_turn_window`): a face of the same surface beyond the
+    /// covering face's part of the turn, as two halves of a split cone are. Set only while
+    /// [`crate::topology::brep::p5::remove_splits_of_one_sweep`] takes such splits out; every
+    /// other cover keeps upstream's, within the covering surface's own sweep. A [`Cell`] as
+    /// [`Self::refit_raising_trims`]. Crate-private: not a kernel option.
+    pub(crate) cover_across_sweeps: Cell<bool>,
 }
 
 impl Default for Caches {
@@ -183,6 +191,7 @@ impl Default for Caches {
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
+            cover_across_sweeps: Cell::new(false),
         }
     }
 }
@@ -195,6 +204,7 @@ impl Caches {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
             hold_trim_raise: self.hold_trim_raise,
             refit_raising_trims: Cell::new(self.refit_raising_trims.get()),
+            cover_across_sweeps: Cell::new(self.cover_across_sweeps.get()),
             ..Self::default()
         };
     }

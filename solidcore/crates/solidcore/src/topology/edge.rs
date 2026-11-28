@@ -2261,6 +2261,13 @@ fn is_topological_with(
             .caches
             .refit_raising_trims
             .replace(matches!(gain, CoverTolerance::NoGrowth));
+        // the faces whose sweep was a whole turn before the cover (`whole_turn_seam`)
+        let whole_before = [face1, face2_].map(|f| {
+            b.face(f)
+                .ok()
+                .and_then(|r| r.surface.as_ref())
+                .is_some_and(|s| s.step_uv_domain().u_interval().length() >= 360.0 - EFF_ZERO_SQRT)
+        });
         let covered = cover_other_coincident_face(k, b, face1, face2_, approx_tol, false);
         k.caches.refit_raising_trims.set(refit);
         let (dist, keep, merged) = match covered {
@@ -2272,14 +2279,98 @@ fn is_topological_with(
         };
         out.dist_between = dist;
         out.surf_to_keep = keep;
-        if keep.is_none() {
+        let Some(kept) = keep else {
             return Ok(out);
+        };
+        let was_whole = if kept == face1 {
+            whole_before[0]
+        } else {
+            whole_before[1]
+        };
+        if !was_whole && k.caches.cover_across_sweeps.get() {
+            whole_turn_seam(k, b, e, [face1, face2_], kept)?;
         }
         out.merged_face_domain = Some(merged);
     }
 
     out.is_topological = true;
     Ok(out)
+}
+
+/// Not upstream (#23441): where the cover makes the kept face's sweep a whole turn (two faces
+/// on one cone, torus or surface of revolution that together go all the way round, such as a
+/// cone split into two halves along two generators), the merged face's seam is the other edge
+/// the two faces share, the one that then has the merged face on both its sides. The cover
+/// sets the turn from the kept surface's own angles, so its seam can fall on `e`, the edge
+/// being taken out or beside it, leaving a seam to be made there again. The kept surface's turn
+/// is moved round to start at that other edge's angle (the merged face's domain, in the NURBS
+/// parameters, spans the whole turn either way). Nothing changes where the turn is not whole
+/// or no other edge has both faces.
+fn whole_turn_seam(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    faces2: [FaceId; 2],
+    kept: FaceId,
+) -> Result<()> {
+    let Some(surface) = b.face(kept)?.surface.as_ref() else {
+        return Ok(());
+    };
+    let sweep = crate::surface::surface::p3::sweeps_in_closed_form(surface);
+    let step = surface.step_uv_domain();
+    if !sweep || step.u_interval().length() < 360.0 - EFF_ZERO_SQRT {
+        return Ok(());
+    }
+    // the other edge with the two faces on its sides
+    let mut other = None;
+    for f in faces2 {
+        for x in crate::topology::face::p4::edges(b, f, None, false, None)? {
+            if x != e && other.is_none() {
+                let mut on = faces(b, x, None)?;
+                on.sort();
+                on.dedup();
+                let mut want = faces2.to_vec();
+                want.sort();
+                if on == want {
+                    other = Some(x);
+                }
+            }
+        }
+    }
+    let Some(other) = other else {
+        return Ok(());
+    };
+    // the sweep angle of an edge's middle on the kept surface, on the turn from `lo`
+    let lo = step.u_interval().min();
+    let angle = |b: &Brep, x: EdgeId| -> Result<Option<f64>> {
+        let Some(curve) = evaluation_curve(b, x)? else {
+            return Ok(None);
+        };
+        let mid = curve.evaluate_point(k, interval(b, x)?.mid())?;
+        let surface = b
+            .face(kept)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| null("IsTopological: face without surface"))?;
+        let tol = face2::tolerance(b, kept)?.max(tolerance(b, x)?);
+        Ok(surface
+            .step_inversion_unbounded(k, mid, tol)
+            .ok()
+            .map(|(uv, _)| lo + (uv.x - lo).rem_euclid(360.0)))
+    };
+    let on_seam = |a: f64| a - lo < EFF_ZERO_SQRT || lo + 360.0 - a < EFF_ZERO_SQRT;
+    let Some(a) = angle(b, other)? else {
+        return Ok(());
+    };
+    if on_seam(a) {
+        return Ok(());
+    }
+    let window = Extent2d::from_bounds(a, step.min().y, a + 360.0, step.max().y);
+    b.face_mut(kept)?
+        .surface
+        .as_mut()
+        .ok_or_else(|| null("IsTopological: face without surface"))?
+        .adjust_step_uv_domain(k, &window)
 }
 
 /// `IsTangentEdge`: a manifold edge whose primary edge use's sector is tangent
