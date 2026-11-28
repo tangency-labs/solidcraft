@@ -203,6 +203,8 @@ pub struct Override {
     pub flip: bool,
     /// Its own weld gap; empty: the frame's.
     pub gap: String,
+    /// Whether its butt is coped, once chosen on its row; none: the frame's Coped.
+    pub coped: Option<bool>,
     /// An edit's: the members in their saved order, and the Flip the row showed for it. While the row's Flip is
     /// unchanged they go back in that order, so OK leaves an order today's rules wouldn't give as it was.
     pub saved: Option<(Vec<String>, bool)>,
@@ -211,7 +213,7 @@ pub struct Override {
 impl Override {
     /// A new pick: the frame's type `corner`, unflipped, the frame's gap.
     fn new(pick: Sel, corner: usize) -> Override {
-        Override { pick, corner, flip: false, gap: String::new(), saved: None }
+        Override { pick, corner, flip: false, gap: String::new(), coped: None, saved: None }
     }
 }
 
@@ -1066,6 +1068,63 @@ fn read_override(o: &Value) -> Option<frame::CornerOverride> {
     serde_json::from_value(o.clone()).ok()
 }
 
+/// The rows that set every corner of `picks` at once, above their own rows: a type (a dash while they differ), a Gap
+/// (empty while they differ; the frame's gap as the hint) and Coped. Each sets that value on every one of them
+/// ([`set_corners`]). `frame`, `skip` and `labels` as [`corner_rows`] shows a row's type. True when Enter was pressed
+/// in the Gap.
+fn corners_together(
+    ui: &mut egui::Ui,
+    m: &mut Member,
+    picks: &[Sel],
+    (frame, skip, labels): (usize, usize, &[&str]),
+    (frame_coped, frame_gap): (bool, &str),
+) -> bool {
+    let rows: Vec<&Override> = m.overrides.iter().filter(|o| picks.contains(&o.pick)).collect();
+    let same = |values: Vec<String>| -> Option<String> {
+        let first = values.first().cloned()?;
+        values.iter().all(|v| *v == first).then_some(first)
+    };
+    let title = solidcraft_ui_text::format("ui.frame_corners_together", &[("count", &rows.len().to_string())]);
+    let mut options: Vec<&str> = labels.to_vec();
+    options.push("—");
+    let shown = same(rows.iter().map(|o| override_type(o.corner, frame).saturating_sub(skip).to_string()).collect());
+    let mut chosen = shown.and_then(|s| s.parse::<usize>().ok()).unwrap_or(labels.len());
+    let before = chosen;
+    let mut gap = same(rows.iter().map(|o| o.gap.trim().to_string()).collect()).unwrap_or_default();
+    let typed = gap.clone();
+    let was = same(rows.iter().map(|o| o.coped.unwrap_or(frame_coped).to_string()).collect()).as_deref() == Some("true");
+    let mut on = was;
+    let can = frame != NONE && rows.iter().any(|o| override_flips(override_type(o.corner, frame)));
+    let enter = ui
+        .scope_builder(egui::UiBuilder::new().id_salt("frame_corners_together"), |ui| {
+            choice_row(ui, &title, "frame_corners_together", &mut chosen, &options);
+            let enter = hint_row(ui, "Gap", &mut gap, frame_gap);
+            form_row(ui, "Coped", |ui| {
+                ui.add_enabled_ui(can, |ui| check(ui, &mut on));
+            });
+            enter
+        })
+        .inner;
+    let corner = (chosen != before && chosen < labels.len()).then_some(chosen + skip);
+    set_corners(m, picks, corner, (gap != typed).then_some(gap.as_str()), (on != was).then_some(on));
+    enter
+}
+
+/// Give each of the corners `picks` type `corner`, gap `gap` (empty: the frame's) and Coped `coped`, each when given.
+fn set_corners(m: &mut Member, picks: &[Sel], corner: Option<usize>, gap: Option<&str>, coped: Option<bool>) {
+    for o in m.overrides.iter_mut().filter(|o| picks.contains(&o.pick)) {
+        if let Some(c) = corner {
+            o.corner = c;
+        }
+        if let Some(g) = gap {
+            o.gap = g.to_string();
+        }
+        if let Some(c) = coped {
+            o.coped = Some(c);
+        }
+    }
+}
+
 fn corner_label(n: usize) -> String {
     solidcraft_ui_text::format("ui.frame_corner_number", &[("n", &n.to_string())])
 }
@@ -1094,14 +1153,20 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
         return false;
     }
     let frame = m.corner;
+    let frame_coped = m.coped;
     let frame_gap = if m.gap.trim().is_empty() { "0 mm".to_string() } else { m.gap.clone() };
     let mut enter = false;
     let choices = override_choices(frame);
     let skip = CORNER_TYPES.len() - choices.len();
     let labels: Vec<&str> = choices.iter().map(|c| c.1).collect();
+    // Two or more picked corners (not crossings, which have only Flip): one type, gap and Coped for them all.
+    let together: Vec<Sel> = picks.iter().enumerate().filter(|(n, _)| !crossings.get(*n).copied().unwrap_or(false)).map(|(_, p)| p.clone()).collect();
+    if together.len() >= 2 {
+        enter |= corners_together(ui, m, &together, (frame, skip, &labels), (frame_coped, &frame_gap));
+    }
     let mut drop = None;
     for (n, pick) in picks.iter().enumerate() {
-        let Some(Override { corner, flip, gap, .. }) = m.overrides.iter_mut().find(|o| o.pick == *pick) else { continue };
+        let Some(Override { corner, flip, gap, coped, .. }) = m.overrides.iter_mut().find(|o| o.pick == *pick) else { continue };
         let label = corner_label(n + 1);
         let crossed = crossings.get(n).copied().unwrap_or(false);
         // A scope of its own keeps each row's ids apart.
@@ -1148,6 +1213,20 @@ fn corner_rows(ui: &mut egui::Ui, d: &mut Dialog, lit: Option<usize>, crossings:
                     }
                 });
                 enter |= hint_row(ui, "Gap", gap, &frame_gap);
+                // A butt (or Auto's) here coped on its own; unchosen, it follows the frame's Coped.
+                if !crossed {
+                    let can = override_flips(override_type(*corner, frame)) && frame != NONE;
+                    form_row(ui, "Coped", |ui| {
+                        ui.add_enabled_ui(can, |ui| {
+                            let before = coped.unwrap_or(frame_coped);
+                            let mut on = before;
+                            check(ui, &mut on);
+                            if on != before {
+                                *coped = Some(on);
+                            }
+                        });
+                    });
+                }
             });
         });
     }
@@ -1315,6 +1394,10 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
     enter
 }
 
+/// The keys of a Frame Member's corners and finishing, which a frame of several groups takes for
+/// the whole frame, not per group.
+const FINISHING: [&str; 6] = ["corner", "corners", "flip", "coped", "gap", "fit_ends"];
+
 /// Keep Offset A and B and the shown group's `locate` in step. The offsets are the user's
 /// intention: typed (or set by an arrow or the marker in the view), they set `locate` (the
 /// anchor's point minus the offset; both empty: none), and a later change of the profile, Anchor,
@@ -1452,8 +1535,9 @@ fn applied_locate(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<S
 }
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
-/// Group placement uses the same path/profile reader as an ordinary frame. Unsupported joined
-/// groups are refused, preserving the selected corner and finishing controls for the user.
+/// Group placement uses the same path/profile reader as an ordinary frame, one group at a time;
+/// the corners and finishing are read once over every group's lines, since a corner override can
+/// name a line of each of two groups.
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     // Offset A and B typed for the group shown are applied to its `locate` as the values are now.
     let applied;
@@ -1475,16 +1559,6 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     if m.continuous {
         return Err("not supported yet: continuous members cannot be combined with groups; use separate Frame Members".into());
     }
-    if m.corner != NONE
-        || !m.overrides.is_empty()
-        || !crate::selection::items(inputs, 2).is_empty()
-        || extra.get("corners").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
-    {
-        return Err("not supported yet: frame member groups with joined corners; use corner none without corner overrides".into());
-    }
-    if m.flip || m.coped || !m.gap.trim().is_empty() || extra.get("fit_ends").and_then(Value::as_bool) == Some(true) {
-        return Err("not supported yet: frame member groups with finishing options; use separate Frame Members for finishing".into());
-    }
     if extra.get("pairs").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
         return Err("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs".into());
     }
@@ -1503,12 +1577,22 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
         shown.angle = group.angle;
         shown.mirror = group.mirror;
         shown.name = group.name;
+        // Placement only: the corners are the whole frame's, read below.
+        shown.corner = NONE;
+        shown.overrides.clear();
+        shown.flip = false;
         let mut picks = inputs.to_vec();
+        if let Some(corners) = picks.get_mut(2) {
+            corners.items.clear();
+        }
         let path = picks.first_mut().ok_or("select lines for the path first")?;
         path.items = group.lines;
         shown.sync(&path.items);
         let mut kept = extra.clone();
         kept.remove("locate");
+        for key in FINISHING {
+            kept.remove(key);
+        }
         let mut flat = flat_commands(app, &shown, &picks, &kept)?.into_iter().next().ok_or("select lines for the path first")?.1;
         let mut placement = Map::new();
         for key in ["lines", "anchor", "locate", "angle", "mirror", "body_name"] {
@@ -1527,6 +1611,24 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     }
     let mut p = common.ok_or("select lines for the path first")?;
     p["groups"] = json!(grouped);
+    // The corners and finishing, over every group's lines.
+    let mut whole = m.clone();
+    whole.all = false;
+    whole.groups = vec![Group::default()];
+    whole.current = 0;
+    let mut picks = inputs.to_vec();
+    let path = picks.first_mut().ok_or("select lines for the path first")?;
+    path.items = m.all_groups(inputs).into_iter().flat_map(|g| g.lines).collect();
+    whole.sync(&path.items);
+    let flat = flat_commands(app, &whole, &picks, extra)?.into_iter().next().ok_or("select lines for the path first")?.1;
+    if let Some(o) = p.as_object_mut() {
+        for key in FINISHING {
+            match flat.get(key) {
+                Some(v) => o.insert(key.into(), v.clone()),
+                None => o.remove(key),
+            };
+        }
+    }
     Ok(vec![("frame.member".into(), p)])
 }
 
@@ -1709,6 +1811,10 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
             if let Some(gap) = o.map(|o| o.gap.trim()).filter(|g| !g.is_empty()) {
                 entry["gap"] = json!(gap);
             }
+            // Its own Coped, saved only where it differs from the frame's.
+            if let Some(c) = o.and_then(|o| o.coped).filter(|c| *c != m.coped) {
+                entry["coped"] = json!(c);
+            }
             corners.push(entry);
         }
     }
@@ -1886,7 +1992,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
                 }
                 let flip = flipped(&lines);
                 let gap = o.gap.as_deref().map(|g| shown_expr(g, ValueKind::Length)).unwrap_or_default();
-                m.overrides.push(Override { flip, gap, saved: Some((lines, flip)), ..Override::new(pick, corner_index(&o.kind)) });
+                m.overrides.push(Override { flip, gap, coped: o.coped, saved: Some((lines, flip)), ..Override::new(pick, corner_index(&o.kind)) });
             }
             None => missing.push(o),
         }
@@ -1901,9 +2007,6 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         if !pairs.is_empty() {
             extra.insert("pairs".into(), json!(pairs));
             extra.insert("next_pair".into(), json!(next_pair));
-        }
-        if *fit_ends {
-            extra.insert("fit_ends".into(), json!(true));
         }
         m.groups = groups
             .iter()

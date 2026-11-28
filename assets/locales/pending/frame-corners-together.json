@@ -1,0 +1,10 @@
+{
+  "en": { "ui.frame_corners_together": "All {count} corners" },
+  "ar": { "ui.frame_corners_together": "كل الزوايا ({count})" },
+  "de": { "ui.frame_corners_together": "Alle {count} Ecken" },
+  "he": { "ui.frame_corners_together": "כל {count} הפינות" },
+  "ja": { "ui.frame_corners_together": "{count} 個のコーナーすべて" },
+  "ko": { "ui.frame_corners_together": "모서리 {count}개 모두" },
+  "vi": { "ui.frame_corners_together": "Tất cả {count} góc" },
+  "zh": { "ui.frame_corners_together": "全部 {count} 个角" }
+}

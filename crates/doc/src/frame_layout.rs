@@ -441,6 +441,8 @@ pub struct AutoCorner {
     pub overridden: bool,
     /// Its override's weld gap (mm); none: the frame's.
     pub gap: Option<f64>,
+    /// Whether its butt is coped, as its override says; none: the frame's Coped.
+    pub coped: Option<bool>,
 }
 
 /// A member's end cut to fit the tubes already at its point.
@@ -468,6 +470,8 @@ pub struct ChainCorner {
     pub overridden: bool,
     /// Its override's weld gap (mm); none: the frame's.
     pub gap: Option<f64>,
+    /// Whether its butt is coped, as its override says; none: the frame's Coped.
+    pub coped: Option<bool>,
 }
 
 /// A stretch of one line between two of its cuts (or its ends): a member of its own (stage 3).
@@ -737,7 +741,18 @@ pub(crate) fn planned(
             };
             let point = points.at.get(n).copied().unwrap_or(Vec3::ZERO);
             let (kind, flip) = o.map_or((CornerType::Auto, false), |o| (o.corner, o.flip));
-            corners.push(AutoCorner { point, long, short, angle_deg, joint, kind, flip, overridden: o.is_some(), gap: o.map(|o| o.gap) });
+            corners.push(AutoCorner {
+                point,
+                long,
+                short,
+                angle_deg,
+                joint,
+                kind,
+                flip,
+                overridden: o.is_some(),
+                gap: o.map(|o| o.gap),
+                coped: o.and_then(|o| o.coped),
+            });
         } else if group_whole.is_empty() {
             done = group.len(); // one end alone
         }
@@ -762,7 +777,15 @@ pub(crate) fn planned(
             let o = matching(&ids).and_then(|o| overrides.get(o));
             let (kind, flip) = o.map_or((CornerType::Mitre, false), |o| (o.corner, o.flip));
             let kind = if kind == CornerType::Auto { CornerType::Mitre } else { kind };
-            chained.push(ChainCorner { a: (a.1, a.2), b: (b.1, b.2), kind, flip, overridden: o.is_some(), gap: o.map(|o| o.gap) });
+            chained.push(ChainCorner {
+                a: (a.1, a.2),
+                b: (b.1, b.2),
+                kind,
+                flip,
+                overridden: o.is_some(),
+                gap: o.map(|o| o.gap),
+                coped: o.and_then(|o| o.coped),
+            });
         }
         for (j, e) in rest.iter().enumerate().skip(done) {
             let earlier = rest.iter().take(j).map(|e| e.1);

@@ -230,7 +230,7 @@ fn at(segments: &[(String, Vec3, Vec3)], id: &str) -> usize {
 }
 
 fn auto(members: &[&str], flip: bool) -> Override {
-    Override { members: members.iter().map(|s| s.to_string()).collect(), corner: CornerType::Auto, flip, gap: 0.0 }
+    Override { members: members.iter().map(|s| s.to_string()).collect(), corner: CornerType::Auto, flip, gap: 0.0, coped: None }
 }
 
 #[test]
@@ -352,10 +352,13 @@ fn tubes_in_no_plane_chain_and_mitre() {
     planes[5] = None;
     let p = plan(&segs, &planes, &in_order(&segs), &|_, _| true, &[]).unwrap();
     assert_eq!(p.corners.len(), 4, "the rectangle's corners only");
-    assert_eq!(p.chained, [ChainCorner { a: (4, false), b: (5, true), kind: CornerType::Mitre, flip: false, overridden: false, gap: None }]);
+    assert_eq!(
+        p.chained,
+        [ChainCorner { a: (4, false), b: (5, true), kind: CornerType::Mitre, flip: false, overridden: false, gap: None, coped: None }]
+    );
     assert_eq!(p.fits, [Fit { member: 4, at_start: true, against: vec![0], gap: None }]);
     // An override at the chained corner is at a corner of the frame.
-    let o = Override { members: vec!["pair1".into(), "pair2".into()], corner: CornerType::Butt, flip: false, gap: 0.0 };
+    let o = Override { members: vec!["pair1".into(), "pair2".into()], corner: CornerType::Butt, flip: false, gap: 0.0, coped: None };
     assert!(plan(&segs, &planes, &in_order(&segs), &|_, _| true, &[o]).is_ok());
 }
 
@@ -366,7 +369,7 @@ fn an_override_on_a_chained_corner_reaches_the_plan() {
         vec![("pair1".to_string(), p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 300.0)), ("pair2".to_string(), p3(0.0, 0.0, 300.0), p3(300.0, 300.0, 300.0))];
     let planes = vec![None; segs.len()];
     let chained = |corner: CornerType, flip: bool| {
-        let o = Override { members: vec!["pair1".into(), "pair2".into()], corner, flip, gap: 0.0 };
+        let o = Override { members: vec!["pair1".into(), "pair2".into()], corner, flip, gap: 0.0, coped: None };
         plan(&segs, &planes, &in_order(&segs), &|_, _| true, &[o]).unwrap().chained
     };
     let butt = chained(CornerType::Butt, true);
