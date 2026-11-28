@@ -2251,6 +2251,377 @@ fn copies_of_a_to_object_extrude_follow_the_moved_face() {
     assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
 }
 
+/// A curved To Object end comes from the seed's inputs, even if the target has since been removed.
+#[test]
+fn copies_of_an_extrude_keep_its_curved_end_after_removing_the_target() {
+    let mut seed = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-20,0,30],"axis":[1,0,0],"radius":10,"height":40,"body_name":"Bar"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-5],"p1":[4,5]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"to_offset":-2,"body_name":"Post","name":"Seed"})),
+        ("solid.remove", json!({"bodies":["Bar"]})),
+    ] {
+        run(&mut seed, command, params);
+    }
+    let post = volume(&mut seed);
+    for (command, params) in [
+        ("solid.mirror", json!({"features":["Seed"],"plane":{"origin":[0,0,30],"normal":[0,0,1]}})),
+        ("solid.pattern.rectangular", json!({"features":["Seed"],"dir1":[1,0,0],"count1":2,"spacing1":15})),
+    ] {
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&seed.doc.to_json()).unwrap());
+        run(&mut s, command, params);
+        let total = volume(&mut s);
+        // Both transforms preserve volume and keep the copies disjoint from the seed.
+        assert!(rel(total, 2.0 * post) < 1e-6, "{command}: {total} mm³, expected {} mm³", 2.0 * post);
+        let bodies = run(&mut s, "inspect.measure", json!({}));
+        assert_eq!(bodies["body_count"], 2);
+        let copy = &bodies["bodies"][1];
+        assert_eq!(copy["closed"], true);
+        assert_eq!(copy["face_types"]["cylinder"], 1, "the copied cap must stay curved: {copy}");
+    }
+}
+
+/// The curve ends partly on a box joined to the cylinder. A later edit or removal of that
+/// reference must not rebind the clipped face's ordinal to a different face or lose its name.
+#[test]
+fn a_copied_extrude_names_trimmed_faces_from_the_seed_reference() {
+    let mut seed = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-5,0,30],"axis":[1,0,0],"radius":10,"height":10,"body_name":"Bar"})),
+        ("solid.box", json!({"corner":[4,-6,18],"length":9,"width":12,"height":19,"operation":"join","targets":["Bar"]})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-3],"p1":[10,3]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"operation":"new","name":"Seed","body_name":"Post"})),
+    ] {
+        run(&mut seed, command, params);
+    }
+    for edit in [
+        None,
+        Some(("solid.box", json!({"corner":[8,-6,17],"length":3,"width":12,"height":10,"operation":"join","targets":["Bar"]}))),
+        Some(("solid.remove", json!({"bodies":["Bar"]}))),
+    ] {
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&seed.doc.to_json()).unwrap());
+        if let Some((command, params)) = edit {
+            run(&mut s, command, params);
+        }
+        run(&mut s, "solid.mirror", json!({"features":["Seed"],"plane":{"origin":[0,0,30],"normal":[0,0,1]},"body_name":"Copy"}));
+        let check = |s: &mut Session, z: f64| {
+            let faces = run(s, "model.faces", json!({"body":"Copy"}));
+            let face = faces["faces"].as_array().unwrap().iter().find(|f| f["name"] == "F2:-z").expect("the reference box's underside");
+            assert_eq!(face["exact"], true, "{face}");
+            assert!(face["plane_normal"][2].as_f64().unwrap() < -0.999, "{face}");
+            assert!((face["centroid"][2].as_f64().unwrap() - z).abs() < 1e-8, "{face}");
+        };
+        // Reflection of the reference box's underside at Z = 18 across Z = 30.
+        check(&mut s, 42.0);
+        let saved = s.model.saved(&s.doc).expect("a valid model can be saved");
+        let mut reopened = Session::opened((*s.doc).clone(), Some(&saved));
+        check(&mut reopened, 42.0);
+        run(&mut reopened, "solid.offset_face", json!({"faces":["F2:-z"],"distance":0.25,"body":"Copy"}));
+        check(&mut reopened, 41.75);
+    }
+}
+
+/// Old designs may name the same pocket wall with a longer qualifier when replay used the
+/// Plate's original pocket as the stop instead of the removed Bar. Keep saved offsets working.
+#[test]
+fn a_saved_offset_still_finds_a_numbered_wall_of_a_patterned_to_object_cut() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-5,0,30],"axis":[1,0,0],"radius":10,"height":10,"body_name":"Bar"})),
+        ("solid.box", json!({"corner":[4,-6,18],"length":9,"width":12,"height":19,"operation":"join","targets":["Bar"]})),
+        ("solid.box", json!({"corner":[-15,-10,-5],"length":90,"width":20,"height":29,"body_name":"Plate"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-3],"p1":[10,3]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"operation":"cut","targets":["Plate"],"name":"Seed"})),
+        ("solid.remove", json!({"bodies":["Bar"]})),
+        ("solid.pattern.rectangular", json!({"features":["Seed"],"dir1":[1,0,0],"count1":3,"spacing1":25})),
+    ] {
+        run(&mut s, command, params);
+    }
+    for (rank, x, other) in [(1, 21.0, 46.0), (2, 46.0, 21.0)] {
+        let mut edited = Session::new((*s.doc).clone());
+        run(&mut edited, "solid.offset_face", json!({"faces":[[x,0,10]],"distance":0.25,"body":"Plate"}));
+        let mut doc = (*edited.doc).clone();
+        // The same point with the name saved by the unpatched release, before cold reopening.
+        doc.features.last_mut().unwrap().face_names = vec![format!("F7:side:l4#[F1:side,F7:start]#{rank}")];
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        let result = reopened.model.results.last().unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let faces = run(&mut reopened, "model.faces", json!({"body":"Plate"}));
+        let has_wall = |x: f64| {
+            faces["faces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["name"].as_str().is_some_and(|n| n.starts_with("F7:side:l4")) && (f["centroid"][0].as_f64().unwrap() - x).abs() < 1e-8)
+        };
+        assert!(has_wall(x + 0.25) && has_wall(other), "only the selected wall moves: {faces}");
+    }
+}
+
+/// Respacing the pattern moves the walls a stored reference numbered: the reference follows the
+/// wall of its stored number, never the wall that now stands where the reference was picked
+/// (the replay shortens the walls' qualifiers, so the number is what still names one).
+#[test]
+fn a_respaced_pattern_offset_follows_the_numbered_wall_not_the_old_place() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-5,0,30],"axis":[1,0,0],"radius":10,"height":10,"body_name":"Bar"})),
+        ("solid.box", json!({"corner":[4,-6,18],"length":9,"width":12,"height":19,"operation":"join","targets":["Bar"]})),
+        ("solid.box", json!({"corner":[-15,-10,-5],"length":90,"width":20,"height":29,"body_name":"Plate"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-3],"p1":[10,3]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"operation":"cut","targets":["Plate"],"name":"Seed"})),
+        ("solid.remove", json!({"bodies":["Bar"]})),
+        ("solid.pattern.rectangular", json!({"features":["Seed"],"dir1":[1,0,0],"count1":3,"spacing1":25,"name":"Copied"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    // The second wall (at x=46) offset by the name the unpatched release saved for it, with its
+    // point on that wall, then the pattern respaced over the same span: four pockets, and the
+    // third now stands at the stored point's place (x=46). The reference must stay with the
+    // second wall (now at x=100/3-4), not move to the third. The pick is the point the unpatched
+    // release stored for that wall (its nearest face point), an input, not an expectation.
+    let mut edited = Session::new((*s.doc).clone());
+    run(&mut edited, "solid.offset_face", json!({"faces":[[46.0, 0.0, 2.5835622624235026]],"distance":0.25,"body":"Plate"}));
+    let mut doc = (*edited.doc).clone();
+    doc.features.last_mut().unwrap().face_names = vec!["F7:side:l4#[F1:side,F7:start]#2".to_string()];
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert!(reopened.model.results.last().unwrap().error.is_none());
+    run(&mut reopened, "timeline.edit", json!({"feature":"Copied","set":{"pattern.count1":4,"pattern.spacing1":"50 / 3"}}));
+    let faces = run(&mut reopened, "model.faces", json!({"body":"Plate"}));
+    let l4 = |faces: &serde_json::Value| {
+        faces["faces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with("F7:side:l4")))
+            .map(|f| f["centroid"][0].as_f64().unwrap())
+            .collect::<Vec<f64>>()
+    };
+    let walls = l4(&faces);
+    let has = |x: f64| walls.iter().any(|w| (*w - x).abs() < 1e-6);
+    assert!(has(100.0 / 3.0 - 4.0 + 0.25) && has(46.0) && has(50.0 / 3.0 - 4.0), "the second wall moved, the others stayed: {walls:?}");
+    assert!(!walls.iter().any(|w| (*w - 46.25).abs() < 1e-6), "the wall at the stored point's place stayed: {walls:?}");
+    // Spacing the pattern out without adding a pocket moves the wall away from the stored
+    // point entirely: the reference still follows it (the name, not the place, is its identity).
+    run(&mut reopened, "timeline.edit", json!({"feature":"Copied","set":{"pattern.count1":3,"pattern.spacing1":30}}));
+    let faces = run(&mut reopened, "model.faces", json!({"body":"Plate"}));
+    let walls = l4(&faces);
+    assert!(
+        walls.iter().any(|w| (*w - 56.25).abs() < 1e-6) && walls.iter().any(|w| (*w - 26.0).abs() < 1e-6),
+        "the named wall followed the wider spacing: {walls:?}"
+    );
+}
+
+/// A bare name an unpatched release stored for a mirrored cap now matches the pieces of the
+/// face every copy ended on: the pieces of one stem can be pieces of several faces, so the name
+/// asks for a reselection rather than follow a stored point an edit could move onto another
+/// copy's piece. The same offset picked by its point alone still works.
+#[test]
+fn a_bare_name_of_a_mirrored_cap_split_from_its_original_asks_for_a_reselection() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-5,0,30],"axis":[1,0,0],"radius":10,"height":10,"body_name":"Bar"})),
+        ("solid.box", json!({"corner":[4,-6,18],"length":9,"width":12,"height":19,"operation":"join","targets":["Bar"]})),
+        ("solid.box", json!({"corner":[-15,-10,-5],"length":90,"width":20,"height":6,"body_name":"Plate"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-3],"p1":[10,3]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"operation":"join","targets":["Plate"],"name":"Seed"})),
+        // A later join changes the far side of the stop without touching the face the seed
+        // ended on: the mirrored cap keeps the seed's shape either way.
+        ("solid.box", json!({"corner":[-4,-6,35],"length":9,"width":12,"height":5,"operation":"join","targets":["Bar"]})),
+        ("solid.mirror", json!({"features":["Seed"],"plane":{"origin":[16,0,0],"normal":[1,0,0]}})),
+    ] {
+        run(&mut s, command, params);
+    }
+    // The pick the unpatched release stored on the mirrored cap (its nearest face point): an
+    // input recorded by that release, not an expectation.
+    let pick = [35.37603890040617, -0.9068032957160501, 20.041199480716624];
+    let plate = |s: &mut Session| {
+        let measured = run(s, "inspect.measure", json!({}));
+        measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Plate").unwrap().clone()
+    };
+    // The same offset picked by its point alone, which every build resolves, is the control.
+    let mut control = Session::new((*s.doc).clone());
+    run(&mut control, "solid.offset_face", json!({"faces":[pick],"distance":0.25,"body":"Plate"}));
+    let control = plate(&mut control);
+    // The bare name the unpatched release saved for the mirrored cap, with the pick on it: the
+    // copy's cap and the original's are now two pieces of the face they both ended on, and the
+    // pieces of one stem can be pieces of several faces, so the name asks for a reselection
+    // rather than follow a pick an edit could have moved onto another copy's piece.
+    let mut edited = Session::new((*s.doc).clone());
+    run(&mut edited, "solid.offset_face", json!({"faces":[pick],"distance":0.25,"body":"Plate"}));
+    let mut doc = (*edited.doc).clone();
+    doc.features.last_mut().unwrap().face_names = vec!["F1:side".to_string()];
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    let result = reopened.model.results.last().unwrap();
+    let error = result.error.as_ref().map(|e| format!("{e:?}")).unwrap_or_default();
+    assert!(result.error.is_some() && error.contains("reselect"), "the stored bare name asks for a reselection: {error}");
+    let refused = plate(&mut reopened);
+    assert!(
+        rel(refused["volume_mm3"].as_f64().unwrap(), control["volume_mm3"].as_f64().unwrap()) > 1e-6,
+        "the refused design keeps its unoffset volume: {refused}"
+    );
+}
+
+/// A two-sided To Object cut, both of its stops removed before the pattern: every copy keeps
+/// the seed's curved end and the seed's flat start, so the whole pattern removes exactly what
+/// the seed's own pocket removed, once per pocket.
+#[test]
+fn a_pattern_of_a_two_sided_to_object_cut_whose_stops_are_removed_keeps_both_ends() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base":[-5,0,30],"axis":[1,0,0],"radius":10,"height":10,"body_name":"Bar"})),
+        ("solid.box", json!({"corner":[4,-6,18],"length":9,"width":12,"height":19,"operation":"join","targets":["Bar"]})),
+        // The lower stop: its top face at z = -3 ends side two.
+        ("solid.box", json!({"corner":[-6,-4,-8],"length":20,"width":8,"height":5,"body_name":"Floor"})),
+        ("solid.box", json!({"corner":[-15,-10,-5],"length":90,"width":20,"height":29,"body_name":"Plate"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-4,-3],"p1":[10,3]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[0,0,20],"to2":[0,0,-3],"operation":"cut","targets":["Plate"],"name":"Seed"})),
+        ("solid.remove", json!({"bodies":["Bar","Floor"]})),
+        ("solid.pattern.rectangular", json!({"features":["Seed"],"dir1":[1,0,0],"count1":3,"spacing1":25})),
+    ] {
+        run(&mut s, command, params);
+    }
+    let volume = |s: &mut Session| {
+        let measured = run(s, "inspect.measure", json!({}));
+        measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Plate").unwrap()["volume_mm3"].as_f64().unwrap()
+    };
+    let faces = run(&mut s, "model.faces", json!({"body":"Plate"}));
+    let cylinder = faces["faces"].as_array().unwrap().iter().filter(|f| f["cylinder"].is_object()).count();
+    assert_eq!(cylinder, 3, "the seed's pocket and both copies keep their curved ends: {faces}");
+    let walls = faces["faces"].as_array().unwrap().iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with("F8:side:l4"))).count();
+    assert_eq!(walls, 2, "both copies cut their own pocket walls: {faces}");
+    // The seed's own pocket (rolled back to before the pattern) is the measure of a copy. The
+    // pattern's first instance lands on the seed's own place and cuts nothing new, so count 3
+    // makes two copies beside it.
+    let pattern_volume = volume(&mut s);
+    run(&mut s, "timeline.rollback", json!({"position": 7}));
+    let seed_volume = volume(&mut s);
+    run(&mut s, "timeline.rollback", json!({"position": 5}));
+    let plain_volume = volume(&mut s);
+    let pocket = plain_volume - seed_volume;
+    assert!(
+        pocket > 0.0 && rel(seed_volume - pattern_volume, 2.0 * pocket) < 1e-9,
+        "two copies remove twice the seed's pocket: {pattern_volume} {seed_volume} {pocket}"
+    );
+}
+
+/// Capturing a later position of the end face does not move an earlier To Object end.
+#[test]
+fn a_copied_extrude_uses_the_to_face_at_the_seed_position() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("component.create", json!({"name":"Stop","grounded":false})),
+        ("solid.cylinder", json!({"base":[-20,0,20],"axis":[1,0,0],"radius":10,"height":40,"body_name":"Bar"})),
+        ("component.activate", json!({"component":"root"})),
+        ("occurrence.move", json!({"occurrence":"Stop:1","translate":[0,0,10],"capture":false})),
+        ("component.capture_position", json!({})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[4,-5],"p1":[12,5]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[8,0,20],"to_offset":-2,"name":"Seed","body_name":"Post"})),
+        // Leave the occurrence unpinned so the historical evaluation frame, not a pick-time
+        // transform, decides where the face is. The two captures differ by 15 mm.
+        ("timeline.edit", json!({"feature":"Seed","set":{"extent.picked_placements":[]}})),
+        ("occurrence.move", json!({"occurrence":"Stop:1","translate":[0,0,15],"capture":false})),
+        ("component.capture_position", json!({})),
+        ("solid.mirror", json!({"features":["Seed"],"plane":"YZ","body_name":"Copy"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let volume = |name: &str| measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap()["volume_mm3"].as_f64().unwrap();
+    // Integral of 8 (30 - sqrt(12² - y²)) over y in [-5, 5]: the radius-12 offset of the
+    // original cylinder. Using the second capture would add 8 × 10 × 15 mm³ instead.
+    let expected = 8.0 * (300.0 - 5.0 * 119.0_f64.sqrt() - 144.0 * (5.0_f64 / 12.0).asin());
+    for name in ["Post", "Copy"] {
+        assert!(rel(volume(name), expected) < 1e-8, "{name}: {measured}");
+    }
+}
+
+/// The moved reference and its seed both disappear before the replay. Incremental evaluation
+/// must still invalidate the copy, and the model cache must agree with a cold rebuild.
+#[test]
+fn a_copied_extrude_follows_a_moved_reference_removed_before_the_copy() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("component.create", json!({"name":"Stock","grounded":false})),
+        ("solid.box", json!({"corner":[10,0,0],"length":10,"width":10,"height":5,"body_name":"Blank"})),
+        ("component.activate", json!({"component":"root"})),
+        ("occurrence.copy", json!({"occurrence":"Stock:1","translate":[20,0,10]})),
+        ("occurrence.copy", json!({"occurrence":"Stock:1","translate":[90,0,10]})),
+        ("solid.mirror", json!({"bodies":["Blank (Stock:3)"],"plane":"YZ","name":"ReflectUnrelated","body_name":"Unrelated"})),
+        ("solid.mirror", json!({"bodies":["Blank (Stock:2)"],"plane":"YZ","name":"ReflectStop","body_name":"Stop"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-38,2],"p1":[-36,4]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","to":[-37,3,10],"name":"Seed","body_name":"Post"})),
+        ("solid.remove", json!({"bodies":["Stop","Post","Unrelated"]})),
+        ("solid.mirror", json!({"features":["Seed"],"plane":"XZ","name":"Replay","body_name":"Copy"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    let check = |s: &mut Session, height: f64| {
+        let measured = run(s, "inspect.measure", json!({}));
+        let copy = measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Copy").unwrap();
+        assert!(rel(copy["volume_mm3"].as_f64().unwrap(), 4.0 * height) < 1e-9, "{copy}");
+        assert!(rel(copy["bbox"]["max"][2].as_f64().unwrap(), height) < 1e-9, "{copy}");
+    };
+    check(&mut s, 10.0);
+    // Moving another pose-only copy, also removed before Replay, must not rebuild Replay's tool.
+    let copy = s.model.state().body("Copy").unwrap().body.clone();
+    let mut doc = (*s.doc).clone();
+    doc.occurrences.iter_mut().find(|o| o.name == "Stock:3").unwrap().transform[3][2] = 17.0;
+    s.model.evaluate(&doc);
+    s.doc = Arc::new(doc.clone());
+    assert!(s.model.state().body("Copy").unwrap().body.same(&copy), "an unrelated placement invalidated the copy");
+    check(&mut s, 10.0);
+    // Now move the occurrence whose reflection is the actual end reference.
+    doc.occurrences.iter_mut().find(|o| o.name == "Stock:2").unwrap().transform[3][2] = 17.0;
+    s.model.evaluate(&doc);
+    s.doc = Arc::new(doc.clone());
+    check(&mut s, 17.0);
+    let mut cold = Session::new(doc.clone());
+    check(&mut cold, 17.0);
+    let saved = s.model.saved(&doc).expect("a valid model can be saved");
+    assert!(solidcraft_doc::Model::adopt(&doc, &saved).is_ok(), "the saved model must be reusable");
+    let mut reopened = Session::opened(doc, Some(&saved));
+    check(&mut reopened, 17.0);
+}
+
+/// Through All still reaches the current target if a later join makes the copy's side deeper.
+#[test]
+fn a_mirrored_from_object_through_all_cut_reaches_the_thicker_target() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"corner":[-20,-10,0],"length":40,"width":20,"height":5,"body_name":"Plate"})),
+        ("sketch.create", json!({"plane":"XY","name":"Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0":[-12,-2],"p1":[-8,2]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Profile","from":[0,0,0],"through_all":true,"operation":"cut","targets":["Plate"],"name":"Seed"})),
+        ("solid.box", json!({"corner":[5,-5,4],"length":10,"width":10,"height":16,"operation":"join"})),
+        ("solid.mirror", json!({"features":["Seed"],"plane":"YZ"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    // 40 × 20 plate, 5 thick, plus a 10 × 10 pad 15 above it. The original and mirrored
+    // 4 × 4 cuts go through 5 and 20 mm, respectively.
+    let expected = 40.0 * 20.0 * 5.0 + 10.0 * 10.0 * 15.0 - 4.0 * 4.0 * (5.0 + 20.0);
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-9, "expected {expected} mm³, got {actual} mm³");
+}
+
 /// The lid of #11792: a boss (`Extrude1`) joined to a half-ring, and a cut (`Extrude2`) that starts
 /// on the boss's `F5:bottom` face. Mirroring both across the front plane copies the boss and the
 /// cut, so the part gains what the two features added a second time.

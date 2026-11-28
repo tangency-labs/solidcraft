@@ -22,8 +22,8 @@ use solidcraft_kernel as kernel;
 
 use super::{
     CachedEval, Change, ComponentDigests, Document, EvalCache, EvalKey, EvalValidationGuard, Feature, FeatureKind, FeatureResult, FrameBodies,
-    IMPORT_HEALS, ImportDigests, ModelState, Primed, SourceStates, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances,
-    eval_feature, fingerprint, naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names,
+    IMPORT_HEALS, ImportDigests, ModelState, Primed, ReplayHistory, SourceStates, Value, absorb_sheet_cuts, append_warning, check_kept,
+    copy_instances, eval_feature, fingerprint, naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names,
     track_altered_sheets, with_named_face_points,
 };
 
@@ -522,6 +522,9 @@ fn eval_component_chain(
                 let _val_guard = EvalValidationGuard::new(validation);
                 let (r, deferred) = kernel::validating(validation, || {
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = import_digests.heals(f.id).cloned());
+                    // Only relative-key features reach this path. Replays that read an
+                    // object-relative seed have no relative key and use the full timeline.
+                    let history = ReplayHistory { doc, results: &[], empty };
                     let r = eval_feature(
                         doc,
                         vals,
@@ -534,6 +537,7 @@ fn eval_component_chain(
                         None,
                         prepared_imports.get(f.id),
                         None,
+                        &history,
                         Some(&before_states),
                     );
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = None);

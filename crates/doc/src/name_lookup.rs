@@ -1621,6 +1621,17 @@ pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelB
     }
 }
 
+/// The one body of `st` with a single direct match for `name`. A level pick whose name
+/// needs piece selection, recovery, or a fallback to its point may read other bodies.
+pub(crate) fn exact_level_face_body<'a>(st: &'a ModelState, name: &str, p: Vec3) -> Option<&'a ModelBody> {
+    let body = face_body(st, name)?;
+    let names = naming::names(body);
+    let mut faces = (0..names.faces.len()).filter_map(|i| crate::history_names::matches(&names, i, name).filter(|m| exactly(*m)));
+    (faces.next() == Some(Match::Exact) && faces.next().is_none()).then_some(())?;
+    let bi = st.bodies.iter().position(|b| std::ptr::eq(b, body))?;
+    face_resolved_on_body(st, bi, name, p).then_some(body)
+}
+
 /// [`locate_face`] for a feature that works on the faces of the body called `body` (a shell, a
 /// draft…): the face of that body the name finds, found without working out the names of every
 /// other body (a body named from geometry is meshed for it: seconds in a large model). When
@@ -1818,7 +1829,10 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
         return found(*one).ok_or(Miss::Gone);
     }
     // The very face on several bodies (a body and its copies, whose faces keep their names): the
-    // one the reference's point lies on. Pieces of one face are never told apart by a point.
+    // one the reference's point lies on. Pieces of one face on one body are never told apart by
+    // a point: the pieces of one stem can be pieces of several faces (a copy of the source ends
+    // on the same stop face), and a pick an edit moved onto another copy's piece would silently
+    // choose that piece. Such a stored name asks for a reselection.
     let mut bodies: Vec<usize> = faces.iter().map(|(bi, _, _)| *bi).collect();
     bodies.dedup();
     if level == Match::Piece
@@ -1830,9 +1844,29 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
         // neighbours whose qualifier it lost since (#20027).
         let names = naming::names(b);
         let pieces: Vec<usize> = faces.iter().map(|(_, _, f)| *f).collect();
-        return unqualified_piece(b, &names, &pieces, name, p)
-            .map(|(face, point)| FaceHit { body: *only, face, point, verified: names.verified(face), on_point: true })
-            .ok_or(Miss::Several);
+        if let Some((face, point)) = unqualified_piece(b, &names, &pieces, name, p) {
+            return Ok(FaceHit { body: *only, face, point, verified: names.verified(face), on_point: true });
+        }
+        // A numbered piece whose qualifier lost bounds while its number still ranks the tied
+        // pieces of its stem is the piece of that number, which is what the stored name saved.
+        // The saved point is not consulted here: an edit can move another piece to where this
+        // one was picked (a respaced pattern puts another wall at the old place).
+        let ranked: Vec<usize> = pieces.iter().copied().filter(|&face| crate::history_names::rank_kept(&names, face, name)).collect();
+        if let [face] = ranked.as_slice() {
+            let (distance, point) = nearest_on_face(&b.mesh(), *face, p).ok_or(Miss::Gone)?;
+            return Ok(FaceHit {
+                body: *only,
+                face: *face,
+                point,
+                verified: names.verified(*face),
+                on_point: distance <= (b.body.size() * 1e-3).max(1e-3),
+            });
+        }
+        // A name stored when the face was one face now matches a piece of every copy that ended
+        // on the same stop face: the pieces of one stem can be pieces of several faces, so the
+        // stored point cannot say which face the name meant (an edit can move another copy's
+        // piece onto it). Such a name asks for a reselection.
+        return Err(Miss::Several);
     }
     if level != Match::Exact || bodies.len() < faces.len() || pick.is_none() {
         return Err(Miss::Several);
@@ -2018,6 +2052,10 @@ fn on_face(body: &ModelBody, face: usize, pick: Vec3) -> Option<(usize, Vec3)> {
 /// [`faces_at_saved_point`]: a pick is a point the face had, so only rounding separates them.
 const SAVED_POINT_TOL: f64 = 1e-7;
 
+fn saved_point_tolerance(body: &ModelBody) -> f64 {
+    (body.body.size() * SAVED_POINT_TOL).max(1e-3 * 1e-3)
+}
+
 /// Whether a stored face name that finds nothing may be found again at its saved point
 /// ([`faces_at_saved_point`]): the feature and role that made the named face still make a face
 /// of one of `bodies` (the name's root, before its first `@` or `#`: `F73:side:l47` of
@@ -2061,7 +2099,7 @@ pub(crate) fn faces_at_saved_point(body: &ModelBody, p: Vec3) -> Vec<(usize, Vec
     if body.body.is_mesh() || !p.is_finite() || body.body.face_count() > MAX_PROJECTION_RECOVERY_FACES {
         return Vec::new();
     }
-    let tolerance = (body.body.size() * SAVED_POINT_TOL).max(1e-3 * 1e-3);
+    let tolerance = saved_point_tolerance(body);
     (0..body.body.face_count()).filter_map(|face| Some((face, body.body.point_lies_on_face(face, p, tolerance).ok()??))).collect()
 }
 
@@ -2108,6 +2146,82 @@ mod tests {
         let faces = vec![blend.into(), "F2:side:l1".into(), "F2:side:l2".into(), "F2:side:l3".into(), "F2:side:l4".into(), "F2:top".into()];
         body.names = NameCell::known(Arc::new(faces));
         body
+    }
+
+    #[test]
+    fn a_numbered_piece_that_kept_its_rank_is_found_by_rank_not_by_the_saved_point() {
+        use crate::history_names::FaceInfo;
+        let solid = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 6., 4.)).unwrap();
+        let mut body = ModelBody::new("Block".into(), solid, 1);
+        let faces = body.body.faces(0.01).unwrap();
+        let mut names = Names::default();
+        names.info.resize(faces.len(), FaceInfo::default());
+        let names_of_faces = Arc::make_mut(&mut names.faces);
+        names_of_faces.resize(faces.len(), String::new());
+        for face in &faces {
+            let normal = face.plane_normal.unwrap();
+            let (name, bounds) = if normal.z > 0.9 || normal.x > 0.9 {
+                let rank = if normal.z > 0.9 { 1 } else { 2 };
+                (format!("F3:side:l4#[F3:start]#{rank}"), vec!["F1:side".to_string(), "F3:start".to_string()])
+            } else if normal.x < -0.9 {
+                ("F1:side".to_string(), Vec::new())
+            } else {
+                continue;
+            };
+            names_of_faces[face.index] = name;
+            names.info[face.index] = FaceInfo { bounds: bounds.into_iter().collect(), verified: true, ..FaceInfo::default() };
+        }
+        body.names = NameCell::saved(Arc::new(names), None);
+        let saved = "F3:side:l4#[F1:side,F3:start]#1";
+        let locate = |name: &str, p: Option<Vec3>| locate_in(std::iter::once((0, &body)), name, p).ok();
+        // The stored rank is 1, but the original point is on what is now numbered 2: the rank,
+        // not the point, names the piece, for an edit can move another piece to the point.
+        let hit = locate(saved, Some(Vec3::new(10., 3., 2.))).expect("the piece of the stored rank");
+        assert_eq!(naming::names(&body).faces[hit.face], "F3:side:l4#[F3:start]#1");
+        assert!(locate(saved, None).is_none(), "no point stored: the pieces stay apart");
+        assert!(locate("F3:side:l4#[F1:side,F3:start]#3", Some(Vec3::new(10., 3., 2.))).is_none(), "no piece of that rank");
+        assert!(locate("F3:side:l4#[F1:side,F3:start]#1@F8.1", Some(Vec3::new(10., 3., 2.))).is_none(), "not a different instance");
+        for bound in ["F9:side", "F2:-z"] {
+            let name = format!("F3:side:l4#[{bound},F3:start]#1");
+            assert!(locate(name.as_str(), Some(Vec3::new(10., 3., 2.))).is_none(), "a bound the piece never had: {bound}");
+        }
+    }
+
+    #[test]
+    fn a_bare_stem_matching_pieces_of_several_faces_asks_for_a_reselection() {
+        use crate::history_names::FaceInfo;
+        let solid = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 6., 4.)).unwrap();
+        let mut body = ModelBody::new("Block".into(), solid, 1);
+        let faces = body.body.faces(0.01).unwrap();
+        let mut names = Names::default();
+        names.info.resize(faces.len(), FaceInfo::default());
+        let names_of_faces = Arc::make_mut(&mut names.faces);
+        names_of_faces.resize(faces.len(), String::new());
+        for face in &faces {
+            let normal = face.plane_normal.unwrap();
+            let (name, bounds) = if normal.z > 0.9 {
+                ("F1:side#[F5:side:l1]".to_string(), vec!["F5:side:l1".to_string()])
+            } else if normal.x > 0.9 {
+                ("F1:side#[F5:side:l2]".to_string(), vec!["F5:side:l2".to_string()])
+            } else if normal.x < -0.9 {
+                ("F5:side:l1".to_string(), Vec::new())
+            } else if normal.z < -0.9 {
+                ("F5:side:l2".to_string(), Vec::new())
+            } else {
+                continue;
+            };
+            names_of_faces[face.index] = name;
+            names.info[face.index] = FaceInfo { bounds: bounds.into_iter().collect(), verified: true, ..FaceInfo::default() };
+        }
+        body.names = NameCell::saved(Arc::new(names), None);
+        let locate = |name: &str, p: Option<Vec3>| locate_in(std::iter::once((0, &body)), name, p).ok();
+        // The pieces of one stem can be pieces of several faces (each copy of a source ends on
+        // the same stop face), so a stored point — which an edit can move onto another copy's
+        // piece — cannot say which face a bare stem meant. It asks for a reselection, however
+        // many pieces the stored point lies on.
+        for p in [Some(Vec3::new(10., 3., 2.)), Some(Vec3::new(5., 3., 4.)), Some(Vec3::new(-10., 0., 0.)), None] {
+            assert!(locate("F1:side", p).is_none(), "the pieces stay apart: {p:?}");
+        }
     }
 
     #[test]
