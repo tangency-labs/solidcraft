@@ -5332,6 +5332,35 @@ fn a_cut_hole_is_not_hatched() {
     assert_eq!(sides, BTreeSet::from([-1, 1]), "{block:?}");
 }
 
+/// A revolved part, R14 outside and 40 long, whose bore steps from R4 to R11 by 1 every 5 mm, cut
+/// through its axis from a top view at 1:1 (#23449). A hatch line runs through a wall corner where
+/// it also crosses another edge's enclosure; both walls are hatched, every stroke inside a wall.
+#[test]
+fn a_full_section_through_a_stepped_bore_hatches_both_walls() {
+    let mut s = Session::default();
+    let mut profile = vec![json!([14, 0])];
+    for k in 0..8 {
+        profile.push(json!([4 + k, -5 * k]));
+        profile.push(json!([4 + k, -5 * k - 5]));
+    }
+    profile.push(json!([14, -40]));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": profile, "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "z", "operation": "new", "body_name": "Bore"}));
+    run(&mut s, "drawing.create", json!({}));
+    let made = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [150, 150]}));
+    let line = json!({"kind": "full", "points": [[-20.0, 0.0], [20.0, 0.0]], "arrows": "right"});
+    let made = run(&mut s, "drawing.view.section", json!({"parent": made["view"], "line": line, "place": {"at": [300.0, 150.0]}}));
+    let cut = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let (set, hatches) = drawn_hatches(&s, cut);
+    let bore = hatch_of(&set, &hatches, "Bore");
+    assert_eq!(bore.regions.len(), 2, "two walls: {bore:?}");
+    assert_hatching_inside(bore);
+    let sides: BTreeSet<bool> = bore.strokes.iter().map(stroke_ends).map(|(p, q)| (p.x + q.x) > 0.0).collect();
+    assert_eq!(sides, BTreeSet::from([false, true]), "both walls carry strokes: {bore:?}");
+}
+
 /// A 100 x 60 x 10 plate cut through a centred 10 mm bore and a 30 x 20 x 5 pocket.
 /// The bore removes -30 < x < -20 throughout the centred section; the pocket removes
 /// 5 < x < 35 above y = 0. Every complete stroke must stay out of both open rectangles.
