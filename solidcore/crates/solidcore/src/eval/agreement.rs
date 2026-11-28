@@ -18,7 +18,7 @@
 //! [`Face`]) in the kernel's evaluation types, which `solidcore-ops`' `record_check::agreement`
 //! builds from a record.
 use super::pcurve::loop_is_clockwise;
-use super::vec::{VecExt, v3};
+use super::vec::{v3, VecExt};
 use super::{Curve, Curve2, CurveEval, Surface, SurfaceEval};
 
 /// An edge as the check reads it: the curve it is parameterised on (its NURBS form where it has
