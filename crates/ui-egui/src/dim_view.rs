@@ -937,6 +937,7 @@ fn naming_edit(app: &SolveApp, constraint: &str, sketch: Option<u64>, at: Pos2, 
         sheet: None,
         create_variable: None,
         naming: Some(Naming { constraint: constraint.to_string(), measured: doc.measured_text(value), error: None, resume }),
+        opened: next_opened(),
     })
 }
 
