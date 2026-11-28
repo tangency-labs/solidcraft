@@ -247,7 +247,7 @@ impl Drop for NetScope<'_> {
 /// is the same at every station, their distinct knots, multiplicities and degree
 /// ([`DefinitionIdentity::knots`]): a definition whose leader or law changes is made anew or
 /// renewed, which gives it a new identity, as the memo's stations need.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct DefinitionIdentity {
     /// The leader's knots, multiplicities and degree, once read.
     leader_knots: std::sync::OnceLock<CurveKnots>,
@@ -258,6 +258,15 @@ pub struct DefinitionIdentity {
 /// A curve's distinct knots, their multiplicities and its degree
 /// ([`BSplineCurve::knots`], [`BSplineCurve::degree`]).
 pub(crate) type CurveKnots = (Vec<f64>, Vec<usize>, usize);
+
+/// Written as the identity alone, as before it kept the knots: what it keeps is read from the
+/// definition, not part of it, and a definition's debug text (which tests compare) stays the
+/// same whether a station has read the knots yet or not.
+impl std::fmt::Debug for DefinitionIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DefinitionIdentity")
+    }
+}
 
 impl DefinitionIdentity {
     /// The knots, multiplicities and degree of the definition's leader (`law` false) or its
