@@ -83,6 +83,9 @@ pub(crate) fn intersect(
     if !(radius > 0.0 && tilt * reach <= 1e-3 * tolerance && off.length() <= 1e-3 * tolerance) {
         return Ok(None);
     }
+    // How far the cylinder's axis may be from the screw's over the wall's reach: added to each
+    // edge's deviation.
+    let misaligned = off.length() + tilt * reach;
     let Some((h_lo, h_hi)) = face_heights(k, other, other_domain, c_origin, c_axis, cylinder)?
     else {
         return Ok(None);
@@ -145,7 +148,9 @@ pub(crate) fn intersect(
         let rounding = 64.0 * f64::EPSILON * (reach + h_hi.abs().max(h_lo.abs()));
         result.curves_3d.push(Curve::from(iso.curve));
         result.curve_types.push(TsectCurveType::Crossing);
-        result.deviations.push(residual.max(off_radius) + rounding);
+        result
+            .deviations
+            .push(residual.max(off_radius) + misaligned + rounding);
         result.surface1_uv_curves.push(iso.uv_iso_curve);
         result.surface2_uv_curves.push(None);
     }
