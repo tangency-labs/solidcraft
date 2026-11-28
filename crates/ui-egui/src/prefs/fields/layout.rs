@@ -125,8 +125,8 @@ macro_rules! layout_preferences {
             /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
             /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
             remember_toolbar_tab: bool = false, PAGE_LAYOUT;
-            /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
-            /// instead of a list of small icons with names (#4739).
+            /// Legacy serialized choice, retained so old preference files still load.
+            /// Command menus now use the shared compact menu rows.
             ribbon_icon_grid: bool = false, PAGE_LAYOUT;
             /// Show command names beneath ribbon icons, independently of workspace layout.
             ribbon_labels: bool = true, PAGE_LAYOUT;
@@ -158,8 +158,9 @@ macro_rules! layout_preferences {
             /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
             /// and the design's units (#7243). Off by default.
             status_bar: bool = false, PAGE_LAYOUT;
-            /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
-            /// as the rest of the title bar does, as before.
+            /// A double-click on a design tab renames the design in the tab, and one on a view's sub-tab
+            /// renames the view; off, a double-click on a tab maximizes the window as the rest of the
+            /// title bar does, and one on a sub-tab only shows the view, as before.
             tab_double_click_renames: bool = true, PAGE_LAYOUT;
             /// Two-dimensional (2D) Timeline with multi-track component layout,
             /// two-tier header, movable corridor brackets, and feature grouping.

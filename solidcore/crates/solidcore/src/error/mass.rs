@@ -77,6 +77,10 @@ pub enum MassFailure {
     /// The integrand evaluated to no number (a surface evaluated to a non-finite
     /// point).
     Integrand,
+    /// The closed normalized mesh's signed volume cannot be separated from zero by
+    /// an outward-rounded enclosure, including zero volume or arithmetic overflow.
+    /// This is not a certificate of outward winding. [`ErrorKind::Unsupported`].
+    MeshVolumeSignUncertain,
     /// Something the routine needs is missing, as the phrase says (for example "the
     /// edge's curve").
     Missing(&'static str),
@@ -94,6 +98,11 @@ pub enum MassFailure {
 }
 
 impl MassFailure {
+    /// The Core-owned technical reason for [`MassFailure::MeshVolumeSignUncertain`].
+    /// Ops retains this reason across its typed-refusal boundary.
+    pub const MESH_VOLUME_SIGN_UNCERTAIN_REASON: &str =
+        "the normalized mesh volume has no certified nonzero sign";
+
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
@@ -101,6 +110,7 @@ impl MassFailure {
             | Self::EdgeCurveSingular
             | Self::Failed(_)
             | Self::Integrand
+            | Self::MeshVolumeSignUncertain
             | Self::SkippedSpan
             | Self::StepControl
             | Self::TrimNotFinite => SM_ERR,
@@ -127,6 +137,7 @@ impl MassFailure {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EdgeCurveSingular => ErrorKind::Degenerate,
+            Self::MeshVolumeSignUncertain => ErrorKind::Unsupported,
             Self::EdgeWithoutCurve
             | Self::EdgeuseWithoutEdge
             | Self::EdgeuseWithoutVertexuse
@@ -158,6 +169,7 @@ impl core::fmt::Display for MassFailure {
             Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
             Self::Failed(what) => f.write_str(what),
             Self::Integrand => f.write_str("the integrand is not a finite number"),
+            Self::MeshVolumeSignUncertain => f.write_str(Self::MESH_VOLUME_SIGN_UNCERTAIN_REASON),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::SkippedSpan => f.write_str("the integrator took no step over a span of a face"),
             Self::StepControl => {

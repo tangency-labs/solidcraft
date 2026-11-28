@@ -453,6 +453,7 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
             file_faces: part.file_faces,
             refused: None,
             hidden: r.hidden,
+            layer: None,
         });
     }
     if crate::watch::cancelled() {
@@ -587,6 +588,7 @@ pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> 
             file_faces: face_count,
             refused: None,
             hidden: false,
+            layer: None,
         });
     }
     let tree = vec![StepNode {
@@ -714,7 +716,7 @@ fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
             Some(crate::FacePaint { face: i, color: p.color.map(unit), opacity: unit(p.opacity), name: p.name.clone() })
         })
         .collect();
-    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
+    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone(), layer: paint.layer.clone() }
 }
 
 /// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).

@@ -136,6 +136,7 @@ pub(super) fn local_geometry(f: &Feature, components: &HashMap<u64, u64>) -> boo
                 one_sided_direction: _,
                 to_ref: _,
                 from_ref: _,
+                extend_to_face: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && !through_all2 && to2.is_none() && components.get(&sketch.0) == Some(&f.component)
         }
@@ -383,6 +384,7 @@ pub(super) fn placement_local_feature(doc: &Document, f: &Feature, before: &Mode
                 one_sided_direction: _,
                 to_ref,
                 from_ref,
+                extend_to_face: _,
             } = extent;
             no_attachments(f)
                 && to.is_none()

@@ -158,8 +158,23 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("{case}: missing text"));
-        let center = galley.pos.y + galley.galley.rect.center().y;
-        assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
+        if galley.galley.rows.len() == 1 {
+            // #23381: what must read centred in the frame is the capitals' ink, not the row box
+            // around it: the font's capitals sit low in the row box (ascent exceeds cap height,
+            // a descent hangs under the baseline), so the row box is placed high by the measured
+            // offset and the ink lands in the middle. egui pixel-snaps glyph positions, so the
+            // limit is the issue's: half a point, which is half a device pixel at this DPR.
+            let ink = galley.pos.y + galley.galley.mesh_bounds.center().y;
+            assert!(
+                (ink - rect.center().y).abs() <= 0.5,
+                "{case}: capital ink centre {ink} is {} pt off the field centre {}",
+                ink - rect.center().y,
+                rect.center().y
+            );
+        } else {
+            let center = galley.pos.y + galley.galley.rect.center().y;
+            assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
+        }
         if case == "search" {
             assert!(galley.pos.x >= rect.left() + solidcraft_theme::Tokens::get().space_24, "search text leaves room for its icon");
         }
@@ -1601,6 +1616,47 @@ fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
     right_click(&ctx, egui::pos2(250.0, 300.0), &mut draw);
     assert!(canvas_menu.get(), "a right-click beside the box still reaches the canvas");
     assert!(registry::handle_at("menu:text_paste").is_none(), "and opens no text menu");
+}
+
+#[test]
+fn keyboard_text_menu_refreshes_clipboard_once_per_opening() {
+    let ctx = crate::test_support::context();
+    let id = egui::Id::unique("keyboard_clipboard");
+    let value = RefCell::new(String::new());
+    let mut draw = |ui: &mut Ui| {
+        cell_editor(ui, id, &mut value.borrow_mut(), "", false);
+    };
+    menu_frame(&ctx, vec![], &mut draw);
+    ctx.memory_mut(|memory| memory.request_focus(id));
+    for text in ["first", "second"] {
+        set_clipboard(Some(text));
+        select(&ctx, id, 0, value.borrow().chars().count());
+        let modifiers = egui::Modifiers::SHIFT;
+        let events = vec![
+            egui::Event::ModifiersChanged(modifiers),
+            egui::Event::Key { key: egui::Key::F10, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::F10, physical_key: None, pressed: false, repeat: false, modifiers },
+        ];
+        registry::clear_handles();
+        crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_width(280.0);
+                scope(ui, draw);
+            },
+        );
+        // The open menu uses its snapshot, even if another app changes the clipboard.
+        set_clipboard(Some("changed while open"));
+        menu_frame(&ctx, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)], &mut draw);
+        pick(&ctx, "text_paste", &mut draw);
+        assert_eq!(*value.borrow(), text, "each keyboard opening refreshes the snapshot");
+    }
 }
 
 #[test]

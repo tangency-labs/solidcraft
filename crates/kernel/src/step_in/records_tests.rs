@@ -257,6 +257,7 @@ fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
             crate::FacePaint { face: usize::MAX, color: [0.0; 3], opacity: 1.0, name: None },
         ],
         name: Some("Body".into()),
+        layer: None,
     });
     records.bodies[0].color = Some([-1.0, 0.5, 2.0]);
     let imp = records_import(&records).unwrap();
@@ -479,6 +480,7 @@ fn streaming_digest_matches_serialized_text_key_and_sha256_bit_for_bit() {
         opacity: 0.9,
         faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.2], opacity: 0.75, name: Some("Red".into()) }],
         name: Some("Blue".into()),
+        layer: None,
     });
     let mut copy = records.bodies[0].clone();
     copy.name = "WasherCopy".into();
@@ -648,6 +650,7 @@ fn native_records_from_bodies_round_trip_exactly_without_smlib() {
         opacity: 0.75,
         faces: vec![crate::FacePaint { face: 2, color: [0.1, 0.5, 0.9], opacity: 0.5, name: Some("Accent".into()) }],
         name: Some("ShellBlue".into()),
+        layer: None,
     };
     let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap().with_color(Some([0.2, 0.4, 0.6])).with_paint(Some(paint));
     let cyl = crate::cylinder(Vec3::new(40.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();

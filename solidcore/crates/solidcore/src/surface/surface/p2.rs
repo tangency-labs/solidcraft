@@ -2061,16 +2061,28 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
-        self.copy_and_add_analytics_of_kind(k)
+        self.copy_and_add_analytics_within(k, k.tolerances.zone_tol_3d)
+    }
+
+    /// [`Surface::copy_and_add_analytics`], a B-spline made analytic only where the analytic
+    /// gives its points within `tol` too
+    /// ([`crate::nurbs::b_spline_surface::BSplineSurface::copy_and_add_analytics_within`],
+    /// not upstream, #22584).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::copy_and_add_analytics`].
+    pub fn copy_and_add_analytics_within(&self, k: &Kernel, tol: f64) -> Result<Self> {
+        self.copy_and_add_analytics_of_kind(k, tol)
             .map(|c| self.carry_definition(c))
     }
 
-    /// [`Surface::copy_and_add_analytics`] of the kind alone.
-    fn copy_and_add_analytics_of_kind(&self, k: &Kernel) -> Result<Self> {
+    /// [`Surface::copy_and_add_analytics_within`] of the kind alone.
+    fn copy_and_add_analytics_of_kind(&self, k: &Kernel, tol: f64) -> Result<Self> {
         self.check_evaluation_copy_depth(0)?;
         self.make_revolution_nurb_for_copy(k)?;
         match self.kind() {
-            SurfaceKind::BSpline(s) => s.copy_and_add_analytics(k),
+            SurfaceKind::BSpline(s) => s.copy_and_add_analytics_within(k, tol),
             // SmBSplineSurface::CopyAndAddAnalytics: not SmBSplineSurface_TYPE, so Copy
             SurfaceKind::ProceduralBlend(s) => Ok(Self::from(s.copy(k))),
             SurfaceKind::BallPatch(s) => Ok(Self::from(s.copy())),

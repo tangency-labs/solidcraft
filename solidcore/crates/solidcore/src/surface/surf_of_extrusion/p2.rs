@@ -102,6 +102,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::CurveClassification;
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest as CurveBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -998,7 +999,7 @@ impl SurfOfExtrusion {
                 .curve_vec
                 .angle_between(self.extrusion_vec)
                 .unwrap_or(0.0);
-            let dist_along_extrusion = dist_center_base_to_plane * angle_rad.cos();
+            let dist_along_extrusion = dist_center_base_to_plane * det::cos(angle_rad);
             let param_along_extrusion = dist_along_extrusion / self.extrusion_vec.length();
 
             // get extrusionSurface's sweep interval
@@ -2203,7 +2204,7 @@ mod tests {
     #[test]
     fn parallel_coplanar_sweep_intersection_is_not_duplicated() {
         let k = k();
-        for (finite, drift) in [(false, 0.0), (true, 0.0), (true, 2.0_f64.powi(-44))] {
+        for (finite, drift) in [(false, 0.0), (true, 0.0), (true, det::powi(2.0_f64, -44))] {
             let mut s = swept(
                 &k,
                 &[(-1.0, -1.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0)],
@@ -2261,7 +2262,7 @@ mod tests {
     #[test]
     fn parallel_coplanar_sweep_respects_reparameterized_source_domain() {
         let k = k();
-        let drift = 2.0_f64.powi(-44);
+        let drift = det::powi(2.0_f64, -44);
         let mut s = swept(
             &k,
             &[(-1.0, -1.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0)],
@@ -3647,7 +3648,7 @@ mod tests {
         let dom = Extent2d::from_bounds(o, o, o + 10.0, o + 10.0);
         let plane = rotated_plane(dom);
         let th: f64 = 2.68865247675069297;
-        let euv = (th.cos(), th.sin());
+        let euv = (det::cos(th), det::sin(th));
         // Work relative to the box origin so the expected area does not lose
         // precision by subtracting products of coordinates near 1e6.
         let mu = |p: Point2| -euv.1 * (p.x - o) + euv.0 * (p.y - o);
@@ -3770,7 +3771,7 @@ mod tests {
     #[test]
     fn parallel_patch_deviation_covers_profile_and_sweep() {
         let k = k();
-        let residual = 2.0_f64.powi(-44);
+        let residual = det::powi(2.0_f64, -44);
         for (e, vmin, domain, expected) in [
             (
                 Vec3::new(residual, 0.0, 1.0),
@@ -3831,7 +3832,7 @@ mod tests {
     #[test]
     fn slab_merges_a_far_cut_corner_into_the_corner() {
         let k = k();
-        let d = 2f64.powi(-10);
+        let d = det::powi(2f64, -10);
         for x0 in [0.0, 1e12] {
             let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
             let mut plane = Plane::new(
@@ -3930,7 +3931,7 @@ mod tests {
         } else {
             xy_plane(dom)
         };
-        let euv = (th.cos(), th.sin());
+        let euv = (det::cos(th), det::sin(th));
         let mu = |p: (f64, f64)| -euv.1 * p.0 + euv.0 * p.1;
         let corners = [
             (o, o),
@@ -4097,7 +4098,7 @@ mod tests {
         let dom = Extent2d::from_bounds(0.0, 0.0, 1e-3, 1e-3);
         let plane = xy_plane(dom);
         let th = std::f64::consts::FRAC_PI_6;
-        let (sn, cs) = th.sin_cos();
+        let (sn, cs) = det::sin_cos(th);
         let mu = |p: (f64, f64)| -sn * p.0 + cs * p.1;
         let at_mu = |u: f64, m: f64| (u, (m + sn * u) / cs);
         let (a, c, b) = (at_mu(5e-4, 1e-10), at_mu(6e-4, -2e-4), at_mu(3e-4, -1e-4));

@@ -27,7 +27,7 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
         assert_eq!(session.undo.len(), history + 1);
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
         assert!(
-            matches!(&session.doc.features.last().unwrap().kind, FeatureKind::Extrude { profiles: ProfileSel::Curves { loops }, .. } if loops == &vec![curves.clone()])
+            matches!(&session.doc.features.last().unwrap().kind, FeatureKind::Extrude { profiles: ProfileSel::Curves { loops, .. }, .. } if loops == &vec![curves.clone()])
         );
         let frozen = session.doc.to_json();
         assert!((session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
