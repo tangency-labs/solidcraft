@@ -1,6 +1,7 @@
 use super::*;
 use crate::blur_plan::{self, PxRect, Run};
-use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
+use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
+use solidcraft_window_gpu::FrameCompositor;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -134,7 +135,9 @@ impl State {
                 windows.map.clear();
             }
             if let Some(renderer) = self.host.as_ref().and_then(|h| h.renderer.upgrade()) {
-                renderer.write().frame_compositor = None;
+                let mut renderer = renderer.write();
+                renderer.frame_compositor = None;
+                renderer.callback_resources.remove::<solidcraft_window_gpu::Compositor>();
             }
         }
     }
@@ -291,7 +294,10 @@ impl State {
             inner.drawn_before = inner.counts.markers_drawn;
         }
         if let Some(renderer) = host.renderer.upgrade() {
-            renderer.write().frame_compositor = Some(shared.clone());
+            let mut renderer = renderer.write();
+            // eframe's painter (the vendored egui-wgpu's hook) and our own runner's painter.
+            renderer.frame_compositor = Some(Arc::new(Vendored(shared.clone())));
+            renderer.callback_resources.insert(solidcraft_window_gpu::Compositor(shared.clone()));
         }
         CURRENT.with(|c| *c.borrow_mut() = Some(Current { shared: shared.clone(), window: id }));
         scope
@@ -908,6 +914,36 @@ impl Shared {
     }
 }
 
+/// The blur as the vendored egui-wgpu's frame hook, which eframe's painter calls; it does what
+/// [`Shared`] does for our own runner's painter.
+struct Vendored(Arc<Shared>);
+
+impl egui_wgpu::FrameCompositor for Vendored {
+    fn begin_viewport(&self, viewport: u64) {
+        self.0.begin_viewport(viewport);
+    }
+    fn screen(&self, screen: &ScreenDescriptor, resources: &mut CallbackResources) {
+        self.0.screen(screen, resources);
+    }
+    fn suspend(&self) {
+        self.0.suspend();
+    }
+    fn render(
+        &self,
+        renderer: &egui_wgpu::Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        jobs: &[egui::ClippedPrimitive],
+        screen: &ScreenDescriptor,
+        clear: [f32; 4],
+    ) -> bool {
+        self.0.render(renderer, encoder, target, jobs, screen, clear)
+    }
+    fn submitted(&self) {
+        self.0.submitted();
+    }
+}
+
 impl FrameCompositor for Shared {
     fn begin_viewport(&self, viewport: u64) {
         if let Ok(mut windows) = self.windows.lock() {
@@ -994,7 +1030,7 @@ impl FrameCompositor for Shared {
             }
             if start < end {
                 let mut ui = load_pass(encoder, "blur_ui_segment", &composition);
-                renderer.render_with_mesh_offset(&mut ui, &jobs[start..end], screen, mesh_offset);
+                solidcraft_window_gpu::render_run(renderer, &mut ui, &jobs[start..end], screen, mesh_offset);
                 mesh_offset += jobs[start..end].iter().filter(|job| matches!(&job.primitive, egui::epaint::Primitive::Mesh(_))).count();
                 segment_passes += 1;
             }
