@@ -11762,6 +11762,22 @@ fn an_extension_adds_only_its_strip_of_flat_leg_and_a_set_back_shortens_the_bend
 }
 
 #[test]
+fn a_set_back_beside_a_wall_counts_from_the_end_of_the_flat_edge() {
+    // FreeCAD's SMBendWall, a wall on the plate's y = 0 edge, then one with 0.5 mm gaps on its
+    // x = 0 edge: the second wall from y 0.5 to 59.5, nothing closed against the first, and the
+    // part's volume.
+    let mut s = Session::default();
+    a063_flange(&mut s, "outside", [0.0; 4]).unwrap_or_else(|e| panic!("{e}"));
+    let p = json!({"edges": [[0, 30, 1.6002]], "height": "17.5962 mm", "position": "outside", "start_setback": "0.5 mm", "end_setback": "0.5 mm"});
+    s.execute("sheet.flange", &p).unwrap_or_else(|e| panic!("{e}"));
+    assert!((volume(&mut s) - 14119.968).abs() < 1e-3, "volume {}", volume(&mut s));
+    let points = json!([[-1.2, 0.45, 10], [-1.2, 0.55, 10], [-1.2, 59.45, 10], [-1.2, 59.55, 10], [0.05, -1.7, 10]]);
+    let got = s.execute("inspect.classify_points", &json!({"body": "Body1", "points": points})).unwrap_or_default();
+    let classes: Vec<&str> = got["results"].as_array().into_iter().flatten().filter_map(|r| r["class"].as_str()).collect();
+    assert_eq!(classes, ["outside", "inside", "inside", "outside", "inside"], "{got}");
+}
+
+#[test]
 fn flange_set_backs_follow_parameters_and_bad_ones_are_refused() {
     let mut s = Session::default();
     a063_flange(&mut s, "outside", [0.0, 0.0, 2.4892, 2.4892]).unwrap_or_default();

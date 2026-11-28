@@ -1194,6 +1194,27 @@ impl SurfaceSheet {
         // moves its stretch of the edge cuts its corners off before the next run, or its own
         // flange, is laid on.
         let slants = self.edge_slants(edge.panel, (a, b, d));
+        // A set-back counts from where the edge's flat ends: past a bend at that end of the edge,
+        // the bend's tangent line, its setback in from the sharp the panel's outline runs to.
+        let bent_back = |p: Vec2| {
+            let joints = self.sheet.joints.iter();
+            joints
+                .filter_map(|j| match &j.kind {
+                    JointKind::Bend(bend) => [&j.a, &j.b]
+                        .into_iter()
+                        .find(|an| {
+                            let along = (p - an.origin).dot(an.dir);
+                            an.panel == edge.panel
+                                && an.dir.cross(d).abs() > 1e-6
+                                && an.dir.cross(p - an.origin).abs() <= 1e-6
+                                && along >= -1e-6
+                                && along <= bend.length + 1e-6
+                        })
+                        .map(|an| bend.setback(t) / an.dir.cross(d).abs()),
+                    _ => None,
+                })
+                .fold(0.0, f64::max)
+        };
         // Each run's stretch as its bend's anchors run, from `a` to `b`: it starts at its `to`
         // (`hi`) and ends at its `from` (`lo`).
         let mut plans = Vec::with_capacity(runs.len());
@@ -1237,7 +1258,10 @@ impl SurfaceSheet {
                 extension: (if junction.0 { 0.0 } else { ends.extension.0 }, if junction.1 { 0.0 } else { ends.extension.1 }),
             };
             let set = (own.setback.0 > 0.0, own.setback.1 > 0.0);
-            let (x0, x1) = (if set.0 { a + d * own.setback.0 } else { point(hi) }, if set.1 { b - d * own.setback.1 } else { point(lo) });
+            let (x0, x1) = (
+                if set.0 { a + d * (own.setback.0 + bent_back(a)) } else { point(hi) },
+                if set.1 { b - d * (own.setback.1 + bent_back(b)) } else { point(lo) },
+            );
             let cut = (junction.0 || set.0, junction.1 || set.1);
             plans.push(FlangeRun {
                 angle,
@@ -1321,6 +1345,10 @@ impl SurfaceSheet {
                 let side = |x: f64| [Vec2::new(x, 0.0), Vec2::new(x, -depth)];
                 square.push(SquareSides { joint, slants: (k0, k1), sides: [side(p0), side(p1)] });
             }
+            let (s, e) = (run.ends.setback, run.ends.extension);
+            self.kept_ends.extend(
+                [(joint, false), (joint, true)].into_iter().filter(|&(_, end)| if end { s.1 > 0.0 || e.1 > 0.0 } else { s.0 > 0.0 || e.0 > 0.0 }),
+            );
             made.push(joint);
         }
         // Where two runs meet, their bends butt: the later run's, nearer `a`, ends there, and the
@@ -1401,8 +1429,9 @@ impl SurfaceSheet {
     fn close_corners(&mut self, j: usize) -> Result<Vec<Vec3>> {
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
-        let junctions = self.junctions.clone();
-        let butt = move |joint: usize, at_end: bool| crate::sheet_surface_convert::butts(&junctions, joint, at_end);
+        let (junctions, kept) = (self.junctions.clone(), self.kept_ends.clone());
+        let butt =
+            move |joint: usize, at_end: bool| crate::sheet_surface_convert::butts(&junctions, joint, at_end) || kept.contains(&(joint, at_end));
         close_corners_on(&mut self.sheet, &places, self.reliefs.gap, j, None, &butt)
     }
 
@@ -2610,6 +2639,9 @@ impl SurfaceSheet {
         // starts there, and the one that started there ends there.
         for pair in &mut self.junctions {
             pair.swap(0, 1);
+        }
+        for (_, end) in &mut self.kept_ends {
+            *end = !*end;
         }
         for c in &mut self.sheet.cuts {
             c.region = r(&c.region);

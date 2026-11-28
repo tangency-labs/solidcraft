@@ -3403,6 +3403,11 @@ pub struct SurfaceSheet {
     /// end, each ending square across its joint (see [`settle`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub junctions: Vec<[usize; 2]>,
+    /// The bend ends a flange's set-back or extension keeps where they are (see
+    /// [`SurfaceSheet::flanges_on`]): the joint and the end (false at its anchors' origin, true at
+    /// their length). No corner is closed there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_ends: Vec<(usize, bool)>,
     /// Where the flat is cut along a junction of a split edge whose two stretches bend to opposite
     /// sides (see [`SurfaceSheet::junctions`]), as last laid out: each `[start, end]` in the flat,
     /// from the deeper of the two bends' lines on the panel they stand on out to the nearer of
@@ -3832,6 +3837,7 @@ impl SurfaceSheet {
             bend_reliefs: Vec::new(),
             torn: Vec::new(),
             junctions: Vec::new(),
+            kept_ends: Vec::new(),
             slits: Vec::new(),
             notes: c.notes.clone(),
             // The engravings Convert keeps; Recognize reads a body's own once it is built.
@@ -4054,6 +4060,7 @@ impl SurfaceSheet {
             bend_reliefs: Vec::new(),
             torn: Vec::new(),
             junctions: Vec::new(),
+            kept_ends: Vec::new(),
             slits: Vec::new(),
             notes: Vec::new(),
             recesses: Vec::new(),
