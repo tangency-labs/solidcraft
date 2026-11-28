@@ -129,6 +129,8 @@ mod pie_slices_off_centre_arc;
 mod plane_cv_edit;
 #[path = "../plane_match.rs"]
 mod plane_match;
+#[path = "../plate_contact.rs"]
+mod plate_contact;
 #[path = "../prism.rs"]
 mod prism;
 #[path = "../profile_hook.rs"]
