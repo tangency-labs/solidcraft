@@ -605,6 +605,8 @@ fn ask(tx: &std::sync::mpsc::Sender<crate::ControlRequest>, method: &str, params
 /// The block with its boss and hole, driven over the control channel.
 fn agent_harness() -> (Harness, std::sync::mpsc::Sender<crate::ControlRequest>) {
     let mut h = block_boss_hole();
+    // The model's own SMLib checks are not the agent rows these tests count.
+    h.app.session.settle_feature_checks(true);
     h.app.preferences.agent_off_thread = true;
     let (tx, rx) = std::sync::mpsc::channel();
     h.app.control_rx = Some(rx);

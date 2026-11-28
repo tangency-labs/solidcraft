@@ -2985,6 +2985,8 @@ mod browser_rows {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.session.run_script(&solidcraft_engine::sample::script()).expect("sample");
+        // The sample's own SMLib checks are no operations row under the point these tests click.
+        h.app.session.settle_feature_checks(true);
         h.frames(3);
         h
     }
