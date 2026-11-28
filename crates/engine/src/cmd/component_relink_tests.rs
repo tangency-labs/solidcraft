@@ -3039,6 +3039,120 @@ fn a_collision_shape_survives_a_link_update() {
     assert_eq!(s.doc.collision_shapes, before);
 }
 
+/// A Hole placed on a neighbour-qualified face of a linked component (`F<id>:link:<hash1>#[…]`)
+/// must survive deleting an unrelated cut elsewhere in the linked part and running
+/// `component.relink` — both when deleting the cut makes the face whole again and when an
+/// assembly-level cut still splits the linked face — while replacing the target face itself with
+/// a new feature's face at the same coordinates still asks to reselect.
+#[test]
+fn hole_on_linked_qualified_face_survives_relink_when_distant_cut_deleted() {
+    let dir = folder("hole-qualified-face-relink");
+    let before = dir.join("beam-before.sc");
+    let after = dir.join("beam-after.sc");
+    let replaced = dir.join("beam-replaced.sc");
+
+    let mut beam = Session::default();
+    run(&mut beam, "solid.box", json!({"corner": [0, 0, 0], "length": 200, "width": 40, "height": 20, "body_name": "Beam"}));
+    run(&mut beam, "solid.hole", json!({"position": [50, 20, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 8, "name": "PilotA"}));
+    run(&mut beam, "solid.hole", json!({"position": [125, 20, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 8, "name": "PilotB"}));
+    // Distant cut at x = 155..167 splits F1:+z into x = 0..155 and x = 167..200.
+    run(&mut beam, "solid.box", json!({"corner": [155, -2, 12], "length": 12, "width": 44, "height": 10, "operation": "cut", "name": "DistantCut"}));
+    run(&mut beam, "file.save", json!({"path": before}));
+
+    // Delete the unrelated distant cut: F1:+z becomes whole in the linked part.
+    run(&mut beam, "timeline.delete", json!({"features": ["DistantCut"]}));
+    run(&mut beam, "file.save", json!({"path": after}));
+
+    // Negative source: replace the original block with a brand-new box at the exact same
+    // coordinates so the original target face stem (`F1:+z`) no longer exists.
+    run(&mut beam, "timeline.delete", json!({"features": ["PilotA", "PilotB"]}));
+    let box_id = beam.doc.features.first().unwrap().id;
+    run(&mut beam, "timeline.delete", json!({"feature": box_id}));
+    run(&mut beam, "solid.box", json!({"corner": [0, 0, 0], "length": 200, "width": 40, "height": 20, "body_name": "Beam"}));
+    run(&mut beam, "file.save", json!({"path": replaced}));
+
+    let hole_vol = std::f64::consts::PI * 9.0 * 10.0;
+    let pilot_vol = 2.0 * std::f64::consts::PI * 9.0 * 8.0;
+
+    // Case 1: deleting DistantCut makes the linked top face whole again (`F<id>:link:<hash1>`).
+    // Both `"keep"` and `"sync"` relink modes must keep MountHole green.
+    {
+        let mut s = Session::default();
+        let link = run(&mut s, "component.insert_design", json!({"path": before, "name": "Beam"}));
+        let comp = link["component"].as_u64().unwrap();
+        let hole_id = run(
+            &mut s,
+            "solid.hole",
+            json!({"position": [25, 20, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 10, "name": "MountHole"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        let stored = s.doc.feature(hole_id).unwrap().face_names.clone();
+        assert!(
+            stored.first().is_some_and(|n| n.contains(":link:") && n.contains("#[")),
+            "expected linked neighbour-qualified face name: {stored:?}"
+        );
+        assert_eq!(s.model.result(hole_id).and_then(|r| r.error.clone()), None);
+
+        for mode in ["keep", "sync"] {
+            run(&mut s, "component.relink", json!({"component": comp, "path": after, "names": mode}));
+            let res = s.model.result(hole_id).unwrap();
+            assert_eq!(res.error, None, "mode={mode}: hole must survive relink when distant cut is deleted");
+            assert_eq!(res.warning, None, "mode={mode}: hole should rebuild without warning");
+            let v = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+            let expected = 200.0 * 40.0 * 20.0 - pilot_vol - hole_vol;
+            assert!((v - expected).abs() < 0.05, "mode={mode}: {v} vs {expected}");
+        }
+
+        // Negative check: when the target face stem itself disappears, MountHole must ask to reselect.
+        run(&mut s, "component.relink", json!({"component": comp, "path": replaced, "names": "keep"}));
+        let err = s.model.result(hole_id).and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(err.contains("no longer exists as it was picked; reselect it"), "{err}");
+    }
+
+    // Case 2: an assembly-level cut (`AssemblyCut`) also splits the linked face, so MountHole's
+    // stored qualifier carries both `:link:` faces (inherited across both sides of AssemblyCut)
+    // and the assembly cut face (`F<asm>:-x`). Deleting DistantCut and relinking leaves both
+    // assembly pieces sharing inherited linked neighbours; MountHole must still resolve at its
+    // pick point and survive cold reopen.
+    {
+        let mut s = Session::default();
+        let link = run(&mut s, "component.insert_design", json!({"path": before, "name": "Beam"}));
+        let comp = link["component"].as_u64().unwrap();
+        let asm_cut_id = run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [90, -2, 12], "length": 10, "width": 44, "height": 10, "operation": "cut", "targets": ["Beam"], "name": "AssemblyCut"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        let hole_id = run(
+            &mut s,
+            "solid.hole",
+            json!({"position": [25, 20, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 10, "name": "MountHole"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        let stored = s.doc.feature(hole_id).unwrap().face_names.clone();
+        assert!(
+            stored.first().is_some_and(|n| n.contains(":link:") && n.contains("#[") && n.contains(&format!("F{asm_cut_id}:"))),
+            "expected linked + assembly neighbour qualifier: {stored:?}"
+        );
+
+        run(&mut s, "component.relink", json!({"component": comp, "path": after, "names": "sync"}));
+        let res = s.model.result(hole_id).unwrap();
+        assert_eq!(res.error, None, "hole on assembly-split linked face must survive relink");
+        assert_eq!(res.warning, None);
+
+        let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+        let reopened_res = reopened.model.result(hole_id).unwrap();
+        assert_eq!(reopened_res.error, None, "cold reopen must keep hole resolved");
+        assert_eq!(reopened_res.warning, None);
+    }
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// When `component.relink` binds an existing carried face name to an opposite/incompatible face
 /// on the replacement design, `component.relink` reports the per-joint frame deviation, flags the
 /// incompatible re-binding in `joint_errors` and `warnings`, and reports the moved occurrence.

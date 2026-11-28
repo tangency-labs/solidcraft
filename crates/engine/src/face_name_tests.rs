@@ -857,3 +857,175 @@ fn renaming_a_body_opened_from_its_saved_model_keeps_its_face_names() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "{errors:?} (body by {hole:?})");
 }
+
+/// Deleting an unrelated upstream cut whose face only appeared inside an edge's face qualifier
+/// (`F2:side:l1#[...,F4:side:l2]|F6:side:l4`) must not break a downstream fillet on untouched
+/// primary faces — even when deleting the cut makes the qualified face whole again — while
+/// deleting a feature that owns one of the edge's primary faces still asks to reselect.
+#[test]
+fn a_fillet_survives_deleting_an_unrelated_cut_listed_only_in_its_edge_qualifier() {
+    let build = |with_slot: bool| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 40]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "BaseSketch", "distance": 20, "name": "Block", "body_name": "Body1"}));
+        if with_slot {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, -5], "p1": [25, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "SlotSketch", "distance": 20, "operation": "cut", "name": "SideSlot"}));
+        }
+        // A partial-height boss on the front wall far from SideSlot leaves the right piece of
+        // F2:side:l1 connected above z = 10, so its vertical concave edges inherit SideSlot's
+        // face inside the qualifier of F2:side:l1.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "BossSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [60, -8], "p1": [80, 0]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "BossSketch", "distance": 10, "operation": "join", "name": "Boss"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[60, 0, 5], [80, 0, 5]], "radius": 2, "name": "Rounds"}));
+        s
+    };
+
+    let mut baseline = build(false);
+    let expected_volume = volume(&mut baseline, "Body1");
+
+    let mut s = build(true);
+    let slot_id = s.doc.find_feature("SideSlot").unwrap().id;
+    let rounds_id = s.doc.find_feature("Rounds").unwrap().id;
+    let stored = s.doc.feature(rounds_id).unwrap().edge_names.clone();
+    assert_eq!(stored.len(), 2, "{stored:?}");
+    let slot_prefix = format!("F{slot_id}:");
+    assert!(stored.iter().all(|n| n.contains("#[") && n.contains(&slot_prefix)), "expected SideSlot face inside edge qualifiers: {stored:?}");
+    assert_eq!(shell_error(&s, rounds_id), None);
+
+    // Delete the unrelated SideSlot cut: F2:side:l1 becomes whole and F4:* disappears from its
+    // bounds, while both primary faces of both filleted edges remain intact.
+    run(&mut s, "timeline.delete", json!({"features": ["SideSlot", "SlotSketch"]}));
+    let res = s.model.result(rounds_id).unwrap();
+    assert_eq!(res.error, None, "fillet must survive deleting unrelated context feature");
+    assert_eq!(res.warning, None, "fillet should rebuild cleanly without warning");
+    assert!((volume(&mut s, "Body1") - expected_volume).abs() < 1e-3, "{} vs {expected_volume}", volume(&mut s, "Body1"));
+
+    // Cold reopen of the saved document must also rebuild cleanly.
+    let mut reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    let reopened_res = reopened.model.result(rounds_id).unwrap();
+    assert_eq!(reopened_res.error, None);
+    assert_eq!(reopened_res.warning, None);
+    assert!((volume(&mut reopened, "Body1") - expected_volume).abs() < 1e-3);
+
+    // Negative check: deleting Boss removes primary faces of the filleted edges, so Rounds must
+    // still fail asking to reselect.
+    run(&mut s, "timeline.delete", json!({"features": ["Boss", "BossSketch"]}));
+    let err = shell_error(&s, rounds_id).unwrap_or_default();
+    assert!(err.contains("no longer exists as it was picked; reselect it"), "{err}");
+}
+
+/// An upstream sketch edit that removes a splitting neighbour from a pocket wall's qualifier
+/// (`F3:side:l1|F3:side:l2#[F3:side:l1,F5:side:l1]`) must not break a fillet on that vertical
+/// pocket corner — both when the corner stays in place and when a parametric sketch edit shifts
+/// the corner to a new position.
+#[test]
+fn a_fillet_on_a_pocket_corner_survives_upstream_edit_changing_its_face_qualifier() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "pocket_x", "expression": "70 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "cut_x", "expression": "65 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 100, "width": 60, "height": 20, "body_name": "Body1"}));
+
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PocketSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 15], "p1": [70, 45]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": "20 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": "15 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "pocket_x - 20 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "type": "length", "value": "30 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "PocketSketch", "distance": 20, "operation": "cut", "name": "Pocket"}));
+
+    // A side notch splitting the pocket's right wall (x = 70) away from the corner at (70, 15).
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [65, 27], "p1": [80, 33]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": "cut_x"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": "27 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "15 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "type": "length", "value": "6 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "NotchSketch", "distance": 20, "operation": "cut", "name": "Notch"}));
+
+    run(&mut s, "solid.fillet", json!({"edges": [[70, 15, 10]], "radius": 2, "name": "CornerFillet"}));
+    let pocket_id = s.doc.find_feature("Pocket").unwrap().id;
+    let notch_id = s.doc.find_feature("Notch").unwrap().id;
+    let fillet_id = s.doc.find_feature("CornerFillet").unwrap().id;
+    let stored = s.doc.feature(fillet_id).unwrap().edge_names.clone();
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert!(
+        stored[0].contains("#[") && stored[0].contains(&format!("F{pocket_id}:side:l1")) && stored[0].contains(&format!("F{notch_id}:")),
+        "expected corner edge qualified by pocket side and notch face: {stored:?}"
+    );
+    assert_eq!(shell_error(&s, fillet_id), None);
+
+    // Move Notch off the pocket wall (x = 75..90): the pocket's right wall becomes whole again and
+    // Notch's face disappears from its bounds, while the corner at (70, 15) stays intact.
+    run(&mut s, "parameters.change", json!({"name": "cut_x", "expression": "75 mm"}));
+    let res = s.model.result(fillet_id).unwrap();
+    assert_eq!(res.error, None, "fillet must survive upstream sketch edit removing qualifier face");
+    assert_eq!(res.warning, None);
+    let sharp_area = 100.0 * 60.0 - 50.0 * 30.0 - 15.0 * 6.0;
+    let round_area = 4.0 - PI; // concave R2 corner adds (r^2 - pi*r^2/4) = 4 - pi mm^2
+    let expected_unmoved = (sharp_area + round_area) * 20.0;
+    assert!((volume(&mut s, "Body1") - expected_unmoved).abs() < 0.05, "{} vs {expected_unmoved}", volume(&mut s, "Body1"));
+
+    // Shift the pocket wall itself (x = 70 -> 66) so the corner moves off the stored pick point:
+    // the unique corner edge between F3:side:l1 and F3:side:l2 still resolves cleanly.
+    run(&mut s, "parameters.change", json!({"name": "pocket_x", "expression": "66 mm"}));
+    let res = s.model.result(fillet_id).unwrap();
+    assert_eq!(res.error, None, "fillet must follow moved pocket corner edge");
+    assert_eq!(res.warning, None);
+    let expected_moved = (100.0 * 60.0 - 46.0 * 30.0 - 15.0 * 6.0 + round_area) * 20.0;
+    assert!((volume(&mut s, "Body1") - expected_moved).abs() < 0.05, "{} vs {expected_moved}", volume(&mut s, "Body1"));
+
+    // Cold reopen must preserve the moved corner fillet too.
+    let mut reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert_eq!(shell_error(&reopened, fillet_id), None);
+    assert!((volume(&mut reopened, "Body1") - expected_moved).abs() < 0.05);
+}
+
+/// Deleting a hole that was the only distinguishing neighbour between two pieces of a still-split
+/// face (leaving the remaining pieces numbered `#1`/`#2` instead of `#[...]`) must still let a
+/// fillet on an untouched edge of one piece resolve cleanly at its pick point.
+#[test]
+fn a_fillet_survives_when_a_still_split_face_loses_its_distinguishing_neighbour() {
+    let mut sharp = Session::default();
+    run(&mut sharp, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 30, "height": 20, "body_name": "Body1"}));
+    run(&mut sharp, "solid.cylinder", json!({"base": [0, -35, 22], "axis": "Y", "radius": 6, "height": 70, "operation": "cut", "name": "Groove"}));
+    let sharp_volume = volume(&mut sharp, "Body1");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 30, "height": 20, "body_name": "Body1"}));
+    // Place TagHole on the -X side BEFORE Groove splits F1:top, so when Groove splits F1:top into
+    // two halves (-X and +X), only the -X half touches TagHole and gets qualified as
+    // `F1:top#[F2:bore:side:0]`.
+    run(&mut s, "solid.hole", json!({"position": [-18, 0, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 5, "name": "TagHole"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, -35, 22], "axis": "Y", "radius": 6, "height": 70, "operation": "cut", "name": "Groove"}));
+    // Fillet the unbroken outer top rim of the -X half at (-30, 0, 20) (opposite the +X seam).
+    run(&mut s, "solid.fillet", json!({"edges": [[-30, 0, 20]], "radius": 1, "name": "RimRound"}));
+    let tag_id = s.doc.find_feature("TagHole").unwrap().id;
+    let round_id = s.doc.find_feature("RimRound").unwrap().id;
+    let stored = s.doc.feature(round_id).unwrap().edge_names.clone();
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert!(stored[0].contains("#[") && stored[0].contains(&format!("F{tag_id}:")), "{stored:?}");
+    assert_eq!(shell_error(&s, round_id), None);
+
+    // Deleting TagHole leaves both halves of F1:top with identical neighbours (numbered `#1`/`#2`,
+    // no longer `#[...]`). The rim fillet at (-30, 0, 20) must still rebuild cleanly.
+    run(&mut s, "timeline.delete", json!({"features": ["TagHole"]}));
+    let res = s.model.result(round_id).unwrap();
+    assert_eq!(res.error, None, "fillet must survive still-split face losing its qualifier");
+    assert_eq!(res.warning, None);
+    let top_names: Vec<String> = faces(&mut s, "Body1")
+        .iter()
+        .filter_map(|f| f["name"].as_str().map(str::to_string))
+        .filter(|n| n.starts_with("F1:top#") && !n.contains("#["))
+        .collect();
+    assert_eq!(top_names.len(), 2, "both top halves should now be numbered pieces: {top_names:?}");
+    assert!(volume(&mut s, "Body1") < sharp_volume - 1.0, "the -X rim should still be filleted");
+}

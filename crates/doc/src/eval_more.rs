@@ -3051,7 +3051,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let i = st.bodies.iter().position(|b| b.name == target).ok_or_else(|| DocError::Invalid("boss body".into()))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("boss body".into())) };
                 let mut warn = None;
-                let edges = resolve_edges(&mb.body, &[position.0 + x * r0], &[], &mut warn)?;
+                let edges: Vec<Vec3> = resolve_edges(&mb.body, &[position.0 + x * r0], &[], false, &mut warn)?.into_iter().map(|(_, p)| p).collect();
                 let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, rf)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = mb.remade(nb);

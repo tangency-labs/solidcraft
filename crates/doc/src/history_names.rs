@@ -923,9 +923,70 @@ pub(crate) fn piece_overlap(names: &Names, index: usize, name: &str) -> Option<(
     Some((matched, around.len()))
 }
 
+/// How a stored non-numbered neighbour qualifier (`stem#[a, b, …]`, with optional pattern copy
+/// `@F…`) compares with the current bounds of a face of the same stem and copy instance (whether
+/// that face is currently qualified, bare stem, or numbered).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct QualifierStatus {
+    /// How many faces listed in the stored qualifier still bound the face (directly or through a
+    /// blend that replaced the edge).
+    pub matched: usize,
+    /// Whether `other_face`'s stem was explicitly listed in the stored qualifier.
+    pub lists_other: bool,
+    /// Qualifier entries that no longer bound the face.
+    pub missing: Vec<String>,
+}
+
+/// Compare a stored non-numbered neighbour-qualified piece name (`stem#[a, b, …]`, optionally
+/// followed by pattern copies `@F…`) against face `index` of `names`, regardless of whether face
+/// `index` is currently qualified, bare stem, or numbered. `other_face` is the stored name of the
+/// other face sharing an edge with `name`.
+/// Returns `None` when `name` is not a non-numbered neighbour-qualified piece name, or `index`
+/// does not share its stem and copy instance.
+pub(crate) fn qualifier_status(names: &Names, index: usize, name: &str, other_face: &str) -> Option<QualifierStatus> {
+    let face = names.faces.get(index)?;
+    let info = names.info.get(index)?;
+    let canonical = crate::persistent_name::written_now(name);
+    let today = crate::persistent_name::written_now(face);
+    let ((name_core, at), (current, here)) = (instance_suffix(&canonical), instance_suffix(&today));
+    if at != here || !name_core.ends_with(']') {
+        return None;
+    }
+    let (stem, around) = crate::piece_names::piece_parts(name_core)?;
+    if around.is_empty() || crate::naming::strip_piece(current) != crate::naming::strip_piece(stem) {
+        return None;
+    }
+    let other_canonical = crate::persistent_name::written_now(other_face);
+    let (other_core, _) = instance_suffix(&other_canonical);
+    let other_stem = crate::naming::strip_piece(other_core);
+    let mut matched = 0usize;
+    let mut lists_other = false;
+    let mut missing = Vec::new();
+    for f in &around {
+        let (f_core, _) = instance_suffix(f);
+        if crate::naming::strip_piece(f_core) == other_stem {
+            lists_other = true;
+        }
+        let suffixed = (!at.is_empty()).then(|| format!("{f}{at}"));
+        let target = suffixed.as_deref().unwrap_or(f);
+        let kept = info.bounds.contains(target)
+            || (!at.is_empty() && info.bounds.contains(*f))
+            || info.bounds.iter().any(|bound| {
+                let (bound_core, bound_at) = instance_suffix(bound);
+                (bound_at == at || bound_at.is_empty()) && rounds_the_edge(bound_core, current, f)
+            });
+        if kept {
+            matched += 1;
+        } else {
+            missing.push((*f).to_string());
+        }
+    }
+    Some(QualifierStatus { matched, lists_other, missing })
+}
+
 /// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and
 /// `@F9.1`; a copy of a copy carries one instance after another).
-fn instance_suffix(n: &str) -> (&str, &str) {
+pub(crate) fn instance_suffix(n: &str) -> (&str, &str) {
     let mut core = n;
     while let Some(at) = core.rfind('@') {
         let instance = core.get(at + 1..).and_then(|t| t.strip_prefix('F')).and_then(|t| t.split_once('.'));
