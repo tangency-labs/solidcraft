@@ -7667,6 +7667,7 @@ mod tests {
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("browser_hide_construction_folder", json!(true), PAGE_LAYOUT),
             ("browser_hide_sketches_folder", json!(true), PAGE_LAYOUT),
+            ("browser_history_without_folder", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("origin_plane_scale", json!(2.0), PAGE_DESIGN),

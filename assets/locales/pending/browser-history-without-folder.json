@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.browser_history_without_folder": "History without a folder"
+  },
+  "de": {
+    "prefs.browser_history_without_folder": "Verlauf ohne Ordner"
+  },
+  "ja": {
+    "prefs.browser_history_without_folder": "フォルダーなしの履歴"
+  },
+  "zh": {
+    "prefs.browser_history_without_folder": "历史不放在文件夹中"
+  },
+  "ko": {
+    "prefs.browser_history_without_folder": "폴더 없는 히스토리"
+  },
+  "vi": {
+    "prefs.browser_history_without_folder": "Lịch sử không có thư mục"
+  },
+  "ar": {
+    "prefs.browser_history_without_folder": "السجل بدون مجلد"
+  },
+  "he": {
+    "prefs.browser_history_without_folder": "ציר זמן ללא תיקייה"
+  }
+}

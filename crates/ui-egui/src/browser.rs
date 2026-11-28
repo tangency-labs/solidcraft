@@ -1733,6 +1733,7 @@ pub(crate) fn menu_toggles(app: &SolveApp) -> Vec<(&'static str, &'static str, b
     vec![
         ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", app.preferences.browser_hide_sketches_folder),
         ("hide-construction-folder", "prefs.browser_hide_construction_folder", app.preferences.browser_hide_construction_folder),
+        ("history-without-folder", "prefs.browser_history_without_folder", app.preferences.browser_history_without_folder),
         ("fold-other-components", "prefs.browser_fold_other_components", app.preferences.browser_fold_other_components),
     ]
 }
@@ -1743,6 +1744,7 @@ pub(crate) fn menu_action(app: &mut SolveApp, action: &str) -> Result<(), String
     let setting = match action {
         "hide-sketches-folder" => "browser_hide_sketches_folder",
         "hide-construction-folder" => "browser_hide_construction_folder",
+        "history-without-folder" => "browser_history_without_folder",
         "fold-other-components" => "browser_fold_other_components",
         _ => {
             magnifier(app);
