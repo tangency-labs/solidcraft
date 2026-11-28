@@ -1,39 +1,198 @@
 {
   "area": "fillets",
   "bodies": {
-    "b12": {
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
       "keeping_splines": false,
       "trusted": true
     }
   },
   "calls": [
     {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                40.0,
+                8.0,
+                0.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 8.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                16.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                16.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                16.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                40.0,
+                8.0,
+                0.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 8.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                40.0,
+                8.0,
+                0.0
+              ],
+              "end": 4.71238898038469,
+              "radius": 8.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.5707963267948966
+            }
+          }
+        ]
+      }
+    },
+    {
       "inputs": [
-        "b12"
+        "b4",
+        "b5"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b8"
       ],
       "op": "copy",
       "outputs": [
-        "b13"
+        "b9"
       ],
       "params": {}
     },
     {
       "inputs": [
-        "b13"
-      ],
-      "op": "copy",
-      "outputs": [
-        "b14"
-      ],
-      "params": {}
-    },
-    {
-      "inputs": [
-        "b14"
+        "b9"
       ],
       "op": "tagged",
       "outputs": [
-        "b15"
+        "b10"
       ],
       "params": {
         "operand": 0
@@ -41,11 +200,11 @@
     },
     {
       "inputs": [
-        "b15"
+        "b10"
       ],
       "op": "blend_dropping",
       "outputs": [
-        "b16"
+        "b11"
       ],
       "params": {
         "edges": {
@@ -90,7 +249,7 @@
             ],
             [
               32.0,
-              7.999999999999995,
+              8.0,
               10.0
             ]
           ],
@@ -100,7 +259,8 @@
         "sizes": [
           5.0,
           5.0
-        ]
+        ],
+        "turn": "auto"
       }
     }
   ],
@@ -125,38 +285,37 @@
     "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the front top edge (y = 0, z = 10) and the concave arc rounded r5 in one fillet, tangent chain on; the planes of the front face y = 0, the back y = 16, the bottom, the left end and the cylinder's top bound the whole body (the cylinder's wall runs tangent into the front and back faces), and every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, (0, 0, 0) .. (48, 16, 20); graded to 4e-5, the blends' approximation tolerance: a corner patch or an end that stands out of the front face fails; every seam a round makes with its faces, and those of a corner patch, G1",
     "source": "invariants",
     "tolerance": {
-      "abs_mm": 0.00004
+      "abs_mm": 4e-05
     },
     "what": "the peg's front top edge (convex) and the concave arc where its top meets the cylinder, rounded r5 together: the two edges are tangent where they meet, at the point where the front face runs tangent into the cylinder, and the corner patch there stood out of the front face; reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": false,
-  "gallery_note": "R5, half the bar's height: the front top edge's round touches the front at z = 5 and the top at y = 5; the arc's round touches the top 5 out from the cylinder and the wall up to z = 15. They turn into each other at x = 40, as at R2, over a wider corner.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,
     "raw_counts": {
-      "edges": 26,
-      "faces": 11,
-      "vertices": 17
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14
     }
   },
   "records": "report-peg-front-and-concave-rounds-together-r5.bodies.json.gz",
   "result": [
     {
       "body": "Peg",
-      "made": "b16"
+      "made": "b11"
     }
   ],
   "rig": {
     "error": null,
     "known_failing": null,
     "measured": {
-      "area_mm2": 3093.062161268072,
+      "area_mm2": 3092.4557865659713,
       "body_count": 1,
-      "edges": 25,
-      "faces": 11,
-      "vertices": 16,
-      "volume_mm3": 9328.4458751187
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14,
+      "volume_mm3": 9305.429135991846
     },
     "refused_with": null,
     "status": "pass"
@@ -165,14 +324,7 @@
   "traced_ops": [
     "extrude",
     "extrude",
-    "copy",
-    "copy",
-    "copy",
-    "copy",
-    "tagged",
-    "tagged",
-    "boolean",
-    "copy",
+    "boolean_tagged",
     "copy",
     "tagged",
     "blend_dropping"
@@ -181,5 +333,6 @@
     "continuity: SolidCraft computes it"
   ],
   "what": "the peg's front top edge (convex) and the concave arc where its top meets the cylinder, rounded r5 together: the two edges are tangent where they meet, at the point where the front face runs tangent into the cylinder, and the corner patch there stood out of the front face; reported from the app (2026-10-30, test-peg part)",
-  "why_not": []
+  "why_not": [],
+  "gallery_note": "R5, half the bar's height: the front top edge's round touches the front at z = 5 and the top at y = 5; the arc's round touches the top 5 out from the cylinder and the wall up to z = 15. They turn into each other at x = 40, as at R2, over a wider corner."
 }

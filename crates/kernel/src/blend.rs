@@ -829,12 +829,61 @@ pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: Chamfer
     })
 }
 
+/// The largest fitting size reported by a blend refusal: a length in mm (radius, chord width, or
+/// chamfer distance) or a scale factor on a two-sided chamfer's distances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BlendFit {
+    /// A constant or curvature fillet radius (mm).
+    Radius(f64),
+    /// A chord-length fillet width (mm).
+    Chord(f64),
+    /// An equal or fixed-angle chamfer distance (mm).
+    Distance(f64),
+    /// A scale factor on a two-sided chamfer's distances.
+    Scale(f64),
+}
+
+impl BlendFit {
+    /// The fitting length in mm for a radius, chord width, or chamfer distance (`None` for a
+    /// two-sided scale factor).
+    pub fn length_mm(self) -> Option<f64> {
+        match self {
+            BlendFit::Radius(v) | BlendFit::Chord(v) | BlendFit::Distance(v) => Some(v),
+            BlendFit::Scale(_) => None,
+        }
+    }
+}
+
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
 /// that fits is 3 mm". `None` where it names none, or names a scale ("2 times the distances").
 pub fn named_fit(why: &str) -> Option<f64> {
     let (_, rest) = why.split_once("that fits is ")?;
     let (number, _) = rest.split_once(" mm")?;
     number.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// The typed largest fitting size a refusal names ([`largest_fit_note`] or [`scale_fit_note`]).
+/// `None` where the refusal names no usable positive size.
+pub fn named_blend_fit(why: &str) -> Option<BlendFit> {
+    let (_, rest) = why.split_once("the largest ")?;
+    let positive = |n: &str| n.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0);
+    if let Some(after) = rest.strip_prefix("radius that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Radius);
+    }
+    if let Some(after) = rest.strip_prefix("chord width that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Chord);
+    }
+    if let Some(after) = rest.strip_prefix("distance that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Distance);
+    }
+    if let Some(after) = rest.strip_prefix("that fits is ") {
+        let (number, _) = after.split_once(" times the distances given")?;
+        return positive(number).map(BlendFit::Scale);
+    }
+    None
 }
 
 /// What [`largest_that_fits`] found: the largest size it built, with its result, or (none built)
@@ -1012,9 +1061,9 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
         let r = match fillet_turning(body, &pts, radius, turn) {
             Ok(_) => continue,
-            Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
+            Err(KernelError::TooLarge(why)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius, turn)? {
+                match fillet_max_why(body, &pts, radius, turn, named_fit(&why))?.found {
                     Some((r, _)) => r,
                     None => return one(),
                 }
@@ -1284,6 +1333,24 @@ pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
 /// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
 pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// Whether the tangent chain of the edge at `pick` ([`tangent_chain`]) closes on itself: each
+/// vertex of its edges is an end of two of them, as on a rim rounded at every corner. One radius
+/// law runs along an open chain only ([`crate::fillet_variable_spline_chain`]).
+pub fn tangent_chain_closes(body: &Body, pick: Vec3) -> Result<bool> {
+    let (rec, chain, _) = picked_chain(body, &[pick])?;
+    let mut ends: Vec<(u32, usize)> = Vec::new();
+    for e in &chain {
+        let edge = rec.rec.edges.get(*e).ok_or_else(|| KernelError::Failed("an edge of the chain".into()))?;
+        for v in edge.vertices {
+            match ends.iter_mut().find(|(w, _)| *w == v) {
+                Some((_, n)) => *n += 1,
+                None => ends.push((v, 1)),
+            }
+        }
+    }
+    Ok(!ends.is_empty() && ends.iter().all(|&(_, n)| n == 2))
 }
 
 /// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
@@ -2981,6 +3048,22 @@ mod tests {
         );
         assert_eq!(without_fit_note("too large: the largest distance that fits is 1.6 mm"), "too large");
         assert_eq!(without_fit_note("the trim leaks"), "the trim leaks");
+    }
+
+    /// Typed blend fit parsing distinguishes radius, chord width, chamfer distance and two-sided
+    /// scale, and ignores zero or missing fit sizes.
+    #[test]
+    fn a_refusal_parses_typed_blend_fit() {
+        assert_eq!(named_blend_fit("too large, at the edge at (1, 2, 3); the largest radius that fits is 3 mm"), Some(BlendFit::Radius(3.0)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("chord width", 1.25))), Some(BlendFit::Chord(1.25)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("distance", 2.5))), Some(BlendFit::Distance(2.5)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", scale_fit_note(0.6))), Some(BlendFit::Scale(0.6)));
+        assert_eq!(named_blend_fit("too large; the largest radius that fits is 0 mm"), None);
+        assert_eq!(named_blend_fit("the fillet is larger than the faces beside its edges allow"), None);
+        assert_eq!(BlendFit::Radius(3.0).length_mm(), Some(3.0));
+        assert_eq!(BlendFit::Chord(1.25).length_mm(), Some(1.25));
+        assert_eq!(BlendFit::Distance(2.5).length_mm(), Some(2.5));
+        assert_eq!(BlendFit::Scale(0.6).length_mm(), None);
     }
 
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.

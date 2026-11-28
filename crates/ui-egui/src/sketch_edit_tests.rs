@@ -805,6 +805,158 @@ mod open_view_preference {
     }
 }
 
+/// A sketch can optionally reopen at the camera where its edit ended (#18998). This is
+/// per-design view state in the running app, never an edit to the sketch's saved geometry.
+mod remembered_sketch_views {
+    use super::*;
+    use crate::scenario::Harness;
+    use crate::sketch_palette::SketchOpenView;
+    use solidcraft_engine::Session;
+
+    #[test]
+    fn three_modes_keep_the_old_default_and_distinguish_finish_from_cancel() {
+        assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
+        let mut h = Harness::new();
+        *h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        h.app.ui.sketch_open_view = SketchOpenView::LastFinished;
+
+        // The first edit of this sketch still faces the sketch: it has no saved camera.
+        h.app.edit_sketch(id);
+        assert!(h.app.cam_anim.is_some(), "first edit takes the existing look-at path");
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(32.0, -17.0);
+        h.app.cam.pan(17.0, -7.0, 800.0);
+        let finished = h.app.cam;
+        h.app.finish_sketch();
+        h.settle();
+        assert_eq!(h.app.sketch_last_views.finished.get(&id), Some(&finished));
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&finished));
+
+        // A later edit opens exactly at the camera left by Finish, not at its face.
+        h.app.cam.orbit(-70.0, 25.0);
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), finished);
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(43.0, 19.0);
+        let cancelled = h.app.cam;
+        h.app.cancel_sketch();
+        h.settle();
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&cancelled));
+        assert_eq!(h.app.sketch_last_views.finished.get(&id), Some(&finished), "Cancel never replaces a finished view");
+
+        // Last uses a cancelled edit's camera; LastFinished ignores it.
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), cancelled);
+        h.app.cancel_sketch();
+        h.settle();
+        h.app.ui.sketch_open_view = SketchOpenView::LastFinished;
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), finished);
+        h.app.finish_sketch();
+        h.settle();
+
+        // The current default can be chosen again and still faces the plane.
+        h.app.ui.sketch_open_view = SketchOpenView::Face;
+        h.app.edit_sketch(id);
+        assert_ne!(h.app.settled_cam(), finished);
+        h.app.finish_sketch();
+        h.settle();
+    }
+
+    #[test]
+    fn one_sketchs_last_view_is_private_to_its_design_tab() {
+        let mut h = Harness::new();
+        *h.app = sample_app();
+        h.app.home.open = false;
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(25.0, 9.0);
+        let saved = h.app.cam;
+        h.app.finish_sketch();
+        h.settle();
+
+        crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+        assert!(h.app.sketch_last_views.last.is_empty(), "another design has no remembered views");
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&saved), "returning to the tab restores its own history");
+    }
+
+    #[test]
+    fn reopening_ignores_a_camera_with_an_incompatible_up_axis() {
+        use solidcraft_viewport::UpAxis;
+        let mut h = Harness::new();
+        *h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
+        h.app.preferences.sketch_open_look_at = false;
+        let before = h.app.settled_cam();
+        let mut stale = before;
+        stale.up = if before.up == UpAxis::Z { UpAxis::Y } else { UpAxis::Z };
+        stale.orbit(26.0, -13.0);
+        h.app.sketch_last_views.closed(id, stale, true);
+
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), before, "incompatible history follows the Look At-off preference");
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&stale), "the saved view is retained for its original up axis");
+    }
+
+    #[test]
+    fn replacing_a_design_clears_its_remembered_sketch_cameras() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        *h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        let cam = h.app.cam;
+        h.app.sketch_last_views.closed(id, cam, true);
+        h.app.run("file.new", json!({})).unwrap();
+        assert!(h.app.sketch_last_views.last.is_empty());
+        assert!(h.app.sketch_last_views.finished.is_empty());
+    }
+
+    #[test]
+    fn undo_removes_camera_history_for_deleted_sketch_ids() {
+        use serde_json::json;
+        let (mut h, ids) = super::two_finished_sketches();
+        let id = ids[1];
+        let cam = h.app.cam;
+        h.app.sketch_last_views.closed(id, cam, true);
+        for _ in 0..6 {
+            if h.app.session.doc.feature(id).is_none() {
+                break;
+            }
+            h.app.run("edit.undo", json!({})).unwrap();
+        }
+        assert!(h.app.session.doc.feature(id).is_none(), "undo removed the second sketch");
+        assert!(!h.app.sketch_last_views.last.contains_key(&id));
+        assert!(!h.app.sketch_last_views.finished.contains_key(&id));
+        let _ = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert!(!h.app.sketch_last_views.last.contains_key(&id), "a recreated ID cannot inherit a stale camera");
+    }
+
+    #[test]
+    fn sketch_open_view_mode_is_session_scoped_and_keeps_face_as_default() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
+        assert_eq!(serde_json::to_value(SketchOpenView::Face).unwrap(), json!("face"));
+        assert_eq!(serde_json::to_value(SketchOpenView::Last).unwrap(), json!("last"));
+        assert_eq!(serde_json::to_value(SketchOpenView::LastFinished).unwrap(), json!("last_finished"));
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Last);
+        assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
+    }
+}
+
 #[test]
 fn sketch_mode_belongs_to_one_tile_and_focus_never_finishes_it() {
     use serde_json::json;
@@ -1657,4 +1809,57 @@ fn ownerless_sheet_sketch_does_not_receive_hosted_tool_input() {
     assert!(!crate::workspace::tool_receives_input(&app));
     app.preferences.workspace_follows_view = false;
     assert!(crate::workspace::tool_receives_input(&app), "legacy independent workspace behavior remains available");
+}
+
+/// #23342: Extrude started while an earlier sketch is edited takes that sketch's profile, with
+/// it picked first or with nothing picked, not the later sketch's.
+#[test]
+fn extrude_from_an_edited_sketch_takes_its_profile_not_a_later_sketchs() {
+    use serde_json::json;
+    use solidcraft_engine::Sel;
+    for picked in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut ids = Vec::new();
+        for (name, x) in [("First", 0), ("Second", 40)] {
+            let created = h.app.run("sketch.create", json!({"plane": "XY", "name": name})).unwrap();
+            ids.push(created["sketch"].as_u64().unwrap());
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [x, 0], "p1": [x + 20, 10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.settle();
+        h.app.edit_sketch(ids[0]);
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, Some(ids[0]), "picked: {picked}");
+        if picked {
+            h.app.session.selection = vec![Sel::Profile { sketch: ids[0], index: 0 }];
+        }
+        h.step(&json!({"start": "solid.extrude"})).unwrap();
+        h.settle();
+        let dialog = h.app.dialog.as_ref().expect("Extrude opens");
+        assert_eq!(dialog.inputs[0].items, vec![Sel::Profile { sketch: ids[0], index: 0 }], "picked: {picked}");
+    }
+}
+
+/// #23342: where the edited sketch has several profiles, Extrude waits for a pick instead of
+/// taking a later sketch's.
+#[test]
+fn extrude_from_an_edited_sketch_with_two_profiles_waits_for_a_pick() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let first = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    for x in [0, 40] {
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [x, 0], "p1": [x + 20, 10]})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 40], "p1": [20, 50]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    h.app.edit_sketch(first);
+    h.settle();
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.dialog.as_ref().expect("Extrude opens").inputs[0].items, vec![]);
 }

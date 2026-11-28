@@ -21,6 +21,7 @@ impl Model {
         let reusable = !self.no_cache
             && self.primed.is_empty()
             && !doc.has_capture_position_timeline()
+            && !self.has_pending_import_checks()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
@@ -124,6 +125,9 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 from_level: _,
                 picked_placements: _,
                 one_sided_direction: _,
+                to_ref: _,
+                from_ref: _,
+                extend_to_face: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && !through_all2 && to2.is_none() && components.get(&sketch.0) == Some(&f.component)
         }
@@ -168,6 +172,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         print_faces,
         // Read only by robot exports: no feature's geometry depends on it.
         collision_shapes: _,
+        // Display only: no feature's geometry depends on it.
+        edgeless_bodies: _,
         user_materials,
         appearances,
         body_components,
@@ -185,6 +191,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
+        // Weld graphics do not feed feature evaluation.
+        welds: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format

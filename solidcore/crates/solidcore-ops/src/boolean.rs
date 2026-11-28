@@ -93,6 +93,22 @@ fn expect_of(
     operands: &mut [(Brep, Proof)],
     contract: Contract,
 ) -> KernelResult<Expect> {
+    if contract == Contract::Proved && operands.len() >= 2 {
+        let taken: Vec<(Brep, Proof)> = operands
+            .iter_mut()
+            .map(|(b, p)| (std::mem::take(b), std::mem::take(p)))
+            .collect();
+        let checked = crate::session::run_parallel(k, taken, |wk, (mut b, proof)| {
+            let is_solid = Expect::under(wk, &mut b, proof, contract)? != Expect::FACES;
+            Ok((b, is_solid))
+        })?;
+        let mut all = true;
+        for ((dst_b, _), (b, is_solid)) in operands.iter_mut().zip(checked) {
+            *dst_b = b;
+            all &= is_solid;
+        }
+        return Ok(if all { Expect::SOLID } else { Expect::FACES });
+    }
     let mut all = true;
     for (b, proof) in operands.iter_mut() {
         all &= Expect::under(k, b, std::mem::take(proof), contract)? != Expect::FACES;
@@ -298,12 +314,12 @@ fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
         .collect()
 }
 
-/// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
-/// carried to the next level as it is), with solids touching along edges or at vertices
-/// allowed. Each union ([`union_step`]) is `SmApiBoolean`'s, except that two solids the kernel
-/// proves apart are put side by side with no intersection work ([`union_if_apart`]): a plate
-/// and pegs that each stand in it but meet no other peg take one boolean per level, the
-/// plate's, where each union of pegs was one (#21438). Each pairwise result gets
+/// The union of `bodies` under [`Contract::Closed`], with solids touching along edges or at
+/// vertices allowed. Certified-disjoint components and hub-and-spoke spoke groups are merged side
+/// by side in linear time ([`sm::combine_disjoint_breps`]) without intersection work, while
+/// overlapping components pair spatially in 3D Morton order ([`sm::union_all_breps`]): a plate and
+/// 25 pegs that each stand in it but meet no other peg batch all 25 pegs side by side first and
+/// take a single boolean against the plate instead of 5 (#21438). Each union result gets
 /// [`after_boolean`]'s tolerance update, as [`boolean`] does, so a later level unions a
 /// repaired operand and the result passes the same check a chain of single unions does. A
 /// single body makes no union and is untouched.
@@ -331,19 +347,10 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
     let d = run_taking("union_all", &operands(&bodies), |k| {
         let mut held: Vec<(Brep, Proof)> = bodies.iter().map(take).collect();
         let expect = expect_of(k, &mut held, contract)?;
-        let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
-        while level.len() > 1 {
-            let mut next = Vec::new();
-            let mut it = level.into_iter();
-            while let Some(a) = it.next() {
-                match it.next() {
-                    Some(b) => next.push(union_step(k, a, b)?),
-                    None => next.push(a),
-                }
-            }
-            level = next;
-        }
-        match level.pop() {
+        let breps: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
+        match sm::union_all_breps_with(k, breps, |kernel, pairs| {
+            crate::session::run_parallel(kernel, pairs, |wk, (a, b)| union_step(wk, a, b))
+        })? {
             Some(r) => finished(k, r, expect, contract),
             None => Ok(Done::Empty),
         }
@@ -351,10 +358,7 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
     result(d, Err(Error::Empty))?.ok_or(Error::Empty)
 }
 
-/// One union of [`union_all_with`]'s levels. The two operands' tolerances are matched first
-/// ([`matched_tolerances`]). Two solids the kernel then proves apart (every shell's certified box
-/// farther from the other's than their intersection tolerance) are put side by side
-/// ([`union_if_apart`]), which is what a boolean of them gives, without the intersection work;
+/// One pairwise union step for [`union_all_with`]: bodies proved apart unite side by side, while
 /// any other pair is `SmApiBoolean`'s union. Either result gets [`after_boolean`]'s update, so
 /// both routes leave the same tolerances for the next level.
 fn union_step(k: &mut Kernel, mut a: Brep, mut b: Brep) -> KernelResult<Brep> {
@@ -536,6 +540,41 @@ mod tests {
         assert!((v - 2.0).abs() < 2.0 * 1e-9, "{v}");
     }
 
+    /// Many overlapping boxes through parallel level-by-level `union_all_with(Contract::Proved)`
+    /// produce the exact closed-form volume and counts deterministically for even and odd counts.
+    #[test]
+    fn parallel_union_all_is_exact_and_deterministic() {
+        all_fixes();
+        for n in [16_u32, 17_u32] {
+            let make = || {
+                (0..n)
+                    .map(|i| make_box([f64::from(i) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+                    .collect::<Vec<_>>()
+            };
+            let u1 = union_all_with(make(), Contract::Proved).unwrap();
+            let u2 = union_all_with(make(), Contract::Proved).unwrap();
+            let want = 1.0 + f64::from(n - 1) * 0.5;
+            let v1 = u1.volume(1e-8).unwrap();
+            let v2 = u2.volume(1e-8).unwrap();
+            assert!((v1 - want).abs() < 1e-7, "n={n}: {v1} vs {want}");
+            assert_eq!(u1.counts().unwrap(), u2.counts().unwrap());
+            assert!((v1 - v2).abs() < 1e-12, "n={n}: {v1} vs {v2}");
+        }
+    }
+
+    /// Parallel `union_all` stops cleanly and returns `Error::Cancelled` when cancelled.
+    #[test]
+    fn parallel_union_all_respects_cancellation() {
+        all_fixes();
+        let boxes: Vec<Body> = (0..12_u32)
+            .map(|i| make_box([f64::from(i) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+            .collect();
+        let token = solidcore::kernel::CancelToken::new();
+        token.cancel();
+        let res = crate::cancel::within(&token, || union_all(boxes));
+        assert!(matches!(res, Err(Error::Cancelled)), "{res:?}");
+    }
+
     /// `bodies` united as `union_all` pairs them, each pair by [`boolean`] (a boolean every
     /// time, as before solids apart were put side by side): level by level, an odd one carried.
     fn paired_unions(mut level: Vec<Body>) -> Body {
@@ -591,9 +630,10 @@ mod tests {
     }
 
     /// A 50 x 50 x 10 plate and 25 pegs (radius 2, height 12 from z = 8) on a 10 mm grid: each
-    /// peg stands in the plate and meets no other. 26 bodies pair in five levels; only the
-    /// plate's union at each level is a boolean, the other 20 put pegs side by side, where each
-    /// was a boolean (#21438). Each peg adds its 10 mm above the plate: 25000 + 25 pi 2^2 10.
+    /// peg stands in the plate and meets no other. Hub-and-spoke batching combines all 25 apart
+    /// pegs side by side first (24 apart unions) and runs a single boolean against the plate,
+    /// where blind sequential pairing took 5 booleans and 20 apart unions (#21438). Each peg adds
+    /// its 10 mm above the plate: 25000 + 25 pi 2^2 10.
     #[test]
     fn pegs_on_a_plate_take_one_boolean_per_level() {
         all_fixes();
@@ -607,7 +647,7 @@ mod tests {
             }
             b
         };
-        let v = same_as_paired_unions(bodies, 5, 20);
+        let v = same_as_paired_unions(bodies, 1, 24);
         let want = 25_000.0 + 25.0 * std::f64::consts::PI * 4.0 * 10.0;
         assert!((v - want).abs() <= 1e-9 * want, "{v} {want}");
     }

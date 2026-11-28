@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="330" viewBox="0 0 900 330">
+  <title>topology.brep_p7--18923-copy-keeps-its-trims</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="330" fill="#ffffff"/>
+    <rect id="source_face" data-name="source face" x="40" y="95" width="200" height="140" fill="#f0f0f0"/>
+    <rect id="copy_main" data-name="copy main" x="350" y="95" width="200" height="140" fill="#f0f0f0"/>
+    <rect id="copy_now" data-name="copy now" x="650" y="95" width="200" height="140" fill="#f0f0f0"/>
+    <ellipse id="source_trims" data-name="source trims" cx="140" cy="165" rx="60" ry="40" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path id="main_no_trims" data-name="main no trims" d="M390 165 C390 142.909 416.863 125 450 125 C483.137 125 510 142.909 510 165 C510 187.091 483.137 205 450 205 C416.863 205 390 187.091 390 165 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <ellipse id="kept_trims" data-name="kept trims" cx="750" cy="165" rx="60" ry="40" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="arrow" x1="255" y1="165" x2="325" y2="165" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <polygon id="arrowhead" points="335,165 323,159 323,171" fill="#000000"/>
+    <line id="divider" x1="600" y1="95" x2="600" y2="235" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="4 4"/>
+    <text transform="matrix(1 0 0 1 40 42)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">CopyFaces without the merge: the copy keeps its source face&apos;s UV trims</tspan></text>
+    <text transform="matrix(1 0 0 1 40 85)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">source face, its (u, v) domain</tspan></text>
+    <text transform="matrix(1 0 0 1 350 85)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">copy, main</tspan></text>
+    <text transform="matrix(1 0 0 1 650 85)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">copy, this PR</tspan></text>
+    <text transform="matrix(1 0 0 1 262 155)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">CopyFaces</tspan></text>
+    <text transform="matrix(1 0 0 1 40 250)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">the edge uses&apos; UV trims</tspan><tspan x="0" y="26.4">(CreateCurvesFromFace)</tspan></text>
+    <text transform="matrix(1 0 0 1 350 250)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">no UV trims: each edge is projected</tspan><tspan x="0" y="26.4">again later, a fit</tspan></text>
+    <text transform="matrix(1 0 0 1 650 250)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">the source&apos;s trims (pbOptCrvOnSurf),</tspan><tspan x="0" y="26.4">each certified on its edge within its</tspan><tspan x="0" y="40.8">tolerance</tspan></text>
+  </g>
+</svg>

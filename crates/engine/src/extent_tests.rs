@@ -577,6 +577,74 @@ fn join_to_a_round_the_profile_overhangs_ends_at_its_extended_surface() {
     assert!((added - want).abs() < want * 1e-3, "added {added}, want {want}");
 }
 
+/// #23158: a Join To Object down to the round of a shell's cavity ends on that round. A cylinder
+/// r 20, 20 tall, its bottom rim rounded r 5 and shelled 2 in from the top: the cavity's round is
+/// the torus of major radius 15 and tube radius 3 about (0, 0, 5), z = 5 - sqrt(9 - u^2) at
+/// rho = 15 + u. The ring r 16 to 17 on the top plane, joined down to it, adds the tube between
+/// z = 20 and the round: 2 pi times the integral of (15 + sqrt(9 - u^2)) (15 + u) over u in
+/// [1, 2]. The round keeps its definition, which a split tool can't evaluate: the extrude was
+/// refused ("a blend's label"), and designs from 0.45 that ended on such a round stopped
+/// rebuilding in 0.47. A New Body from below up to the outer round (tube radius 5) of the
+/// cylinder, not shelled, was refused the same way: it holds 2 pi times the integral of
+/// (15 - sqrt(25 - u^2)) (15 + u) over u in [1, 2], from z = -10.
+#[test]
+fn extrude_to_a_round_along_a_curved_edge_ends_on_it_shelled_or_not() {
+    // The integrals of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2), over u in [1, 2].
+    let f = |r: f64| {
+        let p = |u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        p(2.0) - p(1.0)
+    };
+    let g = |r: f64| ((r * r - 1.0).powf(1.5) - (r * r - 4.0).powf(1.5)) / 3.0;
+    // The integral of 15 + u over u in [1, 2].
+    let ring = 16.5;
+    let cup = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Cup"}));
+        run(s, "solid.fillet", json!({"body": "Cup", "edges": [[20, 0, 0]], "radius": 5}));
+    };
+    let ring_sketch = |s: &mut Session, z: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Ring"}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 16}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 17}));
+        run(s, "sketch.finish", json!({}));
+    };
+    // A point of the torus of tube radius r about the axis at 45 degrees, half way round its arc.
+    let on_round = |r: f64| {
+        let (rho, z) = (15.0 + r / 2f64.sqrt(), 5.0 - r / 2f64.sqrt());
+        [rho / 2f64.sqrt(), rho / 2f64.sqrt(), z]
+    };
+
+    let mut s = Session::default();
+    cup(&mut s);
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": 2}));
+    let before = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0);
+    ring_sketch(&mut s, 20.0);
+    let to = on_round(3.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "negative", "to": to, "operation": "join"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert_eq!(s.model.state().bodies.len(), 1, "the post joins the cup");
+    let added = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0) - before;
+    let want = 2.0 * PI * (15.0 * ring + g(3.0) + 15.0 * f(3.0));
+    assert!((added - want).abs() < want * EXACT, "added {added}, want {want}");
+
+    let mut s = Session::default();
+    cup(&mut s);
+    ring_sketch(&mut s, -10.0);
+    let to = on_round(5.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "positive", "to": to, "operation": "new_body", "body_name": "Post"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let got = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let want = 2.0 * PI * (15.0 * ring - g(5.0) - 15.0 * f(5.0));
+    assert!((got - want).abs() < want * EXACT, "post {got}, want {want}");
+}
+
 /// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
 /// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
 /// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the
@@ -1013,5 +1081,426 @@ fn extrude_from_a_face_a_letters_island_splits_starts_on_the_piece_under_its_poi
         assert!((changed - built).abs() < 1e-3, "{words}: {changed} after the change, {built} built so");
         let top = body(&mut s, "Block")["bbox"]["max"][2].as_f64().unwrap();
         assert!((top - 13.0).abs() < 1e-6, "{words}: the post ends at {top}");
+    }
+}
+
+/// A 20 × 10 mm rectangle on XY, from the origin, in a sketch named `Base`, and the parameter
+/// `H` = 25 mm.
+fn base_rectangle() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "25 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn volume_and_z(s: &mut Session, b: &str) -> (f64, f64, f64) {
+    let b = body(s, b);
+    let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    (num(&b["volume_mm3"]), num(&b["bbox"]["min"][2]), num(&b["bbox"]["max"][2]))
+}
+
+fn assert_block(s: &mut Session, b: &str, (volume, lo, hi): (f64, f64, f64)) {
+    let got = volume_and_z(s, b);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((got.0 - volume).abs() < 1e-6 * volume, "volume {}, want {volume}", got.0);
+    assert!((got.1 - lo).abs() < 1e-6 && (got.2 - hi).abs() < 1e-6, "z {}..{}, want {lo}..{hi}", got.1, got.2);
+}
+
+/// To Object on a construction plane keeps the plane, so the extrusion follows it when a
+/// parameter moves it, also after a save and reload (#8527).
+#[test]
+fn extrude_to_a_construction_plane_follows_it() {
+    for to in [json!({"plane": "Target"}), json!("Target")] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": to, "body_name": "Post"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut cold = Session::new(doc);
+        for current in [&mut s, &mut cold] {
+            run(current, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+            assert_block(current, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+        }
+    }
+}
+
+/// To Object on a construction point ends at the plane through the point, parallel to the
+/// sketch, wherever the point lies beside the profile, and follows the point (#8527).
+#[test]
+fn extrude_to_a_construction_point_follows_it() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 50, "name": "PX"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 50, "name": "PY"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "PZ"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "PX", "b": "PY", "c": "PZ", "name": "End"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"construct_point": "End"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// From Object on one construction plane and To Object on another: the extrusion runs between
+/// them and follows both (#8527).
+#[test]
+fn extrude_from_a_construction_plane_to_another_runs_between_them() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Floor"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 20.0, 5.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 35.0, 5.0, 40.0));
+}
+
+/// To Object on a construction plane at a slant cuts the end along the plane, as on a slanted
+/// body face. The plane z = 20 + x / 2 over the 20 × 10 rectangle leaves
+/// 10 × ∫₀²⁰ (20 + x / 2) dx = 5000 mm³, from z 0 to 30 (#8527).
+#[test]
+fn extrude_to_a_slanted_construction_plane_cuts_the_end_along_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Slope"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (5000.0, 0.0, 30.0));
+}
+
+/// A plane the extrusion runs along gives no end, so To Object on it is refused with that
+/// reason (#8527).
+#[test]
+fn extrude_to_a_plane_along_the_extrusion_is_refused() {
+    let mut s = base_rectangle();
+    let e = s.execute("solid.extrude", &json!({"sketch": "Base", "to": {"plane": "YZ"}})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("gives no end"), "{e}");
+}
+
+/// From Object on a construction plane at a slant starts on the plane, as on a slanted body face.
+/// From z = x / 2 to z = 25 over the 20 × 10 rectangle: 10 × ∫₀²⁰ (25 − x / 2) dx = 4000 mm³
+/// (#8527).
+#[test]
+fn extrude_from_a_slanted_construction_plane_starts_on_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 0]}, "b": {"point": [20, 0, 10]}, "c": {"point": [0, 10, 0]}, "name": "Slope"}),
+    );
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Slope"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (4000.0, 0.0, 25.0));
+}
+
+/// Renaming the construction plane an extrude runs to keeps the extrude on it (#8527).
+#[test]
+fn extrude_to_a_renamed_construction_plane_still_follows_it() {
+    let mut s = base_rectangle();
+    let plane = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}))["feature"].clone();
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}));
+    run(&mut s, "timeline.rename", json!({"feature": plane, "name": "Shelf"}));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// `operation: auto` reads where a To plane ends the extrude: from the top of a block down to a
+/// plane inside it, the extrude cuts (#8527).
+#[test]
+fn an_automatic_extrude_down_to_a_construction_plane_inside_a_block_cuts() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 10, "height": 30, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Floor"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 2], "p1": [15, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Top", "to": {"plane": "Floor"}, "operation": "auto"}));
+    assert_block(&mut s, "Block", (20.0 * 10.0 * 30.0 - 10.0 * 6.0 * 10.0, 0.0, 30.0));
+}
+
+/// The Extrude dialog reopens a To plane as the point stored with it and sends that point back.
+/// An edit that sends the same point keeps the plane, so the extrude still follows it; an edit
+/// that sends another point ends there instead (#8527).
+#[test]
+fn an_edit_that_sends_the_stored_to_point_keeps_the_plane() {
+    for (to, top) in [([0.0, 0.0, 25.0], 40.0), ([0.0, 0.0, 30.0], 30.0)] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        let params = json!({"sketch": "Base", "to": to, "body_name": "Post"});
+        run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.extrude", "params": params}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// `timeline.edit` merges what it sets into the stored extrude: a new To point ends the extrude
+/// there, and an edit that clears the reference keeps the stored point, not the plane (#8527).
+#[test]
+fn an_edit_that_sets_another_to_point_or_clears_the_plane_ends_at_the_point() {
+    for (set, top) in [(json!({"extent.to_offset": "0 mm"}), 40.0), (json!({"extent.to": [0, 0, 30]}), 30.0), (json!({"extent.to_ref": null}), 25.0)]
+    {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": set}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// The run between a slanted To plane and the start has no second side: two sides are refused,
+/// not dropped (#8527).
+#[test]
+fn two_sides_to_a_slanted_construction_plane_are_refused() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    let p = json!({"sketch": "Base", "to": {"plane": "Slope"}, "distance2": 5});
+    let e = s.execute("solid.extrude", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("two sides with a plane at a slant"), "{e}");
+}
+
+/// The Extend the To face option. A bar along X (radius 10, its axis at z 30, x -20 to 20),
+/// and a sketch at z 0 with `rect` ([x0, y0], [x1, y1]) extruded up To the bar's underside
+/// (x 0, y 0, z 20) with `extra`. A new body named Post.
+fn bar_and_post(rect: [[f64; 2]; 2], extra: Value) -> (Session, Result<Value, crate::EngineError>) {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [-20, 0, 30], "axis": [1, 0, 0], "radius": 10, "height": 40, "body_name": "Bar"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    let [[x0, y0], [x1, y1]] = rect;
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x0, y0], "p1": [x1, y1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"sketch": "P", "to": [0, 0, 20], "body_name": "Post"});
+    if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
+    let r = s.execute("solid.extrude", &p);
+    (s, r)
+}
+
+fn volume_of(s: &mut Session, name: &str) -> f64 {
+    body(s, name)["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+}
+
+/// the area under the bar's underside z = 30 - sqrt(100 - y^2) over x in [-30, 30] (past the
+/// bar's ends at x = +-20: the cylinder is carried on along its axis) and y in [-4, 4]: 60 times
+/// the integral over y, which is 8 * 30 less F(4), F(a) = a sqrt(r^2 - a^2) + r^2 asin(a / r) (the
+/// integral of the circle's height over [-a, a]) for r = 10: 60 * (240 - (4 sqrt 84 + 100 asin 0.4)).
+const WIDE_POST: f64 = 9_731.262_590_016_273;
+
+/// a profile past the bar's ends ends on the cylinder carried on along its axis, with the
+/// option and (as the To face is carried on where a profile overhangs it) without it.
+#[test]
+fn extend_the_to_face_ends_a_profile_wider_than_a_cylinder_on_its_surface() {
+    for opts in [json!({}), json!({"extend_to_face": false}), json!({"extend_to_face": true})] {
+        let (mut s, made) = bar_and_post([[-30.0, -4.0], [30.0, 4.0]], opts);
+        made.expect("extended");
+        let v = volume_of(&mut s, "Post");
+        assert!((v - WIDE_POST).abs() < 1e-4 * WIDE_POST, "volume {v}, want {WIDE_POST}");
+    }
+}
+
+/// undo and redo of such an extrude, and a save and reload, keep the extended end.
+#[test]
+fn extend_the_to_face_survives_undo_redo_and_reload() {
+    let (mut s, made) = bar_and_post([[-30.0, -4.0], [30.0, 4.0]], json!({"extend_to_face": true}));
+    made.expect("extended");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().bodies.iter().all(|b| b.name != "Post"), "undone: the post is gone");
+    run(&mut s, "edit.redo", json!({}));
+    let v = volume_of(&mut s, "Post");
+    assert!((v - WIDE_POST).abs() < 1e-4 * WIDE_POST, "redone: {v}");
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(s.doc.to_json().contains("extend_to_face"), "the option is saved");
+    let mut cold = Session::new(doc);
+    let v = volume_of(&mut cold, "Post");
+    assert!((v - WIDE_POST).abs() < 1e-4 * WIDE_POST, "reloaded: {v}");
+}
+
+/// a design saved without the option (off) saves nothing new and keeps the refusal.
+#[test]
+fn a_design_without_extend_the_to_face_saves_no_key() {
+    let (s, made) = bar_and_post([[-4.0, -4.0], [4.0, 4.0]], json!({}));
+    made.expect("a profile over the face builds");
+    assert!(!s.doc.to_json().contains("extend_to_face"));
+}
+
+/// a profile over a bore in the To face. The bar has a vertical bore of radius 3 through
+/// its axis, so the face has a window under x, y in [-3, 3]; the profile x in [-5, 5], y in [-4, 4]
+/// spans it. With the option or without (a window in the face is already trimmed to the body), the
+/// post ends on the cylinder under it: 10 times the integral over y in [-4, 4] of
+/// 30 - sqrt(100 - y^2), which is 10 * (240 - (4 sqrt 84 + 100 asin 0.4)).
+#[test]
+fn extend_the_to_face_ends_a_profile_over_a_bore_on_the_surface() {
+    let want = 1_621.877_098_336_044_6;
+    for extend in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"base": [-20, 0, 30], "axis": [1, 0, 0], "radius": 10, "height": 40, "body_name": "Bar"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 3}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 40, "operation": "cut", "targets": ["Bar"]}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -4], "p1": [5, 4]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let r = s.execute("solid.extrude", &json!({"sketch": "P", "to": [8, 0, 20], "body_name": "Post", "extend_to_face": extend}));
+        r.expect("builds");
+        let v = volume_of(&mut s, "Post");
+        assert!((v - want).abs() < 1e-4 * want, "extend {extend}: volume {v}, want {want}");
+    }
+}
+
+/// a two-sided extrude with side one To the extended face and side two 5 mm the other way:
+/// the post plus 5 times the profile's area.
+#[test]
+fn extend_the_to_face_with_a_second_side_adds_side_two() {
+    let (mut s, made) = bar_and_post([[-30.0, -4.0], [30.0, 4.0]], json!({"extend_to_face": true, "distance2": "5 mm"}));
+    made.expect("extended");
+    let v = volume_of(&mut s, "Post");
+    let want = WIDE_POST + 5.0 * 60.0 * 8.0;
+    assert!((v - want).abs() < 1e-4 * want, "volume {v}, want {want}");
+}
+
+/// a cone shell (inner face r = 4 + k |z| below z 0, ending at r 14; k = 10 / 17.32) under
+/// a profile x 10 to 15, y 0 to 1, which reaches past the face's end (r 14). Each point ends on the
+/// cone's surface carried on, |z| = (rho - 4) / k, rho = sqrt(x^2 + y^2): the volume is that
+/// integrated over the profile (a Simpson rule to 1e-9).
+#[test]
+fn extend_the_to_face_ends_a_profile_past_a_cones_end_on_its_surface() {
+    let want = 73.726_924_295_74;
+    let k = 10.0 / 17.32;
+    let rho: f64 = (12.0f64.powi(2) + 0.5f64.powi(2)).sqrt();
+    let to = [12.0, 0.5, -(rho - 4.0) / k];
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+    run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [15, 0], [15, 1], [10, 1]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let p = json!({"sketch": "SketchR", "exact_regions": true, "direction": "negative", "to": to, "body_name": "Post"});
+    let mut p = p;
+    p["extend_to_face"] = json!(true);
+    run(&mut s, "solid.extrude", p);
+    let v = volume_of(&mut s, "Post");
+    assert!((v - want).abs() < 1e-3 * want, "volume {v}, want {want}");
+}
+
+/// the repro of the issue, a profile partly over the cone's hole (x 3 to 4, inside the
+/// face's rim), where the cone's surface carried on inward only meets the line of each point
+/// behind the sketch plane (toward the apex, above z 0) and never ahead of it: refused by name,
+/// with a second distance as well.
+#[test]
+fn extend_the_to_face_refuses_where_the_surface_never_meets_the_profile() {
+    for extra in [json!({}), json!({"distance2": "20 mm"})] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+        run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+        run(&mut s, "sketch.line", json!({"points": [[3, 0], [8, 0], [8, 1], [3, 1]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "SketchR", "exact_regions": true, "operation": "join", "direction": "negative", "to": [7.5, 0.5, -5.196], "extend_to_face": true});
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        let before = s.doc.features.len();
+        let err = s.execute("solid.extrude", &p).expect_err("refused");
+        assert!(err.to_string().contains("does not meet the whole profile"), "{extra}: {err}");
+        // A refused command leaves the design as it was.
+        assert_eq!(s.doc.features.len(), before, "{extra}");
+    }
+}
+
+/// a profile 24 across a bar 20 wide never meets the cylinder at its ends (y beyond the
+/// radius): refused by name, not run on past.
+#[test]
+fn extend_the_to_face_refuses_a_profile_wider_than_the_cylinder_across_it() {
+    let (_, r) = bar_and_post([[-4.0, -12.0], [4.0, 12.0]], json!({"extend_to_face": true}));
+    assert!(r.expect_err("refused").to_string().contains("does not meet the whole profile"));
+}
+
+/// a torus (a half ring of tube radius 2, its centre circle 8 from the axis and 8 below the
+/// sketch plane z 0) under a profile x 7 to 9, y -1 to 1 that reaches past the half ring's end at
+/// y 0: the torus is carried on round. Its top is z = -8 + sqrt(4 - (rho - 8)^2), and the post
+/// from z 0 down to it has the volume of 8 - sqrt(4 - (rho - 8)^2) integrated over the profile.
+#[test]
+fn extend_the_to_face_ends_a_profile_past_a_half_torus_on_the_whole_torus() {
+    let want = 24.346_127_695_73;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [8, 8], "radius": 2}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "180 deg", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+    run(&mut s, "sketch.line", json!({"points": [[7, -1], [9, -1], [9, 1], [7, 1]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let at = |y: f64| json!({"sketch": "SketchR", "exact_regions": true, "direction": "negative", "to": [8, y, -6], "body_name": "Post"});
+    // Pick the face on whichever side of y 0 the half ring is.
+    let mut made = None;
+    for y in [0.5, -0.5] {
+        let mut p = at(y);
+        p["extend_to_face"] = json!(true);
+        if let Ok(v) = s.execute("solid.extrude", &p) {
+            made = Some(v);
+            break;
+        }
+    }
+    made.expect("extended");
+    let v = volume_of(&mut s, "Post");
+    assert!((v - want).abs() < 1e-3 * want, "volume {v}, want {want}");
+}
+
+/// a flat To face is already carried on past its edges; the option changes nothing for one.
+/// A box 20 square (z 0 to 10) under a profile 40 square from z 0 up To its top: 40 * 40 * 10, with
+/// and without the option.
+#[test]
+fn extend_the_to_face_on_a_plane_face_is_what_the_plane_gave() {
+    for extend in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, -20], "p1": [20, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, 10], "body_name": "Post", "extend_to_face": extend}));
+        let v = volume_of(&mut s, "Post");
+        assert!((v - 16_000.0).abs() < 1e-6 * 16_000.0, "extend {extend}: {v}");
+    }
+}
+
+/// a slanted flat face (a wedge whose top rises z = x / 2 over x 0 to 20) under a profile
+/// x 0 to 30, y -10 to 0 that overhangs it: the plane carried on, so the post is the integral of
+/// x / 2 over the profile, 10 * 30^2 / 4 = 2250.
+#[test]
+fn extend_the_to_face_on_a_slanted_plane_ends_the_whole_profile_on_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "W"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "W", "distance": 10, "body_name": "Wedge"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, -10], "p1": [30, 0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [10, -5, 5], "body_name": "Post", "extend_to_face": true}));
+    let v = volume_of(&mut s, "Post");
+    assert!((v - 2250.0).abs() < 1e-4 * 2250.0, "volume {v}");
+}
+
+/// an `extend_to_face` that is not a boolean is refused, not counted as off.
+#[test]
+fn extend_the_to_face_must_be_a_boolean() {
+    for bad in [json!("true"), json!(1)] {
+        let (_, r) = bar_and_post([[-4.0, -4.0], [4.0, 4.0]], json!({"extend_to_face": bad}));
+        assert!(r.expect_err("refused").to_string().contains("extend_to_face"));
     }
 }
