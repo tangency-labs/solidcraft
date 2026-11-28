@@ -367,6 +367,26 @@ impl CPoint {
         )
     }
 
+    /// Whether a control point represents a coordinate outside the model's
+    /// coordinate ceiling. Test Cartesian coordinates, not weighted coefficients:
+    /// scaling all homogeneous coefficients does not change the geometry.
+    pub(crate) fn exceeds_model_coordinate_bound(self) -> bool {
+        use crate::limits::MAX_COORDINATE_MAGNITUDE;
+        let z = if self.z == NOZ { 0.0 } else { self.z };
+        if self.w == NOW {
+            [self.x, self.y, z].into_iter().any(|coordinate| {
+                coordinate.is_finite() && coordinate.abs() > MAX_COORDINATE_MAGNITUDE
+            })
+        } else if self.w.is_finite() && self.w != 0.0 {
+            [self.x, self.y, z].into_iter().any(|coordinate| {
+                coordinate.is_finite() && (coordinate / self.w).abs() > MAX_COORDINATE_MAGNITUDE
+            })
+        } else {
+            // Undefined weights are handled by the existing weight validation.
+            false
+        }
+    }
+
     /// Euclidean point: divides by `w` unless non-rational; a missing `z` becomes `0`
     /// (`N_CPtToPtEuclid`; multiplies by the reciprocal of `w`, as upstream).
     #[must_use]

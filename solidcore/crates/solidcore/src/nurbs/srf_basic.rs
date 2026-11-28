@@ -83,7 +83,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, surface::SurfaceFailure, Result, SolidError};
 use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::geom::{
@@ -251,7 +251,8 @@ impl Surface {
     ///
     /// Errors with `InvalidInput` for an empty net, rows of different lengths, an empty
     /// knot array, or control points that do not all share the rationality of
-    /// `Pw[0][0]`. Nothing else is checked (see [`Surface::is_valid`]).
+    /// `Pw[0][0]`, or a control point beyond the model coordinate ceiling.
+    /// Other validity checks belong to [`Surface::is_valid`].
     pub fn new(
         net: Vec<Vec<CPoint>>,
         p: usize,
@@ -281,6 +282,16 @@ impl Surface {
         if !rationality_is_uniform(&net, n, m) {
             return Err(invalid(OP_NEW, MIXED_RATIONALITY));
         }
+        if net
+            .iter()
+            .flatten()
+            .any(|point| point.exceeds_model_coordinate_bound())
+        {
+            return Err(SolidError::surface(
+                OP_NEW,
+                SurfaceFailure::ControlPointOutsideModel,
+            ));
+        }
         Ok(Self {
             net: Arc::new(net),
             n,
@@ -299,7 +310,8 @@ impl Surface {
     /// with a net and knot vectors whose indices may be below their storage).
     ///
     /// Errors with `InvalidInput` when the storage does not hold the indices, or when
-    /// the control points in use do not all share the rationality of `Pw[0][0]`.
+    /// the control points in use do not all share the rationality of `Pw[0][0]`,
+    /// or a control point in use exceeds the model coordinate ceiling.
     pub fn with_indices(
         net: Vec<Vec<CPoint>>,
         u: Vec<f64>,
@@ -315,6 +327,17 @@ impl Surface {
         }
         if !rationality_is_uniform(&net, n, m) {
             return Err(invalid(OP_WITH_INDICES, MIXED_RATIONALITY));
+        }
+        if net
+            .iter()
+            .take(n + 1)
+            .flat_map(|row| row.iter().take(m + 1))
+            .any(|point| point.exceeds_model_coordinate_bound())
+        {
+            return Err(SolidError::surface(
+                OP_WITH_INDICES,
+                SurfaceFailure::ControlPointOutsideModel,
+            ));
         }
         Ok(Self {
             net: Arc::new(net),
@@ -1278,6 +1301,51 @@ mod tests {
         assert!(!Arc::ptr_eq(&a.net, &b.net));
         assert_eq!(a, bilinear());
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn coordinate_bound_refuses_surface_control_points_in_use() {
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let point = CPoint::new(0.0, 0.0, 0.0, NOW);
+        let far = CPoint::new(0.0, 0.0, 1e300, NOW);
+        let indices = SurfaceIndices {
+            n: 1,
+            m: 1,
+            p: 1,
+            q: 1,
+            r: 3,
+            s: 3,
+        };
+        for outside in [
+            far,
+            CPoint::new(f64::MAX, 0.0, 0.0, NOW),
+            CPoint::new(-f64::MAX, 0.0, 0.0, NOW),
+            CPoint::new(0.0, f64::MAX, 0.0, NOW),
+            CPoint::new(0.0, -f64::MAX, 0.0, NOW),
+        ] {
+            let net = vec![vec![point, point], vec![point, outside]];
+            for result in [
+                Surface::new(net.clone(), 1, 1, knots.clone(), knots.clone()),
+                Surface::with_indices(net, knots.clone(), knots.clone(), indices),
+            ] {
+                let error = result.unwrap_err();
+                assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+                assert_eq!(
+                    error.surface_failure(),
+                    Some(&SurfaceFailure::ControlPointOutsideModel)
+                );
+            }
+        }
+        let spare = vec![vec![point, point, far], vec![point, point, far]];
+        assert!(Surface::with_indices(spare, knots.clone(), knots.clone(), indices).is_ok());
+        let weighted = CPoint::new(1.0, 0.0, 0.0, 1e-200);
+        let rational = vec![vec![weighted; 2]; 2];
+        let error = Surface::new(rational, 1, 1, knots.clone(), knots).unwrap_err();
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            error.surface_failure(),
+            Some(&SurfaceFailure::ControlPointOutsideModel)
+        );
     }
 
     fn bilinear() -> Surface {

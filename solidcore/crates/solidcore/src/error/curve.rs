@@ -101,6 +101,8 @@ pub enum CurveFailure {
         /// The break.
         at: f64,
     },
+    /// A Cartesian control point exceeds the model coordinate ceiling. [`ErrorKind::InvalidInput`].
+    ControlPointOutsideModel,
     /// The span given to the span measure has `points` control points, fewer than the
     /// two its base line needs. [`ErrorKind::InvalidInput`].
     ControlPolygonTooShort {
@@ -779,7 +781,9 @@ impl CurveFailure {
             | Self::PolarConversionNotSetUp
             | Self::SolutionWithoutCurve { .. }
             | Self::TargetDistanceMissing => SM_ERR_NULL_POINTER,
-            Self::ZeroDirection(_) | Self::AuxiliaryAlongProjection => SM_ERR_INVALID_INPUT,
+            Self::ZeroDirection(_)
+            | Self::AuxiliaryAlongProjection
+            | Self::ControlPointOutsideModel => SM_ERR_INVALID_INPUT,
         }
     }
 
@@ -815,6 +819,7 @@ impl CurveFailure {
             | Self::CacheTypeNotCurve
             | Self::ContinuityUndefined { .. }
             | Self::ControlPolygonTooShort { .. }
+            | Self::ControlPointOutsideModel
             | Self::CurveNodeWithoutChild
             | Self::CurveNodeWithoutData
             | Self::IntervalOutsideBase
@@ -964,7 +969,8 @@ impl CurveFailure {
             | Self::ZeroTangent { .. } => true,
             Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
-            | Self::PieceOutsideSpan { .. } => false,
+            | Self::PieceOutsideSpan { .. }
+            | Self::ControlPointOutsideModel => false,
         }
     }
 }
@@ -972,6 +978,7 @@ impl CurveFailure {
 impl core::fmt::Display for CurveFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
+            Self::ControlPointOutsideModel => f.write_str("control point coordinate above 1e150"),
             Self::LengthBelowFloor {
                 asked,
                 floor,
