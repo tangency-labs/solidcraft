@@ -32,8 +32,6 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.parts_list.renumber", "drawing_parts_renumber"),
     ("drawing.replace_model", "drawing_replace_model"),
     ("drawing.resources", "drawing_resources"),
-    ("drawing.revise.planned", "drawing_issue_revision"),
-    ("drawing.revision", "drawing_revision"),
     ("drawing.revision.tag.add.planned", "drawing_revision_tag"),
     ("drawing.revision_table", "drawing_revision_table"),
     ("drawing.sheet_sketch", "drawing_sheet_sketch"),
@@ -81,7 +79,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.revision_table", "Revision Table", "4894").at("DRAWING PARTS", "TABLES").icon("drawing_revision_table"),
     planned!("drawing.update.planned", "Update Drawing", "4892").at("DRAWING REVIEW", "CHANGES").icon("drawing_update"),
     planned!("drawing.check.planned", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("drawing_check"),
-    planned!("drawing.revision", "Add Drawing Revision", "4894").at("DRAWING REVIEW", "REVISION").icon("drawing_revision"),
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
     planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
     planned!("drawing.view.pictorial", "Pictorial View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_pictorial"),
@@ -103,7 +100,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.parts_list.renumber", "Renumber", "3874").at("DRAWING PARTS", "ASSEMBLY").icon("drawing_parts_renumber"),
     planned!("drawing.table.edit.planned", "Edit Table", "3874").at("DRAWING PARTS", "TABLES").icon("drawing_edit_table"),
     planned!("drawing.replace_model", "Replace Model", "13029").at("DRAWING REVIEW", "CHANGES").icon("drawing_replace_model"),
-    planned!("drawing.revise.planned", "Issue Revision", "3874").at("DRAWING REVIEW", "REVISION").icon("drawing_issue_revision"),
     planned!("drawing.revision.tag.add.planned", "Revision Tag", "3874").at("DRAWING REVIEW", "REVISION").icon("drawing_revision_tag"),
 ];
 
