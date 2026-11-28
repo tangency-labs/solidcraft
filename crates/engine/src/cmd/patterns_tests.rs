@@ -3488,6 +3488,7 @@ fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
         run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        let pad_copied_before = before.is_some();
         if let Some(p) = before {
             let r = run(&mut s, "solid.pattern.rectangular", p);
             assert!(r["error"].is_null(), "{what}: {r}");
@@ -3502,7 +3503,8 @@ fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
         assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
         let r = run(&mut s, copy, params);
         assert!(r["error"].is_null(), "{what}: {r}");
-        let pads = if what == "pattern of the draft alone" { pads } else { 48000.0 + 8000.0 };
+        // Both pads undrafted: the second pad is either there already or copied now.
+        let pads = if pad_copied_before { pads } else { 48000.0 + 8000.0 };
         let want = pads + 2.0 * drafted;
         assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
     }
