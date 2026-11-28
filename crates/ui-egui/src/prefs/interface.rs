@@ -53,6 +53,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui_kit::settings_section_count(ui, "theme", app.tr("ui.theme"), Some(&count), |ui| {
             theme_row(app, ui);
             theme_options_row(app, ui);
+            crate::plugins::effects_on(app, ui);
         });
         ui_kit::settings_section(ui, "viewport_logo", app.tr("prefs.appearance.viewport_logo"), |ui| {
             // The 3D view in the theme's colours, or the Light or Dark theme's (#4146).

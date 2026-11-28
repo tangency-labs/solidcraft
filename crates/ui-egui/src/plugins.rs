@@ -1155,6 +1155,44 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
     });
 }
 
+/// Each plugin effect that is on, with a switch to turn it off, also when its plugin is off or gone.
+pub(crate) fn effects_on(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let prefs = &app.preferences;
+    let on = [("panel", prefs.panel_shader.clone()), ("background", prefs.background_shader.clone()), ("tint", prefs.tint_shader.clone())];
+    if on.iter().all(|(_, key)| key.is_empty()) {
+        return;
+    }
+    let dir = if cfg!(target_arch = "wasm32") { None } else { app.session.plugin_state.plugins_dir() };
+    let plugins = dir.map(|dir| crate::plugin_slots::preferences_inventory(app, &dir)).unwrap_or_default();
+    for (kind, key) in on.into_iter().filter(|(_, key)| !key.is_empty()) {
+        let (owner, shader) = key.split_once('/').unwrap_or((key.as_str(), key.as_str()));
+        let plugin = plugins.iter().find(|p| p.id == owner);
+        let (kind_label, listed) = match kind {
+            "panel" => ("prefs.panel_shader", plugin.map(|p| &p.panels)),
+            "background" => ("prefs.background_shader", plugin.map(|p| &p.shaders)),
+            _ => ("prefs.tint_shader", plugin.map(|p| &p.tints)),
+        };
+        let name = listed.and_then(|list| list.iter().find(|(k, _)| *k == key)).map_or(shader, |(_, name)| name.as_str());
+        let label = solidcraft_ui_text::format(
+            "prefs.plugin_effect",
+            &[("kind", solidcraft_ui_text::tr(kind_label)), ("name", name), ("plugin", plugin.map_or(owner, |p| p.name.as_str()))],
+        );
+        let mut still_on = true;
+        crate::ui_kit::row(ui, &label, |ui| {
+            let switch = crate::ui_kit::theme_option_switch(ui, &label, &mut still_on);
+            crate::scenario::publish_target(&format!("prefs:plugin_effect:{kind}"), switch.rect);
+        });
+        if !still_on {
+            let prefs = &mut app.preferences;
+            match kind {
+                "panel" => prefs.panel_shader.clear(),
+                "background" => prefs.background_shader.clear(),
+                _ => prefs.tint_shader.clear(),
+            }
+        }
+    }
+}
+
 /// A shader's settings as sliders, stored in `shader_settings` as `key/setting`.
 #[cfg(not(target_arch = "wasm32"))]
 fn shader_sliders(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, key: &str) {
@@ -2461,5 +2499,113 @@ mod tests {
         assert!(matches_query(&plugin, "commercial"));
         assert!(matches_query(&plugin, "0.1"));
         assert!(!matches_query(&plugin, "bearing"));
+    }
+
+    const GLASS: &str = r#"{"id":"test-glass","name":"Test glass","version":"1","description":"","capabilities":["shaders@0.2"],"shaders":[
+        {"id":"frost","name":"Frost","kind":"panel","source":"frost.wgsl"},
+        {"id":"sky","name":"Sky","kind":"background","source":"sky.wgsl"},
+        {"id":"amber","name":"Amber","kind":"tint","source":"amber.wgsl"}]}"#;
+
+    fn appearance(installed: bool, set: impl FnOnce(&mut crate::prefs::Prefs)) -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let dir = h.dir.join("plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        if installed {
+            write(&dir, "test-glass", GLASS);
+        }
+        h.app.session.plugin_state.plugins_dir = Some(dir);
+        set(&mut h.app.preferences);
+        h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
+        h.frames(4);
+        h
+    }
+
+    fn effect_rows() -> Vec<&'static str> {
+        ["panel", "background", "tint"]
+            .into_iter()
+            .filter(|kind| crate::scenario::handle_at(&format!("prefs:plugin_effect:{kind}")).is_some())
+            .collect()
+    }
+
+    fn shows(label: &str) -> bool {
+        crate::scenario::handle_at(&format!("prefs:theme_option_switch:{label}")).is_some()
+    }
+
+    fn click(h: &mut crate::scenario::Harness, handle: &str) {
+        crate::prefs::reveal_preference(h, handle);
+        h.step(&serde_json::json!({"click":{"handle":handle}})).unwrap();
+        h.frames(3);
+    }
+
+    fn effects(h: &crate::scenario::Harness) -> [&str; 3] {
+        let p = &h.app.preferences;
+        [p.panel_shader.as_str(), p.background_shader.as_str(), p.tint_shader.as_str()]
+    }
+
+    #[test]
+    fn plugin_effects_that_are_on_show_in_appearance_and_switch_off_there() {
+        let mut h = appearance(true, |p| {
+            p.panel_shader = "test-glass/frost".into();
+            p.background_shader = "test-glass/sky".into();
+            p.tint_shader = "test-glass/amber".into();
+        });
+        assert_eq!(effect_rows(), ["panel", "background", "tint"]);
+        assert!(shows("Panel backdrop: Frost (Test glass)"));
+        assert!(shows("Background effect: Sky (Test glass)"));
+        assert!(shows("Tint: Amber (Test glass)"));
+        click(&mut h, "prefs:plugin_effect:panel");
+        assert_eq!(effects(&h), ["", "test-glass/sky", "test-glass/amber"]);
+        assert_eq!(effect_rows(), ["background", "tint"]);
+        click(&mut h, "prefs:plugin_effect:background");
+        click(&mut h, "prefs:plugin_effect:tint");
+        assert_eq!(effects(&h), ["", "", ""]);
+        assert!(effect_rows().is_empty());
+    }
+
+    #[test]
+    fn a_turned_off_plugins_effect_still_shows_in_appearance_and_clears() {
+        let mut h = appearance(true, |p| {
+            p.disabled_plugins.insert("test-glass".into());
+            p.panel_shader = "test-glass/frost".into();
+        });
+        assert_eq!(effect_rows(), ["panel"]);
+        assert!(shows("Panel backdrop: Frost (Test glass)"));
+        click(&mut h, "prefs:plugin_effect:panel");
+        assert_eq!(effects(&h), ["", "", ""]);
+        assert!(h.app.preferences.disabled_plugins.contains("test-glass"), "the plugin stays off");
+        assert!(effect_rows().is_empty());
+    }
+
+    #[test]
+    fn a_removed_plugins_effect_still_shows_in_appearance_and_clears() {
+        let mut h = appearance(false, |p| p.tint_shader = "test-glass/amber".into());
+        assert_eq!(effect_rows(), ["tint"]);
+        assert!(shows("Tint: amber (test-glass)"));
+        click(&mut h, "prefs:plugin_effect:tint");
+        assert_eq!(effects(&h), ["", "", ""]);
+        assert!(effect_rows().is_empty());
+    }
+
+    #[test]
+    fn appearance_has_no_plugin_effect_rows_when_none_is_on() {
+        let _h = appearance(true, |_| {});
+        assert!(effect_rows().is_empty());
+    }
+
+    #[test]
+    fn choosing_a_theme_leaves_plugin_effects_on() {
+        let mut h = appearance(true, |p| {
+            p.panel_shader = "test-glass/frost".into();
+            p.background_shader = "test-glass/sky".into();
+            p.tint_shader = "test-glass/amber".into();
+        });
+        for theme in ["light", "dark"] {
+            click(&mut h, &format!("prefs:theme:{theme}"));
+            assert_eq!(h.app.preferences.theme, theme);
+            assert_eq!(effects(&h), ["test-glass/frost", "test-glass/sky", "test-glass/amber"]);
+            assert_eq!(effect_rows(), ["panel", "background", "tint"]);
+        }
     }
 }
