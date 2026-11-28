@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: flanged corner</title>
+  <path d="M6 38L34 38L34 48L6 48Z" fill="#b8c3cf"/>
+  <path d="M6 38L34 38L34 48L6 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34 12L44 12L44 48L34 48Z" fill="#b8c3cf"/>
+  <path d="M34 12L44 12L44 48L34 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44 48L56 48L44 36Z" fill="#328bd3"/>
+  <path d="M44 48L56 48L44 36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

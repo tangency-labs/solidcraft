@@ -87,6 +87,34 @@ pub fn ease_in_out(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// How far a pointer moving from `from` to `to` turned around `centre`, as a dial turns: the
+/// signed angle (radians) between the two directions from the centre, positive clockwise on a
+/// screen whose y grows downwards (the way [`Camera::roll_by`] turns the picture). Motion straight
+/// towards or away from the centre turns nothing. Within `dead_zone` of the centre, where a tiny
+/// motion would swing the direction wildly, it is 0, as it is for points that aren't finite. So
+/// is a step whose straight path passes through the dead zone: a fast drag straight across the
+/// centre would otherwise read as a half turn.
+pub fn dial_turn(centre: [f64; 2], from: [f64; 2], to: [f64; 2], dead_zone: f64) -> f64 {
+    let (ax, ay) = (from[0] - centre[0], from[1] - centre[1]);
+    let (bx, by) = (to[0] - centre[0], to[1] - centre[1]);
+    let zone = dead_zone.max(0.0);
+    let near = |x: f64, y: f64| !(x.hypot(y) > zone);
+    if near(ax, ay) || near(bx, by) {
+        return 0.0;
+    }
+    // The point of the step nearest the centre: the segment's parameter, clamped to its ends.
+    let (dx, dy) = (bx - ax, by - ay);
+    let length2 = dx * dx + dy * dy;
+    if length2 > 0.0 {
+        let t = (-(ax * dx + ay * dy) / length2).clamp(0.0, 1.0);
+        if near(ax + dx * t, ay + dy * t) {
+            return 0.0;
+        }
+    }
+    let turn = (ax * by - ay * bx).atan2(ax * bx + ay * by);
+    if turn.is_finite() { turn } else { 0.0 }
+}
+
 /// A unit quaternion (w, x, y, z).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quat {
@@ -987,6 +1015,33 @@ mod tests {
         c.orbit(20.0, 0.0);
         let x1 = c.to_screen(near, 800.0, 600.0, 10.0).unwrap().0;
         assert!(x1 > x0, "dragging right must move the near side right: {x0} -> {x1}");
+    }
+
+    #[test]
+    fn a_dial_turn_follows_the_pointer_around_the_centre_and_ignores_the_middle() {
+        use std::f64::consts::FRAC_PI_2;
+        let c = [400.0, 300.0];
+        // Right of the centre to below it: a quarter turn clockwise on a y-down screen.
+        assert!((dial_turn(c, [500.0, 300.0], [400.0, 400.0], 8.0) - FRAC_PI_2).abs() < 1e-12);
+        assert!((dial_turn(c, [400.0, 400.0], [500.0, 300.0], 8.0) + FRAC_PI_2).abs() < 1e-12);
+        // Straight out from the centre turns nothing; so does a step inside the dead zone.
+        assert_eq!(dial_turn(c, [450.0, 300.0], [600.0, 300.0], 8.0), 0.0);
+        assert_eq!(dial_turn(c, [403.0, 300.0], [400.0, 350.0], 8.0), 0.0);
+        assert_eq!(dial_turn(c, [f64::NAN, 300.0], [400.0, 350.0], 8.0), 0.0);
+        // A fast step straight across the centre is no half turn; one that passes just outside
+        // the dead zone still turns nearly half way.
+        assert_eq!(dial_turn(c, [410.0, 300.0], [390.0, 300.0], 8.0), 0.0);
+        assert_eq!(dial_turn(c, [410.0, 303.0], [390.0, 297.0], 8.0), 0.0);
+        assert!(dial_turn(c, [410.0, 309.0], [390.0, 309.0], 8.0) > 1.5, "a step past the zone still turns");
+        // Rolling the camera by that turn carries a point under the pointer along with it.
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Front);
+        let (x0, y0, _) = cam.to_screen(Vec3::X, 800.0, 600.0, 10.0).unwrap();
+        let turn = dial_turn(c, [x0, y0], [400.0, 300.0 + (x0 - 400.0)], 0.5);
+        assert!((turn - FRAC_PI_2).abs() < 1e-9, "{turn}");
+        cam.roll_by(turn);
+        let (x1, y1, _) = cam.to_screen(Vec3::X, 800.0, 600.0, 10.0).unwrap();
+        assert!((x1 - 400.0).abs() < 1e-9 && y1 > 300.0, "the point follows the pointer below the centre: ({x1}, {y1})");
     }
 
     #[test]

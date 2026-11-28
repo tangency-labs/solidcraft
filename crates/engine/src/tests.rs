@@ -4,6 +4,134 @@ use std::f64::consts::PI;
 use serde_json::{Value, json};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    #[test]
+    fn weld_review_choices_evaluate_and_reject_hostile_values_atomically() {
+        let mut s = Session::default();
+        for groove in solidcraft_doc::weld::GROOVES {
+            s.execute("weld.create", &json!({"weld_type":"butt", "groove":groove, "penetration":"partial", "size":{"h":"1 mm","s":"2 mm"}, "root":"backing_run", "root_gap":"0 mm", "add_fillet":true, "symbol_standard":"iso2553_2019_b"})).unwrap();
+            let settings = &s.doc.welds.last().unwrap().settings;
+            assert_eq!(settings.groove, *groove);
+            assert_eq!(settings.size["s"], 2.);
+            assert_eq!(settings.root_gap, Some(0.));
+            assert!(settings.add_fillet);
+        }
+        s.execute("weld.create", &json!({"weld_type":"fillet", "size":{"a":3,"z1":4,"z2":6,"s":5}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["z2"], 6.);
+        for mode in ["pitch", "count", "points"] {
+            s.execute("weld.create", &json!({"weld_type":"tack", "tack_mode":mode})).unwrap();
+            assert_eq!(s.doc.welds.last().unwrap().settings.tack_mode, mode);
+        }
+        s.execute("weld.create", &json!({"weld_type":"tack","tack_mode":"count","size":{"l":"5 mm","n":"2+3"}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["n"], 5.);
+        let back = solidcraft_doc::format::read(&serde_json::to_string(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.welds, s.doc.welds);
+        for invalid in [
+            json!({"weld_type":"butt","groove":"unknown"}),
+            json!({"weld_type":"butt","penetration":"partial"}),
+            json!({"weld_type":"butt","size":{"h":1,"s":2}}),
+            json!({"weld_type":"butt","root":"unknown"}),
+            json!({"weld_type":"butt","root_gap":-1}),
+            json!({"weld_type":"butt","root_gap":"1/0"}),
+            json!({"weld_type":"fillet","symbol_standard":"jis"}),
+            json!({"weld_type":"fillet","symbol_standard":4}),
+            json!({"weld_type":"tack","tack_mode":"unknown"}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":1.5}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":0}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":"2 mm"}}),
+            json!({"weld_type":"tack","tack_mode":"points","size":{"l":5,"e":40}}),
+            json!({"weld_type":"plug","size":{"fill":20}}),
+        ] {
+            let before = s.doc.clone();
+            assert!(matches!(s.execute("weld.create", &invalid), Err(EngineError::BadParams { .. })), "{invalid}");
+            assert_eq!(s.doc, before);
+        }
+    }
+    #[test]
+    fn weld_create_is_a_graphic_and_undoable() {
+        let mut s = Session::default();
+        let reply = s.execute("weld.create", &json!({"weld_type":"fillet","size":{"a":"0.25 in"}})).unwrap();
+        assert_eq!(reply["number"], "W1");
+        assert_eq!(s.doc.welds.len(), 1);
+        assert_eq!(s.doc.welds[0].settings.size["a"], 6.35);
+        assert_eq!(s.doc.welds[0].symbol.as_ref().unwrap().arrow_side.as_ref().unwrap().size, Some(solidcraft_geom::weld::Size::Throat(6.35)));
+        assert!(s.doc.features.is_empty());
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(s.execute("weld.create", &json!({"weld_type":"spot"})).unwrap()["number"], "W2");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.welds.is_empty());
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+    }
+    #[test]
+    fn weld_create_hostile_params_leave_document_unchanged() {
+        let mut s = Session::default();
+        let before = s.doc.clone();
+        let cases = [
+            json!(null),
+            json!([]),
+            json!({}),
+            json!({"weld_type":7}),
+            json!({"weld_type":"unknown"}),
+            json!({"weld_type":"fillet","size":{"a":0}}),
+            json!({"weld_type":"fillet","size":{"a":-1}}),
+            json!({"weld_type":"fillet","size":{"a":100001}}),
+            json!({"weld_type":"fillet","size":{"a":"NaN"}}),
+            json!({"weld_type":"fillet","size":{"a":"1 / 0"}}),
+            json!({"weld_type":"fillet","size":{"a":"2 deg"}}),
+            json!({"weld_type":"fillet","size":{"a":[]}}),
+            json!({"weld_type":"fillet","size":{"nope":3}}),
+            json!({"weld_type":"fillet","size":{}}),
+            json!({"weld_type":"fillet","face":"inward"}),
+            json!({"weld_type":"fillet","process":7}),
+            json!({"weld_type":"fillet","root_side":2}),
+            json!({"weld_type":"fillet","ends":3}),
+            json!({"weld_type":"fillet","reference_plane":1}),
+            json!({"weld_type":"fillet","tack":"yes"}),
+            json!({"weld_type":"fillet","pattern_count":1.5}),
+            json!({"weld_type":"fillet","pattern_count":10001}),
+            json!({"weld_type":"fillet","pattern_pitch":0}),
+            json!({"weld_type":"fillet","density":-1}),
+            json!({"weld_type":"fillet","picks":{"line":["Edge 1"]}}),
+            json!({"weld_type":"fillet","picks":{"unknown":[]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0]}]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":"missing","index":0}]}}),
+            json!({"weld_type":"fillet","picks":{"point":[{"point":[1e10,0,0]}]}}),
+            json!({"weld_type":"fillet","symbol":{"arrow_side":null,"other_side":null,"field":false,"all_round":false,"tail":""}}),
+        ];
+        for p in cases {
+            assert!(matches!(s.execute("weld.create", &p), Err(EngineError::BadParams { .. })), "{p}");
+            assert_eq!(s.doc, before, "{p}");
+        }
+    }
+    #[test]
+    fn weld_all_panel_type_ids_and_delete() {
+        let mut s = Session::default();
+        for id in solidcraft_doc::weld::TYPES {
+            s.execute("weld.create", &json!({"weld_type":id})).unwrap();
+        }
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
+        let id = s.doc.welds[0].id;
+        assert_eq!(s.execute("weld.delete", &json!({"id":id})).unwrap()["deleted"], id);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
+        assert_eq!(s.doc.welds[0].id, id);
+    }
+    #[test]
+    fn weld_topology_picks_validate_exact_indices() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        let body = s.model.state().bodies[0].name.clone();
+        s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":0}]}})).unwrap();
+        let before = s.doc.clone();
+        assert!(s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":999999}]}})).is_err());
+        assert_eq!(s.doc, before);
+    }
+}
 
 /// A folder of the test's own, removed when dropped.
 pub(crate) struct Folder(pub std::path::PathBuf);
@@ -993,6 +1121,36 @@ fn revolved_edge_almost_square_to_the_axis_reads_back() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// A profile arc that bows out of its chord by less than a micrometre (radius 140, chord 0.01,
+/// sagitta 9e-8) revolves into a body that measures and splits (#15385). Revolve writes its face
+/// as a torus whose NURBS form SMLib's torus test does not find (a tube swept over 4e-3 degrees).
+/// The flat reader refused that face ("a NURBS form that is not its analytic surface"), so the
+/// body did not read back and Split Body failed with it; it now reads it back as the arrays' own
+/// torus where the kernel proves it on the form, or as the form itself
+/// (`Torus::from_label_unless_found_stands`). The profile is a cylinder of radius 20 up to the arc
+/// and a cone to the apex at 40: its volume is theirs less the arc's segment swept round the
+/// axis (Pappus, 7.5e-8 mm3). Split 10 along the axis, the lower half is the cylinder of height
+/// 10. The 1e-6 relative bound is that of `revolved_edge_almost_square_to_the_axis_reads_back`.
+#[test]
+fn a_profile_arc_almost_straight_revolves_into_a_body_that_splits() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [0, 0], [20, 0], [20, 20]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [160, 20.005], "start": [20, 20.01], "end": [20, 20]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20.01], [0, 40]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "l1", "angle": "360 deg", "body_name": "B"}));
+    let whole = 33_518.699_218_625_91;
+    let v = volume(&mut s);
+    assert!(rel(v, whole) < 1e-6, "revolved: volume {v}, want {whole}");
+    // the sketch's y runs along -Z
+    run(&mut s, "solid.split_body", json!({"body": "B", "plane": {"origin": [0, 0, -10], "normal": [0, 0, 1]}}));
+    let part = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    let (low, high) = (part(&s, "B"), part(&s, "B (1)"));
+    let cylinder = PI * 400.0 * 10.0;
+    assert!(rel(low, cylinder) < 1e-6 && rel(high, whole - cylinder) < 1e-6, "split: {low} + {high}, want {cylinder} + {}", whole - cylinder);
+}
+
 /// A spherical shell (a half ring between two arcs, both radial lines on the axis) revolved on a
 /// sketch plane that does not pass through the origin: the body is the shell, as it is on XY.
 /// Before, built in place, it measured a third too large (truck tessellates the degenerate faces
@@ -1023,6 +1181,106 @@ fn revolve_a_spherical_shell_off_the_origin() {
         let b = &m["bodies"][0]["bbox"];
         assert!((b["min"][2].as_f64().unwrap() - (z - 40.0)).abs() < 1e-6 && (b["max"][2].as_f64().unwrap() - (z + 40.0)).abs() < 1e-6, "{b}");
     }
+}
+
+fn split_revolve_profile(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "flip": true, "name": "Pot"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [66.14378277661477, 0]], "ids": ["base"]}));
+    run(s, "sketch.arc.center_point", json!({"center": [0, 75], "start": [66.14378277661477, 0], "end": [0, 175], "id": "round"}));
+    run(s, "sketch.line", json!({"points": [[0, 175], [0, 0]], "ids": ["axis"]}));
+    run(s, "sketch.line", json!({"points": [[0, 250], [40, 250]], "ids": ["top"]}));
+    run(
+        s,
+        "sketch.arc.center_point",
+        json!({
+            "center": [40, 190], "start": [40, 250], "end": [95.4327719506772, 167.0389940580946], "clockwise": true, "id": "bend"
+        }),
+    );
+    run(s, "sketch.line", json!({"points": [[95.4327719506772, 167.0389940580946], [57.308972344637716, 75]], "ids": ["leg"]}));
+    run(s, "sketch.finish", json!({}));
+    assert_eq!(s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "round").count(), 2);
+}
+
+#[test]
+fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
+    // #18537: the open leg cuts the pot profile into two arcs on the same circle.
+    // Revolving them as separate faces introduced a boundary through the handle junction.
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
+    run(&mut s, "solid.revolve", json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}}));
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
+    let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 2, "one spherical face and the bottom plane: {names:?}");
+    assert!(names.contains(&"F2:side:round") && names.contains(&"F2:side:base"), "{names:?}");
+    // Sphere R100 minus its bottom cap of height 25.
+    let want = 4.0 / 3.0 * PI * 100.0f64.powi(3) - PI * 25.0f64.powi(2) * (100.0 - 25.0 / 3.0);
+    assert!(rel(volume(&mut s), want) < 5e-4);
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "flip": "y", "name": "Handle"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 250], "radius": 17.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Handle", "path_sketch": "Pot", "path": ["top", "bend", "leg"], "operation": "join"}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[81.4, 17.5, 133.1]], "radius": 15}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 1);
+    assert_eq!(measured["bodies"][0]["closed"], true);
+    assert!(measured["total"]["volume_mm3"].as_f64().unwrap() > before, "the concave junction round adds material");
+}
+
+#[test]
+fn an_old_split_revolve_reopens_with_both_named_faces() {
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
+    let params = json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}});
+    let mut legacy_params = params.clone();
+    legacy_params["join_profile_arcs"] = json!(false);
+    run(&mut s, "solid.revolve", legacy_params);
+    let picks = [[100.0, 0.0, 75.0], [60.0, 0.0, 155.0]];
+    for (pick, name) in picks.iter().zip(["Lower", "Upper"]) {
+        run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "name": name}));
+    }
+
+    // The old format had no joining option. The planes hold the exact names of the two
+    // faces, as they would in a design saved before Revolve could join the arcs.
+    let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    legacy["format"] = json!("solidcraft/58");
+    legacy.as_object_mut().unwrap().remove("format_pending");
+    assert!(legacy["features"][1].get("join_profile_arcs").is_none());
+    let names = [2, 3].map(|i| legacy["features"][i]["plane"]["face"]["name"].as_str().unwrap().to_owned());
+    assert_eq!(names, ["F2:side:round#[F2:side:base]", "F2:side:round"]);
+
+    let dir = std::env::temp_dir().join(format!("solidcraft-split-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.solidcraft");
+    std::fs::write(&path, legacy.to_string()).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let body = state.body("Body1").unwrap();
+        assert_eq!(body.body.face_count(), 3, "both original sphere faces and the bottom plane");
+        let faces: Vec<_> = names
+            .iter()
+            .zip(picks)
+            .map(|(name, pick)| {
+                let pick = Vec3::from(pick);
+                let (face, _) = solidcraft_doc::naming::face_on_body(body, name, pick).unwrap();
+                let (distance, exact_face) = body.body.nearest_face(pick).unwrap();
+                assert!(distance < 1e-5, "{name}: {distance}");
+                assert_eq!(face, exact_face, "{name}");
+                face
+            })
+            .collect();
+        assert_ne!(faces[0], faces[1]);
+        let planes = crate::view::construction_planes(s);
+        assert!(planes.iter().any(|(_, name, _)| name == "Lower") && planes.iter().any(|(_, name, _)| name == "Upper"));
+    };
+    check(&reopened);
+    // An ordinary redefine of an old feature keeps its topology, including when its
+    // original command parameters did not specify an arc-joining mode.
+    run(&mut reopened, "timeline.redefine", json!({"feature": "Revolve1", "command": "solid.revolve", "params": params}));
+    check(&reopened);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -1337,6 +1595,7 @@ fn hostile_params_never_panic() {
         "shaft_face",
         "shape",
         "sheet",
+        "shows",
         "side",
         "sides",
         "size",
@@ -2549,6 +2808,111 @@ fn measure_items() {
     assert!((r["distance_mm"].as_f64().unwrap() - (1600.0f64 + 900.0 + 400.0).sqrt()).abs() < 1e-9);
     assert!(s.execute("inspect.measure", &json!({"items": []})).is_err());
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
+}
+
+/// Three or more round items measure as a row or a bolt circle (#10170): the gaps centre to
+/// centre in order along the row, the span and whether the spacing is even. A 400 × 40 × 5 panel
+/// with 3 mm holes at x = 22.5, 111.25, 200 and 377.5 on y = 20: three at a pitch of 88.75 and
+/// one 177.5 further, where a hole is left out.
+#[test]
+fn measure_items_reports_row_spacing_of_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 400, "width": 40, "height": 5, "corner": [0, 0, 0], "body_name": "Panel"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    for x in [22.5, 111.25, 200.0, 377.5] {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, 20], "diameter": 3}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "cut"}));
+    let hole = |x: f64| json!({"type": "face", "body": "Panel", "point": [x + 1.5, 20.0, 2.5]});
+    let floats = |v: &Value| -> Vec<f64> { v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect() };
+    let near = |a: &[f64], b: &[f64]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9);
+
+    // Picked out of order: the row runs from the end hole picked first.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(200.0), hole(22.5), hole(111.25)]}));
+    let sp = &r["spacing"];
+    assert_eq!(sp["pattern"], "line", "{r}");
+    assert_eq!(sp["order"], json!([0, 2, 1]), "{r}");
+    assert!(near(&floats(&sp["gaps"]), &[88.75, 88.75]), "{r}");
+    assert!((sp["span"].as_f64().unwrap() - 177.5).abs() < 1e-9, "{r}");
+    assert_eq!(sp["even"], true, "{r}");
+    assert!((sp["pitch"].as_f64().unwrap() - 88.75).abs() < 1e-9, "{r}");
+    assert_eq!(sp["odd_gaps"], json!([]), "{r}");
+    assert!(sp.get("pcd").is_none(), "{r}");
+    assert_eq!(r["items"].as_array().unwrap().len(), 3, "{r}");
+    // Each gap lies between two hole centres.
+    let ends: Vec<Vec<Vec3>> = serde_json::from_value(sp["gap_points"].clone()).unwrap();
+    assert!(ends[0][0].dist(Vec3::new(200.0, 20.0, 2.5)) < 1e-9 && ends[0][1].dist(Vec3::new(111.25, 20.0, 2.5)) < 1e-9, "{r}");
+    // A pair's own figures are not a row's.
+    assert!(r.get("center_distance").is_none() && r.get("distance_mm").is_none(), "{r}");
+
+    // The hole left out shows as the odd gap, beside the pitch of the others.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(111.25), hole(200.0), hole(377.5)]}));
+    let sp = &r["spacing"];
+    assert!(near(&floats(&sp["gaps"]), &[88.75, 88.75, 177.5]), "{r}");
+    assert_eq!((&sp["even"], &sp["odd_gaps"]), (&json!(false), &json!([2])), "{r}");
+    assert!((sp["pitch"].as_f64().unwrap() - 88.75).abs() < 1e-9 && (sp["span"].as_f64().unwrap() - 355.0).abs() < 1e-9, "{r}");
+
+    // Two holes measure as before, with no spacing; so do two picks of one hole and another.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(111.25)]}));
+    assert!((r["center_distance"].as_f64().unwrap() - 88.75).abs() < 1e-9 && r.get("spacing").is_none(), "{r}");
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(22.5), hole(111.25)]}));
+    assert!((r["center_distance"].as_f64().unwrap() - 88.75).abs() < 1e-9 && r.get("spacing").is_none(), "{r}");
+
+    // Three items that are not all round are still refused, and so are holes across each other.
+    let flat = json!({"type": "face", "body": "Panel", "point": [300.0, 20.0, 5.0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(22.5), flat, hole(111.25)]})).unwrap_err().to_string();
+    assert!(e.contains("measure one or two items, or three or more round edges or holes"), "{e}");
+    let too_many: Vec<Value> = (0..65).map(|_| hole(22.5)).collect();
+    let e = s.execute("inspect.measure", &json!({"items": too_many})).unwrap_err().to_string();
+    assert!(e.contains("measure at most 64 items"), "{e}");
+}
+
+/// Holes round a bolt circle (#10170): six 4 mm holes on a 60 mm pitch circle in a disc give the
+/// pitch-circle diameter, the 60° between holes and the chord between neighbours (30 mm). A
+/// hole's rim picked beside its own wall is refused in the kernel's words: two items, one centre.
+#[test]
+fn measure_items_reports_a_bolt_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 40, "height": 6, "body_name": "Flange"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bolts"}));
+    let at = |k: u32| {
+        let t = (f64::from(k) * 60.0).to_radians();
+        (30.0 * t.cos(), 30.0 * t.sin())
+    };
+    for k in 0..6 {
+        let (x, y) = at(k);
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 4}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 6, "operation": "cut"}));
+    // A point on each hole's wall, on the side away from the disc's axis.
+    let hole = |k: u32| {
+        let (x, y) = at(k);
+        json!({"type": "face", "body": "Flange", "point": [x * 32.0 / 30.0, y * 32.0 / 30.0, 3.0]})
+    };
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(0), hole(3), hole(1), hole(5), hole(2), hole(4)]}));
+    let sp = &r["spacing"];
+    assert_eq!(sp["pattern"], "circle", "{r}");
+    assert_eq!(sp["order"], json!([0, 2, 4, 1, 5, 3]), "{r}");
+    assert!((sp["pcd"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{r}");
+    let centre: Vec3 = serde_json::from_value(sp["pcd_center"].clone()).unwrap();
+    assert!(centre.dist(Vec3::new(0.0, 0.0, 3.0)) < 1e-6, "{r}");
+    let gaps = sp["gaps"].as_array().unwrap();
+    assert!(gaps.len() == 6 && gaps.iter().all(|g| (g.as_f64().unwrap() - 30.0).abs() < 1e-6), "{r}");
+    let angles = sp["angle_deg"].as_array().unwrap();
+    assert!(angles.len() == 6 && angles.iter().all(|a| (a.as_f64().unwrap() - 60.0).abs() < 1e-6), "{r}");
+    assert_eq!(sp["even"], true, "{r}");
+    assert!((sp["angle_pitch_deg"].as_f64().unwrap() - 60.0).abs() < 1e-12 && (sp["pitch"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{r}");
+
+    let (x, y) = at(0);
+    let rim = json!({"type": "edge", "body": "Flange", "point": [x, y + 2.0, 6.0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), rim]})).unwrap_err().to_string();
+    assert!(e.ends_with("`inspect.measure`: two of the round items share one centre"), "{e}");
+    // Bodies and vertices are never round: three of them are refused as a third item always was.
+    let corner = json!({"type": "vertex", "body": "Flange", "point": [40, 0, 0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), corner]})).unwrap_err().to_string();
+    assert!(e.contains("measure one or two items, or three or more round edges or holes"), "{e}");
 }
 
 /// The closest distance between a face and an edge, line or face that ends (#16270, #16271): a
@@ -4011,6 +4375,64 @@ fn sample_plate_step_round_trip() {
     }
 }
 
+/// #22579: a bent strip with two cuts whose slanted sides cross 7e-5 mm inside the strip's
+/// outer line (edges about 7e-5 mm long), the lower cut kinked 1.85e-5 mm from the inner arc's
+/// end. The body passes SMLib's full check where it is built; read back from SolidCraft's own
+/// STEP export it must pass it too, not come back as "needs repair".
+#[test]
+fn bent_strip_with_micrometre_cuts_passes_the_check_after_a_step_round_trip() {
+    let mut s = Session::default();
+    let sketch = |s: &mut Session, origin: [f64; 3], x: [f64; 3], y: [f64; 3]| {
+        run(s, "sketch.create", json!({"plane": {"origin": origin, "x_dir": x, "y_dir": y}}));
+    };
+    sketch(&mut s, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "sketch.line", json!({"points": [[3.997905609150866, 3.599996344594674], [3.9987782701438714, 3.6999989338393013]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [3.956046636329481, 2.3013812901002098], "end": [3.9987782701438714, 3.6999989338393013], "through": [4.699673513585699, 2.9786230407531242]}),
+    );
+    run(&mut s, "sketch.line", json!({"points": [[3.956046636329481, 2.3013812901002098], [3.9623256882824123, 2.401183962943037]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [3.9623256882824123, 2.401183962943037], "end": [3.997905609150866, 3.599996344594674], "through": [4.59973591607163, 2.9822002535489336]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 7.6, "operation": "new", "direction": "symmetric", "name": "Bend"}));
+    sketch(&mut s, [0.0, 0.0, 3.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[1.8748913900000002, -1.5999999999999996], [5.0, -1.5999999999999996], [5.0, 5.0], [1.06309139, 5.0], [1.8748913900000002, -1.5999999999999996]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 1.0, "operation": "cut", "direction": "positive", "name": "CutAbove"}));
+    sketch(&mut s, [0.0, 0.0, 2.2], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[1.7, -0.5], [4.0, -0.5], [4.0, 5.0], [1.139459205, 5.0], [1.0030074657591372, 3.962344188282412], [0.7396074657591372, 1.9623441882824122], [1.7, -0.5]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 0.8, "operation": "cut", "direction": "positive", "name": "CutBelow"}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1);
+    let source = &st.bodies[0].body;
+    assert_eq!(solidcraft_kernel::failing_check(source).unwrap(), None, "the body as built");
+    let p = std::env::temp_dir().join(format!("solidcraft-22579-{}.step", std::process::id()));
+    run(&mut s, "file.export", json!({"path": p.to_string_lossy()}));
+    let text = std::fs::read_to_string(&p).unwrap();
+    let _ = std::fs::remove_file(&p);
+    let imp = solidcraft_kernel::step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let back = &imp.bodies[0].body;
+    assert_eq!(solidcraft_kernel::failing_check(back).unwrap(), None, "read back: {:?}", imp.warnings);
+    let (ma, mb) = (solidcraft_kernel::measure(source).unwrap(), solidcraft_kernel::measure(back).unwrap());
+    assert!(rel(mb.volume, ma.volume) < 1e-6, "{} vs {}", mb.volume, ma.volume);
+    assert_eq!(back.face_count(), source.face_count());
+}
+
 /// Bodies export in the colour they are shown in: a material's look, an appearance over it,
 /// none for the default; and colours read from a STEP file survive the next export.
 #[test]
@@ -4428,6 +4850,37 @@ fn face_extrude_follows_edits() {
 }
 
 /// Appearances on faces, bodies and components: face > body > component > material.
+/// #22984: the appearance commands take a face by the name `model.faces` lists, as Shell does.
+#[test]
+fn appearance_commands_take_a_face_by_name() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"body_name": "Plate", "length": 40, "width": 30, "height": 6})).unwrap();
+    let faces = s.execute("model.faces", &json!({"body": "Plate"})).unwrap();
+    let top = faces["faces"].as_array().unwrap().iter().find(|f| f["point"][2] == 6.0).unwrap().clone();
+    let name = top["name"].as_str().unwrap();
+    // With and without `body`, and as `{point}` is still read.
+    for (params, color) in [(json!({"body": "Plate", "faces": [name]}), "#ff0000"), (json!({"faces": [name]}), "#00ff00")] {
+        let mut params = params;
+        params["color"] = json!(color);
+        let reply = s.execute("appearance.assign", &params).unwrap();
+        assert_eq!(reply["faces"][0]["body"], "Plate", "{reply}");
+        for face in [json!(name), top["index"].clone()] {
+            let chain = s.execute("appearance.chain", &json!({"target": {"body": "Plate", "face": face}})).unwrap();
+            assert_eq!(chain["active"], "face", "{chain}");
+            assert_eq!(chain["steps"][0]["look"]["color"], color, "{chain}");
+        }
+        let picked = s.execute("appearance.pick_up", &json!({"target": {"body": "Plate", "face": name}})).unwrap();
+        assert_eq!(picked["look"]["color"], color, "{picked}");
+    }
+    for (command, params) in [
+        ("appearance.assign", json!({"faces": ["F99:top"], "color": "#ff0000"})),
+        ("appearance.chain", json!({"target": {"body": "Plate", "face": "F99:top"}})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("no face is named `F99:top`"), "{error}");
+    }
+}
+
 #[test]
 fn appearances_by_face_body_and_component() {
     let mut s = Session::default();
@@ -7493,6 +7946,39 @@ fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
     }
 }
 
+/// An outline that folds back on itself for a few micrometres (an imported SVG's coast) extrudes
+/// as one picked region as it does as the whole sketch (#22630): the fold's lobe, 6e-6 mm wide,
+/// is no spur of the region's outline (two coincident edges the kernel's check refused) and no
+/// region of its own.
+#[test]
+fn a_picked_region_whose_outline_folds_back_for_micrometres_extrudes() {
+    let mut s = Session::default();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    // The curves s193, s194 and s195 of the reporter's sketch, closed by two lines clear of them.
+    for points in [
+        json!([[-4.40374, -7.86433], [-4.52194, -7.73448], [-3.75452, -7.79009], [-3.6926, -7.70315]]),
+        json!([[-3.6926, -7.70315], [-3.72686, -7.75118], [-3.68916, -7.45021], [-3.67333, -7.49464]]),
+        json!([[-3.67333, -7.49464], [-3.78961, -7.16718], [-4.31691, -7.50127], [-4.44598, -7.18056]]),
+    ] {
+        run(&mut s, "sketch.spline.control_point", json!({"points": points}));
+    }
+    run(&mut s, "sketch.line", json!({"points": [[-4.44598, -7.18056], [-5.5, -7.5], [-4.40374, -7.86433]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let state = s.model.state();
+    let ss = state.sketch(id).unwrap();
+    assert_eq!(ss.profiles.len(), 1, "{:?}", ss.profiles.iter().map(|p| p.area).collect::<Vec<_>>());
+    let area = ss.profiles[0].area;
+    for profiles in [json!([{"point": [-4.46, -7.53]}]), json!("all")] {
+        let mut s2 = Session::new((*s.doc).clone());
+        let p = json!({"sketch": id, "distance": 10, "operation": "new", "body_name": "Coast", "profiles": profiles.clone(), "exact_regions": true});
+        run(&mut s2, "solid.extrude", p);
+        let state = s2.model.state();
+        let body = state.bodies.iter().find(|b| b.name == "Coast").expect("the extruded body");
+        let v = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        assert!(rel(v, area * 10.0) < 1e-3, "{profiles}: {v} vs {}", area * 10.0);
+    }
+}
+
 /// An explicit pick of a drawn hole still fills only that hole (#5176).
 #[test]
 fn an_explicit_pick_of_a_drawn_hole_fills_only_that_hole() {
@@ -8152,6 +8638,69 @@ fn fillet_fit_taper_closes_to_a_point() {
     let out = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 15]], "radius": 16, "fit": "taper"}));
     let w = out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone()).unwrap_or_default();
     assert!(w.contains("on 1 of 1 edges, down to 0 mm"), "{w}");
+}
+
+#[test]
+fn spline_fillet_follows_a_rounded_corner_chain() {
+    // #6473: the top outline has a line, an R10 quarter arc, and another line.
+    // Equal spline control radii describe the same R2 round as a constant fillet,
+    // including the arc between the two straight edges.
+    let rounded_box = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 15]], "radius": "10 mm"}));
+        s
+    };
+    let mut constant = rounded_box();
+    run(&mut constant, "solid.fillet", json!({"edges": [[50, 0, 30]], "radius": "2 mm", "tangent_chain": true}));
+    let mut spline = rounded_box();
+    run(
+        &mut spline,
+        "solid.fillet",
+        json!({
+            "edges": [[50, 0, 30]], "radius": "2 mm", "type": "spline",
+            "start": [0, 0, 30], "tangent_chain": true,
+            "radii": ["2 mm", "2 mm", "2 mm", "2 mm"],
+            "knots": [0, 0, 0, 0, 0.5, 1, 1, 1, 1]
+        }),
+    );
+    assert!(rel(volume(&mut spline), volume(&mut constant)) < 1e-9);
+}
+
+#[test]
+fn variable_fillet_runs_its_radius_along_a_rounded_corner_chain() {
+    // #6473: the same line, R10 quarter arc and line, rounded from R2 at the far end of the first
+    // line to R1 at the far end of the second. With tangent_chain the law runs along the whole
+    // chain, so the arc and the second line are rounded too. Where SMLib cannot build that law
+    // along the chain, the round takes the picked line alone, as with tangent_chain: false, and
+    // the warning says why: following the chain never fails where the picked edge alone builds.
+    let round = |tangent_chain: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 15]], "radius": "10 mm"}));
+        let before = volume(&mut s);
+        let p = json!({
+            "edges": [[50, 0, 30]], "radius": "2 mm", "type": "variable", "radius2": "1 mm",
+            "start": [0, 0, 30], "tangent_chain": tangent_chain
+        });
+        let out = s.execute("solid.fillet", &p).ok()?;
+        let w = out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        Some((before - volume(&mut s), w))
+    };
+    let (alone, _) = round(false).expect("the fixed picked-edge control must build");
+    let (chain, warning) = round(true).expect("the chain round fails where the picked edge alone builds");
+    // the cut of an R round along a length L is (1 - pi/4) r^2 L
+    let cut = |r: f64, l: f64| (1.0 - std::f64::consts::FRAC_PI_4) * r * r * l;
+    assert!(alone > cut(1.0, 90.0) && alone < cut(2.0, 90.0), "{alone}");
+    if warning.contains("could not run along the tangent chain") {
+        assert!(rel(chain, alone) < 1e-9, "{chain} vs {alone}: {warning}");
+        assert!(!warning.contains("chain closes on itself"), "{warning}");
+    } else {
+        // the chain is 90 + 5 pi + 50 long
+        let along = 90.0 + 5.0 * std::f64::consts::PI + 50.0;
+        assert!(chain > cut(1.0, along) && chain < cut(2.0, along), "{chain}");
+        assert!(chain > alone * 1.2, "{chain} vs {alone}");
+    }
 }
 
 #[test]

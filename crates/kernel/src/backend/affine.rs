@@ -51,6 +51,10 @@ impl Affine for Solidcore {
         ops::orthonormal_axes(x, y).map_err(refused)
     }
 
+    fn frame_axes(&self, d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
+        ops::frame_axes(d, v).map_err(refused)
+    }
+
     fn axis_squared_axes(&self, x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
         ops::axis_squared_axes(x, y, noise)
     }
@@ -99,6 +103,10 @@ impl Affine for Solidcore {
 
     fn rect_of_aspect(&self, bl: [f64; 2], br: [f64; 2], top_left: Option<[f64; 2]>, aspect: f64) -> Option<[[f64; 2]; 4]> {
         ops::rect_of_aspect(bl, br, top_left, aspect)
+    }
+
+    fn plane_onto_line(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])> {
+        ops::plane_onto_line(origin, x, y, at, dir)
     }
 
     fn fit_aspect(&self, bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {

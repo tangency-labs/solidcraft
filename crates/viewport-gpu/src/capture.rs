@@ -108,7 +108,7 @@ impl Capturer {
     }
 
     /// Stop drawing once `lost` is set: the flag the device's lost callback sets (the app's
-    /// window device has one, `egui_wgpu::DeviceLost`). A lost device can't draw again; its
+    /// window device has one, [`crate::DeviceLost`]). A lost device can't draw again; its
     /// pictures fail with [`GpuError::DeviceLost`] without touching it (#4172).
     pub fn watching(mut self, lost: Arc<AtomicBool>) -> Self {
         self.lost = lost;
@@ -122,7 +122,7 @@ impl Capturer {
 
     /// [`Capturer::is_lost`], asking the driver first: a submission that opens a command list
     /// meets a loss the driver reports and marks it, where the picture's first upload would
-    /// panic inside wgpu. As `egui_wgpu::DeviceLost::probe`: an empty submission only signals a
+    /// panic inside wgpu. An empty submission only signals a
     /// fence, which a reset D3D12 device let through (#6528).
     fn probe_lost(&self, gpu: &Gpu) -> bool {
         if self.is_lost() {

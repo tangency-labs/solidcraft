@@ -15,15 +15,25 @@
 //! is left, and joins the feature back on, solid. A feature is a set of faces, at most half
 //! the body's, reached from a face across convex edges (a feature's own faces meet at convex
 //! edges; the face it stands on meets it at concave ones); the smallest are tried first, one
-//! at a time, until the shell of what is left builds. One is taken off only where the room
+//! at a time, until the shell of what is left builds. A single face is a feature only where
+//! its inset collapses and it meets the faces it stands on at creases (a dome, a sphere's cap
+//! on a face, inset by its radius or more): its offset has no surface at all, so the offset
+//! of the body is the offset of the body without it. One is taken off only where the room
 //! test finds no cavity in it ([`shell_wall_room`] shows no witness: the room test proves a
 //! cavity, it does not prove there is none), and the whole result stands only if every step
 //! builds; otherwise the caller's refusal stands. The features with a face whose inset
 //! collapses come off together, first, before one shell of what is left (solidcore#3353).
+//!
+//! The cap lies on the plane of the face the feature stands on, so the body with the feature
+//! taken off is that face run on across the footprint: the cap's rim, an edge between two
+//! faces on one plane, is taken out before the shell ([`remove_cap_rims`]). Left in, it
+//! pinched the face where the footprint touches the face's outer edge (a boss whose side is
+//! tangent to that edge, or within the contact tolerance of it, solidcraft#22785), and the
+//! offset, which moves that touching vertex along both loops, refused the edge as vanishing.
 
 use std::collections::BTreeSet;
 
-use crate::blend::feature_executive::{defeature_and_rebuild, RebuildBrepType};
+use crate::blend::feature_executive::{defeature_and_rebuild, remove_patch_rims, RebuildBrepType};
 use crate::boolean::api_brep::boolean_union;
 use crate::error::offset::OffsetFailure;
 use crate::error::{Reason, Result, SolidError};
@@ -57,11 +67,21 @@ pub fn refused_for_a_thin_feature(e: &SolidError) -> bool {
     )
 }
 
+/// A set of faces reached across convex edges ([`feature_from`]).
+struct Reached {
+    /// The faces, in id order.
+    faces: Vec<FaceId>,
+    /// Whether an edge the walk did not cross is tangent: the set runs on smoothly into a
+    /// face beside it (a round), instead of standing on it at a crease.
+    tangent_rim: bool,
+}
+
 /// The faces reached from `seed` across convex edges, `None` when that is every face of `b`
 /// (no feature: the seed's convex neighbours are the whole body).
-fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<FaceId>>> {
+fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Reached>> {
     let all = b.faces().ids().count();
     let mut found: BTreeSet<FaceId> = BTreeSet::from([seed]);
+    let mut tangent_rim = false;
     let mut todo = vec![seed];
     while let Some(f) = todo.pop() {
         let outer = crate::topology::face::p2::outer_faceuse(b, f)?;
@@ -81,11 +101,14 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
                 continue;
             };
             // a seam, a tangent edge or a concave one is not crossed
-            if faces.len() != 2
-                || faces.first() == faces.get(1)
-                || eu2::is_tangent_sector(k, b, eu, TANGENT_DEG, false, true)?
-                || !eu2::is_convex_radial_sector(k, b, eu, 5, false, TANGENT_DEG)?
-            {
+            if faces.len() != 2 || faces.first() == faces.get(1) {
+                continue;
+            }
+            if eu2::is_tangent_sector(k, b, eu, TANGENT_DEG, false, true)? {
+                tangent_rim = true;
+                continue;
+            }
+            if !eu2::is_convex_radial_sector(k, b, eu, 5, false, TANGENT_DEG)? {
                 continue;
             }
             for g in edge::faces(b, e, None)? {
@@ -98,11 +121,15 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
             return Ok(None);
         }
     }
-    Ok(Some(found.into_iter().collect()))
+    Ok(Some(Reached {
+        faces: found.into_iter().collect(),
+        tangent_rim,
+    }))
 }
 
-/// The features of `b`: each set of two or more faces, at most half of them, reached from a
-/// face across convex edges ([`feature_from`]), smallest first, each once.
+/// The features of `b`: each set of faces, at most half of them, reached from a face across
+/// convex edges ([`feature_from`]), smallest first, each once. A single face is one only
+/// where it stands on its neighbours at creases (a dome, not a round).
 fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
     // a measurement copy: it reads the topology and tangency of the body and its faces are
     // only grouped, never built from, so its surfaces' definitions are not needed
@@ -113,13 +140,15 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
         if seen.contains(&f) {
             continue;
         }
-        let Some(faces) = feature_from(k, &mut probe, f)? else {
+        let Some(reached) = feature_from(k, &mut probe, f)? else {
             seen.insert(f);
             continue;
         };
+        let faces = reached.faces;
         seen.extend(faces.iter().copied());
         // a feature is the smaller part: at most half the faces
-        if faces.len() >= 2 && 2 * faces.len() <= b.faces().ids().count() {
+        if 2 * faces.len() <= b.faces().ids().count() && (faces.len() >= 2 || !reached.tangent_rim)
+        {
             found.push(faces);
         }
     }
@@ -133,7 +162,10 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
 /// its axis), since each such feature left on is refused again, and its collapse is refused
 /// only once every face's offset and mitre is built (solidcore#3353: seven Ø4 bosses on a drum
 /// of 120 holes took eight shells, seven of them refused, before the one that builds; now
-/// two); then each other feature on its own, smallest first.
+/// two); then each other feature on its own, smallest first. A feature of a single face
+/// ([`features`]) is taken only where its inset collapses: a dome inset by less than its
+/// radius keeps an offset (the smaller sphere), and what the shell is then is not the hollow
+/// of the body without it.
 fn steps(k: &Kernel, b: &Brep, wall: f64) -> Result<Vec<Vec<Vec<FaceId>>>> {
     let mut collapsing: Vec<Vec<FaceId>> = Vec::new();
     let mut others: Vec<Vec<FaceId>> = Vec::new();
@@ -151,7 +183,7 @@ fn steps(k: &Kernel, b: &Brep, wall: f64) -> Result<Vec<Vec<Vec<FaceId>>>> {
         }
         if collapses {
             collapsing.push(faces);
-        } else {
+        } else if faces.len() >= 2 {
             others.push(faces);
         }
     }
@@ -182,11 +214,40 @@ fn take_off(k: &mut Kernel, b: &Brep, faces: &[FaceId], wall: f64) -> Result<Opt
     };
     base.refresh_cached_topology();
     feature.refresh_cached_topology();
+    remove_cap_rims(k, b, &mut base, faces)?;
     // a feature with room for a cavity is not one the wall fills
     Ok(match shell_wall_room(k, &mut feature, &[], wall)? {
         WallRoom::NotShown => Some((base, feature)),
         _ => None,
     })
+}
+
+/// `base` (`b` with the feature `faces` taken off by [`take_off`]) with the rims of its caps
+/// taken out where a cap and the face beside it lie on one surface, so that face runs on
+/// across the footprint (module docs). A cap is a face of `base` that `b` did not have, or one
+/// whose id was a feature face's. A rim stays where taking it out would grow a tolerance
+/// (`remove_topological_joins`), and `base` stays as it was where the removal is refused.
+///
+/// # Errors
+///
+/// A cancellation, or an unported step, of the removal.
+fn remove_cap_rims(k: &mut Kernel, b: &Brep, base: &mut Brep, faces: &[FaceId]) -> Result<()> {
+    let had: BTreeSet<FaceId> = b.faces().ids().collect();
+    let (caps, supports): (Vec<FaceId>, Vec<FaceId>) = base
+        .faces()
+        .ids()
+        .partition(|f| !had.contains(f) || faces.contains(f));
+    if caps.is_empty() {
+        return Ok(());
+    }
+    let saved = base.snapshot()?;
+    match remove_patch_rims(k, base, &supports, &caps) {
+        Ok(()) => {}
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => base.restore(saved),
+    }
+    base.refresh_cached_topology();
+    Ok(())
 }
 
 /// The shell of `b` (`options`, inward: a negative distance, no faces opened) whose offset

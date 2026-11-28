@@ -61,6 +61,7 @@
 // The range tests are NaN-safe negations (`!(x > y)`), as `sweep::screw`'s.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::blend::fillet_section::interval::{round_up, Ivl};
@@ -279,7 +280,7 @@ impl ScrewMotion {
     /// Rodrigues: `v` turned right-handed about the axis by `a`.
     fn turn(&self, v: Vec3, a: f64) -> Vec3 {
         let k = self.axis;
-        v * a.cos() + k.cross(v) * a.sin() + k * (k.dot(v) * (1.0 - a.cos()))
+        v * det::cos(a) + k.cross(v) * det::sin(a) + k * (k.dot(v) * (1.0 - det::cos(a)))
     }
 
     /// The lift at angle `a`.
@@ -352,7 +353,7 @@ fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
         sum = if n % 2 == 0 { sum + term } else { sum - term };
         power = power * r;
         n += 1;
-        if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+        if (c(n) * power).mag() <= sum.mig() * det::powi(2.0, -64) {
             break;
         }
     }
@@ -511,7 +512,7 @@ impl ProceduralSweep {
             motion: Motion::Screw(motion),
             stations: stations.to_vec(),
             halves: halves.to_vec(),
-            taus: halves.iter().map(|h| (0.5 * h).tan()).collect(),
+            taus: halves.iter().map(|h| det::tan(0.5 * h)).collect(),
             bound: 0.0,
             map: SweepMap::default(),
         };
@@ -626,7 +627,7 @@ impl ProceduralSweep {
         let width = t1 - t0;
         let s = 2.0 * (t - t0) / width - 1.0;
         let x = tau * s;
-        let theta = 0.5 * (t0 + t1) + 2.0 * x.atan();
+        let theta = 0.5 * (t0 + t1) + 2.0 * det::atan(x);
         let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
         (theta, rate)
     }
@@ -880,7 +881,7 @@ impl ProceduralSweep {
                     (lo.min(w), hi.max(w))
                 })
         };
-        let cos_h = self.half_angle().cos();
+        let cos_h = det::cos(self.half_angle());
         let mut dist = 0.0_f64;
         let mut reach = 0.0_f64;
         for &p in &c.control_points {
@@ -1237,7 +1238,7 @@ mod tests {
     fn atan_is_enclosed() {
         for x in [0.0, 1e-9, 0.05, 0.0985, 0.19891, 0.5] {
             let e = atan_point(x);
-            let y = f64::atan(x);
+            let y = det::atan(x);
             assert!(e.lo <= y && y <= e.hi, "{x}: {e:?} misses {y}");
             assert!(e.hi - e.lo <= 1e-13 * y + 1e-290, "{x}: {e:?} is loose");
         }
@@ -1250,9 +1251,9 @@ mod tests {
     #[test]
     fn the_lift_error_bound_is_its_maximum() {
         for half in [MAX_HALF_ANGLE, 0.1, 1e-3] {
-            let tau = (0.5 * half).tan();
-            let k = 2.0 * (1.0 + tau * tau) * tau.atan() / tau;
-            let e = |x: f64| k * x / (1.0 + x * x) - 2.0 * x.atan();
+            let tau = det::tan(0.5 * half);
+            let k = 2.0 * (1.0 + tau * tau) * det::atan(tau) / tau;
+            let e = |x: f64| k * x / (1.0 + x * x) - 2.0 * det::atan(x);
             let bound = lift_error_bound(tau);
             let mut most = 0.0_f64;
             for i in 0..=20_000 {
@@ -1271,7 +1272,7 @@ mod tests {
     #[test]
     fn the_offset_error_bound_holds_and_is_tight() {
         for half in [MAX_HALF_ANGLE, 0.05] {
-            let tau = (0.5 * half).tan();
+            let tau = det::tan(0.5 * half);
             let bound = offset_error_bound(tau);
             let mut most = 0.0_f64;
             for i in 0..=20_000 {
@@ -1348,7 +1349,7 @@ mod tests {
         for (t0, t1, half) in [(0.0_f64, 0.2_f64, 0.1_f64), (0.2, 0.3, 0.05)] {
             let t = t0 + 0.3 * (t1 - t0);
             let s = 2.0 * (t - t0) / (t1 - t0) - 1.0;
-            let want = 0.5 * (t0 + t1) + 2.0 * ((0.5 * half).tan() * s).atan();
+            let want = 0.5 * (t0 + t1) + 2.0 * det::atan(det::tan(0.5 * half) * s);
             assert!((mixed.turn_at(t).0 - want).abs() < 1e-15, "{t}");
         }
         let wide = ProceduralSweep::create(&line, motion.clone(), &[0.0, 0.2], &[0.1]).unwrap();

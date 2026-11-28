@@ -14,6 +14,7 @@
 //! The dot lattices (circles and regular polygons on a hexagonal or square grid of centres)
 //! don't tile, have no lattice lines and never snap.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, FRAC_PI_6, PI, SQRT_2};
 
 use crate::math::Vec2;
@@ -35,12 +36,12 @@ pub const MAX_CELLS: usize = 100_000;
 /// axis-aligned).
 pub(crate) fn regular_polygon(r_in: f64, n: usize) -> Vec<Vec2> {
     let nf = n as f64;
-    let rc = r_in / (PI / nf).cos();
+    let rc = r_in / det::cos(PI / nf);
     let a0 = -PI / 2.0 + PI / nf;
     (0..n)
         .map(|k| {
             let a = a0 + 2.0 * PI * k as f64 / nf;
-            Vec2::new(rc * a.cos(), rc * a.sin())
+            Vec2::new(rc * det::cos(a), rc * det::sin(a))
         })
         .collect()
 }
@@ -54,7 +55,7 @@ pub(crate) fn regular_polygon(r_in: f64, n: usize) -> Vec<Vec2> {
 /// larger than inscribed diameter plus web.
 fn polygon_pitch(poly: &[Vec2], grid: DotGrid, web: f64) -> f64 {
     let width = |angle: f64| {
-        let u = Vec2::new(angle.cos(), angle.sin());
+        let u = Vec2::new(det::cos(angle), det::sin(angle));
         let (lo, hi) = poly.iter().fold((f64::MAX, f64::MIN), |(lo, hi), q| {
             let t = q.dot(u);
             (lo.min(t), hi.max(t))
@@ -179,8 +180,8 @@ impl Lattice {
                 let hex = (0..6)
                     .map(|k| {
                         Vec2::new(
-                            r * (f64::from(k) * FRAC_PI_3).cos(),
-                            r * (f64::from(k) * FRAC_PI_3).sin(),
+                            r * det::cos(f64::from(k) * FRAC_PI_3),
+                            r * det::sin(f64::from(k) * FRAC_PI_3),
                         )
                     })
                     .collect();
@@ -518,7 +519,7 @@ impl Lattice {
     /// The left normal of direction `k * step`.
     pub fn normal(&self, k: usize) -> Vec2 {
         let a = k as f64 * self.step;
-        Vec2::new(-a.sin(), a.cos())
+        Vec2::new(-det::sin(a), det::cos(a))
     }
 
     fn base_family(&self, k: usize) -> Family {

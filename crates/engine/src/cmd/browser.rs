@@ -166,7 +166,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements); \
-         or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or show everything). Saved with the design and undone like any other change (the camera is not)",
+         or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or with none in effect show every body and placement, as folder:bodies does; sketches, construction items and joints stay as they are). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.isolate", "Isolate", crate::checked!("browser.isolate", isolate_selection))
         .icon("body")
@@ -717,7 +717,8 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
 }
 
 /// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
-/// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+/// changed since (locks, sketches, dimensions). With no Isolate in effect, shows every body and
+/// placement (`folder: bodies`), and nothing else (#22707).
 /// Keeps what an Isolate is about to change, with the bodies on screen now, unless an earlier
 /// Isolate is still in effect (#8120).
 fn remember_before_isolate(s: &mut Session) {
@@ -774,8 +775,10 @@ fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     if ["items", "folder", "features", "joints", "paths", "tree_folders", "isolate"].iter().any(|k| p.get(*k).is_some()) {
         return Err(bad(cmd, "unisolate takes no targets"));
     }
+    // Isolate hides bodies and placements only, so with none on record that is what comes back:
+    // not every sketch, construction item and joint the user hid (#22707).
     let Some(before) = s.visibility.before_isolate.take() else {
-        return visibility(s, &json!({ "folder": "all", "visible": true }));
+        return visibility(s, &json!({ "folder": "bodies", "visible": true }));
     };
     s.visibility.hidden_bodies = before.hidden_bodies;
     s.visibility.hidden_occurrences = before.hidden_occurrences;
@@ -2575,9 +2578,18 @@ mod tests {
         assert_eq!(hidden(&s).len(), 2, "undo brings the isolation back");
         assert!(s.visibility.before_isolate.is_some(), "and Unisolate with it");
         run(&mut s, "edit.redo", json!({}));
-        // With no Isolate in effect, Unisolate shows everything.
+        // With no Isolate in effect, Unisolate shows every body, and nothing else (#22707).
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spare"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "browser.visibility", json!({"folder": "sketches", "visible": false}));
+        run(&mut s, "browser.visibility", json!({"folder": "origin", "visible": false}));
+        let (sketches, origin) = (s.visibility.hidden_sketches.clone(), s.visibility.hidden_origin.clone());
+        assert!(!sketches.is_empty() && !origin.is_empty());
         run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
         assert!(hidden(&s).is_empty());
+        assert_eq!(s.visibility.hidden_sketches, sketches, "the hidden sketches stay hidden");
+        assert!(s.visibility.shown_sketches.is_empty(), "and none is marked shown");
+        assert_eq!(s.visibility.hidden_origin, origin, "the origin too");
         assert!(s.execute("browser.visibility", &json!({"visible": false, "unisolate": true})).is_err());
         assert!(s.execute("browser.visibility", &json!({"visible": true, "unisolate": true, "items": ["A"]})).is_err());
     }

@@ -261,18 +261,17 @@ pub const ELEMENTS: &[Element] = &[
     element!("navigation_regular", |ui, _| navigation_sample(ui, NavigationSize::Regular)),
     element!("navigation_compact", |ui, _| navigation_sample(ui, NavigationSize::Compact)),
     element!("navigation_popup", |ui, _| {
-        navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
-            navigation_menu_heading(ui, "Visual style");
-            let mut row = NavigationMenuRow::new("shaded", "Shaded", "style_shaded");
-            row.selected = true;
-            row.show(ui);
-            navigation_menu_separator(ui);
-            NavigationMenuRow::new("fit", "Fit", "fit").show(ui);
-            let mut later = NavigationMenuRow::new("translucent", "Translucent", "style_translucent");
-            later.enabled = false;
-            later.detail = Some("Later");
-            later.show(ui);
-        });
+        let mut shaded = Item::action("shaded", "Shaded", "style_shaded");
+        shaded.checked = Some(true);
+        shaded.radio = true;
+        let rows = [
+            Item::heading("Visual style"),
+            shaded,
+            Item::sep(),
+            Item::action("fit", "Fit", "fit"),
+            Item::action("translucent", "Translucent", "style_translucent").key("Later").on_if(false),
+        ];
+        Menu::items(ui, ui.scope_id().with("navigation_popup"), &rows, false);
     }),
     element!("navigation_settings", |ui, state| {
         settings_section(ui, "gallery_navigation", "Navigation bar", |ui| {
@@ -988,16 +987,9 @@ pub const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preference_specimens", |ui, _| {
-        settings_axis_row(
-            ui,
-            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
-            "Push X",
-            0.6,
-            [0.1, 0.2],
-            |_| {},
-            |_| {},
-            |_| {},
-        );
+        let t = Tokens::get();
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_14), egui::Sense::hover());
+        live_axis_bar_in(ui, rect, 0.6, [0.1, 0.2]);
         settings_mouse_mapping(ui, &[(vec!["Shift".into(), "Middle drag".into()], "Orbit".into())], |_| {});
     }),
     element!("assistant_entry", |ui, _| {
@@ -1248,52 +1240,31 @@ pub const ELEMENTS: &[Element] = &[
         });
     }),
     element!("menu", |ui, _| {
-        Menu::show(ui, 268.0, |ui| {
-            Menu::heading(ui, "Body");
-            MenuItem::new("gallery:normal", "Properties", "measure").show(ui);
-            let mut item = MenuItem::new("gallery:hover", "Hide", "eye");
-            item.highlighted = true;
-            item.shortcut = "H";
-            item.show(ui);
-            item = MenuItem::new("gallery:open", "Appearance", "appearance");
-            item.submenu = true;
-            item.highlighted = true;
-            item.show(ui);
-            item = MenuItem::new("gallery:disabled", "Paste", "paste");
-            item.enabled = false;
-            item.shortcut = "Ctrl+V";
-            item.show(ui);
-            item = MenuItem::new("gallery:checked", "Show Origin", "origin");
-            item.checked = Some(true);
-            item.show(ui);
-            item.checked = Some(false);
-            item.id = "gallery:unchecked";
-            item.show(ui);
-            item = MenuItem::new("gallery:swatch", "Aluminum - Satin", "appearance");
-            item.swatch = Some(Tokens::get().control_border);
-            item.show(ui);
-            Menu::separator(ui);
-            item = MenuItem::new("gallery:danger", "Delete", "delete");
-            item.danger = true;
-            item.shortcut = "Del";
-            item.show(ui);
-        });
+        let [r, g, b, _] = Tokens::get().control_border.to_array();
+        let mut swatch = Item::action("gallery:swatch", "Aluminum - Satin", "appearance");
+        swatch.swatch = Some([r, g, b]);
+        let mut hide = Item::action("gallery:hover", "Hide", "eye").key("H");
+        hide.selected = true;
+        let rows = [
+            Item::heading("Body"),
+            Item::action("gallery:normal", "Properties", "measure"),
+            hide,
+            Item::submenu("gallery:open", "Appearance", "appearance", vec![swatch.clone()]),
+            Item::action("gallery:disabled", "Paste", "paste").key("Ctrl+V").on_if(false),
+            Item::action("gallery:checked", "Show Origin", "origin").checked(true),
+            Item::action("gallery:unchecked", "Show Origin", "origin").checked(false),
+            swatch,
+            Item::sep(),
+            Item::action("gallery:danger", "Delete", "delete").key("Del"),
+        ];
+        Menu::items(ui, ui.scope_id().with("menu"), &rows, false);
     }),
     element!("menu_submenu", |ui, _| {
-        ui.horizontal_top(|ui| {
-            Menu::show(ui, 244.0, |ui| {
-                let mut item = MenuItem::new("parent", "Appearance", "appearance");
-                item.submenu = true;
-                item.highlighted = true;
-                item.show(ui);
-            });
-            Menu::show(ui, 236.0, |ui| {
-                Menu::heading(ui, "Appearance");
-                let mut item = MenuItem::new("look", "Aluminum - Satin", "appearance");
-                item.swatch = Some(Tokens::get().control_border);
-                item.show(ui);
-            });
-        });
+        let [r, g, b, _] = Tokens::get().control_border.to_array();
+        let mut swatch = Item::action("look", "Aluminum - Satin", "appearance");
+        swatch.swatch = Some([r, g, b]);
+        let rows = [Item::submenu("parent", "Appearance", "appearance", vec![Item::heading("Appearance"), swatch])];
+        Menu::items(ui, ui.scope_id().with("menu_submenu"), &rows, false);
     }),
     element!("rename_menu", |ui, s| {
         rename_menu(ui, &mut s.value, &mut false);
@@ -1320,15 +1291,7 @@ pub const ELEMENTS: &[Element] = &[
             Item::action("sample.space_b", "Space B", "placeholder"),
             Item::action("sample.space_c", "Space C", "placeholder").on(false),
         ];
-        let style = |item: &Item| {
-            let (slug, tabs, ramp) = match item.label.as_str() {
-                "Space A" => ("a", Some("Tab A · Tab B"), None),
-                "Space B" => ("b", Some("Tab C"), Some(solidcraft_theme::AccentRamp::Surface)),
-                _ => ("c", None, None),
-            };
-            Some(WorkspaceStyle { slug, description: "A sample workspace", tabs, ramp })
-        };
-        workspace_menu(ui, &WorkspaceMenu { items: &items, style: &style, footer: "Every workspace shows the same sample." }, None, 550.0);
+        Menu::items(ui, ui.scope_id().with("workspace_menu"), &items, false);
     }),
     element!("window", "dialog:footer", Some("dialog:ok"), |ui, _| {
         Window::new(ui.scope_id().with("window"), "settings", "Preferences").content(
@@ -1399,8 +1362,8 @@ pub const ELEMENTS: &[Element] = &[
         color_popover(ui, &mut [204, 208, 214]);
     }),
     element!("report_list", |ui, _| {
-        report_list(ui, "sample", 120.0, |ui| {
-            report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
+        report_list(ui, "sample", 120.0, &[Column::new("Report", 1.0).flex(), Column::new("Actions", 0.0).icon_only()], "", |ui, table| {
+            report_header(ui, table, "sample", "2026-10-18 21:04:12 · Internal error ×3", |ui| {
                 bin_button(ui, "Delete");
             });
             text(ui, "solid.fillet · replayable", Text::MonoNote("sample"));
@@ -1414,9 +1377,34 @@ pub const ELEMENTS: &[Element] = &[
     element!("empty_box", |ui, _| {
         empty_box(ui, "empty", "No crash reports.");
     }),
+    element!("report_card", "dialog:card:gallery_crash", None, |ui, _| {
+        report_card(
+            ui,
+            "gallery_crash",
+            ReportCardSummary {
+                title: "Fillet stopped unexpectedly",
+                subtitle: "24 Nov, 09:30 · replayable",
+                icon: "warning",
+                ink: Tokens::get().form_error,
+            },
+            ReportCardDetails {
+                fields: &[
+                    ("version", "Version", "0.49.0 · abc1234"),
+                    ("command", "Command", "solid.fillet"),
+                    ("system", "System", "Windows · x86_64"),
+                ],
+                code: "index out of bounds\nblends.rs:418",
+            },
+            &mut true,
+            "Copy path",
+            |_, _| {},
+        );
+    }),
     element!("report_header", |ui, _| {
-        report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
-            bin_button(ui, "Delete");
+        report_list(ui, "sample", 120.0, &[Column::new("Report", 1.0).flex(), Column::new("Actions", 0.0).icon_only()], "", |ui, table| {
+            report_header(ui, table, "sample", "2026-10-18 21:04:12 · Internal error ×3", |ui| {
+                bin_button(ui, "Delete");
+            });
         });
     }),
     element!("parameter_import", |ui, _| {
@@ -1482,11 +1470,6 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("table_row_height", |ui, _| {
         ui.allocate_space(vec2(table_row_height(), table_row_height()));
-    }),
-    element!("summary_row", |ui, s| {
-        summary_row(ui, "Rule", "Drives width = 120 mm", &mut s.checked, ContentWidth::button(ui, "Edit"), |ui| {
-            button(ui, "Edit", Button::Normal);
-        });
     }),
     element!("compact_button", |ui, _| {
         compact_button(ui, "▲", "Move up", true, false);
@@ -1657,8 +1640,10 @@ pub const ELEMENTS: &[Element] = &[
         text_lines(ui, "gallery", "Licence\nSecond line");
     }),
     element!("report_divider", "dialog:divider:gallery_report", None, |ui, _| {
-        report_list(ui, "gallery_report", row_height() * 3.0, |ui| {
-            text(ui, "Report message", Text::Report("gallery_report", false));
+        report_list(ui, "gallery_report", row_height() * 3.0, &[Column::new("Report", 1.0).flex()], "", |ui, table| {
+            table.row(ui, "message", false, |row| {
+                row.cell(|ui| text(ui, "Report message", Text::Cell));
+            });
             report_divider(ui, "gallery_report");
         });
     }),
@@ -1770,9 +1755,7 @@ pub const ELEMENTS: &[Element] = &[
         });
     }),
     element!("action_menu", |ui, _| {
-        action_menu(ui, "Actions", |ui| {
-            button(ui, "Add", Button::Normal);
-        });
+        action_menu(ui, "Actions", &[Item::action("add", "Add", "")]);
     }),
     element!("enabled_button", |ui, _| {
         button(ui, "Add", Button::Enabled(true));
@@ -2804,6 +2787,28 @@ fn card_looks_follow_selected_hover_disabled_and_focus() {
 }
 
 #[test]
+fn card_disclosure_keeps_its_body_inside_narrow_ltr_and_rtl_headers() {
+    let ctx = super::test_support::context();
+    for (title, layout) in
+        [("Corner 1", egui::Layout::left_to_right(egui::Align::Center)), ("زاوية 1", egui::Layout::right_to_left(egui::Align::Center))]
+    {
+        super::test_support::frame(&ctx, vec![], |ui| {
+            for width in [0.0, 1.0, 20.0, 240.0] {
+                ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+                    let closed = super::card_section(ui, "closed", title, false, Some("chevron"), |_| true);
+                    let open = super::card_section(ui, "open", title, true, Some("chevron"), |ui| {
+                        assert!(ui.available_width().is_finite());
+                        true
+                    });
+                    assert_eq!(closed, None);
+                    assert_eq!(open, Some(true));
+                });
+            }
+        });
+    }
+}
+
+#[test]
 fn cards_size_to_their_container_and_survive_hostile_sizes() {
     use super::preferences_cards::card_width;
     assert_eq!(card_width(320.0, 4, 10.0), 72.5);
@@ -2980,4 +2985,65 @@ fn preference_widgets_and_figures_board_in_both_themes() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn page_switch_empty_and_stale_selection_are_bounded() {
+    assert_eq!(super::page_switch::selected_index(0, 0), None);
+    assert_eq!(super::page_switch::selected_index(usize::MAX, 2), Some(1));
+    assert_eq!(super::page_switch::selected_index(0, 2), Some(0));
+}
+
+#[test]
+fn page_switch_slide_eases_out_and_finishes_in_140_ms() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    assert_eq!(slide.sample([80.0, 200.0], 1.0, 0.14), [0.0, 80.0]);
+    let halfway = slide.sample([80.0, 200.0], 1.07, 0.14);
+    assert!((halfway[0] - 70.0).abs() < 0.01);
+    assert!((halfway[1] - 185.0).abs() < 0.01);
+    assert_eq!(slide.sample([80.0, 200.0], 1.15, 0.14), [80.0, 200.0]);
+}
+
+#[test]
+fn page_switch_rapid_reversal_starts_at_the_current_position() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    slide.sample([80.0, 200.0], 1.0, 0.14);
+    let moving = slide.sample([80.0, 200.0], 1.04, 0.14);
+    assert_eq!(slide.sample([0.0, 80.0], 1.04, 0.14), moving);
+    assert_eq!(slide.sample([0.0, 80.0], 1.19, 0.14), [0.0, 80.0]);
+}
+
+#[test]
+fn page_switch_reduced_motion_and_invalid_duration_snap() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    for duration in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(slide.sample([80.0, 200.0], 1.02, duration), [80.0, 200.0]);
+        assert_eq!(slide.sample([0.0, 80.0], 1.03, duration), [0.0, 80.0]);
+    }
+}
+
+#[test]
+fn page_switch_honours_the_hosts_zero_animation_duration() {
+    let ctx = super::test_support::context();
+    ctx.global_style_mut(|style| style.animation_time = 0.14);
+    let selected = std::cell::Cell::new(0);
+    let mut draw = |ui: &mut Ui| {
+        let mut value = selected.get();
+        PageSwitch::new("test_pages", &["Named", "Dimensions"])
+            .counts(&[8, 41])
+            .targets(&["test:page:first", "test:page:second"])
+            .show(ui, &mut value);
+        selected.set(value);
+    };
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.0), ..Default::default() }, &mut draw);
+    let original = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    selected.set(1);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.01), ..Default::default() }, &mut draw);
+    assert_eq!(solidcraft_ui_registry::rect_of("page_switch:highlight"), Some(original));
+    ctx.global_style_mut(|style| style.animation_time = 0.0);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.02), ..Default::default() }, &mut draw);
+    let pill = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    let target = solidcraft_ui_registry::rect_of("test:page:second").unwrap();
+    assert_eq!(pill.x_range(), target.x_range());
+    assert!(pill.left() > original.left());
 }
