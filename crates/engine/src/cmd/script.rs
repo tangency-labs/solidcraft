@@ -823,6 +823,7 @@ fn config_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, omitted: &mut V
             Column::Material(body) => json!({"material": body}),
             Column::Appearance(body) => json!({"appearance": body}),
             Column::ComponentAppearance(_) | Column::FaceAppearance(_) => return Err("component or face appearance columns".into()),
+            Column::SuppressFolder(_) => return Err("timeline folder suppression columns".into()),
         };
         out.push(step("config.column", params));
     }

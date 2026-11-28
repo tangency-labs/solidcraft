@@ -65,6 +65,7 @@ impl ConfigTable {
                 Column::Material(name) => maps.bodies.get(name).cloned().map(Column::Material),
                 Column::Appearance(name) => maps.bodies.get(name).cloned().map(Column::Appearance),
                 Column::ComponentAppearance(id) => maps.components.get(id).copied().map(Column::ComponentAppearance),
+                Column::SuppressFolder(_) => None,
                 Column::FaceAppearance(target) => {
                     maps.bodies.get(&target.body).zip(maps.features.get(&target.origin_feature)).map(|(body, origin)| {
                         let mut target = target.clone();

@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONFIGURE_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
         .params(
-        "params?: [parameter names]; features?: [feature names]; materials?: [body names]; appearances?: [body names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
+        "params?: [parameter names]; features?: [feature names]; materials?: [body names]; appearances?: [body names]; folders?: [folder ids or names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
     ),
     CommandSpec::new("config.table", "Display Configuration Table", crate::checked!("config.table", show))
         .at("SOLID", "CONFIGURE")
@@ -39,12 +39,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&TABLE_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
-        .params("→ columns (param:<name> or suppress:<feature>), rows (each with its fixed id), the active row's name and whether the design still matches it"),
+        .params("→ columns (param:<name>, suppress:<feature> or suppress_folder:<folder>), rows (each with its fixed id), the active row's name and whether the design still matches it"),
     CommandSpec::new("config.column", "Configuration Column", crate::checked!("config.column", column))
         .icon("configuration_table")
         .contract(&COLUMN_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
-        .params("param? | feature? | material? | appearance? (target name); delete?: bool"),
+        .params("param? | feature? | material? | appearance? | folder? (target name or folder id); delete?: bool"),
     CommandSpec::new("config.row", "Configuration Row", crate::checked!("config.row", row))
         .icon("configuration_table")
         .contract(&ROW_EDIT_CONTRACT)
@@ -85,8 +85,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("ordered typed rules, rows and active state"),
 ];
 
+fn folder_id(s: &Session, value: &Value, cmd: &str) -> Result<u64> {
+    if let Some(id) = value.as_u64() {
+        return s.doc.timeline_group(id).map(|_| id).ok_or_else(|| bad(cmd, format!("no timeline folder {id}")));
+    }
+    let Some(name) = value.as_str().filter(|n| !n.is_empty()) else {
+        return Err(bad(cmd, "folder name or ID required"));
+    };
+    let matches: Vec<u64> = s.doc.timeline_groups.iter().filter(|g| g.name == name).map(|g| g.id).collect();
+    match matches.as_slice() {
+        [] => Err(bad(cmd, format!("no timeline folder `{name}`"))),
+        [id] => Ok(*id),
+        many => {
+            let ids = many.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+            Err(bad(cmd, format!("several timeline folders are named `{name}` (ids: {ids}); give the folder id")))
+        }
+    }
+}
+
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
-    const TARGETS: &[&str] = &["param", "feature", "material", "appearance", "component_appearance", "face_appearance"];
+    const TARGETS: &[&str] = &["param", "feature", "material", "appearance", "component_appearance", "face_appearance", "folder"];
     if TARGETS.iter().filter(|k| p.get(**k).is_some()).count() != 1 {
         let named = TARGETS.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>();
         let mut message = format!("give exactly one configuration target: {} or {}", named[..named.len() - 1].join(", "), named[named.len() - 1]);
@@ -175,6 +193,10 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
         }
         return Ok(Column::Param(n.to_string()));
     }
+    if let Some(value) = p.get("folder") {
+        let id = folder_id(s, value, cmd)?;
+        return Ok(Column::SuppressFolder(id));
+    }
     let f = str_(p, "feature").ok_or_else(|| bad(cmd, "give `param` or `feature`"))?;
     let id = s.doc.find_feature(f).map(|x| x.id).ok_or_else(|| bad(cmd, format!("no feature `{f}`")))?;
     Ok(Column::Suppress(id))
@@ -216,7 +238,7 @@ fn configure(s: &mut Session, p: &Value) -> Result<Value> {
             add_column(s, c, cmd)?;
         }
     }
-    for (plural, singular) in [("component_appearances", "component_appearance"), ("face_appearances", "face_appearance")] {
+    for (plural, singular) in [("component_appearances", "component_appearance"), ("face_appearances", "face_appearance"), ("folders", "folder")] {
         if let Some(values) = p.get(plural) {
             let values = values
                 .as_array()
@@ -269,6 +291,9 @@ fn table(s: &Session, cmd: &str) -> Result<ConfigTable> {
                         target.body,
                         solidcraft_doc::persistent_name::split_feature(&target.name).map(|(_, role)| role).unwrap_or(&target.name)
                     )
+                }
+                Column::SuppressFolder(id) => {
+                    format!("Suppress Folder: {}", s.doc.timeline_group(*id).map(|g| g.name.clone()).unwrap_or_else(|| id.to_string()))
                 }
                 _ => s.doc.config_key(column),
             };
@@ -386,6 +411,10 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
                         || match c {
                             Column::Param(n) => n == k,
                             Column::Suppress(id) => s.doc.feature(*id).is_some_and(|f| f.name == *k),
+                            Column::SuppressFolder(id) => s
+                                .doc
+                                .timeline_group(*id)
+                                .is_some_and(|g| g.name == *k && s.doc.timeline_groups.iter().filter(|other| other.name == g.name).count() == 1),
                             Column::Material(_) | Column::Appearance(_) | Column::ComponentAppearance(_) | Column::FaceAppearance(_) => false,
                         }
                 })
@@ -415,7 +444,7 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "configuration name already exists"));
     }
     for (column, value) in s.doc.configs.columns.iter().zip(&cells) {
-        if matches!(column, Column::Suppress(_)) {
+        if matches!(column, Column::Suppress(_) | Column::SuppressFolder(_)) {
             solidcraft_doc::config::suppression_cell(value).map_err(|e| bad(cmd, e.to_string()))?;
         }
     }
@@ -606,8 +635,28 @@ pub(crate) struct PutRow {
 pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<PutRow> {
     let failing: BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
     let solved_before = s.solved_sketches();
+    let before_doc = s.doc.clone();
+    let before_state = s.model.state();
     let trace = s.doc_mut().apply_configuration_with_trace(key).map_err(|e| bad(cmd, e.to_string()))?;
-    s.settle_value_edit(&solved_before)?;
+    let joint_solution = s.settle_value_edit_with_joints(&solved_before)?;
+    if let Some(sol) = joint_solution
+        && (!sol.errors.is_empty() || !sol.conflicts.is_empty())
+    {
+        let prior = solidcraft_doc::joints::solve(&before_doc, &before_state);
+        let new_joint_problems: Vec<String> = sol
+            .errors
+            .iter()
+            .filter(|e| !prior.errors.contains(e))
+            .chain(sol.conflicts.iter().filter(|c| !prior.conflicts.contains(c)))
+            .map(|(_, name, why)| format!("{name}: {why}"))
+            .collect();
+        if !new_joint_problems.is_empty() {
+            s.doc = before_doc;
+            s.refresh();
+            let row = s.doc.configs.row(key).map(|r| r.name.as_str()).unwrap_or("");
+            return Err(bad(cmd, format!("configuration `{row}` would break assembly joints: {}", new_joint_problems.join("; "))));
+        }
+    }
     let new_errors = s
         .model
         .results
@@ -694,11 +743,21 @@ fn not_captured(s: &Session) -> Vec<String> {
         _ => &s.saved,
     };
     let columns = &s.doc.configs.columns;
+    let mut captured_features = std::collections::BTreeSet::new();
+    for column in columns {
+        match column {
+            Column::Suppress(id) => {
+                captured_features.insert(*id);
+            }
+            Column::SuppressFolder(gid) => {
+                captured_features.extend(s.doc.timeline_group_contents(*gid).0);
+            }
+            _ => {}
+        }
+    }
     let mut out = Vec::new();
     for feature in &s.doc.features {
-        if !columns.contains(&Column::Suppress(feature.id))
-            && baseline.feature(feature.id).is_some_and(|before| before.suppressed != feature.suppressed)
-        {
+        if !captured_features.contains(&feature.id) && baseline.feature(feature.id).is_some_and(|before| before.suppressed != feature.suppressed) {
             out.push(format!("suppress:{}", feature.name));
         }
     }
@@ -1657,5 +1716,135 @@ mod tests {
         let mut empty = Session::default();
         let err = empty.execute("config.update_from_design", &json!({})).unwrap_err().to_string();
         assert!(err.contains("no configuration is active"), "{err}");
+    }
+
+    #[test]
+    fn suppress_folder_toggles_nested_features_and_joints_per_row() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base", "name": "Base"}));
+        run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Addon", "name": "Addon"}));
+        run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Extra", "name": "Extra"}));
+        run(&mut s, "component.create", json!({"name": "Arm"}));
+        let joint = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Arm", "name": "Hinge"}))["joint"].as_u64().unwrap();
+        let chain = run(&mut s, "timeline.group", json!({"name": "Chain", "features": ["Addon"], "joints": [joint]}))["group"].as_u64().unwrap();
+        let details = run(&mut s, "timeline.group", json!({"name": "Details", "features": ["Extra"], "parent": chain}))["group"].as_u64().unwrap();
+        let _ = details;
+
+        let table = run(&mut s, "config.configure", json!({"folders": ["Chain"]}));
+        assert_eq!(table["columns"], json!(["suppress_folder:Chain"]));
+        assert_eq!(table["targets"][0]["label"], "Suppress Folder: Chain");
+        assert_eq!(table["rows"][0]["values"], json!({"suppress_folder:Chain": "false"}));
+
+        // Manually suppressing a feature inside the configured folder is captured by it
+        // (not reported in not_captured), while Base outside it is reported.
+        let base_id = s.doc.find_feature("Base").unwrap().id;
+        let addon_id = s.doc.find_feature("Addon").unwrap().id;
+        let extra_id = s.doc.find_feature("Extra").unwrap().id;
+        run(&mut s, "timeline.suppress", json!({"feature": addon_id, "suppressed": true}));
+        assert!(!s.doc.configuration_matches());
+        run(&mut s, "timeline.suppress", json!({"feature": base_id, "suppressed": true}));
+        let updated = run(&mut s, "config.update_from_design", json!({"row": "Default"}));
+        assert_eq!(updated["not_captured"], json!(["suppress:Base"]));
+        run(&mut s, "timeline.suppress", json!({"feature": base_id, "suppressed": false}));
+        run(&mut s, "timeline.suppress", json!({"feature": addon_id, "suppressed": false}));
+        run(&mut s, "config.update_from_design", json!({"row": "Default"}));
+        assert!(s.doc.configuration_matches());
+
+        // Switching rows toggles every nested feature and joint together.
+        run(&mut s, "config.row", json!({"name": "NoChain", "values": {"Chain": true}}));
+        run(&mut s, "config.activate", json!({"row": "NoChain"}));
+        assert!(s.doc.feature(addon_id).unwrap().suppressed);
+        assert!(s.doc.feature(extra_id).unwrap().suppressed);
+        assert!(s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap().suppressed);
+        run(&mut s, "config.activate", json!({"row": "Default"}));
+        assert!(!s.doc.feature(addon_id).unwrap().suppressed);
+        assert!(!s.doc.feature(extra_id).unwrap().suppressed);
+        assert!(!s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap().suppressed);
+
+        // Duplicate folder names require numeric id and key by id.
+        let dup = run(&mut s, "timeline.group", json!({"name": "Chain"}))["group"].as_u64().unwrap();
+        let err = s.execute("config.column", &json!({"folder": "Chain"})).unwrap_err().to_string();
+        assert!(err.contains("several timeline folders are named `Chain`"), "{err}");
+        let table = run(&mut s, "config.column", json!({"folder": dup}));
+        assert_eq!(table["columns"], json!([format!("suppress_folder:{chain}"), format!("suppress_folder:{dup}")]));
+    }
+
+    #[test]
+    fn suppress_folder_refuses_new_joint_conflicts_but_allows_existing_conflicts() {
+        use solidcraft_doc::joints::{Joint, JointExprs, JointKind, JointOrigin, Snap};
+        let make_joint = |id: u64, name: &str, a_occ: u64, b_occ: u64, b_origin: [f64; 3], suppressed: bool| Joint {
+            id,
+            name: name.into(),
+            kind: JointKind::Rigid,
+            a: JointOrigin::new(a_occ, Snap::Frame { origin: [0.0, 0.0, 0.0].into(), z: [0.0, 0.0, 1.0].into(), x: None }),
+            b: JointOrigin::new(b_occ, Snap::Frame { origin: b_origin.into(), z: [0.0, 0.0, 1.0].into(), x: None }),
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: false,
+            offset: 0.0,
+            offset_xy: [0.0, 0.0],
+            angle: 0.0,
+            suppressed,
+            exprs: JointExprs::default(),
+            captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
+            constraint: None,
+            dynamics: Vec::new(),
+        };
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10, "name": "ExtraBox"}));
+        let occ_arm = run(&mut s, "component.create", json!({"name": "Arm"}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": "Arm", "name": "OkJoint"}));
+
+        let conflict_id = s.doc_mut().allocate_id().unwrap();
+        let existing_id = s.doc_mut().allocate_id().unwrap();
+        {
+            let doc = s.doc_mut();
+            // Suppressed by default; unsuppressing it conflicts rigidly with OkJoint.
+            doc.assembly.joints.push(make_joint(conflict_id, "ConflictJoint", 0, occ_arm, [25.0, 0.0, 0.0], true));
+            // Already broken in the baseline design (outside any folder).
+            doc.assembly.joints.push(make_joint(existing_id, "ExistingBroken", 999_999, occ_arm, [0.0, 0.0, 0.0], false));
+        }
+        s.refresh();
+
+        let broken = run(&mut s, "timeline.group", json!({"name": "Broken", "joints": [conflict_id]}))["group"].as_u64().unwrap();
+        let extra = run(&mut s, "timeline.group", json!({"name": "Extra", "features": ["ExtraBox"]}))["group"].as_u64().unwrap();
+        run(&mut s, "config.configure", json!({"folders": [broken, extra]}));
+        run(&mut s, "config.row", json!({"name": "EnableConflict", "values": {"Broken": false}}));
+        run(&mut s, "config.row", json!({"name": "ToggleExtra", "values": {"Extra": true}}));
+
+        let err = s.execute("config.activate", &json!({"row": "EnableConflict"})).unwrap_err().to_string();
+        assert!(err.contains("would break assembly joints"), "{err}");
+        assert!(err.contains("ConflictJoint"), "{err}");
+        assert_eq!(s.doc.configs.active.as_deref(), Some("Default"));
+
+        // Existing baseline joint errors do not block switching another folder's row.
+        run(&mut s, "config.activate", json!({"row": "ToggleExtra"}));
+        assert!(s.doc.find_feature("ExtraBox").unwrap().suppressed);
+    }
+
+    #[test]
+    fn suppress_folder_cleans_up_on_ungroup_delete_and_script_omits() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "B1"}));
+        run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10, "name": "B2"}));
+        let f1 = run(&mut s, "timeline.group", json!({"name": "F1", "features": ["B1"]}))["group"].as_u64().unwrap();
+        let f2 = run(&mut s, "timeline.group", json!({"name": "F2", "features": ["B2"]}))["group"].as_u64().unwrap();
+        run(&mut s, "config.configure", json!({"folders": [f1, f2]}));
+        run(&mut s, "config.row", json!({"name": "R2", "values": {"F1": true, "F2": false}}));
+
+        let script = run(&mut s, "timeline.export_script", json!({}));
+        let omitted: Vec<&str> = script["omitted"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(omitted.iter().any(|item| item.contains("folder")), "{omitted:?}");
+
+        run(&mut s, "timeline.ungroup", json!({"group": f1}));
+        assert_eq!(s.doc.configs.columns, vec![super::Column::SuppressFolder(f2)]);
+        assert!(s.doc.configs.rows.iter().all(|r| r.cells.len() == 1));
+
+        run(&mut s, "timeline.delete", json!({"groups": [f2]}));
+        assert!(s.doc.configs.columns.is_empty());
+        assert!(s.doc.configs.rows.iter().all(|r| r.cells.is_empty()));
     }
 }

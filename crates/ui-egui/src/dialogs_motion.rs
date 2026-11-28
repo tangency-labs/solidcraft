@@ -352,7 +352,7 @@ pub fn column_parts(c: &str) -> (&str, &str) {
 /// The value a table cell edit sends: suppress columns take booleans, parameters expressions.
 pub fn cell_value(column: &str, text: &str) -> Value {
     match column_parts(column).0 {
-        "suppress" => match text.trim().to_ascii_lowercase().as_str() {
+        "suppress" | "suppress_folder" => match text.trim().to_ascii_lowercase().as_str() {
             "suppressed" | "true" | "yes" | "1" | "off" => json!(true),
             "unsuppressed" | "false" | "no" | "0" | "on" => json!(false),
             _ => json!(text),
