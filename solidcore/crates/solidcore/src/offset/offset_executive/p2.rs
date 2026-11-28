@@ -1308,7 +1308,11 @@ impl OffsetExecutive {
             // vertex cannot stand for. The difference below takes the input as it is.
             let mut unpinched = if crate::topology::brep::vertex_fans::has_pinched_loop(original)? {
                 let mut copy = original.clone_standing_for_self_keeping_definitions()?;
-                crate::topology::brep::vertex_fans::split_pinched_loops(kernel, &mut copy)?;
+                crate::topology::brep::vertex_fans::split_pinched_loops(
+                    kernel,
+                    &mut copy,
+                    options.offset.distance,
+                )?;
                 Some(copy)
             } else {
                 None

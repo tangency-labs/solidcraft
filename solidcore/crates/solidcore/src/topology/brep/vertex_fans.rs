@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::error::topology::TopologyFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
+use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{
@@ -260,13 +261,22 @@ pub fn join_vertex_fans(b: &mut Brep, survivor: VertexId, other: VertexId) -> Re
 /// at a point: two faces, not one face with two outer loops) or whose orientation the UV curves
 /// do not decide is left as it is.
 ///
+/// A pinch is cut only where the two sectors' offsets by `distance` meet in two points. The
+/// offset of a vertex in a sector is fixed by the normals there of the faces bounding it, so
+/// where the faces across the touch on one side have, at the vertex, the normals of those on
+/// the other (a cylinder's side tangent to a block's side along the line where its rim's
+/// circle touches the block's edge), both sectors' offsets meet in one point and the one
+/// vertex stands for them: such a pinch is left as it is. The normals are compared with their
+/// proved bounds, against the vertex's tolerance over `|distance|`.
+///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; a [`TopologyFailure::Defect`] for a loop use
 /// without mate, face use or vertex uses where the kernel links them, or a mate loop whose
-/// edge uses do not run back along the loop's; those of the UV trim curves and of
+/// edge uses do not run back along the loop's; those of the UV trim curves, of the face
+/// normals at the vertex ([`crate::query::api_queries::face_normal_at_vertex`]) and of
 /// [`split_vertex_by_fans`].
-pub fn split_pinched_loops(k: &Kernel, b: &mut Brep) -> Result<Vec<VertexId>> {
+pub fn split_pinched_loops(k: &Kernel, b: &mut Brep, distance: f64) -> Result<Vec<VertexId>> {
     let mut made = Vec::new();
     for f in crate::topology::brep::p1::faces(b, None)? {
         let Some(fu) = b.face(f)?.faceuse else {
@@ -289,7 +299,9 @@ pub fn split_pinched_loops(k: &Kernel, b: &mut Brep) -> Result<Vec<VertexId>> {
                 ));
             }
             budget -= 1;
-            if cut_pinched_loop(k, b, f, fu, &pinch)? {
+            if sectors_offset_apart(k, b, f, &pinch, distance)?
+                && cut_pinched_loop(k, b, f, fu, &pinch)?
+            {
                 b.refresh_cached_topology();
                 made.extend(split_vertex_by_fans(b, pinch.vertex)?);
                 b.refresh_cached_topology();
@@ -425,6 +437,72 @@ fn link_cycle(b: &mut Brep, cycle: &[EdgeuseId]) -> Result<()> {
         record.cw = Some(previous);
     }
     Ok(())
+}
+
+/// The outward unit normals at `v`, each with its proved bound, of the faces other than `f`
+/// across the first and the last of `edgeuses`, the edge uses of one side of a pinch at `v`.
+fn faces_across(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    v: VertexId,
+    edgeuses: &[EdgeuseId],
+) -> Result<Vec<(Vec3, f64)>> {
+    let mut faces: Vec<FaceId> = Vec::new();
+    for eu in [edgeuses.first(), edgeuses.last()].into_iter().flatten() {
+        let e = eu1::edge(b, *eu)?.ok_or_else(|| pinch_defect("an edge use has no edge"))?;
+        for u in crate::topology::edge::edgeuses(b, e, None, None)? {
+            if let Some(g) = eu1::face(b, u)? {
+                if g != f && !faces.contains(&g) {
+                    faces.push(g);
+                }
+            }
+        }
+    }
+    let mut normals = Vec::new();
+    for g in faces {
+        // the face use on the body's outside: its normal faces the exterior
+        let Some(gu) = crate::topology::face::p2::outer_faceuse(b, g)? else {
+            continue;
+        };
+        let n = crate::query::api_queries::face_normal_at_vertex(k, b, v, g, gu)?;
+        normals.push((n.value, n.bound));
+    }
+    Ok(normals)
+}
+
+/// Whether the two sectors of `pinch` on face `f` have their offsets by `distance` meet in
+/// two points: whether a face across the touch on one side has, at the vertex, a normal no
+/// face across it on the other side has (see [`split_pinched_loops`]).
+fn sectors_offset_apart(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    pinch: &Pinch,
+    distance: f64,
+) -> Result<bool> {
+    let (Some(piece), Some(head), Some(tail)) = (
+        pinch.edgeuses.get(pinch.first..pinch.second),
+        pinch.edgeuses.get(pinch.second..),
+        pinch.edgeuses.get(..pinch.first),
+    ) else {
+        return Err(pinch_defect("a pinch's passes lie outside its loop"));
+    };
+    let rest: Vec<EdgeuseId> = head.iter().chain(tail).copied().collect();
+    let one = faces_across(k, b, f, pinch.vertex, piece)?;
+    let other = faces_across(k, b, f, pinch.vertex, &rest)?;
+    if one.is_empty() || other.is_empty() {
+        return Ok(true);
+    }
+    let tolerance = b.vertex(pinch.vertex)?.tolerance;
+    let reach = distance.abs();
+    // two faces' offsets by `distance` part at the vertex by at most |n_a - n_b| |distance|
+    let same = |a: &(Vec3, f64), c: &(Vec3, f64)| {
+        (a.0 - c.0).length() * reach <= tolerance + (a.1 + c.1) * reach
+    };
+    let covered =
+        |xs: &[(Vec3, f64)], ys: &[(Vec3, f64)]| xs.iter().all(|x| ys.iter().any(|y| same(x, y)));
+    Ok(!(covered(&one, &other) && covered(&other, &one)))
 }
 
 /// Cuts `pinch`'s loop (on face use `fu` of face `f`, and its mate on the other face use) at
