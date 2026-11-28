@@ -2087,8 +2087,8 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let button = rect_of("status:navigation").unwrap();
     assert!(rect_of("status:bar").unwrap().contains_rect(button));
     assert!(button.right() < rect_of("status:units").unwrap().left(), "the mapping sits left of the units");
-    assert_eq!(crate::status_bar::contents(&h.app).navigation, "Fusion");
-    assert!(painted_texts(&h).iter().any(|t| t == "Fusion"));
+    assert_eq!(crate::status_bar::contents(&h.app).navigation, "Middle pan, Shift orbit");
+    assert!(painted_texts(&h).iter().any(|t| t == "Middle pan, Shift orbit"));
     h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
     h.settle();
     assert_eq!(h.app.menu.target, Target::Navigation);
@@ -2096,7 +2096,10 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let menu = crate::context_menu::items(&h.app, &Target::Navigation);
     let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
-    assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
+    assert_eq!(
+        menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(),
+        ["Middle pan, Shift orbit"]
+    );
     let list = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.

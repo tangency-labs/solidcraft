@@ -242,7 +242,7 @@ const fn bind(button: NavButton, keys: NavKeys, mode: NavMode) -> NavBinding {
 /// with all its keys held wins).
 pub struct NavPreset {
     pub id: &'static str,
-    pub label: &'static str,
+    pub label_id: &'static str,
     /// What the mouse does, for the Preferences page.
     pub help: &'static str,
     /// Choosing the preset turns the wheel the other way.
@@ -273,7 +273,7 @@ use NavMode::{Orbit, Pan, Zoom};
 pub const NAV_PRESETS: &[NavPreset] = &[
     NavPreset {
         id: "fusion",
-        label: "Fusion",
+        label_id: "nav.preset.fusion",
         help: "Middle drag pans, Shift+middle orbits, right drag orbits",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -286,7 +286,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     // https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm
     NavPreset {
         id: "right-drag-orbit",
-        label: "Right-drag orbit",
+        label_id: "nav.right-drag-orbit.label",
         help: "Right drag orbits; middle drag or Ctrl/Cmd+right drag pans; wheel zooms",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -298,7 +298,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "solidworks",
-        label: "SolidWorks",
+        label_id: "nav.preset.solidworks",
         help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
         reverse_zoom: true,
         reverse_drag_zoom: false,
@@ -317,7 +317,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
     NavPreset {
         id: "creo",
-        label: "Creo",
+        label_id: "nav.preset.creo",
         help: "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
         reverse_zoom: false,
         reverse_drag_zoom: true,
@@ -328,7 +328,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "nx",
-        label: "NX",
+        label_id: "nav.preset.nx",
         // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
         // pan (the chords, #22063); Shift and Ctrl with the middle drag do the same.
         help: "Middle drag orbits, middle + right drag or Shift+middle pans, middle + left drag or Ctrl+middle zooms; right drag leaves the camera",
@@ -341,7 +341,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "inventor",
-        label: "Inventor",
+        label_id: "nav.preset.inventor",
         help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -357,7 +357,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "alias",
-        label: "Alias",
+        label_id: "nav.preset.alias",
         help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -375,7 +375,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "maya",
-        label: "Maya",
+        label_id: "nav.preset.maya",
         help: "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -391,7 +391,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "blender",
-        label: "Blender",
+        label_id: "nav.preset.blender",
         help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -402,7 +402,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "tinkercad",
-        label: "Tinkercad",
+        label_id: "nav.preset.tinkercad",
         help: "Right drag orbits, middle or Shift+right drag pans",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -413,7 +413,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: OPENSCAD_NAV,
-        label: "OpenSCAD",
+        label_id: "nav.preset.openscad",
         help: "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -430,7 +430,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: "hfss",
-        label: "HFSS",
+        label_id: "nav.preset.hfss",
         help: "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -443,7 +443,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
     },
     NavPreset {
         id: TOUCHPAD_NAV,
-        label: "Touchpad",
+        label_id: "nav.touchpad.label",
         help: "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",
         reverse_zoom: false,
         reverse_drag_zoom: false,
@@ -468,12 +468,7 @@ impl NavPreset {
     }
 
     pub(crate) fn translated_label(&self) -> &str {
-        match self.id {
-            "creo" => solidcraft_ui_text::tr("nav.creo.label"),
-            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.label"),
-            TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
-            _ => solidcraft_ui_text::tr_label(self.label),
-        }
+        solidcraft_ui_text::tr(self.label_id)
     }
 
     pub(crate) fn translated_help(&self) -> &str {
@@ -13375,7 +13370,7 @@ mod tests {
         }
         let output = draw();
         for label in [
-            "Creo",
+            "Zoom per Mitteltaste umkehren",
             solidcraft_ui_text::tr("prefs.gesture_orbit"),
             solidcraft_ui_text::tr("prefs.gesture_pan"),
             solidcraft_ui_text::tr("prefs.gesture_zoom"),

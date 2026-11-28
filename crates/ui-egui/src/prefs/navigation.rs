@@ -126,7 +126,7 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             crate::scenario::publish_target("prefs:maya_horizontal_zoom", axis.rect);
         }
         if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
-            let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.right_drag_orbits.help"));
+            let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.right_drag_orbits.disabled_help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", response.rect);
         }
         let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.drag_keeps_mode.help"));

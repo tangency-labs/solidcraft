@@ -1315,15 +1315,19 @@ mod tests {
     }
 
     /// The mouse mapping picker shows its preset's help through `tr_label`, which the guard above
-    /// can't see: the text sits in a struct field, not in a call. Each one must be the English text
-    /// of its preset's catalog message, or it stays English in every locale.
+    /// can't see: the text sits in a struct field, not in a call. The picker also needs a
+    /// translated label for each preset.
     #[test]
     fn navigation_preset_help_reaches_the_catalog() {
         install();
         let english = Locale::for_language("en");
+        let mut labels = std::collections::BTreeSet::new();
         for preset in crate::prefs::NAV_PRESETS {
             let id = format!("nav.{}.help", preset.id);
             assert_eq!(english.text(&id), preset.help, "{id}");
+            let label = english.text(preset.label_id);
+            assert_ne!(label, preset.label_id, "missing label for {}", preset.id);
+            assert!(labels.insert(label), "duplicate preset label: {label}");
         }
     }
 

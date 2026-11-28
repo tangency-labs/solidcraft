@@ -48,7 +48,7 @@ macro_rules! navigation_preferences {
             /// as before.
             mark_orbit_point: bool = true, PAGE_NAVIGATION => check_tr("nav.mark_orbit_point.label");
             /// Maya Alt+right drag uses horizontal motion; off restores the former vertical zoom.
-            maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.maya_horizontal_zoom.label");
+            maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.zoom_drag_horizontal.label");
             /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
             middle_double_click: String = "home".into(), PAGE_NAVIGATION;
             /// Mouse gestures: a ring of tools on the right button.

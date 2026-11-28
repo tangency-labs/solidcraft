@@ -88,8 +88,8 @@ view.
   selects it (Shift or Ctrl adds), and in a command's dialog it goes to the active selection box.
   Esc or a click elsewhere closes the list. Clicking again on the same spot, with nothing changed
   in between, cycles through visible candidates at that point. The
-  wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
-  preset in Preferences switches to Right-drag orbit, SolidWorks, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
+  wheel zooms at the cursor, the middle button pans, and right-drag orbits freely. Choose another
+  preset in **Preferences › Navigation › Mouse mapping** to change the gestures. On a
   trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
@@ -100,12 +100,12 @@ view.
   the selection. Fingers in the view only move the view, and a finger double-tap on a flat face
   starts a sketch on it. Buttons and panels take finger taps as usual.
   To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
-  With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
+  With the **Middle pan, Shift orbit** preset and two-finger pan enabled, hold **Shift** while scrolling with
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
   to panning, even during the same gesture. Shift does not snap this gesture to standard views;
   orbit gestures do nothing on flat 2D pages. Other presets keep their existing scroll behaviour.
   Shift+middle orbits freely
-  in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
+  in **Middle pan, Shift orbit** and **Middle pan, Ctrl zoom**. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
   (In the web app in Firefox, Shift+right-click opens Firefox's menu instead; see
@@ -120,18 +120,18 @@ view.
   Under it, **Turn around the vertical axis** makes sideways mouse drags spin the model around the
   world's vertical axis instead of the screen's, while up and down drags still tilt over the top
   without a limit. Both default to off for every mouse
-  preset. With SolidWorks navigation, right-click a planar face and choose **Normal to Selection**
-  to use Look At (also Ctrl+8); repeat to flip the side, preserving scale and projection.
+  preset. With **Middle orbit, Shift zoom**, right-click a planar face and choose
+  **Normal to Selection** to use Look At (also Ctrl+8); repeat to flip the side, preserving scale and projection.
 
   **Right drag orbits** (Preferences › Navigation, on by default) is shown where the mouse
   preset orbits on a right drag. Off, a right drag leaves the camera alone and the right button
-  only opens the context menu. Picking the SolidWorks preset turns it off and sets Middle
+  only opens the context menu. Picking **Middle orbit, Shift zoom** turns it off and sets Middle
   double-click to Fit; both can be changed back afterwards.
   Picking **Right-drag orbit** turns **Right drag orbits** on, including after another preset turned it off.
   With this preset, right-drag orbits, middle-drag or Ctrl+right-drag (Cmd also works on macOS)
   pans, and the wheel zooms. **Free orbit** remains a separate preference.
 
-  **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
+  **Mouse gestures** (Preferences › Navigation, off by default) work with **Middle orbit, Shift zoom**
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer
   orbits: hold it and move the pointer 4 pt to open a ring of tools (280 pt inside, 350 pt outside), even
   while a tool is active, and touch a tool's zone to take it. A right-click that does not move still
