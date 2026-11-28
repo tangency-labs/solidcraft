@@ -41,8 +41,9 @@
 //!   Exact boundary contacts flatten as upstream.
 //!   Not upstream: on a surface whose traced UV jets are kept (#17016) upstream's
 //!   fix-up is not made; [`DropPt::keep_boundary_tangents_inside`] instead zeroes only
-//!   the across component of a tangent at an end exactly on the boundary that would put
-//!   the span's inner control point outside the domain (#22816).
+//!   the across component of a tangent at an end on the boundary (within the rounding of
+//!   the domain's coordinates) that would put the span's inner control point outside the
+//!   domain, and puts an end outside it by that rounding on it (#22816).
 //! - **Seam continuation.** A projected point across the seam keeps the same
 //!   seam side when the starting tangent runs along it. A crossing keeps the
 //!   existing 3D approximation bound; along the seam the two sides must be the
@@ -783,16 +784,25 @@ impl DropPt {
     /// jets are kept (`p2::BoundaryPolicy::Preserve`, #17016), made before the span is
     /// tested so that the span stored is the span tested.
     ///
-    /// A span end lying exactly on a boundary line of `uv_domain` (a drop clamped onto
-    /// the boundary, the foot of a curve running along the face's edge) whose UV tangent
-    /// runs along that line but puts the span's inner control point on its side
-    /// (`p1 + d1 h / 3` or `p4 - d2 h / 3`, `h = end.t - start.t`) outside the domain has
-    /// that tangent's component across the line zeroed. On a cubic that starts on the
-    /// line the inner control point is outside exactly when the span leaves the domain
-    /// there, so a kept tangent cannot be proved inside; zeroed, the span starts along
-    /// the line. A tangent whose control point stays inside, an oblique crossing (more
-    /// across the line than along it, see `RUNS_ALONG`) and an end only near the line
-    /// are left as traced. Returns whether a tangent changed.
+    /// A span end on a boundary line of `uv_domain` (a drop clamped onto the boundary, the
+    /// foot of a curve running along the face's edge) whose UV tangent runs along that line
+    /// but puts the span's inner control point on its side (`p1 + d1 h / 3` or
+    /// `p4 - d2 h / 3`, `h = end.t - start.t`) outside the domain has that tangent's
+    /// component across the line zeroed. On a cubic that starts on the line the inner
+    /// control point is outside exactly when the span leaves the domain there, so a kept
+    /// tangent cannot be proved inside; zeroed, the span starts along the line. A tangent
+    /// whose control point stays inside, an oblique crossing (more across the line than
+    /// along it, see `RUNS_ALONG`) and an end farther from the line than rounding are left
+    /// as traced.
+    ///
+    /// An end is on the line when it lies within the rounding of the domain's coordinates,
+    /// [`BOUNDARY_ROUNDING_ULPS`] units in the last place of the axis' largest bound: the
+    /// point solves that find the ends clamp them onto the bound, or converge there within
+    /// that rounding, by an amount that depends on the platform's arithmetic (one ulp inside
+    /// on one, a few outside on another). An end outside the line by that much is put on it,
+    /// the clamp the drop applies to a span's ends where it does not keep them
+    /// ([`super::p2::add_to_curve`]); the domain proof itself stays exact. Returns whether
+    /// an end or a tangent changed.
     pub fn keep_boundary_tangents_inside(&mut self, uv_domain: &Extent2d, end: &mut Self) -> bool {
         let h = end.t - self.t;
         if h.is_nan() || h <= 0.0 {
@@ -800,30 +810,50 @@ impl DropPt {
         }
         let min = uv_domain.min();
         let max = uv_domain.max();
-        let mut changed = false;
         // `sign` 1 for the start (`p1 + d h / 3`), -1 for the end (`p4 - d h / 3`)
-        let mut fix = |p: &mut Self, sign: f64| {
-            let uv = p.uv_pd[0];
-            let d = p.uv_pd[1];
-            let inner_u = uv.x + sign * d.x * h / 3.0;
-            let inner_v = uv.y + sign * d.y * h / 3.0;
+        let fix = |p: &mut Self, sign: f64| {
+            let [uv, d] = p.uv_pd;
             let along_v = d.x.abs() <= RUNS_ALONG * d.y.abs();
             let along_u = d.y.abs() <= RUNS_ALONG * d.x.abs();
-            if along_v && ((uv.x == min.x && inner_u < min.x) || (uv.x == max.x && inner_u > max.x))
-            {
-                p.uv_pd[1].x = 0.0;
-                changed = true;
-            }
-            if along_u && ((uv.y == min.y && inner_v < min.y) || (uv.y == max.y && inner_v > max.y))
-            {
-                p.uv_pd[1].y = 0.0;
-                changed = true;
-            }
+            let (u, du, cu) = settle_on_bound(uv.x, d.x, min.x, max.x, sign * h, along_v);
+            let (v, dv, cv) = settle_on_bound(uv.y, d.y, min.y, max.y, sign * h, along_u);
+            p.uv_pd = [Point2::new(u, v), Vec2::new(du, dv)];
+            cu || cv
         };
-        fix(self, 1.0);
-        fix(end, -1.0);
-        changed
+        let changed = fix(self, 1.0);
+        fix(end, -1.0) || changed
     }
+}
+
+/// How many units in the last place of a domain's largest bound (per axis) a span end may lie
+/// from a bound and still be on it ([`DropPt::keep_boundary_tangents_inside`]): the rounding of
+/// a point solve's last step onto, or clamp to, the bound.
+pub const BOUNDARY_ROUNDING_ULPS: f64 = 4.0;
+
+/// One coordinate `c` of a span end, with its tangent's coordinate `dc`, against the bounds
+/// `lo..hi` of its axis: put on a bound it lies outside by rounding, and its tangent's
+/// coordinate zeroed where the end is on a bound, `along` (the tangent runs along that bound)
+/// and the span's inner control point `c + dc * step / 3` would lie outside it. Returns the
+/// coordinate, the tangent's coordinate and whether either changed.
+fn settle_on_bound(c: f64, dc: f64, lo: f64, hi: f64, step: f64, along: bool) -> (f64, f64, bool) {
+    let rounding = BOUNDARY_ROUNDING_ULPS * f64::EPSILON * lo.abs().max(hi.abs());
+    let on_lo = (c - lo).abs() <= rounding;
+    let on_hi = (c - hi).abs() <= rounding;
+    let c2 = if on_lo && c < lo {
+        lo
+    } else if on_hi && c > hi {
+        hi
+    } else {
+        c
+    };
+    let inner = c2 + dc * step / 3.0;
+    let leaves = (on_lo && inner < lo) || (on_hi && inner > hi);
+    let dc2 = if along && leaves { 0.0 } else { dc };
+    (
+        c2,
+        dc2,
+        c2.to_bits() != c.to_bits() || dc2.to_bits() != dc.to_bits(),
+    )
 }
 
 // ---- span stack ---------------------------------------------------------------------------
@@ -1800,9 +1830,11 @@ mod tests {
 
     /// #22816: the spans of a variable round's drop, both ends clamped onto v = 0 (the
     /// round's tangent edge), whose kept tangents put an inner control point 7e-7 and 2e-16
-    /// outside; zeroed across v = 0 they lie on it. A tangent whose control point stays
-    /// inside, an oblique crossing, an end only near the boundary and a span not in
-    /// increasing parameter are left as traced.
+    /// outside; zeroed across v = 0 they lie on it. The same holds for an end one ulp inside
+    /// the bound (the seam span's, as Windows computes it) and for one outside it by
+    /// rounding, which is put on it. A tangent whose control point stays inside, an oblique
+    /// crossing, an end farther from the boundary than rounding and a span not in increasing
+    /// parameter are left as traced.
     #[test]
     fn a_kept_tangent_that_takes_a_span_out_of_the_domain_at_a_boundary_end_is_zeroed() {
         let d = Extent2d::from_bounds(0.5, 0.0, 1.0, 1.0);
@@ -1854,6 +1886,33 @@ mod tests {
         // an end near the boundary but not on it is not this fix-up's
         let (changed, ..) = span([0.6, 1e-12, 1.0, -1e-4], [0.7, 0.1, 1.0, 0.0], [0.0, 0.1]);
         assert!(!changed);
+        // the drop's span along the round's seam: its end, the corner (1, 0), came out one
+        // ulp inside u = 1 and its tangent took the inner control point to u = 1.0001
+        let one_ulp_in = 1.0 - f64::EPSILON / 2.0;
+        let (changed, a, b) = span(
+            [1.0, 0.124_730_763_878_196_57, 0.0, -0.998_203_770_030_139_6],
+            [
+                one_ulp_in,
+                0.0,
+                -0.002_548_544_537_326_095_8,
+                -0.996_855_994_290_722_5,
+            ],
+            [0.875, 1.0],
+        );
+        assert!(changed);
+        assert_eq!((a.x, b.x), (0.0, 0.0));
+        assert_eq!(b.y, -0.996_855_994_290_722_5);
+        // an end outside v = 0 by rounding is put on it, and its tangent kept inside
+        let mut a = DropPt::new(0.0, None);
+        let mut b = DropPt::new(0.1, None);
+        a.uv_pd = [Point2::new(0.6, -1e-17), Vec2::new(1.0, -1e-4)];
+        b.uv_pd = [Point2::new(0.7, 0.0), Vec2::new(1.0, 0.0)];
+        assert!(a.keep_boundary_tangents_inside(&d, &mut b));
+        assert_eq!(a.uv_pd, [Point2::new(0.6, 0.0), Vec2::new(1.0, 0.0)]);
+        // an end farther outside than rounding is not this fix-up's (the proof refuses it)
+        a.uv_pd = [Point2::new(0.6, -1e-12), Vec2::new(1.0, -1e-4)];
+        assert!(!a.keep_boundary_tangents_inside(&d, &mut b));
+        assert_eq!(a.uv_pd[0].y, -1e-12);
         // the u maximum: the start's tangent leaves across u = 1, the end's stays inside
         let (changed, a, b) = span([1.0, 1.0, 2e-3, -1.0], [1.0, 0.9, 2e-3, -1.0], [0.0, 0.1]);
         assert!(changed);

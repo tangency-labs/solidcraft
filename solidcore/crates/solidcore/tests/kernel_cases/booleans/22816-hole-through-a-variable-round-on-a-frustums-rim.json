@@ -1,10 +1,6 @@
 {
   "area": "booleans",
   "bodies": {
-    "b10": {
-      "keeping_splines": false,
-      "trusted": true
-    },
     "b3": {
       "keeping_splines": false,
       "trusted": true
@@ -217,7 +213,7 @@
     },
     {
       "inputs": [
-        "b10",
+        "b6",
         "b9"
       ],
       "op": "boolean_tagged",
@@ -286,6 +282,6 @@
     "boolean_tagged"
   ],
   "ungraded": [],
-  "what": "a frustum (radii 2 and 1, height 3) with its top rim rounded by a variable radius, 0.14 at (1, 0, 3) rising linearly to 0.28 half way round and back, less a 0.2 mm hole 0.8 deep from the top at (0, -0.85) whose rim runs across the round; the cut failed (\"the traced UV control polygon is not proved inside the surface domain\") while its mirror hole at (0, 0.85) built",
+  "what": "a frustum (radii 2 and 1, height 3) with its top rim rounded by a variable radius, 0.14 at (1, 0, 3) rising linearly to 0.28 half way round and back, less a 0.2 mm hole 0.8 deep from the top at (0, -0.85) whose rim runs across the round. The case replays SolidCraft's traced round and cut from the revolved and extruded records; the cut failed (\"the traced UV control polygon is not proved inside the surface domain\") while its mirror hole at (0, 0.85) built",
   "why_not": []
 }
