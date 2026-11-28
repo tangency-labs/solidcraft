@@ -475,6 +475,7 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
             }
             let selected_id = ui.scope_id().with("plugin-list-selection");
             let mut selected = ui.ctx().data_mut(|data| data.get_temp::<String>(selected_id));
+            let mut picked = false;
             egui::ScrollArea::vertical().id_salt("plugin-list").show_rows(ui, crate::ui_kit::row_height(), rows.len(), |ui, range| {
                 for index in range {
                     if let Some((id, fields)) = rows.get(index) {
@@ -484,19 +485,21 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
                             && let Some(entry) = &spec.on_select
                         {
                             selected = Some(id.clone());
+                            picked = true;
                             actions.push((entry.clone(), event(panel, model::EventKind::Select, &spec.bind, Some(id.clone()), None)));
                         }
                     }
                 }
             });
-            let row = selected.clone();
             ui.ctx().data_mut(|data| {
+                if picked {
+                    data.insert_temp(panel_selection_id(panel), selected.clone());
+                }
                 // Nothing selected stores nothing: an empty row id would have every press of the
                 // panel's buttons refused (#23395).
                 if let Some(selected) = selected {
                     data.insert_temp(selected_id, selected);
                 }
-                data.insert_temp(panel_selection_id(panel), row);
             });
         }
         model::Widget::Form(spec) => form(ui, panel, spec, actions, units),
@@ -526,6 +529,7 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
     let columns: Vec<_> = spec.columns.iter().map(|column| crate::ui_kit::Column::new(&column.label, 1.0).flex()).collect();
     let selected_id = ui.scope_id().with("plugin-selection");
     let mut selected = ui.ctx().data_mut(|data| data.get_temp::<BTreeSet<String>>(selected_id).unwrap_or_default());
+    let mut picked = false;
     crate::ui_kit::table_custom(
         ui,
         &format!("plugin:{}:{}:{}", panel.plugin, panel.panel.id, spec.bind),
@@ -565,6 +569,7 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
                             if spec.select == model::SelectionMode::Single {
                                 selected.clear();
                             }
+                            picked = true;
                             if !selected.insert(row_id.clone()) {
                                 selected.remove(&row_id);
                             }
@@ -585,8 +590,12 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
         Some(selected.iter().cloned().collect::<Vec<_>>().join(","))
     };
     ui.ctx().data_mut(|data| {
+        // A button acts on the table or list picked in last, so only a pick writes this: a table
+        // drawn later, with nothing picked in it, leaves it alone (#23397).
+        if picked {
+            data.insert_temp(panel_selection_id(panel), selection_str);
+        }
         data.insert_temp(selected_id, selected);
-        data.insert_temp(panel_selection_id(panel), selection_str);
     });
 }
 

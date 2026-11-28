@@ -16436,3 +16436,57 @@ fn plugin_panel_button_beside_an_unselected_item_list_sends_no_row() {
         vec![("show".into(), UiEvent { panel: "tools".into(), event: EventKind::Press, path: "show".into(), row: None, value: None })]
     );
 }
+
+/// #23397: a button sends the row picked in the selectable table, however many tables that take
+/// no selection are drawn after it.
+#[test]
+fn plugin_panel_button_sends_the_picked_row_beside_tables_without_selection() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let table = |bind: &str, select| {
+        Widget::Table(TableSpec {
+            bind: bind.into(),
+            row_id: "id".into(),
+            columns: vec![Column { key: "name".into(), label: "Tool".into(), unit: None }],
+            select,
+            on_select: None,
+            on_edit: None,
+        })
+    };
+    panel.panel.layout = Layout {
+        root: 0,
+        nodes: vec![
+            Node { widget: Widget::Group(vec![1, 2, 3, 4]) },
+            Node { widget: Widget::Toolbar(vec![ButtonSpec { label: "Edit".into(), icon: None, entry: "edit".into() }]) },
+            Node { widget: table("/tools", SelectionMode::Single) },
+            Node { widget: table("/notes", SelectionMode::None) },
+            Node { widget: Widget::ItemList(ListSpec { bind: "/warnings".into(), on_select: None }) },
+        ],
+    };
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 600.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        frame(Vec::new());
+        for name in ["button:edit", "row:tool-0", "button:edit"] {
+            let at = crate::scenario::rect_of(&format!("plugin-panel:machining:tools:{name}")).unwrap().center();
+            frame(crate::test_support::pointer(at, true));
+            frame(crate::test_support::pointer(at, false));
+            frame(Vec::new());
+        }
+    }
+    let rows: Vec<_> = actions.iter().map(|(_, event)| event.row.clone()).collect();
+    assert_eq!(rows, vec![None, Some("tool-0".to_owned())], "no row before a pick, the picked one after it");
+}
