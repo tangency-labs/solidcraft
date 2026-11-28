@@ -51,20 +51,26 @@ pub enum Carried {
     },
 }
 
-/// The roots `t` of `a t^2 + 2 b t + c` (a line when `a` vanishes against the others), pushed on
-/// `out`.
+/// The roots `t` of `a t^2 + 2 b t + c`, pushed on `out`. `a` is a product of unit directions, so
+/// it is a pure number and is judged against rounding alone; `b` and `c` carry lengths and are
+/// never compared with it. A vanishing `a` leaves a line.
 fn roots(a: f64, b: f64, c: f64, out: &mut Vec<f64>) {
-    let scale = a.abs().max(b.abs()).max(c.abs()).max(1e-300);
-    if a.abs() <= 1e-12 * scale {
-        if b.abs() > 1e-12 * scale {
+    if a.abs() <= 16.0 * f64::EPSILON {
+        if b != 0.0 {
             out.push(-c / (2.0 * b));
         }
         return;
     }
     let disc = b * b - a * c;
     if disc >= 0.0 {
-        let r = disc.sqrt();
-        out.extend([(-b - r) / a, (-b + r) / a]);
+        // The root of larger size first, the other from the product `c / a` of the two, so
+        // neither is lost to cancellation.
+        let q = -(b + b.signum() * disc.sqrt());
+        if q == 0.0 {
+            out.push(0.0);
+        } else {
+            out.extend([q / a, c / q]);
+        }
     }
 }
 
@@ -86,7 +92,7 @@ pub fn extended_levels(
     match *surface {
         Carried::Plane { point, normal } => {
             let across = n.dot(normal);
-            if across.abs() > 1e-9 {
+            if across != 0.0 {
                 for q in points {
                     out.push((point - *q).dot(normal) / across);
                 }
@@ -213,6 +219,59 @@ mod tests {
             }),
             vec![-5.0, 9.0]
         );
+        // A line far from a sphere centre still gets both of its meetings, and a plane that is
+        // nearly but not exactly along the line is still met.
+        let far = [Vec3 {
+            x: 3.0,
+            y: 0.0,
+            z: 0.0,
+        }];
+        let tall = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 2_000_000.0,
+        };
+        let mut hit = extended_levels(
+            &Carried::Sphere {
+                center: tall,
+                radius: 5.0,
+            },
+            O,
+            X,
+            Y,
+            &far,
+        )
+        .unwrap_or_default();
+        hit.sort_by(f64::total_cmp);
+        assert_eq!(hit.len(), 2);
+        assert!(
+            (hit[0] - 1_999_996.0).abs() < 1e-6 && (hit[1] - 2_000_004.0).abs() < 1e-6,
+            "{hit:?}"
+        );
+        let slant = Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 1e-10,
+        }
+        .unitize()
+        .unwrap_or(X);
+        let met = extended_levels(
+            &Carried::Plane {
+                point: Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                normal: slant,
+            },
+            O,
+            X,
+            Y,
+            &[O],
+        )
+        .unwrap_or_default();
+        assert_eq!(met.len(), 1);
+        assert!((met[0] - 1.0).abs() < 1e-6, "{met:?}");
         // A plane the line runs along has no meeting, and axes that span no plane give none.
         assert!(at(Carried::Plane {
             point: O,
