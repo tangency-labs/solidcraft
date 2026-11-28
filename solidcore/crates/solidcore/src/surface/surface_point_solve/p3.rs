@@ -24,7 +24,11 @@
 //! up to `MAX_GEOMETRY_NESTING` levels, on an ownerless copy with a cache of its own,
 //! as the face's trims play no part), which bounds every candidate by the target, so a
 //! nearer point within it is not lost (#20483); when the tree solve fails as upstream
-//! can (no tree for the surface, a failed evaluation) the drop stands.
+//! can (no tree for the surface, a failed evaluation) the drop stands. Not upstream
+//! (tangency-labs/solidcore#3446): a minimize that converges to a saddle of the distance (a
+//! point off the surface whose Hessian has a negative eigenvalue) goes on from the least
+//! distance along that eigenvalue's direction ([`SurfPtSolveStepper::leave_saddle`]), within
+//! the same 35 steps; upstream reports the saddle as the minimum.
 
 use super::p1::ErrorNormType;
 use super::p2::with_out_of_bounds_enabled_in_place;
@@ -48,6 +52,11 @@ use crate::surface::surface::p1::zone_tol_3d;
 use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
+
+/// The steps of [`SurfPtSolveStepper::leave_saddle`]'s golden-section search: each keeps
+/// the golden ratio's 0.618 of the bracket, and 0.618^80 < 2e-17, so the bracket ends below
+/// the rounding of a parameter as large as the line's length.
+const GOLDEN_STEPS: usize = 80;
 
 /// Whether the iteration's step failed, and its termination reason (`FindNextStep`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +244,119 @@ impl SurfPtSolveStepper<'_> {
             error > -tight
         } else {
             error < tight
+        })
+    }
+
+    /// Not upstream (tangency-labs/solidcore#3446): moves a point the minimize converged to
+    /// off a saddle of the distance and returns whether it moved. The Newton step solves
+    /// for a zero of the distance's gradient, so it converges to a saddle as readily as to a
+    /// minimum (Nocedal and Wright, *Numerical Optimization*, 2nd ed., §3.4); a point off the
+    /// surface where the Hessian of `|S - P|² / 2`,
+    /// `[[Su·Su + g·Suu, Su·Sv + g·Suv], [Su·Sv + g·Suv, Sv·Sv + g·Svv]]` with `g = S - P`,
+    /// has a negative eigenvalue is no minimum, and the distance falls along that
+    /// eigenvalue's eigenvector `e` (a direction of negative curvature: Moré and Sorensen,
+    /// *Math. Programming* 16 (1979) 1–20). The point moves to the least distance along the
+    /// line `uv + s e` in whichever direction is lower (a golden-section search over `s` in
+    /// the domain, and no farther than the 3D reach `|Su e_u + Sv e_v| s` of twice the
+    /// distance, past which no point of the line's tangent is nearer), when that is nearer
+    /// by more than the solve's tight tolerance; the iteration goes on from there. The
+    /// iso-direction tests of [`SurfPtGlobalSolver::is_local_max`] miss such a saddle where
+    /// the surface's parameter lines meet at a small angle and the descent is across them
+    /// (a coil's wall where the profile circle runs almost along the screw motion: its
+    /// partials 3° apart, a saddle 0.0137 from a point on the wall's start station).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the evaluation.
+    pub fn leave_saddle(&mut self, k: &Kernel) -> Result<bool> {
+        let tight = self.base.tight_tol();
+        let distance = self.gap_length()?;
+        if !(distance > tight) {
+            return Ok(false);
+        }
+        let g = self.gap()?;
+        let (su, sv) = (self.su()?, self.sv()?);
+        let (suu, suv, svv) = (self.suu()?, self.suv()?, self.svv()?);
+        let a = su.dot(su) + g.dot(suu);
+        let b = su.dot(sv) + g.dot(suv);
+        let c = sv.dot(sv) + g.dot(svv);
+        // the smaller eigenvalue of [[a, b], [b, c]] and its eigenvector, the longer of the
+        // two rows of the matrix less it, turned a quarter
+        let low = 0.5 * (a + c) - (0.25 * (a - c) * (a - c) + b * b).sqrt();
+        if !(low < 0.0) {
+            return Ok(false);
+        }
+        let (e1, e2) = (Point2::new(b, low - a), Point2::new(low - c, b));
+        let e = if e1.x * e1.x + e1.y * e1.y >= e2.x * e2.x + e2.y * e2.y {
+            e1
+        } else {
+            e2
+        };
+        let len = e.x.hypot(e.y);
+        let reach = (su * (e.x / len) + sv * (e.y / len)).length();
+        if !(len > 0.0 && reach > 0.0) {
+            return Ok(false);
+        }
+        let e = Point2::new(e.x / len, e.y / len);
+        let domain = *self.base.domain();
+        let uv = self.uv();
+        let mut best: Option<(f64, Self)> = None;
+        for sign in [1.0, -1.0] {
+            let d = Point2::new(sign * e.x, sign * e.y);
+            // the line's last parameter in the domain, and within the reach
+            let mut far = 2.0 * distance / reach;
+            for (x, step, lo, hi) in [
+                (uv.x, d.x, domain.min().x, domain.max().x),
+                (uv.y, d.y, domain.min().y, domain.max().y),
+            ] {
+                if step > 0.0 {
+                    far = far.min((hi - x) / step);
+                } else if step < 0.0 {
+                    far = far.min((lo - x) / step);
+                }
+            }
+            if !(far > 0.0) {
+                continue;
+            }
+            let at = |s: f64| Point2::new(uv.x + s * d.x, uv.y + s * d.y);
+            let mut trial = Self::copy_of(k, self);
+            let value = |s: f64, trial: &mut Self| -> Result<f64> {
+                trial.set_uv(domain.clamp_point(at(s)));
+                trial.gap_length()
+            };
+            // golden-section search on [0, far], each step a fixed fraction of the bracket,
+            // until the bracket is below the rounding of its ends
+            let ratio = 0.5 * (5.0_f64.sqrt() - 1.0);
+            let (mut lo, mut hi) = (0.0, far);
+            let mut x1 = hi - ratio * (hi - lo);
+            let mut x2 = lo + ratio * (hi - lo);
+            let mut f1 = value(x1, &mut trial)?;
+            let mut f2 = value(x2, &mut trial)?;
+            for _ in 0..GOLDEN_STEPS {
+                if f1 <= f2 {
+                    hi = x2;
+                    (x2, f2) = (x1, f1);
+                    x1 = hi - ratio * (hi - lo);
+                    f1 = value(x1, &mut trial)?;
+                } else {
+                    lo = x1;
+                    (x1, f1) = (x2, f2);
+                    x2 = lo + ratio * (hi - lo);
+                    f2 = value(x2, &mut trial)?;
+                }
+            }
+            let s = if f1 <= f2 { x1 } else { x2 };
+            let f = value(s, &mut trial)?;
+            if f < distance - tight && best.as_ref().is_none_or(|(b, _)| f < *b) {
+                best = Some((f, trial));
+            }
+        }
+        Ok(match best {
+            Some((_, point)) => {
+                self.assign(&point);
+                true
+            }
+            None => false,
         })
     }
 
@@ -595,8 +717,10 @@ impl Surface {
         *solution.start.param_mut(0)? = guess.x;
         *solution.start.param_mut(1)? = guess.y;
         solution.start.solution_value = curr.gap_length()?;
+        // (a guess at a saddle of a minimize goes on from below it: `leave_saddle`)
         if curr.converged(k, EFF_ZERO / 1000.0)?
             && (!curr.is_singular()?.0 || curr.gap_length()? < tight)
+            && !(op == SolverOperation::Minimize && curr.leave_saddle(k)?)
         {
             return Ok(LocalPointSolve {
                 found: true,
@@ -611,7 +735,18 @@ impl Surface {
         while iterations < 35 {
             let step = next.find_next_step(k, &mut curr)?;
             reason = step.reason;
+            // Not upstream (tangency-labs/solidcore#3446): a minimize converged to a saddle
+            // goes on from below it (`leave_saddle`), the move counted as a step
+            let saddle = |next: &mut SurfPtSolveStepper<'_>| -> Result<bool> {
+                Ok(op == SolverOperation::Minimize && next.leave_saddle(k)?)
+            };
             if next.converged_with(k, true)? {
+                if saddle(&mut next)? {
+                    curr.assign(&next);
+                    iterations += 1;
+                    curr.set_iter_count(iterations);
+                    continue;
+                }
                 reason = Converged;
                 break;
             }
@@ -660,6 +795,9 @@ impl Surface {
                 }
             }
 
+            if !step.failed && reason == Converged && saddle(&mut next)? {
+                reason = StillIterating;
+            }
             if step.failed || reason != StillIterating {
                 break;
             }
