@@ -593,12 +593,39 @@ pub fn cached_view_boundary(s: &Session, drawing: u64, view: u64) -> Option<Aabb
 
 /// Sheet `sheet` of `drawing`, one of `s`'s design's drawings, drawn at once: its border, then each
 /// of its views by id. A view with nothing to measure, or one that can't be drawn, is left out and
-/// says why; the sheet is refused only when it can't be drawn at all.
+/// says why; the sheet is refused only when it can't be drawn at all. This writes nothing to the
+/// provider cache: [`as_shown`] records an automatic drawing's views ([`record_built`]).
 pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
+    Ok(built_sheet(s, drawing, sheet)?.scene)
+}
+
+/// One view [`build`] drew, in the shape [`finish_view`] keeps it.
+struct RecordedView {
+    id: u64,
+    view: DrawnView,
+    drawn: Drawn,
+    shows: Option<Arc<SourceKey>>,
+    /// Its centre annotations, in view-local paper coordinates.
+    marks: Vec<Mark>,
+    /// The dimensions and notes read through its frame, with their lines.
+    records: Vec<Annotation>,
+    lines: Vec<DrawnDimension>,
+}
+
+/// A sheet scene, with what it drew for [`record_built`]: the views that drew and fit it. Nothing to
+/// record when pending moves made it draw a copy of the design, as that copy's world state is not the
+/// one [`standing`] compares.
+struct BuiltSheet {
+    scene: SheetScene,
+    recorded: Vec<RecordedView>,
+}
+
+fn built_sheet(s: &Session, drawing: &Drawing, sheet: u64) -> Result<BuiltSheet> {
     let record = sheet_of(drawing, sheet)?;
     let on = views_on(s, drawing, sheet)?;
     // Where the design places its parts, as the provider draws them.
-    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let from_copy = !s.pending_moves.is_empty();
+    let copy = from_copy.then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
     // Worked out once for the sheet for each state of the assembly its views draw (#13048): every
     // view of that state draws from the same one, and lends the next the bodies it prepared for exact
@@ -610,25 +637,27 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // What each view drew its lines from, kept as it is drawn (the lines themselves aren't): the
     // state of the assembly it draws, and its bodies.
     let mut owners = Vec::new();
-    let drawn = on.iter().map(|(id, view, centre)| {
+    let mut drawn = Vec::with_capacity(on.len());
+    for (id, view, centre) in &on {
         let choice = sessions.choice(view);
-        let drawn = match sessions.drawing(&choice) {
+        let (lines, shows) = match sessions.drawing(&choice) {
             Ok((from, failing)) => {
                 let shown = shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from));
-                draw(from, failing, shown, prepared.entry(choice.clone()).or_default(), *id, view)
+                (draw(from, failing, shown, prepared.entry(choice.clone()).or_default(), *id, view), SourceKey::of(shown))
             }
-            Err(why) => draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view),
+            Err(why) => (draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view), None),
         };
-        owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
-        (*id, *centre, drawn)
-    });
+        owners.extend(lines.owners.clone().map(|of| (*id, choice, of)));
+        drawn.push((*id, *centre, lines, shows));
+    }
     let lettering = Lettering::of(s, drawing);
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
     let (texts, _) = sheet_texts(s, drawing, sheet, &lettering, true);
     let (labels, _) = view_labels(drawing, drawing.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, true);
     let tables = sheet_tables(s, drawing, record, &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
-    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, drawn)?;
+    let mut assembly =
+        assemble(record, drawing.projection, &text, &images, &logos, drawn.iter().map(|(id, centre, lines, _)| (*id, *centre, lines)))?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
     // the session its view drew from.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
@@ -636,6 +665,13 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
     let dimensions = draw_dimensions(s, Some(&mut sessions), drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
+    // Kept for recording through a view the sheet placed only: another's were read without a frame.
+    let mut read: BTreeMap<u64, (Vec<Annotation>, Vec<DrawnDimension>)> = BTreeMap::new();
+    for (record, lines) in wanted.into_iter().zip(dimensions).filter(|(record, _)| frames.contains_key(&record.view())) {
+        let slot = read.entry(record.view()).or_default();
+        slot.0.push(record);
+        slot.1.push(lines);
+    }
     // Construct annotations in view-local paper coordinates, just as the provider does,
     // then translate them once. This keeps one-shot and accepted cached scenes identical.
     let mark_frames = assembly.placed.iter().map(|(id, (frame, _))| (*id, (*frame, Vec2::ZERO))).collect();
@@ -646,6 +682,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
         }
     }
     marks.sort_by_key(|mark| (matches!(mark.kind, ObjectKind::CentreLine), mark.object));
+    let local_marks = marks.clone();
     for mut mark in marks {
         if let (Some(group), Some((_, centre))) = (&mark.group, assembly.placed.get(&mark.view)) {
             mark.group = Some(moved(group, *centre));
@@ -676,15 +713,75 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Each drawn view's bodies with the world state of the session it drew from: a view that draws its
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
-    let drawn = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(&choice)?, of))).collect();
-    Ok(SheetScene { scene, views, objects, dimensions, notes, balloons, tables, tags, annotation_failures, out_of_date, drawn, sketches, fills })
+    let owned = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(&choice)?, of))).collect();
+    // Only a view that drew and fit the scene is as it says: one the sheet left out is not current.
+    let recorded = if from_copy {
+        Vec::new()
+    } else {
+        let drawn_ids: BTreeSet<u64> = views.iter().filter(|view| view.status == Status::Drawn).map(|view| view.view).collect();
+        let resolved: BTreeMap<u64, DrawnView> = on.iter().map(|(id, view, _)| (*id, view.clone())).collect();
+        drawn
+            .into_iter()
+            .filter(|(id, ..)| drawn_ids.contains(id))
+            .filter_map(|(id, _, lines, shows)| {
+                let (records, dims) = read.remove(&id).unwrap_or_default();
+                let marks = local_marks.iter().filter(|mark| mark.view == id).cloned().collect();
+                Some(RecordedView { id, view: resolved.get(&id)?.clone(), drawn: lines, shows, marks, records, lines: dims })
+            })
+            .collect()
+    };
+    let scene = SheetScene {
+        scene,
+        views,
+        objects,
+        dimensions,
+        notes,
+        balloons,
+        tables,
+        tags,
+        annotation_failures,
+        out_of_date,
+        drawn: owned,
+        sketches,
+        fills,
+    };
+    Ok(BuiltSheet { scene, recorded })
+}
+
+/// Keeps what an automatic [`build`] drew in the cache [`standing`] reads, as [`finish_view`] keeps a
+/// view a job drew: its lines, what they show, its centre annotations, and its dimensions and notes.
+/// `drawing.status` stays a read: the views really were drawn from this model, and the sheet page
+/// shows them later without drawing them again. A view the cache already holds as it draws now is left
+/// as it is, so its pictures stay current.
+fn record_built(s: &mut Session, d: &Drawing, recorded: Vec<RecordedView>) {
+    // [`standing`] compares this Arc: without one a kept entry could not be fresh.
+    let Ok(state) = s.world_state() else { return };
+    if recorded.is_empty() {
+        return;
+    }
+    catch_up(s, d, recorded.iter().map(|view| view.id), &state);
+    let (lettering, revision) = (Lettering::of(s, d), s.revision);
+    let cache = &mut s.drawing_scenes;
+    for RecordedView { id, view, drawn, shows, marks, records, lines } in recorded {
+        if !cache.fresh(id, &state, &view) {
+            cache.serial = cache.serial.wrapping_add(1);
+            let serial = cache.serial;
+            let pixels = cache.views.remove(&id).map(|e| e.pixels).unwrap_or_default();
+            cache.views.insert(id, Entry { state: state.clone(), shows, view, drawn, marks, serial, pixels });
+        }
+        let Some(view_serial) = cache.views.get(&id).map(|e| e.serial) else { continue };
+        cache.serial = cache.serial.wrapping_add(1);
+        cache.keep_dimensions(records, lines, &state, view_serial, &lettering, revision);
+    }
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
 /// deferred drawing, what its last [`update`] allows, with what that leaves behind listed.
 pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> {
     if d.updates == Updates::Automatic {
-        return build(s, d, sheet);
+        let built = built_sheet(s, d, sheet)?;
+        record_built(s, d, built.recorded);
+        return Ok(built.scene);
     }
     extract(s, sheet)?;
     settle(s, d);
