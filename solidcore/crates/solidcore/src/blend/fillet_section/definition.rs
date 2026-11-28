@@ -111,7 +111,7 @@ const INLINE: usize = 9;
 /// A [`T2Of`]'s coefficients: in place up to [`INLINE`] of them, else on the heap. Not the
 /// fork's: its series are arrays on the stack; here a series of small orders, the ones a
 /// point evaluation makes thousands of, allocates nothing. Read as a slice either way.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Coefficients<Z> {
     Inline { len: usize, c: [Z; INLINE] },
     Heap(Vec<Z>),
@@ -147,6 +147,13 @@ impl<Z> core::ops::DerefMut for Coefficients<Z> {
             Self::Inline { len, c } => c.get_mut(..*len).unwrap_or(&mut []),
             Self::Heap(v) => v,
         }
+    }
+}
+
+/// Written as the list of coefficients, as the `Vec` it replaced writes them.
+impl<Z: core::fmt::Debug> core::fmt::Debug for Coefficients<Z> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&**self, f)
     }
 }
 
