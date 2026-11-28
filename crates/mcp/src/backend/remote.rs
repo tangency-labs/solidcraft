@@ -14,11 +14,14 @@ use solidcraft_engine::panels::commands::LayoutCatalogue;
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_mcp_server::ProgressReporter;
 
-use super::{Backend, Headless, step_command};
+use super::{Backend, DesignState, Headless, step_command};
 
 /// How long the app may take to answer `mcp.options`: the window answers it within a frame, so a
 /// longer wait means the app is busy and the server asks again on a later call.
 const OPTIONS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long the app may take to answer `document.revision` when observing design changes.
+const REVISION_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long to wait for a request still running (tests shorten them).
 #[cfg(test)]
@@ -331,6 +334,10 @@ impl Backend for Remote {
     fn set_cancel_flag(&mut self, cancel: Option<Arc<AtomicBool>>) {
         self.conn.set_cancel_flag(cancel);
     }
+    fn design_state(&mut self) -> Option<DesignState> {
+        let reply = self.conn.quick("document.revision", Self::scoped(json!({})), REVISION_TIMEOUT).ok()?;
+        DesignState::from_revision_reply(&reply)
+    }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
         // still running (ask again on a later call), and one try with no retry, because a retry
@@ -519,6 +526,13 @@ impl Backend for Auto {
         self.cancel_flag = cancel.clone();
         if let Some(r) = &mut self.remote {
             r.set_cancel_flag(cancel);
+        }
+    }
+    fn design_state(&mut self) -> Option<DesignState> {
+        match (&mut self.remote, &mut self.headless) {
+            (Some(r), _) => r.design_state(),
+            (None, Some(h)) => h.design_state(),
+            (None, None) => None,
         }
     }
     fn notice(&self) -> Option<String> {
