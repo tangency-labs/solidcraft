@@ -871,6 +871,7 @@ impl Surface {
 mod tests {
     use super::*;
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::{CPoint, NOW};
 
     /// tangency-labs/solidcore#3446: the saddle `z = 2 x y` over `[-1, 1]²` (an exact
     /// twisted bilinear patch, `S(u, v) = (2u - 1, 2v - 1, 2 (2u - 1)(2v - 1))`) and the
@@ -926,5 +927,112 @@ mod tests {
                 "shift {shift}: ({u}, {v})"
             );
         }
+    }
+
+    /// The minimize from `guess` to `point` on the polynomial patch of Bézier control net
+    /// `net` (rows along `u`) and knots `u`, `v` over `domain`: the distance and parameters.
+    fn minimize_on_patch(
+        net: &[Vec<CPoint>],
+        (u, v): (&[f64], &[f64]),
+        domain: Extent2d,
+        point: Point3,
+        guess: Point2,
+    ) -> (bool, f64, f64, f64) {
+        let k = Kernel::default();
+        let (n, m) = (net.len() - 1, net[0].len() - 1);
+        let s = Surface::from(
+            BSplineSurface::from_data(n, m, n, m, u.len() - 1, v.len() - 1, net, u, v).unwrap(),
+        );
+        let r = s
+            .local_point_solve_1::<()>(&k, &domain, SolverOperation::Minimize, point, guess, None)
+            .unwrap();
+        (
+            r.found,
+            r.solution.start.solution_value,
+            r.solution.start.param(0).unwrap(),
+            r.solution.start.param(1).unwrap(),
+        )
+    }
+
+    /// tangency-labs/solidcore#3446: a minimize started at a maximum of the distance whose
+    /// Hessian is a multiple of the identity, where every direction is an eigenvector. The
+    /// paraboloid `S(u, v) = (u, v, u² + v²)` over `[-1, 1]²` (Bézier net: `x` and `y` at
+    /// -1, 0, 1, the `z` of each of `u²`, `v²` at 1, -1, 1), the point `P = (0, 0, 1)` and the
+    /// guess `(0, 0)`: there `g = S - P = (0, 0, -1)`, the gradient vanishes and the Hessian
+    /// of `|S - P|² / 2` is `[[1 - 2, 0], [0, 1 - 2]]`. With `w = u² + v²`, `|S - P|² =
+    /// w + (w - 1)²` is 1 at the guess and least at `w = 1/2`, `√3 / 2` away. Bounds as in
+    /// the saddle test above.
+    #[test]
+    fn a_minimize_started_at_a_round_maximum_goes_on_to_the_nearest_point() {
+        let line = [-1.0, 0.0, 1.0];
+        let square = [1.0, -1.0, 1.0];
+        let net: Vec<Vec<CPoint>> = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| CPoint::new(line[i], line[j], square[i] + square[j], NOW))
+                    .collect()
+            })
+            .collect();
+        let knots = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+        let point = Point3::new(0.0, 0.0, 1.0);
+        let (found, d, u, v) = minimize_on_patch(
+            &net,
+            (&knots, &knots),
+            Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0),
+            point,
+            Point2::new(0.0, 0.0),
+        );
+        let bound = 1000.0 * EFF_ZERO * (1.0 + point.max_dimension());
+        assert!(found);
+        assert!((d - 0.75_f64.sqrt()).abs() < bound, "{d} at ({u}, {v})");
+        assert!((u * u + v * v - 0.5).abs() < bound, "({u}, {v})");
+    }
+
+    /// tangency-labs/solidcore#3446: a saddle whose distance falls along the descent
+    /// direction only close to it and rises beyond, so a golden-section search over the
+    /// whole window drops the fall. The patch `S(u, v) = (u, v, 150 u² - 100 u⁴)` over
+    /// `[-2, 2] × [-1, 1]` (Bézier net along `u`: `x` at -2, -1, 0, 1, 2, `z` at -1000, 1600,
+    /// -1800, 1600, -1000; linear along `v`), the point `P = (0, 0, 1)` and the guess
+    /// `(0, 0)`: the Hessian of `|S - P|² / 2` there is `[[1 - 300, 0], [0, 1]]`, and the
+    /// window along `u` is the whole `[0, 2]`, where the distance at 0.764 and 1.236 (the
+    /// search's first two points) is over 5. The nearest points are on `v = 0`, where
+    /// `|S - P|² = u² + (150 u² - 100 u⁴ - 1)²` is stationary when
+    /// `1 + (150 w - 100 w² - 1)(300 - 400 w) = 0` (`w = u²`); its root below 0.01 (bisected
+    /// to 50 digits) is `u = ±0.0816941811425684873`, 0.0817633827650059730 away (the
+    /// other stationary points, near `|u| = 1.22`, are farther than 1). Bounds as in the
+    /// saddle test above.
+    #[test]
+    fn a_saddle_left_finds_a_fall_close_to_it() {
+        let x = [-2.0, -1.0, 0.0, 1.0, 2.0];
+        let z = [-1000.0, 1600.0, -1800.0, 1600.0, -1000.0];
+        let net: Vec<Vec<CPoint>> = (0..5)
+            .map(|i| {
+                [-1.0, 1.0]
+                    .iter()
+                    .map(|&y| CPoint::new(x[i], y, z[i], NOW))
+                    .collect()
+            })
+            .collect();
+        let point = Point3::new(0.0, 0.0, 1.0);
+        let (found, d, u, v) = minimize_on_patch(
+            &net,
+            (
+                &[-2.0, -2.0, -2.0, -2.0, -2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+                &[-1.0, -1.0, 1.0, 1.0],
+            ),
+            Extent2d::from_bounds(-2.0, -1.0, 2.0, 1.0),
+            point,
+            Point2::new(0.0, 0.0),
+        );
+        let bound = 1000.0 * EFF_ZERO * (1.0 + point.max_dimension());
+        assert!(found);
+        assert!(
+            (d - 0.081_763_382_765_005_973).abs() < bound,
+            "{d} at ({u}, {v})"
+        );
+        assert!(
+            (u.abs() - 0.081_694_181_142_568_487).abs() < bound && v.abs() < bound,
+            "({u}, {v})"
+        );
     }
 }
