@@ -31,6 +31,7 @@ pub(crate) const KIT_COMPONENTS: &[&str] = &[
     "nav_bar_layout.rs",
     "nav_bar_tests.rs",
     "navigation_bar.rs",
+    "panel_runtime",
     "prefs_window.rs",
     "prefs_window_tests.rs",
     "ribbon.rs",
@@ -78,7 +79,10 @@ pub(crate) fn guard_file(name: &str) -> std::path::PathBuf {
         return kit_src().join(if kit == "mod.rs" { "lib.rs" } else { kit });
     }
     if KIT_COMPONENTS.iter().any(|component| name.starts_with(component)) {
-        return kit_src().join(name);
+        let kit_path = kit_src().join(name);
+        if kit_path.exists() {
+            return kit_path;
+        }
     }
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)
 }
@@ -163,4 +167,22 @@ pub(crate) fn is_two_colour(id: &str) -> bool {
 pub(crate) fn tab_fixture(base: &str) -> crate::theme_files::ThemeFile {
     let catalog: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-tabs.json")).unwrap();
     crate::theme_files::from_value(&catalog[base]).unwrap()
+}
+
+/// What lights up with the pointer at `p` ([`crate::viewport::follow_pointer_without_frame`]
+/// compares it).
+pub(crate) fn lit(h: &Harness, p: egui::Pos2) -> String {
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("the viewport was laid out"));
+    crate::viewport::hover_drawn(&crate::viewport::candidate(&h.app, &crate::viewport::pick(&h.app, &proj, p)).map(|(hit, _)| hit))
+}
+
+/// Points around `at`, from 10 to 160 screen points away, that light up what `at` does and that
+/// `skip` leaves.
+pub(crate) fn lit_alike_around(h: &Harness, at: egui::Pos2, skip: impl Fn(egui::Pos2) -> bool) -> Vec<egui::Pos2> {
+    let want = lit(h, at);
+    (10..=160)
+        .step_by(6)
+        .flat_map(|r| (0..24).map(move |k| at + egui::Vec2::angled(k as f32 * std::f32::consts::TAU / 24.0) * r as f32))
+        .filter(|p| !skip(*p) && lit(h, *p) == want)
+        .collect()
 }

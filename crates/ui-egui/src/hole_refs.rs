@@ -158,20 +158,16 @@ fn edges(d: &Dialog) -> [Option<Vec3>; 2] {
     })
 }
 
-/// A point `[x, y, z]` of a dialog's stored parameters.
-fn vec3(v: &Value) -> Option<Vec3> {
-    let a = v.as_array()?;
-    let c = |i: usize| a.get(i).and_then(Value::as_f64).filter(|x| x.is_finite());
-    (a.len() == 3).then(|| Some(Vec3::new(c(0)?, c(1)?, c(2)?))).flatten()
-}
-
 /// The way the hole drills at `at`: as it was made (editing), else into the face there. A
 /// cylinder's: into the face it stands on, against its axis.
 fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
+    d.extra
+        .get("direction")
+        .and_then(|v| crate::dialogs::axis_now(s, v))
+        .or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found
@@ -397,7 +393,9 @@ pub(crate) fn params(d: &Dialog) -> Vec<Value> {
         .iter()
         .enumerate()
         .filter_map(|(k, e)| {
-            let distance = model_text(refs, k)?;
+            // An edge with no distance (a circular edge has no line to measure from) places
+            // nothing; sending its empty box would make the command refuse the whole hole.
+            let distance = model_text(refs, k).filter(|t| !t.trim().is_empty())?;
             e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))
         })
         .collect()

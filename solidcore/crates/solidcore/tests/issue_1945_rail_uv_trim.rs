@@ -166,14 +166,12 @@ const TOP: [Point3; 2] = [
     Point3::new(14.25957, -15.0, 10.48333),
 ];
 
-/// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`, so
+/// SolidCraft's fixes: every `UpstreamFixes` field on, so
 /// both rounds are built by the blend corner, the construction kept since WR-641's `fillet_through_extended_rail_end` was removed (#2500).
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     k
 }
@@ -332,7 +330,7 @@ fn bracket() -> (f64, f64) {
 ///
 /// Without WR-641's flag this failed under SolidCraft's fixes (#2500), 1001
 /// `CalcFilletIntSideFace` at the End on the boss: the trace's extension before the End's
-/// section, on the torus's offset extended round its tube (`offset_extension_as_itself`), ran
+/// section, on the torus's offset extended round its tube (WR-633), ran
 /// round the offsets' closed oval past its own span (the end-point and loop checks compare UV,
 /// which the wrapped extension does not repeat), the fillet surface covered that span twice,
 /// and the End's rail ends dropped onto the second sheet. The extension now stops where it

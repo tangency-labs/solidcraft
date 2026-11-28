@@ -19,6 +19,8 @@ fn slot(index: usize, id: &'static str, kind: NavigationKind, x: f32) -> SlotVie
         show_text: false,
         rect: Rect::from_min_size(pos2(x, 304.0), vec2(26.0, 26.0)),
         alias: None,
+        dot: false,
+        context: Vec::new(),
     }
 }
 
@@ -46,7 +48,7 @@ fn menu(id: &str) -> Menu {
         "styles" => Menu { entries: vec![MenuEntry::Row(MenuRow::new("wire", "Wire", "", "test:wire"))], close_on_pick: true },
         "view" => {
             let mut preset = MenuRow::new("preset", "Preset", "", "test:preset");
-            preset.submenu = vec![MenuRow::new("fast", "Fast", "", "test:fast")];
+            preset.submenu = vec![MenuEntry::Row(MenuRow::new("fast", "Fast", "", "test:fast"))];
             Menu {
                 entries: vec![
                     MenuEntry::Heading("Show".into()),

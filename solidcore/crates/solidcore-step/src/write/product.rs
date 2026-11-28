@@ -2,10 +2,13 @@
 //!
 //! Each body's record is written as it is, the exact B-rep, by
 //! [`topology`]: its material regions as solids, its open shells as a
-//! surface model. Around it this writes one header and context, a product per part with its
-//! shape representation, named solids, surface and face colours, and assemblies as
+//! surface model. Around it this writes one header, a representation context that states the
+//! loosest body's accuracy (and one for each finer accuracy, which the bodies that have it are
+//! written in), a product per part with its shape representation, named solids, surface and
+//! face colours, and assemblies as
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
-//! CAx-IF recommends and our reader follows). Identical geometric entities (points, directions,
+//! CAx-IF recommends and our reader follows), and each body's presentation layer as a
+//! `PRESENTATION_LAYER_ASSIGNMENT` of its solids and surface model. Identical geometric entities (points, directions,
 //! placements, curves, surfaces) are written once and referenced; ids are dense from `#1`.
 //!
 //! [`products`] writes products and assemblies, [`bodies`] the bodies of one part, and
@@ -47,6 +50,9 @@ pub struct ExportBody<'a> {
     /// Faces with colours of their own: an index into the record's faces (one out of range is
     /// refused, [`ExportError::Face`]) and its colour.
     pub faces: Vec<(usize, Colour)>,
+    /// The presentation layer the body is on, empty for none: bodies with the same layer name,
+    /// in any product, are assigned to one `PRESENTATION_LAYER_ASSIGNMENT` named so.
+    pub layer: String,
 }
 
 /// A part or assembly: its own bodies and placed child products.
@@ -250,18 +256,10 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
             return Err(ExportError::Face { name: b.name.clone(), face, faces });
         }
     }
-    // The context states the models' accuracy: the loosest tolerance of their records, edges
-    // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
-    // intersection curve fitted within its tolerance) is only as good as the file says (#11997).
-    let uncertainty = reached
-        .iter()
-        .flat_map(|(_, p)| &p.bodies)
-        .flat_map(|b| {
-            let r = b.record;
-            std::iter::once(r.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).chain(r.vertices.iter().map(|v| v.tolerance))
-        })
-        .filter(|t| t.is_finite())
-        .fold(MIN_UNCERTAINTY, f64::max);
+    // The file's context states the loosest accuracy of the bodies ([`accuracy`]); a body whose
+    // own accuracy is finer has a context of its own stating it, so a reader takes each body as
+    // good as it is and not as good as the loosest body beside it.
+    let uncertainty = reached.iter().flat_map(|(_, p)| &p.bodies).map(|b| accuracy(b.record)).fold(MIN_UNCERTAINTY, f64::max);
 
     let mut w = Writer::new();
     let app = w.add_distinct("APPLICATION_CONTEXT", &[s("managed model based 3d engineering")]);
@@ -286,16 +284,10 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
         ("SI_UNIT", vec![Param::Null, Param::Enum("STERADIAN".into())]),
         ("SOLID_ANGLE_UNIT", vec![]),
     ]);
-    let unc = w.add_distinct(
-        "UNCERTAINTY_MEASURE_WITH_UNIT",
-        &[Param::Typed("LENGTH_MEASURE".into(), vec![Param::Real(uncertainty)]), r(mm), s("distance_accuracy_value"), s("confusion accuracy")],
-    );
-    let ctx = w.add_complex(&[
-        ("GEOMETRIC_REPRESENTATION_CONTEXT", vec![Param::Int(3)]),
-        ("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", vec![refs(&[unc])]),
-        ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
-        ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
-    ]);
+    let units = [mm, rad, sr];
+    let ctx = context(&mut w, units, uncertainty, 1);
+    // The contexts of bodies finer than the file's, by their accuracy's bits.
+    let mut finer: Vec<(u64, u64)> = Vec::new();
     let origin =
         GeomWriter::new(&mut w).placement(&crate::geom::Placement { origin: [0.0; 3], axis: [0.0, 0.0, 1.0], ref_direction: [1.0, 0.0, 0.0] });
 
@@ -317,6 +309,8 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
     let mut shape_rep = vec![0u64; products.len()];
     let mut product_ids = Vec::new();
     let mut styled = Vec::new();
+    // Layers by name, in the order they are first met, with the items assigned to each.
+    let mut layers: Vec<(&str, Vec<u64>)> = Vec::new();
     let mut face_ids: Vec<Vec<Vec<u64>>> = products.iter().map(|_| Vec::new()).collect();
     for &(pi, p) in &reached {
         let name = product_name(p);
@@ -335,7 +329,13 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
         if let Some(slot) = shape_rep.get_mut(pi) {
             *slot = srep;
         }
-        let (mut solids, mut sheets) = (Vec::new(), Vec::new());
+        // The product's solids and its sheets, each in runs of bodies that come one after another
+        // and share the context that states their accuracy. SolidCraft's reader meets a product's
+        // linked representations last written first, and a file with one context gave it every
+        // sheet, then every solid, each in body order: the runs are written in the reverse of
+        // that, so it meets the bodies in the same order (a link update keeps body names by
+        // position), and a file whose bodies are all as accurate is written as it was.
+        let (mut solid_runs, mut sheet_runs): (Vec<(u64, Vec<u64>)>, Vec<(u64, Vec<u64>)>) = (Vec::new(), Vec::new());
         let mut product_faces = Vec::new();
         for b in &p.bodies {
             let before = w.non_finite();
@@ -350,6 +350,13 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
                     styled.push(style(&mut w, *item, c));
                 }
             }
+            let layer = b.layer.trim();
+            if !layer.is_empty() && !items.is_empty() {
+                match layers.iter_mut().find(|(name, _)| *name == layer) {
+                    Some((_, assigned)) => assigned.extend(&items),
+                    None => layers.push((layer, items.clone())),
+                }
+            }
             // Faces with colours of their own.
             for (index, c) in &b.faces {
                 if let Some(&face) = written.faces.get(*index).filter(|id| **id != 0) {
@@ -357,17 +364,36 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
                 }
             }
             product_faces.push(written.faces);
-            solids.extend(written.solids);
-            sheets.extend(written.sheets);
+            let own = accuracy(b.record);
+            let body_ctx = if own < uncertainty {
+                match finer.iter().find(|(bits, _)| *bits == own.to_bits()) {
+                    Some(&(_, c)) => c,
+                    None => {
+                        let c = context(&mut w, units, own, finer.len() + 2);
+                        finer.push((own.to_bits(), c));
+                        c
+                    }
+                }
+            } else {
+                ctx
+            };
+            for (runs, items) in [(&mut solid_runs, written.solids), (&mut sheet_runs, written.sheets.into_iter().collect())] {
+                if items.is_empty() {
+                    continue;
+                }
+                match runs.last_mut().filter(|(c, _)| *c == body_ctx) {
+                    Some((_, list)) => list.extend(items),
+                    None => runs.push((body_ctx, items)),
+                }
+            }
         }
         if let Some(slot) = face_ids.get_mut(pi) {
             *slot = product_faces;
         }
-        for (kind, list) in [("ADVANCED_BREP_SHAPE_REPRESENTATION", solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", sheets)] {
-            if list.is_empty() {
-                continue;
-            }
-            let rep = w.add_distinct(kind, &[s(&name), refs(&[list, vec![origin]].concat()), r(ctx)]);
+        let solids = solid_runs.into_iter().rev().map(|run| ("ADVANCED_BREP_SHAPE_REPRESENTATION", run));
+        let sheets = sheet_runs.into_iter().rev().map(|run| ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", run));
+        for (kind, (body_ctx, list)) in solids.chain(sheets) {
+            let rep = w.add_distinct(kind, &[s(&name), refs(&[list, vec![origin]].concat()), r(body_ctx)]);
             w.add_distinct("SHAPE_REPRESENTATION_RELATIONSHIP", &[s(""), s(""), r(srep), r(rep)]);
         }
     }
@@ -401,6 +427,9 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
     if !styled.is_empty() {
         w.add_distinct("MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION", &[s(""), refs(&styled), r(ctx)]);
     }
+    for (name, assigned) in &layers {
+        w.add_distinct("PRESENTATION_LAYER_ASSIGNMENT", &[s(name), s(""), refs(assigned)]);
+    }
 
     let mut text = String::new();
     text.push_str("ISO-10303-21;\nHEADER;\n");
@@ -419,6 +448,32 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
     text.push_str(&w.data());
     text.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
     Ok(Exported { text, face_ids })
+}
+
+/// A body's accuracy: the loosest tolerance of its record, edges and vertices, at least
+/// [`MIN_UNCERTAINTY`]. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
+/// intersection curve fitted within its tolerance) is only as good as its context says (#11997).
+fn accuracy(r: &Brep) -> f64 {
+    std::iter::once(r.tolerance)
+        .chain(r.edges.iter().map(|e| e.tolerance))
+        .chain(r.vertices.iter().map(|v| v.tolerance))
+        .filter(|t| t.is_finite())
+        .fold(MIN_UNCERTAINTY, f64::max)
+}
+
+/// A geometric representation context `Context #number` in millimetres, radians and steradians
+/// (`units`) that states `uncertainty` mm as its distance accuracy.
+fn context(w: &mut Writer, units: [u64; 3], uncertainty: f64, number: usize) -> u64 {
+    let unc = w.add_distinct(
+        "UNCERTAINTY_MEASURE_WITH_UNIT",
+        &[Param::Typed("LENGTH_MEASURE".into(), vec![Param::Real(uncertainty)]), r(units[0]), s("distance_accuracy_value"), s("confusion accuracy")],
+    );
+    w.add_complex(&[
+        ("GEOMETRIC_REPRESENTATION_CONTEXT", vec![Param::Int(3)]),
+        ("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", vec![refs(&[unc])]),
+        ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&units)]),
+        ("REPRESENTATION_CONTEXT", vec![s(&format!("Context #{number}")), s("3D Context with UNIT and UNCERTAINTY")]),
+    ])
 }
 
 /// A product's name as written: `Part` when it is blank.
@@ -546,7 +601,7 @@ pub fn solidcore_bodies(named: &[(&str, &solidcore_ops::Body)], header: &Header)
     let list = named
         .iter()
         .zip(&records)
-        .map(|((name, _), record)| ExportBody { name: (*name).to_string(), record, color: None, faces: Vec::new() })
+        .map(|((name, _), record)| ExportBody { name: (*name).to_string(), record, color: None, faces: Vec::new(), layer: String::new() })
         .collect();
     bodies(list, header)
 }
@@ -596,7 +651,7 @@ mod tests {
         let (record, _) = bx.to_record().unwrap();
         let part = ExportProduct {
             name: "Part".into(),
-            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new(), layer: String::new() }],
             children: vec![],
         };
         let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![(1, m, String::new())] };
@@ -648,7 +703,7 @@ mod tests {
         let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![] };
         let stray = ExportProduct {
             name: "Stray".into(),
-            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new(), layer: String::new() }],
             children: vec![],
         };
         let list = [root, stray];
@@ -685,7 +740,44 @@ mod tests {
         solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().to_record().unwrap().0
     }
     fn body<'a>(name: &str, record: &'a Brep) -> ExportBody<'a> {
-        ExportBody { name: name.into(), record, color: None, faces: Vec::new() }
+        ExportBody { name: name.into(), record, color: None, faces: Vec::new(), layer: String::new() }
+    }
+
+    /// Each layer is one `PRESENTATION_LAYER_ASSIGNMENT` naming the solids of every body on it, in
+    /// any product; a body with no layer is on none, and a blank name is no layer.
+    #[test]
+    fn bodies_on_a_layer_are_assigned_to_it() {
+        let record = box_record();
+        let on = |name: &str, layer: &str| ExportBody { layer: layer.into(), ..body(name, &record) };
+        let list = [
+            ExportProduct {
+                name: "Root".into(),
+                bodies: vec![on("A", "Panels"), on("B", "Frame/Rails"), on("C", ""), on("D", "  ")],
+                children: vec![(1, IDENTITY, String::new())],
+            },
+            ExportProduct { name: "Child".into(), bodies: vec![on("E", "Panels")], children: vec![] },
+        ];
+        let text = products(&list, 0, &Header::default()).unwrap();
+        let ex = p21::parse(&text).unwrap();
+        let solid = |name: &str| {
+            ex.entities
+                .iter()
+                .find(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP" && e.params().first().and_then(p21::Param::as_str) == Some(name))
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let mut layers: Vec<(String, Vec<u64>)> = ex
+            .entities
+            .values()
+            .filter(|e| e.name() == "PRESENTATION_LAYER_ASSIGNMENT")
+            .map(|e| {
+                let name = e.params().first().and_then(p21::Param::as_str).unwrap().to_string();
+                let items = e.params().get(2).and_then(p21::Param::as_list).unwrap().iter().filter_map(p21::Param::as_ref_id).collect();
+                (name, items)
+            })
+            .collect();
+        layers.sort();
+        assert_eq!(layers, vec![("Frame/Rails".to_string(), vec![solid("B")]), ("Panels".to_string(), vec![solid("A"), solid("E")])]);
     }
 
     #[test]
@@ -718,6 +810,59 @@ mod tests {
             let traversal: Vec<_> = order.iter().map(|&index| ids[index]).collect();
             assert!(traversal.windows(2).all(|pair| pair[0] < pair[1]));
         }
+    }
+
+    /// Each solid representation's context and the names of the solids it lists, in file order.
+    fn solids_by_context(text: &str) -> Vec<(Option<f64>, Vec<String>)> {
+        let ex = p21::parse(text).unwrap();
+        let mut reps: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "ADVANCED_BREP_SHAPE_REPRESENTATION").collect();
+        reps.sort_by_key(|(id, _)| **id);
+        reps.into_iter()
+            .map(|(_, e)| {
+                let p = e.params();
+                let names = p[1]
+                    .as_list()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|i| ex.get(i.as_ref_id()?))
+                    .filter(|s| s.name() == "MANIFOLD_SOLID_BREP")
+                    .map(|s| s.params()[0].as_str().unwrap().to_string())
+                    .collect();
+                (crate::units::context(&ex, p[2].as_ref_id().unwrap()).uncertainty, names)
+            })
+            .collect()
+    }
+
+    /// Each body is written in a context that states its own accuracy, not the loosest of the
+    /// bodies beside it: a box beside a box with an edge 0.3 mm off its faces was written as good
+    /// to 0.3 mm, and a reader took both as only that good (an Insert Design of the two read the
+    /// first back at 0.3 mm). The file's context still states the loosest, runs of bodies as
+    /// accurate share a context, and a file whose bodies are all as accurate has the one context
+    /// it had.
+    #[test]
+    fn each_body_is_written_in_a_context_of_its_own_accuracy() {
+        let tight = box_record();
+        let own = accuracy(&tight);
+        let mut loose = box_record();
+        loose.edges[0].tolerance = 0.3;
+        let text =
+            bodies(vec![body("Tight", &tight), body("Loose", &loose), body("Twin", &tight), body("Third", &tight)], &Header::default()).unwrap();
+        // Runs of bodies, each in the context of its accuracy, written last run first (the order
+        // SolidCraft's reader meets them in is the reverse); the two tight runs share a context.
+        let strings = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            solids_by_context(&text),
+            vec![(Some(own), strings(&["Twin", "Third"])), (Some(0.3), strings(&["Loose"])), (Some(own), strings(&["Tight"]))],
+            "{text}"
+        );
+        assert_eq!(text.matches("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT(").count(), 2, "{text}");
+        let ex = p21::parse(&text).unwrap();
+        let shape = ex.entities.values().find(|e| e.name() == "SHAPE_REPRESENTATION").unwrap();
+        assert_eq!(crate::units::context(&ex, shape.params()[2].as_ref_id().unwrap()).uncertainty, Some(0.3));
+        // All as accurate: one context, as before.
+        let text = bodies(vec![body("Tight", &tight), body("Twin", &tight)], &Header::default()).unwrap();
+        assert_eq!(solids_by_context(&text), vec![(Some(own), strings(&["Tight", "Twin"]))]);
+        assert_eq!(text.matches("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT(").count(), 1, "{text}");
     }
 
     /// `levels` products in a chain, each placing the next twice (a shared child), the last
@@ -821,7 +966,7 @@ mod tests {
         let faces = record.faces.len();
         let ok = Colour { rgb: [0.0, 0.5, 1.0], opacity: 0.25, name: String::new() };
         let with = |color: Option<Colour>, face: Vec<(usize, Colour)>| {
-            bodies(vec![ExportBody { name: "B".into(), record: &record, color, faces: face }], &Header::default())
+            bodies(vec![ExportBody { name: "B".into(), record: &record, color, faces: face, layer: String::new() }], &Header::default())
         };
         assert!(with(Some(ok.clone()), vec![(faces - 1, ok.clone())]).is_ok());
         for bad in [[f32::NAN, 0.0, 0.0], [1.5, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, f32::INFINITY]] {

@@ -74,6 +74,15 @@ impl Session {
         }
     }
 
+    /// The point a component origin key names, placed where its component now stands:
+    /// `None` for the planes and axes, and for a key whose placement is gone.
+    pub fn origin_point(&self, name: &str) -> Option<Vec3> {
+        match self.origin_geometry(name)? {
+            ConstructGeom::Point(p) => Some(p),
+            _ => None,
+        }
+    }
+
     /// Reference geometry explicitly shown by the user. No assembly expansion on every frame.
     pub fn shown_component_origins(&self) -> Vec<(String, ConstructGeom)> {
         let mut out = Vec::new();
@@ -82,7 +91,7 @@ impl Session {
             if path.is_empty() || path.len() > 64 || !seen.insert(path) || !self.occurrence_visible(path) {
                 continue;
             }
-            let Ok(placement) = self.occurrence_placement(path) else { continue };
+            let Ok(placement) = self.shown_occurrence_placement(path) else { continue };
             for item in ITEMS {
                 let name = key(path, item);
                 if !self.visibility.hidden_origin.contains(&name)

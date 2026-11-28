@@ -39,6 +39,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{Continuity, ExtendRefusal, Extended};
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -50,8 +51,8 @@ use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "surface::extend::Surface::extended_sides";
 
-/// Halvings of an ask whose side was refused naming nothing, to name a distance that works.
-const NAMING_HALVINGS: usize = 60;
+/// Smaller asks checked against all requested sides before naming a distance that works.
+const NAMING_TRIES: usize = 60;
 
 /// What [`Surface::extended_sides`] did at one side of the source's box.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -180,21 +181,37 @@ impl Surface {
             Err(SolidError::ExtendRefused {
                 operation,
                 refusal: ExtendRefusal::NotExact,
-                distance: None,
-            }) => {
-                let mut tried = distance;
+                distance: reached,
+            }) if reached.is_none() || asked.len() > 1 => {
+                // A reach measured for one side may be too far for a later side. Check the
+                // complete operation, using a shorter certified reach when a side gives one.
+                let mut tried = reached
+                    .filter(|&reach| reach > 0.0 && reach < distance)
+                    .unwrap_or(distance * 0.5);
                 let mut named = None;
-                for _ in 0..NAMING_HALVINGS {
-                    tried *= 0.5;
-                    // a distance works when some side extends at it: one below every side's
-                    // resolution leaves them all unchanged and extends nothing
-                    if let Ok(e) = self.extended_in_turn(k, asked, how, tried) {
-                        if e.sides.iter().any(|s| {
-                            matches!(s, SideExtension::Extended(_) | SideExtension::UpToLimit(_))
-                        }) {
-                            named = Some(tried);
-                        }
+                for _ in 0..NAMING_TRIES {
+                    if tried <= 0.0 {
                         break;
+                    }
+                    match self.extended_in_turn(k, asked, how, tried) {
+                        Ok(e) => {
+                            // Below every side's resolution the operation extends nothing.
+                            if e.sides.iter().any(|s| {
+                                matches!(
+                                    s,
+                                    SideExtension::Extended(_) | SideExtension::UpToLimit(_)
+                                )
+                            }) {
+                                named = Some(tried);
+                            }
+                            break;
+                        }
+                        Err(SolidError::ExtendRefused {
+                            refusal: ExtendRefusal::NotExact,
+                            distance: Some(reach),
+                            ..
+                        }) if reach > 0.0 && reach < tried => tried = reach,
+                        _ => tried *= 0.5,
                     }
                 }
                 Err(SolidError::ExtendRefused {
@@ -235,7 +252,12 @@ impl Surface {
                 continue;
             }
             let side = *on.get(at).ok_or_else(|| {
-                SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::Defect {
+                        why: "a side of the source's box has no counterpart on the result, though the counterparts are one per side, four, and the loop counts the four sides",
+                    },
+                )
             })?;
             let surface = current.as_ref().map_or(self, |e| &e.surface);
             let dom = surface.natural_uv_domain_with_nurb(k)?;
@@ -298,13 +320,10 @@ impl Surface {
                 measured = o.base_surface();
             }
             if !matches!(measured.kind(), SurfaceKind::ProceduralBlend(_)) {
-                for (done, at) in sides.iter_mut().zip(0..) {
+                for (done, &side) in sides.iter_mut().zip(on.iter()) {
                     if !matches!(done, SideExtension::Extended(_)) {
                         continue;
                     }
-                    let side = *on.get(at).ok_or_else(|| {
-                        SolidError::surface_failed(OP, "the side has no counterpart on the surface")
-                    })?;
                     let across = measured.length_across_side(k, &face, side, super::REL)?;
                     if !across.converged
                         || across.enclosure.lower

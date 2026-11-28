@@ -1,16 +1,18 @@
 # Start the Windows app under different graphics settings and check each one gets its window up,
-# draws a frame and quits cleanly, with no crash report. The CI runner has no GPU: its D3D12 adapter
-# is WARP, so this exercises the backend order's fallback and the D3D12 path end to end.
+# draws a frame and quits cleanly, with no crash report. The CI runner has no GPU: the default case
+# shows what eframe's and wgpu's own choice picks there, and the D3D12 cases run on WARP.
 #
 # Usage: tools/windows-startup-smoke.ps1 -Exe target\ci\solidcraft.exe
 param([Parameter(Mandatory = $true)][string]$Exe)
 $ErrorActionPreference = 'Stop'
 
 $cases = @(
-    @{ Name = 'default order'; Graphics = $null; Env = @{}; Args = @(); Expect = 'graphics: Dx12' },
+    @{ Name = 'default (wgpu picks)'; Graphics = $null; Env = @{}; Args = @(); Expect = 'SolidCraft graphics: ' },
+    # The default again, after a warm start.
+    @{ Name = 'default, warm'; Graphics = $null; Env = @{}; Args = @(); Expect = 'SolidCraft graphics: ' },
     @{ Name = 'saved 8x anti-aliasing'; Graphics = '{"msaa":8}'; Env = @{}; Args = @(); Expect = '(requested 8x)' },
     @{ Name = 'saved 2x, backend preference dx12'; Graphics = '{"msaa":2,"backend":"dx12"}'; Env = @{}; Args = @(); Expect = '(requested 2x)' },
-    @{ Name = 'damaged graphics.json'; Graphics = '{"msaa":'; Env = @{}; Args = @(); Expect = 'graphics: Dx12' },
+    @{ Name = 'damaged graphics.json'; Graphics = '{"msaa":'; Env = @{}; Args = @(); Expect = 'SolidCraft graphics: ' },
     @{ Name = 'WGPU_BACKEND=dx12 with FXC'; Graphics = $null; Env = @{ WGPU_BACKEND = 'dx12'; WGPU_DX12_COMPILER = 'fxc' }; Args = @(); Expect = 'graphics: Dx12' },
     @{ Name = 'safe mode'; Graphics = '{"msaa":8,"backend":"vulkan"}'; Env = @{}; Args = @('--safe-mode'); Expect = 'graphics: Dx12' }
 )
@@ -44,6 +46,7 @@ foreach ($case in $cases) {
     $psi.Environment.Remove('WGPU_DX12_COMPILER') | Out-Null
     foreach ($k in $case.Env.Keys) { $psi.Environment[$k] = $case.Env[$k] }
     Write-Host "=== $($case.Name)"
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $p = [System.Diagnostics.Process]::Start($psi)
     $stderr = $p.StandardError.ReadToEndAsync()
     $stdout = $p.StandardOutput.ReadToEndAsync()
@@ -67,6 +70,8 @@ foreach ($case in $cases) {
         $reply = $reader.ReadLine()
         Write-Host "screenshot: $reply"
         if (-not ($reply -like '*"ok":true*') -or -not (Test-Path $shot)) { throw "no frame drawn: $reply" }
+        # Start to the first frame on screen, for comparing startups (control channel up, then a screenshot).
+        Write-Host ("startup to first frame: {0} ms" -f $clock.ElapsedMilliseconds)
         $writer.WriteLine((@{ id = 2; method = 'app.quit'; params = @{ force = $true } } | ConvertTo-Json -Compress))
         Write-Host "quit: $($reader.ReadLine())"
         $client.Close()

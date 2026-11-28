@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use crate::{ForeignCopy, Session};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
@@ -185,6 +186,56 @@ fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
     assert_eq!(s.doc.to_json(), saved);
 }
 
+/// A Rotate step in a component, turning a frame member outside it, uses that member: it isn't
+/// pasted into another design, where the member's feature id could name something else.
+#[test]
+fn a_rotate_step_on_a_member_outside_its_component_is_refused_saying_what() {
+    let mut source = design("Rack");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut source, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
+    let index = {
+        let st = source.model.state();
+        let b = st.body("Post").unwrap();
+        (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().x > 0.999 && (pl.origin.x - 20.0).abs() < 1e-6))
+            .unwrap()
+    };
+    // The command refuses a member outside the active component, so the step is made at the
+    // root and moved in, as an old or hand-edited design can hold it.
+    let turn = run(&mut source, "frame.rotate_member", json!({"face": {"body": "Post", "index": index, "face": [20, 0, 150]}, "angle": "30 deg"}));
+    let (turns, at) = created(&mut source, "Turns");
+    source.doc_mut().feature_mut(turn["feature"].as_u64().unwrap()).unwrap().component = turns;
+    source.refresh();
+
+    let mut s = design("Frame");
+    s.foreign_copy = copied(&source, vec![at]);
+    let saved = s.doc.to_json();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses feature reference"), "{error}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
+fn construction_plane_with_an_external_face_is_refused_when_pasted_into_another_design() {
+    let mut source = design("Source");
+    run(&mut source, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"}));
+    let (_, at) = created(&mut source, "Planes");
+    run(&mut source, "construct.plane.offset", json!({"base":{"face":[1,1,2]},"offset":2,"name":"Above"}));
+
+    let mut s = design("Destination");
+    s.foreign_copy = copied(&source, vec![at]);
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses exact face attachment to Cube"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.undo.len(), undo);
+}
+
 /// A component that bodies were moved into (a body transfer, as Create Components from Bodies
 /// makes) pastes into another design, which has none of the components the transfer names.
 #[test]
@@ -204,4 +255,48 @@ fn a_component_bodies_were_moved_into_pastes_into_another_design() {
     assert_eq!(s.doc.model_body_component(state.body("Pin").unwrap()), new);
     // The body moved in from outside comes as an imported body.
     assert!(s.doc.find_feature("BodyImport1").is_some_and(|f| f.component == new));
+}
+
+/// With `placement: "origin"` (#17621), components pasted from another design go to the origin of
+/// the component they go into, not where they were in the world: the first copied component's
+/// origin on the target's origin, each body where it was from its own component's origin, and a
+/// second copied component kept where it was from the first. A placement other than `world` or
+/// `origin` is refused.
+#[test]
+fn components_pasted_at_the_origin_keep_their_own_origins() {
+    let mut source = design("Parts");
+    let (_, at_a) = created(&mut source, "A");
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "CubeA"}));
+    run(&mut source, "component.activate", json!({"component": 0}));
+    let (_, at_b) = created(&mut source, "B");
+    run(&mut source, "solid.box", json!({"length": 3, "width": 3, "height": 3, "body_name": "CubeB"}));
+    run(&mut source, "component.activate", json!({"component": 0}));
+    for (at, by) in [(at_a, [0, 30, 0]), (at_b, [10, 30, 5])] {
+        run(&mut source, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
+        run(&mut source, "occurrence.move", json!({"occurrence": at, "translate": by}));
+    }
+    let bounds = |s: &Session, body: &str| s.world_state().unwrap().body(body).unwrap().mesh().bounds();
+    let (was_a, was_b) = (bounds(&source, "CubeA"), bounds(&source, "CubeB"));
+
+    let mut s = design("Assembly");
+    let (target, at_target) = created(&mut s, "Target");
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": at_target, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": at_target, "translate": [5, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": target}));
+    s.foreign_copy = ForeignCopy::of(&source, Vec::new(), vec![vec![at_a], vec![at_b]]).ok().map(Arc::new);
+    let refused = s.execute("component.paste_from_design", &json!({"placement": "cursor"}));
+    assert!(refused.unwrap_err().to_string().contains("placement"));
+    let out = run(&mut s, "component.paste_from_design", json!({"placement": "origin"}));
+    assert_eq!(out["paths"].as_array().map(Vec::len), Some(2));
+
+    let pasted = s.doc.components.iter().find(|c| c.name == "A").unwrap().id;
+    let placed = s.doc.occurrences.iter().find(|o| o.component == pasted).unwrap();
+    assert_eq!(placed.parent, target);
+    assert!(solidcraft_doc::is_identity(&placed.transform), "{:?}", placed.transform);
+    let (is_a, is_b) = (bounds(&s, "CubeA"), bounds(&s, "CubeB"));
+    // In the target (placed at x = 5): A's cube where it is from A's origin, B's where it was from A's.
+    let shift = Vec3::new(5.0, -30.0, 0.0);
+    assert!(is_a.min.dist(was_a.min + shift) < 1e-6 && is_a.max.dist(was_a.max + shift) < 1e-6, "{was_a:?} vs {is_a:?}");
+    assert!(is_b.min.dist(was_b.min + shift) < 1e-6 && is_b.max.dist(was_b.max + shift) < 1e-6, "{was_b:?} vs {is_b:?}");
 }

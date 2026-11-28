@@ -4,9 +4,12 @@
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    solidcraft-<version>-windows-<arch>.msi            installer (WiX v5): all users, or just for me
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
+    solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
+                                                       Intune and Group Policy (x64 job only; the
+                                                       templates are the same for every arch)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
@@ -59,6 +62,8 @@ if (-not $Version) {
 if (-not $Version) { throw 'could not read [workspace.package] version from Cargo.toml' }
 # MSI ProductVersion is numeric (major.minor.build); pre-release tags are dropped there.
 $MsiVersion = ($Version -split '-')[0]
+# The same, each part zero-padded, so the installer can compare versions as strings.
+$SortableVersion = (($MsiVersion -split '\.') | ForEach-Object { $_.PadLeft(5, '0') }) -join '.'
 
 $Target = switch ($Arch) { 'x64' { 'x86_64-pc-windows-msvc' } 'x86' { 'i686-pc-windows-msvc' } 'arm64' { 'aarch64-pc-windows-msvc' } }
 $Dist = if ($env:DIST) { $env:DIST } else { Join-Path $Root 'dist\release' }
@@ -141,7 +146,7 @@ Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
     -culture en-US -loc (Join-Path $Root 'assets/platforms/windows/solidcraft.en-us.wxl') `
-    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$Icon" `
+    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "SortableVersion=$SortableVersion" -d "BinDir=$Stage" -d "IconPath=$Icon" `
     -o $Msi
 }
 Invoke-Native 'MSI shortcut icon validation (ICE50)' {
@@ -161,12 +166,61 @@ $Zip = Join-Path $Dist "solidcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
+# ---- debug symbols (separate asset) ------------------------------------------------------------
+# solidcraft.pdb (profile.release debug = "line-tables-only") maps crash offsets to file and line.
+# It is not in the MSI or the portable zip, so those downloads stay small.
+$Outputs = @()
+if (-not $PortableOnly) {
+  $Pdb = Join-Path $Bin 'solidcraft.pdb'
+  if (-not (Test-Path $Pdb)) { throw "Missing debug symbols: $Pdb" }
+  $PdbZip = Join-Path $Dist "solidcraft-$Version-windows-$Arch.pdb.zip"
+  Remove-Item -Force $PdbZip -ErrorAction SilentlyContinue
+  Compress-Archive -Path $Pdb -DestinationPath $PdbZip
+  $Outputs += $PdbZip
+}
+
 # ---- the app as a plain download (x64) ---------------------------------------------------------
-$Outputs = if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
+$Outputs += if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
 if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe
+}
+
+# ---- administrative templates (x64) ------------------------------------------------------------
+# packaging/windows/policies as it is: the .admx at the top and en-US\solidcraft.adml, the layout
+# PolicyDefinitions uses, so an admin copies the zip's contents in or uploads both files to Intune.
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
+  $Policies = Join-Path $Root 'packaging\windows\policies'
+  $Templates = Join-Path $Dist "solidcraft-$Version-windows-policy-templates.zip"
+  Remove-Item -Force $Templates -ErrorAction SilentlyContinue
+  # Entries written one by one with '/' in their names: Compress-Archive in Windows PowerShell 5.1
+  # (Archive module before 1.2.3) stores 'en-US\solidcraft.adml', which other unzip tools take as
+  # one file name with a backslash in it.
+  $Names = 'solidcraft.admx', 'en-US/solidcraft.adml'
+  Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+  $zip = [IO.Compression.ZipFile]::Open($Templates, 'Create')
+  try {
+    foreach ($name in $Names) { $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $Policies $name), $name) }
+  } finally { $zip.Dispose() }
+  $zip = [IO.Compression.ZipFile]::OpenRead($Templates)
+  try { $entries = @($zip.Entries | ForEach-Object { $_.FullName }) }
+  finally { $zip.Dispose() }
+  if (($entries -join '|') -cne ($Names -join '|')) { throw "$Templates holds $($entries -join ', '), expected $($Names -join ', ')" }
+  Write-Output "ok $(Split-Path -Leaf $Templates): $($entries -join ', ')"
+  $Outputs += $Templates
+}
+
+# The CLI runs where the machine can run its build: an x64 machine runs x64 and x86, an Arm64 one
+# (Windows 11's emulation) all three. A machine whose architecture can't be read fails the job
+# rather than skip the check (#22444).
+$HostArch = "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)".ToLowerInvariant()
+if (-not $HostArch) { $HostArch = "$env:PROCESSOR_ARCHITECTURE".ToLowerInvariant() -replace '^amd64$', 'x64' }
+$CanRun = switch ($HostArch) {
+  'arm64' { $true }
+  'x64' { $Arch -ne 'arm64' }
+  'x86' { $Arch -eq 'x86' }
+  default { throw "cannot tell this machine's architecture ('$HostArch'), so cannot decide whether to run solidcraft-cli --version" }
 }
 
 if ($CanRun) {

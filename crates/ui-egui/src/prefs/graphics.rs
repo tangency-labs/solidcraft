@@ -205,7 +205,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = setting::ground_shadow_follows_model(app, ui).backing_on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
                 crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
             });
-            ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+            let shadow_style = app.tr("ui.ground_shadow_style");
+            let label_width = (t.form_label_width + t.space_24).max(ui_kit::ContentWidth::label(ui, shadow_style) + t.space_4);
+            ui_kit::settings_form(ui, label_width, |ui| {
                 ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                     let options = crate::navigation_slots::VISUAL_STYLES.map(|(_, label)| solidcraft_ui_text::tr_label(label));
                     let choices: Vec<_> =
@@ -226,6 +228,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let _ = app.run("view.visual_style", json!({"style":style}));
                     }
                 });
+                ui_kit::row(ui, shadow_style, |ui| super::ground_shadow_selector(app, ui));
                 ui.add_enabled_ui(app.ui.perspective || app.ui.auto_ortho_faces, |ui| field_of_view_row(app, ui));
             });
         });
@@ -385,6 +388,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if app.services.graphics_path.is_some() {
                     graphics_api_row(app, ui, help_label_width);
                     graphics_card_row(app, ui, help_label_width);
+                    safe_graphics_row(app, ui);
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
@@ -629,4 +633,17 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         response
     });
+}
+
+/// Start in safe graphics mode, the next launch only (`crate::safe_graphics`): written to
+/// `graphics.json` at once, as the graphics API is.
+fn safe_graphics_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let mut next = app.safe_graphics_next;
+    let response = ui_kit::checkbox(ui, app.tr("prefs.safe_graphics_next"), &mut next).backing_on_hover_text(app.tr("prefs.safe_graphics_next_help"));
+    crate::scenario::publish_target("prefs:safe_graphics_next", response.rect);
+    if next != app.safe_graphics_next
+        && let Err(error) = crate::safe_graphics::set_next_launch(app, next)
+    {
+        app.set_status(error, true);
+    }
 }

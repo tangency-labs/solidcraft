@@ -1,0 +1,1 @@
+measures clearances between B-rep bodies on display meshes

@@ -70,9 +70,10 @@ impl ProtoBrep<FilletObject> for InsertionGeometry<'_> {
         curve: &Curve,
         interval: Extent1d,
         tolerance: f64,
+        crossing: Option<FilletObject>,
     ) -> Result<Option<FilletObject>> {
         InsertionGeometry::face_edge_proved_along(
-            self, k, face, start, end, curve, interval, tolerance,
+            self, k, face, start, end, curve, interval, tolerance, crossing,
         )
     }
     fn raise_edge_tolerance(

@@ -526,6 +526,80 @@ mod fields {
         drag(&ctx, "Scale factor", -150.0, Default::default(), &mut values);
         assert_eq!(values[2], "0.00", "Scale factor stops at zero");
     }
+
+    /// A label drag that reaches the window's edge moves the cursor to the opposite edge and goes
+    /// on scrubbing, and the frame that reports the jump changes the value only by what the hand
+    /// did (#22495). Off, the cursor is never moved and the drag stops at the edge. Where the host
+    /// can't move the cursor, the drag stops asking after a few frames, and a later fast move back
+    /// is not taken for the jump.
+    #[test]
+    fn a_label_drag_at_the_window_edge_wraps_the_cursor_and_keeps_scrubbing() {
+        fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut String) -> Vec<egui::Pos2> {
+            registry::clear_handles();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                events,
+                focused: true,
+                ..Default::default()
+            };
+            let out = crate::ui_kit::test_support::raw_frame(ctx, input, |ui| {
+                ui.set_width(280.0);
+                scope(ui, |ui| {
+                    expr_row(ui, "Distance", value);
+                });
+            });
+            out.viewport_output
+                .values()
+                .flat_map(|v| v.commands.iter())
+                .filter_map(|c| if let egui::ViewportCommand::CursorPosition(p) = c { Some(*p) } else { None })
+                .collect()
+        }
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        // (wrap, the host moves the cursor)
+        for (wrap, moves) in [(true, true), (false, true), (true, false)] {
+            let ctx = crate::ui_kit::test_support::context();
+            crate::params_dialog::install_expressions(&ctx);
+            crate::ui_kit::set_scrub_cursor_wrap(&ctx, wrap);
+            let mut value = "20 mm".to_owned();
+            frame(&ctx, vec![], &mut value);
+            let start = registry::rect_of("dialog:label:Distance").unwrap().center();
+            frame(&ctx, vec![egui::Event::PointerMoved(start), button(start, true)], &mut value);
+            frame(&ctx, vec![egui::Event::PointerMoved(start + egui::vec2(10.0, 0.0))], &mut value);
+            let edge = egui::pos2(319.0, start.y);
+            let moved = frame(&ctx, vec![egui::Event::PointerMoved(edge)], &mut value);
+            let at_edge = 20.0 + f64::from(edge.x - start.x) * 0.1;
+            assert_eq!(value, format!("{at_edge:.1} mm"), "wrap {wrap}: the value follows the drag to the edge");
+            if !wrap {
+                assert!(moved.is_empty(), "off, the cursor is never moved: {moved:?}");
+                continue;
+            }
+            let [to] = moved.as_slice() else { panic!("one cursor move at the edge: {moved:?}") };
+            if !moves {
+                // The pointer stays at the edge: the jump never comes.
+                for _ in 0..12 {
+                    let again = frame(&ctx, vec![egui::Event::PointerMoved(edge)], &mut value);
+                    assert!(again.is_empty(), "no second move while the first is unreported: {again:?}");
+                }
+                let back = egui::pos2(100.0, start.y);
+                let again = frame(&ctx, vec![egui::Event::PointerMoved(back)], &mut value);
+                assert!(again.is_empty(), "{again:?}");
+                let there = 20.0 + f64::from(back.x - start.x) * 0.1;
+                assert_eq!(value, format!("{there:.1} mm"), "a fast move back after the jump never came is the hand's");
+                let again = frame(&ctx, vec![egui::Event::PointerMoved(edge)], &mut value);
+                assert!(again.is_empty(), "the drag asks no more: {again:?}");
+                frame(&ctx, vec![button(edge, false)], &mut value);
+                continue;
+            }
+            assert!(to.x < 40.0 && (to.y - start.y).abs() < 1e-3, "the cursor goes to the left edge, at the same height: {to:?}");
+            // The pointer reports the jump together with 5 points of the hand's motion.
+            let moved = frame(&ctx, vec![egui::Event::PointerMoved(*to + egui::vec2(5.0, 0.0))], &mut value);
+            assert!(moved.is_empty(), "one move at a time: {moved:?}");
+            assert_eq!(value, format!("{:.1} mm", at_edge + 0.5), "the jump itself changes nothing");
+            frame(&ctx, vec![egui::Event::PointerMoved(*to + egui::vec2(25.0, 0.0))], &mut value);
+            assert_eq!(value, format!("{:.1} mm", at_edge + 2.5), "the drag goes on from the opposite edge");
+            frame(&ctx, vec![button(*to + egui::vec2(25.0, 0.0), false)], &mut value);
+        }
+    }
 }
 
 /// Layout in SolidCraft's shipped themes and its viewport's navigator axes.
@@ -666,11 +740,14 @@ mod navigation {
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
-            let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
-            let ink = navigation_ink(&tokens, NavigationFill::Active);
-            let ratio = solidcraft_theme::contrast_ratio(ink, fill);
-            if ratio < 3.0 {
-                failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+            // Strong: Isolate's on state, the primary action's colours (#8120).
+            for state in [NavigationFill::Active, NavigationFill::Strong] {
+                let Some(fill) = navigation_fill(&tokens, state) else { continue };
+                let ink = navigation_ink(&tokens, state);
+                let ratio = solidcraft_theme::contrast_ratio(ink, fill);
+                if ratio < 3.0 {
+                    failures.push(format!("{name} {state:?}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+                }
             }
         }
         assert!(failures.is_empty(), "active navigation slot unreadable:\n{}", failures.join("\n"));
@@ -700,7 +777,7 @@ mod panel {
         ) -> (bool, bool) {
             content.tick().unwrap();
             host.capture_metrics(&content.runtime, &content.models).unwrap();
-            host.capture_reservations(&content.runtime, &content.catalogue).unwrap();
+            host.capture_reservations(&content.runtime, &crate::panel_runtime::CatalogueLayoutStoreRef(&content.catalogue)).unwrap();
             host.prepare(&content.runtime, LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 1000.0 } }).unwrap();
             *time += 1.0 / 60.0;
             let mut observed = (false, false);
@@ -783,7 +860,7 @@ mod panel {
                         &mut content.runtime,
                         &mut content.native,
                         &mut ContentServices { models: &content.models, commands: &mut content.commands, local: &mut content.local },
-                        &mut content.catalogue,
+                        &mut crate::panel_runtime::CatalogueLayoutStore(&mut content.catalogue),
                     )
                     .unwrap();
                 },
@@ -919,7 +996,8 @@ mod panel {
                 authored.form_dim = egui::Color32::BLACK;
                 authored.dialog_label = egui::Color32::BLACK;
                 if fallback {
-                    authored.text = authored.panel;
+                    // A transparent ink cannot be lifted, so only the fallback reads.
+                    authored.text = egui::Color32::TRANSPARENT;
                 }
                 let _authored = solidcraft_theme::scoped_panel_tokens(authored);
                 let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
@@ -1014,8 +1092,16 @@ mod view_compass {
                 ..Default::default()
             };
             let output = crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
-                let compass =
-                    Compass { clip: ui.max_rect(), centre, axes: front, hover: Some(at), orbiting: false, snap_hint, home_label: "Home".into() };
+                let compass = Compass {
+                    clip: ui.max_rect(),
+                    centre,
+                    axes: front,
+                    hover: Some(at),
+                    orbiting: false,
+                    snap_hint,
+                    home_label: "Home".into(),
+                    turn_around_label: None,
+                };
                 show(ui, &compass);
             });
             texts = Vec::new();

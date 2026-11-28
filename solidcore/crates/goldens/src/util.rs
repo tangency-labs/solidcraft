@@ -1,6 +1,8 @@
 //! Small conversions shared by the unit runners in [`crate::units`].
 
 pub mod assert_reports;
+#[cfg(test)]
+pub(crate) mod contact_certificate;
 pub mod primitive;
 pub(crate) mod trim_curve;
 
@@ -80,6 +82,23 @@ pub fn inline_curve_definitions(v: &serde_json::Value) -> Result<(), crate::Harn
 #[must_use]
 pub fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
+}
+
+/// The `contact` record of line or curve solutions, one exact code per solution in
+/// order: `0` unclassified, `1` crossing, `2` touching, `3` undecided
+/// ([`solidcore::geom::solution_array::Contact`]). Kept in `ints`, so a changed type
+/// fails even when every number in `values` agrees.
+#[must_use]
+pub fn contact_codes<O>(sols: &[solidcore::geom::solution_array::Solution<O>]) -> Vec<i64> {
+    use solidcore::geom::solution_array::Contact;
+    sols.iter()
+        .map(|s| match s.contact {
+            Contact::Unclassified => 0,
+            Contact::Crossing => 1,
+            Contact::Touching => 2,
+            Contact::Undecided => 3,
+        })
+        .collect()
 }
 
 /// Gives every edge curve and face surface of an imported B-rep the owner a native

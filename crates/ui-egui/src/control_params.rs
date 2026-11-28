@@ -302,18 +302,10 @@ pub(crate) struct Shortcut {
     pub replace: bool,
 }
 
-/// The two workspaces.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Workspace {
-    Design,
-    Render,
-}
-
-/// `ui.workspace {workspace?}`: without one, the workspace shown.
+/// `ui.workspace {workspace?}`: built-in name or `plugin:<package>/<workspace>`.
 #[derive(Deserialize)]
 pub(crate) struct WorkspaceParams {
-    pub workspace: Option<Workspace>,
+    pub workspace: Option<String>,
 }
 
 /// `ui.home {open?, sample?}`: `sample` is checked where it is read, against the samples there are.
@@ -428,6 +420,8 @@ pub(crate) struct Action {
 /// `app.quit {force?}`.
 #[derive(Deserialize)]
 pub(crate) struct Quit {
+    #[serde(default = "yes")]
+    pub ask: bool,
     #[serde(default)]
     pub force: bool,
 }

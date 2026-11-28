@@ -437,34 +437,6 @@ impl BSplineCurve {
         Ok(self.degree()? == 3 && self.is_piecewise_c0()?)
     }
 
-    /// Certified boxes covering the part of the curve over `interval`, one per knot span
-    /// that meets it ([`crate::nurbs::nurbs_crv::crv_span_boxes`]); `None`, meaning no
-    /// certified cover, without a NURB, when the weights, knots or interval cannot be
-    /// read as a cover, or while evaluation beyond the natural interval is enabled.
-    /// Not upstream.
-    #[must_use]
-    pub fn span_boxes(&self, interval: &Extent1d) -> Option<Vec<Extent3d>> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::crv_span_boxes(self.nurb.as_ref()?, interval)
-    }
-
-    /// The refinable certified cover ([`crate::nurbs::nurbs_crv::CurveCover`]) over
-    /// `interval`, refined `depth` times; `None` under the conditions of
-    /// [`BSplineCurve::span_boxes`]. Not upstream.
-    #[must_use]
-    pub fn cover(
-        &self,
-        interval: &Extent1d,
-        depth: usize,
-    ) -> Option<crate::nurbs::nurbs_crv::CurveCover> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::CurveCover::new(self.nurb.as_ref()?, interval, depth)
-    }
-
     /// Bounding boxes of the part of the curve over `interval` (clamped to the natural
     /// interval), built from the control points of the spans it covers
     /// (`CalculateBoundingBox`). The pseudo box takes its basis from the control point
@@ -568,7 +540,7 @@ impl BSplineCurve {
         if num_points < 1 {
             return Err(SolidError::b_spline(
                 OP_BBOX,
-                BSplineFailure::Failed("the span range has no points"),
+                BSplineFailure::IntervalSelectsNoControlPoints,
             ));
         }
 
@@ -914,6 +886,16 @@ impl BSplineCurve {
         Ok((joined, breaks))
     }
 
+    /// Whether a segment ending at `last` and one starting at `first` are end to end as
+    /// [`BSplineCurve::create_by_joining`] requires: no further apart than
+    /// `1000 * sqrt(SM_EFF_ZERO) * (1 + max|last|)`. A caller that chains pieces for the
+    /// join tests them with this, so it never hands the join a pair it refuses.
+    pub(crate) fn ends_meet_for_join(last: Point3, first: Point3) -> bool {
+        let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last.max_dimension());
+        // (written so a NaN distance does not meet)
+        last.distance(first) <= scaled_zero
+    }
+
     /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
     fn join(
         segments: &mut [Self],
@@ -1081,8 +1063,7 @@ impl BSplineCurve {
                 }
             }
             // Make sure end-points are the same
-            let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last_point.max_dimension());
-            if last_point.distance(first_pt) > scaled_zero {
+            if !Self::ends_meet_for_join(last_point, first_pt) {
                 return Err(invalid(OP_JOIN, "segments not end to end"));
             }
 
@@ -1093,7 +1074,7 @@ impl BSplineCurve {
                     if last_weight.abs() < EFF_ZERO || w0.abs() < EFF_ZERO {
                         return Err(SolidError::b_spline(
                             OP_JOIN,
-                            BSplineFailure::Failed("an end weight of the joined curves is zero"),
+                            BSplineFailure::JoinEndWeightZero,
                         ));
                     }
 
@@ -1713,7 +1694,10 @@ impl BSplineCurve {
         if other_pts.len() != our_pts.len() {
             return Err(SolidError::b_spline(
                 OP_MATCH,
-                BSplineFailure::Failed("the curves have different numbers of control points"),
+                BSplineFailure::ControlPointCountsDiffer {
+                    ours: our_pts.len(),
+                    theirs: other_pts.len(),
+                },
             ));
         }
 
@@ -1742,7 +1726,10 @@ impl BSplineCurve {
         if new_degree < degree {
             return Err(SolidError::b_spline(
                 OP_ELEVATE,
-                BSplineFailure::Failed("the new degree is below the current one"),
+                BSplineFailure::DegreeBelowCurrent {
+                    given: new_degree,
+                    current: degree,
+                },
             ));
         }
         if new_degree == degree {
@@ -1825,7 +1812,10 @@ impl BSplineCurve {
         if index >= pw.len() {
             return Err(SolidError::b_spline(
                 OP_SET_CP,
-                BSplineFailure::Failed("the control point index is past the last control point"),
+                BSplineFailure::ControlPointIndex {
+                    index,
+                    count: pw.len(),
+                },
             ));
         }
 
@@ -1850,17 +1840,14 @@ impl BSplineCurve {
         }
 
         let rational = pw.first().is_some_and(|c| c.w != NOW);
-        let cpt = pw.get_mut(index).ok_or_else(|| {
-            SolidError::b_spline(
-                OP_SET_CP,
-                BSplineFailure::Failed("the control point index is past the last control point"),
-            )
-        })?;
-        cpt.x = control_point.x;
-        cpt.y = control_point.y;
-        cpt.z = control_point.z;
-        if rational {
-            cpt.w = weight;
+        // `index` is below `pw.len()` (checked above, and nothing since changes the count).
+        if let Some(cpt) = pw.get_mut(index) {
+            cpt.x = control_point.x;
+            cpt.y = control_point.y;
+            cpt.z = control_point.z;
+            if rational {
+                cpt.w = weight;
+            }
         }
         Ok(())
     }
@@ -1885,9 +1872,11 @@ impl BSplineCurve {
                 if !ivl.contains_value(param, tol) {
                     match self.create_extended_curve(param, ContinuityType::CInfinity, true) {
                         Ok(Some(ext)) if ext.nurb.is_some() => self.nurb = ext.nurb,
-                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                            return Err(e)
-                        }
+                        Err(
+                            e @ (SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }),
+                        ) => return Err(e),
                         _ => {}
                     }
                 }
@@ -2233,7 +2222,14 @@ mod tests {
         let mut c = line(Point3::new(0.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0));
         c.degree_elevate(3).unwrap();
         assert_eq!(c.degree().unwrap(), 3);
-        assert!(c.degree_elevate(2).is_err());
+        let e = c.degree_elevate(2).unwrap_err();
+        assert_cause(
+            &e,
+            BSplineFailure::DegreeBelowCurrent {
+                given: 2,
+                current: 3,
+            },
+        );
         let ivl = c.natural_interval();
         let r = c.reverse_parameterization(&ivl).unwrap();
         assert_eq!(r, ivl);
@@ -2317,14 +2313,43 @@ mod tests {
             c.control_points().unwrap()[1],
             CPoint::new(2.0, 2.0, 2.0, 2.0)
         );
-        assert!(c
+        let before = c.control_points().unwrap().to_vec();
+        let e = c
             .set_control_point(
-                ControlPointForm::NonRational,
+                ControlPointForm::EuclideanRational,
                 9,
                 Point3::new(0.0, 0.0, 0.0),
-                1.0
+                1.0,
             )
-            .is_err());
+            .unwrap_err();
+        assert_cause(&e, BSplineFailure::ControlPointIndex { index: 9, count: 5 });
+        // refused before any weight is touched
+        assert_eq!(c.control_points().unwrap(), &before[..]);
+    }
+
+    /// `e` is a B-spline failure with `cause`, keeping the status `SM_ERR` it had as a phrase
+    /// and the class the cause names.
+    fn assert_cause(e: &SolidError, cause: BSplineFailure) {
+        use crate::error::nurbs::NurbsFailure;
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(cause)),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(e.kind(), cause.kind(), "{e:?}");
+    }
+
+    #[test]
+    fn match_weights_takes_curves_with_as_many_control_points() {
+        let mut c = cubic();
+        let other = line(Point3::new(0.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0));
+        let e = c.match_weights(&other).unwrap_err();
+        assert_cause(
+            &e,
+            BSplineFailure::ControlPointCountsDiffer { ours: 5, theirs: 2 },
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

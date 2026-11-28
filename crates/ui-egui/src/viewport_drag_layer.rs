@@ -84,7 +84,7 @@ fn drawable(app: &SolveApp) -> bool {
 /// No section, analysis or isocurve is shown (their outlines, colours and curves follow the
 /// bodies' places, which a layer moves on the GPU alone).
 fn plain(app: &SolveApp) -> bool {
-    app.session.analysis.is_none() && app.session.continuity.is_empty() && app.session.isocurves.is_empty() && super::section_plane(app).is_none()
+    app.session.analysis.is_none() && app.session.continuity.is_empty() && app.session.isocurves.is_empty() && super::section_planes(app).is_empty()
 }
 
 /// Whether a preview may have the renderer's one moving layer for the bodies it moves: the
@@ -276,8 +276,8 @@ fn build(app: &mut SolveApp, layer: &DragLayer) -> GpuScene {
     let world = &layer.from.world;
     let moved = |i: usize| layer.moving.get(i).copied().unwrap_or(false);
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-    let (mut statics, mut made) = super::body_scene(app, world, |i| !moved(i), false, &mut kept);
-    let (moving, made_moving) = super::body_scene(app, world, moved, false, &mut kept);
+    let (mut statics, mut made, _) = super::body_scene(app, world, |i| !moved(i), false, &mut kept);
+    let (moving, made_moving, _) = super::body_scene(app, world, moved, false, &mut kept);
     made.extend(made_moving);
     super::keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {
@@ -309,8 +309,14 @@ mod tests {
     }
 
     fn with_gpu(app: &mut SolveApp) {
-        app.viewport.gpu =
-            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.viewport.gpu = Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
     }
 
     /// Whole bodies light by drawing the model's own triangles again, but a drag drawn as a layer

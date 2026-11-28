@@ -11,7 +11,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
 }
 
 #[test]
@@ -38,6 +41,11 @@ fn strict_keeps_todays_errors() {
         ("file.insert_step", json!({"path": "a.iges", "names": []})),
         ("file.insert_step", json!({"path": "a.fcstd", "folder": "yes"})),
         ("file.insert_step", json!({"path": "a.3dm", "folder": 1})),
+        ("file.insert_step", json!({"path": "a.step", "envelope": "hull"})),
+        ("file.insert_step", json!({"path": "a.step", "envelope": true})),
+        ("file.insert_step", json!({"path": "x.stl", "envelope": 5})),
+        ("file.insert_step", json!({"path": "a.step", "flatten": "yes"})),
+        ("file.insert_step", json!({"path": "x.stl", "flatten": 1})),
         // `matrix` is the handler's to read; `tolerance` only with it.
         ("file.insert_step", json!({"path": "a.step", "matrix": "turn it"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0]})),
@@ -46,6 +54,8 @@ fn strict_keeps_todays_errors() {
         ("file.insert_step", json!({"path": "a.step", "matrix": [1, 2, 3], "tolerance": "loose"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0.01})),
+        ("file.insert_step", json!({"path": "a.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "a.stl", "link": "yes"})),
         // A file that isn't there.
         ("file.insert_step", json!({"path": "does-not-exist.step"})),
         ("file.insert_step", json!({"path": "does-not-exist.step", "up": "Z", "names": " Auto ", "folder": false})),
@@ -70,6 +80,8 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(keys(json!({"path": "a.iges", "up": "Z"})).up, Some(super::UpParam(false)));
     assert_eq!(keys(json!({"path": "a.3dm", "names": " Instance "})).names.map(|names| names.0), Some(solidcraft_io::StepNames::Instance));
     assert!(keys(json!({"path": "a.step"})).folder.is_none());
+    assert_eq!(keys(json!({"path": "a.step", "flatten": true})).flatten, Some(true));
+    assert!(keys(json!({"path": "a.step", "flatten": null})).flatten.is_none());
     let none = keys(json!({"path": "a.step", "name": null, "up": null, "names": null, "folder": null, "matrix": null, "tolerance": null}));
     assert!(none.name.is_none() && none.up.is_none() && none.names.is_none() && none.folder.is_none() && none.matrix.is_none());
     for matrix in [json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]), json!({"m": 1}), json!("turn")] {
@@ -111,6 +123,7 @@ fn the_types_read_each_key_as_the_handler_does() {
             json!({"path": "a.step", "folder": 0}),
             "`folder` must be true (an import that brings more than one item goes into a `Group #N` history folder) or false (no folder)",
         ),
+        (json!({"path": "a.step", "flatten": "yes"}), super::FLATTEN_MESSAGE),
         (json!({}), "`path` is required"),
         (json!({"path": " "}), "`path` is required"),
         (json!({"up": "x", "path": 5}), "`path` is required"),
@@ -150,7 +163,10 @@ fn the_schema_takes_what_the_handler_reads() {
     let matrix = json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]);
     for (p, takes) in [
         (json!({"path": "a.step"}), true),
-        (json!({"path": "a.STP", "name": "N", "up": "y", "names": "auto", "folder": true}), true),
+        (json!({"path": "a.step", "link": false}), true),
+        (json!({"path": "a.step", "link": null}), true),
+        (json!({"path": "a.step", "link": "yes"}), false),
+        (json!({"path": "a.STP", "name": "N", "up": "y", "names": "auto", "folder": true, "flatten": true}), true),
         (json!({"path": "a.iges", "up": null, "names": null, "folder": null, "matrix": null, "tolerance": null}), true),
         (json!({"path": "a.fcstd", "matrix": matrix, "tolerance": 1e-9}), true),
         (json!({"path": "a.3dm", "matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], "tolerance": 0.001}), true),
@@ -283,7 +299,7 @@ fn replies_match_the_output_schema() {
     assert_eq!(plain["component_name"], "block", "{plain}");
     assert_eq!(plain["name"], "Block", "{plain}");
     assert!(plain["bodies"] == plain["created_bodies"] && plain["occurrence"].is_u64(), "{plain}");
-    assert!(plain.get("subcomponents").is_none() && plain.get("rigid_joints").is_none(), "{plain}");
+    assert!(plain.get("subcomponents").is_none() && plain.get("rigid_members").is_none(), "{plain}");
     assert!(plain.get("stand_up").is_none() && plain.get("group").is_none() && plain.get("transform").is_none(), "{plain}");
 
     let named = run(json!({"path": block, "name": "Brake", "up": " Z ", "names": " Solid ", "folder": false}));
@@ -295,15 +311,22 @@ fn replies_match_the_output_schema() {
     run(json!({"path": block, "matrix": null, "tolerance": []}));
 
     let stood = run(json!({"path": frame}));
-    assert!(stood["subcomponents"].is_u64() && stood["rigid_joints"].is_u64(), "{stood}");
+    assert!(stood["subcomponents"].is_u64() && stood["rigid_members"].is_u64(), "{stood}");
     assert!(stood.get("stand_up").is_none(), "{stood}");
     let turned = run(json!({"path": frame, "up": " y "}));
     assert_eq!(turned["stand_up"], turned["occurrence"], "{turned}");
     let grouped = run(json!({"path": frame, "up": "z", "names": " Instance ", "folder": true}));
     assert!(grouped["group"].is_u64() && grouped.get("stand_up").is_none(), "{grouped}");
+    let flat = run(json!({"path": frame, "flatten": true, "folder": true}));
+    assert!(flat.get("subcomponents").is_none() && flat.get("rigid_members").is_none() && flat.get("group").is_none(), "{flat}");
+    assert_eq!(flat["bodies"].as_array().map(Vec::len), Some(3), "{flat}");
     let quarter = json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]);
     let placed = run(json!({"path": frame, "up": "y", "matrix": quarter, "tolerance": 1e-9}));
     assert_eq!(placed["transform"][3][0], json!(100.0), "{placed}");
+    // With an envelope: a hidden box around the plate and both posts, in the import's component.
+    let enveloped = run(json!({"path": frame, "envelope": "box", "matrix": [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0]}));
+    assert_eq!(enveloped["envelope"], json!(format!("{} Envelope", enveloped["component_name"].as_str().unwrap_or(""))), "{enveloped}");
+    run(json!({"path": block, "envelope": null}));
 
     // A misspelt key still runs in Warn, says so, and the reply still matches.
     let warned = s.execute("file.insert_step", &json!({"path": block, "toleranc": 1})).unwrap_or_else(|e| panic!("{e}"));
@@ -322,11 +345,16 @@ fn strict_runs_the_calls_that_work() {
     for p in [
         json!({"path": block}),
         json!({"path": block, "name": "Brake"}),
+        json!({"path": block, "link": false}),
+        json!({"path": block, "link": true}),
         json!({"path": block, "up": "z", "names": "auto", "folder": true}),
         json!({"path": block, "tolerance": "x"}),
         json!({"path": block, "matrix": null, "tolerance": []}),
         json!({"path": frame, "up": "y", "names": "instance", "folder": true}),
+        json!({"path": frame, "flatten": true}),
+        json!({"path": frame, "flatten": null}),
         json!({"path": frame, "matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0], "tolerance": 1e-9}),
+        json!({"path": frame, "envelope": "box"}),
     ] {
         s.execute("file.insert_step", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     }

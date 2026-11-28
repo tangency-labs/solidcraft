@@ -1,10 +1,12 @@
-//! 3D mouse navigation on Windows and macOS (through hidapi) and Linux (through spacenavd when it runs, else
-//! hidraw). Read directly, any HID multi-axis controller works: 3Dconnexion's and homemade ones.
+//! 3D mouse navigation on Windows and macOS (through hidapi) and Linux (through smed or spacenavd when one
+//! runs, else hidraw). Read directly, any HID multi-axis controller works: 3Dconnexion's and homemade ones.
 //! The device reader never touches the document or UI; it publishes the latest axes, and the egui
 //! thread applies them once per frame.
 
 #[cfg(target_os = "linux")]
 mod hidraw;
+#[cfg(target_os = "linux")]
+mod smed;
 #[cfg(target_os = "linux")]
 mod spacenavd;
 #[cfg(target_os = "windows")]
@@ -25,7 +27,7 @@ use hidapi::DeviceInfo;
 use hidapi::HidApi;
 use quick_xml::Reader;
 use quick_xml::events::Event;
-use solidcraft_space_mouse::Layout;
+use solidcraft_space_mouse::{ButtonSet, Layout};
 use solidcraft_ui_egui::SolveApp;
 #[cfg(target_os = "linux")]
 use solidcraft_ui_egui::prefs::SpaceMouseDriver;
@@ -200,6 +202,10 @@ enum Source {
     /// spacenavd, which may have swapped or inverted axes on its own (`spnavcfg`).
     #[cfg(target_os = "linux")]
     Spacenavd,
+    /// smed, the SpaceMouse Enterprise driver daemon, with the ids of the device it has. It passes
+    /// the raw axes on unchanged and reports every key by its 3Dconnexion id, short and long.
+    #[cfg(target_os = "linux")]
+    Smed(Option<(u16, u16)>),
     /// The 3Dconnexion driver (macOS), which applies its own settings first.
     #[cfg(target_os = "macos")]
     Driver,
@@ -212,6 +218,8 @@ impl Source {
             Self::Hid(_) => "the hidraw device",
             #[cfg(target_os = "linux")]
             Self::Spacenavd => "spacenavd",
+            #[cfg(target_os = "linux")]
+            Self::Smed(_) => "smed",
             #[cfg(target_os = "macos")]
             Self::Driver => "the 3Dconnexion driver",
         }
@@ -231,6 +239,11 @@ impl Source {
             Self::Hid(None) => "hid".into(),
             #[cfg(target_os = "linux")]
             Self::Spacenavd => "spacenavd".into(),
+            // smed hands on the raw axes, so the device keeps a key of its own (`smed 256f:c633`).
+            #[cfg(target_os = "linux")]
+            Self::Smed(Some((vendor, product))) => format!("smed {vendor:04x}:{product:04x}"),
+            #[cfg(target_os = "linux")]
+            Self::Smed(None) => "smed".into(),
             #[cfg(target_os = "macos")]
             Self::Driver => "3dxware".into(),
         }
@@ -255,12 +268,18 @@ struct Reading {
     /// `HELD_SETTLE_AFTER`. A HID device repeats its report while the cap is held, so it ages out
     /// per axis instead.
     held: bool,
-    /// The buttons that are down: bit N for button N + 1, as the device (or spacenavd) numbers them.
-    buttons: u32,
+    /// The buttons that are down, by number from 1 (spacenavd's, which count from 0, plus one).
+    buttons: ButtonSet,
     /// The buttons that went down since the UI last looked, even if they came up again before it
     /// did: a quick tap between two frames is still a press. It is a set, not a queue: two taps of one
     /// button between two looks are one press, and run its job once.
-    taps: u32,
+    taps: ButtonSet,
+    /// The buttons held past the long-press threshold, and those that went so since the UI last looked:
+    /// only smed reports long presses.
+    long_buttons: ButtonSet,
+    long_taps: ButtonSet,
+    /// The device's rotation lock, from a reader that keeps one (smed).
+    lock: Option<bool>,
     /// A motion report or record arrived since the UI last looked. Not whether the value changed: a
     /// ball rolling at one speed sends the same reading again and again, and a daemon that truncates
     /// it can send two different records that decode alike. The calibration window needs the
@@ -279,13 +298,13 @@ struct Reading {
 impl Reading {
     /// The buttons that are down now; those that just went down are kept as taps until taken. The first
     /// state a HID source reports is only taken as the baseline: a button down in it is held, not a tap.
-    fn set_buttons(&mut self, buttons: u32) {
+    fn set_buttons(&mut self, buttons: ButtonSet) {
         if !self.buttons_known {
             self.buttons_known = true;
             self.buttons = buttons;
             return;
         }
-        self.taps |= buttons & !self.buttons;
+        self.taps |= buttons.minus(self.buttons);
         self.buttons = buttons;
     }
 
@@ -305,8 +324,11 @@ impl Reading {
             axes: Axes::default(),
             at: [now; 6],
             held: false,
-            buttons: 0,
-            taps: 0,
+            buttons: ButtonSet::EMPTY,
+            taps: ButtonSet::EMPTY,
+            long_buttons: ButtonSet::EMPTY,
+            long_taps: ButtonSet::EMPTY,
+            lock: None,
             arrived: false,
             buttons_known: true,
             generation: 0,
@@ -388,7 +410,7 @@ fn decode_report(report: &[u8], layout: Layout, reading: &mut Reading, now: Inst
     }
     // A report that carries buttons says which are down, all up included.
     if let Some(buttons) = decoded.buttons {
-        reading.set_buttons(buttons);
+        reading.set_buttons(ButtonSet::from_mask(buttons));
     }
     true
 }
@@ -423,6 +445,9 @@ fn publish_held(ctx: &Context, shared: &Mutex<Reading>, axes: Axes) {
             held: true,
             buttons: reading.buttons,
             taps: reading.taps,
+            long_buttons: reading.long_buttons,
+            long_taps: reading.long_taps,
+            lock: reading.lock,
             arrived: true,
             generation: reading.generation,
             ..Reading::new(Instant::now())
@@ -434,12 +459,60 @@ fn publish_held(ctx: &Context, shared: &Mutex<Reading>, axes: Axes) {
 /// A button pressed or released, from spacenavd, which numbers them from 0.
 #[cfg(target_os = "linux")]
 fn publish_button(ctx: &Context, shared: &Mutex<Reading>, button: u32, down: bool) {
-    if let (Ok(mut reading), Some(bit)) = (shared.lock(), 1_u32.checked_shl(button)) {
+    let number = button.checked_add(1).and_then(|number| u8::try_from(number).ok());
+    if let (Ok(mut reading), Some(number)) = (shared.lock(), number) {
         reading.heard();
-        let buttons = if down { reading.buttons | bit } else { reading.buttons & !bit };
+        let mut buttons = reading.buttons;
+        if down {
+            buttons.insert(number);
+        } else {
+            buttons.remove(number);
+        }
         reading.set_buttons(buttons);
         ctx.request_repaint_after(REPAINT_EVERY);
     }
+}
+
+/// One motion message from smed: the raw axes of one device report, all six fresh. smed forwards
+/// every report, repeated while the cap is held as the device does, so the reading ages like a HID
+/// device's.
+#[cfg(target_os = "linux")]
+fn publish_smed_motion(ctx: &Context, shared: &Mutex<Reading>, axes: Axes) {
+    if let Ok(mut reading) = shared.lock() {
+        reading.axes = axes;
+        reading.at = [Instant::now(); 6];
+        reading.held = false;
+        reading.arrived = true;
+        ctx.request_repaint_after(REPAINT_EVERY);
+    }
+}
+
+/// A key from smed, by its 3Dconnexion id, short or long. The device decides which: a short press
+/// arrives (down, then up about 100 ms later) once the key is let go, a long one while it is held.
+#[cfg(target_os = "linux")]
+fn publish_smed_key(ctx: &Context, shared: &Mutex<Reading>, id: u8, long: bool, down: bool) {
+    if let Ok(mut reading) = shared.lock() {
+        let reading = &mut *reading;
+        let (buttons, taps) = if long { (&mut reading.long_buttons, &mut reading.long_taps) } else { (&mut reading.buttons, &mut reading.taps) };
+        if down {
+            if !buttons.contains(id) {
+                taps.insert(id);
+            }
+            buttons.insert(id);
+        } else {
+            buttons.remove(id);
+        }
+        ctx.request_repaint_after(REPAINT_EVERY);
+    }
+}
+
+/// The rotation lock smed reports.
+#[cfg(target_os = "linux")]
+fn publish_lock(ctx: &Context, shared: &Mutex<Reading>, lock: Option<bool>) {
+    if let Ok(mut reading) = shared.lock() {
+        reading.lock = lock;
+    }
+    ctx.request_repaint();
 }
 
 /// Whether a connection to `source` says nothing about a device being there until it sends a record.
@@ -685,7 +758,7 @@ fn reader(ctx: Context, shared: Arc<Mutex<Reading>>, bridge: crate::nav_bridge::
                 if let Some(buttons) = buttons
                     && let Ok(mut reading) = shared.lock()
                 {
-                    reading.set_buttons(buttons);
+                    reading.set_buttons(ButtonSet::from_mask(buttons));
                 }
             }
             Followed::Report(..) if bridge.claims(strings) => {}
@@ -731,6 +804,8 @@ struct Drivers {
     found: AtomicU8,
     /// Ends the reader.
     quit: AtomicBool,
+    /// A change of smed's rotation lock asked for in Preferences: `LOCK_ON`, `LOCK_OFF` or 0 for none.
+    lock_request: AtomicU8,
 }
 
 #[cfg(target_os = "linux")]
@@ -739,6 +814,12 @@ const PRESENT_SPACENAVD: u8 = 1;
 const PRESENT_DIRECT: u8 = 2;
 #[cfg(target_os = "linux")]
 const PRESENT_DENIED: u8 = 4;
+#[cfg(target_os = "linux")]
+const PRESENT_SMED: u8 = 8;
+#[cfg(target_os = "linux")]
+const LOCK_OFF: u8 = 1;
+#[cfg(target_os = "linux")]
+const LOCK_ON: u8 = 2;
 /// How often a connected reader looks again at what is there, and how long a read of spacenavd
 /// waits for a record before it checks the choice.
 #[cfg(target_os = "linux")]
@@ -754,11 +835,31 @@ impl Drivers {
 
     fn present(&self) -> DriversPresent {
         let found = self.found.load(Ordering::Relaxed);
-        DriversPresent { spacenavd: found & PRESENT_SPACENAVD != 0, direct: found & PRESENT_DIRECT != 0, denied: found & PRESENT_DENIED != 0 }
+        DriversPresent {
+            smed: found & PRESENT_SMED != 0,
+            spacenavd: found & PRESENT_SPACENAVD != 0,
+            direct: found & PRESENT_DIRECT != 0,
+            denied: found & PRESENT_DENIED != 0,
+        }
+    }
+
+    /// Asks the reader to switch smed's rotation lock.
+    fn request_lock(&self, on: bool) {
+        self.lock_request.store(if on { LOCK_ON } else { LOCK_OFF }, Ordering::Relaxed);
+    }
+
+    /// The lock change asked for since the last call, if any.
+    fn take_lock_request(&self) -> Option<bool> {
+        match self.lock_request.swap(0, Ordering::Relaxed) {
+            LOCK_ON => Some(true),
+            LOCK_OFF => Some(false),
+            _ => None,
+        }
     }
 
     fn publish(&self, present: DriversPresent) {
-        let found = (u8::from(present.spacenavd) * PRESENT_SPACENAVD)
+        let found = (u8::from(present.smed) * PRESENT_SMED)
+            | (u8::from(present.spacenavd) * PRESENT_SPACENAVD)
             | (u8::from(present.direct) * PRESENT_DIRECT)
             | (u8::from(present.denied) * PRESENT_DENIED);
         self.found.store(found, Ordering::Relaxed);
@@ -776,6 +877,11 @@ enum Pick {
 /// How long a direct device that failed to open stays out of the choice before it is tried again.
 #[cfg(target_os = "linux")]
 const UNREADABLE_RETRY: Duration = Duration::from_secs(30);
+
+/// How long smed has to send its hello and first state after a connect: it answers a local socket in
+/// milliseconds, so one that stays silent is left (as a refusal is) and the others are read.
+#[cfg(target_os = "linux")]
+const SMED_ANSWER: Duration = Duration::from_secs(1);
 
 /// When the direct device last failed to open, and which node has had its failure said out loud: a
 /// device that is there but unreadable (no permission) does not keep the choice from a daemon that
@@ -838,7 +944,8 @@ fn switch_back(
 #[cfg(target_os = "linux")]
 fn choose(wanted: SpaceMouseDriver, spacenavd: bool, direct: bool) -> Option<Pick> {
     let first = match wanted {
-        SpaceMouseDriver::Automatic | SpaceMouseDriver::Direct => Pick::Direct,
+        // smed is tried before this choice (`smed_wanted`); without it, Smed reads like Automatic.
+        SpaceMouseDriver::Automatic | SpaceMouseDriver::Direct | SpaceMouseDriver::Smed => Pick::Direct,
         SpaceMouseDriver::Spacenavd => Pick::Spacenavd,
     };
     let there = |pick| match pick {
@@ -855,6 +962,10 @@ trait System {
     fn find(&self) -> Option<hidraw::Device>;
     fn daemon_exists(&self) -> bool;
     fn daemon_connect(&self) -> Option<std::os::unix::net::UnixStream>;
+    fn smed_exists(&self) -> bool;
+    fn smed_connect(&self) -> Option<std::os::unix::net::UnixStream>;
+    /// Whether smed has a device now, asked without reading it (None: it does not answer).
+    fn smed_has_device(&self) -> Option<bool>;
     fn open(&self, path: &std::path::Path) -> std::io::Result<Box<dyn std::io::Read>>;
     fn times(&self) -> Times;
 }
@@ -871,6 +982,8 @@ struct Times {
     unreadable_retry: Duration,
     /// How long a read of the daemon waits for a record before it checks for a change.
     wake: Duration,
+    /// How long smed has to answer a connect with its hello and first state.
+    smed_answer: Duration,
 }
 
 /// The machine itself.
@@ -891,12 +1004,26 @@ impl System for Machine {
         spacenavd::connect()
     }
 
+    fn smed_exists(&self) -> bool {
+        smed::exists()
+    }
+
+    fn smed_connect(&self) -> Option<std::os::unix::net::UnixStream> {
+        smed::connect()
+    }
+
+    fn smed_has_device(&self) -> Option<bool> {
+        let stream = smed::connect()?;
+        stream.set_read_timeout(Some(SPACENAVD_WAKE)).ok()?;
+        smed::has_device(stream, SMED_ANSWER)
+    }
+
     fn open(&self, path: &std::path::Path) -> std::io::Result<Box<dyn std::io::Read>> {
         Ok(Box::new(hidraw::open(path)?))
     }
 
     fn times(&self) -> Times {
-        Times { look_every: LOOK_EVERY, retry_after: RETRY_AFTER, unreadable_retry: UNREADABLE_RETRY, wake: SPACENAVD_WAKE }
+        Times { look_every: LOOK_EVERY, retry_after: RETRY_AFTER, unreadable_retry: UNREADABLE_RETRY, wake: SPACENAVD_WAKE, smed_answer: SMED_ANSWER }
     }
 }
 
@@ -915,12 +1042,55 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
     let times = system.times();
     let mut unreadable = Unreadable::default();
     let mut told = None;
+    // When smed's socket last failed to connect: a stale socket file is not tried again at once.
+    let mut smed_failed: Option<Instant> = None;
+    // When smed, read by Automatic, last had no device: the others are read meanwhile, and smed is
+    // looked at again after a wait, or at once when it restarts.
+    let mut smed_empty: Option<Instant> = None;
     while !drivers.quit.load(Ordering::Relaxed) {
         let device = system.find();
-        let present =
-            DriversPresent { spacenavd: system.daemon_exists(), direct: device.is_some(), denied: unreadable.at.is_some() && device.is_some() };
+        let present = DriversPresent {
+            smed: system.smed_exists(),
+            spacenavd: system.daemon_exists(),
+            direct: device.is_some(),
+            denied: unreadable.at.is_some() && device.is_some(),
+        };
         drivers.publish(present);
         let wanted = drivers.choice();
+        if !present.smed {
+            smed_empty = None;
+        }
+        // smed comes first where it is wanted (Automatic and Smed): it owns the device and reports
+        // all of it, long presses and its rotation lock included. Automatic leaves a smed without a
+        // device for the others (another 3D mouse, or the Enterprise unplugged); Smed stays with it.
+        let smed_wanted = matches!(wanted, SpaceMouseDriver::Automatic | SpaceMouseDriver::Smed);
+        let smed_ready = |failed: Option<Instant>| failed.is_none_or(|at| at.elapsed() >= times.unreadable_retry);
+        if smed_wanted && present.smed && smed_ready(smed_failed) && smed_ready(smed_empty) {
+            if let Some(stream) = system.smed_connect() {
+                smed_failed = None;
+                match read_smed(&ctx, &shared, &drivers, stream, wanted, times) {
+                    SmedRead::Empty => {
+                        if smed_empty.is_none() {
+                            log::info!("3D mouse: smed has no device; reading the others meanwhile");
+                        }
+                        smed_empty = Some(Instant::now());
+                    }
+                    // It refused the handshake (another API version), went away before answering or did
+                    // not answer in time: tried again after the wait, the others are read meanwhile.
+                    SmedRead::Refused => smed_failed = Some(Instant::now()),
+                    SmedRead::Ended => {
+                        smed_empty = None;
+                        if drivers.choice() == wanted {
+                            std::thread::sleep(times.retry_after);
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                log::info!("3D mouse: smed's socket is there but does not answer; trying again later");
+                smed_failed = Some(Instant::now());
+            }
+        }
         // The wait after a failed open is for a daemon that works to be read meanwhile; with none there
         // is nothing else to read, so the device is tried again at the usual pace.
         let since_failed = unreadable.at.filter(|_| present.spacenavd).map(|at| at.elapsed());
@@ -932,7 +1102,7 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
             pick = choose(wanted, false, present.direct);
         }
         let asked_for = match wanted {
-            SpaceMouseDriver::Automatic => None,
+            SpaceMouseDriver::Automatic | SpaceMouseDriver::Smed => None,
             SpaceMouseDriver::Spacenavd => Some(Pick::Spacenavd),
             SpaceMouseDriver::Direct => Some(Pick::Direct),
         };
@@ -946,6 +1116,9 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
         // Asked at every idle moment of a read: has the choice changed, and what is there now.
         let mut looked = Instant::now();
         let mut failed_at = unreadable.at;
+        // smed went away during this read: when it comes back it is read at once, device or not yet.
+        let mut smed_gone = !present.smed;
+        let mut smed_restarted = false;
         let mut stop = || {
             if drivers.quit.load(Ordering::Relaxed) {
                 return true;
@@ -953,7 +1126,26 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
             if looked.elapsed() >= times.look_every {
                 looked = Instant::now();
                 let now_device = system.find();
+                let now_smed = system.smed_exists();
+                smed_gone |= !now_smed;
+                // smed started (its socket appeared since this read began): it is read instead, where it
+                // is wanted. One that was there already, without a device or not answering (a stale
+                // socket), does not interrupt the read of another device; it is looked at again after it.
+                if smed_wanted && now_smed && smed_gone {
+                    smed_restarted = true;
+                    return true;
+                }
+                // A smed left for having no device is asked again after the wait, without reading it:
+                // when it has one now (the Enterprise plugged in), it is read instead.
+                if smed_wanted && now_smed && smed_empty.is_some_and(|at| at.elapsed() >= times.unreadable_retry) {
+                    if system.smed_has_device() == Some(true) {
+                        smed_restarted = true;
+                        return true;
+                    }
+                    smed_empty = Some(Instant::now());
+                }
                 let now_present = DriversPresent {
+                    smed: now_smed,
                     spacenavd: system.daemon_exists(),
                     direct: now_device.is_some(),
                     // Not while the device itself is what is being read: it opened.
@@ -1010,10 +1202,78 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
             },
             _ => {}
         }
+        if smed_restarted {
+            smed_empty = None;
+            smed_failed = None;
+        }
         // A new choice is taken up at once; anything else waits to try again.
         if drivers.choice() == wanted {
             std::thread::sleep(times.retry_after);
         }
+    }
+}
+
+/// How a read of smed ended.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SmedRead {
+    /// It went away, or the choice changed, after the handshake.
+    Ended,
+    /// Automatic left it for having no device.
+    Empty,
+    /// It refused the handshake, went away before answering, or did not answer in time.
+    Refused,
+}
+
+/// Reads smed until it goes away or the choice changes: the device it reports, its motion, every key
+/// short and long, and its rotation lock. A lock change asked for in Preferences is passed on. For
+/// Automatic it also ends when smed has no device, so the others are read.
+#[cfg(target_os = "linux")]
+fn read_smed(
+    ctx: &Context,
+    shared: &Mutex<Reading>,
+    drivers: &Drivers,
+    stream: std::os::unix::net::UnixStream,
+    wanted: SpaceMouseDriver,
+    times: Times,
+) -> SmedRead {
+    log::info!("3D mouse: reading smed");
+    if let Err(error) = stream.set_read_timeout(Some(times.wake)) {
+        log::warn!("3D mouse: smed reads cannot time out ({error}); not reading smed");
+        return SmedRead::Refused;
+    }
+    let mut lock = None;
+    let empty = std::cell::Cell::new(false);
+    let greeted = smed::read(
+        stream,
+        times.smed_answer,
+        |event| match event {
+            smed::Event::Device(device, said) => {
+                lock = said.or(lock);
+                match device {
+                    Some(ids) => connected(ctx, shared, Source::Smed(Some(ids))),
+                    None => {
+                        reset(ctx, shared);
+                        empty.set(wanted == SpaceMouseDriver::Automatic);
+                    }
+                }
+                publish_lock(ctx, shared, lock);
+            }
+            smed::Event::Motion(axes) => publish_smed_motion(ctx, shared, axes),
+            smed::Event::Key { id, long, down } => publish_smed_key(ctx, shared, id, long, down),
+            smed::Event::Lock(on) => {
+                lock = Some(on);
+                publish_lock(ctx, shared, lock);
+            }
+        },
+        || empty.get() || drivers.quit.load(Ordering::Relaxed) || drivers.choice() != wanted,
+        || drivers.take_lock_request(),
+    );
+    reset(ctx, shared);
+    match (greeted, empty.get()) {
+        (false, _) => SmedRead::Refused,
+        (true, true) => SmedRead::Empty,
+        (true, false) => SmedRead::Ended,
     }
 }
 
@@ -1045,7 +1305,7 @@ fn start_driver_client(ctx: &Context, shared: &Arc<Mutex<Reading>>) {
             }
             Event::Buttons(buttons) => {
                 if let Ok(mut reading) = shared.lock() {
-                    reading.set_buttons(buttons);
+                    reading.set_buttons(ButtonSet::from_mask(buttons));
                     ctx.request_repaint_after(REPAINT_EVERY);
                 }
             }
@@ -1061,6 +1321,8 @@ fn start_driver_client(ctx: &Context, shared: &Arc<Mutex<Reading>>) {
 }
 
 pub struct SpaceMouse {
+    #[cfg(test)]
+    inactive: bool,
     shared: Arc<Mutex<Reading>>,
     #[cfg(target_os = "linux")]
     drivers: Arc<Drivers>,
@@ -1076,6 +1338,24 @@ pub struct SpaceMouse {
 }
 
 impl SpaceMouse {
+    /// Headless lifecycle tests neither start a reader nor load the user's driver profile.
+    #[cfg(test)]
+    pub fn inactive() -> Self {
+        let now = Instant::now();
+        Self {
+            inactive: true,
+            shared: Arc::new(Mutex::new(Reading::new(now))),
+            #[cfg(target_os = "linux")]
+            drivers: Arc::new(Drivers::default()),
+            last_frame: now,
+            driver_mapping: without_profile(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        }
+    }
+
     /// Starts the reader. A device that `bridge` says its own app reads is left to that app.
     pub fn start(ctx: &Context, bridge: crate::nav_bridge::Claim) -> Self {
         let now = Instant::now();
@@ -1101,6 +1381,8 @@ impl SpaceMouse {
         #[cfg(target_os = "macos")]
         start_driver_client(ctx, &shared);
         Self {
+            #[cfg(test)]
+            inactive: false,
             shared,
             #[cfg(target_os = "linux")]
             drivers,
@@ -1141,16 +1423,24 @@ impl SpaceMouse {
     pub fn buttons(&self) -> solidcraft_ui_egui::space_mouse::Buttons {
         let Ok(mut reading) = self.shared.lock() else { return Default::default() };
         let taps = std::mem::take(&mut reading.taps);
+        let long_taps = std::mem::take(&mut reading.long_taps);
         solidcraft_ui_egui::space_mouse::Buttons {
             device: reading.device.map(Source::key),
             down: reading.buttons,
             taps,
+            long_down: reading.long_buttons,
+            long_taps,
+            lock: reading.lock.filter(|_| reading.device.is_some()),
             pending: !reading.buttons_known,
             generation: reading.generation,
         }
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &Context) {
+        #[cfg(test)]
+        if self.inactive {
+            return;
+        }
         self.tick_at(app, ctx, Instant::now());
     }
 
@@ -1170,6 +1460,9 @@ impl SpaceMouse {
         {
             self.drivers.choice.store(app.preferences.space_mouse_driver.to_u8(), Ordering::Relaxed);
             app.space_mouse.drivers = Some(self.drivers.present());
+            if let Some(on) = app.space_mouse.lock_request.take() {
+                self.drivers.request_lock(on);
+            }
         }
         // What the reader has published, and whether anything arrived since the last frame (taken, so
         // the next frame sees only what comes after).
@@ -1182,6 +1475,12 @@ impl SpaceMouse {
         app.space_mouse.device = reading.device.map(Source::key);
         // One line per connect or reconnect: which device, which read path, and what is saved for it.
         if app.space_mouse.logged_device != app.space_mouse.device {
+            // Read through smed for the first time: it starts from what was saved for it read directly.
+            if let Some(key) = &app.space_mouse.device
+                && solidcraft_ui_egui::space_mouse::adopt_direct_settings(&mut app.preferences, key)
+            {
+                log::info!("3D mouse: {key} starts from the settings saved for it read directly");
+            }
             if let (Some(key), Some(source)) = (&app.space_mouse.device, reading.device) {
                 log::info!(
                     "3D mouse: {key} read through {} (driver setting {:?}); saved calibration: {}; calibration offered before: {}",
@@ -1299,8 +1598,8 @@ mod tests {
         let drivers = Drivers::default();
         assert_eq!(drivers.present(), DriversPresent::default());
         for (spacenavd, direct) in [(true, false), (false, true), (true, true), (false, false)] {
-            drivers.publish(DriversPresent { spacenavd, direct, denied: false });
-            assert_eq!(drivers.present(), DriversPresent { spacenavd, direct, denied: false });
+            drivers.publish(DriversPresent { smed: false, spacenavd, direct, denied: false });
+            assert_eq!(drivers.present(), DriversPresent { smed: false, spacenavd, direct, denied: false });
         }
         assert_eq!(drivers.choice(), SpaceMouseDriver::Automatic);
         for choice in SpaceMouseDriver::ALL {
@@ -1595,13 +1894,13 @@ mod tests {
         );
         // What the reader does with that: the press after the baseline is a tap.
         let mut reading = Reading { buttons_known: false, ..Reading::new(Instant::now()) };
-        reading.set_buttons(0);
+        reading.set_buttons(ButtonSet::EMPTY);
         assert!(decode_report(first_down, layout, &mut reading, Instant::now()));
-        assert_eq!((reading.buttons, reading.taps), (1, 1));
+        assert_eq!((reading.buttons, reading.taps), (ButtonSet::of(1), ButtonSet::of(1)));
         // Without one, the same report is the baseline: held, not pressed.
         let mut unseen = Reading { buttons_known: false, ..Reading::new(Instant::now()) };
         assert!(decode_report(first_down, layout, &mut unseen, Instant::now()));
-        assert_eq!((unseen.buttons, unseen.taps), (1, 0));
+        assert_eq!((unseen.buttons, unseen.taps), (ButtonSet::of(1), ButtonSet::EMPTY));
     }
 
     #[test]
@@ -1646,8 +1945,8 @@ mod tests {
     #[test]
     fn a_replugged_device_takes_the_reading_back_from_the_daemon_it_fell_back_to() {
         use SpaceMouseDriver::{Direct, Spacenavd};
-        let both = DriversPresent { spacenavd: true, direct: true, denied: false };
-        let only_daemon = DriversPresent { spacenavd: true, direct: false, denied: false };
+        let both = DriversPresent { smed: false, spacenavd: true, direct: true, denied: false };
+        let only_daemon = DriversPresent { smed: false, spacenavd: true, direct: false, denied: false };
         // Direct asked for, unplugged: the daemon is read. It comes back: switch.
         let pick = choose(Direct, true, false);
         assert_eq!(pick, Some(Pick::Spacenavd));
@@ -1682,8 +1981,10 @@ mod tests {
         assert_eq!(choose(Spacenavd, true, true), Some(Pick::Spacenavd));
         assert_eq!(choose(Direct, true, true), Some(Pick::Direct));
         // The replug path: unplugged -> daemon, replugged -> the read ends and the device is taken.
-        let (both, only_daemon) =
-            (DriversPresent { spacenavd: true, direct: true, denied: false }, DriversPresent { spacenavd: true, direct: false, denied: false });
+        let (both, only_daemon) = (
+            DriversPresent { smed: false, spacenavd: true, direct: true, denied: false },
+            DriversPresent { smed: false, spacenavd: true, direct: false, denied: false },
+        );
         let pick = choose(Automatic, true, false);
         assert_eq!(pick, Some(Pick::Spacenavd));
         assert!(!switch_back(Automatic, pick, only_daemon, None, UNREADABLE_RETRY, || false), "still away");
@@ -1700,7 +2001,7 @@ mod tests {
     #[test]
     fn a_device_that_failed_to_open_ends_the_daemon_read_only_after_a_successful_probe() {
         use SpaceMouseDriver::{Automatic, Direct, Spacenavd};
-        let both = DriversPresent { spacenavd: true, direct: true, denied: false };
+        let both = DriversPresent { smed: false, spacenavd: true, direct: true, denied: false };
         let wait = UNREADABLE_RETRY;
         let daemon = Some(Pick::Spacenavd);
         let no_probe = || panic!("the reader must not probe the device");
@@ -1780,13 +2081,13 @@ mod tests {
     fn a_tap_between_two_frames_is_still_a_press_and_ends_with_nothing_held() {
         let mut reading = Reading::new(Instant::now());
         // Down and up before the UI looks: the mask is back to zero, the press is not lost.
-        reading.set_buttons(0b100);
-        reading.set_buttons(0);
-        assert_eq!((reading.buttons, reading.taps), (0, 0b100));
+        reading.set_buttons(ButtonSet::of(3));
+        reading.set_buttons(ButtonSet::EMPTY);
+        assert_eq!((reading.buttons, reading.taps), (ButtonSet::EMPTY, ButtonSet::of(3)));
         // Holding, then more taps, accumulate until taken; held buttons are not new taps.
-        reading.set_buttons(0b001);
-        reading.set_buttons(0b001);
-        assert_eq!(reading.taps, 0b101);
+        reading.set_buttons(ButtonSet::of(1));
+        reading.set_buttons(ButtonSet::of(1));
+        assert_eq!(reading.taps, ButtonSet::of(1) | ButtonSet::of(3));
     }
 
     #[test]
@@ -1899,6 +2200,7 @@ mod tests {
         let mut reading = Reading::new(now);
         reading.axes.rotation = [0, 350, 0];
         let mut mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -1931,6 +2233,7 @@ mod tests {
 
     fn mouse(reading: Reading, now: Instant) -> SpaceMouse {
         SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2079,6 +2382,13 @@ mod tests {
             pub daemon_end: Option<UnixStream>,
             pub opens: u32,
             pub connects: u32,
+            /// smed's socket is there, and its end of the connection the reader made to it.
+            pub smed: bool,
+            /// smed's socket is there but nothing answers on it (smed crashed).
+            pub smed_dead: bool,
+            /// What smed answers when asked whether it has a device (`smed_has_device`).
+            pub smed_device: bool,
+            pub smed_end: Option<UnixStream>,
         }
 
         #[derive(Clone, Default)]
@@ -2115,7 +2425,42 @@ mod tests {
             }
         }
 
+        impl Fake {
+            /// smed sends one line of its API (the reader's hello is never read: it waits in the socket).
+            pub fn smed_says(&self, line: &str) {
+                if let Some(end) = self.world().smed_end.as_mut() {
+                    end.write_all(format!("{line}\n").as_bytes()).ok();
+                }
+            }
+
+            /// smed stops: its socket goes and the connection closes.
+            pub fn smed_stops(&self) {
+                let mut world = self.world();
+                world.smed = false;
+                world.smed_end = None;
+            }
+        }
+
         impl System for Fake {
+            fn smed_exists(&self) -> bool {
+                self.world().smed
+            }
+
+            fn smed_has_device(&self) -> Option<bool> {
+                let world = self.world();
+                (world.smed && !world.smed_dead).then_some(world.smed_device)
+            }
+
+            fn smed_connect(&self) -> Option<UnixStream> {
+                let mut world = self.world();
+                if !world.smed || world.smed_dead {
+                    return None;
+                }
+                let (ours, theirs) = UnixStream::pair().unwrap();
+                world.smed_end = Some(theirs);
+                Some(ours)
+            }
+
             fn find(&self) -> Option<hidraw::Device> {
                 self.world().device.then(|| hidraw::Device { path: PathBuf::from("/dev/hidraw-fake"), layout: Layout::default(), ids: Some(IDS) })
             }
@@ -2153,6 +2498,7 @@ mod tests {
                     retry_after: Duration::from_millis(10),
                     unreadable_retry: Duration::from_millis(300),
                     wake: Duration::from_millis(5),
+                    smed_answer: Duration::from_millis(200),
                 }
             }
         }
@@ -2222,6 +2568,324 @@ mod tests {
         fake.world().device = true;
         reader.reads(&device_key);
         assert_eq!(reader.drivers.choice(), SpaceMouseDriver::Automatic, "the saved choice is not changed by any of it");
+    }
+
+    /// smed, where it runs, is read first by Automatic: the device it reports gets a key of its own,
+    /// its keys arrive by 3Dconnexion id short and long, and its lock reaches the buttons. When smed
+    /// stops, the device itself is read again.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn automatic_reads_smed_first_with_long_presses_and_its_lock() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, daemon: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+        let until = Instant::now() + Duration::from_secs(3);
+        while fake.world().smed_end.is_none() {
+            assert!(Instant::now() < until, "smed was never connected");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        fake.smed_says(r#"{"type":"hello","api":1,"server":"smed test"}"#);
+        fake.smed_says(r#"{"type":"state","device":{"vid":9583,"pid":50739,"name":"SpaceMouse Enterprise","firmware":null},"lock":true}"#);
+        reader.reads("smed 256f:c633");
+        fake.smed_says(r#"{"type":"key","key":"space","id":176,"press":"short","down":true}"#);
+        fake.smed_says(r#"{"type":"key","key":"t","id":3,"press":"long","down":true}"#);
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            let reading = *reader.shared.lock().unwrap();
+            if reading.taps.contains(176) && reading.long_buttons.contains(3) {
+                assert_eq!(reading.lock, Some(true));
+                assert!(!reading.buttons.contains(3), "a long press is not a short one");
+                break;
+            }
+            assert!(Instant::now() < until, "the keys never arrived");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Its motion reaches the reading navigation takes, as fresh.
+        fake.smed_says(r#"{"type":"motion","t":[1,-2,3],"r":[4,5,-6]}"#);
+        let moved = solidcraft_ui_egui::space_mouse::Axes { translation: [1, -2, 3], rotation: [4, 5, -6] };
+        let until = Instant::now() + Duration::from_secs(3);
+        while !{
+            let reading = reader.shared.lock().unwrap();
+            reading.axes == moved && reading.arrived
+        } {
+            assert!(Instant::now() < until, "the motion never arrived");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The device's Lock key switches the lock in smed; the app learns it with the buttons.
+        fake.smed_says(r#"{"type":"lock","on":false}"#);
+        let mouse = SpaceMouse {
+            inactive: false,
+            shared: Arc::clone(&reader.shared),
+            drivers: Arc::clone(&reader.drivers),
+            last_frame: Instant::now(),
+            driver_mapping: DriverMapping::default(),
+            mapping_checked_at: Instant::now(),
+            wheel: WheelGuard::default(),
+            started: Instant::now(),
+            calibration: None,
+        };
+        while mouse.buttons().lock != Some(false) {
+            assert!(Instant::now() < until, "the lock never changed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        app.home.open = false;
+        let ctx = Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        let mut raw = egui::RawInput { focused: true, ..Default::default() };
+        solidcraft_ui_egui::space_mouse::buttons_hook(&mut app, &ctx, mouse.buttons(), &mut raw);
+        ctx.run_ui(raw, |_| {}).textures_delta.clear();
+        assert_eq!(app.space_mouse.lock, Some(false), "Preferences shows the device's lock");
+        assert_eq!(fake.world().opens, 0, "the device was left to smed");
+        fake.smed_stops();
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        assert_eq!(mouse.buttons().lock, None, "no lock without smed");
+    }
+
+    /// Waits (up to three seconds) until the reader has connected to smed, then says its hello.
+    #[cfg(target_os = "linux")]
+    fn smed_connected(fake: &machine::Fake) {
+        let until = Instant::now() + Duration::from_secs(3);
+        while fake.world().smed_end.is_none() {
+            assert!(Instant::now() < until, "smed was never connected");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        fake.smed_says(r#"{"type":"hello","api":1,"server":"smed test"}"#);
+    }
+
+    /// Automatic leaves a smed that has no device for the others: another 3D mouse, or the
+    /// Enterprise unplugged, is read as without smed. A restarted smed is read again at once.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn automatic_reads_another_mouse_while_smed_has_no_device_and_smed_again_when_it_restarts() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":null,"lock":false}"#);
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        // Read on well past smed's wait: the device is not left to ask smed again.
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(reader.key(), Some(Source::Hid(Some(machine::IDS)).key()), "the device stays read");
+        assert_eq!(fake.world().opens, 1, "the device was opened once");
+        // Gone for many of the reader's looks (every 10 ms here), so it sees the restart.
+        fake.smed_stops();
+        std::thread::sleep(Duration::from_millis(300));
+        fake.world().smed = true;
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":{"vid":9583,"pid":50739,"name":"SpaceMouse Enterprise","firmware":null},"lock":false}"#);
+        reader.reads("smed 256f:c633");
+    }
+
+    /// A stale smed socket (smed crashed) does not interrupt the read of the device: Automatic reads
+    /// it once and keeps it, instead of leaving it to try smed again after every wait.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stale_smed_socket_does_not_interrupt_the_device() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, smed_dead: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        // Several of smed's waits (300 ms here) go by.
+        std::thread::sleep(Duration::from_millis(1000));
+        assert_eq!(fake.world().opens, 1, "the device was opened once and kept");
+        // smed comes back for real: its socket goes and returns, and it is read.
+        fake.smed_stops();
+        std::thread::sleep(Duration::from_millis(300));
+        {
+            let mut world = fake.world();
+            world.smed = true;
+            world.smed_dead = false;
+        }
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":{"vid":9583,"pid":50739,"name":"SpaceMouse Enterprise","firmware":null},"lock":false}"#);
+        reader.reads("smed 256f:c633");
+    }
+
+    /// A smed that refuses the handshake (another API version) is left for the others, and not
+    /// asked again while the device is read.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_smed_that_refuses_the_handshake_is_left_for_the_device() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+        let until = Instant::now() + Duration::from_secs(3);
+        while fake.world().smed_end.is_none() {
+            assert!(Instant::now() < until, "smed was never connected");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        fake.smed_says(r#"{"type":"error","message":"unsupported API version 1"}"#);
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        std::thread::sleep(Duration::from_millis(1000));
+        assert_eq!(fake.world().opens, 1, "the device is kept");
+    }
+
+    /// A smed socket that accepts and stays silent, or answers the hello and sends no state, is left
+    /// after the wait as a refusal is: Automatic reads the device meanwhile instead of hanging on it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_smed_that_does_not_answer_is_left_for_the_device() {
+        use machine::{Fake, Running};
+        for hello in [false, true] {
+            let fake = Fake::default();
+            *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+            let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+            let until = Instant::now() + Duration::from_secs(3);
+            while fake.world().smed_end.is_none() {
+                assert!(Instant::now() < until, "smed was never connected");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if hello {
+                fake.smed_says(r#"{"type":"hello","api":1,"server":"smed test"}"#);
+            }
+            reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        }
+    }
+
+    /// The Enterprise plugged into a smed that had none, while Automatic reads another 3D mouse:
+    /// smed is asked again after the wait and read once it has the device, without a restart.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_device_plugged_into_a_running_smed_is_read_through_it() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":null,"lock":false}"#);
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        // Asked again (every 300 ms here) while it has none: the device stays read.
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(reader.key(), Some(Source::Hid(Some(machine::IDS)).key()));
+        {
+            let mut world = fake.world();
+            world.smed_end = None;
+            world.smed_device = true;
+        }
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":{"vid":9583,"pid":50739,"name":"SpaceMouse Enterprise","firmware":null},"lock":false}"#);
+        reader.reads("smed 256f:c633");
+    }
+
+    /// Smed, asked for, stays with smed while it has no device: the device itself is not opened.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn smed_asked_for_stays_with_smed_without_a_device() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Smed, fake.clone());
+        smed_connected(&fake);
+        fake.smed_says(r#"{"type":"state","device":null,"lock":false}"#);
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!((reader.key(), fake.world().opens), (None, 0), "nothing but smed is read");
+    }
+
+    /// A device read through smed for the first time starts from what was saved for it read directly
+    /// (its calibration, button jobs and the calibration offer's mark), and the direct entries stay.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_device_first_read_through_smed_keeps_what_was_saved_for_it_read_directly() {
+        use solidcraft_ui_egui::space_mouse::{ButtonJob, ButtonKey};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        app.home.open = false;
+        let (direct, smed) = ("hid 256f:c633", "smed 256f:c633");
+        let calibration = solidcraft_space_mouse::Calibration {
+            dead_zone_share: 0.07,
+            kind: solidcraft_space_mouse::Kind::ReturnToCenter,
+            axes: std::array::from_fn(|source| solidcraft_space_mouse::AxisCalibration {
+                source,
+                reversed: false,
+                rest: 3,
+                dead_zone: 9,
+                full: [340; 2],
+            }),
+        };
+        app.preferences.space_mouse_calibrations.insert(direct.into(), calibration);
+        app.preferences.space_mouse_buttons.insert(direct.into(), [(23, ButtonJob::Key(ButtonKey::Tab))].into());
+        app.preferences.space_mouse_offered.insert(direct.into());
+        let now = Instant::now();
+        let mut reading = Reading::new(now);
+        reading.device = Some(Source::Smed(Some((0x256f, 0xc633))));
+        let mut mouse = SpaceMouse {
+            inactive: false,
+            shared: Arc::new(Mutex::new(reading)),
+            drivers: Arc::default(),
+            last_frame: now - Duration::from_millis(20),
+            driver_mapping: DriverMapping::default(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        };
+        let ctx = Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        mouse.tick_at(&mut app, &ctx, now);
+        let prefs = &app.preferences;
+        assert_eq!(prefs.space_mouse_calibrations.get(smed), Some(&calibration));
+        assert_eq!(prefs.space_mouse_buttons.get(smed), prefs.space_mouse_buttons.get(direct));
+        assert!(prefs.space_mouse_offered.contains(smed), "the calibration offer is not shown again");
+        assert!(prefs.space_mouse_calibrations.contains_key(direct) && prefs.space_mouse_buttons.contains_key(direct), "the direct entries stay");
+        assert!(!prefs.space_mouse_long_buttons.contains_key(smed), "long jobs start from the measured defaults");
+    }
+
+    /// The rotation lock switched in Preferences reaches the reader at the next frame, once.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_lock_switched_in_preferences_reaches_the_reader() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        app.home.open = false;
+        let now = Instant::now();
+        let drivers: Arc<Drivers> = Arc::default();
+        let mut mouse = SpaceMouse {
+            inactive: false,
+            shared: Arc::new(Mutex::new(Reading::new(now))),
+            drivers: Arc::clone(&drivers),
+            last_frame: now - Duration::from_millis(20),
+            driver_mapping: DriverMapping::default(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        };
+        let ctx = Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        for on in [true, false] {
+            app.space_mouse.lock_request = Some(on);
+            mouse.tick_at(&mut app, &ctx, Instant::now());
+            assert_eq!(app.space_mouse.lock_request, None, "taken by the frame");
+            assert_eq!(drivers.take_lock_request(), Some(on));
+            assert_eq!(drivers.take_lock_request(), None, "and passed on once");
+        }
+    }
+
+    /// Direct, asked for, reads the device even while smed runs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn direct_asked_for_is_read_with_smed_running() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { device: true, openable: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Direct, fake.clone());
+        reader.reads(&Source::Hid(Some(machine::IDS)).key());
+        assert!(fake.world().smed_end.is_none(), "smed was not connected");
+    }
+
+    /// Spacenavd, asked for, is read while smed runs: smed is not connected.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn spacenavd_asked_for_is_read_with_smed_running() {
+        use machine::{Fake, Running};
+        let fake = Fake::default();
+        *fake.world() = machine::World { daemon: true, smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Spacenavd, fake.clone());
+        reader.reads("spacenavd");
+        assert!(fake.world().smed_end.is_none(), "smed was not connected");
     }
 
     /// Spacenavd, asked for, is read even with the device there and openable, and the device is not opened.
@@ -2360,6 +3024,7 @@ mod tests {
         reader.reads("spacenavd");
         let now = Instant::now();
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&reader.shared),
             drivers: Arc::clone(&reader.drivers),
             last_frame: now,
@@ -2374,13 +3039,13 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(3);
         let on_daemon = loop {
             let seen = mouse.buttons();
-            if seen.down != 0 {
+            if !seen.down.is_empty() {
                 break seen;
             }
             assert!(Instant::now() < until, "the daemon's button never showed");
             std::thread::sleep(Duration::from_millis(2));
         };
-        assert_eq!((on_daemon.device.as_deref(), on_daemon.down), (Some("spacenavd"), 1));
+        assert_eq!((on_daemon.device.as_deref(), on_daemon.down), (Some("spacenavd"), ButtonSet::of(1)));
         // The device comes up and the reader moves to it.
         fake.world().device = true;
         let key = Source::Hid(Some(IDS)).key();
@@ -2391,7 +3056,11 @@ mod tests {
         // A record that arrived on the daemon does not become fresh again on the device.
         assert!(!reader.shared.lock().unwrap().arrived, "nothing has arrived on the device yet");
         let on_device = mouse.buttons();
-        assert_eq!((on_device.device.as_deref(), on_device.down, on_device.taps), (Some(key.as_str()), 0, 0), "nothing held, nothing pressed");
+        assert_eq!(
+            (on_device.device.as_deref(), on_device.down, on_device.taps),
+            (Some(key.as_str()), ButtonSet::EMPTY, ButtonSet::EMPTY),
+            "nothing held, nothing pressed"
+        );
     }
 
     /// The same ball on the daemon's path, through the reader and the tick: newly arriving records are
@@ -2413,6 +3082,7 @@ mod tests {
             app.home.open = false;
             let start = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: start,
@@ -2497,6 +3167,7 @@ mod tests {
         ctx.run_ui(egui::RawInput { focused: true, ..Default::default() }, |_| {}).textures_delta.clear();
         let shared = Arc::new(Mutex::new(Reading::new(Instant::now())));
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&shared),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2645,6 +3316,7 @@ mod tests {
             }
             let now = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: now,

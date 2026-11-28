@@ -252,6 +252,72 @@ fn assembly_tree_hover_highlight_cost() {
     }
 }
 
+/// `each` bolts in a row, `each` rows in a frame and `each` frames in the design, so `each` cubed
+/// bolts from a few commands. Settled.
+fn nested_bolts(each: usize) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.create", json!({"name": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Row", "parent": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Bolt", "parent": "Row"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 2, "height": 20, "base": [0, 0, 0], "axis": "Z", "body_name": "Shank"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    for (component, parent, step) in [("Bolt", "Row", [10, 0, 0]), ("Row", "Frame", [0, 10, 0]), ("Frame", "root", [0, 0, 30])] {
+        for i in 1..each {
+            let translate: Vec<usize> = step.iter().map(|s| s * i).collect();
+            h.app.run("occurrence.copy", json!({"component": component, "parent": parent, "translate": translate})).unwrap();
+        }
+    }
+    h.frames(3);
+    h
+}
+
+/// The browser's search on an assembly: one keystroke's search, and a whole frame with the tree
+/// unfiltered, listing a few rows and listing many. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual search measurement"]
+fn browser_search_cost() {
+    use solidcraft_engine::browser_find::{Pattern, find};
+    for each in [5, 10, 15] {
+        let mut h = nested_bolts(each);
+        let placements = each + each * each + each * each * each;
+        let mut line = format!("SEARCH placements={placements} bodies={}", each * each * each);
+        for text in ["shank", "bolt", "bolt:7", "*:1", "nothing like it"] {
+            let pattern = Pattern::new(text);
+            let mut times: Vec<f64> = (0..9).map(|_| ms(|| drop(find(&h.app.session, pattern.as_ref(), &[])))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" find[{text}]_ms={:.2}", times[times.len() / 2]));
+        }
+        // What the bar costs with nobody searching, against the same frame without it.
+        h.frames(2);
+        let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" no_bar_frame_ms={:.2}", times[times.len() / 2]));
+        for (name, text) in [("no_search", ""), ("few_rows", "bolt:7"), ("many_rows", "bolt")] {
+            if text.is_empty() {
+                h.app.tree.search.clear();
+            } else {
+                h.app.tree.search.show();
+                h.app.tree.search.text = text.to_string();
+            }
+            h.frames(2);
+            let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" {name}_frame_ms={:.2}", times[times.len() / 2]));
+        }
+        // A keystroke: the frame that searches again, its rows all listed.
+        let mut times: Vec<f64> = (0..21)
+            .map(|i| {
+                h.app.tree.search.text = if i % 2 == 0 { "bol" } else { "bolt" }.to_string();
+                ms(|| h.frames(1))
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" keystroke_frame_ms={:.2}", times[times.len() / 2]));
+        println!("{line}");
+    }
+}
+
 /// A frame of the viewport for `app`'s camera, drawing the given model and highlight scenes.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn view_frame(
@@ -266,6 +332,8 @@ pub(crate) fn view_frame(
     let t = solidcraft_theme::Tokens::get();
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
+        selection_all: false,
+        hover_body: None,
         product: false,
         product_lights: None,
         upload_error: None,
@@ -283,7 +351,8 @@ pub(crate) fn view_frame(
         turned_depth: Some(proj.vp.turned_depth_f32()),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
-        clip: [0.0; 4],
+        clip: [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
+        clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -294,12 +363,16 @@ pub(crate) fn view_frame(
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+        occlusion: false,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 
@@ -468,8 +541,14 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
     let bodies = names.len();
     h.app.viewport.hover_bodies = names;
     let copied = ms(|| drop(crate::viewport::build_highlight(&h.app)));
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
     let planned = ms(|| drop(crate::viewport::build_highlight(&h.app)));
     println!("HIGHLIGHT bodies={bodies} triangles={triangles} cpu_copy_ms={copied:.2} model_triangles_ms={planned:.2}");
 }
@@ -646,8 +725,14 @@ fn many_selected_bodies_hover_cost() {
     };
     let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
     for (mode, tess) in modes {
-        h.app.viewport.gpu =
-            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        h.app.viewport.gpu = tess.map(|tess| crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess,
+            oit: false,
+            edges: false,
+        });
         drop(crate::viewport::build_scene(&h.app));
         for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
             h.app.session.selection =
@@ -751,6 +836,55 @@ fn sketch_scene_cost_while_the_camera_moves() {
     }
 }
 
+/// Orbiting over many finished, shown sketches (#22709): the window thread's frame while the camera
+/// turns, how many sketch scenes those frames built, and the frame once the view rests.
+/// `SOLIDCRAFT_SCALE_SKETCHES` sketches (default 300) of 4 × 4 blobs each. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "manual sketch scene measurement"]
+fn orbit_over_many_finished_sketches() {
+    let n: usize = std::env::var("SOLIDCRAFT_SCALE_SKETCHES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let mut h = Harness::new();
+    let logo = blob_logo(4);
+    for i in 0..n {
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.insert_svg", json!({"text": logo, "at": [(i % 20) as f64 * 16.0, (i / 20) as f64 * 16.0]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    // The sketch scene is built only for a GPU target; this one draws nothing.
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
+    h.frames(3);
+    h.app.fit_view();
+    h.frames(30);
+    let median = |mut t: Vec<f64>| {
+        t.sort_by(f64::total_cmp);
+        (t[t.len() / 2], t[0], t[t.len() - 1])
+    };
+    let one_scene = ms(|| drop(crate::viewport::build_sketch_scene(&h.app, &crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap()))));
+    let built = h.app.viewport.sketch_scenes_built;
+    let mut moving = Vec::new();
+    for i in 0..30 {
+        h.app.cam.yaw += 0.02;
+        h.app.cam.pitch = 0.9 + 0.01 * f64::from(i % 5);
+        moving.push(ms(|| h.frame()));
+    }
+    let built_moving = h.app.viewport.sketch_scenes_built - built;
+    let (m, mmin, mmax) = median(moving);
+    // The harness clock moves 1/60 s a frame: 30 frames are half a second at rest.
+    let rest = ms(|| h.frames(30));
+    println!(
+        "MANYSKETCHES sketches={n} one_scene_ms={one_scene:.2} orbit_frame_ms={m:.2} ({mmin:.2}-{mmax:.2}) scenes_built_in_30_orbit_frames={built_moving} rest_30_frames_ms={rest:.2} scenes_built_after_rest={}",
+        h.app.viewport.sketch_scenes_built - built - built_moving
+    );
+}
+
 /// Orbiting a large design with the right button, as a person turns the view: per frame, the
 /// window thread's frame (the model scene built, as the app builds it once a renderer is there),
 /// its named steps, and the renderer's prepare, draw recording and GPU work on an offscreen device
@@ -786,7 +920,14 @@ fn orbit_frame_cost() {
     let mut frames = crate::gpu::OffscreenFrames::new(SIZE, true);
     h.app.viewport.gpu = match &frames {
         Some(f) => f.target(),
-        None => Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false }),
+        None => Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: true,
+            oit: false,
+            edges: false,
+        }),
     };
     h.app.fit_view();
     h.frames(5);
@@ -924,4 +1065,32 @@ fn product_preview_rebuild_cost() {
             instanced.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>(),
         );
     }
+}
+
+#[test]
+fn pop_out_interface_scales_only_its_own_viewport_and_pointer() {
+    let ctx = egui::Context::default();
+    let child = egui::ViewportId::from_hash_of("scaled pop-out");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let pointer = egui::pos2(400.0, 200.0);
+    let input = |viewport_id| {
+        let mut raw =
+            egui::RawInput { viewport_id, screen_rect: Some(screen), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
+        raw.viewports.entry(viewport_id).or_default().native_pixels_per_point = Some(1.0);
+        raw
+    };
+    crate::view_window_scale::in_window(&ctx, child, 2.0, || {
+        ctx.run_ui(input(child), |ui| {
+            assert_eq!(ui.ctx().pixels_per_point(), 2.0);
+            assert_eq!(ui.ctx().content_rect().size(), egui::vec2(400.0, 300.0));
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(200.0, 100.0)));
+        })
+        .drop_without_applying_deltas();
+    });
+    ctx.run_ui(input(egui::ViewportId::ROOT), |ui| {
+        assert_eq!(ui.ctx().pixels_per_point(), 1.0);
+        assert_eq!(ui.ctx().content_rect(), screen);
+        assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(pointer));
+    })
+    .drop_without_applying_deltas();
 }

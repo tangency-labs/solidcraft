@@ -7,7 +7,8 @@
 //! tolerance of the kernel's certified bound ([`certified_distance`]). Ops checks the inputs
 //! and converts.
 //! A closed periodic curve (unclamped knots, as `curve_fit::closed_cv_curve` makes) is refused
-//! for now: the kernel's knot routines take clamped knots.
+//! for now: the kernel's knot routines take clamped knots. A curve's joints, where its knots make
+//! it at most continuous ([`joints`]), are read from its knots as they are, clamped or not.
 
 use solidcore::error::nurbs::NurbsFailure;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -68,6 +69,29 @@ pub fn insert_knot(curve: &Curve, t: f64) -> Result<Curve> {
     }
     run("curve_knots::insert_knot", |_| {
         Ok(record_of(&nurb.insert_knot(t, 1)?))
+    })?
+}
+
+/// `curve` with a knot inserted at the middle of each of its spans
+/// ([`solidcore::nurbs::knots::span_midpoints`]; Boehm's insertion, [`NurbCurve::insert_knot`]):
+/// the same curve, twice the spans, so a curve fitted on its knots has twice the freedom.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid clamped spline or rational spline, or a
+/// result the record cannot hold (more control points than it takes); the kernel's status
+/// otherwise.
+pub fn halve_spans(curve: &Curve) -> Result<Curve> {
+    let nurb = nurb_of(curve)?;
+    let Natural::Range(t0, t1) = curve.natural() else {
+        return Err(Error::Argument);
+    };
+    let mids = solidcore::nurbs::knots::span_midpoints(nurb.knots(), [t0, t1]);
+    run("curve_knots::halve_spans", |_| {
+        let mut halved = nurb;
+        for t in mids {
+            halved = halved.insert_knot(t, 1)?;
+        }
+        Ok(record_of(&halved))
     })?
 }
 
@@ -175,6 +199,23 @@ pub fn split_at(curve: &Curve, t: f64) -> Result<(Curve, Curve)> {
         };
         Ok(record_of(&before).and_then(|b| record_of(&after).map(|a| (b, a))))
     })?
+}
+
+/// The joints of spline `curve` strictly inside `interval`, in order: its knots held at least
+/// as many times as its degree, where it is at most continuous, as where the pieces of a chain
+/// meet ([`solidcore::nurbs::knots::joints`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a spline or rational spline, or whose knots are
+/// fewer than its control points need.
+pub fn joints(curve: &Curve, interval: [f64; 2]) -> Result<Vec<f64>> {
+    let (knots, count) = match curve {
+        Curve::Spline { knots, points } => (knots, points.len()),
+        Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+        _ => return Err(Error::Argument),
+    };
+    let degree = knots.len().checked_sub(count + 1).ok_or(Error::Argument)?;
+    Ok(solidcore::nurbs::knots::joints(knots, degree, interval))
 }
 
 /// The record of `changed` and the kernel's certified bound of its distance from `original`,
@@ -338,6 +379,42 @@ mod tests {
         assert_eq!(multiplicity(parts(&c3).0, 0.5), 3);
         same_shape(&c, &c3, 1e-12);
         assert_eq!(insert_knot(&c3, 0.5), Err(Error::Argument));
+    }
+
+    /// The cubic on six points has three spans (inner knots 1/3 and 2/3): halved, the knots
+    /// 1/6, 1/2 and 5/6 come in, three points more, the same curve. A quarter circle's one span
+    /// halved stays rational, on its circle.
+    #[test]
+    fn halved_spans_keep_the_shape() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let halved = halve_spans(&c).unwrap();
+        let (knots, count) = parts(&halved);
+        assert_eq!(count, WAVE.len() + 3);
+        for t in [1.0 / 6.0, 0.5, 5.0 / 6.0] {
+            assert!(
+                knots.iter().any(|k| (k - t).abs() < 1e-15),
+                "{t}: {knots:?}"
+            );
+        }
+        same_shape(&c, &halved, 1e-12);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        let halved = halve_spans(&arc).unwrap();
+        assert!(matches!(halved, Curve::RationalSpline { .. }), "{halved:?}");
+        assert_eq!(parts(&halved).1, 4);
+        same_shape(&arc, &halved, 1e-12);
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(halve_spans(&line), Err(Error::Argument));
     }
 
     #[test]
@@ -578,5 +655,35 @@ mod tests {
             end: [1.0; 3],
         };
         assert_eq!(split_at(&line, 0.5), Err(Error::Argument));
+    }
+
+    #[test]
+    fn joints_are_the_knots_held_as_many_times_as_the_degree() {
+        // The cubic on WAVE has the inner knots 1/3 and 2/3 once each: no joint. With 0.5
+        // inserted three times, the degree, it has one there, and only strictly inside.
+        let mut c = cv_curve(&WAVE, 3).unwrap();
+        assert_eq!(joints(&c, [0.0, 1.0]), Ok(vec![]));
+        for _ in 0..3 {
+            c = insert_knot(&c, 0.5).unwrap();
+        }
+        assert_eq!(joints(&c, [0.0, 1.0]), Ok(vec![0.5]));
+        assert_eq!(joints(&c, [0.5, 1.0]), Ok(vec![]));
+        // Unclamped knots are read as they are: 0 to 9 under 6 points, a cubic, each held once.
+        let floating = Curve::Spline {
+            knots: (0..10).map(f64::from).collect(),
+            points: WAVE.to_vec(),
+        };
+        assert_eq!(joints(&floating, [3.0, 6.0]), Ok(vec![]));
+        // Not a spline, or fewer knots than its points need: refused.
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(joints(&line, [0.0, 1.0]), Err(Error::Argument));
+        let short = Curve::Spline {
+            knots: vec![0.0, 1.0],
+            points: WAVE.to_vec(),
+        };
+        assert_eq!(joints(&short, [0.0, 1.0]), Err(Error::Argument));
     }
 }

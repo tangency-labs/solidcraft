@@ -94,7 +94,7 @@ impl Look {
         self.color.map(|x| x as f32 / 255.0)
     }
     pub fn hex(&self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2])
+        solidcraft_color::hex::format(self.color)
     }
 }
 
@@ -331,7 +331,7 @@ impl Document {
                     .bodies
                     .iter()
                     .filter(|b| owner(b) == id)
-                    .map(|b| self.materials.get(b.definition_name()).and_then(|m| self.material_look(m)));
+                    .map(|b| self.resolved_body_material(b.definition_name()).and_then(|m| self.material_look(m)));
                 let material = materials.next().flatten().filter(|first| materials.all(|look| look.as_ref() == Some(first)));
                 Ok(AppearanceChain { face: None, body: None, component: self.appearances.components.get(&id).cloned(), material })
             }
@@ -343,7 +343,7 @@ impl Document {
             face: None,
             body: self.appearances.bodies.get(name).cloned(),
             component: (component != 0).then(|| self.appearances.components.get(&component).cloned()).flatten(),
-            material: self.materials.get(name).and_then(|material| self.material_look(material)),
+            material: self.resolved_body_material(name).and_then(|material| self.material_look(material)),
         }
     }
 
@@ -460,7 +460,8 @@ impl Document {
                 let target = crate::config::ConfigFaceTarget {
                     body: f.body.clone(),
                     origin_feature,
-                    name: crate::naming::strip_piece(name).into(),
+                    // A Split Face piece by its own name is that piece; any other name, the face.
+                    name: if crate::history_names::names_split_piece(name) { name.clone() } else { crate::naming::strip_piece(name).into() },
                     point: f.point,
                     certificate: f.certificate.clone(),
                 };
@@ -471,9 +472,14 @@ impl Document {
                 }
                 continue;
             }
-            // By name (every piece of a split face), else by the point.
+            // By name (every piece of a split face; a Split Face piece by its own name, that piece
+            // alone), else by the point.
             if let Some(n) = &f.name {
-                let hits = crate::naming::faces_with_stem(b, n);
+                let hits = if crate::history_names::names_split_piece(n) {
+                    (0..b.body.face_count()).filter(|i| crate::name_lookup::face_has_name(b, *i, n)).collect()
+                } else {
+                    crate::naming::faces_with_stem(b, n)
+                };
                 if !hits.is_empty() {
                     for i in hits {
                         out.retain(|(j, _)| *j != i);
@@ -496,6 +502,13 @@ impl Document {
 pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
     let (d, f) = nearest_face(b, p)?;
     (d <= pick_tolerance(b)).then_some(f)
+}
+
+/// The faces of `b` that hold `p` within `tolerance`, in ascending order: one when `p` lies on a
+/// face, several when it lies on an edge or a vertex they share, none when it floats. Each face is
+/// decided exactly on its surface and trim, not on the display mesh.
+pub fn faces_within(b: &crate::ModelBody, p: Vec3, tolerance: f64) -> Vec<usize> {
+    (0..b.body.face_count()).filter(|&face| b.body.point_lies_on_face(face, p, tolerance).ok().flatten().is_some()).collect()
 }
 
 /// The face of `b` nearest `p` and how far it is, however far.
@@ -580,7 +593,7 @@ mod tests {
             .iter()
             .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5, name: None })
             .collect();
-        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None })), 1)
+        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None, layer: None })), 1)
     }
 
     fn check_imported_appearance_precedence(body: &crate::ModelBody) {
