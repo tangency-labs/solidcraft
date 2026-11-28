@@ -9,6 +9,7 @@
 
 use core::num::NonZeroU32;
 use egui::{Context, ViewportId, ViewportIdMap, ViewportIdSet};
+use egui::epaint;
 use egui_wgpu::capture::CaptureState;
 use egui_wgpu::{RenderState, RendererOptions, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration};
 use std::sync::Arc;
