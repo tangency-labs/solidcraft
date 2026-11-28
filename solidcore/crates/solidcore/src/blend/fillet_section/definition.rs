@@ -600,16 +600,20 @@ pub fn evaluate_definition(
         // (the leader's derivatives to order s + 1 enter, its unit tangent's; the law's
         // to order s; a curve is C^(p - multiplicity) at a knot, its derivatives to
         // that order the same either side)
-        let along = [(Some(&def.leader), ts + 1), (def.law.as_ref(), ts)];
-        for (curve, used) in along {
+        let along = [
+            (Some(&def.leader), ts + 1, false),
+            (def.law.as_ref(), ts, true),
+        ];
+        for (curve, used, is_law) in along {
             if sided {
                 break;
             }
             let Some(curve) = curve else {
                 continue;
             };
-            let (knots, mult) = curve.knots(None)?;
-            let deg = curve.degree()?;
+            // (the same at every station: kept with the definition's identity)
+            let (knots, mult, deg) = identity.knots(curve, is_law)?;
+            let deg = *deg;
             let mut m = 1;
             while m + 1 < knots.len() && m < mult.len() {
                 let (Some(&km), Some(&mm)) = (knots.get(m), mult.get(m)) else {
