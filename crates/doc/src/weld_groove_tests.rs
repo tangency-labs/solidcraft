@@ -963,3 +963,22 @@ fn a_rib_inside_the_mark_only_at_the_joint_s_end_leaves_no_seam_under_the_root()
         assert_eq!(no.other, None);
     }
 }
+
+/// CodeRabbit on #22504: the rib of [`a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root`]
+/// only 0.04 deep (a fifth of the mark's height), between the points where the undersides are read
+/// flat: still inside the mark, so still no seam under the root.
+#[test]
+fn a_shallow_rib_inside_the_mark_leaves_no_seam_under_the_root() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (-2.0, -6.0), (-1.5, -6.04), (-1.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}

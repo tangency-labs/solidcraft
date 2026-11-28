@@ -981,9 +981,13 @@ fn span(p: Vec2, q: Vec2) -> Option<f64> {
     affine::segment_distance(&Seg2::Line { a: p, b: p }, q)
 }
 
-/// How deep below a face a slab ([`slab`]) starts: a quarter of [`MARK_HEIGHT`], so that its side
-/// along the face is not the face itself.
-const SLAB_GAP: f64 = MARK_HEIGHT / 4.0;
+/// How far off a face a slab ([`slab`]) starts: [`ALLOWANCE`] zone tolerances, so that its side
+/// along the face is apart from the face for the kernel, while anything that stands off or sinks
+/// into the face by more than that is inside the slab (CodeRabbit on #22504: a quarter of
+/// [`MARK_HEIGHT`] did not see a rib or a hole shallower than it).
+fn slab_gap(piece: &Piece<'_>) -> f64 {
+    piece.zone * ALLOWANCE
+}
 
 /// The quadrilateral `corners` (in the frame's plane) swept along the whole of `piece`, end to end
 /// (CodeRabbit on #22504: a slab short of the ends would not see what lies within that of them).
@@ -993,11 +997,11 @@ fn slab(corners: [Vec2; 4], piece: &Piece<'_>) -> Result<Body> {
     Ok(extrude_planar_regions(piece.frame, &[region], lo, hi)?)
 }
 
-/// The volume a slab `width` wide (and [`MARK_HEIGHT`] - [`SLAB_GAP`] deep) may leave from a
+/// The volume a slab `width` wide (and [`MARK_HEIGHT`] less [`slab_gap`] deep) may leave from a
 /// boolean and still count as nothing: a skin [`ALLOWANCE`] zone tolerances thick over its two end
 /// faces, the only faces it may share with a part (a plate that ends where the piece does).
 fn skin(width: f64, piece: &Piece<'_>) -> f64 {
-    2.0 * piece.zone * ALLOWANCE * width * (MARK_HEIGHT - SLAB_GAP)
+    2.0 * piece.zone * ALLOWANCE * width * (MARK_HEIGHT - slab_gap(piece))
 }
 
 /// The volume of a boolean's result `got`, none for an empty one; `None` where the kernel
@@ -1008,10 +1012,10 @@ fn volume_of(got: Option<Body>) -> Option<f64> {
 
 /// Whether face `face` of `pick`'s part, a plane, is whole under the strip from `a` to `b`
 /// (points of the face in the frame's plane) all along `piece`: a slab under the strip, from
-/// [`SLAB_GAP`] to [`MARK_HEIGHT`] inside the part, lies in its material (cut by the part, at most
+/// [`slab_gap`] to [`MARK_HEIGHT`] inside the part, lies in its material (cut by the part, at most
 /// a [`skin`] is left; [`boolean`]). A hole, a notch, or an edge of the face that crosses the strip,
 /// straight or curved, leaves more (CodeRabbit on #22504). `true` for a face that is not a plane.
-/// shortcut: a gap shallower than [`SLAB_GAP`] is not seen.
+/// A gap no deeper than [`slab_gap`] is the face's own tolerance.
 fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Piece<'_>) -> Result<bool> {
     let Some(n) = pick.part.face_plane_normal(face)? else {
         return Ok(true);
@@ -1024,19 +1028,21 @@ fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Pie
     let Some(width) = span(a, b) else {
         return Ok(false);
     };
-    let under = slab([below(a, SLAB_GAP), below(b, SLAB_GAP), below(b, MARK_HEIGHT), below(a, MARK_HEIGHT)], piece)?;
+    let gap = slab_gap(piece);
+    let under = slab([below(a, gap), below(b, gap), below(b, MARK_HEIGHT), below(a, MARK_HEIGHT)], piece)?;
     Ok(volume_of(boolean(&under, pick.part, BoolOp::Cut)?).is_some_and(|v| v <= skin(width, piece)))
 }
 
 /// Whether the space of the default mark on `seam` (the other side's seam of a joint with no
-/// groove) is clear of `pick`'s part all along `piece`: a slab from [`SLAB_GAP`] to
+/// groove) is clear of `pick`'s part all along `piece`: a slab from [`slab_gap`] to
 /// [`MARK_HEIGHT`] off the surface, as wide as the mark, meets at most a [`skin`] of the part
 /// ([`boolean`]): a rib or anything else below the root within the mark is seen, across its
-/// whole width and length (CodeRabbit on #22504). shortcut: a part reaching less than
-/// [`SLAB_GAP`] into the mark is not seen.
+/// whole width, length and height (CodeRabbit on #22504). A part reaching no further than
+/// [`slab_gap`] into the mark is within the surface's own tolerance.
 fn clear_under(pick: &GroovePick<'_>, seam: &Seam, piece: &Piece<'_>) -> Result<bool> {
     let (half, x, y) = (seam.mark_width() / 2.0, seam.at.x, seam.at.y);
-    let (near, far) = if seam.normal.y > 0.0 { (y + SLAB_GAP, y + MARK_HEIGHT) } else { (y - SLAB_GAP, y - MARK_HEIGHT) };
+    let gap = slab_gap(piece);
+    let (near, far) = if seam.normal.y > 0.0 { (y + gap, y + MARK_HEIGHT) } else { (y - gap, y - MARK_HEIGHT) };
     let probe = slab([Vec2::new(x - half, near), Vec2::new(x + half, near), Vec2::new(x + half, far), Vec2::new(x - half, far)], piece)?;
     Ok(volume_of(boolean(&probe, pick.part, BoolOp::Intersect)?).is_some_and(|v| v <= skin(2.0 * half, piece)))
 }
