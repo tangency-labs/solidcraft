@@ -154,12 +154,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   A reset that lands after the probe is still met by a queue write or the present: the painter
   runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
   then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
-  destroys a second handle to the frame's texture once the frame is presented or dropped. On a
-  lost device wgpu's present and discard keep the frame's image in the surface, and dropping
-  the surface (the window closing for the restart) then panicked in wgpu-hal ("Trying to
-  destroy a SwapchainAcquireSemaphore that is still in use by a SurfaceTexture", #7148); the
-  destroy takes the image back whatever the device's state.
 - `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
