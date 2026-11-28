@@ -2643,7 +2643,7 @@ pub(crate) fn closed_turn(
 /// the ends' geometric mean the cosine of half the span's angle, which is also half the
 /// turn at `P1`. Every span on one circle: one centre and radius. (A round's cross section
 /// revolved round a boss's axis, the surface SMLib's concave round of an arc is.)
-fn generator_is_circle(rev: &SurfOfRevolution) -> Option<(Point3, f64)> {
+pub(crate) fn generator_is_circle(rev: &SurfOfRevolution) -> Option<(Point3, f64)> {
     let turn = rot_turn(rev).ok()?;
     let l_gen = 1 - turn.rot;
     let e_gen = if l_gen == 0 {

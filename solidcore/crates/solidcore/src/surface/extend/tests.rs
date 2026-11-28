@@ -2139,6 +2139,216 @@ fn a_label_its_form_does_not_prove_extends_as_the_form() {
     assert!((a - b).length() < 1e-12, "{a:?} {b:?}");
 }
 
+/// The quarter circle r 6 about `(4, y, 4)` in the plane `y` from `(10, y, 4)` up to
+/// `(4, y, 10)`, revolved `turn` degrees about z: at `y = 0` a torus about `(0, 0, 4)`
+/// (major 4, minor 6) without its label, the round on a post's top edge that the shell of #14370 offsets. In
+/// the plane `y = 1` the circle's plane misses the axis, and the revolution is no torus.
+fn revolved_quarter_circle(kk: &Kernel, y: f64, turn: f64) -> Surface {
+    use crate::curve::curve::Curve;
+    use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+    let arc = BSplineCurve::create_arc_from_points(
+        Vec3::new(4.0, y, 4.0),
+        Vec3::new(10.0, y, 4.0),
+        Vec3::new(4.0, y, 10.0),
+        NurbCircleParam::Quadratic,
+    )
+    .unwrap();
+    revolved(kk, Curve::from(arc), turn)
+}
+
+/// `generator` revolved `turn` degrees about z.
+fn revolved(kk: &Kernel, generator: crate::curve::curve::Curve, turn: f64) -> Surface {
+    use crate::surface::surf_of_revolution::SurfOfRevolution;
+    let mut rev =
+        SurfOfRevolution::create_canonical(kk, generator, Vec3::ZERO, Vec3::Z, false).unwrap();
+    let d = rev.step_uv_domain();
+    rev.adjust_step_uv_domain(
+        kk,
+        &Extent2d::from_bounds(d.min().x, d.min().y, turn, d.max().y),
+    )
+    .unwrap();
+    Surface::from(rev)
+}
+
+/// `s` on the torus about `(0, 0, 4)` with axis z, major 4 and minor 6 ([`on_its_analytic`]).
+fn on_the_posts_torus(s: &BSplineSurface) {
+    use crate::surface::implicit::Implicit;
+    let on = Implicit::Torus {
+        centre: Vec3::new(0.0, 0.0, 4.0),
+        axis: Vec3::Z,
+        major: 4.0,
+        minor: 6.0,
+    };
+    let tube = |x: Vec3| (x.x.hypot(x.y) - 4.0).hypot(x.z - 4.0) - 6.0;
+    on_its_analytic(s, &on, tube, 1e-11);
+}
+
+/// The sides of `s`'s box round its axis.
+fn round_sides(s: &Surface) -> Vec<BoxSide> {
+    BoxSide::ALL
+        .into_iter()
+        .filter(|&b| round_the_axis(s, b) == Some(true))
+        .collect()
+}
+
+/// A revolved quarter circle (a torus without its label, a quarter turn of it) extended 1.5
+/// past its two sides round the axis: as a torus's, its net continued Natural on the torus
+/// (about (0, 0, 4), major 4, minor 6) and 1.5 across each side, where a revolution's are
+/// left. Asked on every side, its sides along the generator are extended too, as any
+/// revolution's. The same arc made as a circle (not a B-spline) turns on the same way.
+#[test]
+fn a_revolved_circle_turns_on_round_its_axis_as_a_torus() {
+    use crate::curve::curve::Curve;
+    use crate::curve::ellipse::Ellipse;
+    let kk = k();
+    let s = revolved_quarter_circle(&kk, 0.0, 90.0);
+    let round = round_sides(&s);
+    assert_eq!(round.len(), 2);
+    let circle = Ellipse::circle_from_3_points(
+        &kk,
+        Vec3::new(10.0, 0.0, 4.0),
+        Vec3::new(4.0 + 6.0 * FRAC_1_SQRT_2, 0.0, 4.0 + 6.0 * FRAC_1_SQRT_2),
+        Vec3::new(4.0, 0.0, 10.0),
+        3,
+        false,
+    )
+    .unwrap();
+    for made in [
+        s.copy(&kk).unwrap(),
+        revolved(&kk, Curve::from(circle), 90.0),
+    ] {
+        assert_eq!(round_sides(&made), round);
+        let e = made
+            .extended_sides(&kk, &round, Continuity::Natural, 1.5)
+            .unwrap();
+        let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+            panic!("not a B-spline: {:?}", e.surface.kind());
+        };
+        on_the_posts_torus(grown);
+        for (side, done) in BoxSide::ALL.into_iter().zip(e.sides) {
+            if round.contains(&side) {
+                let SideExtension::Extended(a) = done else {
+                    panic!("{side:?}: {:?}", e.sides);
+                };
+                assert!((a.enclosure.mid() - 1.5).abs() <= 1e-9 * 1.5, "{a:?}");
+            } else {
+                assert_eq!(done, SideExtension::NotAsked);
+            }
+        }
+    }
+    let all = s
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 1.5)
+        .unwrap();
+    for done in all.sides {
+        let SideExtension::Extended(a) = done else {
+            panic!("{:?}", all.sides);
+        };
+        assert!((a.enclosure.mid() - 1.5).abs() <= 1e-6 * 1.5, "{a:?}");
+    }
+}
+
+/// Asked past the cap, a revolved quarter circle's sides round the axis turn on a quarter of
+/// the turn it leaves open (270 degrees), as a torus's: across each, at the side's middle (the
+/// arc's middle, 4 + 6 cos 45 from the axis), `3 pi / 8 (4 + 3 sqrt 2)`, said so.
+#[test]
+fn a_revolved_circle_turns_on_no_farther_than_a_quarter_of_its_open_turn() {
+    let kk = k();
+    let s = revolved_quarter_circle(&kk, 0.0, 90.0);
+    let round = round_sides(&s);
+    let e = s
+        .extended_sides(&kk, &round, Continuity::Natural, 100.0)
+        .unwrap();
+    let cap = 3.0 * PI / 8.0 * (4.0 + 6.0 * FRAC_1_SQRT_2);
+    for &side in &round {
+        let done = BoxSide::ALL
+            .into_iter()
+            .zip(e.sides)
+            .find(|&(b, _)| b == side)
+            .map(|(_, d)| d);
+        let Some(SideExtension::UpToLimit(a)) = done else {
+            panic!("{side:?}: {:?}", e.sides);
+        };
+        assert!(
+            (a.enclosure.mid() - cap).abs() <= 1e-9 * cap,
+            "{a:?} vs {cap}"
+        );
+    }
+}
+
+/// An offset surface of a revolved quarter circle (the shell's offset of the round) turns on
+/// round the axis as its base does: the offset, by the same distance, of its base turned on
+/// the torus.
+#[test]
+fn an_offset_revolved_circle_turns_on_round_its_axis() {
+    use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
+    let kk = k();
+    let base = revolved_quarter_circle(&kk, 0.0, 90.0);
+    let round = round_sides(&base);
+    let s = Surface::from(OffsetSurface::new(&kk, -1.0, base, true, SS_UNKNOWN).unwrap());
+    let e = s
+        .extended_sides(&kk, &round, Continuity::Natural, 1.5)
+        .unwrap();
+    let SurfaceKind::OffsetSurface(o) = e.surface.kind() else {
+        panic!("not an offset surface: {:?}", e.surface.kind());
+    };
+    assert_eq!(o.offset_distance(), -1.0);
+    let SurfaceKind::BSpline(base) = o.base_surface().kind() else {
+        panic!("not a B-spline: {:?}", o.base_surface().kind());
+    };
+    on_the_posts_torus(base);
+    // 1.5 across each side round the axis, measured on the base as the extension was
+    for (side, done) in BoxSide::ALL.into_iter().zip(e.sides) {
+        if round.contains(&side) {
+            let SideExtension::Extended(a) = done else {
+                panic!("{side:?}: {:?}", e.sides);
+            };
+            assert!((a.enclosure.mid() - 1.5).abs() <= 1e-9 * 1.5, "{a:?}");
+        } else {
+            assert_eq!(done, SideExtension::NotAsked);
+        }
+    }
+}
+
+/// A revolution that is no torus keeps its sides round the axis as they are: a revolved
+/// quarter circle whose plane misses the axis (its torus read off the arc is off its form),
+/// and a revolved parabola.
+#[test]
+fn other_revolutions_leave_their_sides_round_the_axis() {
+    use crate::curve::curve::Curve;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+    let kk = k();
+    let off_plane = revolved_quarter_circle(&kk, 1.0, 90.0);
+    let parabola = {
+        let pw = [[10.0, 0.0, 4.0], [10.0, 0.0, 10.0], [4.0, 0.0, 10.0]]
+            .iter()
+            .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+            .collect();
+        let cur = NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        revolved(
+            &kk,
+            Curve::from(BSplineCurve::from_nurb(cur, 2, false)),
+            90.0,
+        )
+    };
+    for s in [off_plane, parabola] {
+        let round = round_sides(&s);
+        assert_eq!(round.len(), 2);
+        let e = s
+            .extended_sides(&kk, &round, Continuity::Natural, 1.5)
+            .unwrap();
+        for (side, done) in BoxSide::ALL.into_iter().zip(e.sides) {
+            let want = if round.contains(&side) {
+                SideExtension::AroundAxis
+            } else {
+                SideExtension::NotAsked
+            };
+            assert_eq!(done, want, "{side:?}: {:?}", e.sides);
+        }
+    }
+}
+
 /// No knot of `s` repeated past its degree plus one, in either direction (the knot fixup
 /// merges a span shorter than the ends' scaled zero onto its neighbour).
 fn knots_well_formed(s: &BSplineSurface) -> bool {
