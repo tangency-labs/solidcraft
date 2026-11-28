@@ -460,6 +460,50 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
 }
 
+/// A record edge curve prepared for repeated point queries. Supports lines and
+/// polynomial or rational splines. The spline domain is retained so callers
+/// cannot accidentally use an extrapolated point to certify a trim.
+pub struct EdgePointEval {
+    curve: solidcore::eval::CurveEval,
+    domain: Option<[f64; 2]>,
+}
+
+impl EdgePointEval {
+    /// Prepare a supported, valid edge curve.
+    #[must_use]
+    pub fn new(curve: &Curve) -> Option<Self> {
+        let domain = match curve {
+            Curve::Line { .. } => None,
+            Curve::Spline { knots, points } => Some(spline_domain(knots, points.len())?),
+            Curve::RationalSpline { knots, homogeneous } => {
+                Some(spline_domain(knots, homogeneous.len())?)
+            }
+            _ => return None,
+        };
+        check_curve(curve, &mut Budget::input()).ok()?;
+        let curve = solidcore_convert::curve(curve).ok()?;
+        Some(Self {
+            curve: solidcore::eval::CurveEval::new(&curve).ok()?,
+            domain,
+        })
+    }
+
+    /// Evaluate the point at a finite parameter, refusing spline extrapolation.
+    #[must_use]
+    pub fn point(&self, t: f64) -> Option<[f64; 3]> {
+        if !t.is_finite() || self.domain.is_some_and(|[lo, hi]| t < lo || t > hi) {
+            return None;
+        }
+        let p = self.curve.point(t)?;
+        Some([p.x, p.y, p.z])
+    }
+}
+
+fn spline_domain(knots: &[f64], count: usize) -> Option<[f64; 2]> {
+    let degree = knots.len().checked_sub(count.checked_add(1)?)?;
+    Some([*knots.get(degree)?, *knots.get(count)?])
+}
+
 /// The points of `surface` at each of `uvs`, in the surface's own (u, v) (`None` for a surface
 /// that does not convert, or a parameter off it) ([`solidcore::eval::SurfaceEval::point`]).
 #[must_use]

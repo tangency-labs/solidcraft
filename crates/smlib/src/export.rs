@@ -813,7 +813,8 @@ fn mapped(
 /// parameters, evenly spaced, the face's `surface` at the trim's point is the edge `curve`'s point
 /// at the same parameter, within `reach` (the edge's tolerance). False where any of them cannot be
 /// evaluated.
-fn along_edge(trim: &b::Curve2, surface: &b::Surface, curve: &b::Curve, [t0, t1]: [f64; 2], reach: f64) -> bool {
+fn along_edge(trim: &b::Curve2, surface: &b::Surface, curve: Option<&solidcore_ops::pcurve::EdgePointEval>, [t0, t1]: [f64; 2], reach: f64) -> bool {
+    let Some(curve) = curve else { return false };
     const STEPS: u8 = 5;
     let ts: Vec<f64> = (0..=STEPS).map(|i| if i == STEPS { t1 } else { t0 + (t1 - t0) * f64::from(i) / f64::from(STEPS) }).collect();
     let Some(uvs) = ts.iter().map(|t| solidcore_ops::pcurve::eval(trim, *t)).collect::<Option<Vec<_>>>() else {
@@ -822,7 +823,7 @@ fn along_edge(trim: &b::Curve2, surface: &b::Surface, curve: &b::Curve, [t0, t1]
     let Some(on_face) = solidcore_ops::pcurve::surface_points(surface, &uvs) else {
         return false;
     };
-    ts.iter().zip(&on_face).all(|(t, p)| match point3(curve, *t) {
+    ts.iter().zip(&on_face).all(|(t, p)| match curve.point(*t) {
         Some(q) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
         None => false,
     })
@@ -1020,11 +1021,12 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                         // The edge's points at two of its parameters lie within its tolerance.
                         let curve = edge.nurbs.as_ref().unwrap_or(&edge.curve);
                         let reach = tolerances.edges.as_ref().and_then(|t| t.get(e)).copied().unwrap_or(tolerance);
-                        let on_edge = |s: f64, t: f64| match (point3(curve, s), point3(curve, t)) {
-                            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
+                        let evaluator = solidcore_ops::pcurve::EdgePointEval::new(curve);
+                        let on_edge = |s: f64, t: f64| match evaluator.as_ref().and_then(|c| Some((c.point(s)?, c.point(t)?))) {
+                            Some((p, q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
                             _ => false,
                         };
-                        let carried_along_edge = |carried: &b::Curve2| along_edge(carried, params, curve, edge.interval, reach);
+                        let carried_along_edge = |carried: &b::Curve2| along_edge(carried, params, evaluator.as_ref(), edge.interval, reach);
                         Some(mapped(trim, same, map, edge.interval, &on_edge, &carried_along_edge)?)
                     }
                     _ => None,
@@ -1932,7 +1934,15 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     for (pc, &(e, forward)) in curves.iter().zip(outer) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
         let [a, z] = edge.interval;
-        let mut run: Vec<[f64; 2]> = (0..=32).filter_map(|i| point2(pc, a + (z - a) * f64::from(i) / 32.0)).collect();
+        let (knots, count) = match pc {
+            b::Curve2::Spline { knots, points } => (knots, points.len()),
+            b::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+        };
+        let Some(degree) = knots.len().checked_sub(count + 1) else { continue };
+        let (Some(&lo), Some(&hi)) = (knots.get(degree), knots.get(count)) else { continue };
+        let mut run: Vec<[f64; 2]> = (0..=32)
+            .filter_map(|i| solidcore_ops::pcurve::eval(pc, (if i == 32 { z } else { a + (z - a) * f64::from(i) / 32.0 }).clamp(lo, hi)))
+            .collect();
         if !forward {
             run.reverse();
         }
@@ -1940,91 +1950,6 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     }
     let n = pts.len();
     Ok(0.5 * (0..n).filter_map(|k| Some((pts.get(k)?, pts.get((k + 1) % n)?))).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>())
-}
-
-/// An edge curve's point at `t` within its domain: a line's, or a spline's (de Boor on the
-/// homogeneous coefficients); none for other kinds, or outside the domain.
-fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
-    // the homogeneous control point `i`, read in place: a copy of all of them per point was
-    // most of an export's cost on a long curve
-    let (knots, n, at): (&[f64], usize, &dyn Fn(usize) -> Option<[f64; 4]>) = match c {
-        b::Curve::Line { start, end } => return Some([0, 1, 2].map(|k| start[k] + t * (end[k] - start[k]))),
-        b::Curve::Spline { knots, points } => (knots, points.len(), &|i| points.get(i).map(|p| [p[0], p[1], p[2], 1.0])),
-        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), &|i| homogeneous.get(i).copied()),
-        _ => return None,
-    };
-    let p = knots.len().checked_sub(n + 1)?;
-    if !(*knots.get(p)? <= t && t <= *knots.get(n)?) {
-        return None;
-    }
-    let mut s = p;
-    while s + 1 < n && *knots.get(s + 1)? <= t {
-        s += 1;
-    }
-    // de Boor's points, on the stack for the degrees records hold
-    let mut stack = [[0.0; 4]; 16];
-    let mut heap: Vec<[f64; 4]>;
-    let d: &mut [[f64; 4]] = if p < stack.len() {
-        let d = stack.get_mut(..=p)?;
-        for (j, x) in d.iter_mut().enumerate() {
-            *x = at(s + j - p)?;
-        }
-        d
-    } else {
-        heap = (0..=p).map(|j| at(s + j - p)).collect::<Option<Vec<_>>>()?;
-        &mut heap
-    };
-    for r in 1..=p {
-        for j in (r..=p).rev() {
-            let i = s + j - p;
-            let den = knots.get(i + p + 1 - r)? - knots.get(i)?;
-            let a = if den == 0.0 { 0.0 } else { (t - knots.get(i)?) / den };
-            let (lo, hi) = (*d.get(j - 1)?, *d.get(j)?);
-            *d.get_mut(j)? = [0, 1, 2, 3].map(|c| (1.0 - a) * lo[c] + a * hi[c]);
-        }
-    }
-    let q = d.get(p)?;
-    (q[3] != 0.0).then(|| [q[0] / q[3], q[1] / q[3], q[2] / q[3]])
-}
-
-/// A pcurve's point at `t` (de Boor on the homogeneous coefficients).
-#[cfg(test)]
-fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
-    // the homogeneous control point `i`, read in place (see [`point3`])
-    let (knots, n, at): (&[f64], usize, &dyn Fn(usize) -> Option<[f64; 3]>) = match c {
-        b::Curve2::Spline { knots, points } => (knots, points.len(), &|i| points.get(i).map(|p| [p[0], p[1], 1.0])),
-        b::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), &|i| homogeneous.get(i).copied()),
-    };
-    let p = knots.len().checked_sub(n + 1)?;
-    let t = t.clamp(*knots.get(p)?, *knots.get(n)?);
-    let mut s = p;
-    while s + 1 < n && *knots.get(s + 1)? <= t {
-        s += 1;
-    }
-    // de Boor's points, on the stack for the degrees records hold
-    let mut stack = [[0.0; 3]; 16];
-    let mut heap: Vec<[f64; 3]>;
-    let d: &mut [[f64; 3]] = if p < stack.len() {
-        let d = stack.get_mut(..=p)?;
-        for (j, x) in d.iter_mut().enumerate() {
-            *x = at(s + j - p)?;
-        }
-        d
-    } else {
-        heap = (0..=p).map(|j| at(s + j - p)).collect::<Option<Vec<_>>>()?;
-        &mut heap
-    };
-    for r in 1..=p {
-        for j in (r..=p).rev() {
-            let i = s + j - p;
-            let den = knots.get(i + p + 1 - r)? - knots.get(i)?;
-            let a = if den == 0.0 { 0.0 } else { (t - knots.get(i)?) / den };
-            let (lo, hi) = (*d.get(j - 1)?, *d.get(j)?);
-            *d.get_mut(j)? = [0, 1, 2].map(|c| (1.0 - a) * lo[c] + a * hi[c]);
-        }
-    }
-    let q = d.get(p)?;
-    (q[2] != 0.0).then(|| [q[0] / q[2], q[1] / q[2]])
 }
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
