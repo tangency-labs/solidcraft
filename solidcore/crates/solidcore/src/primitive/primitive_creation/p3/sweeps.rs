@@ -696,6 +696,17 @@ impl PrimitiveCreation {
                     a.delete_primitive_faces(brep, &faces)?;
                     return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
+                // Not upstream (#22036): an axis square to the face's plane that meets the
+                // plane outside the face passes both checks above, but the turn keeps the
+                // face in its own plane: both caps lie in that plane and the body built
+                // between them encloses no volume
+                if cap && turn_keeps_face_in_plane(a, (brep, face), axis_base, axis)? {
+                    a.delete_primitive_faces(brep, &faces)?;
+                    return Err(SolidError::primitive(
+                        OP,
+                        PrimitiveFailure::AxisNormalToProfile,
+                    ));
+                }
             }
             // Not upstream (WR-448, #545): analytic side faces (with `make_analytics`, the default)
             let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
@@ -785,6 +796,70 @@ fn axis_crosses_face_inside(
     })
 }
 
+/// Not upstream (#22036): whether every turn about the axis through `axis_base` along
+/// `axis` keeps every point of the planar profile `face` within the face's tolerance of
+/// the face's plane, so that a capped partial revolution of it is flat: both caps lie in
+/// that plane and the body between them encloses no volume.
+///
+/// Take `n` the plane's unit normal, `a` the unit axis and `P` the point where the axis
+/// meets the plane. By Rodrigues' formula a turn by `phi` about the axis moves `P + v`,
+/// for `v` in the plane, by `(cos phi - 1) v + sin phi (a x v) + (1 - cos phi) a (a . v)`,
+/// whose component along `n` is `sin phi v . (n x a) + (1 - cos phi)(a . n)(a . v)`. As
+/// `v` is square to `n`, `a . v = a_t . v` with `a_t = a - (a . n) n`; `n x a` and `a_t`
+/// both lie in the plane, are square to each other and have length `s = |n x a|`, so
+/// `(v . (n x a))^2 + (a_t . v)^2 = s^2 |v|^2`. With `|a . n| <= 1` the lift is at most
+/// `sqrt(sin^2 phi + (1 - cos phi)^2) s |v| = 2 |sin(phi / 2)| s |v| <= 2 s |v|`. The
+/// check uses `(1 + sqrt 2) s R`, with `R` bounding `|v|` over the face (the distance
+/// from `P` to the face's bounding sphere, plus its radius): the bound of the two terms
+/// taken one at a time. It exceeds the exact `2 s R` by the factor `(1 + sqrt 2) / 2`,
+/// about 1.21, and that 21 % margin holds the floating-point rounding of `P`, `R` and the
+/// product, a few units in the last place of numbers no larger than the coordinates.
+/// A point of the face off the plane by up to the planarity deviation `d` moves rigidly
+/// with its foot in the plane, so it stays within `d` of where the foot goes. The face is
+/// flat for the whole turn when `d + (1 + sqrt 2) s R` is within the tolerance. The bound
+/// is an upper one: an axis tilted from the normal far enough to sweep a solid thicker
+/// than the tolerance, however thin, is never decided flat. An axis close
+/// to parallel to the plane meets it far away or nowhere, and is not flat (`false`); a face
+/// that is not planar within its tolerance is not decided here (`false`).
+///
+/// # Errors
+///
+/// Those of the face's box and surface.
+fn turn_keeps_face_in_plane(
+    a: &mut impl PrimitiveAccess,
+    face: crate::sweep::topology_sweep::access::FaceRef,
+    axis_base: Point3,
+    axis: Vec3,
+) -> Result<bool> {
+    let bound = a.primitive_face_box(face)?.sphere_bound();
+    let Ok(direction) = axis.unitize() else {
+        return Ok(false);
+    };
+    a.with_brep_mut(face.0, |k, b, _, _| {
+        let tolerance = b.face(face.1)?.tolerance;
+        let Some(surface) = crate::topology::face::p2::surface(b, face.1)? else {
+            return Ok(false);
+        };
+        let plane = surface.is_planar(k, tolerance)?;
+        if !plane.is_planar {
+            return Ok(false);
+        }
+        let Ok(normal) = plane.normal.unitize() else {
+            return Ok(false);
+        };
+        let along = normal.dot(direction);
+        if along == 0.0 || !along.is_finite() {
+            return Ok(false);
+        }
+        let t = normal.dot(plane.point - axis_base) / along;
+        let pierce = axis_base + t * direction;
+        let reach = pierce.distance(bound.center) + bound.radius;
+        let lift = plane.deviation.abs()
+            + (1.0 + std::f64::consts::SQRT_2) * normal.cross(direction).length() * reach;
+        Ok(lift.is_finite() && lift <= tolerance)
+    })
+}
+
 /// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
 /// of the axis through `axis_base` along `axis` but off it put exactly on it (the end's
 /// control point, which is the end of a curve clamped there, moved to its foot on the axis,
@@ -844,6 +919,7 @@ fn spline_ends_on_axis(
 mod tests {
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves;
     use crate::sweep::api_brep::create_rotational_sweep;
@@ -951,6 +1027,70 @@ mod tests {
         }
     }
 
+    /// #22036 (goldens `primitive.primitive_creation_p3`
+    /// `capped_rot_square_axis_z_outside_{90,270}`): a capped partial revolve whose axis is
+    /// square to the profile's plane and meets it outside the profile turns the profile in
+    /// its own plane, and is refused with `AxisNormalToProfile`. The square [2,4] x [0,2]
+    /// at z 0 about the z axis: every point keeps z 0, so both caps lie in z 0 and the body
+    /// between them has no volume. Before, the 90 degree turn returned that body. The same
+    /// is refused about the reversed axis through a base off the plane, (0, 0, 5), and about
+    /// an axis tilted 1e-12 rad from the normal, which lifts no point by more than
+    /// (1 + sqrt 2) * 1e-12 * (sqrt 10 + sqrt 2), about 1.1e-11, far within the tolerance.
+    /// Control that still builds: the axis (sin e, 0, cos e) through the origin, tilted
+    /// e = 0.4 degrees (inside the kernel's 0.5 degree parallel tolerance, so the check is
+    /// not an angle test). A rigid turn by theta about the unit axis a through P sweeps
+    /// the planar region F of unit normal n through the volume theta * area(F) *
+    /// (c - P) . (n x a), c its centroid (the flux of the velocity a x (p - P) through F,
+    /// the same at every instant as the turn moves F and n together; Pappus' theorem when a
+    /// lies in the plane). Here n x a = (0, sin e, 0) and c - P = (3, 1, 0), and the flux
+    /// y sin e is nowhere negative on F, so the swept body is the turned region once over:
+    /// a quarter turn gives pi / 2 * 4 * sin e = 2 pi sin e, about 0.0439.
+    #[test]
+    fn issue_22036_an_axis_square_to_the_capped_profile_outside_it_is_refused() {
+        use crate::error::primitive::PrimitiveFailure;
+        use crate::mass::integrator::properties::brep_volume_default;
+
+        let square = [
+            segment([2.0, 0.0, 0.0], [4.0, 0.0, 0.0]),
+            segment([4.0, 0.0, 0.0], [4.0, 2.0, 0.0]),
+            segment([4.0, 2.0, 0.0], [2.0, 2.0, 0.0]),
+            segment([2.0, 2.0, 0.0], [2.0, 0.0, 0.0]),
+        ];
+        let curves: Vec<Option<&Curve>> = square.iter().map(Some).collect();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        let mut k = Kernel::default();
+        for (base, axis, angle) in [
+            (origin, Vec3::new(0.0, 0.0, 1.0), 90.0),
+            (origin, Vec3::new(0.0, 0.0, 1.0), 270.0),
+            (Point3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0), 90.0),
+            (origin, Vec3::new(1e-12, 0.0, 1.0), 90.0),
+        ] {
+            let got = create_rotational_sweep(&mut k, &curves, base, axis, angle, true);
+            assert_eq!(
+                got.as_ref()
+                    .err()
+                    .and_then(|e| e.primitive_failure())
+                    .copied(),
+                Some(PrimitiveFailure::AxisNormalToProfile),
+                "axis {axis:?} through {base:?}, {angle} degrees: {:?}",
+                got.map(|_| ())
+            );
+        }
+
+        let e = 0.4_f64.to_radians();
+        let tilted = Vec3::new(e.sin(), 0.0, e.cos());
+        let mut body = create_rotational_sweep(&mut k, &curves, origin, tilted, 90.0, true)
+            .unwrap_or_else(|e| panic!("axis tilted 0.4 degrees: {e}"));
+        assert!(crate::topology::brep::p2::is_manifold_solid(&body).unwrap());
+        // signed: an inward-facing solid fails too
+        let want = 2.0 * std::f64::consts::PI * e.sin();
+        let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap();
+        assert!(
+            (volume - want).abs() < 1e-6 * want,
+            "axis tilted 0.4 degrees: volume {volume}, want {want}"
+        );
+    }
+
     /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of
     /// the result is as far from the axis as the profile's point at the same axial
     /// coordinate, both measured here from the profile's and the axis's own numbers.
@@ -1035,7 +1175,8 @@ mod tests {
         };
         let volume = brep_volume(&k, &mut ball, 1e-6, &attributes).unwrap();
         // 4/3 pi (40^3 - 18.5^3)
-        let want = 4.0 / 3.0 * std::f64::consts::PI * (40.0_f64.powi(3) - 18.5_f64.powi(3));
+        let want =
+            4.0 / 3.0 * std::f64::consts::PI * (det::powi(40.0_f64, 3) - det::powi(18.5_f64, 3));
         assert!(
             (volume - want).abs() < 1e-3 * want,
             "volume {volume}, want {want}"

@@ -279,6 +279,17 @@ The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save
 To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
 Mesh panel customizations are kept but hidden while the legacy toolbar is enabled.
 
+To model against a mesh body, such as a 3D scan or the STL of an existing part, use
+**Surface → Mesh → Section Stack** (`mesh.section_stack`). Pick the mesh body and a plane, and
+give the spacing (and, if you like, the first and last distance from the plane; by default the
+whole body). Each plane that meets the mesh gets an ordinary sketch holding the lines, arcs and
+circles fitted to the section there, as **Fit Curves to Mesh Section** fits one. Tick **Extrude
+slabs** to extrude each section's outline to the next plane, each slab a body of its own, for a
+stepped stand-in for the mesh. A slab never runs past a plane that missed the mesh, and the last
+one stops where the body ends. A section whose slab cannot be built is listed in the command's
+reply with the reason, and the other slabs stand. The sketches and slabs go into one timeline
+folder, and one Undo removes them all.
+
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
 is the tessellation's own double-precision value. Meshing and analysis tools can use the tags to
@@ -460,6 +471,16 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+**Preferences → Design → Send to Slicer file name** names the file that **Send to Slicer** writes,
+which is the name the slicer and the printer show. It takes the same placeholders and makes the
+name safe in the same way; `{body}` is the first body sent. With `{design}-{body}`, sending the
+body Base of the design Bracket writes `Bracket-Base.3mf`. Sending again replaces that file.
+Designs that get the same name share one file, so a later send replaces the earlier one. Left
+empty, the file is named after the design, followed by a code that keeps designs and body
+selections apart, such as `Bracket-71b989e9a18bb966.3mf`. The control channel sets it with
+`ui.prefs {"slicer_file_name": "{design}-{body}"}`. A script names the file itself, with the
+`name` of `file.send_to_slicer`; the preference does not apply to it.
 
 ## Default folders
 

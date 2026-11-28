@@ -1410,7 +1410,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let comment_id = ui.make_persistent_id("pnew_comment");
     let focused_id = ui.memory(|m| [name_id, expr_id, comment_id].into_iter().find(|id| m.has_focus(*id) || m.had_focus_last_frame(*id)));
     let mut row_ids = vec![name_id, expr_id, comment_id];
-    let menu_was_open = egui::Popup::is_any_open(ui.ctx());
+    let menu_was_open = egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx());
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
@@ -1491,7 +1491,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
     // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {

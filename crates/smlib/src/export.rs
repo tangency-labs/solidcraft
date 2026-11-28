@@ -175,6 +175,18 @@ impl Brep {
             face.surface = b::Surface::Blend { definition: Box::new(definition) };
             face.nurbs = Some(net);
         }
+        // A screw-swept wall: its definition as its label, its net as its form.
+        let sweeps = crate::core::definition::sweeps(self.core()).map_err(ExportError::Smlib)?;
+        for (i, definition) in sweeps.into_iter().enumerate() {
+            let Some(definition) = definition else { continue };
+            let at = if order.faces.is_empty() { i } else { *order.faces.get(i).ok_or_else(|| invalid("a face the order does not place"))? };
+            let face = record.faces.get_mut(at).ok_or_else(|| invalid("a face the record does not have"))?;
+            if face.nurbs.is_some() || !matches!(face.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            let net = std::mem::replace(&mut face.surface, b::Surface::Sweep { definition: Box::new(definition) });
+            face.nurbs = Some(net);
+        }
         Ok(())
     }
 }
@@ -1024,7 +1036,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         faces.push(Face { nurbs, surface, domain, agrees: true, loops: out, records, given });
     }
     for face in &mut faces {
-        if outer_area(face, &edges, largest)? < 0.0 {
+        if outer_is_clockwise(face, &edges, largest)? {
             face.agrees = false;
             for l in &mut face.loops {
                 if let Loop::Edges(uses) = l {
@@ -1890,18 +1902,34 @@ fn pcurves<'a>(
     Ok(curves)
 }
 
-/// The signed area of a face's outer loop in the record's parameters, from its pcurves
-/// (positive: counter-clockwise, the record's convention); 0 where it has no edge loop.
-fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
-    let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
+/// The outer loop's pcurves in the same parameters as the native record.
+fn outer_pcurves(face: &Face, outer: &[(u32, bool)], edges: &[Edge], tolerance: f64) -> Res<Vec<b::Curve2>> {
     let geometry = |e: u32| {
         let edge = edges.get(e as usize)?;
         Some(EdgeGeometry { curve: edge.nurbs.as_ref().unwrap_or(&edge.curve), interval: edge.interval, tolerance })
     };
     let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
-    let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, geometry, tolerance)?;
+    let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.to_vec())], given, geometry, tolerance)?;
+    curves.into_iter().next().ok_or_else(|| invalid("outer loop pcurves"))
+}
+
+/// The native record uses counter-clockwise outer loops. Reverse a face only when
+/// the curve integral certifies clockwise winding: coarse sampling can give the
+/// opposite sign for a narrow loop whose curves have different parameterizations.
+fn outer_is_clockwise(face: &Face, edges: &[Edge], tolerance: f64) -> Res<bool> {
+    let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(false) };
+    let curves = outer_pcurves(face, outer, edges, tolerance)?;
+    let uses: Vec<_> = curves.iter().zip(outer).map(|(curve, &(_, forward))| (curve, forward)).collect();
+    Ok(solidcore_ops::pcurve::loop_is_clockwise(&uses).map_err(|e| invalid(format!("pcurve orientation: {e}")))? == Some(true))
+}
+
+/// The sampled area used by the edge-lookup parity test.
+#[cfg(test)]
+fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
+    let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
+    let curves = outer_pcurves(face, outer, edges, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();
-    for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
+    for (pc, &(e, forward)) in curves.iter().zip(outer) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
         let [a, z] = edge.interval;
         let mut run: Vec<[f64; 2]> = (0..=32).filter_map(|i| point2(pc, a + (z - a) * f64::from(i) / 32.0)).collect();
@@ -1960,6 +1988,7 @@ fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
 }
 
 /// A pcurve's point at `t` (de Boor on the homogeneous coefficients).
+#[cfg(test)]
 fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
     // the homogeneous control point `i`, read in place (see [`point3`])
     let (knots, n, at): (&[f64], usize, &dyn Fn(usize) -> Option<[f64; 3]>) = match c {

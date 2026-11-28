@@ -44,7 +44,9 @@
 //! - **Disappearing periodic seams.** Genuine support roots bound each SSI
 //!   component's active interval. A seam outside that interval emits a boundary
 //!   event; its branch is identified by an already mated opposite boundary,
-//!   rather than proximity to the old edge. Seam walks use explicit visited sets.
+//!   rather than proximity to the old edge. Seam walks use explicit visited sets. A
+//!   support root that is a limit root (`Solution::limit_root`) leaves the boundary
+//!   unresolved: it may be one of two crossings, the other unreported.
 //! - **Curved tangent crossings.** A local operation may create two intersection
 //!   branches beside an originally tangent edge. A plane/curved pair keeps the curved
 //!   face's side. Two curved faces require a proved unique physical component
@@ -255,6 +257,7 @@ use crate::geom::solution_array::{SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::{approx_tol3d, are_same, zone_tol_3d_of_curve};
 use crate::intersect::point_class::{ClassGeometry, ClassObject};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI,
     UNDEF_DOUBLE,
@@ -2081,7 +2084,7 @@ fn join_through_tangent_points(
     tol: f64,
     tangency_tol_radians: f64,
 ) -> Result<()> {
-    let sine = tangency_tol_radians.abs().min(PI / 2.0).sin();
+    let sine = det::sin(tangency_tol_radians.abs().min(PI / 2.0));
     // each join removes a piece: at most one fewer than the pieces
     for _ in 1..ssi.curves_3d.len() {
         let mut ends = Vec::new();
@@ -4376,7 +4379,8 @@ impl OffsetGeometryCreation {
     }
 
     /// One reported root of a genuine boundary's displaced support on this SSI
-    /// component. Distinct curve parameters do not establish endpoint ownership.
+    /// component. Distinct curve parameters do not establish endpoint ownership. (Not
+    /// upstream) A limit root leaves it unresolved.
     fn unique_boundary_root<O: ClassObject + SolutionObject>(
         k: &Kernel,
         brep: &mut impl OffsetBrep<O>,
@@ -4409,6 +4413,12 @@ impl OffsetGeometryCreation {
                 if lo.min(hi) <= interval.min() && lo.max(hi) >= interval.max() {
                     return Ok(BoundaryRoot::Contains);
                 }
+                return Ok(BoundaryRoot::Unresolved);
+            }
+            // (not upstream) a limit root may be one of two crossings of a leaf whose
+            // certified pass stopped at its limit, the other unreported: it does not show
+            // the root unique
+            if solution.limit_root {
                 return Ok(BoundaryRoot::Unresolved);
             }
             let parameter = solution.start.param(0)?;
@@ -8665,7 +8675,7 @@ impl OffsetGeometryCreation {
         let c3_ivl = c3.natural_interval();
         let dropped =
             ext_s.drop_curve::<NoObject>(k, &ext_dom, c3, &c3_ivl, tol, false, None, true)?;
-        let drop_dev = dropped.max_drop_to_surf.hypot(dropped.max_approx_dev);
+        let drop_dev = det::hypot(dropped.max_drop_to_surf, dropped.max_approx_dev);
         if dropped.uv_curves.is_empty() || !drop_dev.is_finite() || drop_dev > tol {
             return Err(SolidError::Unsupported {
                 operation: OP_EDGEUSE,
@@ -9849,7 +9859,7 @@ mod tests {
         let phi = 10.0_f64.to_radians();
         let origin = Point3::new(20.0, 0.0, 10.0);
         let n1 = Vec3::new(1.0, 0.0, 0.0);
-        let n2 = Vec3::new(phi.cos(), 0.0, phi.sin());
+        let n2 = Vec3::new(det::cos(phi), 0.0, det::sin(phi));
         let planes = Some([(origin, n1), (origin, n2)]);
         let line = Curve::from(Line::from_points(
             Point3::new(20.0, -10.0, 10.0),
@@ -10319,7 +10329,7 @@ mod tests {
         assert!(!passes_through(&k, &touching, at(1e-6), &plane, uv, tol).unwrap());
         let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
         assert!(passes_through(&k, &lifted, at(1e-3), &plane, uv, tol).unwrap());
-        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        let shallow = over_the_plane(det::tan(0.6_f64.to_radians()), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &plane, uv, tol).unwrap());
     }
 
@@ -10351,7 +10361,7 @@ mod tests {
         assert!(!passes_through(&k, &touching, at(1e-6), &surface, uv, tol).unwrap());
         let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
         assert!(passes_through(&k, &lifted, at(1e-3), &surface, uv, tol).unwrap());
-        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        let shallow = over_the_plane(det::tan(0.6_f64.to_radians()), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &surface, uv, tol).unwrap());
     }
 

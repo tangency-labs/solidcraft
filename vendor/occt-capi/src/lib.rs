@@ -33,10 +33,38 @@ mod raw {
         pub fn occt_cut(a: u32, b: u32) -> u32;
         pub fn occt_common(a: u32, b: u32) -> u32;
         pub fn occt_fillet_nearest(h: u32, points: *const f64, count: usize, radius: f64) -> u32;
+        pub fn occt_fillet_each(h: u32, points: *const f64, radii: *const f64, count: usize) -> u32;
+        pub fn occt_picked_edges_meet(h: u32, points: *const f64, count: usize) -> i32;
+        pub fn occt_chamfer_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
+        pub fn occt_shell_nearest(h: u32, points: *const f64, count: usize, thickness: f64) -> u32;
+        pub fn occt_draft_nearest(
+            h: u32,
+            points: *const f64,
+            count: usize,
+            ox: f64,
+            oy: f64,
+            oz: f64,
+            nx: f64,
+            ny: f64,
+            nz: f64,
+            px: f64,
+            py: f64,
+            pz: f64,
+            angle: f64,
+        ) -> u32;
+        pub fn occt_offset_faces_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
+        pub fn occt_thicken(h: u32, thickness: f64, symmetric: i32) -> u32;
+        pub fn occt_loft_ruled(data: *const f64, count: usize) -> u32;
+        pub fn occt_loft_to_point(data: *const f64, count: usize, x: f64, y: f64, z: f64) -> u32;
+        pub fn occt_prism_profile(data: *const f64, count: usize, dx: f64, dy: f64, dz: f64, distance: f64) -> u32;
+        pub fn occt_revol_profile(data: *const f64, count: usize, ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> u32;
 
         pub fn occt_volume(h: u32) -> f64;
         pub fn occt_area(h: u32) -> f64;
         pub fn occt_solid_count(h: u32) -> i32;
+        pub fn occt_solid_at(h: u32, index: i32) -> u32;
+        pub fn occt_split_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64) -> u32;
+        pub fn occt_trim_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64, side: i32) -> u32;
 
         pub fn occt_step_write(h: u32) -> u32;
         pub fn occt_step_read(data: *const u8, len: usize) -> u32;
@@ -44,7 +72,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 10;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +198,131 @@ impl Shape {
         let flat: Vec<f64> = points.iter().flatten().copied().collect();
         // SAFETY: a live handle and `points.len()` triples of doubles.
         shape(unsafe { raw::occt_fillet_nearest(self.0, flat.as_ptr(), points.len(), radius) })
+    }
+
+    /// Whether two of the edges nearest `points` share a vertex.
+    pub fn picked_edges_meet(&self, points: &[[f64; 3]]) -> Result<bool> {
+        let flat: Vec<f64> = points.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `points.len()` triples of doubles.
+        match unsafe { raw::occt_picked_edges_meet(self.0, flat.as_ptr(), points.len()) } {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(last_error()),
+        }
+    }
+
+    /// Constant-radius rounds, the edge nearest each of `points` at the radius in the same place
+    /// of `radii` (as many).
+    pub fn fillet_each(&self, points: &[[f64; 3]], radii: &[f64]) -> Result<Shape> {
+        if points.len() != radii.len() {
+            return Err(Error("a radius for each edge".into()));
+        }
+        let flat: Vec<f64> = points.iter().flatten().copied().collect();
+        // SAFETY: a live handle, `points.len()` triples of doubles and as many radii.
+        shape(unsafe { raw::occt_fillet_each(self.0, flat.as_ptr(), radii.as_ptr(), points.len()) })
+    }
+
+    /// A planar profile's face extruded `distance` along the unit `dir`. `profile` is the loop
+    /// count, then each loop (outer first, then its holes) as its curve count and curves: `0`
+    /// and a line's start and end; `1` and an arc's centre, unit axis, unit reference, radius
+    /// and start and end angles (counter-clockwise about the axis from the reference); `2` and
+    /// a NURBS's degree, point count and knot count, its points as x, y, z, weight, and its
+    /// clamped knots.
+    pub fn prism_profile(profile: &[f64], dir: [f64; 3], distance: f64) -> Result<Shape> {
+        // SAFETY: `profile.len()` readable doubles.
+        shape(unsafe { raw::occt_prism_profile(profile.as_ptr(), profile.len(), dir[0], dir[1], dir[2], distance) })
+    }
+
+    /// A planar profile's face ([`Shape::prism_profile`]'s encoding) turned `angle` radians
+    /// (above 0, at most a full turn) about the line through `origin` along the unit `dir`.
+    pub fn revolve_profile(profile: &[f64], origin: [f64; 3], dir: [f64; 3], angle: f64) -> Result<Shape> {
+        // SAFETY: `profile.len()` readable doubles.
+        shape(unsafe { raw::occt_revol_profile(profile.as_ptr(), profile.len(), origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], angle) })
+    }
+
+    /// An equal chamfer of the edges nearest `points`.
+    pub fn chamfer_nearest(&self, points: &[[f64; 3]], distance: f64) -> Result<Shape> {
+        let flat: Vec<f64> = points.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `points.len()` triples of doubles.
+        shape(unsafe { raw::occt_chamfer_nearest(self.0, flat.as_ptr(), points.len(), distance) })
+    }
+
+    /// The solid hollowed to walls `thickness` thick inside it, open at the faces nearest `open`.
+    pub fn shell_nearest(&self, open: &[[f64; 3]], thickness: f64) -> Result<Shape> {
+        let flat: Vec<f64> = open.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `open.len()` triples of doubles.
+        shape(unsafe { raw::occt_shell_nearest(self.0, flat.as_ptr(), open.len(), thickness) })
+    }
+
+    /// The faces nearest `faces` tilted by `angle` about their line on the neutral plane through
+    /// `origin` square to `normal`, leaning in going along `pull`.
+    pub fn draft_nearest(&self, faces: &[[f64; 3]], origin: [f64; 3], normal: [f64; 3], pull: [f64; 3], angle: f64) -> Result<Shape> {
+        let flat: Vec<f64> = faces.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `faces.len()` triples of doubles.
+        shape(unsafe {
+            raw::occt_draft_nearest(
+                self.0,
+                flat.as_ptr(),
+                faces.len(),
+                origin[0],
+                origin[1],
+                origin[2],
+                normal[0],
+                normal[1],
+                normal[2],
+                pull[0],
+                pull[1],
+                pull[2],
+                angle,
+            )
+        })
+    }
+
+    /// The faces nearest `faces` moved `distance` along their outward normals.
+    pub fn offset_faces_nearest(&self, faces: &[[f64; 3]], distance: f64) -> Result<Shape> {
+        let flat: Vec<f64> = faces.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `faces.len()` triples of doubles.
+        shape(unsafe { raw::occt_offset_faces_nearest(self.0, flat.as_ptr(), faces.len(), distance) })
+    }
+
+    /// A sheet thickened into a solid `thickness` thick (to both sides when `symmetric`).
+    pub fn thicken(&self, thickness: f64, symmetric: bool) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_thicken(self.0, thickness, i32::from(symmetric)) })
+    }
+
+    /// A solid ruled between closed sections: their count, then each in [`Shape::prism_profile`]'s
+    /// encoding with one loop.
+    pub fn loft_ruled(sections: &[f64]) -> Result<Shape> {
+        // SAFETY: `sections.len()` readable doubles.
+        shape(unsafe { raw::occt_loft_ruled(sections.as_ptr(), sections.len()) })
+    }
+
+    /// The shape cut by the plane through `origin` square to `normal`: a compound of its pieces.
+    pub fn split_plane(&self, origin: [f64; 3], normal: [f64; 3]) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_split_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2]) })
+    }
+
+    /// A sheet cut by the plane through `origin` square to `normal`, keeping as one shell the
+    /// faces on the normal's side (`above`) or its back.
+    pub fn trim_plane(&self, origin: [f64; 3], normal: [f64; 3], above: bool) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_trim_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2], if above { 1 } else { -1 }) })
+    }
+
+    /// The shape's solids, in OCCT's order.
+    pub fn solids(&self) -> Result<Vec<Shape>> {
+        let n = i32::try_from(self.solid_count()?).map_err(|_| Error("too many solids".into()))?;
+        // SAFETY: a live handle and an index below its solid count.
+        (0..n).map(|i| shape(unsafe { raw::occt_solid_at(self.0, i) })).collect()
+    }
+
+    /// A solid ruled from a closed section ([`Shape::prism_profile`]'s encoding with one loop)
+    /// to the point `apex`.
+    pub fn loft_to_point(section: &[f64], apex: [f64; 3]) -> Result<Shape> {
+        // SAFETY: `section.len()` readable doubles.
+        shape(unsafe { raw::occt_loft_to_point(section.as_ptr(), section.len(), apex[0], apex[1], apex[2]) })
     }
 
     /// Whether OCCT's own checker passes the shape.
