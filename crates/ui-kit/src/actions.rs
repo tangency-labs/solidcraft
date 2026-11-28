@@ -841,6 +841,35 @@ pub fn wide_primary_button(ui: &mut Ui, label: &str) -> Response {
     response
 }
 
+/// A full-width row of a secondary action and the primary one, side by side in the order every
+/// dialog footer uses (Cancel left of OK), each half the row: `(secondary, primary)`.
+pub fn wide_secondary_and_primary(ui: &mut Ui, secondary: &str, primary: &str) -> (Response, Response) {
+    let t = Tokens::get();
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_6;
+                let size = vec2(dimension((ui.available_width() - t.space_6) / 2.0), t.form_button_height);
+                let add = |ui: &mut Ui, label: &str, tone: ButtonTone| {
+                    let mut text = RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label);
+                    if matches!(tone, ButtonTone::Primary) {
+                        text = text.bold_face();
+                    }
+                    let response = ui.add_sized(size, styled_button(ui, text.into(), tone).corner_radius(t.control_radius));
+                    t.button_bevel(ui, &response, false);
+                    pointer_on_hover(ui, &response);
+                    response
+                };
+                let secondary = add(ui, secondary, ButtonTone::Normal);
+                let primary = add(ui, primary, ButtonTone::Primary);
+                (secondary, primary)
+            })
+            .inner
+        })
+        .inner
+}
+
 #[cfg(test)]
 #[path = "actions_tests.rs"]
 mod tests;

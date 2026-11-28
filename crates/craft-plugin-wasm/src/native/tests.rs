@@ -1313,6 +1313,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -2207,6 +2233,16 @@ fn a_late_cranelift_compile_never_replaces_another_components_code() {
     let cached = cached.as_ref().unwrap();
     assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
 }
+#[test]
+fn preparation_is_reported_only_for_an_uncached_component() {
+    let bytes = importer_component();
+    let mut preparations = 0;
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+}
+
 #[test]
 fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
     // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.

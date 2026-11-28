@@ -360,6 +360,15 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   face's chart seam split off past the neighbours' offsets, nearer the edge's middle than the
   whole curve's). A marched piece lying on an exact line or conic of the two surfaces is replaced
   by that curve.
+- **Tangent edges** are not mitred: their faces' offsets are tangent too. `extend_trim_edges`
+  carries each face's trim onto its offset, and `trim_extended_edge` ends it where a neighbour's
+  offset cuts it. At a vertex where those cuts are tangential it ends at the vertex's image
+  V + d n(V) instead, where the curve passes nearest it: at a lamina edge's vertex, between two
+  faces on one plane, and at a smooth vertex, where every edge is a tangent sector (a round's
+  rail meeting the tangent edge between its support and the next round) and every face moves by
+  the one distance (not in a local operation, nor at a face the shell keeps). There every face's
+  offset passes through the one image, and a tangential crossing is found only to about the
+  square root of its residual along the curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
@@ -425,7 +434,12 @@ line on the neutral plane until it makes the draft angle with the pull; a cone o
 pull moves each control point radially, keeping its parameters. The hinge, the lean and a cone's
 sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The result is a plane
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
-operation (`solidcore-ops/src/offset.rs`, `draft`).
+operation (`solidcore-ops/src/offset.rs`, `draft`). The tangent blends on the drafted faces follow
+them as they follow moved faces (`OffsetFacesExecutive::move_onto`): taken off, the faces drafted,
+put back at their sizes. A blend rolled on the old surface cannot be extended to meet the drafted
+one: a round of a cylinder's rim lies off the cone the side drafts to, and leaning in, the cone
+passes inside the round's torus, so there is no meeting to bound. With no blend to follow, the
+draft is the local operation alone.
 
 **A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
 about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
@@ -485,7 +499,9 @@ point of the body. If a turn before the shell fails, the shell builds, or is ref
 as it would without that turn. If a turn back fails, the result is the same valid body, with
 that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
-then each other feature on its own.
+then each other feature on its own. Each cap's rim is taken out where the cap and the face beside
+it lie on one plane (`remove_cap_rims`), so that face runs on across the footprint; left in, a
+footprint touching the face's outer edge pinched the face, and the offset refused it (solidcraft#22785).
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with
