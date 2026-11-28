@@ -212,6 +212,10 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     for file in app.file_load.operations() {
         let key = format!("file:{}", file.serial);
         let label = if file.name.is_empty() { command_name(file.command) } else { format!("{} {}", command_name(file.command), file.name) };
+        let label = match file.importer_status {
+            Some(stage) => format!("{label}: {stage}"),
+            None => label,
+        };
         let cancel = if file.waiting {
             Cancel::FileWaiting(file.serial)
         } else if file.queued {
