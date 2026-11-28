@@ -1367,6 +1367,26 @@ mod tests {
             ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7);
         }
 
+        /// Half a ball of radius 10 (y >= 0) cut at z = 0, the part below kept: a hemisphere on
+        /// its flat, its rim (radius 10, a wedge of 90 degrees) on the ball's equator, which is
+        /// an inner double knot line of the ball's net. Chamfered by setbacks 1 and 1. By Pappus
+        /// in the meridian plane, as `ball_rim_chamfered_by_setbacks_1_and_1` derives it:
+        /// - the plane foot is P = (9, 0) and the rim E = (10, 0);
+        /// - the sphere foot is a chord 1 down the meridian, S = (10 - 1/20, -sqrt(1 - 1/400))
+        ///   = (9.95, -0.9987492178);
+        /// - the half hemisphere holds 1/3 π 1000 = 1047.1975511966, and half the region PES
+        ///   turned the whole turn removes 15.4006968995.
+        ///
+        /// That leaves 1031.7968542971, half the whole turn's 2063.5937085942.
+        ///
+        /// The edge's projection on the ball lies on the knot line at every station, and the
+        /// foot lies below it: the first crossing is proved on the foot's piece continued past
+        /// the line, not on the piece beyond it (which refused it as `SectionNotProved`).
+        #[test]
+        fn a_hemisphere_rim_on_the_ball_s_knot_line_chamfered_by_setbacks_is_its_pappus_volume() {
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2);
+        }
+
         /// A foot crossing a smooth seam mid-edge: a slab, the profile x in [0, 40], y in [-5, 30]
         /// with its corner (0, -5) rounded to 5 (about (5, 0)) swept along z, so the side x = 0
         /// meets the cylinder along the seam y = 0 (along z); cut by the top plane y = 0.5 + 0.1 z

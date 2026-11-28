@@ -1736,7 +1736,17 @@ pub fn prove_setback_feet(
             let eta = 1e-9 * (kb - ka).abs().max(f64::MIN_POSITIVE);
             let meets = |x: f64| (x - kb).abs() <= 1e3 * eta || (x - ka).abs() <= 1e3 * eta;
             // along a, the side of the line the projection meets at a span's end (the piece it
-            // comes from, continued); across b, as it lies or continued either way
+            // comes from, continued); across b, as it lies or else the foot's piece continued
+            // past the line, away from the foot: `first_crossing` reads the continued piece on
+            // the far side from the foot, so the piece on the far side, continued toward the
+            // foot, is never proved and trying it would hide the foot's (a rim on an inner
+            // knot line of its face, a hemisphere's on the ball's equator)
+            let b_of = |x: [f64; 2]| x.get(ib).copied().unwrap_or(f64::NAN);
+            let toward_foot = if b_of(x_m) > 0.5 * (b_of(p_lo) + b_of(p_hi)) {
+                1
+            } else {
+                -1
+            };
             let a_side = [a_of(p_lo), a_of(p_hi)]
                 .into_iter()
                 .find(|&x| meets(x))
@@ -1748,7 +1758,7 @@ pub fn prove_setback_feet(
                     }
                 });
             let mut proj = None;
-            for b_side in [0, 1, -1] {
+            for b_side in [0, toward_foot] {
                 let mut try_sides = [0, 0];
                 if let Some(x) = try_sides.get_mut(ia) {
                     *x = a_side;
