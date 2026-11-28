@@ -2534,6 +2534,7 @@ fn marking(p: Vec3) -> FeatureKind {
         face: FacePick(p),
         designation: Some("M6".into()),
         length: None,
+        offset: None,
         modeled: false,
         from: None,
         up_to: None,
