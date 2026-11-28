@@ -2348,9 +2348,16 @@ fn occurrence_rows_inner(
         toggle(app, key, true);
     }
     if r.eye {
-        let paths = selected_occurrence_paths(app, path);
-        let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
-        let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
+        // Ctrl/Command-click isolates just this occurrence; a plain click retains
+        // the newer multi-selection visibility behaviour.
+        let isolate = rows.ui().input(|i| i.modifiers.ctrl || i.modifiers.command);
+        if isolate {
+            let _ = app.run("browser.visibility", json!({"visible": true, "paths": [path], "isolate": true}));
+        } else {
+            let paths = selected_occurrence_paths(app, path);
+            let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
+            let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
+        }
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());
     let params = json!({"component": placement.component, "occurrence": placement.occurrence, "path": path});
@@ -3894,7 +3901,14 @@ fn entry_row(
         app.tree.reveal_construction = None;
     }
     if r.eye {
-        set_visible(app, folder, &[e], !visible);
+        // Ctrl-click (Command on macOS) isolates this body. The engine's isolate
+        // command keeps this body and hides other bodies in one undo step (#17864).
+        let isolate = folder == "bodies" && rows.ui().input(|i| i.modifiers.ctrl || i.modifiers.command);
+        if isolate && !e.bodies.is_empty() {
+            let _ = app.run("browser.visibility", json!({"items": e.bodies, "visible": true, "isolate": true}));
+        } else {
+            set_visible(app, folder, &[e], !visible);
+        }
     }
     if r.double
         && folder == "sketches"
