@@ -1099,7 +1099,8 @@ fn undo_does_not_bring_back_a_chain_ended_with_esc() {
 /// #22247: a shape's key starts the variant used last (#4308), and its menu says so. After a
 /// 2-point circle, C starts 2-Point Circle, and the Circle menu shows C beside that row, not
 /// beside Center Diameter Circle. A variant with a key of its own keeps it, and then the family's
-/// key starts its first command again, shown there.
+/// key starts its first command again, shown there. With #22261's listed-tool mode on, C stays
+/// beside the first.
 #[test]
 fn a_shape_menu_shows_the_key_beside_the_variant_it_starts() {
     let mut h = Harness::new();
@@ -1114,6 +1115,11 @@ fn a_shape_menu_shows_the_key_beside_the_variant_it_starts() {
     assert_eq!(key(&h, "sketch.circle.center"), None, "C no longer starts Center Diameter Circle");
     assert_eq!(key(&h, "sketch.circle.two_point"), c, "C starts 2-Point Circle, and its row says so");
     assert_eq!(key(&h, "sketch.circle.three_point"), None);
+    // With the mode that makes the key start the listed tool (#22261), C stays beside the first.
+    h.app.preferences.shortcut_starts_listed_tool = true;
+    assert_eq!(key(&h, "sketch.circle.center"), c);
+    assert_eq!(key(&h, "sketch.circle.two_point"), None);
+    h.app.preferences.shortcut_starts_listed_tool = false;
     press(&mut h, c.as_deref().unwrap_or("C"));
     assert_eq!(tool(&h), Some("sketch.circle.two_point"), "the key starts the row it is shown beside");
     // Given a key of its own, 2-Point Circle shows that one, and C is Center Diameter's again.
