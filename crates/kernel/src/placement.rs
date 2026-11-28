@@ -9,6 +9,7 @@
 use solidcore_record::brep::blend::{
     BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ProceduralBlendRecord, RevolutionRecord, SupportRecord,
 };
+use solidcore_record::brep::sweep::{SweepDefinition, SweepMotion};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
 /// A rotation (rows of an orthonormal matrix with determinant +1) and a translation:
@@ -134,7 +135,26 @@ impl Rigid {
             // The definition moves as the kernel moves it: its supports, leader and centre. A
             // procedural blend's bound takes in the motion's rounding, from its net ([`moved`]).
             Surface::Blend { definition } => Surface::Blend { definition: Box::new(self.blend(definition)?) },
+            // A screw sweep moves exactly with a proper rigid motion: its profile, axis and law
+            // direction; the pitch, stations and map stay, as does the handedness.
+            Surface::Sweep { definition } => Surface::Sweep { definition: Box::new(self.sweep(definition)?) },
         })
+    }
+
+    /// A screw sweep's definition moved. `None` for a motion only near rigid, as for a blend.
+    fn sweep(&self, d: &SweepDefinition) -> Option<SweepDefinition> {
+        if !self.exact() {
+            return None;
+        }
+        let mut d = d.clone();
+        d.profile = self.curve(&d.profile)?;
+        let SweepMotion::Screw { origin, axis, law, .. } = &mut d.motion;
+        *origin = self.point(*origin);
+        *axis = self.direction(*axis);
+        if let Some(law) = law {
+            law.direction = self.direction(law.direction);
+        }
+        Some(d)
     }
 
     /// Whether the rotation is orthonormal to rounding: a motion [`moved`] moves blend
@@ -415,7 +435,8 @@ impl Affine {
             | Surface::BallPatch { .. }
             | Surface::Torus { .. }
             | Surface::PlacedRevolution { .. }
-            | Surface::Blend { .. } => return None,
+            | Surface::Blend { .. }
+            | Surface::Sweep { .. } => return None,
         })
     }
 
