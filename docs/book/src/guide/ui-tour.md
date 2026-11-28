@@ -21,7 +21,9 @@ view.
   design that has features. Double-click a design's tab, or right-click it and choose **Rename**, to
   rename the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave
   the old one (Preferences › Interface turns the double-click off, for a double-click that maximizes
-  the window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
+  the window instead; **Rename** stays in the menu). Double-click a view's sub-tab (Model, Sketch 1…)
+  to rename that view the same way; the same preference turns that off, and the view's **Rename
+  view** row and F2 still work. **Duplicate** in a design tab's right-click menu
   opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
   and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
   do. With a design's views shown as tabs inside its tab, the chevron right after its + folds them
@@ -87,7 +89,7 @@ view.
   Esc or a click elsewhere closes the list. Clicking again on the same spot, with nothing changed
   in between, cycles through visible candidates at that point. The
   wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
-  preset in Preferences switches to SolidWorks, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
+  preset in Preferences switches to Right-drag orbit, SolidWorks, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
   trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
@@ -125,6 +127,9 @@ view.
   preset orbits on a right drag. Off, a right drag leaves the camera alone and the right button
   only opens the context menu. Picking the SolidWorks preset turns it off and sets Middle
   double-click to Fit; both can be changed back afterwards.
+  Picking **Right-drag orbit** turns **Right drag orbits** on, including after another preset turned it off.
+  With this preset, right-drag orbits, middle-drag or Ctrl+right-drag (Cmd also works on macOS)
+  pans, and the wheel zooms. **Free orbit** remains a separate preference.
 
   **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer

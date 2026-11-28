@@ -14,6 +14,7 @@
 use super::uv;
 use super::vec::VecExt;
 use super::{Curve2, EvalError};
+use crate::math::det;
 use crate::math::{det3, Vec3};
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::knots::Side;
@@ -52,7 +53,7 @@ pub(crate) fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Optio
 
 /// The `k`-th derivatives of cos and sin at `t`: `cos(t + kπ/2)` and `sin(t + kπ/2)`.
 pub(crate) fn trig_derivative(t: f64, k: usize) -> (f64, f64) {
-    let (sin, cos) = t.sin_cos();
+    let (sin, cos) = det::sin_cos(t);
     match k % 4 {
         0 => (cos, sin),
         1 => (-sin, cos),
@@ -333,6 +334,9 @@ pub struct Nurbs {
     /// Whether it closes on itself along each direction ([`uv::closed`]), worked out once
     /// (every evaluation outside the knot interval asks, and the test walks the whole net).
     closed: [bool; 2],
+    /// Whole-surface certified bounds for pole classification ([`super::collapse`]), worked out
+    /// once when the surface is built.
+    collapse_bounds: super::collapse::CollapseBounds,
     /// NLib's surface and its Euclidean net, `None` when the data are malformed (nothing
     /// then evaluates).
     nl: Option<(NlSurface, EuclidNet)>,
@@ -344,6 +348,12 @@ impl Nurbs {
         let [k0, k1] = &self.knots;
         let ([p0, p1], [n0, n1]) = (self.degree, self.count);
         Some([onto_knots(k0, p0, n0, u)?, onto_knots(k1, p1, n1, v)?])
+    }
+
+    /// NLib's surface on the net as it is (a non-rational net carries no weights), `None` when
+    /// the data are malformed.
+    pub(crate) fn nl_surface(&self) -> Option<&NlSurface> {
+        self.nl.as_ref().map(|(s, _)| s)
     }
 
     /// The degrees along u and v.
@@ -370,6 +380,10 @@ impl Nurbs {
     #[must_use]
     pub fn closed(&self) -> [bool; 2] {
         self.closed
+    }
+    /// Whole-surface certified bounds for pole classification ([`super::collapse`]).
+    pub(super) fn collapse_bounds(&self) -> super::collapse::CollapseBounds {
+        self.collapse_bounds
     }
 }
 
@@ -450,12 +464,14 @@ impl EvalSurface {
                 Some((nl, euclid))
             })
             .flatten();
+        let collapse_bounds = super::collapse::CollapseBounds::of(degree, &knots, count, &ctrl);
         EvalSurface::Nurbs(Box::new(Nurbs {
             degree,
             knots,
             count,
             ctrl,
             closed,
+            collapse_bounds,
             nl,
         }))
     }
@@ -611,7 +627,7 @@ impl EvalSurface {
                 let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let (c, dc) = profile.eval(s)?;
-                let (sin, cos) = a.sin_cos();
+                let (sin, cos) = det::sin_cos(a);
                 let rot =
                     |x: Vec3| x * cos + axis.cross(x) * sin + *axis * (axis.dot(x) * (1.0 - cos));
                 let r = c - *origin;

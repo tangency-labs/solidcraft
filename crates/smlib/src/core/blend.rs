@@ -12,23 +12,18 @@
 //! The blend executive splits variable-radius faces at corners in their law. An unported kernel
 //! operation maps to [`Error::Unsupported`].
 //!
-//! The picks by point, the statuses and the result contract below ([`pick_edges`], [`status`],
-//! [`finish`], [`on_copy`]) are what the operation families still on the kernel crate share
-//! (tangency-labs/solidcore#3304).
+//! The picks by point, the statuses and the copy below ([`pick`], [`status`], [`on_copy`]) are
+//! what the operation families still on the kernel crate share (tangency-labs/solidcore#3304).
 
 use solidcore::SolidError;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::error::nurbs::NurbsFailure;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::query::api_queries::edge_closest_point;
-use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::p2 as brep_p2;
+use solidcore::topology::Brep;
 use solidcore::topology::brep::p3::brep_copy;
-use solidcore::topology::brep::validation::{CheckLevel, validate_and_update_tolerances};
-use solidcore::topology::{Brep, EdgeId};
 
-use super::{Body, answer};
+use super::Body;
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
@@ -133,7 +128,7 @@ pub(super) enum Miss {
 /// first picked it. A point picks none when the nearest is farther than `tol`, and is ambiguous
 /// when the second nearest is within `tol` too and nearer than the first by at most `model_tol`.
 /// An entity whose distance query returns a status other than success is skipped, as the capi
-/// skips it ([`answer`]); any other solidcore error fails the pick.
+/// skips it ([`super::answer`]); any other solidcore error fails the pick.
 pub(super) fn pick<T: Copy + PartialEq>(
     all: &[T],
     points: &[[f64; 3]],
@@ -172,17 +167,6 @@ pub(super) fn pick<T: Copy + PartialEq>(
     Ok(Ok((picked, first)))
 }
 
-/// `pick_edges` (`edge_distance`: `SmApiEdgeClosestPoint`).
-pub(super) fn pick_edges(
-    k: &Kernel,
-    b: &Brep,
-    points: &[[f64; 3]],
-    tol: f64,
-) -> solidcore::Result<std::result::Result<(Vec<EdgeId>, Vec<usize>), Miss>> {
-    let all = brep_p1::edges(b, None)?;
-    pick(&all, points, tol, b.tolerance(), |e, p| Ok(answer(edge_closest_point(k, b, e, p))?.map(|c| c.closest.distance)))
-}
-
 /// An edge pick's failure as `pick_error` (ops.rs) reads it.
 pub(super) fn edge_miss(m: Miss) -> Error {
     match m {
@@ -207,9 +191,19 @@ const ERR_PICK_AMBIGUOUS: i32 = -1102;
 /// Runs `f`, a step of the entry point `call` on solidcore-ops, for `body`, the entry point's
 /// input ([`super::call::ops_as`]: the session's fixes, the stop token, the profiler span, the
 /// call running now, and `body` left in the dump folder should it fail), its refusal as
-/// SolidCraft's error ([`refused`]).
+/// SolidCraft's error ([`blend_refused`]).
 fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
-    super::call::ops_as(call, &[("brep", body)], refused, f)
+    super::call::ops_as(call, &[("brep", body)], blend_refused, f)
+}
+
+/// A refusal of a blend's own step as [`refused`] words it, except that what the kernel cannot
+/// build yet keeps the kernel's reason ([`Error::Unported`]) instead of the bare
+/// [`Error::Unsupported`], which the other callers of [`refused`] word in their own terms.
+fn blend_refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    match e {
+        solidcore_ops::Error::Unsupported(why) if why != MIXED_CORNER_RAILS_CROSS => Error::Unported(why),
+        e => refused(call, e, detail),
+    }
 }
 
 /// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
@@ -236,7 +230,7 @@ pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Optio
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
-        Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
+        Ops::TurnRefused { room, why, at, .. } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,
         Ops::Unsupported(why) if why == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         Ops::Unsupported(_) | Ops::Unported(_) => Error::Unsupported,
@@ -297,23 +291,6 @@ fn picked_edges(call: &'static str, body: &Body, points: &[[f64; 3]], tolerance:
 /// change the body they are given.
 fn copy(call: &'static str, body: &Body) -> Result<Body> {
     ops(call, body, || body.copy())
-}
-
-/// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
-/// Before refusing a non-manifold result, grows tolerances to cover marginal gaps (SolidCraft
-/// issue #10: fuzzer seeds 178 and others). Tolerances only grow.
-pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
-    if b.face_list().is_empty() {
-        return Ok(Err(Error::Empty));
-    }
-    // Always try growing tolerances first: covers marginal edge/vertex gaps where the gap
-    // exceeds the recorded tolerance. Tolerances only grow: a body that already passes is
-    // unchanged; a marginal failure becomes sound.
-    let _ = validate_and_update_tolerances(k, &mut b, false, None, CheckLevel::Level2 as u8);
-    if solid_in && !brep_p2::is_manifold_solid(&b)? {
-        return Ok(Err(Error::NotSolid));
-    }
-    Ok(Ok(b))
 }
 
 /// Runs `f` on a copy of `body` (`brep_copy`).
@@ -579,6 +556,31 @@ pub(crate) fn fillet_variable(
     // the circle shifted -r r'/|c'| from its great circle. A law whose balls fold over one
     // another is refused, [`Error::NoRoom`].
     ops(CALL, &w, || solidcore_ops::fillet_variable_from(&w, e, start, degree, knots, radii))?;
+    Ok(w)
+}
+
+/// The edges nearest `points`, one tangent chain, rounded with one radius law of `degree`,
+/// `knots` and `radii` along the whole chain, 0 at the chain's end nearest `start`
+/// ([`solidcore_ops::fillet_variable_chain_from`], on a copy of the body).
+pub(crate) fn fillet_variable_chain(
+    body: &Body,
+    points: &[[f64; 3]],
+    tolerance: f64,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<Body> {
+    if !points_ok(points, false) || !start.iter().all(|x| x.is_finite()) || !tolerance_ok(tolerance) || !law_ok(degree, knots, radii) {
+        return Err(Error::Argument);
+    }
+    if law_pinches(degree, knots, radii) {
+        return Err(Error::Unsupported);
+    }
+    const CALL: &str = "smlib_fillet_variable_chain";
+    let w = copy(CALL, body)?;
+    let picked = picked_edges(CALL, &w, points, tolerance)?;
+    ops(CALL, &w, || solidcore_ops::fillet_variable_chain_from(&w, &picked.entities, start, degree, knots, radii))?;
     Ok(w)
 }
 

@@ -219,6 +219,16 @@ pub trait GridSource {
     fn row_count(&self) -> usize;
     /// A key for the row that stays the same across sorting and filtering.
     fn row_key(&self, row: usize) -> Cow<'_, str>;
+    /// Optional caller-owned row selection, independent of the cell cursor.
+    fn row_selected(&self, _row: usize) -> bool {
+        false
+    }
+    /// Row gestures after its cells have been built. Controls retain their own input.
+    fn row_drawn(&mut self, _ui: &Ui, _row: usize, _response: &Response) {}
+    /// Keep the keyboard cell cursor but leave selection ranges to the owning rows.
+    fn cell_ranges(&self) -> bool {
+        true
+    }
     /// The cell's text: shown, copied and edited.
     fn text(&self, row: usize, col: usize) -> Cow<'_, str>;
     /// This cell's kind when it differs from its column's (a read-only cell in an editable column).
@@ -480,6 +490,10 @@ impl<'a> Grid<'a> {
         let count = source.row_count();
         let shown = Shown(self.filter.map(|keep| (0..count).filter(|r| keep(*r)).collect()), count);
         resolve(&mut state, source, &shown, columns.len());
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
+            state.dragging = false;
+        }
         let focus = focus_id(sid);
         // A press elsewhere takes egui's focus away at the end of its frame, so the grid takes the
         // keyboard it asked for on a later frame without one, before reading this frame's keys.
@@ -500,8 +514,11 @@ impl<'a> Grid<'a> {
         {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) {
+        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) && !crate::Menu::any_open(&ctx) {
             navigate(ui, &mut state, source, &shown, &columns, &mut out);
+        }
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
         }
         let manual: Vec<Option<f32>> = self.resize.and_then(|key| ctx.data_mut(|m| m.get_persisted(key))).unwrap_or_default();
         let mut layout: Vec<Column<'_>> = columns.iter().enumerate().map(|(i, c)| c.layout(manual.get(i).copied().flatten())).collect();
@@ -509,7 +526,7 @@ impl<'a> Grid<'a> {
             layout.push(Column::new("", 0.0).icon_only().min_content_width(Tokens::get().form_close_size));
             extra = layout.len() - 1;
         }
-        let range = range(&state, &shown, columns.len());
+        let range = source.cell_ranges().then(|| range(&state, &shown, columns.len())).flatten();
         let shows_focus = focused || editing_focused || state.focus;
         let mut clicks: Vec<Click> = Vec::new();
         let mut cells: Vec<(usize, usize, egui::Rect)> = Vec::new();
@@ -562,7 +579,8 @@ impl<'a> Grid<'a> {
                 let key = source.row_key(source_row).into_owned();
                 let mut reveal = None;
                 let table_key = if embedded { format!("{id}:{key}") } else { key.clone() };
-                let response = table.row_visible(ui, &table_key, false, true, |table_row| {
+                let selected = source.row_selected(source_row);
+                let response = table.row_visible(ui, &table_key, selected, true, |table_row| {
                     for (col, column) in columns.iter().enumerate() {
                         table_row.cell(|ui| {
                             let rect = ui.max_rect();
@@ -581,6 +599,7 @@ impl<'a> Grid<'a> {
                         table_row.cell(|_| {});
                     }
                 });
+                source.row_drawn(ui, source_row, &response);
                 if embedded {
                     // Embedding changes the table's widget namespace, not the grid's public
                     // handles. Keep callers' row targets stable alongside the shared table's.
@@ -611,6 +630,10 @@ impl<'a> Grid<'a> {
             None => table_custom(ui, id, &layout, self.empty, draw),
         }
         pointer(ui, &mut state, source, &shown, &columns, &cells, clicks, &mut out);
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
+            state.dragging = false;
+        }
         take_focus(&ctx, &mut state, focus);
         state.held = ctx.memory(|m| m.has_focus(focus));
         state.keyed = ctx.input(|i| {
@@ -660,6 +683,17 @@ impl<'a> Grid<'a> {
         state.anchor = Some(spot);
         state.edit = None;
         state.focus = true;
+        store(ctx, id, state);
+    }
+
+    /// Open an existing text cell from an explicit action such as Rename.
+    pub fn edit(ctx: &egui::Context, id: egui::Id, row_key: &str, row: usize, col: usize, text: String) {
+        let mut state = load(ctx, id);
+        let at = Spot { key: row_key.to_owned(), row, col };
+        state.cursor = Some(at.clone());
+        state.anchor = Some(at.clone());
+        state.edit = Some(Editing { at, text, caret: Some(Caret::All), unfocused: 0, had_focus: false, message: None });
+        state.reveal = true;
         store(ctx, id, state);
     }
 
@@ -949,7 +983,7 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
     if editor.taken {
         return;
     }
-    let escape = focused && ui.input(|i| i.raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
+    let escape = focused && ui.input(|i| i.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
     if escape {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
         out.cancelled = Some((cell.key.to_owned(), cell.col));

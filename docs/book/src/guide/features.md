@@ -63,7 +63,10 @@ the same for any feature.
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
 what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
-(I) does more.
+(I) does more. With its **Spacing of several holes** option ticked, three or more round edges or
+holes measure together: the gap between each neighbouring pair in order along the row, the span,
+whether the spacing is even (and the gap that differs when a hole is left out), and for a bolt
+circle its pitch-circle diameter and the angle between holes.
 
 **Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
@@ -125,6 +128,15 @@ existing picks. With the setting off, picks only add profiles.
 **To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
+
+Scripts and MCP can end an extrusion at a construction plane or point, or start it there:
+`to: {plane: "Target"}` (or just the plane's name) and `to: {construct_point: "P1"}`, and the
+same for `from`. The extrusion follows the plane or the point when a parameter moves it. A
+plane parallel to the sketch ends the extrusion on it. A plane at a slant cuts the end along
+it, as a slanted face does. A plane the extrusion runs along gives no end, so it is refused. A
+point ends the extrusion on the plane through it, parallel to the sketch. The Extrude dialog
+doesn't offer these picks yet; editing such an extrusion in the dialog keeps its plane or
+point unless you pick another target.
 
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
@@ -352,6 +364,36 @@ local segment. Preview does not change the design; OK creates one editable timel
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
 
+## Cell Grid
+
+`solid.cell_grid` fills the closed profiles of a sketch with cells and cuts them out of the bodies
+(vents, grilles, weight-saving pockets), or with `mode: raised` stands them on the sketch plane as
+material. A profile's outer loop is the field; a loop inside it is a keep-out.
+
+The cells are hexagons, squares, triangles, circles or regular polygons (`shape`, with `size`), or
+your own: `shape: sketch` repeats the one closed profile of another sketch of the design
+(`cell_sketch`, lines and arcs, no holes), drawn and constrained like any sketch. A sketched cell
+has no lattice of its own, so you give the layout:
+
+- `pitch_x`, `pitch_y`: the distance between cell origins along a row and between rows.
+- `stagger`: how far each row shifts along the row, as a fraction of `pitch_x`, 0 to 1 (default 0).
+  0.5 gives hexagonal and brick layouts; other values give a skewed lattice.
+- `cell_angle`: turns the cell about its own origin. `angle` turns the whole grid, as for every shape.
+- `flip`: mirrors every other cell (row plus column odd), for cells that interlock.
+- `cell_origin`: the cell's origin as `[x, y]` in the cell sketch's own coordinates (default: the
+  profile's centroid). `anchor` is where the origin of the first cell sits.
+
+`web` is the least distance between neighbouring cells, checked exactly on the lines and arcs: a
+pitch that makes a cell overlap a neighbour or come nearer than `web` is refused. `size`, `sides`
+and `dot_grid` are not used by a sketched cell. `clip` defaults to `whole` for a sketched cell
+(`snap` for the built-in shapes), `free` trims the cells at the edge, and `snap` is refused.
+A cell sketch with no closed profile, or with several, is refused with the sketch's name.
+
+In the Cell Grid dialog, choose **Shape: Sketch**, pick one profile of the cell sketch, and fill in
+**Pitch X**, **Pitch Y**, **Stagger**, **Cell angle** and **Flip alternate cells**. Cell size and
+Snap are not offered, and the cell's origin is the profile's centroid (set `cell_origin` through the
+command to move it).
+
 ## Section Analysis
 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
@@ -457,6 +499,13 @@ An explicit origin must contain three finite numeric coordinates in millimetres
 (`[x, y, z]` or `{x, y, z}`); omitting it uses the world origin. Expressions and
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
+
+Linear, rectangular, and circular body patterns require the stored coordinates of
+each copy to be finite and at most 10¹² in absolute value. This includes surface
+origins and curve control points. A cylinder's cap plane origin can cross the
+limit while all of its vertices still fit. Reduce the spacing or the number of
+copies in a linear or rectangular pattern, or adjust the axis origin, angle, or
+number of copies in a circular pattern.
 
 ## Axes and points on round edges and faces
 

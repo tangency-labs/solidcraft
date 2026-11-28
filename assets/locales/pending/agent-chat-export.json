@@ -1,0 +1,74 @@
+{
+  "en": {
+    "ui.agent_chat_export": "Export conversation as Markdown…",
+    "ui.agent_chat_export_empty": "Send a message before exporting the conversation.",
+    "ui.agent_chat_export_failed": "Could not save the conversation: {error}",
+    "ui.agent_chat_export_saved": "Conversation saved",
+    "ui.agent_chat_export_tools": "Include tool details",
+    "ui.agent_chat_export_warning": "The conversation and tool details can contain file paths or other sensitive information. Review the exported file before sharing it."
+  },
+  "ar": {
+    "ui.agent_chat_export": "تصدير المحادثة بتنسيق Markdown…",
+    "ui.agent_chat_export_empty": "أرسل رسالة قبل تصدير المحادثة.",
+    "ui.agent_chat_export_failed": "تعذّر حفظ المحادثة: {error}",
+    "ui.agent_chat_export_saved": "تم حفظ المحادثة",
+    "ui.agent_chat_export_tools": "تضمين تفاصيل الأدوات",
+    "ui.agent_chat_export_warning": "قد تحتوي المحادثة وتفاصيل الأدوات على مسارات ملفات أو معلومات حساسة أخرى. راجع الملف المصدّر قبل مشاركته."
+  },
+  "de": {
+    "ui.agent_chat_export": "Chat als Markdown exportieren…",
+    "ui.agent_chat_export_empty": "Senden Sie eine Nachricht, bevor Sie den Chat exportieren.",
+    "ui.agent_chat_export_failed": "Der Chat konnte nicht gespeichert werden: {error}",
+    "ui.agent_chat_export_saved": "Chat gespeichert",
+    "ui.agent_chat_export_tools": "Werkzeugdetails einschließen",
+    "ui.agent_chat_export_warning": "Der Chat und die Werkzeugdetails können Dateipfade oder andere vertrauliche Informationen enthalten. Prüfen Sie die exportierte Datei, bevor Sie sie weitergeben."
+  },
+  "fr": {
+    "ui.agent_chat_export": "Exporter le chat en Markdown…",
+    "ui.agent_chat_export_empty": "Envoyez un message avant d’exporter le chat.",
+    "ui.agent_chat_export_failed": "Impossible d’enregistrer le chat : {error}",
+    "ui.agent_chat_export_saved": "Chat enregistré",
+    "ui.agent_chat_export_tools": "Inclure les détails des outils",
+    "ui.agent_chat_export_warning": "Le chat et les détails des outils peuvent contenir des chemins de fichiers ou d’autres informations sensibles. Vérifiez le fichier exporté avant de le partager."
+  },
+  "he": {
+    "ui.agent_chat_export": "ייצא את הצ'אט כ-Markdown…",
+    "ui.agent_chat_export_empty": "יש לשלוח הודעה לפני ייצוא הצ'אט.",
+    "ui.agent_chat_export_failed": "לא ניתן לשמור את הצ'אט: {error}",
+    "ui.agent_chat_export_saved": "הצ'אט נשמר",
+    "ui.agent_chat_export_tools": "כלול את פרטי הכלים",
+    "ui.agent_chat_export_warning": "הצ'אט ופרטי הכלים עשויים לכלול נתיבים לקבצים או מידע רגיש אחר. יש לבדוק את הקובץ שיוצא לפני שמשתפים אותו."
+  },
+  "ja": {
+    "ui.agent_chat_export": "チャットを Markdown 形式で書き出す…",
+    "ui.agent_chat_export_empty": "チャットを書き出すには、先にメッセージを送信してください。",
+    "ui.agent_chat_export_failed": "チャットを保存できませんでした: {error}",
+    "ui.agent_chat_export_saved": "チャットを保存しました",
+    "ui.agent_chat_export_tools": "ツールの詳細を含める",
+    "ui.agent_chat_export_warning": "チャットやツールの詳細には、ファイルパスなどの機密情報が含まれることがあります。共有する前に、書き出したファイルの内容を確認してください。"
+  },
+  "ko": {
+    "ui.agent_chat_export": "채팅을 Markdown으로 내보내기…",
+    "ui.agent_chat_export_empty": "채팅을 내보내기 전에 메시지를 보내세요.",
+    "ui.agent_chat_export_failed": "채팅을 저장하지 못했습니다: {error}",
+    "ui.agent_chat_export_saved": "채팅을 저장했습니다",
+    "ui.agent_chat_export_tools": "도구 세부 정보 포함",
+    "ui.agent_chat_export_warning": "채팅과 도구 세부 정보에는 파일 경로 또는 기타 민감한 정보가 포함될 수 있습니다. 내보낸 파일을 공유하기 전에 내용을 확인하세요."
+  },
+  "vi": {
+    "ui.agent_chat_export": "Xuất cuộc trò chuyện dưới dạng Markdown…",
+    "ui.agent_chat_export_empty": "Hãy gửi một tin nhắn trước khi xuất cuộc trò chuyện.",
+    "ui.agent_chat_export_failed": "Không thể lưu cuộc trò chuyện: {error}",
+    "ui.agent_chat_export_saved": "Đã lưu cuộc trò chuyện",
+    "ui.agent_chat_export_tools": "Bao gồm chi tiết công cụ",
+    "ui.agent_chat_export_warning": "Cuộc trò chuyện và chi tiết công cụ có thể chứa đường dẫn tệp hoặc thông tin nhạy cảm khác. Hãy kiểm tra tệp đã xuất trước khi chia sẻ."
+  },
+  "zh": {
+    "ui.agent_chat_export": "将对话导出为 Markdown…",
+    "ui.agent_chat_export_empty": "请先发送一条消息，再导出对话。",
+    "ui.agent_chat_export_failed": "无法保存对话：{error}",
+    "ui.agent_chat_export_saved": "已保存对话",
+    "ui.agent_chat_export_tools": "包含工具详情",
+    "ui.agent_chat_export_warning": "对话和工具详情可能包含文件路径或其他敏感信息。请在分享前检查导出的文件。"
+  }
+}

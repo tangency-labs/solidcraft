@@ -24,8 +24,8 @@ use super::design_link::{
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
-    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams,
+    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -74,14 +74,14 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
+         features that newly fail and joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors, joint_conflicts, joint_deviations and moved_occurrences",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -291,6 +291,11 @@ type ReadOnce = std::result::Result<
     String,
 >;
 
+/// What one linked STEP file gave when it was read for a link saved without bodies: the parts of
+/// its Import feature and its file's digest, or why it could not be read.
+type StepReadOnce =
+    std::result::Result<(String, FeatureKind, Vec<String>, Vec<bool>, Vec<String>, std::sync::Arc<solidcraft_kernel::StepImport>, String), String>;
+
 /// What [`left_out_bodies`] gives for one link: its Import feature as the file gives it now,
 /// the face names, whether the file changed since the link read it, and the mesh bodies of a
 /// linked design (none for a STEP file).
@@ -300,6 +305,10 @@ type LeftOut = (solidcraft_io::StepFeature, Vec<Vec<String>>, bool, Vec<MeshData
 /// configuration selection, allowed folder root, and current nesting depth (`opening.len()`) so a
 /// shallow read is never reused at a depth where nested links would exceed [`OPENING_DEPTH`].
 type ReadKey = (PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>, usize);
+
+/// Cache key for a linked STEP file read during one open: `(absolute_path, flat, step_names)`,
+/// so a STEP file linked into many components is read, parsed and hashed once per open.
+type StepReadKey = (PathBuf, bool, String);
 
 /// Single-flight, deadlock-free memoization map shared across parallel branches of one open.
 ///
@@ -316,6 +325,7 @@ struct SharedReads {
 #[derive(Default)]
 struct SharedReadsState {
     ready: std::collections::HashMap<ReadKey, ReadOnce>,
+    step_ready: std::collections::HashMap<StepReadKey, StepReadOnce>,
     /// Key -> `(owner_thread, owner_pool_depth_when_claimed)`.
     in_flight: std::collections::HashMap<ReadKey, (std::thread::ThreadId, usize)>,
     /// Waiter -> `(owner_thread, owner_claim_depth)`.
@@ -387,6 +397,16 @@ impl SharedReads {
 
     fn get_ready(&self, key: &ReadKey) -> Option<ReadOnce> {
         self.state.lock().ok().and_then(|st| st.ready.get(key).cloned())
+    }
+
+    fn get_step_ready(&self, key: &StepReadKey) -> Option<StepReadOnce> {
+        self.state.lock().ok().and_then(|st| st.step_ready.get(key).cloned())
+    }
+
+    fn insert_step_ready(&self, key: StepReadKey, val: StepReadOnce) {
+        if let Ok(mut st) = self.state.lock() {
+            st.step_ready.insert(key, val);
+        }
     }
 
     fn remove_ready(&self, key: &ReadKey) {
@@ -542,6 +562,16 @@ fn reading_read_acquire(key: &ReadKey) -> ReadAcquire {
     }
 }
 
+fn reading_step_get(key: &StepReadKey) -> Option<StepReadOnce> {
+    READING.with(|reading| reading.borrow().read.clone())?.get_step_ready(key)
+}
+
+fn reading_step_insert(key: StepReadKey, val: StepReadOnce) {
+    if let Some(cache) = READING.with(|reading| reading.borrow().read.clone()) {
+        cache.insert_step_ready(key, val);
+    }
+}
+
 /// Temporarily installs a branch [`Reading`] snapshot on a worker thread (preserving `opening`,
 /// `which`, shared memoization cache, and bounded `budget`), records the parent-to-child join
 /// wait edge in [`SharedReads`] for deadlock detection, and restores the thread's prior
@@ -598,27 +628,31 @@ impl Drop for BranchReading {
 }
 
 #[cfg(test)]
-fn measure_eval_counts<R>(f: impl FnOnce() -> R) -> (R, usize, usize) {
+fn measure_eval_counts<R>(f: impl FnOnce() -> R) -> (R, usize, usize, usize) {
     let saved_e = EVALUATED.with(|n| n.replace(0));
     let saved_r = REUSED.with(|n| n.replace(0));
-    struct Restore(usize, usize);
+    let saved_s = STEP_READS.with(|n| n.replace(0));
+    struct Restore(usize, usize, usize);
     impl Drop for Restore {
         fn drop(&mut self) {
             EVALUATED.with(|n| n.set(self.0));
             REUSED.with(|n| n.set(self.1));
+            STEP_READS.with(|n| n.set(self.2));
         }
     }
-    let _restore = Restore(saved_e, saved_r);
+    let _restore = Restore(saved_e, saved_r, saved_s);
     let out = f();
     let e = EVALUATED.with(std::cell::Cell::get);
     let r = REUSED.with(std::cell::Cell::get);
-    (out, e, r)
+    let s = STEP_READS.with(std::cell::Cell::get);
+    (out, e, r, s)
 }
 
 #[cfg(test)]
-fn add_eval_counts(evaluated: usize, reused: usize) {
+fn add_eval_counts(evaluated: usize, reused: usize, step_reads: usize) {
     EVALUATED.with(|n| n.set(n.get() + evaluated));
     REUSED.with(|n| n.set(n.get() + reused));
+    STEP_READS.with(|n| n.set(n.get() + step_reads));
 }
 
 /// How many designs deep [`read_left_out_bodies`] follows links saved without bodies.
@@ -723,7 +757,7 @@ pub(super) fn read_left_out_bodies(
         return Vec::new();
     }
     let _opening = Opening::enter(from, which);
-    let mut prefetched_steps: std::collections::HashMap<usize, Result<LeftOut>> = std::collections::HashMap::new();
+    let mut prefetched_steps: std::collections::HashMap<usize, StepReadOnce> = std::collections::HashMap::new();
     let mut prefetched_designs: std::collections::HashMap<usize, ReadOnce> = std::collections::HashMap::new();
     let (budget, parent_opening, parent_which, parent_refused, parent_again, shared_read) = READING.with(|reading| {
         let r = reading.borrow();
@@ -731,18 +765,21 @@ pub(super) fn read_left_out_bodies(
     });
     if links.len() > 1 && budget > 1 && parent_refused == 0 && parent_again == 0 && !solidcraft_doc::progress::cancelled() {
         enum LeftOutJob {
-            Step { link_idx: usize, link: DesignLink, file: PathBuf, flat: bool },
+            Step { link_indices: Vec<usize>, key: StepReadKey, file: PathBuf, flat: bool, step_names: String },
             Design { link_indices: Vec<usize>, key: ReadKey, file: PathBuf, configuration: Option<SelectedConfiguration> },
         }
         enum LeftOutJobOut {
             Cancelled,
             Step {
-                link_idx: usize,
-                result: Result<LeftOut>,
+                link_indices: Vec<usize>,
+                key: StepReadKey,
+                read: StepReadOnce,
                 #[cfg(test)]
                 evals: usize,
                 #[cfg(test)]
                 reuses: usize,
+                #[cfg(test)]
+                step_reads: usize,
             },
             Design {
                 link_indices: Vec<usize>,
@@ -755,19 +792,35 @@ pub(super) fn read_left_out_bodies(
                 evals: usize,
                 #[cfg(test)]
                 reuses: usize,
+                #[cfg(test)]
+                step_reads: usize,
             },
         }
         let allowed_by = (parent_which == LinkedRead::Folder).then(|| parent_opening.get(1).cloned().flatten()).flatten();
         let depth = parent_opening.len();
         let mut jobs: Vec<LeftOutJob> = Vec::new();
+        let mut step_job_by_key: std::collections::HashMap<StepReadKey, usize> = std::collections::HashMap::new();
         let mut design_job_by_key: std::collections::HashMap<ReadKey, usize> = std::collections::HashMap::new();
         for (link_idx, (_comp, link)) in links.iter().enumerate() {
             let file = resolve(from, &link.path);
             if !may_read(&file) || link_refused(from, &link.path).is_err() {
                 continue;
             }
-            if link.step_names.is_some() {
-                jobs.push(LeftOutJob::Step { link_idx, link: link.clone(), file, flat: step_import_flat(doc, link) });
+            if let Some(step_names) = &link.step_names {
+                let flat = step_import_flat(doc, link);
+                let key: StepReadKey = (absolute(&file), flat, step_names.clone());
+                if reading_step_get(&key).is_some() {
+                    continue;
+                }
+                if let Some(&job_idx) = step_job_by_key.get(&key) {
+                    if let LeftOutJob::Step { link_indices, .. } = &mut jobs[job_idx] {
+                        link_indices.push(link_idx);
+                    }
+                } else {
+                    let job_idx = jobs.len();
+                    step_job_by_key.insert(key.clone(), job_idx);
+                    jobs.push(LeftOutJob::Step { link_indices: vec![link_idx], key, file, flat, step_names: step_names.clone() });
+                }
                 continue;
             }
             let target = absolute(&file);
@@ -810,19 +863,22 @@ pub(super) fn read_left_out_bodies(
                                 return LeftOutJobOut::Cancelled;
                             }
                             match job {
-                                LeftOutJob::Step { link_idx, link, file, flat } => {
-                                    let run = || left_out_step(link, file, from, *flat, validation);
+                                LeftOutJob::Step { link_indices, key, file, flat, step_names } => {
+                                    let run = || read_step_once(file, from, step_names, *flat, validation);
                                     #[cfg(test)]
-                                    let (result, evals, reuses) = measure_eval_counts(run);
+                                    let (read, evals, reuses, step_reads) = measure_eval_counts(run);
                                     #[cfg(not(test))]
-                                    let result = run();
+                                    let read = run();
                                     LeftOutJobOut::Step {
-                                        link_idx: *link_idx,
-                                        result,
+                                        link_indices: link_indices.clone(),
+                                        key: key.clone(),
+                                        read,
                                         #[cfg(test)]
                                         evals,
                                         #[cfg(test)]
                                         reuses,
+                                        #[cfg(test)]
+                                        step_reads,
                                     }
                                 }
                                 LeftOutJob::Design { link_indices, key, file, configuration } => {
@@ -834,29 +890,29 @@ pub(super) fn read_left_out_bodies(
                                         parent_tid,
                                         pool_depth,
                                     );
-                                    let (read, evals, reuses) = match reading_read_acquire(key) {
-                                        ReadAcquire::Ready(read) => (*read, 0usize, 0usize),
+                                    let (read, evals, reuses, step_reads) = match reading_read_acquire(key) {
+                                        ReadAcquire::Ready(read) => (*read, 0usize, 0usize, 0usize),
                                         ReadAcquire::Claimed(claim) => {
                                             let run = || read_once(file, from, *configuration, validation);
                                             #[cfg(test)]
-                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            let (read, evals, reuses, step_reads) = measure_eval_counts(run);
                                             #[cfg(not(test))]
-                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
+                                            let (read, evals, reuses, step_reads) = (run(), 0usize, 0usize, 0usize);
                                             let refused_here = READING.with(|r| r.borrow().refused);
                                             claim.finish((refused_here == 0).then(|| read.clone()));
-                                            (read, evals, reuses)
+                                            (read, evals, reuses, step_reads)
                                         }
                                         ReadAcquire::Bypass => {
                                             let run = || read_once(file, from, *configuration, validation);
                                             #[cfg(test)]
-                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            let (read, evals, reuses, step_reads) = measure_eval_counts(run);
                                             #[cfg(not(test))]
-                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
-                                            (read, evals, reuses)
+                                            let (read, evals, reuses, step_reads) = (run(), 0usize, 0usize, 0usize);
+                                            (read, evals, reuses, step_reads)
                                         }
                                     };
                                     #[cfg(not(test))]
-                                    let _ = (evals, reuses);
+                                    let _ = (evals, reuses, step_reads);
                                     let (refused, outside, again) = branch.finish();
                                     LeftOutJobOut::Design {
                                         link_indices: link_indices.clone(),
@@ -869,6 +925,8 @@ pub(super) fn read_left_out_bodies(
                                         evals,
                                         #[cfg(test)]
                                         reuses,
+                                        #[cfg(test)]
+                                        step_reads,
                                     }
                                 }
                             }
@@ -881,16 +939,22 @@ pub(super) fn read_left_out_bodies(
                 match out {
                     LeftOutJobOut::Cancelled => {}
                     LeftOutJobOut::Step {
-                        link_idx,
-                        result,
+                        link_indices,
+                        key,
+                        read,
                         #[cfg(test)]
                         evals,
                         #[cfg(test)]
                         reuses,
+                        #[cfg(test)]
+                        step_reads,
                     } => {
                         #[cfg(test)]
-                        add_eval_counts(evals, reuses);
-                        prefetched_steps.insert(link_idx, result);
+                        add_eval_counts(evals, reuses, step_reads);
+                        reading_step_insert(key, read.clone());
+                        for idx in link_indices {
+                            prefetched_steps.insert(idx, read.clone());
+                        }
                     }
                     LeftOutJobOut::Design {
                         link_indices,
@@ -903,9 +967,11 @@ pub(super) fn read_left_out_bodies(
                         evals,
                         #[cfg(test)]
                         reuses,
+                        #[cfg(test)]
+                        step_reads,
                     } => {
                         #[cfg(test)]
-                        add_eval_counts(evals, reuses);
+                        add_eval_counts(evals, reuses, step_reads);
                         let within_limit = READING.with(|reading| {
                             let mut r = reading.borrow_mut();
                             if r.again >= READ_AGAIN {
@@ -947,7 +1013,10 @@ pub(super) fn read_left_out_bodies(
             continue;
         }
         let read_result = if let Some(step_res) = prefetched_steps.remove(&link_idx) {
-            step_res
+            step_res.map_err(EngineError::Other).map(|(n, kind, body_names, invisible, w, import, digest)| {
+                let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+                (solidcraft_io::StepFeature { name: n, kind, body_names, invisible, warnings: w, import }, Vec::new(), changed, Vec::new())
+            })
         } else if let Some(design_res) = prefetched_designs.remove(&link_idx) {
             design_res.map_err(EngineError::Other).map(|(n, kind, body_names, invisible, w, import, faces, digest, meshes)| {
                 let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
@@ -1108,13 +1177,31 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
     Ok((solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import }, faces, changed, meshes))
 }
 
+/// [`left_out_step`]'s single read of a linked STEP file at `file`, for a design opened from `from`.
+fn read_step_once(file: &Path, from: Option<&str>, step_names: &str, flat: bool, validation: solidcraft_kernel::Validation) -> StepReadOnce {
+    let bytes = read_link(file, from, false).map_err(|e| e.to_string())?;
+    let probe = DesignLink { step_names: Some(step_names.to_string()), ..Default::default() };
+    let ((_, feature, ..), _) = source_bodies(file, &bytes, &probe, flat, validation).map_err(|e| e.to_string())?;
+    let solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import } = feature;
+    Ok((name, kind, body_names, invisible, warnings, import, DesignLink::file_digest(&bytes)))
+}
+
 /// [`left_out_bodies`] for a linked STEP file at `file`: read again as Update Links reads it
 /// ([`source_bodies`]), with the link's naming rule; `flat` as there.
 fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
-    let bytes = read_link(file, from, false)?;
-    let ((_, feature, ..), _) = source_bodies(file, &bytes, link, flat, validation)?;
-    let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != DesignLink::file_digest(&bytes));
-    Ok((feature, Vec::new(), changed, Vec::new()))
+    let step_names = link.step_names.as_deref().unwrap_or_default();
+    let key = (absolute(file), flat, step_names.to_string());
+    let read = match reading_step_get(&key) {
+        Some(read) => read,
+        None => {
+            let read = read_step_once(file, from, step_names, flat, validation);
+            reading_step_insert(key, read.clone());
+            read
+        }
+    };
+    let (name, kind, body_names, invisible, warnings, import, digest) = read.map_err(EngineError::Other)?;
+    let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+    Ok((solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import }, Vec::new(), changed, Vec::new()))
 }
 
 /// [`left_out_bodies`]' read of the design at `file`, for a design opened from `from`.
@@ -1151,7 +1238,7 @@ struct SourceProperties {
 static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
 const READS_SIZE: usize = 256;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct SelectedConfiguration {
     row: u64,
     identity: Option<u64>,
@@ -1181,6 +1268,76 @@ thread_local! {
     static EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Of those, the ones whose evaluation came from the local store, for tests.
     static REUSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Linked STEP files parsed on this thread, for tests.
+    static STEP_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Uncached file SHA-256 digests computed on this thread, for tests.
+    static FILE_HASH_COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// `Session::refresh()` calls made inside `update_links` on this thread, for tests.
+    static UPDATE_LINKS_REFRESHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f` over `items` in parallel when there is more than one item, propagating this thread's
+/// `vfs::ThreadContext` (path scope and one-action allowed network hosts) and merging test
+/// counters from helper threads back into the calling thread.
+fn map_link_work<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {
+    if items.len() <= 1 {
+        return items.iter().map(|item| Some(f(item))).collect();
+    }
+    let caller = std::thread::current().id();
+    let vfs_ctx = solidcraft_io::vfs::ThreadContext::current();
+    #[cfg(test)]
+    {
+        let raw = solidcraft_kernel::map_on_threads(items, MAX_LINK_WORKERS, |item| {
+            if std::thread::current().id() == caller {
+                (f(item), 0usize, 0usize, 0usize, 0usize)
+            } else {
+                vfs_ctx.run(|| {
+                    let eval_before = EVALUATED.with(std::cell::Cell::get);
+                    let reused_before = REUSED.with(std::cell::Cell::get);
+                    let step_before = STEP_READS.with(std::cell::Cell::get);
+                    let hash_before = FILE_HASH_COMPUTED.with(std::cell::Cell::get);
+                    let out = f(item);
+                    let eval_delta = EVALUATED.with(std::cell::Cell::get).saturating_sub(eval_before);
+                    let reused_delta = REUSED.with(std::cell::Cell::get).saturating_sub(reused_before);
+                    let step_delta = STEP_READS.with(std::cell::Cell::get).saturating_sub(step_before);
+                    let hash_delta = FILE_HASH_COMPUTED.with(std::cell::Cell::get).saturating_sub(hash_before);
+                    (out, eval_delta, reused_delta, step_delta, hash_delta)
+                })
+            }
+        });
+        let (mut eval_add, mut reused_add, mut step_add, mut hash_add) = (0usize, 0usize, 0usize, 0usize);
+        let out = raw
+            .into_iter()
+            .map(|entry| {
+                entry.map(|(value, e, r, s, h)| {
+                    eval_add = eval_add.saturating_add(e);
+                    reused_add = reused_add.saturating_add(r);
+                    step_add = step_add.saturating_add(s);
+                    hash_add = hash_add.saturating_add(h);
+                    value
+                })
+            })
+            .collect();
+        if eval_add > 0 {
+            EVALUATED.with(|n| n.set(n.get().saturating_add(eval_add)));
+        }
+        if reused_add > 0 {
+            REUSED.with(|n| n.set(n.get().saturating_add(reused_add)));
+        }
+        if step_add > 0 {
+            STEP_READS.with(|n| n.set(n.get().saturating_add(step_add)));
+        }
+        if hash_add > 0 {
+            FILE_HASH_COMPUTED.with(|n| n.set(n.get().saturating_add(hash_add)));
+        }
+        out
+    }
+    #[cfg(not(test))]
+    {
+        solidcraft_kernel::map_on_threads(items, MAX_LINK_WORKERS, |item| {
+            if std::thread::current().id() == caller { f(item) } else { vfs_ctx.run(|| f(item)) }
+        })
+    }
 }
 
 fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
@@ -1208,17 +1365,18 @@ fn unchanged_read(
         .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
-fn remember_read(
+fn remember_read_parts(
     file: &Path,
     configuration: Option<SelectedConfiguration>,
     bytes: u64,
-    feature: &solidcraft_io::StepFeature,
+    kind: &FeatureKind,
+    warnings: &[String],
     faces: &[Vec<String>],
     properties: &[SourceProperties],
     metadata: &solidcraft_doc::Metadata,
     meshes: &[MeshData],
 ) {
-    let FeatureKind::Import { step, .. } = &feature.kind else { return };
+    let FeatureKind::Import { step, .. } = kind else { return };
     let file = absolute(file);
     let Ok(mut reads) = READS.lock() else { return };
     reads.retain(|r| r.file != file || r.configuration != configuration);
@@ -1231,11 +1389,24 @@ fn remember_read(
         bytes,
         step: digest(step.as_bytes()),
         faces: digest(faces),
-        warnings: feature.warnings.clone(),
+        warnings: warnings.to_vec(),
         properties: properties.to_vec(),
         metadata: metadata.clone(),
         meshes: meshes.to_vec(),
     });
+}
+
+fn remember_read(
+    file: &Path,
+    configuration: Option<SelectedConfiguration>,
+    bytes: u64,
+    feature: &solidcraft_io::StepFeature,
+    faces: &[Vec<String>],
+    properties: &[SourceProperties],
+    metadata: &solidcraft_doc::Metadata,
+    meshes: &[MeshData],
+) {
+    remember_read_parts(file, configuration, bytes, &feature.kind, &feature.warnings, faces, properties, metadata, meshes);
 }
 
 /// The bytes of the source at `file`, which must not be the design saved at `own`.
@@ -1278,24 +1449,24 @@ fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<Sele
 static DIGESTS: Mutex<(u64, Vec<(PathBuf, (std::time::SystemTime, u64), String)>)> = Mutex::new((0, Vec::new()));
 const DIGESTS_SIZE: usize = 256;
 
-/// The digest of the design file at `file` now ([`DesignLink::file_digest`]), `None` when it
-/// can't be read. `component.links` asks each time a tab is shown, so a file is read again only
-/// when its time or size changed since; the browser build keeps no times and reads it each time.
-pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<String> {
-    let file = absolute(file);
-    let generation = {
-        let digests = DIGESTS.lock().ok()?;
-        let generation = digests.0;
-        let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
-        if let Some(stamp) = stamp
-            && let Some(known) = digests.1.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
-        {
-            return Some(known);
-        }
-        (generation, stamp)
-    };
-    let (generation, stamp) = generation;
-    let digest = DesignLink::file_digest(&read_link(&file, own, any).ok()?);
+enum DigestLookup {
+    Hit(String),
+    Miss { generation: u64, stamp: Option<(std::time::SystemTime, u64)> },
+}
+
+fn lookup_cached_sha256(file: &Path, own: Option<&str>) -> Option<DigestLookup> {
+    let digests = DIGESTS.lock().ok()?;
+    let generation = digests.0;
+    let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
+    if let Some(stamp) = stamp
+        && let Some(known) = digests.1.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
+    {
+        return Some(DigestLookup::Hit(known));
+    }
+    Some(DigestLookup::Miss { generation, stamp })
+}
+
+fn store_cached_sha256(file: PathBuf, generation: u64, stamp: Option<(std::time::SystemTime, u64)>, digest: &str) {
     if let (Some(stamp), Ok(mut digests)) = (stamp, DIGESTS.lock())
         && digests.0 == generation
     {
@@ -1303,8 +1474,27 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<S
         if digests.1.len() >= DIGESTS_SIZE {
             digests.1.remove(0);
         }
-        digests.1.push((file, stamp, digest.clone()));
+        digests.1.push((file, stamp, digest.to_string()));
     }
+}
+
+fn compute_file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<String> {
+    #[cfg(test)]
+    FILE_HASH_COMPUTED.with(|n| n.set(n.get() + 1));
+    Some(DesignLink::file_digest(&read_link(file, own, any).ok()?))
+}
+
+/// The digest of the design file at `file` now ([`DesignLink::file_digest`]), `None` when it
+/// can't be read. `component.links` asks each time a tab is shown, so a file is read again only
+/// when its time or size changed since; the browser build keeps no times and reads it each time.
+pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<String> {
+    let file = absolute(file);
+    let (generation, stamp) = match lookup_cached_sha256(&file, own)? {
+        DigestLookup::Hit(known) => return Some(known),
+        DigestLookup::Miss { generation, stamp } => (generation, stamp),
+    };
+    let digest = compute_file_sha256(&file, own, any)?;
+    store_cached_sha256(file, generation, stamp, &digest);
     Some(digest)
 }
 
@@ -1335,6 +1525,8 @@ fn source_bodies(
     let Some(names) = &link.step_names else {
         return design_bodies(&Source::File(file.to_path_buf()), bytes, selected_configuration(link), validation);
     };
+    #[cfg(test)]
+    STEP_READS.with(|n| n.set(n.get() + 1));
     let names = solidcraft_io::StepNames::parse(names).ok_or_else(|| EngineError::Other("invalid linked STEP naming policy".into()))?;
     let shown = file.to_string_lossy();
     let mut feature = solidcraft_io::step_import_feature_named(bytes, &shown, names).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
@@ -1520,16 +1712,23 @@ fn linked_evaluation(file: &Path, bytes: &[u8]) -> Option<(solidcraft_io::Import
     Some((cache, key))
 }
 
-/// [`design_bodies`], with `reuse` taking the design's evaluation from the local store of reused
-/// imports when it holds one for these bytes, and keeping it there otherwise
-/// (`solidcraft_io::ImportCache`, with its trust rules: only this build's evaluation of exactly
-/// this design is adopted). A design saved without linked bodies reads every link as it opens,
-/// and a plain JSON part keeps no model of its own, so each open would evaluate each part's whole
-/// timeline again. Only a design whose model depends on its bytes alone is kept: one with links
-/// of its own, read in a chosen configuration, or held in memory, is evaluated each time.
-fn design_bodies_reusing(
+fn parse_design_bytes(source: &Source, bytes: &[u8]) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let shown = source.shown();
+    let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
+    if solidcraft_io::is_design_container(bytes) {
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
+        let saved = reader.geometry();
+        Ok((reader.read_document().map_err(fail)?, saved))
+    } else {
+        Ok((solidcraft_io::read_design(bytes).map_err(fail)?, None))
+    }
+}
+
+fn evaluate_parsed_design(
     source: &Source,
     bytes: &[u8],
+    doc: Document,
+    saved: Option<solidcraft_doc::SavedModel>,
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
     reuse: bool,
@@ -1537,14 +1736,6 @@ fn design_bodies_reusing(
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = source.shown();
-    let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
-    let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
-        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
-        let saved = reader.geometry();
-        (reader.read_document().map_err(fail)?, saved)
-    } else {
-        (solidcraft_io::read_design(bytes).map_err(fail)?, None)
-    };
     if let Some(selected) = configuration
         && doc.configs.row_identity(selected.row) != selected.identity
     {
@@ -1593,6 +1784,31 @@ fn design_bodies_reusing(
     }
     let images = design_images(&part, &shown);
     Ok(((name, feature, faces, metadata, properties, meshes), images))
+}
+
+/// [`design_bodies`], with `reuse` taking the design's evaluation from the local store of reused
+/// imports when it holds one for these bytes, and keeping it there otherwise
+/// (`solidcraft_io::ImportCache`, with its trust rules: only this build's evaluation of exactly
+/// this design is adopted). A design saved without linked bodies reads every link as it opens,
+/// and a plain JSON part keeps no model of its own, so each open would evaluate each part's whole
+/// timeline again. Only a design whose model depends on its bytes alone is kept: one with links
+/// of its own, read in a chosen configuration, or held in memory, is evaluated each time.
+fn design_bodies_reusing(
+    source: &Source,
+    bytes: &[u8],
+    configuration: Option<SelectedConfiguration>,
+    validation: solidcraft_kernel::Validation,
+    reuse: bool,
+) -> Result<(Linked, LinkedImages)> {
+    let (doc, saved) = match parse_design_bytes(source, bytes) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            #[cfg(test)]
+            EVALUATED.with(|n| n.set(n.get() + 1));
+            return Err(e);
+        }
+    };
+    evaluate_parsed_design(source, bytes, doc, saved, configuration, validation, reuse)
 }
 
 /// The canvases and decals of `part`, the design saved as `shown`, each where the design shows
@@ -1645,6 +1861,18 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
     (images, warnings)
 }
 
+/// The name to read the STEP text of a design's bodies under: `shown`, unless its extension names a
+/// format with its own reader (FreeCAD, Rhino, IGES). The text is STEP whatever the design came
+/// from: a design an importer plugin wrote from `part.FCStd` is linked as `part.FCStd`, and routing
+/// that STEP by the name sent it to the FreeCAD reader, which refused it.
+fn step_label(shown: &str) -> String {
+    if solidcraft_io::is_native_cad_path(shown) || solidcraft_io::is_iges_path(shown) {
+        Path::new(shown).with_extension("step").to_string_lossy().into_owned()
+    } else {
+        shown.to_string()
+    }
+}
+
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature, and its mesh
 /// bodies, which a Mesh Import feature beside it holds (#20050).
 fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
@@ -1659,7 +1887,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     }
     let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let mut feature = solidcraft_io::step_import_feature(&step, &step_label(shown)).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
@@ -2493,24 +2721,247 @@ fn add_design_images(s: &mut Session, comp: u64, component: &str, images: Vec<so
     Ok(())
 }
 
-/// Clone [`Linked`] when multiple linked components share the same updated source file.
-fn clone_linked(linked: &Linked) -> Linked {
-    let (name, sf, faces, metadata, properties, meshes) = linked;
-    (
-        name.clone(),
-        solidcraft_io::StepFeature {
-            name: sf.name.clone(),
-            kind: sf.kind.clone(),
-            body_names: sf.body_names.clone(),
-            invisible: sf.invisible.clone(),
-            warnings: sf.warnings.clone(),
-            import: sf.import.clone(),
-        },
-        faces.clone(),
-        metadata.clone(),
-        properties.clone(),
-        meshes.clone(),
-    )
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct UpdateSourceKey {
+    canonical: PathBuf,
+    configuration: Option<SelectedConfiguration>,
+    step_names: Option<String>,
+    flat: bool,
+}
+
+#[derive(Clone)]
+struct EvaluatedLink {
+    kind: FeatureKind,
+    body_names: Vec<String>,
+    warnings: Vec<String>,
+    /// Held alive until `s.refresh()` so timeline evaluation reuses the parsed STEP import.
+    import: std::sync::Arc<solidcraft_kernel::StepImport>,
+    faces: Vec<Vec<String>>,
+    metadata: solidcraft_doc::Metadata,
+    properties: Vec<SourceProperties>,
+    meshes: Vec<MeshData>,
+}
+
+impl EvaluatedLink {
+    fn from_linked(linked: Linked) -> Self {
+        let (_, sf, faces, metadata, properties, meshes) = linked;
+        Self { kind: sf.kind, body_names: sf.body_names, warnings: sf.warnings, import: sf.import, faces, metadata, properties, meshes }
+    }
+}
+
+enum TargetLink {
+    SessionOnly {
+        cname: String,
+    },
+    Failed {
+        comp: u64,
+        cname: String,
+        error: String,
+    },
+    Kicad {
+        comp: u64,
+        cname: String,
+        link: DesignLink,
+        importer: solidcraft_doc::LinkImporter,
+    },
+    Importer {
+        comp: u64,
+        cname: String,
+        link: DesignLink,
+        old: ImportSource,
+        file: PathBuf,
+        before: Option<solidcraft_doc::ModelState>,
+    },
+    Native {
+        comp: u64,
+        cname: String,
+        link: DesignLink,
+        old: ImportSource,
+        file: PathBuf,
+        canonical: PathBuf,
+        flat: bool,
+        before: Option<solidcraft_doc::ModelState>,
+    },
+}
+
+enum PostRefreshEntry {
+    Done { cname: String, updated: bool },
+    Inherit { comp: u64, cname: String, properties: Vec<SourceProperties>, changed: bool },
+}
+
+struct EvalJob {
+    key: UpdateSourceKey,
+    display_name: String,
+    slot: usize,
+    file: PathBuf,
+    bytes: std::sync::Arc<Vec<u8>>,
+    configuration: Option<SelectedConfiguration>,
+    step_names: Option<String>,
+    flat: bool,
+}
+
+struct ApplyContext<'a> {
+    s: &'a mut Session,
+    link_warnings: &'a mut [Vec<String>],
+    kept_imports: &'a mut Vec<std::sync::Arc<solidcraft_kernel::StepImport>>,
+    rebind_queue: &'a mut Vec<(usize, u64, Option<solidcraft_doc::ModelState>)>,
+    tie_queue: &'a mut Vec<(usize, String, Vec<TieNumberedJointSide>)>,
+    realigned_features: &'a mut std::collections::HashSet<u64>,
+    post_entries: &'a mut Vec<PostRefreshEntry>,
+    read_components: &'a mut Vec<u64>,
+    needs_first_refresh: &'a mut bool,
+}
+
+fn link_threads_for(sources: &[SourceProperties]) -> Vec<Vec<solidcraft_doc::ThreadInfo>> {
+    if sources.iter().any(|source| !source.threads.is_empty()) { sources.iter().map(|source| source.threads.clone()).collect() } else { Vec::new() }
+}
+
+fn apply_link_threads(s: &mut Session, feature: u64, sources: &[SourceProperties]) -> bool {
+    let threads = link_threads_for(sources);
+    if s.doc.feature(feature).is_some_and(|f| f.link_threads != threads) {
+        if let Some(f) = s.doc_mut().feature_mut(feature) {
+            f.link_threads = threads;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+fn eval_job_sequential(job: &EvalJob, validation: solidcraft_kernel::Validation) -> std::result::Result<EvaluatedLink, String> {
+    let probe = DesignLink {
+        configuration: job.configuration.map(|c| c.row),
+        configuration_identity: job.configuration.and_then(|c| c.identity),
+        step_names: job.step_names.clone(),
+        ..Default::default()
+    };
+    source_bodies(&job.file, &job.bytes, &probe, job.flat, validation)
+        .map(|(linked, _)| EvaluatedLink::from_linked(linked))
+        .map_err(|e| e.to_string())
+}
+
+fn apply_evaluated_link(
+    ctx: &mut ApplyContext<'_>,
+    slot: usize,
+    comp: u64,
+    cname: String,
+    link: &DesignLink,
+    old: &ImportSource,
+    file: &Path,
+    before: Option<solidcraft_doc::ModelState>,
+    eval: EvaluatedLink,
+) -> Result<()> {
+    ctx.kept_imports.push(eval.import);
+    ctx.link_warnings[slot].extend(eval.warnings);
+    let (took, kept_metadata) = inherit_metadata(ctx.s, comp, &eval.metadata);
+    ctx.link_warnings[slot].extend(kept_metadata);
+    let mesh_changed = set_link_meshes(ctx.s, comp, link.feature, &cname, &file.display().to_string(), eval.meshes)?;
+    if mesh_changed {
+        *ctx.needs_first_refresh = true;
+    }
+    let threads_changed = apply_link_threads(ctx.s, link.feature, &eval.properties);
+    if threads_changed {
+        *ctx.needs_first_refresh = true;
+    }
+    let took = mesh_changed || threads_changed || took;
+    let same = matches!(&eval.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
+    let kept = ctx.s.doc.feature(link.feature).map(|f| &f.link_faces);
+    if same && kept == Some(&eval.faces) {
+        ctx.post_entries.push(PostRefreshEntry::Inherit { comp, cname, properties: eval.properties, changed: took });
+        ctx.read_components.push(comp);
+        return Ok(());
+    }
+    // The same bodies, their faces named for the first time (a link made before names were
+    // kept): nothing a reference finds changes. Names the design gave other faces since do.
+    let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
+    // Joints on faces told apart only by a positional tie number, and where they were, so a
+    // shift this update gives them is said instead of passing unnoticed.
+    let tie_before = if same { Vec::new() } else { snapshot_tie_numbered_joints(ctx.s, comp, link.feature) };
+    if !same {
+        for name in numbered_references(ctx.s, comp, link.feature) {
+            ctx.link_warnings[slot].push(format!(
+                "{name} refers to faces of {cname} by their place in the linked file, which this update can change: check it, and pick its faces again so it follows them by name"
+            ));
+        }
+        for name in tie_numbered_origin_references(ctx.s, comp, link.feature) {
+            ctx.link_warnings[slot].push(format!(
+                "{name} refers to a positional tie-numbered face of {cname}, which can shift when sibling faces are added or removed: check it, and pick its face again"
+            ));
+        }
+    }
+    let mut moved = None;
+    let mut realigned = None;
+    // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
+    let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
+    let (old_names, other_bodies) = feature_body_context_excluding(ctx.s, link.feature, ctx.realigned_features);
+    let mut unpinned_inherited = if old_names.is_empty() && link.step_names.is_none() {
+        realign_unpinned_inherited(&ctx.s.doc, &link.inherited, &eval.body_names)
+    } else {
+        None
+    };
+    let mut count_changed = false;
+    if let Some(f) = ctx.s.doc_mut().feature_mut(link.feature) {
+        if !same {
+            // Bodies keep their names where the design still has as many, also when it lists
+            // them in another order (#21371).
+            if old_names.len() != eval.body_names.len() {
+                count_changed = true;
+                if old_names.is_empty() {
+                    f.body_names = eval.body_names;
+                    if let Some(next_inherited) = unpinned_inherited.take() {
+                        realigned = Some((next_inherited, Vec::new()));
+                    }
+                } else {
+                    let (next_names, next_inherited, removed) = realign_changed_body_count(
+                        &old.0,
+                        &file.display().to_string(),
+                        naming,
+                        &old_names,
+                        &link.inherited,
+                        &eval.body_names,
+                        &other_bodies,
+                    );
+                    f.body_names = next_names;
+                    realigned = Some((next_inherited, removed));
+                }
+            } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &eval.body_names) {
+                f.body_names = reordered(&old_names, &order);
+                moved = Some(order);
+            } else if f.body_names.is_empty() && !old_names.is_empty() {
+                f.body_names = old_names;
+            }
+            f.kind = eval.kind;
+        }
+        // A link made before the design's face names were kept gets them here.
+        f.link_faces = eval.faces;
+    }
+    if count_changed {
+        ctx.realigned_features.insert(link.feature);
+    }
+    // What the link last took from each body moves with it, so a body's own override stays one.
+    if let Some((next_inherited, removed)) = realigned {
+        if link.step_names.is_none()
+            && let Some(kept) = ctx.s.doc_mut().links.get_mut(&comp)
+        {
+            kept.inherited = next_inherited;
+        }
+        remove_stale_body_properties(ctx.s.doc_mut(), link.feature, &removed, &other_bodies);
+    } else if let Some(order) = moved
+        && let Some(kept) = ctx.s.doc_mut().links.get_mut(&comp)
+        && !kept.inherited.is_empty()
+    {
+        kept.inherited = reordered(&kept.inherited, &order);
+    }
+    *ctx.needs_first_refresh = true;
+    if !same {
+        ctx.rebind_queue.push((slot, link.feature, before));
+    }
+    if !tie_before.is_empty() {
+        ctx.tie_queue.push((slot, cname.clone(), tie_before));
+    }
+    ctx.post_entries.push(PostRefreshEntry::Inherit { comp, cname, properties: eval.properties, changed });
+    ctx.read_components.push(comp);
+    Ok(())
 }
 
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2531,181 +2982,18 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     // A batch goes on past a source it cannot read: that link keeps its bodies and is named in
     // `failed`, so the others still come in as one step (#9743).
     let go_on = p.get("component").is_none();
+    let failing_before: std::collections::BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
     // Linked designs saved without bodies of their own follow the caller's rule as they open.
     let _reading = Opening::enter(s.path.as_deref(), LinkedRead::read(p, cmd)?);
     let links: Vec<(u64, DesignLink)> =
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
-    let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
-    let mut failed: Vec<LinkFailure> = Vec::new();
-    let mut read_components = Vec::new();
-    let count = links.len();
-    // Pre-read and evaluate distinct changed linked sources in parallel when updating multiple
-    // links at once, then apply every update to `s` in exact deterministic link order. Raw file
-    // bytes are dropped immediately for unchanged and prefetched links and capped so large
-    // assemblies stream excess links sequentially instead of retaining gigabytes in memory.
-    const MAX_UPDATE_PREFETCH_BYTES: usize = 128 << 20;
-    enum PrereadLink {
-        Err(String),
-        Meta { old: ImportSource, file: PathBuf, file_sha256: String, bytes_digest: u64 },
-        Bytes { old: ImportSource, file: PathBuf, file_sha256: String, bytes_digest: u64, bytes: std::sync::Arc<[u8]> },
-    }
-    let mut preread_files: std::collections::HashMap<usize, PrereadLink> = std::collections::HashMap::new();
-    let mut prefetched_sources: std::collections::HashMap<usize, std::result::Result<Linked, String>> = std::collections::HashMap::new();
-    let cores = link_cores();
-    if count > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
-        type SourceKey = (PathBuf, u64, Option<(u64, Option<u64>)>, Option<String>, bool);
-        struct SourceJob {
-            file: PathBuf,
-            bytes: std::sync::Arc<[u8]>,
-            link: DesignLink,
-            flat: bool,
-            link_indices: Vec<usize>,
-        }
-        struct SourceJobOut {
-            link_indices: Vec<usize>,
-            result: Option<std::result::Result<Linked, String>>,
-            #[cfg(test)]
-            evals: usize,
-            #[cfg(test)]
-            reuses: usize,
-        }
-        let mut jobs: Vec<SourceJob> = Vec::new();
-        let mut job_by_key: std::collections::HashMap<SourceKey, usize> = std::collections::HashMap::new();
-        let mut retained_bytes: usize = 0;
-        for (index, (comp, link)) in links.iter().enumerate() {
-            if solidcraft_doc::progress::cancelled() {
-                break;
-            }
-            let Some(cname) = s.doc.components.iter().find(|c| c.id == *comp).map(|c| c.name.as_str()) else {
-                continue;
-            };
-            solidcraft_doc::progress::item(Some((cname, index, count)));
-            if link.path.is_empty() || link.importer.is_some() {
-                continue;
-            }
-            let (old, file, bytes) = match read_linked(s, *comp, link) {
-                Ok(read) => read,
-                Err(e) => {
-                    preread_files.insert(index, PrereadLink::Err(e));
-                    continue;
-                }
-            };
-            let file_sha256 = DesignLink::file_digest(&bytes);
-            let bytes_digest = digest(bytes.as_slice());
-            let kept_faces = s
-                .doc
-                .feature(link.feature)
-                .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
-                .map(|f| digest(f.link_faces.as_slice()));
-            let is_unchanged = kept_faces
-                .and_then(|faces| {
-                    let meshes = link_meshes(s, *comp, link.feature);
-                    unchanged_read(&file, selected_configuration(link), bytes_digest, digest(old.0.as_bytes()), faces, meshes)
-                })
-                .is_some();
-            if is_unchanged {
-                // Drop raw bytes immediately; only the digests are needed in the apply loop.
-                preread_files.insert(index, PrereadLink::Meta { old, file, file_sha256, bytes_digest });
-                continue;
-            }
-            let flat = step_import_flat(&s.doc, link);
-            let key: SourceKey =
-                (absolute(&file), bytes_digest, selected_configuration(link).map(|c| (c.row, c.identity)), link.step_names.clone(), flat);
-            if let Some(&job_idx) = job_by_key.get(&key) {
-                jobs[job_idx].link_indices.push(index);
-                preread_files.insert(index, PrereadLink::Meta { old, file, file_sha256, bytes_digest });
-            } else if retained_bytes.saturating_add(bytes.len()) <= MAX_UPDATE_PREFETCH_BYTES || jobs.is_empty() {
-                let bytes: std::sync::Arc<[u8]> = bytes.into();
-                retained_bytes = retained_bytes.saturating_add(bytes.len());
-                let job_idx = jobs.len();
-                job_by_key.insert(key, job_idx);
-                jobs.push(SourceJob { file: file.clone(), bytes: bytes.clone(), link: link.clone(), flat, link_indices: vec![index] });
-                preread_files.insert(index, PrereadLink::Bytes { old, file, file_sha256, bytes_digest, bytes });
-            }
-        }
-        if jobs.len() > 1 || jobs.iter().any(|j| j.link_indices.len() > 1) {
-            let validation = s.validation();
-            let (parent_opening, parent_which, shared_read) = READING.with(|r| {
-                let r = r.borrow();
-                (r.opening.clone(), r.which, r.read.clone())
-            });
-            let workers = cores.min(jobs.len());
-            let child_budget = (cores / workers.max(1)).max(1);
-            let progress = solidcraft_doc::progress::current();
-            let parent_tid = std::thread::current().id();
-            let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
-            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
-            let scope = solidcraft_io::vfs::current_scope();
-            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
-                let (d, g) = c.enter_pool(parent_tid);
-                (d, Some(g))
-            });
-            let evaluated = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> SourceJobOut {
-                solidcraft_io::vfs::scoped(scope.clone(), || {
-                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
-                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
-                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
-                                return SourceJobOut {
-                                    link_indices: job.link_indices.clone(),
-                                    result: None,
-                                    #[cfg(test)]
-                                    evals: 0,
-                                    #[cfg(test)]
-                                    reuses: 0,
-                                };
-                            }
-                            let branch =
-                                BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
-                            let run = || {
-                                source_bodies(&job.file, &job.bytes, &job.link, job.flat, validation).map(|(read, _)| read).map_err(|e| e.to_string())
-                            };
-                            #[cfg(test)]
-                            let (result, evals, reuses) = measure_eval_counts(run);
-                            #[cfg(not(test))]
-                            let result = run();
-                            let _ = branch.finish();
-                            SourceJobOut {
-                                link_indices: job.link_indices.clone(),
-                                result: Some(result),
-                                #[cfg(test)]
-                                evals,
-                                #[cfg(test)]
-                                reuses,
-                            }
-                        })
-                    })
-                })
-            });
-            for out in evaluated.into_iter().flatten() {
-                #[cfg(test)]
-                add_eval_counts(out.evals, out.reuses);
-                let Some(res) = out.result else { continue };
-                // Drop retained raw bytes for every link whose evaluated source is ready.
-                for &idx in &out.link_indices {
-                    if let Some(entry) = preread_files.remove(&idx) {
-                        let downgraded = match entry {
-                            PrereadLink::Bytes { old, file, file_sha256, bytes_digest, .. } => {
-                                PrereadLink::Meta { old, file, file_sha256, bytes_digest }
-                            }
-                            other => other,
-                        };
-                        preread_files.insert(idx, downgraded);
-                    }
-                }
-                if let Some((&first, rest)) = out.link_indices.split_first() {
-                    for &idx in rest {
-                        let cloned = match &res {
-                            Ok(linked) => Ok(clone_linked(linked)),
-                            Err(e) => Err(e.clone()),
-                        };
-                        prefetched_sources.insert(idx, cloned);
-                    }
-                    prefetched_sources.insert(first, res);
-                }
-            }
-        }
-    }
-    for (index, (comp, link)) in links.into_iter().enumerate() {
+    let own = s.path.clone();
+    let validation = s.validation();
+    let doc_before_update = s.doc.clone();
+
+    // Phase 1: classify target links and snapshot `before` states upfront before any mutation.
+    let mut targets: Vec<TargetLink> = Vec::with_capacity(links.len());
+    for (comp, link) in links {
         if solidcraft_doc::progress::cancelled() {
             break;
         }
@@ -2715,257 +3003,507 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             s.doc_mut().links.remove(&comp);
             continue;
         };
-        // A window running this off its thread names the design being read again (#5329).
-        solidcraft_doc::progress::item(Some((&cname, index, count)));
         if link.path.is_empty() {
-            // A design that came from this session has no file to read: it keeps its bodies,
-            // and says so.
-            warnings.push(format!("{cname} keeps its bodies: its design came from this session and has no file yet"));
+            targets.push(TargetLink::SessionOnly { cname });
             continue;
         }
         // A KiCad board is read by SolidCraft itself, with the options it was opened with.
-        if let Some(importer) = link.importer.as_ref().filter(|i| i.is_kicad()) {
-            match update_kicad_link(s, comp, &link, importer) {
-                Ok((true, notes)) => {
-                    warnings.extend(notes);
-                    updated.push(cname);
-                    read_components.push(comp);
-                }
-                Ok((false, _)) => {
-                    unchanged.push(cname);
-                    read_components.push(comp);
-                }
-                Err(e) if go_on => {
-                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
-                    warnings.push(format!("{cname} keeps its bodies: {e}"));
-                }
-                Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
-            }
+        if let Some(importer) = link.importer.as_ref().filter(|i| i.is_kicad()).cloned() {
+            targets.push(TargetLink::Kicad { comp, cname, link, importer });
             continue;
         }
-        let (old, file, read, bytes_digest, raw_bytes) = match preread_files.remove(&index) {
-            Some(PrereadLink::Meta { old, file, file_sha256, bytes_digest }) => (old, file, file_sha256, bytes_digest, None),
-            Some(PrereadLink::Bytes { old, file, file_sha256, bytes_digest, bytes }) => (old, file, file_sha256, bytes_digest, Some(bytes)),
-            Some(PrereadLink::Err(e)) => {
-                if go_on {
-                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
-                    warnings.push(format!("{cname} keeps its bodies: {e}"));
-                    continue;
-                }
-                return Err(bad(cmd, format!("{cname}: {e}")));
+        let Some(FeatureKind::Import { step: old_step, records: old_records, .. }) =
+            s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind)
+        else {
+            let error = format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature);
+            if !go_on {
+                return Err(bad(cmd, format!("{cname}: {error}")));
             }
-            None => match read_linked(s, comp, &link) {
-                Ok((old, file, bytes)) => {
-                    let read = DesignLink::file_digest(&bytes);
-                    let bytes_digest = digest(bytes.as_slice());
-                    (old, file, read, bytes_digest, Some(std::sync::Arc::from(bytes)))
-                }
-                Err(e) if go_on => {
-                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
-                    warnings.push(format!("{cname} keeps its bodies: {e}"));
-                    continue;
-                }
-                Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
-            },
+            targets.push(TargetLink::Failed { comp, cname, error });
+            continue;
         };
-        // The link keeps what it read, so opening this design again knows whether the file
-        // changed while it was closed (#9739).
-        let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
-        if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
-            kept.file_sha256 = Some(read);
-        }
-        // A file an importer read that is the file it read is not read again: no plugin runs, so a
-        // plugin that is gone or turned off has nothing to fail at.
-        if link.importer.is_some() && same_bytes {
-            unchanged.push(cname);
-            read_components.push(comp);
+        if let Err(e) = link_refused(own.as_deref(), &link.path) {
+            let error = e.to_string();
+            if !go_on {
+                return Err(bad(cmd, format!("{cname}: {error}")));
+            }
+            targets.push(TargetLink::Failed { comp, cname, error });
             continue;
         }
+        let old = (old_step.clone(), old_records.clone());
+        let file = resolve(own.as_deref(), &link.path);
+        let before = s.model.result(link.feature).map(|r| (*r.state).clone());
+        if link.importer.is_some() {
+            if let Some(error) = importer_file_refusal(s, &file) {
+                if !go_on {
+                    return Err(bad(cmd, format!("{cname}: {error}")));
+                }
+                targets.push(TargetLink::Failed { comp, cname, error });
+                continue;
+            }
+            targets.push(TargetLink::Importer { comp, cname, link, old, file, before });
+        } else {
+            // Safe: `link_refused` already authorized this path before touching disk.
+            let canonical = real_file(&file).unwrap_or_else(|| absolute(&file));
+            let flat = step_import_flat(&s.doc, &link);
+            targets.push(TargetLink::Native { comp, cname, link, old, file, canonical, flat, before });
+        }
+    }
+
+    // Phase 2A: deduplicate and read/hash unique non-importer files in parallel.
+    let mut file_jobs: Vec<((PathBuf, Option<std::ffi::OsString>), PathBuf)> = Vec::new();
+    let mut seen_files = std::collections::HashSet::new();
+    for target in &targets {
+        if let TargetLink::Native { file, canonical, .. } = target {
+            let key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
+            if seen_files.insert(key.clone()) {
+                file_jobs.push((key, file.clone()));
+            }
+        }
+    }
+    let read_results = map_link_work(&file_jobs, |(_, file)| {
+        let bytes = read_link(file, own.as_deref(), false).map_err(|e| e.to_string())?;
+        let sha256 = DesignLink::file_digest(&bytes);
+        let bytes_hash = digest(bytes.as_slice());
+        Ok::<_, String>((std::sync::Arc::new(bytes), sha256, bytes_hash))
+    });
+    type FileReadResult = std::result::Result<(std::sync::Arc<Vec<u8>>, String, u64), String>;
+    let mut file_reads: std::collections::HashMap<(PathBuf, Option<std::ffi::OsString>), FileReadResult> =
+        std::collections::HashMap::with_capacity(file_jobs.len());
+    for ((key, _), result) in file_jobs.into_iter().zip(read_results) {
+        let entry = result.unwrap_or_else(|| Err("linked file read failed".to_string()));
+        file_reads.insert(key, entry);
+    }
+
+    // Phase 2B: check per-link `unchanged_read` cache and deduplicate unique sources that need evaluation.
+    let mut native_cached: Vec<Option<(Vec<String>, Vec<SourceProperties>, solidcraft_doc::Metadata)>> = vec![None; targets.len()];
+    let mut eval_jobs: Vec<EvalJob> = Vec::new();
+    let mut seen_sources = std::collections::HashSet::new();
+    for (slot, target) in targets.iter().enumerate() {
+        let TargetLink::Native { comp, cname, link, old, file, canonical, flat, .. } = target else { continue };
+        let read_key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
+        let Some(Ok((bytes, _, bytes_hash))) = file_reads.get(&read_key) else { continue };
         // A link that has not recorded the properties it inherited (made before they were) is read again.
         let kept_faces = s
             .doc
             .feature(link.feature)
             .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
-            let meshes = link_meshes(s, comp, link.feature);
-            unchanged_read(&file, selected_configuration(&link), bytes_digest, digest(old.0.as_bytes()), faces, meshes)
+        if let Some(known) = kept_faces.and_then(|faces| {
+            let meshes = link_meshes(s, *comp, link.feature);
+            unchanged_read(file, selected_configuration(link), *bytes_hash, digest(old.0.as_bytes()), faces, meshes)
         }) {
-            warnings.extend(known);
-            // Another component or session may have evaluated this source first. Its
-            // cached geometry says nothing about this link's inherited properties.
-            let (took, kept) = inherit_metadata(s, comp, &metadata);
-            warnings.extend(kept);
-            if inherit_properties(s, comp, &properties)? || took {
-                updated.push(cname)
-            } else {
-                unchanged.push(cname)
-            }
-            read_components.push(comp);
+            native_cached[slot] = Some(known);
             continue;
         }
-        let source_res = match prefetched_sources.remove(&index) {
-            Some(res) => res,
-            None => match raw_bytes {
-                Some(bytes) => linked_bodies(s, comp, &file, &bytes, &link).map(|(read, _)| read).map_err(|e| e.to_string()),
-                None => read_linked(s, comp, &link)
-                    .and_then(|(_, file, bytes)| linked_bodies(s, comp, &file, &bytes, &link).map(|(read, _)| read).map_err(|e| e.to_string())),
-            },
-        };
-        let (_, sf, faces, metadata, properties, meshes) = match source_res {
-            Ok(read) => read,
-            Err(e) if go_on => {
-                // It keeps its bodies, so it has not taken this file in yet.
-                if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
-                    kept.file_sha256.clone_from(&link.file_sha256);
-                }
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
-                warnings.push(format!("{cname} keeps its bodies: {e}"));
-                continue;
-            }
-            Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
-        };
-        warnings.extend(sf.warnings.iter().cloned());
-        let (took, kept_metadata) = inherit_metadata(s, comp, &metadata);
-        warnings.extend(kept_metadata);
-        let took = set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)? || took;
-        let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
-        let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
-        if same && kept == Some(&faces) {
-            if inherit_properties(s, comp, &properties)? || took {
-                updated.push(cname)
-            } else {
-                unchanged.push(cname)
-            }
-            read_components.push(comp);
-            continue;
+        let configuration = selected_configuration(link);
+        let source_key = UpdateSourceKey { canonical: canonical.clone(), configuration, step_names: link.step_names.clone(), flat: *flat };
+        if seen_sources.insert(source_key.clone()) {
+            eval_jobs.push(EvalJob {
+                key: source_key,
+                display_name: cname.clone(),
+                slot,
+                file: file.clone(),
+                bytes: bytes.clone(),
+                configuration,
+                step_names: link.step_names.clone(),
+                flat: *flat,
+            });
         }
-        // The same bodies, their faces named for the first time (a link made before names were
-        // kept): nothing a reference finds changes. Names the design gave other faces since do.
-        let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
-        // Joints on faces told apart only by a positional tie number, and where they were, so a
-        // shift this update gives them is said instead of passing unnoticed.
-        let tie_before = if same { Vec::new() } else { snapshot_tie_numbered_joints(s, comp, link.feature) };
-        if !same {
-            for name in numbered_references(s, comp, link.feature) {
-                warnings.push(format!(
-                    "{name} refers to faces of {cname} by their place in the linked file, which this update can change: check it, and pick its faces again so it follows them by name"
-                ));
-            }
-            for name in tie_numbered_origin_references(s, comp, link.feature) {
-                warnings.push(format!(
-                    "{name} refers to a positional tie-numbered face of {cname}, which can shift when sibling faces are added or removed: check it, and pick its face again"
-                ));
-            }
+    }
+
+    // Phase 2C: evaluate unique changed/uncached sources in parallel (including nested left-out
+    // sub-assemblies via `BranchReading` and `SharedReads`).
+    let count = targets.len();
+    let mut evaluated: std::collections::HashMap<UpdateSourceKey, std::result::Result<(PathBuf, EvaluatedLink), String>> =
+        std::collections::HashMap::with_capacity(eval_jobs.len());
+    let cores = link_cores();
+    if eval_jobs.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
+        struct EvalJobOut {
+            result: Option<std::result::Result<EvaluatedLink, String>>,
+            #[cfg(test)]
+            evals: usize,
+            #[cfg(test)]
+            reuses: usize,
+            #[cfg(test)]
+            step_reads: usize,
         }
-        let mut moved = None;
-        let mut realigned = None;
-        // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
-        let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
-        let before = s.model.result(link.feature).map(|r| r.state.clone());
-        let (old_names, other_bodies) = feature_body_context(s, link.feature);
-        let mut unpinned_inherited = if old_names.is_empty() && link.step_names.is_none() {
-            realign_unpinned_inherited(&s.doc, &link.inherited, &sf.body_names)
-        } else {
-            None
-        };
-        if let Some(f) = s.doc_mut().feature_mut(link.feature) {
-            if !same {
-                // Bodies keep their names where the design still has as many, also when it lists
-                // them in another order (#21371).
-                if old_names.len() != sf.body_names.len() {
-                    if old_names.is_empty() {
-                        f.body_names = sf.body_names;
-                        if let Some(next_inherited) = unpinned_inherited.take() {
-                            realigned = Some((next_inherited, Vec::new()));
+        let (parent_opening, parent_which, shared_read) = READING.with(|r| {
+            let r = r.borrow();
+            (r.opening.clone(), r.which, r.read.clone())
+        });
+        let workers = cores.min(eval_jobs.len());
+        let child_budget = (cores / workers.max(1)).max(1);
+        let progress = solidcraft_doc::progress::current();
+        let parent_tid = std::thread::current().id();
+        let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+        // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+        let scope = solidcraft_io::vfs::current_scope();
+        let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+            let (d, g) = c.enter_pool(parent_tid);
+            (d, Some(g))
+        });
+        let par_results = solidcraft_kernel::map_on_threads(&eval_jobs, workers, |job| -> EvalJobOut {
+            solidcraft_io::vfs::scoped(scope.clone(), || {
+                solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                    solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                        if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                            return EvalJobOut {
+                                result: None,
+                                #[cfg(test)]
+                                evals: 0,
+                                #[cfg(test)]
+                                reuses: 0,
+                                #[cfg(test)]
+                                step_reads: 0,
+                            };
                         }
-                    } else {
-                        let (next_names, next_inherited, removed) = realign_changed_body_count(
-                            &old.0,
-                            &file.display().to_string(),
-                            naming,
-                            &old_names,
-                            &link.inherited,
-                            &sf.body_names,
-                            &other_bodies,
-                        );
-                        f.body_names = next_names;
-                        realigned = Some((next_inherited, removed));
-                    }
-                } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &sf.body_names) {
-                    f.body_names = reordered(&old_names, &order);
-                    moved = Some(order);
-                } else if f.body_names.is_empty() && !old_names.is_empty() {
-                    f.body_names = old_names;
+                        // A window running this off its thread names the design being read again (#5329).
+                        solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
+                        let branch =
+                            BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
+                        let run = || eval_job_sequential(job, validation);
+                        #[cfg(test)]
+                        let (result, evals, reuses, step_reads) = measure_eval_counts(run);
+                        #[cfg(not(test))]
+                        let result = run();
+                        let _ = branch.finish();
+                        EvalJobOut {
+                            result: Some(result),
+                            #[cfg(test)]
+                            evals,
+                            #[cfg(test)]
+                            reuses,
+                            #[cfg(test)]
+                            step_reads,
+                        }
+                    })
+                })
+            })
+        });
+        for (job, outcome) in eval_jobs.into_iter().zip(par_results) {
+            let Some(out) = outcome else {
+                if !solidcraft_doc::progress::cancelled() {
+                    solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
+                    let res = eval_job_sequential(&job, validation);
+                    evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
                 }
-                f.kind = sf.kind;
+                continue;
+            };
+            #[cfg(test)]
+            add_eval_counts(out.evals, out.reuses, out.step_reads);
+            if let Some(res) = out.result {
+                evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
             }
-            // A link made before the design's face names were kept gets them here.
-            f.link_faces = faces;
         }
-        // What the link last took from each body moves with it, so a body's own override stays one.
-        if let Some((next_inherited, removed)) = realigned {
-            if link.step_names.is_none()
-                && let Some(kept) = s.doc_mut().links.get_mut(&comp)
-            {
-                kept.inherited = next_inherited;
+    } else {
+        for job in eval_jobs {
+            if solidcraft_doc::progress::cancelled() {
+                break;
             }
-            remove_stale_body_properties(s.doc_mut(), link.feature, &removed, &other_bodies);
-        } else if let Some(order) = moved
-            && let Some(kept) = s.doc_mut().links.get_mut(&comp)
-            && !kept.inherited.is_empty()
-        {
-            kept.inherited = reordered(&kept.inherited, &order);
+            // A window running this off its thread names the design being read again (#5329).
+            solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
+            let res = eval_job_sequential(&job, validation).map(|eval| (job.file, eval));
+            evaluated.insert(job.key, res);
         }
-        s.refresh();
-        if !same && let (Some(before), Some(after)) = (before, s.model.result(link.feature).map(|r| r.state.clone())) {
-            warnings.extend(s.doc_mut().rebind_linked_faces(link.feature, &before, &after));
-            s.refresh();
+    }
+
+    // Phase 3: apply all mutations in exact deterministic order without refreshing inside the loop.
+    let mut link_warnings: Vec<Vec<String>> = vec![Vec::new(); count];
+    let mut failed: Vec<LinkFailure> = Vec::new();
+    let mut read_components: Vec<u64> = Vec::new();
+    let mut kept_imports: Vec<std::sync::Arc<solidcraft_kernel::StepImport>> = Vec::new();
+    let mut rebind_queue: Vec<(usize, u64, Option<solidcraft_doc::ModelState>)> = Vec::new();
+    let mut tie_queue: Vec<(usize, String, Vec<TieNumberedJointSide>)> = Vec::new();
+    let mut realigned_features: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut post_entries: Vec<PostRefreshEntry> = Vec::new();
+    let mut needs_first_refresh = false;
+
+    for (slot, target) in targets.into_iter().enumerate() {
+        if solidcraft_doc::progress::cancelled() {
+            break;
         }
-        if !tie_before.is_empty() {
-            warnings.extend(tie_numbered_joint_warnings(s, &cname, &tie_before));
+        match target {
+            TargetLink::SessionOnly { cname } => {
+                solidcraft_doc::progress::item(Some((&cname, slot, count)));
+                // A design that came from this session has no file to read: it keeps its bodies,
+                // and says so.
+                link_warnings[slot].push(format!("{cname} keeps its bodies: its design came from this session and has no file yet"));
+            }
+            TargetLink::Failed { comp, cname, error } => {
+                solidcraft_doc::progress::item(Some((&cname, slot, count)));
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+            }
+            TargetLink::Kicad { comp, cname, link, importer } => {
+                solidcraft_doc::progress::item(Some((&cname, slot, count)));
+                match update_kicad_link(s, comp, &link, &importer) {
+                    Ok((true, notes)) => {
+                        link_warnings[slot].extend(notes);
+                        post_entries.push(PostRefreshEntry::Done { cname, updated: true });
+                        read_components.push(comp);
+                    }
+                    Ok((false, _)) => {
+                        post_entries.push(PostRefreshEntry::Done { cname, updated: false });
+                        read_components.push(comp);
+                    }
+                    Err(e) if go_on => {
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
+                    }
+                    Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                }
+            }
+            TargetLink::Importer { comp, cname, link, old, file, before } => {
+                solidcraft_doc::progress::item(Some((&cname, slot, count)));
+                let bytes = match read_link(&file, s.path.as_deref(), true) {
+                    Ok(bytes) => bytes,
+                    Err(e) if go_on => {
+                        let error = e.to_string();
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                        link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+                        continue;
+                    }
+                    Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                };
+                let read = DesignLink::file_digest(&bytes);
+                let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
+                // A file an importer read that is the file it read is not read again: no plugin runs, so a
+                // plugin that is gone or turned off has nothing to fail at.
+                if same_bytes {
+                    post_entries.push(PostRefreshEntry::Done { cname, updated: false });
+                    read_components.push(comp);
+                    continue;
+                }
+                let kept_faces = s
+                    .doc
+                    .feature(link.feature)
+                    .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
+                    .map(|f| digest(f.link_faces.as_slice()));
+                if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
+                    let meshes = link_meshes(s, comp, link.feature);
+                    unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces, meshes)
+                }) {
+                    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                        kept.file_sha256 = Some(read);
+                    }
+                    link_warnings[slot].extend(known);
+                    let (took, kept) = inherit_metadata(s, comp, &metadata);
+                    link_warnings[slot].extend(kept);
+                    let threads_changed = apply_link_threads(s, link.feature, &properties);
+                    if threads_changed {
+                        needs_first_refresh = true;
+                    }
+                    post_entries.push(PostRefreshEntry::Inherit { comp, cname, properties, changed: took || threads_changed });
+                    read_components.push(comp);
+                    continue;
+                }
+                let linked = match linked_bodies(s, comp, &file, &bytes, &link) {
+                    Ok((read_linked, _)) => read_linked,
+                    Err(e) if go_on => {
+                        let error = e.to_string();
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                        link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+                        continue;
+                    }
+                    Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                };
+                if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                    kept.file_sha256 = Some(read);
+                }
+                let mut ctx = ApplyContext {
+                    s,
+                    link_warnings: &mut link_warnings,
+                    kept_imports: &mut kept_imports,
+                    rebind_queue: &mut rebind_queue,
+                    tie_queue: &mut tie_queue,
+                    realigned_features: &mut realigned_features,
+                    post_entries: &mut post_entries,
+                    read_components: &mut read_components,
+                    needs_first_refresh: &mut needs_first_refresh,
+                };
+                apply_evaluated_link(&mut ctx, slot, comp, cname, &link, &old, &file, before, EvaluatedLink::from_linked(linked))?;
+            }
+            TargetLink::Native { comp, cname, link, old, file, canonical, flat, before } => {
+                solidcraft_doc::progress::item(Some((&cname, slot, count)));
+                let read_key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
+                let (sha256, bytes_hash) = match file_reads.get(&read_key) {
+                    Some(Ok((_, sha256, bytes_hash))) => (sha256.clone(), *bytes_hash),
+                    Some(Err(e)) if go_on => {
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
+                        continue;
+                    }
+                    Some(Err(e)) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                    None => {
+                        let error = "linked file read failed".to_string();
+                        if go_on {
+                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                            link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+                            continue;
+                        }
+                        return Err(bad(cmd, format!("{cname}: {error}")));
+                    }
+                };
+                let same_bytes = link.file_sha256.as_deref() == Some(sha256.as_str());
+                if let Some((known, properties, metadata)) = native_cached[slot].take() {
+                    if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                        kept.file_sha256 = Some(sha256);
+                    }
+                    link_warnings[slot].extend(known);
+                    // Another component or session may have evaluated this source first. Its
+                    // cached geometry says nothing about this link's inherited properties.
+                    let (took, kept) = inherit_metadata(s, comp, &metadata);
+                    link_warnings[slot].extend(kept);
+                    let threads_changed = apply_link_threads(s, link.feature, &properties);
+                    if threads_changed {
+                        needs_first_refresh = true;
+                    }
+                    post_entries.push(PostRefreshEntry::Inherit { comp, cname, properties, changed: took || threads_changed });
+                    read_components.push(comp);
+                    continue;
+                }
+                let configuration = selected_configuration(&link);
+                let source_key = UpdateSourceKey { canonical, configuration, step_names: link.step_names.clone(), flat };
+                let (eval_file, eval) = match evaluated.get(&source_key) {
+                    Some(Ok((eval_file, eval))) => (eval_file, eval.clone()),
+                    Some(Err(e)) if go_on => {
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
+                        continue;
+                    }
+                    Some(Err(e)) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                    None => {
+                        let error = "linked source evaluation failed".to_string();
+                        if go_on {
+                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                            link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+                            continue;
+                        }
+                        return Err(bad(cmd, format!("{cname}: {error}")));
+                    }
+                };
+                if absolute(&file) != absolute(eval_file) {
+                    remember_read_parts(
+                        &file,
+                        configuration,
+                        bytes_hash,
+                        &eval.kind,
+                        &eval.warnings,
+                        &eval.faces,
+                        &eval.properties,
+                        &eval.metadata,
+                        &eval.meshes,
+                    );
+                }
+                if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                    kept.file_sha256 = Some(sha256);
+                }
+                let mut ctx = ApplyContext {
+                    s,
+                    link_warnings: &mut link_warnings,
+                    kept_imports: &mut kept_imports,
+                    rebind_queue: &mut rebind_queue,
+                    tie_queue: &mut tie_queue,
+                    realigned_features: &mut realigned_features,
+                    post_entries: &mut post_entries,
+                    read_components: &mut read_components,
+                    needs_first_refresh: &mut needs_first_refresh,
+                };
+                apply_evaluated_link(&mut ctx, slot, comp, cname, &link, &old, &file, before, eval)?;
+            }
         }
-        let changed = inherit_properties(s, comp, &properties)? || changed;
-        if changed {
-            updated.push(cname)
-        } else {
-            unchanged.push(cname)
-        }
-        read_components.push(comp);
     }
     solidcraft_doc::progress::item(None);
     // None could be read: nothing to take back either.
-    if updated.is_empty() && unchanged.is_empty() && !failed.is_empty() {
+    if post_entries.is_empty() && !failed.is_empty() {
         return Err(bad(cmd, format!("{}: {}", failed[0].name, failed[0].error)));
     }
-    s.refresh();
+
+    // Phase 4: ONE refresh for all mutated links, then rebind faces for every changed link.
+    if needs_first_refresh {
+        #[cfg(test)]
+        UPDATE_LINKS_REFRESHES.with(|n| n.set(n.get() + 1));
+        s.refresh();
+    }
+    drop(kept_imports);
+
+    let mut rebind_modified_doc = false;
+    if !rebind_queue.is_empty() {
+        let mut doc = (*s.doc).clone();
+        for (slot, feature, before) in rebind_queue {
+            if let (Some(before), Some(after)) = (before, s.model.result(feature).map(|r| r.state.clone())) {
+                link_warnings[slot].extend(doc.rebind_linked_faces(feature, &before, &after));
+            }
+        }
+        if doc != *s.doc {
+            *s.doc_mut() = doc;
+            rebind_modified_doc = true;
+        }
+    }
+
+    let doc_after_rebind = s.doc.clone();
+    let (mut updated, mut unchanged): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for entry in post_entries {
+        match entry {
+            PostRefreshEntry::Done { cname, updated: is_updated } => {
+                if is_updated {
+                    updated.push(cname);
+                } else {
+                    unchanged.push(cname);
+                }
+            }
+            PostRefreshEntry::Inherit { comp, cname, properties, changed } => {
+                let changed = inherit_properties(s, comp, &properties)? || changed;
+                if changed {
+                    updated.push(cname);
+                } else {
+                    unchanged.push(cname);
+                }
+            }
+        }
+    }
+
+    // Phase 5: at most ONE final refresh, only if any face rebind modified the document.
+    if rebind_modified_doc {
+        #[cfg(test)]
+        UPDATE_LINKS_REFRESHES.with(|n| n.set(n.get() + 1));
+        s.refresh();
+    } else if !needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_update, &s.doc) && *s.doc == *doc_before_update {
+        // Restore the original Arc when helper probes (`s.doc_mut()`) made no actual changes so
+        // `Session::execute` does not record a spurious undo step or extra evaluation.
+        s.doc = doc_before_update;
+    } else if !std::sync::Arc::ptr_eq(&doc_after_rebind, &s.doc) || (!needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_update, &s.doc)) {
+        s.revision += 1;
+    }
+
     if let Some(e) = s.doc.links.values().find_map(|l| s.model.result(l.feature).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
-    // A reference whose face the design no longer has says so here, not only in the joint list.
+    for (slot, cname, tie_before) in tie_queue {
+        link_warnings[slot].extend(tie_numbered_joint_warnings(s, &cname, &tie_before));
+    }
+    let mut warnings: Vec<String> = link_warnings.into_iter().flatten().collect();
+    // A reference whose face or edge the design no longer has says so here, both for timeline
+    // features that newly fail and for joints.
     if !updated.is_empty() {
-        let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        for r in &s.model.results {
+            if let Some(why) = r.error.as_ref()
+                && failing_before.get(&r.id) != Some(why)
+            {
+                warnings.push(if why.starts_with(&format!("{}: ", r.name)) { why.clone() } else { format!("{}: {why}", r.name) });
+            }
+        }
+        let sol = solidcraft_doc::joints::solve_holding_with_analysis(
+            &s.doc,
+            &s.model.state(),
+            &std::collections::BTreeMap::new(),
+            solidcraft_doc::joints::Analysis::Placement,
+        );
         warnings.extend(sol.errors.iter().chain(&sol.conflicts).map(|(_, name, why)| format!("joint {name}: {why}")));
     }
     crate::plugin::record_link_reads(s, &read_components);
     reply(cmd, UpdateLinksResult { updated, unchanged, warnings, failed, param_warnings: Vec::new() })
-}
-
-/// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
-/// anything in the design changes.
-fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
-    let Some(FeatureKind::Import { step: old, records, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
-        return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
-    };
-    link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
-    let file = resolve(s.path.as_deref(), &link.path);
-    if link.importer.is_some()
-        && let Some(why) = importer_file_refusal(s, &file)
-    {
-        return Err(why);
-    }
-    let bytes = read_link(&file, s.path.as_deref(), link.importer.is_some()).map_err(|e| e.to_string())?;
-    Ok(((old.clone(), records.clone()), file, bytes))
 }
 
 /// What an Import feature's bodies are made from: its STEP text and its records.
@@ -3171,6 +3709,16 @@ fn unique_name_slots(names: &[String]) -> std::collections::HashMap<&str, usize>
 /// back to stored `f.body_names` for skipped or unevaluated slots), plus all body names currently
 /// owned by other features.
 fn feature_body_context(s: &Session, feature: u64) -> (Vec<String>, std::collections::HashSet<String>) {
+    feature_body_context_excluding(s, feature, &std::collections::HashSet::new())
+}
+
+/// [`feature_body_context`], skipping stale `s.model` bodies for features already realigned in the
+/// current batch whose updated `f.body_names` in `s.doc` already hold their effective names.
+fn feature_body_context_excluding(
+    s: &Session,
+    feature: u64,
+    stale_model_features: &std::collections::HashSet<u64>,
+) -> (Vec<String>, std::collections::HashSet<String>) {
     let mut effective = s.doc.feature(feature).map(|f| f.body_names.clone()).unwrap_or_default();
     if let Some(f) = s.doc.feature(feature)
         && let Some(r) = s.model.result(feature).filter(|r| r.error.is_none() && !r.skipped && !r.stale)
@@ -3188,8 +3736,14 @@ fn feature_body_context(s: &Session, feature: u64) -> (Vec<String>, std::collect
             }
         }
     }
-    let mut other_bodies: std::collections::HashSet<String> =
-        s.model.state().bodies.iter().filter(|b| b.feature != feature).map(|b| b.name.clone()).collect();
+    let mut other_bodies: std::collections::HashSet<String> = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .filter(|b| b.feature != feature && !stale_model_features.contains(&b.feature))
+        .map(|b| b.name.clone())
+        .collect();
     for f in &s.doc.features {
         if f.id != feature {
             other_bodies.extend(f.body_names.iter().filter(|n| !n.is_empty()).cloned());
@@ -3385,6 +3939,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         || link_meshes(s, comp, link.feature) != meshes.as_slice();
     let path = stored(s.path.as_deref(), &file);
     let mut warnings = sf.warnings;
+    let relink_joints_before = snapshot_relink_joints(s, comp, None);
+    let poses_before = snapshot_occurrence_poses(s);
     if geometry_changed
         && s.doc
             .assembly
@@ -3464,9 +4020,12 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let (_, kept) = inherit_metadata(s, comp, &metadata);
     warnings.extend(kept);
     s.refresh();
-    // Report the solver's diagnostics. A resolved joint can still describe the wrong
-    // connection after a source edit; the reminder above does not depend on solve errors.
-    let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    // Report the solver's diagnostics and any per-joint frame deviations or occurrence pose
+    // displacements caused by the relink. A resolved joint can still bind to the wrong face
+    // when a new source reuses the same carried face name; the deviation check catches that.
+    let (mut joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    let joint_deviations = relink_joint_deviations(s, &relink_joints_before, &mut warnings, &mut joint_errors);
+    let moved_occurrences = relink_moved_occurrences(s, &poses_before, &mut warnings);
     // A link to a design that came from this session had no file: it names none.
     let previous_path = if link.path.is_empty() { String::new() } else { stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path)) };
     reply(
@@ -3482,6 +4041,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             warnings,
             joint_errors,
             joint_conflicts,
+            joint_deviations,
+            moved_occurrences,
             param_warnings: Vec::new(),
         },
     )
@@ -3529,7 +4090,12 @@ fn sync_names(s: &mut Session, comp: u64, feature: u64, source_name: &str, sourc
 
 /// The solver's joint errors and conflicts after a relink: added to `warnings`, and as rows.
 fn joint_diagnostics(s: &Session, warnings: &mut Vec<String>) -> (Vec<JointDiagnostic>, Vec<JointDiagnostic>) {
-    let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+    let sol = solidcraft_doc::joints::solve_holding_with_analysis(
+        &s.doc,
+        &s.model.state(),
+        &std::collections::BTreeMap::new(),
+        solidcraft_doc::joints::Analysis::Placement,
+    );
     for (_, name, why) in sol.errors.iter().chain(&sol.conflicts) {
         warnings.push(format!("joint {name}: {why}"));
     }
@@ -3537,6 +4103,147 @@ fn joint_diagnostics(s: &Session, warnings: &mut Vec<String>) -> (Vec<JointDiagn
         rows.iter().map(|(joint, name, why)| JointDiagnostic { joint: *joint, name: name.clone(), why: why.clone() }).collect()
     };
     (rows(&sol.errors), rows(&sol.conflicts))
+}
+
+/// Thresholds for reporting joint frame deviations and occurrence pose shifts after `component.relink`.
+const RELINK_SHIFT_TOL_MM: f64 = 1e-3;
+const RELINK_ANGLE_TOL_DEG: f64 = 0.1;
+/// Normal/axis rotation (degrees) at or above which a re-resolved face is flagged as incompatible
+/// (e.g., a perpendicular or opposite face carrying the same carried link face name).
+const RELINK_INCOMPATIBLE_ANGLE_DEG: f64 = 45.0;
+
+/// A resolved joint side on a linked component (or single placement), captured before `component.relink`.
+struct RelinkJointSnapshot {
+    joint_id: u64,
+    joint_name: String,
+    is_a: bool,
+    before: solidcraft_doc::Mat,
+}
+
+/// Snapshot every unsuppressed joint side whose snap resolves on `comp` (or on `occurrence` alone
+/// when relinking one placement of several).
+fn snapshot_relink_joints(s: &Session, comp: u64, occurrence: Option<u64>) -> Vec<RelinkJointSnapshot> {
+    let st = s.model.state();
+    let matches_side = |side: &solidcraft_doc::joints::JointOrigin| match occurrence {
+        Some(occ) => side.part() == occ || side.occurrences().any(|id| id == occ),
+        None => s.doc.occurrences.iter().any(|x| x.id == side.part() && s.doc.component_within(x.component, comp)),
+    };
+    let mut out = Vec::new();
+    for j in &s.doc.assembly.joints {
+        if j.suppressed {
+            continue;
+        }
+        for (is_a, side) in [(true, &j.a), (false, &j.b)] {
+            if matches_side(side)
+                && let Ok(before) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side)
+            {
+                out.push(RelinkJointSnapshot { joint_id: j.id, joint_name: j.name.clone(), is_a, before });
+            }
+        }
+    }
+    out
+}
+
+/// Snapshot every occurrence's world transform before `component.relink`.
+fn snapshot_occurrence_poses(s: &Session) -> Vec<(u64, String, solidcraft_doc::Mat)> {
+    s.doc.occurrences.iter().map(|o| (o.id, o.name.clone(), solidcraft_doc::joints::occurrence_world(&s.doc, o.id))).collect()
+}
+
+/// How far two resolved origin frames differ: (origin shift mm, Z-axis angle deg).
+fn frame_deviation(before: &solidcraft_doc::Mat, after: &solidcraft_doc::Mat) -> (f64, f64) {
+    solidcraft_kernel::frame_z_deviation(before, after)
+}
+
+/// How far two rigid world transforms differ: (translation mm, rotation deg).
+fn pose_delta(a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat) -> (f64, f64) {
+    solidcraft_kernel::rigid_pose_delta(a, b)
+}
+
+/// Per-joint frame deviations after `component.relink`: records every snapshotted joint side that
+/// still resolves but whose origin shifted or normal/axis rotated, adds explicit warnings, and
+/// flags sharply rotated (incompatible) face re-bindings in `joint_errors`.
+fn relink_joint_deviations(
+    s: &Session,
+    before: &[RelinkJointSnapshot],
+    warnings: &mut Vec<String>,
+    joint_errors: &mut Vec<JointDiagnostic>,
+) -> Vec<JointDeviation> {
+    let st = s.model.state();
+    let mut out = Vec::new();
+    for entry in before {
+        let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == entry.joint_id) else { continue };
+        let side = if entry.is_a { &j.a } else { &j.b };
+        let Ok(after) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side) else { continue };
+        let (origin_shift_mm, normal_angle_deg) = frame_deviation(&entry.before, &after);
+        let shifted = origin_shift_mm > RELINK_SHIFT_TOL_MM;
+        let tilted = normal_angle_deg > RELINK_ANGLE_TOL_DEG;
+        if !shifted && !tilted {
+            continue;
+        }
+        let incompatible = normal_angle_deg >= RELINK_INCOMPATIBLE_ANGLE_DEG;
+        let side_label = if entry.is_a { "a" } else { "b" };
+        let face = side.snap.face_names().into_iter().next().cloned();
+        let face_note = face.as_deref().map_or_else(String::new, |f| format!(", face `{f}`"));
+        if incompatible {
+            let detail = format!(
+                "side {side_label}{face_note} resolved to an incompatible face (origin shifted by {origin_shift_mm:.2} mm, normal rotated by {normal_angle_deg:.1}°); check and re-pick its face"
+            );
+            warnings.push(format!("joint {}: {detail}", entry.joint_name));
+            if !joint_errors.iter().any(|e| e.joint == entry.joint_id) {
+                joint_errors.push(JointDiagnostic { joint: entry.joint_id, name: entry.joint_name.clone(), why: detail });
+            }
+        } else if shifted && tilted {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face shifted by {origin_shift_mm:.2} mm and tilted by {normal_angle_deg:.1}° after relink",
+                entry.joint_name
+            ));
+        } else if shifted {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face shifted by {origin_shift_mm:.2} mm after relink",
+                entry.joint_name
+            ));
+        } else {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face tilted by {normal_angle_deg:.1}° after relink",
+                entry.joint_name
+            ));
+        }
+        out.push(JointDeviation {
+            joint: entry.joint_id,
+            name: entry.joint_name.clone(),
+            side: side_label.to_string(),
+            face,
+            origin_shift_mm,
+            normal_angle_deg,
+            incompatible,
+        });
+    }
+    out
+}
+
+/// Occurrences whose solved world pose shifted or rotated after `component.relink`.
+fn relink_moved_occurrences(s: &Session, before: &[(u64, String, solidcraft_doc::Mat)], warnings: &mut Vec<String>) -> Vec<MovedOccurrence> {
+    let mut out = Vec::new();
+    for (id, old_name, before_world) in before {
+        let Some(occ) = s.doc.occurrences.iter().find(|o| o.id == *id) else { continue };
+        let after_world = solidcraft_doc::joints::occurrence_world(&s.doc, *id);
+        let (translation_mm, rotation_deg) = pose_delta(before_world, &after_world);
+        let moved = translation_mm > RELINK_SHIFT_TOL_MM;
+        let rotated = rotation_deg > RELINK_ANGLE_TOL_DEG;
+        if !moved && !rotated {
+            continue;
+        }
+        let name = if occ.name.is_empty() { old_name.clone() } else { occ.name.clone() };
+        if moved && rotated {
+            warnings.push(format!("occurrence {name} moved by {translation_mm:.2} mm and rotated by {rotation_deg:.1}° after relink"));
+        } else if moved {
+            warnings.push(format!("occurrence {name} moved by {translation_mm:.2} mm after relink"));
+        } else {
+            warnings.push(format!("occurrence {name} rotated by {rotation_deg:.1}° after relink"));
+        }
+        out.push(MovedOccurrence { occurrence: *id, name, translation_mm, rotation_deg });
+    }
+    out
 }
 
 /// The placement `occurrence` of `comp` to relink on its own: `None` when none is given, or when
@@ -3550,9 +4257,231 @@ fn lone_placement(s: &Session, p: &Value, comp: u64, cmd: &str) -> Result<Option
     Ok((s.doc.occurrences.iter().filter(|o| o.component == comp).count() > 1).then_some(occurrence))
 }
 
+/// Built bodies of a linked component's `Import` or `MeshImport` feature as
+/// `(assembly_name, source_name)` pairs in build order.
+fn linked_body_entries(s: &Session, feature_id: u64) -> Vec<(String, String)> {
+    let Some(f) = s.doc.feature(feature_id) else {
+        return Vec::new();
+    };
+    let skip: std::collections::HashSet<u64> = match &f.kind {
+        FeatureKind::Import { skip, .. } => skip.iter().copied().collect(),
+        _ => std::collections::HashSet::new(),
+    };
+    let built: Vec<(usize, String)> = if let Some(r) = s.model.result(feature_id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) {
+        let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == feature_id).map(|b| b.name.clone()).collect();
+        f.body_name_slots(made.len()).into_iter().zip(made).collect()
+    } else {
+        let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == feature_id).map(|b| b.name.clone()).collect();
+        if !made.is_empty() {
+            f.body_name_slots(made.len()).into_iter().zip(made).collect()
+        } else {
+            f.body_names
+                .iter()
+                .enumerate()
+                .filter(|(k, n)| !skip.contains(&(*k as u64)) && !n.trim().is_empty())
+                .map(|(k, n)| (k, n.clone()))
+                .collect()
+        }
+    };
+    let source_names: Vec<String> = match &f.kind {
+        FeatureKind::Import { step, records, .. } => {
+            let imp = match records {
+                Some(r) => solidcraft_kernel::records_import_shared(r).ok(),
+                None if !step.is_empty() => solidcraft_kernel::step_import_shared(step).ok(),
+                None => None,
+            };
+            imp.map(|imp| imp.bodies.iter().map(|b| b.name.clone()).collect()).unwrap_or_default()
+        }
+        FeatureKind::MeshImport { meshes, .. } => meshes.iter().map(|m| m.name.clone()).collect(),
+        _ => Vec::new(),
+    };
+    built
+        .into_iter()
+        .map(|(slot, assembly)| {
+            let source = source_names.get(slot).filter(|n| !n.trim().is_empty()).cloned().unwrap_or_else(|| assembly.clone());
+            (assembly, source)
+        })
+        .collect()
+}
+
+/// Match bodies built by the old linked feature (`old`: `(assembly_name, source_name)`) to bodies
+/// built by the replacement linked feature (`new`: `(assembly_name, source_name)`) for retargeting
+/// downstream body patterns and mirrors of a relinked placement (#21378).
+///
+/// Only unambiguous 1-to-1 mappings are emitted:
+/// 1. Unique exact source-name matches (so disambiguated assembly names like `Block` -> `Block (2)`
+///    still pair cleanly).
+/// 2. Unique exact assembly-name matches against the replacement's remaining source names (for
+///    bodies renamed locally in the assembly).
+/// 3. When exactly one old body and one new body remain unclaimed (including the common 1 -> 1
+///    single-body swap where the new design names its sole body differently), pair them.
+fn match_relink_bodies(old: &[(String, String)], new: &[(String, String)]) -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
+    if old.is_empty() || new.is_empty() {
+        return map;
+    }
+    let mut claimed_old = vec![false; old.len()];
+    let mut claimed_new = vec![false; new.len()];
+
+    // Pass 1: unique exact source-name match.
+    let old_sources: Vec<String> = old.iter().map(|(_, src)| src.clone()).collect();
+    let new_sources: Vec<String> = new.iter().map(|(_, src)| src.clone()).collect();
+    let old_src_slots = unique_name_slots(&old_sources);
+    let new_src_slots = unique_name_slots(&new_sources);
+    for (name, &oi) in &old_src_slots {
+        if let Some(&ni) = new_src_slots.get(name) {
+            claimed_old[oi] = true;
+            claimed_new[ni] = true;
+            map.insert(old[oi].0.clone(), new[ni].0.clone());
+        }
+    }
+
+    // Pass 2: unique match between unclaimed old assembly names and unclaimed new source names.
+    let rem_old_asm: Vec<String> = old.iter().enumerate().map(|(i, (asm, _))| if claimed_old[i] { String::new() } else { asm.clone() }).collect();
+    let rem_new_src: Vec<String> = new.iter().enumerate().map(|(i, (_, src))| if claimed_new[i] { String::new() } else { src.clone() }).collect();
+    let old_asm_slots = unique_name_slots(&rem_old_asm);
+    let rem_new_src_slots = unique_name_slots(&rem_new_src);
+    for (name, &oi) in &old_asm_slots {
+        if let Some(&ni) = rem_new_src_slots.get(name) {
+            claimed_old[oi] = true;
+            claimed_new[ni] = true;
+            map.insert(old[oi].0.clone(), new[ni].0.clone());
+        }
+    }
+
+    // Pass 3: sole remaining old body <-> sole remaining new body.
+    let unclaimed_old: Vec<usize> = claimed_old.iter().enumerate().filter_map(|(i, c)| (!*c).then_some(i)).collect();
+    let unclaimed_new: Vec<usize> = claimed_new.iter().enumerate().filter_map(|(i, c)| (!*c).then_some(i)).collect();
+    if let ([oi], [ni]) = (unclaimed_old.as_slice(), unclaimed_new.as_slice()) {
+        map.insert(old[*oi].0.clone(), new[*ni].0.clone());
+    }
+
+    map
+}
+
+/// The deepest timeline folder spanning the insertion slot between `slot - 1` and `slot`.
+fn timeline_group_at_slot(doc: &Document, slot: usize) -> Option<u64> {
+    let before = doc.features.get(slot.checked_sub(1)?)?.id;
+    let after = doc.features.get(slot)?.id;
+    let direct = |feature| doc.timeline_groups.iter().find(|group| group.features.contains(&feature)).map(|group| group.id);
+    let parents: std::collections::BTreeMap<u64, Option<u64>> = doc.timeline_groups.iter().map(|group| (group.id, group.parent)).collect();
+    let mut before_ancestors = std::collections::BTreeSet::new();
+    let mut current = direct(before);
+    let mut steps = 0usize;
+    while let Some(id) = current {
+        if !before_ancestors.insert(id) || steps >= doc.timeline_groups.len() {
+            return None;
+        }
+        current = parents.get(&id).copied().flatten();
+        steps = steps.saturating_add(1);
+    }
+    current = direct(after);
+    steps = 0;
+    while let Some(id) = current {
+        if before_ancestors.contains(&id) {
+            return Some(id);
+        }
+        if steps >= doc.timeline_groups.len() {
+            return None;
+        }
+        current = parents.get(&id).copied().flatten();
+        steps = steps.saturating_add(1);
+    }
+    None
+}
+
+/// Move `moving_ids` earlier in `doc.features` to `raw_target` while keeping `doc.marker` and
+/// every `doc.timeline_groups` folder contiguous and ordered by timeline index.
+fn move_features_to(doc: &mut Document, moving_ids: &[u64], raw_target: usize) {
+    if moving_ids.is_empty() {
+        return;
+    }
+    let moving_set: std::collections::BTreeSet<u64> = moving_ids.iter().copied().collect();
+    let before_target = doc.features.iter().take(raw_target).filter(|f| moving_set.contains(&f.id)).count();
+    let target = raw_target.saturating_sub(before_target);
+    let crossed_marker =
+        doc.marker.map_or(0, |m| doc.features.iter().enumerate().filter(|(i, f)| moving_set.contains(&f.id) && *i >= m && target < m).count());
+    let mut moving = Vec::with_capacity(moving_ids.len());
+    doc.features.retain(|f| {
+        if moving_set.contains(&f.id) {
+            moving.push(f.clone());
+            false
+        } else {
+            true
+        }
+    });
+    if moving.is_empty() {
+        return;
+    }
+    for group in &mut doc.timeline_groups {
+        group.features.retain(|id| !moving_set.contains(id));
+    }
+    let insert_at = target.min(doc.features.len());
+    let spanning_group = timeline_group_at_slot(doc, insert_at);
+    let moved_ids: Vec<u64> = moving.iter().map(|f| f.id).collect();
+    doc.features.splice(insert_at..insert_at, moving);
+    if let Some(m) = &mut doc.marker {
+        *m = m.saturating_add(crossed_marker).min(doc.features.len());
+    }
+    if let Some(group_id) = spanning_group
+        && let Some(group) = doc.timeline_groups.iter_mut().find(|g| g.id == group_id)
+    {
+        group.features.extend(moved_ids);
+    }
+    if !doc.timeline_groups.is_empty() {
+        let positions: std::collections::BTreeMap<u64, usize> = doc.features.iter().enumerate().map(|(i, f)| (f.id, i)).collect();
+        for group in &mut doc.timeline_groups {
+            group.features.sort_by_key(|id| positions.get(id).copied().unwrap_or(usize::MAX));
+        }
+    }
+}
+
+/// The earliest timeline index of a body pattern or mirror referencing a body of `occurrence`
+/// that `body_map` can retarget.
+fn earliest_retargeted_consumer(doc: &Document, occurrence: u64, body_map: &std::collections::BTreeMap<String, String>) -> Option<usize> {
+    if body_map.is_empty() {
+        return None;
+    }
+    doc.features.iter().enumerate().find_map(|(i, f)| match &f.kind {
+        FeatureKind::Pattern { bodies, placements, .. } | FeatureKind::Mirror { bodies, placements, .. }
+            if bodies
+                .iter()
+                .zip(placements.iter())
+                .any(|(body, path)| path.last() == Some(&occurrence) && body_map.contains_key(body.0.as_str())) =>
+        {
+            Some(i)
+        }
+        _ => None,
+    })
+}
+
+/// Retarget body patterns and mirrors referencing `occurrence`'s old body names to the
+/// replacement linked component's matched body names (#21378).
+fn retarget_occurrence_copies(doc: &mut Document, occurrence: u64, body_map: &std::collections::BTreeMap<String, String>) {
+    if body_map.is_empty() {
+        return;
+    }
+    for f in &mut doc.features {
+        match &mut f.kind {
+            FeatureKind::Pattern { bodies, placements, .. } | FeatureKind::Mirror { bodies, placements, .. } => {
+                for (body, path) in bodies.iter_mut().zip(placements.iter()) {
+                    if path.last() == Some(&occurrence)
+                        && let Some(mapped) = body_map.get(body.0.as_str())
+                    {
+                        body.0.clone_from(mapped);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// One placement of `comp` comes to show the design at `file` instead: as a placement of a
 /// component already linked to it, or of a new one under the same parent. The placement keeps
-/// its id, position and grounding, so its joints stay; they are moved to the new bodies' faces.
+/// its id, position and grounding, so its joints stay (moved to the new bodies' faces), and
+/// downstream body patterns and mirrors referencing its bodies are retargeted when the new
+/// design has an unambiguous 1-to-1 body match (#21378).
 fn relink_placement(
     s: &mut Session,
     comp: u64,
@@ -3568,14 +4497,22 @@ fn relink_placement(
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
-    // A pattern or mirror of this placement can stop working: the reply names each feature that does.
+    let relink_joints_before = snapshot_relink_joints(s, comp, Some(occurrence));
+    let poses_before = snapshot_occurrence_poses(s);
+    // A pattern or mirror of this placement can still fail when the replacement has no unambiguous
+    // matching body: the reply names each feature that does.
     let failing_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect();
+    let warned_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.warning.is_some()).map(|r| r.id).collect();
+    let old_mesh_feature = link_mesh_feature(s, comp, link.feature).map(|(id, _)| id);
+    let old_solid_bodies = linked_body_entries(s, link.feature);
+    let old_mesh_bodies = old_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
     let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
     }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
+    let new_mesh_feature = link_mesh_feature(s, linked, feature).map(|(id, _)| id);
     let geometry_changed = match (s.doc.feature(link.feature), s.doc.feature(feature)) {
         (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind) || link_meshes(s, comp, link.feature) != link_meshes(s, linked, feature),
         _ => true,
@@ -3584,9 +4521,40 @@ fn relink_placement(
     if geometry_changed && s.doc.assembly.joints.iter().any(|j| j.a.occurrence == occurrence || j.b.occurrence == occurrence) {
         warnings.push("the linked geometry changed; check this placement's joints, even when the solver reports no error".to_string());
     }
+    // Pin evaluated body names before repositioning the replacement's Import feature or
+    // retargeting patterns/mirrors so moving an import earlier never renumbers existing bodies
+    // or shifts inherited materials/appearances.
+    s.pin_timeline_body_names();
+    let new_solid_bodies = linked_body_entries(s, feature);
+    let new_mesh_bodies = new_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
+    let mut body_map = match_relink_bodies(&old_solid_bodies, &new_solid_bodies);
+    for (old_name, new_name) in match_relink_bodies(&old_mesh_bodies, &new_mesh_bodies) {
+        body_map.entry(old_name).or_insert(new_name);
+    }
+    let earliest_consumer = earliest_retargeted_consumer(&s.doc, occurrence, &body_map);
     // Insert Design placed the design once; this placement takes that one's place and name.
     let added = made["occurrence"].as_u64().ok_or_else(|| bad(cmd, "the design was not placed"))?;
     let d = s.doc_mut();
+    if let Some(first) = earliest_consumer {
+        let mut moving_ids = Vec::new();
+        if d.feature_index(feature).is_some_and(|i| i >= first) {
+            moving_ids.push(feature);
+        }
+        if let Some(mesh_id) = new_mesh_feature
+            && d.feature_index(mesh_id).is_some_and(|i| i >= first)
+        {
+            moving_ids.push(mesh_id);
+        }
+        if !moving_ids.is_empty() {
+            let after_old = match (d.feature_index(link.feature), old_mesh_feature.and_then(|id| d.feature_index(id))) {
+                (Some(a), Some(b)) if b == a + 1 => b + 1,
+                (Some(a), _) => a + 1,
+                (None, _) => first,
+            };
+            move_features_to(d, &moving_ids, after_old.min(first));
+        }
+    }
+    retarget_occurrence_copies(d, occurrence, &body_map);
     let name = d.occurrences.iter().find(|o| o.id == added).map(|o| o.name.clone()).unwrap_or_default();
     d.occurrences.retain(|o| o.id != added);
     if let Some(o) = d.occurrences.iter_mut().find(|o| o.id == occurrence) {
@@ -3607,7 +4575,22 @@ fn relink_placement(
             .filter(|r| !failing_before.contains(&r.id))
             .filter_map(|r| r.error.as_ref().map(|e| format!("`{}` worked before this relink and fails now: {e}", r.name))),
     );
-    let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    warnings.extend(
+        s.model
+            .results
+            .iter()
+            .filter(|r| {
+                r.id != feature
+                    && Some(r.id) != new_mesh_feature
+                    && r.error.is_none()
+                    && !failing_before.contains(&r.id)
+                    && !warned_before.contains(&r.id)
+            })
+            .filter_map(|r| r.warning.as_ref().map(|w| format!("`{}` worked before this relink and now warns: {w}", r.name))),
+    );
+    let (mut joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    let joint_deviations = relink_joint_deviations(s, &relink_joints_before, &mut warnings, &mut joint_errors);
+    let moved_occurrences = relink_moved_occurrences(s, &poses_before, &mut warnings);
     reply(
         cmd,
         RelinkResult {
@@ -3621,6 +4604,8 @@ fn relink_placement(
             warnings,
             joint_errors,
             joint_conflicts,
+            joint_deviations,
+            moved_occurrences,
             param_warnings: Vec::new(),
         },
     )
@@ -3679,110 +4664,221 @@ fn importer_needs(importer: &solidcraft_doc::LinkImporter, status: &crate::plugi
     Some(format!("importer plugin `{plugin}`{version} is needed to read this file again, but it is {problem}{installed}"))
 }
 
+enum ListEntry {
+    Empty {
+        c: u64,
+        name: Option<String>,
+        configuration: Option<u64>,
+    },
+    ImporterNotAllowed {
+        c: u64,
+        name: Option<String>,
+        configuration: Option<u64>,
+        importer: Option<LinkSource>,
+        path: String,
+        shown: String,
+        reason: String,
+    },
+    Network {
+        c: u64,
+        name: Option<String>,
+        configuration: Option<u64>,
+        importer: Option<LinkSource>,
+        path: String,
+        shown: String,
+        host: String,
+    },
+    Device {
+        c: u64,
+        name: Option<String>,
+        configuration: Option<u64>,
+        importer: Option<LinkSource>,
+        path: String,
+        shown: String,
+    },
+    LookUp {
+        c: u64,
+        name: Option<String>,
+        configuration: Option<u64>,
+        importer: Option<LinkSource>,
+        path: String,
+        shown: String,
+        abs: PathBuf,
+        any: bool,
+        kept_sha256: Option<String>,
+        is_left_out: bool,
+    },
+}
+
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
-    let mut observations = Vec::new();
-    let links: Vec<LinkInfo> = s
-        .doc
-        .links
-        .iter()
-        .map(|(c, l)| {
-            let file = resolve(s.path.as_deref(), &l.path);
-            let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
-            // A design that came from this session has no file: it is not looked for.
-            if l.path.is_empty() {
-                return LinkInfo::Looked {
-                    component: *c,
-                    configuration: l.configuration,
-                    importer: None,
-                    name,
-                    path: String::new(),
-                    file: String::new(),
-                    found: None,
-                    changed: None,
-                    state: None,
-                    reason: None,
-                };
-            }
-            let path = stored(s.path.as_deref(), &file);
-            let shown = file.to_string_lossy().into_owned();
-            let importer = link_source(s, l);
-            // A refused path is not looked for at all: on Windows asking whether a file on
-            // `\\host\share` exists already connects to the host.
-            match link_refusal(s.path.as_deref(), &l.path) {
-                None if l.importer.is_some() && importer_file_refusal(s, &file).is_some() => {
+    let own = s.path.as_deref();
+    let comp_names: std::collections::HashMap<u64, String> = s.doc.components.iter().map(|c| (c.id, c.name.clone())).collect();
+    let mut entries: Vec<ListEntry> = Vec::with_capacity(s.doc.links.len());
+    let mut unique_shown: Vec<String> = Vec::new();
+    let mut seen_shown = std::collections::HashSet::new();
+
+    for (&c, l) in &s.doc.links {
+        let name = comp_names.get(&c).cloned();
+        // A design that came from this session has no file: it is not looked for.
+        if l.path.is_empty() {
+            entries.push(ListEntry::Empty { c, name, configuration: l.configuration });
+            continue;
+        }
+        let file = resolve(own, &l.path);
+        let path = stored(own, &file);
+        let shown = file.to_string_lossy().into_owned();
+        let importer = link_source(s, l);
+        // A refused path is not looked for at all: on Windows asking whether a file on
+        // `\\host\share` exists already connects to the host.
+        match link_refusal(own, &l.path) {
+            None => {
+                if l.importer.is_some()
+                    && let Some(reason) = importer_file_refusal(s, &file)
+                {
                     // Not read, not even hashed: an importer's file outside the design's folder
                     // waits for its folder to be allowed.
-                    LinkInfo::Looked {
-                        component: *c,
-                        configuration: l.configuration,
-                        importer,
-                        name,
-                        path,
-                        file: shown,
-                        found: None,
-                        changed: None,
-                        state: Some(LinkState::NotAllowed),
-                        reason: importer_file_refusal(s, &file),
-                    }
+                    entries.push(ListEntry::ImporterNotAllowed { c, name, configuration: l.configuration, importer, path, shown, reason });
+                    continue;
                 }
-                None => {
-                    let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
-                    // Whether the file is no longer what this design last read (#9739): `null`
-                    // when it isn't found, or the link keeps no digest (made before they were).
-                    let current = l
-                        .file_sha256
-                        .as_ref()
-                        .filter(|_| found == Some(true))
-                        .and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref(), l.importer.is_some()));
-                    let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
-                    // A link opened without its bodies has read nothing of its file yet.
-                    let changed = if found == Some(true) && left_out(&s.doc, *c, l) { Some(true) } else { changed };
-                    if let (Some(digest), Some(changed)) = (current, changed)
-                        && (changed || s.plugin_state.link_changes.get(c).is_some_and(|change| !change.read))
-                    {
-                        observations.push((*c, shown.clone(), digest, !changed));
-                    }
-                    // Why a file that can't be reached can't be: `None` when it can be read.
-                    let (state, reason) = match link_presence(&file, s.path.as_deref()) {
-                        Some(why) => (Some(why.state), Some(why.reason)),
-                        None => (None, None),
-                    };
-                    LinkInfo::Looked {
-                        component: *c,
-                        configuration: l.configuration,
-                        importer,
-                        name,
-                        path,
-                        file: shown,
-                        found,
-                        changed,
-                        state,
-                        reason,
-                    }
+                if seen_shown.insert(shown.clone()) {
+                    unique_shown.push(shown.clone());
                 }
-                Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
-                    component: *c,
+                entries.push(ListEntry::LookUp {
+                    c,
+                    name,
                     configuration: l.configuration,
                     importer,
-                    name,
                     path,
-                    file: shown,
-                    found: None,
-                    state: LinkState::NotAllowed,
-                    reason: format!("on the network location \\\\{host}, which is not allowed"),
-                    host,
-                },
-                Some(solidcraft_io::vfs::Remote::Device) => LinkInfo::Device {
-                    component: *c,
-                    configuration: l.configuration,
-                    importer,
-                    name,
-                    path,
-                    file: shown,
-                    found: None,
-                    state: LinkState::Unreadable,
-                    reason: "names a device, not a file".into(),
-                },
+                    abs: absolute(&file),
+                    shown,
+                    any: l.importer.is_some(),
+                    kept_sha256: l.file_sha256.clone(),
+                    is_left_out: left_out(&s.doc, c, l),
+                });
+            }
+            Some(solidcraft_io::vfs::Remote::Network(host)) => {
+                entries.push(ListEntry::Network { c, name, configuration: l.configuration, importer, path, shown, host });
+            }
+            Some(solidcraft_io::vfs::Remote::Device) => {
+                entries.push(ListEntry::Device { c, name, configuration: l.configuration, importer, path, shown });
+            }
+        }
+    }
+
+    // Deduplicate presence/is_file checks per unique resolved path.
+    let mut statuses: std::collections::HashMap<String, (Option<bool>, Option<(LinkState, String)>)> =
+        std::collections::HashMap::with_capacity(unique_shown.len());
+    for shown in unique_shown {
+        let found = solidcraft_io::vfs::design_path_is_file(&shown, own);
+        let presence = link_presence(Path::new(&shown), own).map(|why| (why.state, why.reason));
+        statuses.insert(shown, (found, presence));
+    }
+
+    // Deduplicate SHA-256 checks per unique resolved `(absolute_path, any)` and hash uncached files in parallel.
+    let mut seen_digests = std::collections::HashSet::new();
+    let mut digests_map: std::collections::HashMap<(PathBuf, bool), Option<String>> = std::collections::HashMap::new();
+    let mut uncached: Vec<(PathBuf, bool, u64, Option<(std::time::SystemTime, u64)>)> = Vec::new();
+    for entry in &entries {
+        let ListEntry::LookUp { shown, abs, any, kept_sha256, .. } = entry else { continue };
+        if kept_sha256.is_none() || statuses.get(shown).is_none_or(|(found, _)| *found != Some(true)) {
+            continue;
+        }
+        if !seen_digests.insert((abs.clone(), *any)) {
+            continue;
+        }
+        match lookup_cached_sha256(abs, own) {
+            Some(DigestLookup::Hit(known)) => {
+                digests_map.insert((abs.clone(), *any), Some(known));
+            }
+            Some(DigestLookup::Miss { generation, stamp }) => {
+                uncached.push((abs.clone(), *any, generation, stamp));
+            }
+            None => {
+                digests_map.insert((abs.clone(), *any), None);
+            }
+        }
+    }
+    if !uncached.is_empty() {
+        let computed = map_link_work(&uncached, |(abs, any, _, _)| compute_file_sha256(abs, own, *any));
+        for ((abs, any, generation, stamp), digest) in uncached.into_iter().zip(computed) {
+            let digest = digest.flatten();
+            if let Some(d) = &digest {
+                store_cached_sha256(abs.clone(), generation, stamp, d);
+            }
+            digests_map.insert((abs, any), digest);
+        }
+    }
+
+    let mut observations = Vec::new();
+    let links: Vec<LinkInfo> = entries
+        .into_iter()
+        .map(|entry| match entry {
+            ListEntry::Empty { c, name, configuration } => LinkInfo::Looked {
+                component: c,
+                configuration,
+                importer: None,
+                name,
+                path: String::new(),
+                file: String::new(),
+                found: None,
+                changed: None,
+                state: None,
+                reason: None,
+            },
+            ListEntry::ImporterNotAllowed { c, name, configuration, importer, path, shown, reason } => LinkInfo::Looked {
+                component: c,
+                configuration,
+                importer,
+                name,
+                path,
+                file: shown,
+                found: None,
+                changed: None,
+                state: Some(LinkState::NotAllowed),
+                reason: Some(reason),
+            },
+            ListEntry::Network { c, name, configuration, importer, path, shown, host } => LinkInfo::Network {
+                component: c,
+                configuration,
+                importer,
+                name,
+                path,
+                file: shown,
+                found: None,
+                state: LinkState::NotAllowed,
+                reason: format!("on the network location \\\\{host}, which is not allowed"),
+                host,
+            },
+            ListEntry::Device { c, name, configuration, importer, path, shown } => LinkInfo::Device {
+                component: c,
+                configuration,
+                importer,
+                name,
+                path,
+                file: shown,
+                found: None,
+                state: LinkState::Unreadable,
+                reason: "names a device, not a file".into(),
+            },
+            ListEntry::LookUp { c, name, configuration, importer, path, shown, abs, any, kept_sha256, is_left_out } => {
+                let (found, presence) = statuses.get(&shown).cloned().unwrap_or((None, None));
+                // Whether the file is no longer what this design last read (#9739): `null`
+                // when it isn't found, or the link keeps no digest (made before they were).
+                let current = kept_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| digests_map.get(&(abs, any)).cloned().flatten());
+                let changed = current.as_ref().zip(kept_sha256.as_ref()).map(|(now, kept)| now != kept);
+                // A link opened without its bodies has read nothing of its file yet.
+                let changed = if found == Some(true) && is_left_out { Some(true) } else { changed };
+                if let (Some(digest), Some(changed)) = (current, changed)
+                    && (changed || s.plugin_state.link_changes.get(&c).is_some_and(|change| !change.read))
+                {
+                    observations.push((c, shown.clone(), digest, !changed));
+                }
+                // Why a file that can't be reached can't be: `None` when it can be read.
+                let (state, reason) = match presence {
+                    Some((state, reason)) => (Some(state), Some(reason)),
+                    None => (None, None),
+                };
+                LinkInfo::Looked { component: c, configuration, importer, name, path, file: shown, found, changed, state, reason }
             }
         })
         .collect();
@@ -4614,6 +5710,36 @@ mod tests {
 
     /// A one-face sheet at z = 0.15 bounded by spline edges lying on the plane z = 0, written
     /// without pcurves: its edges are 0.15 mm off their face and read with tolerances of 0.45 mm.
+    /// An importer plugin's design carries its geometry as an Import feature labelled with the file it
+    /// came from (`part.FCStd`) holding STEP. Linking it must read that STEP as STEP, as File > Open
+    /// does, not hand it to the FreeCAD reader because of the label.
+    #[test]
+    fn a_design_an_importer_wrote_from_a_freecad_file_links_its_step_geometry() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-importer-fcstd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
+        let step_file = dir.join("block.step");
+        run(&mut part, "file.export", json!({"path": step_file}));
+        let step = std::fs::read(&step_file).unwrap();
+        let mut kind = solidcraft_io::step_import_feature(&step, "block.step").unwrap().kind;
+        if let FeatureKind::Import { file, .. } = &mut kind {
+            *file = "part.FCStd".into();
+        }
+        let mut doc = Document::default();
+        doc.add_feature(kind, None).unwrap();
+        let bytes = solidcraft_io::write_design(&doc).unwrap();
+        for name in ["part.FCStd", "part.fcstd", "part.3dm"] {
+            let source = Source::File(dir.join(name));
+            let ((_, feature, ..), _) = design_bodies(&source, &bytes, None, Default::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(feature.body_names.len(), 1, "{name}");
+        }
+        assert_eq!(step_label("/a/part.FCStd"), "/a/part.step");
+        assert_eq!(step_label("/a/part.sc"), "/a/part.sc");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn loose_sheet_step() -> String {
         let mut t = String::from(
             "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\n\
@@ -5286,6 +6412,280 @@ mod tests {
         assert_eq!(s.doc.body_material("Shared"), "Brass");
     }
 
+    fn save_step_box(path: &Path, height: f64, corner: [f64; 3]) {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": corner, "body_name": "StepBox"}));
+        run(&mut part, "file.export", json!({"path": path}));
+    }
+
+    #[test]
+    fn update_links_batches_refreshes_and_deduplicates_duplicate_sources() {
+        for with_sketch in [false, true] {
+            let dir = std::env::temp_dir().join(format!("solidcraft-link-batch-par-{with_sketch}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let plate_path = dir.join("plate.sc");
+            let block_path = dir.join("block.sc");
+            let step_path = dir.join("bracket.step");
+
+            let mut plate_part = plate(&plate_path);
+            save_material_boxes(&block_path, &[("Block", 0.0, "Steel")]);
+            save_step_box(&step_path, 10.0, [0.0, 200.0, 0.0]);
+
+            let build_assembly = || -> (Session, Vec<u64>, Option<(u64, u64)>) {
+                let mut s = Session::default();
+                let mut comps = vec![
+                    run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateA"}))["component"].as_u64().unwrap(),
+                    run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateB", "translate": [100, 0, 0]}))["component"]
+                        .as_u64()
+                        .unwrap(),
+                    run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateC", "translate": [200, 0, 0]}))["component"]
+                        .as_u64()
+                        .unwrap(),
+                ];
+                run(&mut s, "occurrence.ground", json!({"occurrence": "PlateA:1", "grounded": true}));
+                run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 50, 0], "operation": "new", "body_name": "PinBody"}));
+                run(&mut s, "component.create", json!({"name": "Pin", "parent": "root", "activate": false}));
+                run(&mut s, "component.move_bodies", json!({"bodies": ["PinBody"], "component": "Pin"}));
+                run(
+                    &mut s,
+                    "joint.create",
+                    json!({
+                        "type": "rigid",
+                        "name": "PinInHole",
+                        "flip": true,
+                        "a": {"occurrence": "PlateA:1", "circle": [13, 0, 5]},
+                        "b": {"occurrence": "Pin:1", "circle": [3, 50, 0]},
+                    }),
+                );
+                let attached = if with_sketch {
+                    let sketch =
+                        run(&mut s, "sketch.create", json!({"plane": {"face": [-20, 10, 5]}, "name": "OnPlate"}))["sketch"].as_u64().unwrap();
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-25, 5], "p1": [-15, 15]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    let extrude = run(&mut s, "solid.extrude", json!({"sketch": "OnPlate", "distance": 3}))["feature"].as_u64().unwrap();
+                    Some((sketch, extrude))
+                } else {
+                    None
+                };
+                comps.push(
+                    run(&mut s, "component.insert_design", json!({"path": block_path, "name": "BlockA", "translate": [0, 100, 0]}))["component"]
+                        .as_u64()
+                        .unwrap(),
+                );
+                comps.push(
+                    run(&mut s, "component.insert_design", json!({"path": block_path, "name": "BlockB", "translate": [100, 100, 0]}))["component"]
+                        .as_u64()
+                        .unwrap(),
+                );
+                comps.push(run(&mut s, "file.insert_step", json!({"path": step_path, "name": "StepA"}))["component"].as_u64().unwrap());
+                comps.push(run(&mut s, "file.insert_step", json!({"path": step_path, "name": "StepB"}))["component"].as_u64().unwrap());
+                (s, comps, attached)
+            };
+
+            let (mut batched, comps, attached) = build_assembly();
+            let (mut reference, ref_comps, _) = build_assembly();
+
+            // Mutate all 3 distinct sources on disk (linked into 7 components total).
+            run(&mut plate_part, "parameters.change", json!({"name": "hx", "expression": "20 mm"}));
+            run(&mut plate_part, "file.save", json!({}));
+            save_material_boxes(&block_path, &[("Block", 0.0, "Brass"), ("Cap", 25.0, "Aluminum")]);
+            save_step_box(&step_path, 25.0, [0.0, 200.0, 0.0]);
+
+            // Update batched assembly in one command and verify refresh count & deduplication.
+            EVALUATED.with(|n| n.replace(0));
+            STEP_READS.with(|n| n.replace(0));
+            UPDATE_LINKS_REFRESHES.with(|n| n.replace(0));
+            let batch_reply = run(&mut batched, "component.update_links", json!({}));
+            let refresh_runs = UPDATE_LINKS_REFRESHES.with(std::cell::Cell::get);
+            assert_eq!(EVALUATED.with(std::cell::Cell::get), 2, "2 unique designs across 5 links (with_sketch={with_sketch})");
+            assert_eq!(STEP_READS.with(std::cell::Cell::get), 1, "1 unique STEP file across 2 links (with_sketch={with_sketch})");
+            if with_sketch {
+                assert!((1..=2).contains(&refresh_runs), "expected 1-2 refreshes with face rebind, got {refresh_runs}");
+            } else {
+                assert_eq!(refresh_runs, 1, "expected exactly 1 refresh without face rebind, got {refresh_runs}");
+            }
+
+            // Update reference assembly sequentially one component at a time and compare bit-for-bit.
+            let mut ref_updated = Vec::new();
+            let mut ref_warnings = Vec::new();
+            for comp in &ref_comps {
+                let r = run(&mut reference, "component.update_links", json!({"component": comp}));
+                ref_updated.extend(r["updated"].as_array().unwrap().iter().cloned());
+                ref_warnings.extend(r["warnings"].as_array().unwrap().iter().cloned());
+            }
+
+            assert_eq!(batch_reply["updated"], Value::Array(ref_updated), "with_sketch={with_sketch}: {batch_reply}");
+            assert_eq!(batch_reply["unchanged"], json!([]), "with_sketch={with_sketch}: {batch_reply}");
+            assert_eq!(batch_reply["failed"], json!([]), "with_sketch={with_sketch}: {batch_reply}");
+            assert_eq!(batch_reply["warnings"], Value::Array(ref_warnings), "with_sketch={with_sketch}: {batch_reply}");
+            assert_joint_at(&mut batched, 20.0, "batched updated joint");
+            assert_joint_at(&mut reference, 20.0, "reference updated joint");
+            if let Some((sketch, extrude)) = attached {
+                assert_eq!(feature_error(&batched, sketch), None, "rebound sketch must succeed");
+                assert_eq!(feature_error(&batched, extrude), None, "extrude on rebound sketch must succeed");
+            }
+
+            let batched_bodies = bodies(&mut batched);
+            let ref_bodies = bodies(&mut reference);
+            assert_eq!(batched_bodies.len(), ref_bodies.len());
+            for (b, r) in batched_bodies.iter().zip(&ref_bodies) {
+                assert_eq!((&b.0, b.1, b.2), (&r.0, r.1, r.2), "body mismatch: {b:?} vs {r:?}");
+                match (b.3, r.3) {
+                    (Some(bv), Some(rv)) => assert!((bv - rv).abs() < 1e-6, "volume mismatch for {}: {bv} vs {rv}", b.0),
+                    (None, None) => {}
+                    other => panic!("volume presence mismatch for {}: {other:?}", b.0),
+                }
+            }
+            for (&bc, &rc) in comps.iter().zip(&ref_comps) {
+                assert_eq!(component_materials(&batched, bc), component_materials(&reference, rc));
+            }
+
+            // Re-running with no further changes performs zero evaluations, zero STEP parses, and zero refreshes.
+            EVALUATED.with(|n| n.replace(0));
+            STEP_READS.with(|n| n.replace(0));
+            UPDATE_LINKS_REFRESHES.with(|n| n.replace(0));
+            let evals_before = batched.evaluation_count();
+            let noop = run(&mut batched, "component.update_links", json!({}));
+            assert_eq!(noop["updated"], json!([]), "{noop}");
+            assert_eq!(noop["unchanged"].as_array().map(Vec::len), Some(7), "{noop}");
+            assert_eq!(EVALUATED.with(std::cell::Cell::get), 0);
+            assert_eq!(STEP_READS.with(std::cell::Cell::get), 0);
+            assert_eq!(UPDATE_LINKS_REFRESHES.with(std::cell::Cell::get), 0);
+            assert_eq!(batched.evaluation_count(), evals_before);
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn read_left_out_bodies_deduplicates_duplicate_step_and_design_links() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-left-out-dedup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part_a = dir.join("part_a.json");
+        let part_b = dir.join("part_b.json");
+        let step = dir.join("gear.step");
+        let asm = dir.join("assembly.json");
+
+        save_box(&part_a, 30.0);
+        save_box(&part_b, 15.0);
+        save_step_box(&step, 10.0, [200.0, 0.0, 0.0]);
+
+        let mut s = Session::default();
+        for (idx, x) in [0, 50, 100].into_iter().enumerate() {
+            run(&mut s, "component.insert_design", json!({"path": part_a, "name": format!("PartA{idx}"), "translate": [x, 0, 0]}));
+        }
+        for (idx, x) in [0, 50].into_iter().enumerate() {
+            run(&mut s, "component.insert_design", json!({"path": part_b, "name": format!("PartB{idx}"), "translate": [x, 60, 0]}));
+        }
+        for idx in 0..3 {
+            run(&mut s, "file.insert_step", json!({"path": step, "name": format!("Gear{idx}")}));
+        }
+        run(&mut s, "file.save", json!({"path": asm, "linked_bodies": false}));
+
+        EVALUATED.with(|n| n.replace(0));
+        STEP_READS.with(|n| n.replace(0));
+        let mut opened = Session::default();
+        let reply = run(&mut opened, "doc.open", json!({"path": asm}));
+        assert_eq!(reply["errors"], 0, "{reply}");
+        assert_eq!(EVALUATED.with(std::cell::Cell::get), 2, "5 design links share 2 unique files");
+        assert_eq!(STEP_READS.with(std::cell::Cell::get), 1, "3 STEP links share 1 unique file");
+        assert_eq!(opened.model.state().bodies.len(), 8);
+        // 3 * (10*20*30) + 2 * (10*20*15) + 3 * (10*10*10) = 18_000 + 6_000 + 3_000 = 27_000.
+        assert!((volume(&mut opened) - 27_000.0).abs() < 1e-5, "{}", volume(&mut opened));
+
+        // Modify 1 shared design and the shared STEP file while closed: each is still read once.
+        save_box(&part_a, 40.0);
+        save_step_box(&step, 20.0, [200.0, 0.0, 0.0]);
+        EVALUATED.with(|n| n.replace(0));
+        STEP_READS.with(|n| n.replace(0));
+        let mut reopened = Session::default();
+        let reply = run(&mut reopened, "doc.open", json!({"path": asm}));
+        assert_eq!(reply["errors"], 0, "{reply}");
+        assert_eq!(EVALUATED.with(std::cell::Cell::get), 2);
+        assert_eq!(STEP_READS.with(std::cell::Cell::get), 1);
+        // 3 * 8_000 + 2 * 3_000 + 3 * 2_000 = 36_000.
+        assert!((volume(&mut reopened) - 36_000.0).abs() < 1e-5, "{}", volume(&mut reopened));
+        let changed_warnings = reply["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w.as_str().is_some_and(|text| text.contains("changed since this design was saved")))
+            .count();
+        assert_eq!(changed_warnings, 6, "{reply}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_links_deduplicates_and_matches_exact_status_for_shared_and_distinct_files() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-list-links-dedup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part_a = dir.join("part_a.sc");
+        let part_b = dir.join("part_b.sc");
+        let step = dir.join("gear.step");
+        let gone = dir.join("gone.sc");
+
+        save_box(&part_a, 10.0);
+        save_box(&part_b, 20.0);
+        save_step_box(&step, 10.0, [200.0, 0.0, 0.0]);
+        save_box(&gone, 15.0);
+
+        let mut s = Session::default();
+        for name in ["A1", "A2", "A3"] {
+            run(&mut s, "component.insert_design", json!({"path": part_a, "name": name}));
+        }
+        for name in ["B1", "B2"] {
+            run(&mut s, "component.insert_design", json!({"path": part_b, "name": name}));
+        }
+        for name in ["S1", "S2"] {
+            run(&mut s, "file.insert_step", json!({"path": step, "name": name}));
+        }
+        for name in ["G1", "G2"] {
+            run(&mut s, "component.insert_design", json!({"path": gone, "name": name}));
+        }
+
+        // Modify part_a and gear.step, remove gone.sc, and clear digest cache so hashing actually runs.
+        save_box(&part_a, 45.0);
+        save_step_box(&step, 20.0, [200.0, 0.0, 0.0]);
+        std::fs::remove_file(&gone).unwrap();
+        forget_file_digests();
+
+        FILE_HASH_COMPUTED.with(|n| n.replace(0));
+        let listed = run(&mut s, "component.links", json!({}));
+        assert_eq!(FILE_HASH_COMPUTED.with(std::cell::Cell::get), 3, "only 3 unique existing files should be hashed: {listed}");
+        let rows = listed["links"].as_array().unwrap();
+        assert_eq!(rows.len(), 9, "{listed}");
+        let expected = [
+            ("A1", json!(true), json!(true), Value::Null),
+            ("A2", json!(true), json!(true), Value::Null),
+            ("A3", json!(true), json!(true), Value::Null),
+            ("B1", json!(true), json!(false), Value::Null),
+            ("B2", json!(true), json!(false), Value::Null),
+            ("S1", json!(true), json!(true), Value::Null),
+            ("S2", json!(true), json!(true), Value::Null),
+            ("G1", json!(false), Value::Null, json!("missing")),
+            ("G2", json!(false), Value::Null, json!("missing")),
+        ];
+        for (row, (name, found, changed, state)) in rows.iter().zip(expected) {
+            assert_eq!(
+                (row["name"].as_str(), &row["found"], &row["changed"], &row["state"]),
+                (Some(name), &found, &changed, &state),
+                "link row mismatch for {name}: {row}"
+            );
+        }
+
+        // Second listing with warm cache performs zero uncached hashes and matches identically.
+        FILE_HASH_COMPUTED.with(|n| n.replace(0));
+        let cached = run(&mut s, "component.links", json!({}));
+        assert_eq!(FILE_HASH_COMPUTED.with(std::cell::Cell::get), 0);
+        assert_eq!(cached, listed);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn parallel_left_out_open_and_update_links_are_deterministic_and_deduplicate_shared_parts() {
         let dir = std::env::temp_dir().join(format!("solidcraft-par-links-{}", std::process::id()));
@@ -5676,6 +7076,94 @@ mod tests {
             component_materials(&deferred_relink, comp),
             std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Titanium".into())])
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// when an updated linked design removes the edge a chamfer in the assembly sits on,
+    /// `component.update_links {}` still updates every link at that level, marks the chamfer
+    /// failed with a reselect message, reports it in `warnings`, rebuilds the rest of the
+    /// assembly, and lets `timeline.edit` reselect the chamfer on the updated body.
+    #[test]
+    fn update_links_updates_level_when_dependent_chamfer_loses_reference() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-broken-ref-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (part_a, part_c, assembly) = (dir.join("part_a.sc"), dir.join("part_c.sc"), dir.join("assembly.sc"));
+
+        let mut a = Session::default();
+        run(&mut a, "parameters.add", json!({"name": "step_d", "expression": "12 mm"}));
+        run(&mut a, "solid.cylinder", json!({"diameter": 20, "height": 20, "body_name": "SteppedPin"}));
+        run(
+            &mut a,
+            "solid.cylinder",
+            json!({"diameter": "step_d", "height": 10, "base": [0, 0, 20], "operation": "join", "targets": ["SteppedPin"]}),
+        );
+        run(&mut a, "file.save", json!({"path": &part_a}));
+
+        save_box(&part_c, 10.0);
+
+        let mut b = Session::default();
+        run(&mut b, "component.insert_design", json!({"path": &part_a, "name": "Pin"}));
+        run(&mut b, "component.insert_design", json!({"path": &part_c, "name": "Spacer", "translate": [40, 0, 0]}));
+        let chamfer =
+            run(&mut b, "solid.chamfer", json!({"edges": [[6, 0, 20]], "distance": 1, "body": "SteppedPin", "name": "Chamfer3"}))["feature"]
+                .as_u64()
+                .unwrap();
+        let bracket =
+            run(&mut b, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "body_name": "Bracket"}))["feature"]
+                .as_u64()
+                .unwrap();
+        let hole = run(
+            &mut b,
+            "solid.cylinder",
+            json!({"diameter": 4, "height": 12, "base": [85, 5, -1], "operation": "cut", "targets": ["Bracket"], "name": "MountHole"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        run(&mut b, "file.save", json!({"path": &assembly}));
+        assert_eq!(feature_error(&b, chamfer), None);
+        assert_eq!(feature_error(&b, bracket), None);
+        assert_eq!(feature_error(&b, hole), None);
+
+        // Make the step flush with the Ø20 cylinder so the step edge Chamfer3 picked disappears,
+        // and resize the second linked design at the same level.
+        run(&mut a, "parameters.change", json!({"name": "step_d", "expression": "20 mm"}));
+        run(&mut a, "file.save", json!({}));
+        save_box(&part_c, 20.0);
+
+        let update = run(&mut b, "component.update_links", json!({}));
+        let updated: Vec<&str> = update["updated"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(updated.contains(&"Pin") && updated.contains(&"Spacer"), "both same-level links must update: {update}");
+        assert_eq!(update["failed"], json!([]), "{update}");
+
+        let links = run(&mut b, "component.links", json!({}));
+        for entry in links["links"].as_array().unwrap() {
+            assert_eq!(entry["changed"], json!(false), "{links}");
+        }
+
+        let err = feature_error(&b, chamfer).expect("Chamfer3 must be marked failed when its step edge is gone");
+        assert!(
+            solidcraft_doc::reselect_parts(&err).is_some() || (err.contains("no longer exists") && err.contains("reselect")),
+            "expected clear reselect error on Chamfer3, got: {err}"
+        );
+        let warnings: Vec<&str> = update["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("Chamfer3") && (w.contains("reselect") || w.contains("no longer exists"))),
+            "update_links warnings must report Chamfer3's lost reference: {update}"
+        );
+        assert_eq!(feature_error(&b, bracket), None, "other features in B must still rebuild");
+        assert_eq!(feature_error(&b, hole), None, "downstream features after Chamfer3 must still rebuild");
+
+        let expected_without_chamfer = std::f64::consts::PI * 100.0 * 30.0 + (10.0 * 20.0 * 20.0) + (1000.0 - std::f64::consts::PI * 4.0 * 10.0);
+        let actual = volume(&mut b);
+        assert!((actual - expected_without_chamfer).abs() < 1.0, "expected updated bodies volume {expected_without_chamfer}, got {actual}");
+
+        // Reselecting Chamfer3 onto a valid edge of the updated cylinder clears the error and rebuilds it.
+        run(&mut b, "timeline.edit", json!({"feature": chamfer, "set": {"edges": [[10, 0, 30]]}}));
+        assert_eq!(feature_error(&b, chamfer), None, "reselecting Chamfer3 must clear its error");
+        let after_reselect = volume(&mut b);
+        assert!(after_reselect < expected_without_chamfer - 1.0, "Chamfer3 must cut material after reselect: {after_reselect}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

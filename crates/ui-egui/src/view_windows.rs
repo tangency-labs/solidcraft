@@ -4,7 +4,7 @@ use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
 use solidcraft_views::{DesignView, PopOut, TopBar, ViewKind, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Surface};
 use crate::{SolveApp, documents};
 
 #[derive(Default)]
@@ -85,6 +85,8 @@ struct Host {
     sketch_return_tab: Option<String>,
     ready: bool,
     startup: Option<f64>,
+    /// macOS: the traffic lights are hidden with a collapsed edge top bar.
+    buttons_hidden: bool,
 }
 
 struct Display {
@@ -1170,13 +1172,16 @@ fn toast(app: &mut SolveApp, ctx: &Context) {
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0));
     let undo = edge
         .show(ctx, |ui| {
-            Menu::show(ui, 280.0, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(label);
-                    crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Undo"), crate::ui_kit::Button::Normal).clicked()
+            Container::new(ui.ctx(), Surface::ViewportStatus)
+                .show_frame(ui, Container::menu_frame(), ui.max_rect(), |ui| {
+                    ui.set_width(280.0);
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Undo"), crate::ui_kit::Button::Normal).clicked()
+                    })
+                    .inner
                 })
                 .inner
-            })
         })
         .inner;
     if undo && let Some(returned) = app.view_windows.returned.take() {
@@ -1289,6 +1294,18 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
     if let Err(error) = app.run(command, request) {
         app.set_status(error, true);
     }
+}
+
+/// Whether a pop-out window draws its own title bar and caption buttons. macOS never does: the
+/// window keeps the OS frame (round corners, shadow) and traffic lights in both top bar modes, so
+/// choosing "At top edge" changes nothing about the OS window and it is never recreated.
+pub(crate) fn os_title_bar_is_custom(macos: bool) -> bool {
+    !macos
+}
+
+/// macOS: the traffic lights go with an "At top edge" bar that has slid away completely.
+pub(crate) fn traffic_lights_hidden(macos: bool, top_bar: TopBar, bar_fraction: f32) -> bool {
+    macos && top_bar == TopBar::Edge && bar_fraction <= 0.0
 }
 
 fn window_rename_id(ctx: &Context) -> egui::Id {
@@ -1657,6 +1674,7 @@ impl Host {
             sketch_return_tab: None,
             ready: false,
             startup: None,
+            buttons_hidden: false,
         }
     }
 
@@ -1677,7 +1695,8 @@ impl Host {
         let own_popup = crate::ui_kit::window_options_menu::is_open(ctx, bar_menu_id(ctx))
             || crate::app_bar::tab_popup_open(ctx, documents::tab_strip_id(ctx.viewport_id()));
         let ribbon_popup = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
-        let popup = own_popup || ribbon_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
+        let shared_popup = crate::ui_kit::Menu::any_open(ctx);
+        let popup = own_popup || ribbon_popup || shared_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
         let focus = ctx.memory(|memory| memory.focused());
         let grip_focused = focus == Some(bar_grip_id(ctx));
         let bar_focused = window_focused
@@ -1691,7 +1710,7 @@ impl Host {
         let keyboard_show = f10 || (window_focused && grip_focused);
         let held = own_popup
             || grip_menu
-            || (visible_height > 0.0 && ctx.any_popup_open())
+            || (visible_height > 0.0 && (shared_popup || ctx.any_popup_open()))
             || (visible_height > 0.0 && crate::view_window_drag::active(app));
         if !popup && !bar_focused {
             self.top_bar_reveal.release_keyboard();
@@ -1735,7 +1754,7 @@ impl Host {
         let keyboard_show = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F10));
         let ribbon_focused = crate::toolbar::pop_out_ribbon_focus(ctx);
         let panel_open = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
-        let popup_open = ctx.any_popup_open() || app.viewport.context_menu.is_some() || panel_open;
+        let popup_open = crate::ui_kit::Menu::any_open(ctx) || ctx.any_popup_open() || app.viewport.context_menu.is_some() || panel_open;
         let escape = !popup_open
             && (self.ribbon_reveal.keyboard() || ribbon_focused)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
@@ -1828,7 +1847,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let panel_workspace = crate::panel_runtime::panel_workspace(app);
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
-        let custom = !cfg!(target_os = "macos") || window.options.top_bar == TopBar::Edge;
+        let custom = os_title_bar_is_custom(cfg!(target_os = "macos"));
         let level = if window.options.keep_on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
         let chrome = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom);
         let mut builder =
@@ -1976,6 +1995,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let had_dialog = app.dialog.is_some();
             host.swap_ribbon_popup(ui.ctx());
             let chrome = host.chrome(app, ui.ctx(), ui.available_rect_before_wrap());
+            let hide_lights = traffic_lights_hidden(cfg!(target_os = "macos"), options.top_bar, if chrome.edge { chrome.bar_fraction } else { 1.0 });
+            if hide_lights != host.buttons_hidden {
+                host.buttons_hidden = hide_lights;
+                ui.ctx().send_viewport_cmd(ViewportCommand::TitlebarButtonsHidden(hide_lights));
+            }
             host.panels.load(&window.panel_layout);
             host.panels.swap(app);
             app.view_windows.painting_panels = true;

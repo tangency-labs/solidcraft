@@ -20,7 +20,6 @@ use std::collections::BTreeMap;
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_view::ViewFrame;
@@ -31,7 +30,7 @@ use solidcraft_render::job::{
 };
 use solidcraft_render::{ProductScene, VisualStyle};
 
-use crate::drawing_view::{ShownSet, Styles, Unmeasured};
+use crate::drawing_view::{DrawnView, ShownSet, Styles, Unmeasured};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -125,7 +124,7 @@ pub(crate) struct ViewPicture {
 pub(crate) fn view_pictures(
     shown: &std::result::Result<ShownSet, Unmeasured>,
     id: u64,
-    view: &ResolvedView,
+    view: &DrawnView,
     centre: Vec2,
 ) -> Result<Vec<(u64, ViewPicture)>> {
     if shown.is_err() || view.flat.is_some() || view.cut.is_some() || crate::drawing_view::not_drawable_apart(view).is_some() {
@@ -133,7 +132,7 @@ pub(crate) fn view_pictures(
     }
     let Ok((chosen, extents)) = crate::drawing_view::measured(shown, view) else { return Ok(Vec::new()) };
     let frame = ortho(&crate::drawing_view::view_frame(view, &extents.model, centre, CMD)?);
-    let pictures = view_parts(&chosen, Styles::from(view));
+    let pictures = view_parts(&chosen, Styles::from(&view.view));
     let count = pictures.len();
     let picture = |(i, parts): (usize, Vec<Part>)| (source(id, i, count), ViewPicture { view: id, frame, bodies: drawn_bodies(&chosen, parts) });
     Ok(pictures.into_iter().enumerate().map(picture).collect())
@@ -236,7 +235,7 @@ impl<'a> ViewPictures<'a> {
     pub fn new(s: &'a Session, d: &Drawing, sheet: u64) -> Result<ViewPictures<'a>> {
         let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
         let shown = crate::drawing_view::shown(s);
-        for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
+        for (id, view, centre) in crate::drawing_scene::views_on(s, d, sheet)? {
             for (source, picture) in view_pictures(&shown, id, &view, centre)? {
                 spent.entry(id).or_default();
                 if pictures.insert(source, picture).is_some() {

@@ -960,6 +960,9 @@ fn appearance_reads_and_scopes_take_a_placed_copys_name() {
     s.execute("occurrence.copy", &json!({"component":"K","translate":[30,0,0]})).unwrap();
     let world: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!(world.iter().any(|n| n == "KB (K:2)"), "{world:?}");
+    // With no assigned look, a pick-up falls back to what the body shows, under either name.
+    let pick = |s: &mut Session, body: &str| s.execute("appearance.pick_up", &json!({"target":{"body":body}})).unwrap()["look"].clone();
+    assert_eq!(pick(&mut s, "KB (K:2)"), pick(&mut s, "KB"));
     s.execute("appearance.assign", &json!({"bodies":["KB"],"appearance":"ABS - Red"})).unwrap();
     s.execute("appearance.assign", &json!({"components":["K"],"appearance":"ABS - Blue"})).unwrap();
 
@@ -982,4 +985,107 @@ fn appearance_reads_and_scopes_take_a_placed_copys_name() {
     assert!(s.execute("appearance.list", &json!({"body":"KB (K:9)"})).is_err());
     assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"bodies":["KB (K:9)"]}})).is_err());
     assert!(s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"components":["K:9"]}})).is_err());
+}
+
+#[test]
+fn appearance_list_reports_inactive_bodies_filters_active_only_and_prunes_on_delete() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Keep"})).unwrap();
+    s.execute("solid.box", &json!({"body_name": "KeptBody", "length": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("component.activate", &json!({"component": 0})).unwrap();
+    s.execute("component.create", &json!({"name": "Drop"})).unwrap();
+    s.execute("solid.box", &json!({"body_name": "DroppedBody", "length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": 0})).unwrap();
+    let temp = s.execute("solid.box", &json!({"body_name": "TempBody", "length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]})).unwrap();
+    let temp_feature = temp["feature"].as_u64().unwrap();
+    s.execute("solid.box", &json!({"body_name": "RemovedBody", "length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
+
+    s.execute("appearance.assign", &json!({"bodies": ["KeptBody"], "appearance": "ABS - Red"})).unwrap();
+    s.execute("appearance.assign", &json!({"bodies": ["DroppedBody"], "appearance": "ABS - Blue"})).unwrap();
+    s.execute("appearance.assign", &json!({"body": "DroppedBody", "faces": [[25, 5, 10]], "appearance": "Copper"})).unwrap();
+    s.execute("appearance.assign", &json!({"bodies": ["TempBody"], "appearance": "ABS - Green"})).unwrap();
+    s.execute("appearance.assign", &json!({"bodies": ["RemovedBody"], "appearance": "ABS - Yellow"})).unwrap();
+
+    // Deleting a component prunes its bodies' body and face overrides, and undo restores them.
+    s.execute("component.delete", &json!({"component": "Drop"})).unwrap();
+    assert!(!s.doc.appearances.bodies.contains_key("DroppedBody"));
+    assert!(s.doc.appearances.faces.iter().all(|f| f.body != "DroppedBody"));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.doc.appearances.bodies.contains_key("DroppedBody"));
+    assert!(s.doc.appearances.faces.iter().any(|f| f.body == "DroppedBody"));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(!s.doc.appearances.bodies.contains_key("DroppedBody"));
+
+    // Deleting a body-creating feature prunes its body overrides, and undo restores them.
+    s.execute("timeline.delete", &json!({"features": [temp_feature]})).unwrap();
+    assert!(!s.doc.appearances.bodies.contains_key("TempBody"));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.doc.appearances.bodies.contains_key("TempBody"));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(!s.doc.appearances.bodies.contains_key("TempBody"));
+
+    // Removing a body via Remove feature keeps the override for history/rollback, while
+    // `appearance.list` reports it in `inactive_bodies` and `active_only: true` excludes it.
+    s.execute("selection.delete", &json!({"items": [{"type": "body", "name": "RemovedBody"}]})).unwrap();
+    assert!(s.doc.appearances.bodies.contains_key("RemovedBody"));
+
+    let full = s.execute("appearance.list", &json!({})).unwrap();
+    assert!(full["bodies"].get("KeptBody").is_some(), "{full}");
+    assert!(full["bodies"].get("RemovedBody").is_some(), "{full}");
+    assert_eq!(full["inactive_bodies"], json!(["RemovedBody"]), "{full}");
+
+    let active = s.execute("appearance.list", &json!({"active_only": true})).unwrap();
+    let active_bodies = active["bodies"].as_object().unwrap();
+    assert_eq!(active_bodies.keys().map(String::as_str).collect::<Vec<_>>(), ["KeptBody"]);
+    assert_eq!(active["in_design"].as_array().unwrap().len(), 1, "{active}");
+    assert_eq!(active["inactive_bodies"], json!(["RemovedBody"]), "{active}");
+    for name in active_bodies.keys() {
+        let chain = chain_read(&mut s, json!({"body": name}));
+        assert_eq!(chain["active"], "body", "{name}: {chain}");
+    }
+    assert!(s.execute("appearance.list", &json!({"active_only": "yes"})).is_err());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deleting_a_component_from_an_imported_step_assembly_prunes_its_appearances() {
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-appearances-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("assembly.step");
+
+    let mut src = Session::default();
+    src.execute("component.create", &json!({"name": "Plate"})).unwrap();
+    src.execute("solid.box", &json!({"body_name": "PlateBody", "length": 20, "width": 20, "height": 10})).unwrap();
+    src.execute("component.activate", &json!({"component": 0})).unwrap();
+    src.execute("component.create", &json!({"name": "Pin"})).unwrap();
+    src.execute("solid.box", &json!({"body_name": "PinBody", "length": 10, "width": 10, "height": 20, "corner": [40, 0, 0]})).unwrap();
+    src.execute("file.export", &json!({"path": path.to_str().unwrap(), "format": "step"})).unwrap();
+
+    let mut s = Session::default();
+    s.execute("file.insert_step", &json!({"path": path.to_str().unwrap()})).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let pin_id = s.doc.find_component("Pin").unwrap();
+    let plate_id = s.doc.find_component("Plate").unwrap();
+    let st = s.model.state();
+    let pin_body = st.bodies.iter().find(|b| s.doc.model_body_component(b) == pin_id).unwrap().name.clone();
+    let plate_body = st.bodies.iter().find(|b| s.doc.model_body_component(b) == plate_id).unwrap().name.clone();
+
+    s.execute("appearance.assign", &json!({"bodies": [&plate_body], "appearance": "ABS - Red"})).unwrap();
+    s.execute("appearance.assign", &json!({"bodies": [&pin_body], "appearance": "ABS - Blue"})).unwrap();
+    let pin_face = s.execute("model.faces", &json!({"body": &pin_body})).unwrap()["faces"][0]["point"].clone();
+    s.execute("appearance.assign", &json!({"body": &pin_body, "faces": [pin_face], "appearance": "Copper"})).unwrap();
+
+    s.execute("component.delete", &json!({"component": "Pin"})).unwrap();
+    assert!(!s.doc.appearances.bodies.contains_key(&pin_body), "deleted imported part body override must be pruned");
+    assert!(s.doc.appearances.faces.iter().all(|f| f.body != pin_body), "deleted imported part face override must be pruned");
+    assert!(s.doc.appearances.bodies.contains_key(&plate_body), "surviving imported part override must remain");
+
+    let listed = s.execute("appearance.list", &json!({})).unwrap();
+    assert!(listed.get("inactive_bodies").is_none(), "{listed}");
+    for name in listed["bodies"].as_object().unwrap().keys() {
+        let chain = chain_read(&mut s, json!({"body": name}));
+        assert_eq!(chain["active"], "body", "{name}: {chain}");
+    }
 }

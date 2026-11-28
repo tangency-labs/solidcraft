@@ -49,6 +49,11 @@ this format.
   working radius of its tooling. A rule without them keeps the rule's own radius when picked,
   and its K-factor is estimated from the bend method (air bending, bottoming or coining) at that
   R/T, and said to be an estimate.
+- A pack has no 90° bend deduction or allowance (a rule's `unfold_method` and `unfold_value`).
+  A personal rule that unfolds from one is exported with the K-factor it works out to, and a
+  pack that names the two is read without them, with the fields named as skipped. A rule whose
+  K-factor cannot be worked out without a design (its thickness, radius or 90° value is a
+  design's parameter) is left out of the export and named.
 - A rule may also give `relief_width`, `relief_depth`, `corner_relief`, `corner_relief_shape`
   (`notch`, `round`, `rectangular` or `tear`), `hem_gap`, `gap` and `angle_display` (`bend` or
   `included`), the values of `sheet.manage_rules`. Imported into personal rules, what a rule

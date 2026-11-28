@@ -14,6 +14,7 @@ pub const BIG_OPERATION_MS: f64 = 1500.0;
 
 /// A tab's autosaver has no clock of its own: [`tick`] tells it when its turn has come.
 const SHARED_CADENCE: Duration = Duration::MAX;
+const MIN_CADENCE_DELAY: Duration = Duration::from_millis(100);
 
 /// Shared settings and cadence; each tab owns its own entry and change tracking.
 pub struct Autosaves {
@@ -26,20 +27,20 @@ pub struct Autosaves {
 impl Autosaves {
     /// Save the active design immediately, including when taking over a recovered entry.
     pub fn save(&mut self, session: &Session) -> EngineResult<bool> {
-        save_slot(&self.dir, &mut self.active, session, true, true)
+        save_slot(&self.dir, &mut self.active, session, true, None)
     }
 
     /// Save a background tab's design now, under that tab's own autosaver. A recovered design
     /// that lands behind keeps an entry of its own before the recovery entry it came from goes.
     pub(crate) fn save_background(&mut self, slot: &mut crate::documents::DocSlot) -> EngineResult<bool> {
-        save_slot(&self.dir, &mut slot.autosave, &slot.session, true, true)
+        save_slot(&self.dir, &mut slot.autosave, &slot.session, true, None)
     }
 }
 
-/// Bring one tab's autosave up to date. `due`: its turn has come. `wait`: write on this thread
-/// and wait for it (Save, close, shutdown); otherwise the write runs on a worker thread, so a
-/// scheduled autosave of several large designs never holds up the window (#3044).
-fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, wait: bool) -> EngineResult<bool> {
+/// Bring one tab's autosave up to date. `due`: its turn has come. With a UI context, a
+/// worker writes the design and wakes the window when done. Save, close and shutdown
+/// pass no context and wait for the write.
+fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, ctx: Option<&egui::Context>) -> EngineResult<bool> {
     // Clean tabs need no serialization or entry, even between scheduled saves.
     if !session.is_dirty() {
         if let Some(mut a) = slot.take() {
@@ -49,38 +50,52 @@ fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: b
         }
         return Ok(false);
     }
-    if !due {
+    if !due && !slot.as_ref().is_some_and(Autosaver::has_pending_write) {
         return Ok(false);
     }
     if slot.is_none() {
         *slot = Some(Autosaver::new(dir, SHARED_CADENCE)?);
     }
-    match slot.as_mut() {
-        Some(a) if wait => a.save(session),
-        // Skips a tab whose previous write is still running.
-        Some(a) => a.tick(session, true),
-        None => Ok(false),
+    let Some(a) = slot.as_mut() else { return Ok(false) };
+    if let Some(ctx) = ctx {
+        let ctx = ctx.clone();
+        a.tick_with_wake(session, due, move || ctx.request_repaint_of(egui::ViewportId::ROOT))
+    } else {
+        a.save(session)
     }
 }
 
 /// Autosave every open design on the shared cadence, or a tab after its big operation.
-pub fn tick(app: &mut SolveApp) {
+/// Returns the next cadence delay. In-flight writes wake the window when they finish.
+pub fn tick(app: &mut SolveApp, ctx: &egui::Context) -> Option<Duration> {
     let big = std::mem::take(&mut app.big_operation);
-    let Some(a) = app.autosave.as_mut() else { return };
-    let due = a.last_at.elapsed() >= a.interval;
+    let a = app.autosave.as_mut()?;
+    let now = Instant::now();
+    let elapsed = now.duration_since(a.last_at);
+    let interval = if a.interval.is_zero() { Duration::ZERO } else { a.interval.max(MIN_CADENCE_DELAY) };
+    let due = elapsed >= interval;
     if due {
-        a.last_at = Instant::now();
+        a.last_at = now;
     }
+    let until_due = interval.saturating_sub(if due { Duration::ZERO } else { elapsed }).max(MIN_CADENCE_DELAY);
+    let cadence_delay = (interval != Duration::MAX && !interval.is_zero() && now.checked_add(until_due).is_some()).then_some(until_due);
+    let mut repaint = None;
     let mut error = None;
-    for slot in app.docs.background_mut() {
-        let big = std::mem::take(&mut slot.big_operation);
-        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, due || big, false) {
+    let mut wake_queued = false;
+    let background = app.docs.background_mut().map(|slot| (&mut slot.autosave, &slot.session, std::mem::take(&mut slot.big_operation)));
+    // The active design goes last to preserve its crash-journal checkpoint.
+    for (saver, session, big) in background.chain(std::iter::once((&mut a.active, &app.session, big))) {
+        let result = save_slot(&a.dir, saver, session, due || big, Some(ctx));
+        let pending = saver.as_ref().is_some_and(Autosaver::has_pending_write);
+        if let Err(e) = result {
             error.get_or_insert(e);
+            // If collecting a failed write left a turn queued, that turn has no worker
+            // to wake it. Ask for one more frame to start it.
+            wake_queued |= pending;
         }
-    }
-    // Background writes must not replace the active design's crash-journal checkpoint.
-    if let Err(e) = save_slot(&a.dir, &mut a.active, &app.session, due || big, false) {
-        error.get_or_insert(e);
+        if !pending && repaint.is_none() && cadence_delay.is_some() && session.is_dirty() && saver.as_ref().is_none_or(|a| !a.caught_up(session)) {
+            repaint = cadence_delay;
+        }
     }
     if let Some(e) = error {
         let msg = format!("autosave failed: {e}");
@@ -88,6 +103,10 @@ pub fn tick(app: &mut SolveApp) {
             app.set_status(msg, true);
         }
     }
+    if wake_queued {
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+    repaint
 }
 
 /// Start autosaving into `dir` and queue the designs that crashed apps left there.
@@ -120,7 +139,7 @@ pub fn close(app: &mut SolveApp) -> Vec<String> {
         return unkept;
     };
     for slot in app.docs.background_mut() {
-        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true) {
+        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, None) {
             lost(&slot.session, e.to_string());
         }
         if let Some(saver) = slot.autosave.take() {
@@ -191,10 +210,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 act = Some((e.clone(), false));
                             }
                         });
-                        let file = e.path.clone().unwrap_or_else(|| solidcraft_ui_text::tr("recovery.never_saved").to_string());
+                        let file = e.path.as_deref().map_or_else(|| solidcraft_ui_text::tr("recovery.never_saved"), crate::display_user_path);
                         let detail = solidcraft_ui_text::format(
                             "recovery.detail",
-                            &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
+                            &[("file", file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
                         );
                         ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
                     }
@@ -407,7 +426,7 @@ mod tests {
     /// A tick, then wait for the writes it started on worker threads. Waiting writes nothing
     /// new: every design it would write was just written.
     fn tick_and_wait(app: &mut SolveApp) {
-        tick(app);
+        tick(app, &egui::Context::default());
         let Some(a) = app.autosave.as_mut() else { return };
         for slot in app.docs.background_mut() {
             if let Some(saver) = slot.autosave.as_mut() {
@@ -437,6 +456,120 @@ mod tests {
         h.step(&json!({"restart":"crash"})).unwrap();
         h.run(&json!([{ "widget":"Recover" }])).unwrap();
         assert_eq!(h.app.session.doc.features.len(), latest, "the simulated crash must follow the zero-interval checkpoint");
+    }
+
+    #[test]
+    fn an_idle_window_has_a_repaint_scheduled_when_an_edit_needs_autosave() {
+        let interval = Duration::from_secs(60);
+        let (mut app, dir) = app("idle-cadence", interval);
+        let ctx = crate::fonts::test_context();
+        let frame = |app: &mut SolveApp| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.logic(ui.ctx()));
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+
+        // An ordinary edit doesn't trigger an immediate save. The window still has to
+        // wake by the configured interval even if the user stops interacting with it.
+        app.session.execute("parameters.add", &json!({"name": "length", "expression": "10 mm"})).unwrap();
+        assert!(app.session.is_dirty() && !app.big_operation);
+        let delay = frame(&mut app);
+        assert!(delay <= interval, "no repaint is scheduled by the autosave deadline: {delay:?}");
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_outstanding_autosave_write_schedules_no_poll() {
+        let (mut app, dir) = app("no-write-poll", Duration::MAX);
+        edit(&mut app);
+        app.big_operation = true;
+
+        // The tick starts the worker and leaves its result for a later frame, regardless
+        // of how quickly it writes. There is no periodic cadence in this test.
+        let delay = tick(&mut app, &egui::Context::default());
+        assert!(app.autosave.as_ref().unwrap().active.as_ref().unwrap().has_pending_write());
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+        assert_eq!(delay, None, "the pending write scheduled a polling frame");
+    }
+
+    #[test]
+    fn completing_an_autosave_wakes_the_idle_window() {
+        let (mut app, dir) = app("write-wake", Duration::MAX);
+        let ctx = crate::fonts::test_context();
+        let (send, wakeups) = std::sync::mpsc::channel();
+        ctx.set_repaint_observer(move |info| {
+            // Other jobs can also ask the host for frames. Observe only the autosave worker.
+            if std::thread::current().name() == Some("autosave") && info.viewport_id == egui::ViewportId::ROOT {
+                let _ = send.send(info.delay);
+            }
+        });
+        app.session.execute("parameters.add", &json!({"name": "length", "expression": "10 mm"})).unwrap();
+        app.big_operation = true;
+        ctx.run_ui(egui::RawInput::default(), |ui| app.logic(ui.ctx())).textures_delta.clear();
+
+        // Supply no more frames until the worker asks for one. The timeout bounds a failure
+        // to wake; it does not advance the test or decide when the write must be ready.
+        let wake = wakeups.recv_timeout(Duration::from_secs(30));
+        assert_eq!(wake, Ok(Duration::ZERO), "autosave completion must request an immediate repaint");
+        ctx.run_ui(egui::RawInput::default(), |ui| app.logic(ui.ctx())).textures_delta.clear();
+        let saver = app.autosave.as_ref().unwrap().active.as_ref().unwrap();
+        assert!(saver.caught_up(&app.session), "the requested frame collects the finished write");
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_idle_window_autosaves_the_latest_edit_after_a_write() {
+        let (mut app, dir) = app("idle-follow-up", Duration::from_secs(3600));
+        let ctx = crate::fonts::test_context();
+        let frame = |app: &mut SolveApp| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.logic(ui.ctx()));
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+
+        // Let the host see wakeups even when a worker requests one between frames.
+        let (send, wakeups) = std::sync::mpsc::channel();
+        ctx.set_request_repaint_callback(move |info| {
+            if info.viewport_id == egui::ViewportId::ROOT {
+                let _ = send.send(info.delay);
+            }
+        });
+
+        app.run("parameters.add", json!({"name": "length", "expression": "10 mm"})).unwrap();
+        app.big_operation = true;
+        frame(&mut app);
+
+        // The first write took its snapshot before this edit. The next frame is the last
+        // one the user supplies. The autosaver must finish both writes as the window idles.
+        app.run("parameters.change", json!({"name": "length", "expression": "20 mm"})).unwrap();
+        app.big_operation = true;
+        let mut delay = frame(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let caught_up = |app: &SolveApp| app.autosave.as_ref().unwrap().active.as_ref().unwrap().caught_up(&app.session);
+        while !caught_up(&app) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(!remaining.is_zero(), "the latest edit never reached its autosave");
+            // Run only frames the application asked for. The overall deadline just bounds a
+            // failed test when the app forgets to wake the window.
+            match wakeups.recv_timeout(delay.min(remaining)) {
+                Ok(wake) => delay = delay.min(wake),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if delay < remaining => delay = frame(&mut app),
+                Err(err) => panic!("no repaint serviced the outstanding autosave: {err}, last delay {delay:?}"),
+            }
+        }
+        let id = app.autosave.as_ref().unwrap().active.as_ref().unwrap().id.clone();
+        assert_eq!(recovery::load(&dir, &id).unwrap().0, *app.session.doc);
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -728,10 +861,11 @@ mod tests {
         // The writes run on worker threads: a failure is reported by a later tick.
         let failed = |app: &SolveApp| app.status.as_ref().is_some_and(|(message, _, error)| *error && message.contains("autosave failed"));
         let deadline = Instant::now() + Duration::from_secs(60);
-        tick(&mut app);
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
         while !failed(&app) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
-            tick(&mut app);
+            tick(&mut app, &ctx);
         }
         assert!(failed(&app));
         tick_and_wait(&mut app);
@@ -763,10 +897,11 @@ mod tests {
             app.status.as_ref().is_some_and(|(message, _, error)| *error && message.starts_with(r#"autosave failed: drawing "Broken" ("#))
         };
         let deadline = Instant::now() + Duration::from_secs(60);
-        tick(&mut app);
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
         while !named(&app) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
-            tick(&mut app);
+            tick(&mut app, &ctx);
         }
         assert!(named(&app), "{:?}", app.status);
         let saved = entries(&dir);
@@ -787,7 +922,7 @@ mod tests {
         }
         app.big_operation = false;
         documents::new_tab(&mut app);
-        tick(&mut app); // Starts writing the background tab on a worker thread.
+        tick(&mut app, &egui::Context::default()); // Starts writing the background tab on a worker thread.
         documents::close(&mut app, 0, true); // Don't Save, right away.
         let files = || fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect::<Vec<_>>();
         // A write that outlived the close would recreate the entry; give it time to.

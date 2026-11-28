@@ -484,7 +484,7 @@ pub(crate) fn group_chip(
     if response.clicked() {
         fold(app, group, &history.view);
     }
-    crate::ui_kit::Menu::context(&response, |ui| group_menu(app, ui, group, &history.view));
+    group_menu(app, &response, group, &history.view);
     rect.width()
 }
 
@@ -498,30 +498,38 @@ fn fold(app: &mut SolveApp, group: &Group, view: &View) {
     }
 }
 
-fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View) {
-    let fold_label = if group.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::ui_kit::menu::button(ui, fold_label, "list").clicked() {
-        fold(app, group, view);
-        ui.close();
+fn group_menu(app: &mut SolveApp, response: &egui::Response, group: &Group, view: &View) {
+    if !crate::ui_kit::Menu::context_active(response) {
+        return;
     }
-    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
-        let features = &app.session.doc.features;
-        let items: Vec<_> = view
-            .indices(group.start, group.end)
-            .into_iter()
-            .filter_map(|i| features.get(i))
-            .map(|f| json!({"type": "feature", "id": f.id}))
-            .collect();
-        app.tree.picked_joints.clear();
-        app.tree.picked_timeline_groups.clear();
-        let _ = app.run("select.set", json!({ "items": items }));
-        ui.close();
-    }
-    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
-        let end = view.index(group.end);
-        let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
-        let _ = app.run_heavy("timeline.roll_to", position);
-        ui.close();
+    use crate::ui_kit::Item;
+    let items = [
+        Item::action("fold", if group.open { "Fold Features" } else { "Show Each Feature" }, "list"),
+        Item::action("select", "Select Features", "select"),
+        Item::action("roll", "Roll History Marker Here", "rollback"),
+    ];
+    if let Some(picked) = crate::ui_kit::Menu::context_items(response, &items) {
+        match picked.id.as_str() {
+            "fold" => fold(app, group, view),
+            "select" => {
+                let features = &app.session.doc.features;
+                let items: Vec<_> = view
+                    .indices(group.start, group.end)
+                    .into_iter()
+                    .filter_map(|i| features.get(i))
+                    .map(|f| json!({"type":"feature","id":f.id}))
+                    .collect();
+                app.tree.picked_joints.clear();
+                app.tree.picked_timeline_groups.clear();
+                let _ = app.run("select.set", json!({"items":items}));
+            }
+            "roll" => {
+                let end = view.index(group.end);
+                let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({"position":end}) };
+                let _ = app.run_heavy("timeline.roll_to", position);
+            }
+            _ => {}
+        }
     }
 }
 

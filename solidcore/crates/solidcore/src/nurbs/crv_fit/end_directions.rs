@@ -479,6 +479,7 @@ pub fn approx_end_directions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::knots::Side;
 
     fn pts() -> Vec<Vec3> {
@@ -658,9 +659,9 @@ mod tests {
         let u = even(m);
         let a = u
             .iter()
-            .map(|&t| v((1.2 * t).cos(), (1.2 * t).sin(), 0.0))
+            .map(|&t| v(det::cos(1.2 * t), det::sin(1.2 * t), 0.0))
             .collect();
-        let (s, c) = 1.2_f64.sin_cos();
+        let (s, c) = det::sin_cos(1.2_f64);
         (a, u, v(0.0, 1.0, 0.0), v(-s, c, 0.0))
     }
 
