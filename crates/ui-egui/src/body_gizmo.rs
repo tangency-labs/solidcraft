@@ -3,8 +3,9 @@
 //! face and border colours, the hovered face in the hover colour and accent (themed), or the
 //! body's own appearance with the view's edge colour, the hovered face lit as the view lights a
 //! face under the pointer (modeled); orbit and roll arrows and a Home button go around it when
-//! the `navigator_arrows` and `navigator_home` preferences say so. While the Custom View Navigator
-//! panel is open it shows the panel's choices.
+//! the `navigator_arrows` and `navigator_home` preferences say so, and the world axes stand
+//! beside the body as the view cube's triad did. While the Custom View Navigator panel is open it
+//! shows the panel's choices.
 //! A click on a face looks straight at it; a drag orbits.
 //!
 //! A concave body cannot be drawn back to front as a box's six faces are, so the faces go
@@ -20,6 +21,12 @@ use std::sync::{Arc, Mutex};
 /// The body's bounding sphere, in the navigator's design units: the navigator's own (half
 /// side 40, so its corners lie 40√3 from the centre).
 const RADIUS: f32 = 69.28;
+/// Where the world axes' triad sits beside the body, in design units from the centre: the
+/// bottom-left corner, the one free slot (Home top left, the roll arrows top right, the orbit
+/// arrows on the four compass points).
+const TRIAD_OFFSET: egui::Vec2 = egui::Vec2::new(-60.0, 52.0);
+/// An axis shaft's length from the triad's origin, in design units.
+const TRIAD_LENGTH: f32 = 17.0;
 /// Samples per pixel along each side: smooth silhouettes.
 const SS: usize = 2;
 /// Largest raster side in pixels (a guard against hostile UI scales).
@@ -419,6 +426,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
             navigator_controls::navigate(app, None, Some(app.cam.to_frame(normal)));
         }
     }
+
+    // The world axes beside the body, as the view cube's triad was: X, Y and Z as the camera
+    // poses them, in the axis colours, named at their tips. The letters scale with the gizmo,
+    // so they stay inside its rectangle at every size.
+    let axes = view_axes(&cam);
+    let origin = c + TRIAD_OFFSET * scale;
+    for (d, colour, (letter, handle)) in [(Vec3::X, t.axis_x, ("X", "x")), (Vec3::Y, t.axis_y, ("Y", "y")), (Vec3::Z, t.axis_z, ("Z", "z"))] {
+        let ([x, y], _) = axes.pose([d.x, d.y, d.z]);
+        let tip = origin + vec2(x as f32, y as f32) * (TRIAD_LENGTH * scale);
+        painter.line_segment([origin, tip], Stroke::new(1.5, colour));
+        painter.text(tip, Align2::CENTER_CENTER, letter, FontId::proportional(t.font_triad * scale), colour);
+        crate::scenario::publish_handle(&format!("body_gizmo:axis:{handle}"), tip);
+    }
     if shown.arrows {
         navigator_controls::arrows(app, ui, &painter, c, scale, active, t);
     }
@@ -587,5 +607,18 @@ mod tests {
         h.frames(2);
         assert!(crate::scenario::handle_at("axis_view:z").is_some());
         assert_eq!(crate::scenario::count_of("body_gizmo:faces"), None);
+    }
+
+    #[test]
+    fn the_axes_stand_beside_the_body() {
+        let mut h = boxed();
+        custom(&mut h);
+        h.call("ui.view", json!({"view": "iso"}));
+        h.frames(2);
+        // The world axes stand beside the body as the view cube's triad did — X, Y and Z as
+        // the camera poses them, in the axis colours, named at their tips.
+        for letter in ["x", "y", "z"] {
+            assert!(crate::scenario::handle_at(&format!("body_gizmo:axis:{letter}")).is_some(), "{letter} stands beside the body");
+        }
     }
 }
