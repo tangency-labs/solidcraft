@@ -730,3 +730,23 @@ pub fn fill_channel(
     })?;
     Ok(out.0)
 }
+
+/// [`fill_margin`]'s answer inside [`run`].
+struct Margin(f64);
+
+impl Answer for Margin {}
+
+/// The depth margin the fill of the channel between the walls `left` and `right` keeps from what
+/// a face touches ([`fill::margin`], in the record's types): computed by the kernel only, for a
+/// caller that compares walls against it.
+///
+/// # Errors
+/// The kernel's errors (a session it cannot run).
+pub fn fill_margin(left: &[Seg2], right: &[Seg2]) -> Result<f64> {
+    let channel = fill::Channel {
+        left: left.iter().map(convert::seg2).collect(),
+        right: right.iter().map(convert::seg2).collect(),
+        depth_normal: None,
+    };
+    Ok(run("fill_margin", |k| Ok(Margin(fill::margin(k, &channel))))?.0)
+}

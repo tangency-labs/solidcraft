@@ -428,6 +428,7 @@ pub use polyhedron::offset_solid;
 pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::fill_channel;
+pub use prism::fill_margin;
 pub use prism::planar_regions_boolean;
 pub use prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
 pub use prism_curve::PlanarPiece;

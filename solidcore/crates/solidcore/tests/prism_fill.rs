@@ -15,7 +15,7 @@ use solidcore::error::Result;
 use solidcore::math::det;
 use solidcore::math::{Point2, Vec2};
 use solidcore::prism::fill::{
-    fill, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
+    fill, margin, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
 };
 use solidcore::prism::profile::{loop_crosses, Loop2, Seg2};
 use solidcore::{Kernel, SolidError};
@@ -513,6 +513,56 @@ fn a_concave_face_across_the_walls_is_refused_with_the_deepest_that_builds() {
     assert!(just(fit + 1e-9).is_err());
     assert!(just(touch).is_err());
     assert!(just(a * tan(30.0)).is_err());
+}
+
+/// The depth margin a concave face keeps from what it touches is the one [`margin`] gives (one
+/// implementation, which a caller comparing walls reads too; brett19's point 5 on #22504). A
+/// concave face too deep for the 60 degree V, whose touch is F = a tan 30 in closed form, is
+/// refused with the fit `touch - margin`: F - fit - margin lies within the sides' growth
+/// ([`grown`], twice the crossing check's near miss), and the fit builds.
+#[test]
+fn a_concave_face_s_fit_keeps_the_margin_the_fill_gives() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let a = G / 2.0 + t * tan(30.0);
+    let w = Case {
+        face: Contour::Concave { depth: 3.0 },
+        ..channel(l, r)
+    };
+    let section = Channel {
+        left: w.left.clone(),
+        right: w.right.clone(),
+        depth_normal: w.depth_normal,
+    };
+    // here the zone tolerance: the section's allowance, 1e-9 of its size, is smaller
+    let delta = margin(&Kernel::default(), &section);
+    assert!((delta - ZONE).abs() < 1e-18, "{delta}");
+    let err = run(&w).unwrap_err();
+    let SolidError::Failed(failure) = &err else {
+        panic!("not a typed refusal: {err:?}");
+    };
+    assert!(
+        matches!(
+            failure.reason,
+            Reason::Fill(FillFailure::ConcaveFaceCrossesWall { .. })
+        ),
+        "{err:?}"
+    );
+    let fit = err
+        .fit()
+        .expect("the refusal says the depth that builds")
+        .size;
+    let short = a * tan(30.0) - fit - delta;
+    assert!(
+        (0.0..=grown(&w)).contains(&short),
+        "{short} (growth {})",
+        grown(&w)
+    );
+    assert!(run(&Case {
+        face: Contour::Concave { depth: fit },
+        ..w.clone()
+    })
+    .is_ok());
 }
 
 #[test]
