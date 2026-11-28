@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "name": "partial_cone_full_turn_translated_start_minus_90",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cone",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          5.0,
+          2.0,
+          20.0,
+          -90.0,
+          270.0
+        ]
+      }
+    },
+    {
+      "name": "partial_cone_full_turn_inside_threshold",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cone",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          5.0,
+          2.0,
+          20.0,
+          -90.0,
+          269.99999999982
+        ]
+      }
+    },
+    {
+      "name": "partial_cylinder_full_turn_translated",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cylinder",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          3.0,
+          20.0,
+          0.0,
+          360.0
+        ]
+      }
+    },
+    {
+      "name": "partial_cylinder_full_turn_inside_threshold",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cylinder",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          3.0,
+          20.0,
+          0.0,
+          359.99999999982
+        ]
+      }
+    },
+    {
+      "name": "partial_cone_full_turn_outside_threshold",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cone",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          5.0,
+          2.0,
+          20.0,
+          -90.0,
+          269.99999999928
+        ]
+      }
+    },
+    {
+      "name": "partial_cylinder_full_turn_outside_threshold",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:738",
+      "inputs": {
+        "op": "partial_cylinder",
+        "args": [
+          1.25,
+          -2.5,
+          0.75,
+          3.0,
+          20.0,
+          0.0,
+          359.99999999928
+        ]
+      }
+    }
+  ]
+}
