@@ -544,4 +544,33 @@ mod tests {
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
     }
+
+    /// A double-click on the image while Calibrate is open sets its points and nothing else: with a
+    /// component active, it is not a double-click in empty space, so the component stays active (#18516).
+    #[test]
+    fn a_double_click_that_sets_calibration_points_keeps_the_component_active() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        let part = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap()["component"].as_u64().unwrap();
+        h.app.ui.tab = "MODEL".into();
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+        h.settle();
+        assert!(h.app.preferences.double_click_components, "a double-click in empty space goes up a level");
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let on_the_image = [(-20.0, 0.0), (20.0, 0.0), (0.0, 10.0), (0.0, -10.0), (0.0, 0.0)]
+            .into_iter()
+            .filter_map(|(dx, dy)| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(c.center.x + dx, c.center.y + dy))))
+            .find(|p| crate::viewport::pick(&h.app, &proj, *p).is_empty() && !crate::shell::covered(&h.app, *p))
+            .expect("a spot on the image with nothing else under it");
+        h.call("ui.click", json!({"x": on_the_image.x, "y": on_the_image.y, "double": true}));
+        crate::test_support::play(&mut h);
+        let panel = h.app.tree.canvas_panel.as_ref().expect("Calibrate stays open");
+        assert!(panel.picked_both, "the two clicks set Point A and Point B");
+        assert_eq!(h.app.session.active_component, part, "the double-click set points, so the part stays active");
+    }
 }
