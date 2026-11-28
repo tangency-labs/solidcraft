@@ -508,6 +508,90 @@ fn sheets_apart_or_overlapping_are_refused() {
     assert_eq!(site(&[&lower, &sunk], 1, [0.0, 0.0, 2.0]), Err(SpotRefusal::SheetsOverlap { sheet: 0 }));
 }
 
+/// The spot as built on a site found: the site's frame and thicknesses, diameter `D`.
+fn on_site(s: &SpotSite, style: SpotStyle) -> SpotWeld {
+    SpotWeld { at: s.at, normal: s.normal, thicknesses: s.sheets.iter().map(|x| x.thickness).collect(), diameter: D, style }
+}
+
+/// As found, sheets 0.5 apart build with a notice naming the gap: the far marks lie on the far
+/// sheet's real face (z = 3), the picked marks on the picked face (z = 0), and a ball sits in the
+/// middle of the gap (z = 1.75).
+#[test]
+fn sheets_apart_build_as_found_with_the_gap_named_and_the_marks_on_the_real_faces() {
+    let lower = sheet(0.0, 1.5);
+    let apart = sheet(2.0, 1.0);
+    let found = spot_site_as_found(&[&lower, &apart], 0, face_at(&lower, [0.0; 3]), [0.0; 3], D).unwrap();
+    let [SpotNotice::Gap { sheet: 1, gap }] = found.notices[..] else {
+        panic!("{:?}", found.notices);
+    };
+    assert!((gap - 0.5).abs() < 1e-9, "gap {gap}");
+    assert!(found.fit.gaps.len() == 1 && found.fit.upper.is_none(), "{:?}", found.fit);
+    for piece in spot_weld_fitted(&on_site(&found.site, STYLES[0]), &found.fit).unwrap() {
+        check(&piece.body, "marks across a gap");
+        let (lo, hi) = extent(&piece.body);
+        match piece.side {
+            SpotSide::Lower => assert!(hi <= 1e-9, "{hi}"),
+            SpotSide::Upper => assert!(lo >= 3.0 - 1e-9, "{lo}"),
+            SpotSide::Through => panic!("no pin in this style"),
+        }
+    }
+    let got = spot_weld_fitted(&on_site(&found.site, SpotLook::MarksSmallBall.style()), &found.fit).unwrap();
+    let ball = got.iter().find(|p| p.side == SpotSide::Through).expect("a ball");
+    let (lo, hi) = extent(&ball.body);
+    assert!(((lo + hi) / 2.0 - 1.75).abs() < 1e-6, "ball from {lo} to {hi}");
+}
+
+/// As found, sheets that overlap by 0.5 build with a notice naming the overlap; the far marks lie
+/// on the far sheet's real face (z = 2). Gaps not one per faying face are bad input.
+#[test]
+fn sheets_overlapping_build_as_found_with_the_overlap_named() {
+    let lower = sheet(0.0, 1.5);
+    let sunk = sheet(1.0, 1.0);
+    let found = spot_site_as_found(&[&lower, &sunk], 0, face_at(&lower, [0.0; 3]), [0.0; 3], D).unwrap();
+    let [SpotNotice::Overlap { sheet: 1, overlap }] = found.notices[..] else {
+        panic!("{:?}", found.notices);
+    };
+    assert!((overlap - 0.5).abs() < 1e-9, "overlap {overlap}");
+    let spot = on_site(&found.site, STYLES[0]);
+    for piece in spot_weld_fitted(&spot, &found.fit).unwrap() {
+        let (lo, _) = extent(&piece.body);
+        if piece.side == SpotSide::Upper {
+            assert!((2.0 - 1e-9..=2.0 + 1e-6).contains(&lo), "{lo}");
+        }
+    }
+    let wrong = SpotFit { gaps: vec![0.0, 0.0], upper: None };
+    assert!(matches!(spot_weld_fitted(&spot, &wrong), Err(SpotRefusal::Invalid(_))));
+}
+
+/// As found, a sheet tilted 5° builds with a notice for each of its tilted faces, 5° each; the far
+/// marks lie on its tilted outer face, the same rings as on the picked face, tilted. A curved face
+/// is still refused, naming the curved spot as the fix.
+#[test]
+fn a_tilted_sheet_builds_as_found_with_its_marks_on_the_tilted_face() {
+    let lower = sheet(0.0, 1.5);
+    let tilted = block([-20.0, -20.0, 1.5], [40.0, 40.0, 1.0]);
+    let tilted = transform_matrix(&tilted, affine::rotation([0.0, 0.0, 1.5], [0.0, 1.0, 0.0], 5f64.to_radians()).unwrap()).unwrap();
+    let found = spot_site_as_found(&[&lower, &tilted], 0, face_at(&lower, [0.0; 3]), [0.0; 3], D).unwrap();
+    assert_eq!(found.notices.len(), 2, "{:?}", found.notices);
+    for notice in &found.notices {
+        let SpotNotice::Tilted { sheet: 1, angle, .. } = *notice else {
+            panic!("{notice:?}");
+        };
+        assert!((angle - 5f64.to_radians()).abs() < 1e-9, "{angle}");
+    }
+    let (_, n) = found.fit.upper.expect("the outer face is tilted");
+    assert!(near(n, [5f64.to_radians().sin(), 0.0, 5f64.to_radians().cos()]), "{n:?}");
+    let got = spot_weld_fitted(&on_site(&found.site, STYLES[0]), &found.fit).unwrap();
+    let edge = |side| got.iter().find(|p| p.side == side && p.zone == SpotZone::Edge).expect("an edge ring");
+    let (up, down) = (edge(SpotSide::Upper), edge(SpotSide::Lower));
+    check(&up.body, "tilted edge ring");
+    close(volume(&up.body), volume(&down.body), "tilted edge ring");
+    let (lo, hi) = extent(&up.body);
+    assert!(hi - lo >= 1.05 * D * 5f64.to_radians().sin(), "{lo} {hi}");
+    let ball = solidcraft_kernel::profiles::ball([0.0, 0.0, 10.0], 5.0, None).unwrap();
+    assert_eq!(spot_site_as_found(&[&ball, &lower], 0, 0, [0.0, 0.0, 15.0], D), Err(SpotRefusal::FaceNotFlat { sheet: 0, face: 0 }));
+}
+
 /// A listed sheet the line does not reach is missed; one on the outer side of the picked face means
 /// the face is not an outer face of the stack.
 #[test]
