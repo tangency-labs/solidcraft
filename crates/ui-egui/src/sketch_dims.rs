@@ -1135,7 +1135,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     if focus && i == 0 {
                         r.request_focus();
                     }
-                    any_focused |= r.has_focus() || r.lost_focus();
+                    // `Response::has_focus` is false while the window is not the focused one, which
+                    // would drop a script's Enter (`ui.key`) sent from another window.
+                    any_focused |= ui.memory(|m| m.has_focus(r.id)) || r.lost_focus();
                     if has_focus && ui.is_sizing_pass() {
                         ui.ctx().data_mut(|d| d.insert_temp(refocus, Some(id)));
                     }
