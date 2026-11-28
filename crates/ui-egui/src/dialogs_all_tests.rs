@@ -4297,7 +4297,7 @@ fn delete_switches_between_bodies_and_faces() {
     h.step(&json!({"click": {"handle": "dialog:ui.delete_mode:Faces"}})).unwrap();
     h.frames(3);
     let d = h.app.dialog.as_ref().expect("still open");
-    assert!(matches!(d.kind, Kind::DeleteFaces), "Faces is Delete Face");
+    assert!(matches!(d.kind, Kind::DeleteFaces { .. }), "Faces is Delete Face");
     assert!(d.inputs.first().is_some_and(|i| i.accept & crate::selection::FACES != 0), "it picks faces");
     let repeats = |h: &Harness| h.app.last_command.as_ref().map(|(id, _)| id.clone());
     assert_eq!(repeats(&h).as_deref(), Some("face.delete"), "Repeat repeats Delete Face");

@@ -463,7 +463,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 fn delete_mode_row(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     let faces = match d.kind {
         Kind::Remove => false,
-        Kind::DeleteFaces => true,
+        Kind::DeleteFaces { .. } => true,
         _ => return,
     };
     if d.editing.is_some() {
