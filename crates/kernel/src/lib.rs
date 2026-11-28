@@ -113,6 +113,8 @@ mod outline_tests;
 mod par;
 #[cfg(test)]
 mod split_cone_tests;
+#[cfg(test)]
+mod split_curves3d_tests;
 pub use memory::{available_memory_bytes, with_available_memory_for_test};
 pub use par::KERNEL_STACK;
 pub use par::for_each_on_threads;
@@ -570,11 +572,11 @@ pub use route::trim_keep;
 /// (feature `solidcore-profile`).
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::profiled;
-pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
 pub use splitface::{FieldKind, PieceSides, split_piece_sides};
+pub use splitface::{SplitTool, SweptCurve, curves3d_tool};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
 pub use step_in::HealedBody;

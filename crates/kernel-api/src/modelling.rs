@@ -202,6 +202,55 @@ pub enum SplitTool<'a, F> {
         /// The direction they are swept along.
         along: Option<Vec3>,
     },
+    /// Curves in space (3D sketch curves), each its exact segments end to end swept along its
+    /// own direction; each splits on its own, an open one extended past its ends along its end
+    /// tangents.
+    Curves3d {
+        /// The curves, each with its sweep direction.
+        wires: Vec<SweptCurve>,
+    },
+}
+
+/// A piece of a curve in space.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SpaceSeg {
+    /// A straight line from `a` to `b`.
+    Line {
+        /// Where it starts.
+        a: Vec3,
+        /// Where it ends.
+        b: Vec3,
+    },
+    /// An arc about `center`, turning by `angle` (radians) about `axis` (right hand) from `a`.
+    Arc {
+        /// Where it starts.
+        a: Vec3,
+        /// Its centre.
+        center: Vec3,
+        /// The axis it turns about.
+        axis: Vec3,
+        /// How far it turns.
+        angle: f64,
+    },
+    /// A free-form sketch segment (a Bézier or conic piece): `seg` on `plane`.
+    Curve {
+        /// The sketch plane.
+        plane: Plane,
+        /// The segment in that plane.
+        seg: Seg2,
+    },
+    /// A rational Bézier span on 0…1, its homogeneous control points `(x·w, y·w, z·w, w)`.
+    Bezier(Vec<[f64; 4]>),
+}
+
+/// A curve in space as a split tool: its segments end to end, and the unit direction its sheet
+/// is swept along.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweptCurve {
+    /// The segments, end to end.
+    pub segs: Vec<SpaceSeg>,
+    /// The unit direction the sheet is swept along.
+    pub along: Vec3,
 }
 
 impl<F> Clone for SplitTool<'_, F> {
@@ -210,6 +259,7 @@ impl<F> Clone for SplitTool<'_, F> {
             SplitTool::Plane(p) => SplitTool::Plane(*p),
             SplitTool::Face { body, face } => SplitTool::Face { body, face: *face },
             SplitTool::Curves { plane, curves, along } => SplitTool::Curves { plane: *plane, curves: curves.clone(), along: *along },
+            SplitTool::Curves3d { wires } => SplitTool::Curves3d { wires: wires.clone() },
         }
     }
 }
@@ -222,6 +272,7 @@ impl<F: std::fmt::Debug> std::fmt::Debug for SplitTool<'_, F> {
             SplitTool::Curves { plane, curves, along } => {
                 f.debug_struct("Curves").field("plane", plane).field("curves", curves).field("along", along).finish()
             }
+            SplitTool::Curves3d { wires } => f.debug_struct("Curves3d").field("wires", wires).finish(),
         }
     }
 }

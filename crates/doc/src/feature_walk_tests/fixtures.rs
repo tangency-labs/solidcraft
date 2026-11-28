@@ -419,6 +419,7 @@ pub(super) fn with_points(name: &str, mut v: Value) -> Value {
         "align" => json!({"from_normal": [0.0, 0.0, 1.0], "to_normal": [1.0, 0.0, 0.0]}),
         "scale" => json!({"origin": p(8.0)}),
         "move" => json!({"rotate_axis": [0.0, 1.0, 0.0]}),
+        "split_face" => json!({"wires": ["w1"], "direction": [0.0, 0.6, 0.8]}),
         "unstitch" | "reverse_normal" => json!({"faces": [p(10.0)]}),
         _ => json!({}),
     };

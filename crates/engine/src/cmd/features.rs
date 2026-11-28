@@ -468,7 +468,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only)",
+            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only); with sketch also wires?: [3D curve ids] (its 3D curves instead of its planar ones, each on its own, an open one extended along its end tangents; default: the planar curves, or every 3D curve of a sketch with no planar curves) and direction?: [x,y,z] (the sweep; default: the sketch's normal for planar curves, the mean normal of the faces at each 3D curve; a direction along the face all the way along a 3D curve is refused)",
         ),
     CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body)).begins_edit()
         .at("SOLID", "MODIFY")
@@ -4736,9 +4736,34 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
             sketch: None,
             loops: false,
+            wires: Vec::new(),
+            direction: None,
         }
     } else if p.get("sketch").is_some_and(|v| !v.is_null()) {
         let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+        let wires: Vec<String> = match p.get("wires").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(Value::String(w)) => vec![w.clone()],
+            Some(v) => {
+                let list = v.as_array().filter(|a| a.len() <= 1000).ok_or_else(|| bad(cmd, "`wires` must list 3D curve ids"))?;
+                list.iter()
+                    .map(|x| x.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`wires` must list 3D curve ids")))
+                    .collect::<Result<_>>()?
+            }
+        };
+        if let Some(missing) = wires.iter().find(|w| s.doc.sketch(sketch).is_ok_and(|sk| sk.wire_index(w).is_none())) {
+            return Err(bad(cmd, format!("the sketch has no 3D curve `{missing}`")));
+        }
+        let direction = match p.get("direction").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => {
+                let d = vec3(v).ok_or_else(|| bad(cmd, "`direction` must be [x, y, z]"))?;
+                if !(d.len() > 1e-12) {
+                    return Err(bad(cmd, "`direction` must not be zero"));
+                }
+                Some(Dir(d))
+            }
+        };
         FeatureKind::SplitFace {
             faces: faces.into_iter().map(FacePick).collect(),
             body: picked.body.clone().map(BodyName),
@@ -4746,6 +4771,8 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             tool: None,
             sketch: Some(SketchId(sketch)),
             loops: bool_(p, "loops").unwrap_or(false),
+            wires,
+            direction,
         }
     } else {
         let plane = plane_param(s, p.get("plane"), cmd)?;
@@ -4756,6 +4783,8 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             tool: None,
             sketch: None,
             loops: false,
+            wires: Vec::new(),
+            direction: None,
         }
     };
     add_face_feature(&picked, s, p, kind)

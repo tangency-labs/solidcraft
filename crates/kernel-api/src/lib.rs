@@ -54,7 +54,8 @@ pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal,
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
 pub use modelling::{
-    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, SplitTool, Taper, TrimKeep,
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, SpaceSeg, SplitTool, SweptCurve,
+    Taper, TrimKeep,
 };
 pub use planar::{Planar, PlanarRefused};
 pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};

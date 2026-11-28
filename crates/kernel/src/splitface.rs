@@ -24,15 +24,227 @@ use solidcore_record::brep::{self, Frame, Surface};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::bspline::HPoint;
 use solidcraft_geom::tess::uv::Starts;
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
-use crate::{KernelError, Result, guard, record};
+use crate::{KernelError, PathSeg, Result, guard, record};
 
-/// What splits the faces: a plane, another body's face, or sketch curves swept
-/// ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
+/// What splits the faces: a plane, another body's face, sketch curves swept, or curves in space
+/// swept ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
 pub type SplitTool<'a> = solidcraft_kernel_api::SplitTool<'a, Body>;
+
+use solidcraft_kernel_api::SpaceSeg;
+/// A curve in space as a split tool ([`curves3d_tool`] makes them).
+pub use solidcraft_kernel_api::SweptCurve;
+
+/// A segment of a 3D curve as the kernel interface carries it.
+fn space_seg(s: &PathSeg) -> SpaceSeg {
+    match s {
+        PathSeg::Line { a, b } => SpaceSeg::Line { a: *a, b: *b },
+        PathSeg::Arc { a, center, axis, angle } => SpaceSeg::Arc { a: *a, center: *center, axis: *axis, angle: *angle },
+        PathSeg::Curve { plane, seg } => SpaceSeg::Curve { plane: *plane, seg: *seg },
+        PathSeg::Bezier(b) => SpaceSeg::Bezier(b.ctrl().iter().map(|q| [q.x, q.y, q.z, q.w]).collect()),
+    }
+}
+
+/// A 3D split curve's segments as the kernel's path segments (a Bézier span whose control points
+/// are not a valid span refused).
+fn path_segs(w: &SweptCurve) -> Result<Vec<PathSeg>> {
+    w.segs
+        .iter()
+        .map(|s| match s {
+            SpaceSeg::Line { a, b } => Some(PathSeg::Line { a: *a, b: *b }),
+            SpaceSeg::Arc { a, center, axis, angle } => Some(PathSeg::Arc { a: *a, center: *center, axis: *axis, angle: *angle }),
+            SpaceSeg::Curve { plane, seg } => Some(PathSeg::Curve { plane: *plane, seg: *seg }),
+            SpaceSeg::Bezier(ctrl) => {
+                let h: Vec<HPoint> = ctrl.iter().map(|q| HPoint { x: q[0], y: q[1], z: q[2], w: q[3] }).collect();
+                crate::point_path::SpaceBezier::new(&h).map(PathSeg::Bezier)
+            }
+        })
+        .collect::<Option<Vec<PathSeg>>>()
+        .ok_or_else(|| invalid("a piece of the 3D split curve does not evaluate"))
+}
+
+/// Most points of one 3D curve the default direction is measured at.
+const MAX_DIRECTION_SAMPLES: usize = 64;
+
+/// A split tool of 3D curves (`wires`, each its segments end to end) for the faces `faces` of
+/// `body`: each swept along `along`, or with none along the mean normal of the faces at the curve
+/// (at each of its sample points the normal at the nearest point of the nearest face,
+/// [`solidcore_ops::curve_sweep::sweep_direction`]). Refused: no curves, a curve with no segments
+/// or a point that is not finite, a zero direction, normals that cancel out, and a sweep that
+/// lies in the face's tangent plane, or within 1° of it, at every sample of a curve (the sheet
+/// would touch the face, or cross it too shallowly for where it crosses to be reliable,
+/// [`solidcore_ops::curve_sweep::ALONG_FACE`], for the curve's whole length).
+pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, along: Option<Vec3>) -> Result<SplitTool<'static>> {
+    use solidcore_ops::curve_sweep::{self as cs, SweepRefusal};
+    body.require_brep("split face")?;
+    if wires.is_empty() {
+        return Err(invalid("no 3D curves to split with"));
+    }
+    if wires.iter().map(Vec::len).sum::<usize>() > MAX_SEGMENTS {
+        return Err(invalid("too many split curves"));
+    }
+    if faces.is_empty() || faces.iter().any(|f| *f >= body.face_count()) {
+        return Err(invalid("no such face"));
+    }
+    let reach = reach_of(body).diagonal().max(1.0);
+    let tol = (body.size() * 1e-2).max(1e-6);
+    let mut out = Vec::with_capacity(wires.len());
+    for (i, segs) in wires.into_iter().enumerate() {
+        let n = i + 1;
+        let pts = chain_points(&segs, tol);
+        if pts.is_empty() {
+            return Err(invalid(format!("3D curve {n} has no segments")));
+        }
+        if !pts.iter().all(|p| p.is_finite()) {
+            return Err(invalid(format!("3D curve {n} has a point that is not finite")));
+        }
+        let step = pts.len().div_ceil(MAX_DIRECTION_SAMPLES).max(1);
+        let picked: Vec<Vec3> = pts.iter().step_by(step).chain(pts.last()).copied().collect();
+        // Why a face the curve lies over has no normal there (a pole, an apex, material on both
+        // sides): kept to name the cause when no face gives a normal at all.
+        let mut no_normal: Option<String> = None;
+        let samples: Vec<cs::Sample> = picked
+            .iter()
+            .map(|p| cs::Sample {
+                at: a3(*p),
+                feet: faces
+                    .iter()
+                    .filter_map(|f| {
+                        let foot = body.point_lies_on_face(*f, *p, reach).ok().flatten()?;
+                        let normal = match body.face_normal_at(*f, foot) {
+                            Ok(n) => n?,
+                            Err(e) => {
+                                no_normal.get_or_insert_with(|| e.to_string());
+                                return None;
+                            }
+                        };
+                        Some((a3(foot), a3(normal)))
+                    })
+                    .collect(),
+            })
+            .collect();
+        let dir = cs::sweep_direction(&samples, along.map(a3)).map_err(|e| {
+            invalid(match e {
+                SweepRefusal::NoFace => match &no_normal {
+                    Some(why) => format!(
+                        "the faces have no normal where 3D curve {n} lies over them ({why}), so there is none to sweep it along: give a direction"
+                    ),
+                    None => format!(
+                        "3D curve {n} lies over none of the faces to split, so they give no normal to sweep it along: give a direction"
+                    ),
+                },
+                SweepRefusal::NoDirection if along.is_some() => "the split direction must be a nonzero vector".to_string(),
+                SweepRefusal::NoDirection => format!("the faces' normals at 3D curve {n} cancel out: give a direction"),
+                SweepRefusal::AlongFace => {
+                    format!(
+                        "3D curve {n} would be swept along the face (tangent to it, or within 1° of that) for its whole length, so it cannot cut reliably across it"
+                    )
+                }
+            })
+        })?;
+        out.push(SweptCurve { segs: segs.iter().map(space_seg).collect(), along: v3(dir) });
+    }
+    Ok(SplitTool::Curves3d { wires: out })
+}
+
+/// The points of a chain of segments in order, from its start, each segment within `tol` of
+/// its chords.
+fn chain_points(segs: &[PathSeg], tol: f64) -> Vec<Vec3> {
+    let mut pts: Vec<Vec3> = segs.first().map(PathSeg::start).into_iter().collect();
+    for s in segs {
+        pts.extend(s.points_after_start(tol));
+    }
+    pts
+}
+
+/// One 3D curve swept along its direction: a patch for each segment, unbounded along the sweep
+/// where its surface is (a line's plane, an arc's cylinder), and an open curve's ends continued
+/// along their tangents past `reach`. Each patch's normal points to the curve's left as the sweep
+/// sees it (the sweep crossed with the direction of travel).
+fn wire_patches(w: &SweptCurve, reach: &Aabb3) -> Result<Vec<Patch>> {
+    use solidcore_ops::curve_sweep as cs;
+    let given = path_segs(w)?;
+    let (Some(first), Some(last)) = (given.first(), given.last()) else { return Err(invalid("an empty 3D split curve")) };
+    if !given.iter().all(|s| s.start().is_finite() && s.end().is_finite()) {
+        return Err(invalid("3D split curves need finite segments"));
+    }
+    let dir = a3(w.along);
+    let (lo, hi) = (a3(reach.min), a3(reach.max));
+    let mut segs = given.clone();
+    let (mut lead, mut tail) = (None, None);
+    if !cs::closes(a3(first.start()), a3(last.end())) {
+        let no_tangent = || invalid("a 3D split curve with no tangent at an end");
+        // The directions of travel at the ends (an arc's turned by the sign of its angle).
+        let (_, t0) = first.along(0.0).ok_or_else(no_tangent)?;
+        let (_, t1) = last.along(1.0).ok_or_else(no_tangent)?;
+        let (s0, s1) = (first.start(), last.end());
+        // Each end runs on until it has passed the box across the sweep (the sheet holds only that
+        // part of its run): further for a tangent steep to the sweep.
+        let far = cs::reach_past(lo, hi, a3(s0)).max(cs::reach_past(lo, hi, a3(s1)));
+        let steep = || invalid("an end of the 3D split curve runs along the split direction");
+        let before = cs::run_on_across(a3(s0), a3(t0), dir, -far).map(v3).ok_or_else(steep)?;
+        let after = cs::run_on_across(a3(s1), a3(t1), dir, far).map(v3).ok_or_else(steep)?;
+        // An end line is lengthened; any other end gets a line added.
+        match segs.first_mut() {
+            Some(PathSeg::Line { a, .. }) => *a = before,
+            _ => lead = Some((before, s0)),
+        }
+        match segs.last_mut() {
+            Some(PathSeg::Line { b, .. }) => *b = after,
+            _ => tail = Some((s1, after)),
+        }
+    }
+    let mut out = Vec::new();
+    let line = |a: Vec3, b: Vec3, out: &mut Vec<Patch>| -> Result<()> {
+        let s = cs::line_strip(a3(a), a3(b), dir).ok_or_else(|| invalid("a line of the 3D curve runs along the split direction"))?;
+        // u along the sweep, v along the line: the normal sweep × line is the line's left.
+        out.push(Patch { surface: Surface::Plane { origin: s.origin, u_axis: s.u, v_axis: s.v }, domain: [ALL, [0.0, s.length]], flip: false });
+        Ok(())
+    };
+    let bezier = |ctrl: &[[f64; 4]], out: &mut Vec<Patch>| -> Result<()> {
+        let [low, high] = cs::extruded_rows(ctrl, dir, lo, hi).ok_or_else(|| invalid("a piece of the 3D curve runs along the split direction"))?;
+        let degree = ctrl.len().saturating_sub(1);
+        let knots = |d: usize| std::iter::repeat_n(0.0, d + 1).chain(std::iter::repeat_n(1.0, d + 1)).collect::<Vec<f64>>();
+        let surface = Surface::RationalSpline { u_knots: knots(1), v_knots: knots(degree), homogeneous: vec![low, high] };
+        out.push(Patch { surface, domain: [[0.0, 1.0], [0.0, 1.0]], flip: false });
+        Ok(())
+    };
+    if let Some((a, b)) = lead {
+        line(a, b, &mut out)?;
+    }
+    for s in &segs {
+        match *s {
+            PathSeg::Line { a, b } => line(a, b, &mut out)?,
+            PathSeg::Arc { a, center, axis, angle } => match cs::arc_strip(a3(a), a3(center), a3(axis), angle, dir) {
+                // About an axis along the sweep: its cylinder, the left inside it or outside.
+                Some(c) => {
+                    let surface = Surface::Cylinder { frame: Frame { origin: c.origin, x_axis: c.x, y_axis: c.y }, radius: c.radius };
+                    out.push(Patch { surface, domain: [c.angles, ALL], flip: c.left_inside });
+                }
+                None => {
+                    let pieces = cs::arc_beziers(a3(a), a3(center), a3(axis), angle)
+                        .ok_or_else(|| invalid("a 3D split arc needs a radius and a turn of at most one revolution"))?;
+                    for p in &pieces {
+                        bezier(p, &mut out)?;
+                    }
+                }
+            },
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => {
+                let b = s.space_bezier().ok_or_else(|| invalid("a piece of the 3D split curve does not evaluate"))?;
+                let ctrl: Vec<[f64; 4]> = b.ctrl().iter().map(|q| [q.x, q.y, q.z, q.w]).collect();
+                bezier(&ctrl, &mut out)?;
+            }
+        }
+    }
+    if let Some((a, b)) = tail {
+        line(a, b, &mut out)?;
+    }
+    Ok(out)
+}
 
 /// Most segments a sketch tool may hold.
 pub(crate) const MAX_SEGMENTS: usize = 4096;
@@ -137,6 +349,12 @@ fn cutters(tool: &SplitTool, reach: &Aabb3) -> Result<Vec<Vec<Patch>>> {
                 return Err(invalid("too many split curves"));
             }
             curves.iter().map(|c| curve_patches(plane, c, sweep, reach)).collect()
+        }
+        SplitTool::Curves3d { wires } => {
+            if wires.iter().map(|w| w.segs.len()).sum::<usize>() > MAX_SEGMENTS {
+                return Err(invalid("too many split curves"));
+            }
+            wires.iter().map(|w| wire_patches(w, reach)).collect()
         }
     }
 }
@@ -394,7 +612,8 @@ pub struct PieceSides {
 /// Which side of each field of `tool` each of the faces `faces` of `split` (a body `tool` split
 /// with [`split_faces`]) lies on: the tool's field at a point inside the face, on its surface and
 /// inside its trims (SMLib's `CalculateAnInternalPoint`). Each piece of a split face lies wholly
-/// on one side of every field, so one point says which; a face that lies on a field says nothing.
+/// on one side of every field, so one point says which; a face that lies on a field says nothing,
+/// and nor does any piece about a closed 3D curve that turns no one way about its sweep.
 pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Result<PieceSides> {
     let fields: Vec<ToolSide> = cutters(tool, &reach_of(split))?
         .iter()
@@ -402,12 +621,39 @@ pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Res
         .collect::<Result<_>>()?;
     // Each patch's positive side is a sketch curve's left: inside a counter-clockwise loop,
     // outside a clockwise one.
-    let kinds: Vec<(FieldKind, bool)> = match tool {
-        SplitTool::Plane(_) => vec![(FieldKind::Plane, true)],
-        SplitTool::Face { .. } => vec![(FieldKind::Face, true)],
+    // `None`: which side is which cannot be told for any piece.
+    let kinds: Vec<(FieldKind, Option<bool>)> = match tool {
+        SplitTool::Plane(_) => vec![(FieldKind::Plane, Some(true))],
+        SplitTool::Face { .. } => vec![(FieldKind::Face, Some(true))],
         SplitTool::Curves { curves, .. } => curves
             .iter()
-            .map(|c| if chain_closed(c) { (FieldKind::Loop, solidcore_record::Loop2 { segs: c.clone() }.is_ccw()) } else { (FieldKind::Curve, true) })
+            .map(|c| {
+                if chain_closed(c) {
+                    (FieldKind::Loop, Some(solidcore_record::Loop2 { segs: c.clone() }.is_ccw()))
+                } else {
+                    (FieldKind::Curve, Some(true))
+                }
+            })
+            .collect(),
+        // A closed 3D curve's left is inside where it turns counter-clockwise about its sweep;
+        // where it turns no one way (its view along the sweep crosses itself, or encloses
+        // nothing) no piece is called inside. Sampled to a thousandth of its length, whatever
+        // its size, so a small loop is still seen to turn.
+        SplitTool::Curves3d { wires } => wires
+            .iter()
+            .map(|w| {
+                // A curve that does not convert has no points (its patches refuse it).
+                let segs = path_segs(w).unwrap_or_default();
+                let length: f64 = segs.iter().filter_map(PathSeg::length).sum();
+                let tol = (length * 1e-3).max(1e-9);
+                let pts: Vec<[f64; 3]> = chain_points(&segs, tol).into_iter().map(a3).collect();
+                match (pts.first(), pts.last()) {
+                    (Some(a), Some(b)) if solidcore_ops::curve_sweep::closes(*a, *b) => {
+                        (FieldKind::Loop, solidcore_ops::curve_sweep::loop_turn(&pts, a3(w.along)))
+                    }
+                    _ => (FieldKind::Curve, Some(true)),
+                }
+            })
             .collect(),
     };
     if kinds.len() != fields.len() {
@@ -423,8 +669,9 @@ pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Res
                 .iter()
                 .zip(&kinds)
                 .map(|(field, (_, ahead))| {
+                    let ahead = (*ahead)?;
                     let side = field.at(p?);
-                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == *ahead)
+                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == ahead)
                 })
                 .collect()
         })
@@ -452,6 +699,7 @@ pub(crate) fn inner_points(body: &Body) -> Result<Vec<Option<Vec3>>> {
 pub(crate) fn field_count(tool: &SplitTool) -> Result<usize> {
     Ok(match tool {
         SplitTool::Curves { curves, .. } => curves.len(),
+        SplitTool::Curves3d { wires } => wires.len(),
         _ => 1,
     })
 }
@@ -611,6 +859,7 @@ fn stops_short(tool: &SplitTool) -> KernelError {
     invalid(match tool {
         SplitTool::Face { .. } => "the tool face doesn't reach across the surface, even extended",
         SplitTool::Curves { .. } => "the sketch curves don't reach across the surface, even extended",
+        SplitTool::Curves3d { .. } => "the 3D curves don't reach across the surface, even extended",
         SplitTool::Plane(_) => "the plane doesn't reach across the surface",
     })
 }

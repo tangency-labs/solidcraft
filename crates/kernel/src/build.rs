@@ -1532,7 +1532,7 @@ impl PathSeg {
     /// parameter: a sketch cubic, Bézier or conic carried onto its plane (an affine image keeps
     /// the weights). `None` for a line or an arc, which have closed forms of their own, and for a
     /// span that does not evaluate.
-    fn space_bezier(&self) -> Option<crate::point_path::SpaceBezier> {
+    pub(crate) fn space_bezier(&self) -> Option<crate::point_path::SpaceBezier> {
         use solidcraft_geom::bspline::HPoint;
         let PathSeg::Curve { plane, seg } = *self else {
             return match *self {
