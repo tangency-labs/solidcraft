@@ -305,6 +305,83 @@ fn a_parameter_added_while_the_editor_is_open_keeps_the_edit() {
     assert_editor_volume(&mut session, 12024.0);
 }
 
+/// #9223: a parameter added while the feature editor is open is not part of the edit the
+/// editor is cancelling either: Cancel rolls the editor's rollback back and the design keeps
+/// the parameter.
+#[test]
+fn cancelling_after_a_parameter_was_added_keeps_the_parameter() {
+    let (mut session, source, original, _commands) = extrusion_editor();
+    session.execute("parameters.add", &json!({"name": "len", "expression": "20 mm"})).unwrap();
+    session
+        .restore_editor(&source, original)
+        .unwrap_or_else(|error| panic!("the editor refused the cancel: {error}"));
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "the design keeps the parameter");
+    assert_editor_volume(&mut session, 6024.0);
+}
+
+/// #9223: the parameters the design gained while the feature editor was open are not part of
+/// the editor's edit: the history keeps them, so undoing a visibility change made while the
+/// editor was open does not take the parameter away.
+#[test]
+fn undoing_a_visibility_change_keeps_the_parameter_the_design_gained() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let mut commands = commands;
+    commands[0].1["params"]["distance"] = json!("len");
+    session.execute("parameters.add", &json!({"name": "len", "expression": "20 mm"})).unwrap();
+    session.execute("browser.visibility", &json!({"items": ["Other"], "visible": false})).unwrap();
+    let prepared = session.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "the design keeps the parameter");
+    assert_editor_volume(&mut session, 12024.0);
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert_editor_volume(&mut session, 6024.0);
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "undoing the edit keeps the parameter");
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert_editor_volume(&mut session, 6024.0);
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "undoing the visibility change keeps the parameter");
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert!(!session.doc.params.iter().any(|param| param.name == "len"), "undoing the parameter takes it away");
+    assert_editor_volume(&mut session, 6024.0);
+}
+
+/// #9223: the edit is computed on the design as it was when the editor was opened, with the
+/// parameters it gained since: the poses the editor's rollback solved are not the design's.
+#[test]
+fn a_parameter_added_while_the_editor_is_open_keeps_the_designs_poses() {
+    let mut session = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        session.execute("component.activate", &json!({"component": "root"})).unwrap();
+        session.execute("component.create", &json!({"name": name})).unwrap();
+        session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    let component = |s: &Session, name: &str| s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+    let occurrence = |s: &Session, name: &str| {
+        let component = component(s, name);
+        s.doc.occurrences.iter().find(|o| o.component == component).cloned().unwrap()
+    };
+    session.execute("occurrence.ground", &json!({"occurrence": occurrence(&session, "A").id, "grounded": true})).unwrap();
+    session
+        .execute("joint.create", &json!({"type": "rigid", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "offset": 5, "name": "Seat"}))
+        .unwrap();
+    let seated = occurrence(&session, "B").transform;
+    session.execute("component.activate", &json!({"component": "A"})).unwrap();
+    let a = component(&session, "A");
+    let body = session.model.state().bodies.iter().find(|b| b.component == a).map(|b| b.name.clone()).unwrap();
+    session.execute("solid.move", &json!({"bodies": [body], "translate": [30, 0, 0]})).unwrap();
+    let moved = occurrence(&session, "B").transform;
+    assert_ne!(moved, seated, "B follows the box it is seated on");
+    let original = session.scratch();
+    session.execute("timeline.roll_to", &json!({"position": 2})).unwrap();
+    let source = session.scratch();
+    assert_eq!(occurrence(&session, "B").transform, seated, "before the move, B sits where the box was");
+    session.execute("parameters.add", &json!({"name": "len", "expression": "20 mm"})).unwrap();
+    let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.doc.marker, None);
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "the design keeps the parameter");
+    assert_eq!(occurrence(&session, "B").transform, moved, "the design keeps the pose it had when the editor opened");
+}
+
 #[test]
 fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
     let (mut session, source, original, commands) = extrusion_editor();
