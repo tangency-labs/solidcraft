@@ -3015,3 +3015,99 @@ fn move_points_refuses_a_near_that_two_points_answer() {
     let e = s.execute("sketch.move_points", &json!({"moves": [{"near": [10, 0], "to": [12, 0]}]})).unwrap_err().to_string();
     assert!(e.contains("as close"), "{e}");
 }
+
+/// A failed Save As renames history twice. The failed command must restore the same
+/// Arc graph as the entry that Cancel and Finish use, not only equal document values.
+fn failed_save_keeps_temporary_sketch_history(finish: bool) {
+    for command in ["file.save", "file.save_as"] {
+        for writer_error in ["compression", "write"] {
+            let (mut s, id) = sketch_below_a_solid();
+            let dir = std::env::temp_dir().join(format!("solidcraft-failed-sketch-save-{}-{command}-{writer_error}-{finish}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            run(&mut s, "file.save_as", json!({"path":dir.join("Borrowed.solidcraft").to_string_lossy()}));
+            assert_eq!(s.doc.name, "Borrowed");
+            assert!(!s.user_named, "the fixture uses a borrowed file name");
+            let entry_document = s.doc.to_json();
+            run(&mut s, "sketch.edit", json!({"sketch":id,"restore_marker":null}));
+            assert_eq!(s.sketch_entry.as_ref().unwrap().restore_marker, Some(None));
+            for y in [20, 30] {
+                run(&mut s, "sketch.line", json!({"points":[[0,y],[10,y]]}));
+            }
+            // Retain an actual redo snapshot with its own historical SketchEntry as well.
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.redo.len(), 1);
+            let anchored = |s: &Session| {
+                let entry = s.sketch_entry.as_ref().unwrap();
+                let top = entry.undo_len.checked_sub(1).and_then(|i| s.undo.get(i)).unwrap();
+                std::sync::Arc::ptr_eq(&top.doc, entry.undo_top.as_ref().unwrap())
+            };
+            assert!(anchored(&s), "the entry is genuinely anchored before the failed save");
+            let before = s.doc.to_json();
+            let history = (s.undo.len(), s.redo.len());
+            let path = s.path.clone();
+            let dirty = s.is_dirty();
+            // An ordinary command failure still restores the pre-call entry and document.
+            assert!(s.execute("sketch.line", &json!({"points":[[0,0]]})).is_err());
+            assert_eq!(s.doc.to_json(), before);
+            assert!(anchored(&s));
+            let target = if writer_error == "write" {
+                let missing = dir.join("missing-dir");
+                assert!(!missing.exists());
+                missing.join("Changed.solidcraft")
+            } else {
+                dir.join("Changed.solidcraft")
+            };
+            let mut params = json!({"path":target.to_string_lossy()});
+            if writer_error == "compression" {
+                params["compression"] = json!("invalid");
+            }
+            let error = s.execute(command, &params).unwrap_err();
+            if writer_error == "compression" {
+                assert!(error.to_string().contains("compression"), "{error}");
+            }
+            assert!(!target.exists(), "a refused save writes no target file");
+            assert_eq!(s.doc.to_json(), before, "{command}/{writer_error}: failed save keeps the borrowed name and edit");
+            assert_eq!((s.undo.len(), s.redo.len()), history);
+            assert_eq!(s.path, path);
+            assert_eq!(s.is_dirty(), dirty);
+            let same_anchor = anchored(&s);
+            run(&mut s, "edit.redo", json!({}));
+            assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+            if finish {
+                run(&mut s, "sketch.finish", json!({}));
+                assert_eq!((s.active_sketch, s.doc.marker), (None, None));
+                assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(
+                    s.doc.to_json(),
+                    entry_document,
+                    "{command}/{writer_error}: one Undo takes back the complete edit (anchor survived: {same_anchor})"
+                );
+                assert_eq!(s.active_sketch, None);
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+            } else {
+                let result = s.execute("sketch.cancel", &json!({}));
+                assert!(result.is_ok(), "{command}/{writer_error}: Cancel still reaches the edit entry (anchor survived: {same_anchor}): {result:?}");
+                assert_eq!(s.doc.to_json(), entry_document);
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(s.active_sketch, Some(id));
+                assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.doc.to_json(), entry_document);
+            }
+            assert!(same_anchor, "the failed save restores real alias identity, not only equal values");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+#[test]
+fn failed_save_keeps_temporary_sketch_cancel_and_undo_redo() {
+    failed_save_keeps_temporary_sketch_history(false);
+}
+
+#[test]
+fn failed_save_keeps_temporary_sketch_finish_as_one_undo() {
+    failed_save_keeps_temporary_sketch_history(true);
+}

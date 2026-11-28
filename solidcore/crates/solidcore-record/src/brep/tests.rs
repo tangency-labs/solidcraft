@@ -1113,3 +1113,126 @@ fn validate_file_reports_a_collapsed_segment_past_the_cap() {
     };
     assert_eq!(message, "portable B-rep: collapsed polyline segment");
 }
+
+/// A screw-swept wall's definition: a straight profile across the axis, one turn in eight spans,
+/// with a run-out law.
+fn a_sweep() -> sweep::SweepDefinition {
+    let quarter = TAU / 16.0;
+    sweep::SweepDefinition {
+        profile: Curve::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[5., 0., 0.], [6., 0., 0.5]],
+        },
+        motion: sweep::SweepMotion::Screw {
+            origin: [0.; 3],
+            axis: [0., 0., 1.],
+            pitch: 1.5,
+            law: Some(sweep::RadialLaw {
+                direction: [1., 0., 0.],
+                angles: vec![0., TAU],
+                offsets: vec![0., -0.5],
+            }),
+        },
+        stations: (0..=8).map(|i| f64::from(i) * 2.0 * quarter).collect(),
+        half_angles: vec![quarter; 8],
+        map: sweep::SweepMap::default(),
+        bound: 1e-7,
+    }
+}
+
+/// A sweep face is its definition with its net as its NURBS form: it validates and round-trips
+/// number for number, writes as kind `sweep`, and is refused without its net and with each
+/// structural fault.
+#[test]
+fn a_sweep_face_is_its_definition_on_its_net() {
+    type Fault = fn(&mut sweep::SweepDefinition);
+    let form = Surface::Spline {
+        u_knots: vec![-10., -10., 10., 10.],
+        v_knots: vec![-10., -10., 10., 10.],
+        points: vec![
+            vec![[-10., -10., 0.], [-10., 10., 0.]],
+            vec![[10., -10., 0.], [10., 10., 0.]],
+        ],
+    };
+    let mut b = sheet();
+    b.faces[0].surface = Surface::Sweep {
+        definition: Box::new(a_sweep()),
+    };
+    b.faces[0].nurbs = Some(form);
+    b.validate().unwrap_or_else(|e| panic!("{e}"));
+    let text = serde_json::to_string(&b).unwrap();
+    assert!(text.contains(r#""kind":"sweep""#), "{text}");
+    assert!(text.contains(r#""kind":"screw""#), "{text}");
+    let back: Brep = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, b);
+    let mut bare = b.clone();
+    bare.faces[0].nurbs = None;
+    assert!(bare.validate().is_err(), "a sweep without its net");
+    let faults: [(&str, Fault); 10] = [
+        ("a negative bound", |d| d.bound = -1.0),
+        ("a line profile", |d| {
+            d.profile = Curve::Line {
+                start: [0.; 3],
+                end: [1.; 3],
+            }
+        }),
+        ("one station", |d| {
+            d.stations.truncate(1);
+            d.half_angles.clear();
+        }),
+        ("stations out of order", |d| d.stations.swap(1, 2)),
+        ("a half angle missing", |d| {
+            d.half_angles.pop();
+        }),
+        ("a span past an eighth of a turn", |d| {
+            d.half_angles[0] = 1.0;
+        }),
+        ("a zero pitch", |d| {
+            let sweep::SweepMotion::Screw { pitch, .. } = &mut d.motion;
+            *pitch = 0.0;
+        }),
+        ("an axis not unit", |d| {
+            let sweep::SweepMotion::Screw { axis, .. } = &mut d.motion;
+            *axis = [0., 0., 2.];
+        }),
+        ("a law along the axis", |d| {
+            let sweep::SweepMotion::Screw { law, .. } = &mut d.motion;
+            if let Some(l) = law {
+                l.direction = [0., 0., 1.];
+            }
+        }),
+        ("a map of no scale", |d| d.map.b[1] = 0.0),
+    ];
+    for (what, fault) in faults {
+        let mut bad = b.clone();
+        if let Surface::Sweep { definition } = &mut bad.faces[0].surface {
+            fault(definition);
+        }
+        assert!(bad.validate().is_err(), "{what}");
+    }
+    let mut nan = b;
+    if let Surface::Sweep { definition } = &mut nan.faces[0].surface {
+        definition.stations[3] = f64::NAN;
+    }
+    assert!(nan.validate().is_err(), "a station not finite");
+}
+
+/// A reader from before the sweep kind refuses a record that has one, by name: a design's cached
+/// body that holds one is a cache miss there, and the design is evaluated again from its timeline.
+#[test]
+fn an_older_reader_refuses_a_sweep_face_by_name() {
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    #[allow(dead_code)]
+    enum OlderSurface {
+        BallPatch { center: [f64; 3], radius: f64 },
+    }
+    let label = serde_json::to_value(Surface::Sweep {
+        definition: Box::new(a_sweep()),
+    })
+    .unwrap();
+    let error = serde_json::from_value::<OlderSurface>(label)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown variant `sweep`"), "{error}");
+}
