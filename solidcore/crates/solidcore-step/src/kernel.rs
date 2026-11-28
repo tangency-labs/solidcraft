@@ -12,6 +12,35 @@ pub(crate) use solidcore::eval::uv::{Starts, unwrap};
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
 
+/// A support placement selected by the kernel when a shared-rim pole is witnessed.
+pub(crate) fn sphere_frame(
+    frame: &Frame,
+    radius: f64,
+    candidates: &[(u32, Frame, f64)],
+    edges: &[&solidcore_record::brep::Edge],
+    b: &solidcore_record::brep::Brep,
+) -> Frame {
+    let converted: Option<Vec<_>> = edges
+        .iter()
+        .map(|e| {
+            let tolerance =
+                e.vertices.iter().filter_map(|v| b.vertices.get(*v as usize)).fold(b.tolerance.max(e.tolerance), |t, v| t.max(v.tolerance));
+            c::curve(e.parameters()).ok().map(|curve| (curve, e.interval, tolerance))
+        })
+        .collect();
+    let Some(converted) = converted else { return frame.clone() };
+    let borrowed: Vec<_> = converted.iter().map(|(curve, interval, tolerance)| (curve, *interval, *tolerance)).collect();
+    let original = c::frame(frame);
+    for (face, support, support_radius) in candidates {
+        let junctions: Vec<_> = edges.iter().zip(&borrowed).filter(|(e, _)| e.uses.iter().any(|u| u.face == *face)).map(|(_, edge)| *edge).collect();
+        let selected = k::form::sphere_frame(&original, radius, &c::frame(support), *support_radius, &borrowed, &junctions);
+        if selected != original {
+            return c::record_frame(&selected);
+        }
+    }
+    frame.clone()
+}
+
 /// The kernel's geometric radial order of the faces leaving an edge. Record uses
 /// are returned as a permutation, with their side flags unchanged.
 pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface, &Curve2, bool)]) -> Result<Vec<usize>, Error> {
