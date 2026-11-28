@@ -10,6 +10,9 @@ macro_rules! graphics_preferences {
         $next! { $($rest),* ; $($fields)*
             /// Soft contact shading in the GPU viewport; optional and applied immediately.
             ambient_occlusion: bool = false, PAGE_GRAPHICS;
+            /// Each origin plane wears the colour of the axis normal to it: XY blue, YZ red, XZ green
+            /// (#3722). Off by default: the three planes keep the neutral origin-plane colour.
+            color_origin_planes_by_axis: bool = false, PAGE_GRAPHICS => check_id("prefs.color_origin_planes_by_axis");
             /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
             cosmetic_threads: bool = false, PAGE_GRAPHICS;
             /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
