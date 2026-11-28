@@ -2880,6 +2880,57 @@ fn status_says_which_views_are_out_of_date() {
     assert!(all_are(&status_of(&mut s).1, "out_of_date"), "a model edit marks every view");
 }
 
+/// [`front_and_top`], still automatic, after the block's length becomes 160 mm. Inspect shows both
+/// paper boundaries at that length. This is not the sheet page, and status is not read: a view that
+/// nothing has rebuilt yet may still be out of date.
+fn automatic_views_after_the_block_lengthens() -> (Session, u64, [u64; 2]) {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["updates"], "automatic");
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 160}}));
+    // The block is 160 x 50 x 20 mm along X, Y and Z. Both views are at 1:2, so one model millimetre
+    // is 0.5 mm on paper. The front view is centred at (150, 150): paper size 160/2 by 20/2 = 80 x 10,
+    // boundary (150 ± 40, 150 ± 5) = (110, 145) to (190, 155). The top view keeps that scale, lined
+    // up at y 220: paper size 160/2 by 50/2 = 80 x 25, boundary (150 ± 40, 220 ± 12.5) = (110, 207.5)
+    // to (190, 232.5).
+    let boundary = |s: &mut Session, view: u64| run(s, "drawing.view.inspect", json!({"view": ids::encode(view)}))["boundary_mm"].clone();
+    let is_box = |got: &Value, min: [f64; 2], max: [f64; 2]| {
+        let corner = |at: &str| Vec2::new(got[at][0].as_f64().unwrap(), got[at][1].as_f64().unwrap());
+        (corner("min") - Vec2::from(min)).len() < 1e-6 && (corner("max") - Vec2::from(max)).len() < 1e-6
+    };
+    let (front_box, top_box) = (boundary(&mut s, front), boundary(&mut s, top));
+    assert!(is_box(&front_box, [110.0, 145.0], [190.0, 155.0]), "front followed the length: {front_box}");
+    assert!(is_box(&top_box, [110.0, 207.5], [190.0, 232.5]), "top followed the length: {top_box}");
+    (s, sheet, [front, top])
+}
+
+/// Every view is current, none is waiting, and the drawing is not held.
+fn rebuilt_views_are_current(s: &mut Session) {
+    let (reply, words) = status_of(s);
+    assert!(all_are(&words, "current"), "{reply}");
+    assert_eq!(reply["waiting"], json!(0), "{reply}");
+    assert!(reply.get("held").is_none() || reply["held"] == json!(false), "{reply}");
+}
+
+/// Once an export has rebuilt an automatic drawing's views for the model as it is, `drawing.status`
+/// says they are current. No sheet page is opened.
+#[test]
+fn status_is_current_after_an_export_rebuilds_the_views() {
+    let (mut s, sheet, _) = automatic_views_after_the_block_lengthens();
+    let reply = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert!(reply["svg"].as_str().is_some_and(|svg| svg.contains("<svg")), "{reply}");
+    rebuilt_views_are_current(&mut s);
+}
+
+/// Once `drawing.scene` has rebuilt that sheet, status says the same: it does not stay stale until a
+/// sheet page is shown.
+#[test]
+fn status_is_current_after_drawing_scene_rebuilds_the_views() {
+    let (mut s, sheet, _) = automatic_views_after_the_block_lengthens();
+    run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    rebuilt_views_are_current(&mut s);
+}
+
 /// A failed or placeholder view always says why, and a view on another sheet is out of date until
 /// its own sheet is drawn, with that sheet's id.
 #[test]
