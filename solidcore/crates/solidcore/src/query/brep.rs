@@ -106,7 +106,6 @@ use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
-use crate::geom::solution_array::Solution;
 use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::intersect::api_intersectors::{
     intersect_curve_face, intersect_curve_face_within, CurveHits,
@@ -119,6 +118,7 @@ use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::knots::Side;
 use crate::primitive::api_curves::create_line_segment;
+use crate::query::api_queries::surface_closest_point;
 use crate::query::edge as qe;
 use crate::query::face::{p1 as qf1, p3 as qf3};
 use crate::surface::surface::Surface;
@@ -956,10 +956,17 @@ impl<'a> BrepQuery<'a> {
     /// solve, [`SolverOperation::Rayfire`], every solution), each a face's surface met by the
     /// ray (`GlobalLineIntersect`) inside the face's trim, at the B-rep's zone tolerance
     /// ([`brep_zone_tol_3d`]) plus the face's own, and no farther behind the origin than the
-    /// solve's zero. The first is the hit of least distance; of hits at the same distance (a
-    /// ray through an edge meets each of its faces there) the solve's first. Its distance is
-    /// clamped at 0 (a hit within the solve's zero behind the origin is at the origin), while
-    /// its point stays the surface's point. A sheet is hit from either side. The solve may make missing UV trim curves on `b`, as a ray fire does.
+    /// solve's zero. Each is a hit of the faces at its point as [`face_hits`] finds them:
+    /// those of the vertex, edge or face there at the zone tolerance, else those of the
+    /// solution's own vertex, edge or face (a ray through a seam, an edge or a corner meets
+    /// each face there). The first is the nearest, and of hits at one distance the one on
+    /// the first face in `b`'s face order (`GetFaces`), as `face_hits` orders them. Its
+    /// (u, v) is the solution's when the solution is on that face, else that of the face's
+    /// surface point nearest the ray's point there; a face without one is passed over for
+    /// the next hit. Its distance is the solution's, clamped at 0 (a hit within the solve's
+    /// zero behind the origin is at the origin), and its point is the surface's at its
+    /// (u, v). A sheet is hit from either side. The solve may make missing UV trim curves
+    /// on `b`, as a ray fire does.
     ///
     /// # Errors
     ///
@@ -985,29 +992,81 @@ impl<'a> BrepQuery<'a> {
                 opt_vectors: &vectors,
             },
         )?;
-        let mut first: Option<(FaceId, &Solution<CacheObject>)> = None;
-        for solution in solutions.as_slice() {
-            let Some(CacheObject::Face(face)) = solution.objects.first().copied().flatten() else {
-                continue;
-            };
-            let nearer = first
-                .is_none_or(|(_, best)| solution.start.solution_value < best.start.solution_value);
-            if nearer {
-                first = Some((face, solution));
+        let order = bp1::faces(b, None)?;
+        let rank = |f: FaceId| order.iter().position(|&g| g == f).unwrap_or(usize::MAX);
+        let all = solutions.as_slice();
+        // nearest first; the solutions at one distance are taken together, and those of a
+        // farther distance only when no nearer one gives a hit
+        let mut nearest_first: Vec<(f64, usize)> = all
+            .iter()
+            .enumerate()
+            .map(|(index, solution)| (solution.start.solution_value, index))
+            .collect();
+        nearest_first.sort_by(|p, q| p.0.total_cmp(&q.0));
+        for at_one_distance in nearest_first.chunk_by(|p, q| p.0.total_cmp(&q.0).is_eq()) {
+            // the faces at each solution's point as `face_hits` finds them: those of the
+            // vertex, edge or face there at the zone tolerance (`entity_at`, its errors
+            // returned as `face_hits` returns them), else those of the solution's own
+            // vertex, edge or face
+            let mut met: Vec<(usize, FaceId, f64, usize)> = Vec::new();
+            for &(distance, index) in at_one_distance {
+                let Some(solution) = all.get(index) else {
+                    continue;
+                };
+                let on_ray = ray.origin + ray.direction * distance;
+                let entity = match self.entity_at(k, b, on_ray, tolerance)? {
+                    Some(entity) => Some(entity),
+                    None => solution
+                        .objects
+                        .first()
+                        .copied()
+                        .flatten()
+                        .and_then(|object| bp2::cache_entity(object).ok()),
+                };
+                let faces = match entity {
+                    Some(EntityRef::Vertex(v)) => vertex::faces(b, v).unwrap_or_default(),
+                    Some(EntityRef::Edge(e)) => edge::faces(b, e, None).unwrap_or_default(),
+                    Some(EntityRef::Face(f)) => vec![f],
+                    _ => Vec::new(),
+                };
+                for face in faces {
+                    met.push((rank(face), face, distance, index));
+                }
+            }
+            // at one distance in `GetFaces` order, as `face_hits` orders its hits
+            met.sort_by_key(|hit| hit.0);
+            for (_, face, distance, index) in met {
+                let Some(solution) = all.get(index) else {
+                    continue;
+                };
+                let surface = face::p2::surface(b, face)?.ok_or_else(|| {
+                    SolidError::invalid_input(OP_FIRST_HIT, "a face without a surface")
+                })?;
+                // the solution's (u, v) when it is a solution on this face; else that of
+                // the surface's point nearest the ray's point there, and a face without
+                // one is passed over
+                let uv = match solution.objects.first().copied().flatten() {
+                    Some(CacheObject::Face(f)) if f == face => {
+                        Point2::new(solution.start.param(0)?, solution.start.param(1)?)
+                    }
+                    _ => {
+                        let on_ray = ray.origin + ray.direction * distance;
+                        let nearest = surface_closest_point(k, surface, on_ray).ok();
+                        let Some(&uv) = nearest.as_ref().and_then(|n| n.uvs.first()) else {
+                            continue;
+                        };
+                        uv
+                    }
+                };
+                return Ok(Some(FaceRayHit {
+                    face,
+                    uv,
+                    point: surface.evaluate_point(k, uv)?,
+                    distance: distance.max(0.0),
+                }));
             }
         }
-        let Some((face, solution)) = first else {
-            return Ok(None);
-        };
-        let uv = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
-        let surface = face::p2::surface(b, face)?
-            .ok_or_else(|| SolidError::invalid_input(OP_FIRST_HIT, "a face without a surface"))?;
-        Ok(Some(FaceRayHit {
-            face,
-            uv,
-            point: surface.evaluate_point(k, uv)?,
-            distance: solution.start.solution_value.max(0.0),
-        }))
+        Ok(None)
     }
 
     /// (Not upstream) The lowest dimensional vertex, edge or face of `b` within `tolerance`
@@ -2216,12 +2275,12 @@ mod tests {
     /// the radius-2 sphere's equator in its seam's half-plane: the ends of its stretch, on the
     /// seam, are its crossings 20 -+ sqrt(4 - x^2). Along +x at y = 4.99999, z = 19.999995 it
     /// grazes the rim of the radius-5 cylinder of height 20: the ends of the side's stretch
-    /// are its crossings 20 -+ sqrt(25 - y^2). Up the cylinder from (0, 5 - 0.03, -20) along
-    /// (0, 0.001, 1), it enters the bottom at 20 sqrt(1 + 1e-6) and crosses the side at a
-    /// shallow angle at 30 sqrt(1 + 1e-6); from (0, 5.005, 5) along (0, -0.001, 1) it enters
-    /// the side at 5 sqrt(1 + 1e-6) and leaves the top at 15 sqrt(1 + 1e-6). The first hit of
-    /// each where `first_face_hit` lands, but on the last ray (its own defect: it misses the
-    /// side there).
+    /// are its crossings 20 -+ sqrt(25 - y^2). At a slope e of 1e-3 and 1e-4, up the cylinder
+    /// from (0, 5 - 30e, -20) along (0, e, 1), it enters the bottom at 20 sqrt(1 + e^2) and
+    /// crosses the side at a shallow angle at 30 sqrt(1 + e^2); from (0, 5 + 5e, 5) along
+    /// (0, -e, 1) it enters the side at 5 sqrt(1 + e^2) and leaves the top at
+    /// 15 sqrt(1 + e^2), its side crossing on a span join of the side's surface (#21621). The
+    /// first hit of each where `first_face_hit` lands, and on the shallow rays at the same face.
     #[test]
     fn a_ray_grazing_a_seam_or_a_rim_or_crossing_a_wall_shallowly_meets_it() {
         let mut k = Kernel::default();
@@ -2262,21 +2321,273 @@ mod tests {
             "{first:?} {hits:?}"
         );
 
-        let stretch = (1.0_f64 + 1e-6).sqrt();
-        let (hits, first) =
-            hits_and_first(&k, &mut tube, [0.0, 5.0 - 0.03, -20.0], [0.0, 0.001, 1.0]);
-        close(&hits, &[20.0 * stretch, 30.0 * stretch]);
+        for e in [1e-3, 1e-4] {
+            let stretch = (1.0_f64 + e * e).sqrt();
+            let (hits, first) =
+                hits_and_first(&k, &mut tube, [0.0, 5.0 - 30.0 * e, -20.0], [0.0, e, 1.0]);
+            close(&hits, &[20.0 * stretch, 30.0 * stretch]);
+            assert!(
+                (first.distance - hits[0].distance).abs() < 1e-6 && first.face == hits[0].face,
+                "{e} {first:?} {hits:?}"
+            );
+            let (hits, first) =
+                hits_and_first(&k, &mut tube, [0.0, 5.0 + 5.0 * e, 5.0], [0.0, -e, 1.0]);
+            close(&hits, &[5.0 * stretch, 15.0 * stretch]);
+            assert!(
+                (first.distance - hits[0].distance).abs() < 1e-6 && first.face == hits[0].face,
+                "{e} {first:?} {hits:?}"
+            );
+        }
+    }
+
+    /// #21621 and the #22030 reviews: shallow rays through a cylinder's side. On the
+    /// cylinder of radius r and height 4r about z, the ray through p = r(cos t, sin t, 0) +
+    /// (0, 0, 2r) on its side along d = c r̂ + s t̂ + ẑ (r̂ and t̂ the radial and tangent
+    /// directions at p; c = -e inward, e outward), from p - rd. At p + kd its
+    /// squared distance from the axis is r^2 + 2rck + (c^2 + s^2)k^2, so it crosses the side
+    /// at k = 0 and at k = -2rc / (c^2 + s^2). A hit is a point of the side within T (the
+    /// zone tolerance plus the side's) of the ray, so its k is where that distance is within
+    /// T of r: between the roots for r + T and not between those for r - T; both queries
+    /// give the side first, at a k in that set's piece around the first crossing past the
+    /// origin (k = -r), and `first_face_hit`'s point is the surface's at its (u, v), within
+    /// T of the ray. The origin is outside the side for every inward ray, and inside it
+    /// for an outward one only where c^2 + s^2 < 2c (the unskewed ones among them).
+    /// Unskewed and inward, the ray then leaves through the top at k = 2r, within T. The
+    /// rays, each inward and outward unless said: on radius 5, e = 1e-4, 1e-3 and 2e-3,
+    /// s = 0, +-0.003, +-0.01, +-0.05, at t = 0 (the seam), 45, 89, 90, 180 and 270 degrees
+    /// (90, 180 and 270 the joins of the side surface's spans), the unskewed one at 270
+    /// degrees at e = 1e-4 outward only; on radius 500, 5000 and 50000, e = 1e-5,
+    /// s = 0.01, at 67.5 degrees, inward only; on radius 50000, e = 1e-3 and 1e-4,
+    /// s = +-0.1, at 67.5, 80, 85 and 90; on radius 0.5, e = 1e-4, s = +-0.01, at 89 and
+    /// 90. `first_face_hit`'s distance is its point's from the origin, within T. Every ray
+    /// that misses is listed.
+    #[test]
+    fn a_shallow_ray_meets_a_cylinder_side_at_its_seam_and_span_joins() {
+        let mut k = Kernel::default();
+        // the roots of a k^2 + b k = rhs, least first (b is never 0 here)
+        let roots = |a: f64, b: f64, rhs: f64| -> Option<(f64, f64)> {
+            let disc = b * b + 4.0 * a * rhs;
+            if disc < 0.0 {
+                return None;
+            }
+            let q = -0.5 * (b + b.signum() * disc.sqrt());
+            let (k1, k2) = (q / a, -rhs / q);
+            Some((k1.min(k2), k1.max(k2)))
+        };
+        // each ray's directions: `true` is inward (c = -e)
+        let (both, inward_only, outward_only): (&[bool], &[bool], &[bool]) =
+            (&[true, false], &[true], &[false]);
+        let mut cases = Vec::new();
+        for e in [1e-4, 1e-3, 2e-3] {
+            for degrees in [0.0_f64, 45.0, 89.0, 90.0, 180.0, 270.0] {
+                for skew in [0.0, 0.003, -0.003, 0.01, -0.01, 0.05, -0.05] {
+                    let unskewed_at_270 = e == 1e-4 && degrees == 270.0 && skew == 0.0;
+                    let inwards = if unskewed_at_270 { outward_only } else { both };
+                    cases.push((5.0, e, skew, degrees, inwards));
+                }
+            }
+        }
+        for r in [500.0, 5000.0, 50000.0] {
+            cases.push((r, 1e-5, 0.01, 67.5, inward_only));
+        }
+        for e in [1e-3, 1e-4] {
+            for degrees in [67.5, 80.0, 85.0, 90.0] {
+                for skew in [0.1, -0.1] {
+                    cases.push((50000.0, e, skew, degrees, both));
+                }
+            }
+        }
+        for degrees in [89.0, 90.0] {
+            for skew in [0.01, -0.01] {
+                cases.push((0.5, 1e-4, skew, degrees, both));
+            }
+        }
+        let mut bodies: Vec<(f64, Brep, FaceId, FaceId, f64)> = Vec::new();
+        let mut misses = Vec::new();
+        for (r, e, skew, degrees, inwards) in cases {
+            if !bodies.iter().any(|body| body.0 == r) {
+                let mut tube = crate::primitive::api_primitives::create_cylinder(
+                    &mut k,
+                    Point3::ZERO,
+                    r,
+                    4.0 * r,
+                )
+                .unwrap();
+                let middle = Point3::new(0.0, 0.0, 2.0 * r);
+                let mut face_along = |d: Vec3| {
+                    let ray = Ray::new(middle, d).unwrap();
+                    BrepQuery::of_brep(&tube)
+                        .first_face_hit(&k, &mut tube, ray)
+                        .unwrap()
+                        .unwrap()
+                        .face
+                };
+                let side = face_along(Vec3::new(1.0, 1.0, 0.0));
+                let top = face_along(Vec3::new(0.0, 0.0, 1.0));
+                let within = brep_zone_tol_3d(&k, &tube, SmallTopoType::NormalSize)
+                    + face::p2::tolerance(&tube, side).unwrap();
+                bodies.push((r, tube, side, top, within));
+            }
+            let Some((_, tube, side, top, within)) = bodies.iter_mut().find(|body| body.0 == r)
+            else {
+                continue;
+            };
+            let (side, top, within) = (*side, *top, *within);
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let radial = Vec3::new(cos, sin, 0.0);
+            let tangent = Vec3::new(-sin, cos, 0.0);
+            let p = Point3::new(r * cos, r * sin, 2.0 * r);
+            for &inward in inwards {
+                let c = if inward { -e } else { e };
+                let d = radial * c + tangent * skew + Vec3::new(0.0, 0.0, 1.0);
+                let length = d.length();
+                let ray = Ray::new(p - d * r, d).unwrap();
+                let at = (r, e, skew, degrees, inward);
+                let (a, b) = (c * c + skew * skew, 2.0 * r * c);
+                let first = [0.0, -b / a]
+                    .into_iter()
+                    .filter(|&k1| k1 > -r)
+                    .fold(f64::INFINITY, f64::min);
+                let (p1, p2) = roots(a, b, (r + within).powi(2) - r * r).unwrap();
+                let (lo, hi) = match roots(a, b, (r - within).powi(2) - r * r) {
+                    Some((q1, _)) if first <= q1 => (p1, q1),
+                    Some((_, q2)) if first >= q2 => (q2, p2),
+                    Some(_) => (first, first),
+                    None => (p1, p2),
+                };
+                let slack = 1e-9 * (1.0 + r);
+                let in_band = |distance: f64| {
+                    let k1 = distance / length - r;
+                    k1 >= lo - slack && k1 <= hi + slack
+                };
+                let hits = face_hits(&k, tube, ray).unwrap();
+                if !hits
+                    .first()
+                    .is_some_and(|h| h.face == side && in_band(h.distance))
+                {
+                    misses.push(format!("face_hits {at:?}: {hits:?}, k in [{lo}, {hi}]"));
+                }
+                if skew == 0.0 && inward {
+                    let top_at = 3.0 * r * length;
+                    let leaves = hits.get(1).is_some_and(|h| {
+                        h.face == top && (h.distance - top_at).abs() <= within * length
+                    });
+                    if hits.len() != 2 || !leaves {
+                        misses.push(format!("face_hits top {at:?}: {hits:?}"));
+                    }
+                }
+                let found = BrepQuery::of_brep(tube)
+                    .first_face_hit(&k, tube, ray)
+                    .unwrap();
+                let Some(first_hit) = found else {
+                    misses.push(format!("first_face_hit {at:?}: none, k in [{lo}, {hi}]"));
+                    continue;
+                };
+                let surface = face::p2::surface(tube, side).unwrap().unwrap();
+                let w = first_hit.point - ray.origin;
+                let off_ray = (w - ray.direction * w.dot(ray.direction)).length();
+                if first_hit.face != side
+                    || !in_band(first_hit.distance)
+                    || surface.evaluate_point(&k, first_hit.uv).unwrap() != first_hit.point
+                    || off_ray > within
+                    || (w.length() - first_hit.distance).abs() > within
+                {
+                    misses.push(format!(
+                        "first_face_hit {at:?}: {first_hit:?}, k in [{lo}, {hi}]"
+                    ));
+                }
+            }
+        }
         assert!(
-            (first.distance - hits[0].distance).abs() < 1e-6,
-            "{first:?} {hits:?}"
+            misses.is_empty(),
+            "{} misses:\n{}",
+            misses.len(),
+            misses.join("\n")
         );
-        let hits = face_hits(
-            &k,
-            &mut tube,
-            Ray::new(Point3::new(0.0, 5.005, 5.0), Vec3::new(0.0, -0.001, 1.0)).unwrap(),
-        )
-        .unwrap();
-        close(&hits, &[5.0 * stretch, 15.0 * stretch]);
+    }
+
+    /// Rays through the middle of each edge and each corner of the box [0, 10]^3, from
+    /// three directions each, and the #22030 review's rays: through the box's edges and
+    /// corners, and from (5 + 5 cos 45, 5 sin 45, 25) and (10, 0, 25) along (-5, 0, -5)
+    /// through the top rim of the radius-5 cylinder of height 20, the second on its seam.
+    /// `first_face_hit` names the face `face_hits` gives first, at its distance within
+    /// twice the zone tolerance, with its point the surface's at its (u, v).
+    #[test]
+    fn first_face_hit_at_an_edge_or_corner_is_face_hits_first() {
+        let mut k = Kernel::default();
+        let mut block =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0)
+                .unwrap();
+        let mut tube =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+                .unwrap();
+        let half = 0.5_f64.sqrt();
+        let mut rays = vec![
+            ([20.0, 12.0, 5.0], [-10.0, -2.0, 0.0], false),
+            ([20.0, 15.0, 5.0], [-10.0, -5.0, 0.0], false),
+            ([15.0, 20.0, 5.0], [-5.0, -10.0, 0.0], false),
+            ([20.0, 15.0, 17.0], [-10.0, -5.0, -7.0], false),
+            ([20.0, 20.0, 20.0], [-1.0, -1.0, -1.0], false),
+            ([-5.0, 5.0, 15.0], [5.0, 0.0, -5.0], false),
+            (
+                [5.0 + 5.0 * half, 5.0 * half, 25.0],
+                [-5.0, 0.0, -5.0],
+                true,
+            ),
+            ([10.0, 0.0, 25.0], [-5.0, 0.0, -5.0], true),
+        ];
+        let out = |c: f64| {
+            if c == 0.0 {
+                -1.0
+            } else if c == 10.0 {
+                1.0
+            } else {
+                0.0
+            }
+        };
+        for x in [0.0, 5.0, 10.0] {
+            for y in [0.0, 5.0, 10.0] {
+                for z in [0.0, 5.0, 10.0] {
+                    let n = [out(x), out(y), out(z)];
+                    if n.iter().filter(|&&c| c != 0.0).count() < 2 {
+                        continue;
+                    }
+                    for w in [[1.0, 1.0, 1.0], [1.0, 0.5, 0.25], [0.25, 1.0, 0.5]] {
+                        let o = [
+                            x + 10.0 * n[0] * w[0],
+                            y + 10.0 * n[1] * w[1],
+                            z + 10.0 * n[2] * w[2],
+                        ];
+                        rays.push((o, [x - o[0], y - o[1], z - o[2]], false));
+                    }
+                }
+            }
+        }
+        let mut misses = Vec::new();
+        for (o, d, on_tube) in rays {
+            let b = if on_tube { &mut tube } else { &mut block };
+            let within = 2.0 * brep_zone_tol_3d(&k, b, SmallTopoType::NormalSize);
+            let ray = Ray::new(Point3::new(o[0], o[1], o[2]), Vec3::new(d[0], d[1], d[2])).unwrap();
+            let hits = face_hits(&k, b, ray).unwrap();
+            let first = BrepQuery::of_brep(b).first_face_hit(&k, b, ray).unwrap();
+            let Some(first) = first else {
+                misses.push(format!("{o:?} {d:?}: no first hit, {hits:?}"));
+                continue;
+            };
+            let surface = face::p2::surface(b, first.face).unwrap().unwrap();
+            let same = hits.first().is_some_and(|h| {
+                h.face == first.face && (h.distance - first.distance).abs() <= within
+            });
+            if !same || surface.evaluate_point(&k, first.uv).unwrap() != first.point {
+                misses.push(format!("{o:?} {d:?}: {first:?}, {hits:?}"));
+            }
+        }
+        assert!(
+            misses.is_empty(),
+            "{} misses:\n{}",
+            misses.len(),
+            misses.join("\n")
+        );
     }
 
     /// Shallow chords of a cylinder's side. On the cylinder of radius r and height 4r about
