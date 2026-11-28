@@ -261,7 +261,11 @@ impl SurfPtSolveStepper<'_> {
     /// direction is lower: a golden-section search over `s` inside the domain, its window
     /// ending where the line's tangent image `|Su e_u + Sv e_v| s` reaches twice the
     /// distance. It moves only when that point is nearer by more than the solve's tight
-    /// tolerance, so a minimum never moves; and a direction is searched only where the
+    /// tolerance taken at the scale of the surface point too, `EFF_ZERO (1 + |P| + |S - P|)`
+    /// (`|S| <= |P| + |S - P|`), so the rounding of the distances compared is no fall and a
+    /// minimum never moves (a point on the axis of a cylinder of radius 1e5 has its nearest
+    /// points on a whole circle, 1e5 away, whose distances differ by an ulp, 1.5e-11, where
+    /// `EFF_ZERO (1 + |P|)` is 1e-12); and a direction is searched only where the
     /// quadratic model, a fall of `|λ| s² / 2` in `|S - P|² / 2` over the window, can give
     /// that much (so a degenerate minimum, on a surface of revolution's axis, costs no
     /// search). A distance whose evaluation fails is no candidate. The iso-direction tests
@@ -279,6 +283,9 @@ impl SurfPtSolveStepper<'_> {
         if distance.is_nan() || distance <= tight {
             return Ok(false);
         }
+        let target = self.base.test_point();
+        // the least fall a move must show
+        let fall = tight.max(EFF_ZERO * (1.0 + target.max_dimension() + distance));
         let g = self.gap()?;
         let (su, sv) = (self.su()?, self.sv()?);
         let (suu, suv, svv) = (self.suu()?, self.suv()?, self.svv()?);
@@ -305,7 +312,6 @@ impl SurfPtSolveStepper<'_> {
         let e = Point2::new(e.x / len, e.y / len);
         let domain = *self.base.domain();
         let uv = self.uv();
-        let target = self.base.test_point();
         let surface = self.base.surface();
         // the distance at a parameter of the line; a failed evaluation is no candidate
         let value = |at: Point2| -> Result<f64> {
@@ -331,8 +337,8 @@ impl SurfPtSolveStepper<'_> {
                 }
             }
             // the model's fall in |S - P|² / 2 over the window, against the least fall a
-            // move needs there, (distance - (distance - tight))(2 distance) / 2
-            if far.is_nan() || -low * far * far <= 2.0 * tight * distance {
+            // move needs there, (distance - (distance - fall))(2 distance) / 2
+            if far.is_nan() || -low * far * far <= 2.0 * fall * distance {
                 continue;
             }
             let at = |s: f64| domain.clamp_point(Point2::new(uv.x + s * d.x, uv.y + s * d.y));
@@ -358,7 +364,7 @@ impl SurfPtSolveStepper<'_> {
                 }
             }
             let (s, f) = if f1 <= f2 { (x1, f1) } else { (x2, f2) };
-            if f < distance - tight && best.is_none_or(|(b, _)| f < b) {
+            if f < distance - fall && best.is_none_or(|(b, _)| f < b) {
                 best = Some((f, at(s)));
             }
         }
