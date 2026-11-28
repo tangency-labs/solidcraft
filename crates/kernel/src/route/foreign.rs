@@ -149,7 +149,8 @@ pub(crate) fn run<B: Backend>(
             Some(Ok(body))
         }
         Ok(Err(BackendError::Unsupported(why))) => {
-            log::debug!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
+            // Throwaway OCCT test build only: info, so the smoke step sees it.
+            log::info!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
