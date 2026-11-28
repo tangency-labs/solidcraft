@@ -3057,11 +3057,14 @@ fn guests_read_effective_limits_at_both_api_versions_and_old_guests_still_run() 
         limits.memory_mib = 2;
         let original = include_str!("../fixture.wat").replace("__PACKAGE__", API.split_once('@').unwrap().0).replace("__VERSION__", version);
         let original = if version == "0.1.0" { original.replace(r#" (case "unsupported" string)"#, "") } else { original };
+        // Imported records must be exported by name before a function uses them, as in WIT.
+        // The core memory alias and lowered function below reuse the fixture's core index spaces.
         let query = r#"
   (import "craft:host/limits@0.1.0" (instance $limits
     (type $budgets (record (field "fuel" u64) (field "memory-bytes" u64)
       (field "fuel-left" u64) (field "deadline-ms" u64)))
-    (export "get" (func (result $budgets)))))
+    (export "execution-limits" (type $execution-limits (eq $budgets)))
+    (export "get" (func (result $execution-limits)))))
   (alias export $limits "get" (func $get-limits))
   (core func $get-limits-lowered (canon lower (func $get-limits) (memory $memory)))
   (core module $probe-limits
