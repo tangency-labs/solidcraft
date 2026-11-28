@@ -6576,6 +6576,12 @@ impl Model {
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
+                // The snapshots of the features that are evaluated again predate the refused
+                // results: they are dropped, so that a pattern that copies one of them reads no
+                // state of the refused pass.
+                for f in doc.features.iter().skip(start) {
+                    before_states.remove(&f.id);
+                }
             }
             for (i, f) in doc.features.iter().enumerate().skip(start) {
                 if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
@@ -16542,6 +16548,10 @@ fn replay(
                 // the model as it was then, so that it is the source's own tool, moved (#14305).
                 Err(e) => {
                     let Some(before) = sources.and_then(|s| s.get(&src.id)) else { return Err(e) };
+                    // The retry is built against the model as it was before the source ran, with
+                    // that model's frames: a target the source's own result consumed is measured
+                    // where it is shown, and not in the frames of the model as it is now (#14305).
+                    let _retry_frames = ToolFrames::install(doc, src, before).unwrap_or_else(ToolFrames::clear);
                     feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), before, &mut None, &mut Vec::new(), &mut None)?
                 }
             };
@@ -20740,6 +20750,13 @@ impl ToolFrames {
             return None;
         }
         Some(ToolFrames(TOOL_FRAMES.with(|t| std::mem::replace(&mut *t.borrow_mut(), frames))))
+    }
+
+    /// The frames of [`TOOL_FRAMES`] cleared: what was there before is put back when it is
+    /// dropped. A model with no body placed differently has no frames of its own, so a tool
+    /// built against it must not meet the bodies in the frames of another model.
+    fn clear() -> ToolFrames {
+        ToolFrames(TOOL_FRAMES.with(|t| std::mem::take(&mut *t.borrow_mut())))
     }
 }
 

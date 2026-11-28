@@ -73,6 +73,8 @@
 //! does no checks upstream; here it returns `InvalidInput` for a member that some list
 //! still holds (upstream would splice it into a second list), or for a face use
 //! going into a shell whose head is a wire or vertex use.
+//! (Not upstream) `IsInnerShellOf` takes no answer from a ray with a crossing past its start
+//! that is a limit root (`Solution::limit_root`), and tries the next sample.
 
 use crate::error::topology::TopologyFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -1908,6 +1910,23 @@ fn ray_brep_solve(
     )
 }
 
+/// (Not upstream) Whether a ray of [`is_inner_shell_of`] has a crossing past its start that
+/// is a limit root ([`crate::geom::solution_array::Solution::limit_root`]): one of two
+/// crossings of a leaf whose certified pass stopped at its limit, the other perhaps
+/// unreported, which would unbalance the ray's stack of shells. The start is the ray's
+/// first solution, on the shell it leaves, where `start_kept` (a face use shell's face);
+/// a wire or vertex shell's start (its wire edge or shell vertex) is removed before, and
+/// every solution left is then a crossing.
+fn limit_crossing<O>(
+    solutions: &[crate::geom::solution_array::Solution<O>],
+    start_kept: bool,
+) -> bool {
+    solutions
+        .iter()
+        .skip(usize::from(start_kept))
+        .any(|s| s.limit_root)
+}
+
 /// The outcome of a call whose status upstream ignores (see [`checked`]).
 enum Checked<T> {
     /// It succeeded.
@@ -1947,7 +1966,9 @@ pub fn is_inner_shell_of_tri(
 /// from three sample points of each face use of the shell (along its normal), or from
 /// a wire shell's first edge or a vertex shell's vertex in random directions
 /// (ND-1), against the whole B-rep; the first ray whose crossings are
-/// all simple face crossings decides, by the stack of shells it exits and enters.
+/// all simple face crossings decides, by the stack of shells it exits and enters. (Not
+/// upstream) A ray with a crossing past its start that is a limit root decides nothing, and
+/// the next sample is tried.
 /// Returns [`SM_TRUE`], [`SM_FALSE`] or [`SM_UNSURE`] (no ray decided).
 ///
 /// The random directions and the face samples' dithers come from one generator the call
@@ -2160,6 +2181,8 @@ pub fn is_inner_shell_of(
             // keep things simple - only use classifications which have point
             // intersections with faces
             let mut kk = 0;
+            // (not upstream) whether the ray's start, its first solution, is still the first
+            let mut start_kept = true;
             while kk < solutions.len() {
                 let sol = *solutions.get(kk).ok_or_else(|| null("solution index"))?;
                 let object = sol.objects.get(1).copied().flatten();
@@ -2177,6 +2200,7 @@ pub fn is_inner_shell_of(
                         _ => false,
                     };
                 if ignore {
+                    start_kept &= kk != 0;
                     // remove this solution (upstream's `continue` then also steps past
                     // the solution that moves into its slot)
                     solutions.remove_at(kk, 1);
@@ -2200,6 +2224,12 @@ pub fn is_inner_shell_of(
 
             // try again
             if !found_solution {
+                continue;
+            }
+            // (not upstream) a limit root past the start: the ray decides nothing, and the
+            // next sample is tried
+            if limit_crossing(solutions.as_slice(), start_kept) {
+                found_solution = false;
                 continue;
             }
 
@@ -2344,6 +2374,58 @@ pub fn is_inner_shell_of(
 mod tests {
     use super::*;
     use crate::topology::Faceuse;
+
+    /// A ray of `is_inner_shell_of` decides nothing when a crossing past its start is a
+    /// limit root. Its start is the first solution where it is kept (a face use shell's
+    /// face); where it was removed (a wire or vertex shell's wire edge or shell vertex), the
+    /// first solution is already a crossing. A limit root at the start, or crossings that
+    /// are no limit root (whatever their contact), leave the ray to decide as upstream does.
+    #[test]
+    fn a_limit_root_past_the_start_stops_the_ray() {
+        use crate::geom::solution_array::{Contact, Solution};
+        let sols =
+            |roots: &[(bool, Contact)]| -> Vec<Solution<crate::topology::brep_cache::CacheObject>> {
+                roots
+                    .iter()
+                    .map(|&(limit_root, contact)| Solution {
+                        contact,
+                        limit_root,
+                        ..Solution::default()
+                    })
+                    .collect()
+            };
+        let (limit, plain) = (true, false);
+        let kept = true;
+        assert!(!limit_crossing(
+            &sols(&[
+                (limit, Contact::Undecided),
+                (plain, Contact::Undecided),
+                (plain, Contact::Crossing),
+            ]),
+            kept
+        ));
+        assert!(!limit_crossing(&sols(&[(limit, Contact::Undecided)]), kept));
+        assert!(!limit_crossing(&sols(&[]), kept));
+        assert!(!limit_crossing(&sols(&[]), !kept));
+        assert!(limit_crossing(
+            &sols(&[(plain, Contact::Crossing), (limit, Contact::Undecided)]),
+            kept
+        ));
+        assert!(limit_crossing(
+            &sols(&[(limit, Contact::Undecided), (limit, Contact::Undecided)]),
+            kept
+        ));
+        // the start removed: the first solution is a crossing, and counts
+        assert!(limit_crossing(&sols(&[(limit, Contact::Undecided)]), !kept));
+        assert!(limit_crossing(
+            &sols(&[(limit, Contact::Undecided), (plain, Contact::Crossing)]),
+            !kept
+        ));
+        assert!(!limit_crossing(
+            &sols(&[(plain, Contact::Crossing), (plain, Contact::Undecided)]),
+            !kept
+        ));
+    }
 
     #[test]
     fn region_order_rotates_the_circular_head_without_moving_other_links() {

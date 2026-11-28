@@ -12919,6 +12919,7 @@ mod tests {
         let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
+        // The plane as it turns by default, about the line where it is.
         let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);

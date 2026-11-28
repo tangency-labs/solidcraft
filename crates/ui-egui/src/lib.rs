@@ -79,6 +79,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_scan_align;
 pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -5084,6 +5085,7 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        canvas::share_box_drag(ui.ctx());
         // #9841: dialog buttons answer their first letter only when the preference says so;
         // off is the old behaviour, so the kit default and this preference default agree.
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
