@@ -43,7 +43,7 @@ use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::crossing_ends::{plan as crossing_end_plan, CrossingEndPlan};
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
-    RollOver,
+    RollOver, RollOverKind,
 };
 use solidcore::blend::blend_corner::separate_ends::{
     plan as separate_end_plan, SectionKind, SeparateEndPlan,
@@ -60,6 +60,7 @@ use solidcore::blend::fillet_executive::FilletLaw;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::blend::fillet_solver::p5::is_concave_edge;
 use solidcore::blend::round_room::rounds_cross;
 use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{ids, Attribute, AttributeHandle, AttributeHandlers, Behavior};
@@ -1649,7 +1650,12 @@ fn roll_over(
     for i in rest {
         let mut left = false;
         for e in fresh.edge_list().to_vec() {
-            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i) {
+            // a piece the first pass left smooth or convex has nothing to round: at a cusp
+            // (#22151), B2's piece between the rails' crossing and V, which the second pass's
+            // corner covers
+            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i)
+                && is_concave_edge(k, &mut fresh, e)?
+            {
                 remnants.push(e);
                 size_of.push(sizes.get(i).copied().unwrap_or(0.0));
                 left = true;
@@ -1663,9 +1669,12 @@ fn roll_over(
     }
     if !remnants.is_empty() {
         let chain = concave_chain(k, &mut fresh, &remnants, &first)?;
-        // the chain's V, where it meets the cliff: none, and it is not the Roll-over's
+        // the chain's V, where it meets the cliff: none, and it is not the ledge's. The cusp's
+        // (#22151) has no cliff: its ball rolls off the common face onto B1's surface and down
+        // to the tangent seam, a plain pass of the chain, handed the first pass's faces.
         let ends = concave_chain_ends(k, &mut fresh, &chain)?;
-        if ends.is_empty() {
+        let cusps_only = roll_overs.iter().all(|r| r.kind == RollOverKind::Cusp);
+        if ends.is_empty() && !cusps_only {
             return Ok(Err(Error::Unsupported(
                 "a roll-over's concave chain that does not meet the cliff",
             )));
@@ -1683,7 +1692,11 @@ fn roll_over(
         }
         let chain_sizes = vec![size; chain.len()];
         let p = Pass {
-            roll_over: RollOverStep::Concave(&ends),
+            roll_over: if ends.is_empty() {
+                RollOverStep::No
+            } else {
+                RollOverStep::Concave(&ends)
+            },
             ..together(&chain, section(&chain_sizes), turn, &first, contract)
         };
         if let Err(e) = pass_or_refuse(k, &mut fresh, p)? {

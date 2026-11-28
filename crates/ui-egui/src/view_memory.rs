@@ -49,33 +49,113 @@ pub fn remember(dir: &Path, path: &str, views: Value) -> std::io::Result<()> {
 
 /// Keep the entire read-modify-write transaction exclusive across application processes.
 /// The lockfile stays in place: deleting it would let two processes lock different files.
+/// A busy lock is waited for until its holder releases it (or its process ends, which releases
+/// it too), however long that takes: giving up on a wall-clock limit dropped a design's views
+/// whenever the holder was slow, as on a loaded machine (#135). This runs on the
+/// `remember-views` worker, never the window thread; quitting bounds its own wait
+/// ([`quit_may_proceed`]).
 #[cfg(not(target_arch = "wasm32"))]
 fn lock_memory(dir: &Path) -> std::io::Result<std::fs::File> {
     let lock = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(dir.join("view-memory.lock"))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        match lock.try_lock() {
-            Ok(()) => return Ok(lock),
-            Err(std::fs::TryLockError::Error(error)) => return Err(error),
-            Err(std::fs::TryLockError::WouldBlock) => {
-                if std::time::Instant::now() >= deadline {
-                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "remembered views are busy"));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
+    match lock.try_lock() {
+        Ok(()) => return Ok(lock),
+        Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            #[cfg(test)]
+            tests::saw_busy(dir);
         }
     }
+    lock.lock()?;
+    Ok(lock)
+}
+
+/// How long quitting waits for queued view memories to reach disk before closing anyway.
+/// A transaction is a small read and an atomic write, done in well under a second even on a
+/// loaded machine; 10 s covers a slow disk or another SolidCraft process finishing its own
+/// transaction, yet a holder that never lets go (a stopped process) cannot keep the app open.
+#[cfg(not(target_arch = "wasm32"))]
+pub const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The paths of the designs whose views are queued but not yet on disk, oldest first.
+#[cfg(not(target_arch = "wasm32"))]
+static PENDING_PATHS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// The designs whose views are queued but not yet on disk.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn unsaved() -> Vec<String> {
+    PENDING_PATHS.lock().map(|paths| paths.clone()).unwrap_or_default()
+}
+
+/// What quitting has waited for so far: when it started waiting, and whether it gave up.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct QuitWait {
+    #[cfg(not(target_arch = "wasm32"))]
+    since: Option<web_time::Instant>,
+    #[cfg(not(target_arch = "wasm32"))]
+    gave_up: bool,
+}
+
+/// Whether quitting may close now: no view memory is still queued, or quitting has already
+/// waited [`QUIT_WAIT`] for them. On giving up it logs, once, which designs' views were not
+/// saved; those designs reopen as they would have without remembered views.
+pub fn quit_may_proceed(wait: &std::cell::Cell<QuitWait>) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        quit_may_proceed_at(wait, web_time::Instant::now())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = wait;
+        true
+    }
+}
+
+/// [`quit_may_proceed`] at the time `now`.
+#[cfg(not(target_arch = "wasm32"))]
+fn quit_may_proceed_at(wait: &std::cell::Cell<QuitWait>, now: web_time::Instant) -> bool {
+    let mut state = wait.get();
+    if !pending() {
+        wait.set(QuitWait::default());
+        return true;
+    }
+    if state.gave_up {
+        return true;
+    }
+    let since = *state.since.get_or_insert(now);
+    let gave_up = now.saturating_duration_since(since) >= QUIT_WAIT;
+    if gave_up {
+        state.gave_up = true;
+        log::warn!("quitting without saving the remembered views of {} after waiting {} s", unsaved().join(", "), QUIT_WAIT.as_secs());
+    }
+    wait.set(state);
+    gave_up
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 static PENDING: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(not(target_arch = "wasm32"))]
-struct PendingWrite;
+struct PendingWrite(String);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PendingWrite {
+    fn start(path: &str) -> Self {
+        if let Ok(mut paths) = PENDING_PATHS.lock() {
+            paths.push(path.to_owned());
+        }
+        PENDING.fetch_add(1, Ordering::AcqRel);
+        PendingWrite(path.to_owned())
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for PendingWrite {
     fn drop(&mut self) {
+        if let Ok(mut paths) = PENDING_PATHS.lock()
+            && let Some(at) = paths.iter().position(|path| *path == self.0)
+        {
+            paths.remove(at);
+        }
         PENDING.fetch_sub(1, Ordering::AcqRel);
     }
 }
@@ -124,8 +204,8 @@ pub fn remember_async(dir: PathBuf, path: String, views: Value) -> std::io::Resu
             *writer = Some(sender);
         }
         let Some(sender) = writer.as_ref() else { return Err(std::io::Error::other("remembered views worker unavailable")) };
-        PENDING.fetch_add(1, Ordering::AcqRel);
-        let request = WriteRequest { dir, path, views, _pending: PendingWrite };
+        let pending = PendingWrite::start(&path);
+        let request = WriteRequest { dir, path, views, _pending: pending };
         if sender.send(Request::Write(request)).is_err() {
             *writer = None;
             return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "remembered views worker stopped"));
@@ -139,15 +219,10 @@ pub fn remember_async(dir: PathBuf, path: String, views: Value) -> std::io::Resu
 }
 
 /// Whether a scheduled native cache write still needs the application process to remain alive.
+/// Native only: on the web a write happens at once, so quitting never waits for one.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn pending() -> bool {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        PENDING.load(Ordering::Acquire) != 0
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
+    PENDING.load(Ordering::Acquire) != 0
 }
 
 /// Tests enqueue a barrier behind their writes, then wait for its acknowledgement.
@@ -214,6 +289,73 @@ mod tests {
         set.open(ViewKind::Render, Some("7".into()), true);
         set.open(ViewKind::Sheet, Some("d1".into()), true);
         set
+    }
+
+    /// Folders whose next refused lock attempt a test is waiting for (the waiter is then known
+    /// to be queued behind the holder, with no timing guess).
+    #[cfg(not(target_arch = "wasm32"))]
+    static BUSY_WATCH: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::mpsc::Sender<()>)>> = std::sync::Mutex::new(Vec::new());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn saw_busy(dir: &Path) {
+        if let Ok(mut watch) = BUSY_WATCH.lock() {
+            watch.retain(|(watched, signal)| watched != dir || signal.send(()).is_err());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn watch_busy(dir: &Path) -> std::sync::mpsc::Receiver<()> {
+        let (signal, seen) = std::sync::mpsc::channel();
+        BUSY_WATCH.lock().unwrap().push((dir.to_owned(), signal));
+        seen
+    }
+
+    /// #135: a transaction queued behind a slow holder (a loaded machine, another SolidCraft
+    /// process) waits for that holder's release, however long it takes, and loses no design.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_transaction_waits_for_a_slow_holder_and_keeps_both_designs() {
+        let dir = folder("slow-holder");
+        remember(&dir, "a.sc", ViewSet::new().to_json()).unwrap();
+        let busy = watch_busy(&dir);
+        let held = lock_memory(&dir).unwrap();
+        let waiter = {
+            let dir = dir.clone();
+            std::thread::spawn(move || remember(&dir, "b.sc", ViewSet::new().to_json()))
+        };
+        busy.recv().unwrap();
+        // Longer than any wall-clock budget the waiter used to give the holder (2 s).
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        drop(held);
+        waiter.join().unwrap().unwrap();
+        assert!(recall(&dir, "a.sc").is_some() && recall(&dir, "b.sc").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Quitting waits for a queued view memory held up by another holder, but only for
+    /// [`QUIT_WAIT`]: then it closes and names the design whose views were not saved. The write
+    /// itself still completes once the holder lets go.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn quitting_waits_for_a_held_view_memory_only_for_the_quit_bound() {
+        let dir = folder("quit-bound");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("held.sc").to_string_lossy().into_owned();
+        let busy = watch_busy(&dir);
+        let held = lock_memory(&dir).unwrap();
+        remember_async(dir.clone(), path.clone(), ViewSet::new().to_json()).unwrap();
+        busy.recv().unwrap();
+        let wait = std::cell::Cell::new(QuitWait::default());
+        let start = web_time::Instant::now();
+        assert!(!quit_may_proceed_at(&wait, start), "a queued write holds quitting at first");
+        assert!(!quit_may_proceed_at(&wait, start + QUIT_WAIT - std::time::Duration::from_millis(1)));
+        assert!(unsaved().contains(&path));
+        assert!(quit_may_proceed_at(&wait, start + QUIT_WAIT), "quitting never waits past the bound");
+        assert!(quit_may_proceed_at(&wait, start + QUIT_WAIT), "and stays released");
+        drop(held);
+        wait_for_pending().unwrap();
+        assert!(recall(&dir, &path).is_some() && !unsaved().contains(&path));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

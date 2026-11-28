@@ -8493,7 +8493,8 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 }
 
 /// A Join whose material meets none of its targets still joins it, to the first target as a
-/// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
+/// separate piece (see `apply_traced`), and so does an Emboss, which raises its profiles with a Join
+/// and has no operation to pick (#23375): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
@@ -8501,14 +8502,14 @@ fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &
     if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
         !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
     }));
-    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
+    let emboss = matches!(&f.kind, FeatureKind::Emboss { deboss: false, .. });
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join && !emboss {
         return;
     }
+    // The Emboss window has no New Body to point to.
+    let hint = if emboss { "" } else { " (New Body makes it a body of its own)" };
     for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
+        append_warning(warning, format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces{hint}"));
     }
 }
 

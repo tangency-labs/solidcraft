@@ -95,6 +95,7 @@ pub(crate) struct ViewScenes {
     patches: u64,
     sketch_slot: SceneSlot,
     sketch_key: u64,
+    sketch_hold: SketchHold,
     wireframe: crate::wireframe_silhouettes::Outlines,
     hl_slot: SceneSlot,
     hl_key: u64,
@@ -147,6 +148,7 @@ impl ViewScenes {
         std::mem::swap(&mut self.patches, &mut vp.patches);
         std::mem::swap(&mut self.sketch_slot, &mut vp.sketch_slot);
         std::mem::swap(&mut self.sketch_key, &mut vp.sketch_key);
+        std::mem::swap(&mut self.sketch_hold, &mut vp.sketch_hold);
         std::mem::swap(&mut self.wireframe, &mut vp.wireframe);
         std::mem::swap(&mut self.hl_slot, &mut vp.hl_slot);
         std::mem::swap(&mut self.hl_key, &mut vp.hl_key);
@@ -359,6 +361,8 @@ pub struct ViewportState {
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
     sketch_key: u64,
+    /// The sketch scene kept while only the camera moves (#22709).
+    sketch_hold: SketchHold,
     wireframe: crate::wireframe_silhouettes::Outlines,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
@@ -1228,10 +1232,14 @@ fn ground_grid_key(app: &SolveApp, proj: &Proj) -> (u8, [u64; 3], u64, u64, u64)
 
 #[cfg(test)]
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
-    sketch_scene_key_with(app, proj, scene_key(app))
+    sketch_scene_keys(app, proj, scene_key(app)).0
 }
 
-fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
+/// The sketch scene's key, and with it, when only finished sketches make that scene follow the
+/// camera, the same key with the exact view replaced by a coarse one ([`coarse_view_key`]): two
+/// views with the same coarse key differ only in where the camera looks from, which a scene drawn
+/// in the world still shows fairly (#22709).
+fn sketch_scene_keys(app: &SolveApp, proj: &Proj, model_key: u64) -> (u64, Option<u64>) {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     model_key.hash(&mut h);
     app.viewport.wireframe.generation().hash(&mut h);
@@ -1264,16 +1272,55 @@ fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
     crate::dim_view::preview_solve(app).hash(&mut h);
     let sketch_plane = crate::sketch_view::active_sketch(app).and_then(|id| st.sketch(id)).map(|ss| ss.plane).or(preview_plane);
     let has_failed = app.session.model.results.iter().any(|r| r.lost_projections.is_some() && !r.skipped && !r.stale);
-    let view_dependent_sketches =
-        sketch_plane.is_some() || !st.sketches.is_empty() || has_failed || crate::sketch_attachment_ui::lost_guide(app).is_some();
+    let lost_guide = crate::sketch_attachment_ui::lost_guide(app).is_some();
+    let view_dependent_sketches = sketch_plane.is_some() || !st.sketches.is_empty() || has_failed || lost_guide;
+    let mut held = None;
     if view_dependent_sketches {
         true.hash(&mut h);
+        // An open sketch, the plane Create Sketch would take and a failure's feedback are
+        // worked on while the view moves: they follow it exactly.
+        if sketch_plane.is_none() && !has_failed && !lost_guide {
+            let mut coarse = h.clone();
+            coarse_view_key(proj, app.viewport.pixels_per_point()).hash(&mut coarse);
+            held = Some(coarse.finish());
+        }
         crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     } else if app.ui.show_grid && !hide_grid {
         false.hash(&mut h);
         ground_grid_key(app, proj).hash(&mut h);
     }
+    (h.finish(), held)
+}
+
+/// What a sketch scene drawn for one view needs to stay fair in another (#22709): the same
+/// window, pixel density and field of view, and a zoom within one of [`SKETCH_ZOOM_STEPS`] steps
+/// per doubling, so curves stay as finely sampled as their pixels need.
+fn coarse_view_key(proj: &Proj, ppp: f32) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    [proj.rect.width(), proj.rect.height(), ppp].map(f32::to_bits).hash(&mut h);
+    proj.cam.fov.to_bits().hash(&mut h);
+    let zoom = (SKETCH_ZOOM_STEPS * proj.cam.half_height().max(1e-9).log2()).round();
+    (zoom as i64).hash(&mut h);
     h.finish()
+}
+
+/// Zoom steps per doubling of the view's height within which a held sketch scene is kept: about
+/// 19 % each.
+const SKETCH_ZOOM_STEPS: f64 = 4.0;
+
+/// A sketch scene slower to build than this (ms) is kept while only the camera moves, and built
+/// again once the view has rested ([`REFINE_STILL_MS`]); a quicker one is built every frame.
+const SKETCH_HOLD_MS: f64 = 8.0;
+
+/// The sketch scene on screen, kept while only the camera moves (#22709): its coarse key
+/// ([`sketch_scene_keys`]), how long it took to build, and since when the view has rested.
+#[derive(Default)]
+struct SketchHold {
+    coarse: Option<u64>,
+    build_ms: f64,
+    rest: CameraRest,
+    /// The scene on screen was drawn for an earlier view.
+    stale: bool,
 }
 
 #[cfg(test)]
@@ -1467,7 +1514,8 @@ fn edge_px(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], si
 /// Shaded, or wireframe) any frame is. Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
     let fine_already = (!crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2) && !draws_instanced_edges(app);
-    fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+    // Sketches kept from an earlier view while the camera moved are drawn for this one first.
+    !sketch_scene_held(app) && (fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE)
 }
 
 /// Whether the visual style draws placements' edges from their shared edges, whose level
@@ -3580,20 +3628,48 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
 /// Rebuild the sketch scene when what it shows has changed.
 #[cfg(test)]
 pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
-    refresh_sketch_scene_with_key(app, proj, scene_key(app));
+    refresh_sketch_scene_with_key(app, proj, scene_key(app), None);
 }
 
-fn refresh_sketch_scene_with_key(app: &mut SolveApp, proj: &Proj, model_key: u64) {
+/// With `ctx` (the window's frames), a slow sketch scene is kept while only the camera moves, and
+/// built for the view once it has rested (#22709): re-sampling hundreds of shown sketches on
+/// every frame of an orbit made it crawl. The scene is drawn in the world, so the last one is
+/// still a fair picture; a zoom past a step, another window size, or any change to what the
+/// scene shows builds it at once.
+fn refresh_sketch_scene_with_key(app: &mut SolveApp, proj: &Proj, model_key: u64, ctx: Option<&egui::Context>) {
     refresh_wireframe(app, proj, model_key);
-    let sk = sketch_scene_key_with(app, proj, model_key);
-    if sk != app.viewport.sketch_key {
-        let scene = build_sketch_scene(app, proj);
-        if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
-            *slot = Some(scene);
-        }
-        app.viewport.sketch_scenes_built += 1;
-        app.viewport.sketch_key = sk;
+    let (sk, coarse) = sketch_scene_keys(app, proj, model_key);
+    if sk == app.viewport.sketch_key {
+        return;
     }
+    let hold = &mut app.viewport.sketch_hold;
+    if let Some(ctx) = ctx
+        && coarse.is_some()
+        && coarse == hold.coarse
+        && hold.build_ms > SKETCH_HOLD_MS
+    {
+        let wait = hold.rest.wait(sk, ctx.input(|i| i.time) * 1000.0);
+        if wait > 0.0 {
+            hold.stale = true;
+            ctx.request_repaint_after(std::time::Duration::from_millis(wait as u64 + 5));
+            return;
+        }
+    }
+    let t0 = crate::now_ms();
+    let scene = build_sketch_scene(app, proj);
+    if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
+        *slot = Some(scene);
+    }
+    app.viewport.sketch_hold.build_ms = crate::now_ms() - t0;
+    app.viewport.sketch_hold.coarse = coarse;
+    app.viewport.sketch_hold.stale = false;
+    app.viewport.sketch_scenes_built += 1;
+    app.viewport.sketch_key = sk;
+}
+
+/// Whether the sketch scene on screen was drawn for an earlier view, kept while the camera moves.
+pub(crate) fn sketch_scene_held(app: &SolveApp) -> bool {
+    app.viewport.sketch_hold.stale
 }
 
 /// The camera changes only silhouette classification, never the body's mesh or GPU blocks.
@@ -8897,7 +8973,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else if !layered {
             publish_levels(app);
         }
-        refresh_sketch_scene_with_key(app, &proj, key);
+        refresh_sketch_scene_with_key(app, &proj, key, Some(ui.ctx()));
         if app.viewport.wireframe.busy() {
             ui.ctx().request_repaint();
         }
@@ -12919,6 +12995,7 @@ mod tests {
         let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
+        // The plane as it turns by default, about the line where it is.
         let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);
@@ -22208,6 +22285,53 @@ mod grid_plane_tests {
             refresh_sketch_scene(&mut app, &proj);
         }
         assert_eq!(app.viewport.sketch_scenes_built, 3, "a change of what the scene shows builds it");
+    }
+
+    /// #22709: a slow sketch scene is kept while only the camera moves, and built for the view
+    /// once it has rested; a zoom past a step, a change of what it shows, a quick scene or an open
+    /// sketch build it at once.
+    #[test]
+    fn a_slow_sketch_scene_is_kept_while_only_the_camera_moves() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut SolveApp, time: f64| {
+            let input = egui::RawInput { time: Some(time), ..Default::default() };
+            drop(ctx.run_ui(input, |ui| {
+                let proj = projection(app, rect);
+                refresh_sketch_scene_with_key(app, &proj, scene_key(app), Some(ui.ctx()));
+            }));
+            app.viewport.sketch_scenes_built
+        };
+        assert_eq!(frame(&mut app, 0.0), 1, "built for the first view");
+        // As if hundreds of sketches had taken this long.
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.016), 1, "an orbit keeps the slow scene");
+        assert!(sketch_scene_held(&app), "drawn for an earlier view");
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.033), 1, "and so does the next orbit frame");
+        assert_eq!(frame(&mut app, 0.1), 1, "a view resting for less than a moment too");
+        assert_eq!(frame(&mut app, 0.033 + REFINE_STILL_MS / 1000.0 + 0.01), 2, "the rested view has its own scene");
+        assert!(!sketch_scene_held(&app));
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.distance *= 0.5;
+        assert_eq!(frame(&mut app, 0.5), 3, "zooming in past a step samples the curves finer at once");
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        app.preferences.sketch_halo = !app.preferences.sketch_halo;
+        assert_eq!(frame(&mut app, 0.52), 4, "a change of what the scene shows builds it at once");
+        app.viewport.sketch_hold.build_ms = 1.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.54), 5, "a quick scene follows every frame");
+        app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+        assert_eq!(frame(&mut app, 0.56), 6, "opening a sketch builds it");
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.58), 7, "the open sketch and its grid follow the camera exactly");
     }
 
     /// The capacity hint only reserves room: the scene's bytes are those of one built without it.
