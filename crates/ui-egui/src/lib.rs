@@ -45,6 +45,7 @@ mod control_joint_drive;
 mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
+pub mod copy_links_dialog;
 pub mod crash_ui;
 mod cut_bodies;
 pub mod deferred;
@@ -1033,6 +1034,10 @@ pub struct SolveApp {
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
     /// A STEP, IGES, FreeCAD, Rhino or glTF file waiting for its import options (`import_options`).
+    /// Copy Design with Links' window, while it is open.
+    pub copy_links: Option<copy_links_dialog::CopyLinks>,
+    /// The list or copy running beside the window for Copy Design with Links.
+    pub copy_links_job: Option<copy_links_dialog::Job>,
     pub import_options: Option<import_options::Ask>,
     /// Files asked while another waits for its options (several dropped at once), asked in turn.
     pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
@@ -1380,6 +1385,8 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            copy_links: None,
+            copy_links_job: None,
             import_options: None,
             import_options_waiting: Default::default(),
             plugin_menu: Default::default(),
@@ -2736,6 +2743,12 @@ impl SolveApp {
             if !context_menu::press_shortcut(self, "V") {
                 context_menu::toggle_visibility(self);
             }
+            return;
+        }
+        // Copy Design with Links needs its picks and a folder: started from anywhere (the command
+        // search, a key, `ui.start`) it opens its window, as the File menu does.
+        if id == "file.copy_with_links" {
+            copy_links_dialog::open(self);
             return;
         }
         // Dialog OK runs OK in the open dialog and starts nothing (#17416).
@@ -5217,6 +5230,7 @@ impl SolveApp {
         file_load::show(self, ui.ctx());
         // A file's import options are asked on Home too, where Open and Import start.
         import_options::show(self, ui.ctx());
+        copy_links_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());

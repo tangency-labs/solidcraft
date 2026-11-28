@@ -186,6 +186,7 @@ mod config;
 mod design_link;
 mod documents;
 mod file;
+mod file_copy_links;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
 pub mod frame;
@@ -710,6 +711,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(file_copy_links::COMMANDS.iter());
     v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());

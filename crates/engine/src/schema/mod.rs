@@ -97,6 +97,7 @@ pub mod face_edits;
 pub mod features;
 pub mod features_more;
 pub mod file;
+pub mod file_copy_links;
 pub mod file_library;
 pub mod frame;
 pub mod frame_plate;
