@@ -307,6 +307,7 @@ redo	false
 refold	false
 rename	false
 render_image	false
+render_pick_up	false
 render_scene	false
 reorder	false
 replace_face	false

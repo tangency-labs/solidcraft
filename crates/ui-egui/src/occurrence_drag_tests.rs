@@ -110,7 +110,7 @@ fn grounded_parts_empty_space_and_modifier_drags_draw_a_selection_box() {
 fn option_drag_orbits_when_the_free_parts_pivot_is_behind_the_camera() {
     let (mut h, _, free) = two_parts();
     let part = h.app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == free).unwrap().component;
-    run(&mut h, "component.activate", json!({"component": part, "path": [free]}));
+    run(&mut h, "component.activate", json!({"component": part, "occurrence": free, "path": [free]}));
     run(&mut h, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 900]}));
     run(&mut h, "component.activate", json!({"component": "root"}));
     crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("maya"));

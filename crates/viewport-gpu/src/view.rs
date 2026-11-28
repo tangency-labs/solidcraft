@@ -3436,7 +3436,7 @@ pub struct Renderer {
     line_depth: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     ink: wgpu::RenderPipeline,
-    ink_fractional: wgpu::RenderPipeline,
+    ink_fractional: Option<wgpu::RenderPipeline>,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
     guide_line: wgpu::RenderPipeline,
@@ -4512,9 +4512,12 @@ impl Renderer {
             )
         };
         let lines_all = || {
+            let ink = if t.depth.is_some() { "fs_ink" } else { "fs_ink_no_depth" };
             (
-                pipeline("sc_ink", "vs_ink", "fs_ink", line_layout(), depth(wgpu::CompareFunction::LessEqual, true), alpha),
-                pipeline("sc_ink_fractional", "vs_ink", "fs_ink_fractional", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_ink", "vs_ink", ink, line_layout(), depth(wgpu::CompareFunction::LessEqual, true), alpha),
+                t.depth.map(|_| {
+                    pipeline("sc_ink_fractional", "vs_ink", "fs_ink_fractional", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha)
+                }),
                 pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
                 pipeline("sc_guide_lines", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             )
@@ -5917,12 +5920,14 @@ impl Renderer {
         lines(pass, &res.ink, &h.ink);
         // Blend subpixel coverage after both opaque ink batches. A closer thin stroke then
         // shows the depth-tested color beneath it, regardless of which stroke was submitted first.
-        if sk.ink.is_some() {
-            pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-            lines(pass, &res.ink_fractional, &sk.ink);
-            pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        if let Some(ink_fractional) = &res.ink_fractional {
+            if sk.ink.is_some() {
+                pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+                lines(pass, ink_fractional, &sk.ink);
+                pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+            }
+            lines(pass, ink_fractional, &h.ink);
         }
-        lines(pass, &res.ink_fractional, &h.ink);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
@@ -8220,7 +8225,7 @@ mod glass_tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let depth = Some(crate::depth_format(&device, true));
         let mut renderer = Renderer::new(&device, GpuTarget { format, depth, samples: 1, tess: false, oit: false, edges: false }, None);
-        let mut render = |key, strokes: &[([f32; 2], f32, [u8; 4])]| {
+        let render = |renderer: &mut Renderer, key, strokes: &[([f32; 2], f32, [u8; 4])], with_depth| {
             let mut sketch = GpuScene::default();
             // The middle pixel's centre in the fixed 64 × 64 view.
             let y = -0.15625;
@@ -8231,7 +8236,7 @@ mod glass_tests {
             let mut frame = test_frame(GpuScene::default(), 1.0);
             frame.sketch_key = key;
             frame.sketch_slot = Arc::new(Mutex::new(Some(sketch)));
-            render_frame(&mut renderer, &device, &queue, &frame, true)
+            render_frame(renderer, &device, &queue, &frame, with_depth)
         };
         let pixel = |bytes: &[u8], x: usize| {
             let at = (32 * 64 + x) * 4;
@@ -8243,18 +8248,22 @@ mod glass_tests {
         let near_opaque = ([20.0; 2], 3.0, red);
         let far_opaque = ([-20.0; 2], 3.0, blue);
         let far_thin = ([-20.0; 2], 0.25, blue);
-        let first = pixel(&render(1, &[near_thin, far_opaque]), 32);
+        let first = pixel(&render(&mut renderer, 1, &[near_thin, far_opaque], true), 32);
         assert!(first[0] > 50 && first[0] < 80 && first[1] < 5 && first[2] > 180, "red ink blends over blue: {first:?}");
-        assert_eq!(first, pixel(&render(2, &[far_opaque, near_thin]), 32));
-        assert_eq!(pixel(&render(3, &[near_opaque, far_thin]), 32), red);
-        let both_thin = pixel(&render(4, &[near_thin, far_thin]), 32);
+        assert_eq!(first, pixel(&render(&mut renderer, 2, &[far_opaque, near_thin], true), 32));
+        assert_eq!(pixel(&render(&mut renderer, 3, &[near_opaque, far_thin], true), 32), red);
+        let both_thin = pixel(&render(&mut renderer, 4, &[near_thin, far_thin], true), 32);
         assert!(both_thin[0] < 220 && both_thin[2] < 220, "both thin strokes contribute: {both_thin:?}");
 
         let white = [255; 4];
-        assert_eq!(pixel(&render(5, &[([-80.0; 2], 3.0, red)]), 32), white);
-        let crossing = render(6, &[([-80.0, 0.0], 3.0, red)]);
+        assert_eq!(pixel(&render(&mut renderer, 5, &[([-80.0; 2], 3.0, red)], true), 32), white);
+        let crossing = render(&mut renderer, 6, &[([-80.0, 0.0], 3.0, red)], true);
         assert_eq!(pixel(&crossing, 26), white);
         assert_eq!(pixel(&crossing, 32), red);
+
+        let mut renderer =
+            Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false }, None);
+        assert_eq!(pixel(&render(&mut renderer, 7, &[far_opaque, near_thin], false), 32), first);
     }
 
     /// A frame of opaque triangles at the fixed view.

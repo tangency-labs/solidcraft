@@ -97,7 +97,7 @@ struct Freehand {
 }
 
 pub(crate) fn ink_color(rgb: Option<[u8; 3]>) -> Color32 {
-    rgb.map_or_else(|| solidcraft_theme::Tokens::view().sketch, |[r, g, b]| Color32::from_rgb(r, g, b))
+    rgb.map_or_else(|| solidcraft_theme::Tokens::view().sketch, crate::theme::model_color)
 }
 
 /// Positive widths are screen points. A negative value is projected at unit eye depth.

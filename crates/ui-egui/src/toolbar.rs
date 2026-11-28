@@ -7197,6 +7197,7 @@ mod fill_width_tests {
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":900}));
         crate::toolbar_custom::remove(&mut h.app, "MODEL", "sketch.create");
+        crate::toolbar_custom::remove(&mut h.app, "MODEL", "sketch.grease_pencil");
         assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "sketch.create").is_none());
         h.frames(3);
         assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "New Sketch is no longer a full button");
