@@ -58,21 +58,24 @@ impl std::error::Error for PeriodicSeamError {
 /// Complete an import's periodic topology after its lifted pcurves are known, before the
 /// record is published. Returns the completed record and each output face's input index;
 /// `None` leaves a record with in-domain trims and complete sectors unchanged, and so does a
-/// completion that cannot be made a record passing the import's checks. The kernel removes crossed internal
+/// completion whose kernel edit fails part way or that cannot be made a record passing the
+/// import's checks. The kernel removes crossed internal
 /// cuts, splits genuine boundaries at the base cut, inserts seams and translates the pieces.
 ///
 /// # Errors
-/// Typed evaluation, conversion and topology failures, including a lost face origin.
+/// Typed evaluation and conversion failures, a lost face origin, and a cancelled or
+/// out-of-fuel kernel edit.
 pub fn complete_periodic_seams(
     record: &solidcore_record::brep::Brep,
 ) -> std::result::Result<Option<(solidcore_record::brep::Brep, Vec<usize>)>, PeriodicSeamError> {
     complete_periodic_seams_noted(record).map(|(completed, _)| completed)
 }
 
-/// [`complete_periodic_seams`], and where a completion was made but left unused, why: the
-/// second value says in a sentence which step refused the completed body (it could not be made
-/// a record, or the record failed a check the import makes of every record). It is `None` where
-/// the record needed no completion or the completion was used.
+/// [`complete_periodic_seams`], and where a completion was started but left unused, why: the
+/// second value says in a sentence which step refused it (the kernel's edit of a face failed
+/// part way, the completed body could not be made a record, or the record failed a check the
+/// import makes of every record). It is `None` where the record needed no completion or the
+/// completion was used.
 ///
 /// # Errors
 /// As [`complete_periodic_seams`].
@@ -136,10 +139,25 @@ pub fn complete_periodic_seams_noted(
             .faces
             .get(i)
             .ok_or(PeriodicSeamError::InputFaceLost(i))?;
-        let Some(pieces) =
-            solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, f)
-                .map_err(PeriodicSeamError::Topology)?
-        else {
+        // The edit works on this function's own copy of the body. Where it fails part way (a
+        // trim the classification split still crossing the period, say), the record as imported
+        // passed the import's checks and stands, as it does when the completed body cannot be
+        // made a valid record below: a body keeps its lifted trims rather than being refused for
+        // the completion's sake. A cancellation or a spent work budget is the caller's.
+        let completed =
+            solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, f);
+        #[cfg(test)]
+        let completed = completed.and_then(seam_faults::after_edit);
+        let Some(pieces) = (match completed {
+            Ok(pieces) => pieces,
+            Err(e) if e.is_cancelled() => return Err(PeriodicSeamError::Topology(e)),
+            Err(e) => {
+                return Ok((
+                    None,
+                    Some(format!("the seam edit of face {i} failed part way: {e}")),
+                ));
+            }
+        }) else {
             continue;
         };
         changed = true;
@@ -209,6 +227,52 @@ pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
                     &mut u.pcurve;
                 solidcore::eval::pcurve::snap_end_knots(knots, [lo, hi], ROUNDING);
             }
+        }
+    }
+}
+
+/// Test-only fault injection for [`complete_periodic_seams`], compiled out of every other
+/// build: the one body known to make the kernel's seam edit fail part way is a vendor file that
+/// cannot be shipped, so a test makes an edit that has already changed the body report a
+/// failure instead.
+#[cfg(test)]
+pub(crate) mod seam_faults {
+    use std::cell::Cell;
+
+    use solidcore::error::topology::TopologyFailure;
+    use solidcore::error::Failure;
+    use solidcore::SolidError;
+
+    /// The failure a face's seam edit reports once it has edited the body.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(crate) enum EditFault {
+        /// None: the edit's own result.
+        #[default]
+        Nothing,
+        /// The kernel defect a real import met: a trim still crossing the base period.
+        Defect,
+        /// The caller cancelled.
+        Cancelled,
+    }
+
+    thread_local! {
+        pub(crate) static FAULT: Cell<EditFault> = const { Cell::new(EditFault::Nothing) };
+    }
+
+    /// The edit's result `pieces`, or the failure the test asked for.
+    pub(super) fn after_edit<T>(pieces: T) -> solidcore::Result<T> {
+        const OP: &str = "complete_imported_face_seams";
+        match FAULT.get() {
+            EditFault::Nothing => Ok(pieces),
+            EditFault::Defect => Err(Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the imported face's seam edit left a trim crossing the base period, \
+                          though the seam classification split its boundary",
+                },
+            )
+            .into_error()),
+            EditFault::Cancelled => Err(SolidError::Cancelled { operation: OP }),
         }
     }
 }
