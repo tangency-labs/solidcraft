@@ -953,6 +953,10 @@ fn storage_error(call: &str, error: crate::EngineError) -> HostError {
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn importer_stage(&mut self, plugin: &str, preparing: bool) {
+        solidcraft_doc::progress::importer_stage(Some((plugin, preparing)));
+    }
+
     fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
         self.request_form(entry, params)
     }

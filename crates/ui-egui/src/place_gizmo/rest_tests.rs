@@ -143,6 +143,25 @@ fn a_press_off_centre_does_not_jump_the_pad() {
     assert!((end[1] - (start[1] + dy)).abs() < 6.0, "y jumped: start {start:?} end {end:?}");
 }
 
+/// The value box opens edge to edge with the marker's reach; though the box drags, a press on
+/// that edge still takes the marker, not the box.
+#[test]
+fn a_press_on_the_value_box_edge_by_the_marker_takes_the_marker() {
+    let mut h = plate();
+    h.step(&json!({"start": "plastic.rest"})).unwrap();
+    h.step(&json!({"click": {"world": [40, 25, 10]}})).unwrap();
+    h.settle();
+    let start = h.at(&json!({"handle": "rest:position"})).unwrap();
+    let edge = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box");
+    let from = egui::pos2(edge.left(), (start[1] as f32).clamp(edge.top(), edge.bottom()));
+    assert!(edge.contains(from), "the press is on the box: {edge:?} {from:?}");
+    let (dx, dy) = (60.0, 30.0);
+    h.step(&json!({"drag": [[from.x, from.y], [from.x + dx, from.y + dy]], "steps": 10})).unwrap();
+    h.settle();
+    let end = h.at(&json!({"handle": "rest:position"})).unwrap();
+    assert!((end[0] - start[0] - dx as f64).abs() < 6.0 && (end[1] - start[1] - dy as f64).abs() < 6.0, "the marker moved: {start:?} -> {end:?}");
+}
+
 /// A still press on the marker is someone thinking about where to drag: it never opens Select
 /// Other's list, even where the list has things to offer (a sketch point on a face).
 #[test]

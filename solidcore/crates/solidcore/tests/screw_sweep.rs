@@ -13,6 +13,9 @@
 //!   knots, the bound at most the tolerance asked and no looser than the wall's true
 //!   distance; read through `NetScope` as a blend is, and carried through the net's edits.
 //!   Every wall face is a definition or of a kind `data/sweep_definition_ledger/` lists.
+//! - A joined flank's trims, one along each half turn beside a cylinder piece, are proved
+//!   within their edges' tolerance by their control points, with no bisection (stress
+//!   corpus S0252).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -639,6 +642,104 @@ fn joined_walls_run_on_across_the_half_turns() {
     assert_eq!(walls(&b).len(), 6);
     let (dev, _) = screw_deviation(&k, &b, &m, p, turns, &law);
     assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
+}
+
+/// Stress corpus S0252 (a modelled M100x6 thread on a 100 mm stud): a joined flank runs on
+/// across the half turns, and each cylinder piece beside it meets it along half a turn of its
+/// row, so the flank holds a trim along each such piece of its row, under the edge the stitch
+/// keeps, the piece's path. The stitch's cover proves every joined edge's trims within its
+/// tolerance, and a move's cover proves them again before and after it (a boolean moves its
+/// operands near the origin and back when their box is far from it). Each flank trim is proved
+/// from the control points of its piece of the row at once, as sets as well as at equal
+/// parameters: no bisection runs (before, each was bisected down to just under its tolerance,
+/// and at radius 50 the thread's 22 turns took most of the minutes its cut ran). Here 4 turns
+/// of the M100x6 groove: 8 half turns, 2 flanks, each beside the root's and the crest's
+/// cylinder pieces, so 32 such trims, and the bounds within `1e-9` (the piece's data is the
+/// row's, up to the rounding of the stitched trims' ends).
+#[test]
+fn a_joined_flanks_trims_along_its_half_turns_are_proved_without_bisecting() {
+    use solidcore::query::curve_surface_gap::trim_image_gap_bound_within;
+    use solidcore::topology::edgeuse;
+
+    let mut k = Kernel::default();
+    let (p, turns) = (6.0, 4.0);
+    let tol = p * 1e-4;
+    // (the M100x6 groove as `m10_groove` takes ISO 68-1's, at radius 50)
+    let h = p * 3f64.sqrt() / 2.0;
+    let slope = (PI / 6.0).tan();
+    let r0 = 50.0 - 5.0 * h / 8.0;
+    let w0 = p / 8.0;
+    let r1 = 50.0 + 0.05 * p;
+    let w1 = (p / 4.0 + 2.0 * (r1 - r0) * slope) / 2.0;
+    let m = Meridian::Polygon(vec![
+        (r0, -p - w0),
+        (r1, -p - w1),
+        (r1, -p + w1),
+        (r0, -p + w0),
+    ]);
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert_eq!(walls(&b).len(), 2, "one face per flank");
+    // (each trim once: an edge use without its own reads its mate's)
+    let mut held_by = Vec::new();
+    for e in p1::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let (edge_tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let curve = rec.curve.as_ref().unwrap();
+        for &eu in &rec.edgeuses {
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(&b, eu).unwrap() else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            let f = edgeuse::p1::face(&b, holder).unwrap().unwrap();
+            let held = b.face(f).unwrap().surface.as_ref().unwrap();
+            // (a flank's trim of an edge along half a turn, not of a cap's profile line, whose
+            // parameters run over [0, 1])
+            if held.procedural_sweep().is_none() || range[1] - range[0] <= 3.0 {
+                continue;
+            }
+            // (each as the kernel's covers read them: copies for evaluation)
+            let surface = held.clone_for_evaluation().unwrap();
+            let (curve, trim) = (
+                curve.clone_for_evaluation().unwrap(),
+                trim.clone_for_evaluation().unwrap(),
+            );
+            held_by.push(holder);
+            let before = k.work_counters.fitted_trim_bisections();
+            let g = trim_image_gap_bound_within(
+                &k,
+                &surface,
+                &curve,
+                &trim,
+                range,
+                1e-3 * edge_tol,
+                [edge_tol, f64::INFINITY],
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                k.work_counters.fitted_trim_bisections(),
+                before,
+                "edge {e:?}: the flank's trim over {range:?} was bisected"
+            );
+            assert!(g <= 1e-9, "edge {e:?}: {g:e}");
+        }
+    }
+    assert_eq!(held_by.len(), 32, "the flanks' trims along the half turns");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the

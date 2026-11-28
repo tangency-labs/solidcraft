@@ -72,7 +72,10 @@ pub enum PlaneRef {
     /// `axis_origin` may hold length expressions the axis follows as the parameters change.
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
-    /// through `pivot`, or through the base origin when `pivot` is absent.
+    /// through `pivot`, or through the base origin when `pivot` is absent. With `through_axis`, the
+    /// base is first brought onto the axis (moved along its normal, and tilted when the axis is
+    /// not parallel to it) so the plane goes through the whole axis, at `angle` from where it
+    /// came onto it (#6180).
     AtAngle {
         base: Box<PlaneRef>,
         #[serde(with = "point_expr")]
@@ -87,6 +90,10 @@ pub enum PlaneRef {
         /// Pivot for `direction_only`; absent means the base plane's origin.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pivot: Option<Box<GeoRef>>,
+        /// Go through the axis even when it is off the base; absent in older designs, which keep
+        /// turning the base about the line where it is.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_axis: bool,
     },
     /// A construction plane feature (by id).
     Construction {
@@ -198,7 +205,15 @@ pub enum ProfileSel {
     /// curves cut them (order and repeats don't matter; see `sketch::profile_by_curves`). Found
     /// again on every evaluation, so stable across parameter changes; no match or several is
     /// an error, never another profile.
-    Curves { loops: Vec<Vec<String>> },
+    Curves {
+        loops: Vec<Vec<String>>,
+        /// For each loop, the side of each of its curves the profile lay on when it was picked
+        /// (inside or outside a circle, left or right of a line), or empty when that was not
+        /// saved (older designs, loops with free curves). Used only when the curves come to bound
+        /// several profiles after a change (#23291): the one that lies the same way is taken.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sides: Vec<Vec<SidedCurve>>,
+    },
     /// Complete current boundaries of topology-aware analytic offset associations.
     /// The local association identity survives retirement and resurrection of arc roles.
     OffsetBoundaries { associations: Vec<String> },
@@ -4896,6 +4911,16 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+/// `base` brought onto the line through `at` along the unit direction `dir`, by the kernel
+/// ([`solidcraft_kernel::affine::plane_onto_line`]): tilted by the least turn that makes
+/// it parallel to the line, then moved along its normal until it holds the line. A base that
+/// already holds the line comes back unchanged (#6180). A line square to the base is refused.
+fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
+    let (origin, [x, y]) = solidcraft_kernel::affine::plane_onto_line(base.origin.into(), base.x.into(), base.y.into(), at.into(), dir.into())
+        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
+    Plane::new(origin.into(), x.into(), y.into()).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+}
+
 /// A standard part (fastener, pin, bearing) inserted as a component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StandardPart {
@@ -6774,7 +6799,7 @@ impl Document {
                 let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
-            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot, through_axis } => {
                 let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
@@ -6817,6 +6842,7 @@ impl Document {
                     let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
                     (axis_origin, d)
                 };
+                let b = if *through_axis && !*direction_only { onto_axis(b, axis_origin, d)? } else { b };
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))

@@ -250,6 +250,13 @@ pub fn chamfer_sides_carrying_face(body: &Body, edges: &[Vec3], d1: f64, side: C
 
 /// An equal chamfer of the edges nearest to the given points.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Chamfer, &[body], |k, f| match f {
+        [fb] => k.chamfer(fb, edges, distance).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::Chamfer) {
         Which::Solidcore => Solidcore.chamfer(body, edges, distance),
     }
@@ -265,6 +272,13 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
 
 /// The body hollowed to `thickness`, open at the faces nearest `open`.
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Shell, &[b], |k, f| match f {
+        [fb] => k.shell(fb, open, thickness).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::Shell) {
         Which::Solidcore => Solidcore.shell(b, open, thickness),
     }
@@ -272,6 +286,13 @@ pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
 
 /// A sheet thickened to `thickness`, to both sides when `symmetric`.
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Thicken, &[body], |k, f| match f {
+        [fb] => k.thicken(fb, thickness, symmetric).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::Thicken) {
         Which::Solidcore => Solidcore.thicken(body, thickness, symmetric),
     }
@@ -279,6 +300,13 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 
 /// The faces nearest `at` moved `distance` along their normals.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::OffsetFaces, &[b], |k, f| match f {
+        [fb] => k.offset_faces(fb, at, distance).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::OffsetFaces) {
         Which::Solidcore => Solidcore.offset_faces(b, at, distance),
     }
