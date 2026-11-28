@@ -2129,6 +2129,29 @@ impl Body {
         }))
     }
 
+    /// Whether the plane normals of two record faces are parallel (same or opposite
+    /// direction). Compares component-wise: exact for planar faces of primitives.
+    /// Returns `false` when either face is not planar or has no normal.
+    pub fn face_normals_are_parallel(
+        &self,
+        order: &Order,
+        face_a: usize,
+        face_b: usize,
+    ) -> Result<bool> {
+        let na = self.face_plane_normal(order, face_a)?;
+        let nb = self.face_plane_normal(order, face_b)?;
+        match (na, nb) {
+            (Some(a), Some(b)) => {
+                let same = a.value == b.value;
+                let opposite = a.value[0] == -b.value[0]
+                    && a.value[1] == -b.value[1]
+                    && a.value[2] == -b.value[2];
+                Ok(same || opposite)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// Outward normals and estimated areas of this body's planar faces, in record-face order.
     /// Curved faces are omitted. The area estimate uses the kernel integrator at `1e-8` relative
     /// accuracy; planar classification and normals use the face's own tolerance.
