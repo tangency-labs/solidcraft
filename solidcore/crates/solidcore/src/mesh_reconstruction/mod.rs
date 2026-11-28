@@ -154,14 +154,7 @@ pub fn reconstruct(
         let entry = axes.entry(key).or_insert((n, 0.));
         entry.1 += cross.length();
     }
-    if edges
-        .values()
-        .any(|&(count, balance)| count != 2 || balance != 0)
-    {
-        return Err(invalid(
-            "mesh must be closed and consistently oriented, with two triangles per edge",
-        ));
-    }
+    check_edge_uses(&mesh, &edges)?;
     let mut axes: Vec<_> = axes.into_values().collect();
     axes.sort_by(|a, b| b.1.total_cmp(&a.1));
     for &(axis, _) in axes.iter().take(16) {
@@ -182,6 +175,37 @@ pub fn reconstruct(
         body: faceted::build(k, &mesh)?,
         kind: ReconstructionKind::Faceted,
     })
+}
+
+/// Count every invalid edge use and give one deterministic example in mesh coordinates.
+fn check_edge_uses(mesh: &TriMesh, edges: &BTreeMap<(u32, u32), (usize, i32)>) -> Result<()> {
+    let (mut open, mut nonmanifold, mut inconsistent) = (0, 0, 0);
+    let mut first = None;
+    for (&edge, &(count, balance)) in edges {
+        match count {
+            1 => open += 1,
+            2 if balance == 0 => continue,
+            2 => inconsistent += 1,
+            _ => nonmanifold += 1,
+        }
+        first.get_or_insert(edge);
+    }
+    if let Some((a, b)) = first {
+        let point = |i: u32| {
+            mesh.positions
+                .get(i as usize)
+                .map(|p| [p.x, p.y, p.z])
+                .ok_or_else(|| invalid("triangle refers to a missing vertex"))
+        };
+        return Err(SolidError::MeshTopology {
+            open,
+            nonmanifold,
+            inconsistent,
+            start: point(a)?,
+            end: point(b)?,
+        });
+    }
+    Ok(())
 }
 
 fn check_budget(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<()> {

@@ -1307,6 +1307,7 @@ fn typed(e: SolidError) -> Error {
     use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
         SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
+        e @ SolidError::MeshTopology { .. } => Error::Mesh(e.to_string().into()),
         SolidError::NotConverged { .. } => Error::Status(SM_ERR_NOT_CONVERGING),
         SolidError::NotFound { .. } => Error::Status(SM_ERR),
         SolidError::Degenerate { .. } => Error::Degenerate,
