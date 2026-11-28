@@ -260,7 +260,10 @@ impl SurfPtSolveStepper<'_> {
     /// to). The point moves to the least distance along the line `uv + s e`, in whichever
     /// direction is lower: a golden-section search over `s` inside the domain, its window
     /// ending where the line's tangent image `|Su e_u + Sv e_v| s` reaches twice the
-    /// distance. It moves only when that point is nearer by more than the solve's tight
+    /// distance, and, as that search loses a fall close to the point where the distance
+    /// rises again beyond it, a second search between the neighbours of the lowest of the
+    /// points `0.618^k` of the window toward the point when that one is lower still. Where
+    /// the Hessian is a multiple of the identity, `e` is the `u` direction. It moves only when that point is nearer by more than the solve's tight
     /// tolerance taken at the scale of the surface point too, `EFF_ZERO (1 + |P| + |S - P|)`
     /// (`|S| <= |P| + |S - P|`), so the rounding of the distances compared is no fall and a
     /// minimum never moves (a point on the axis of a cylinder of radius 1e5 has its nearest
@@ -305,11 +308,20 @@ impl SurfPtSolveStepper<'_> {
             e2
         };
         let len = e.x.hypot(e.y);
-        let reach = (su * (e.x / len) + sv * (e.y / len)).length();
-        if len.is_nan() || reach.is_nan() || len <= 0.0 || reach <= 0.0 {
+        if len.is_nan() {
             return Ok(false);
         }
-        let e = Point2::new(e.x / len, e.y / len);
+        // both rows vanish only where the matrix is `low` times the identity (`b = 0`,
+        // `a = c = low`), where every direction is an eigenvector
+        let e = if len > 0.0 {
+            Point2::new(e.x / len, e.y / len)
+        } else {
+            Point2::new(1.0, 0.0)
+        };
+        let reach = (su * e.x + sv * e.y).length();
+        if reach.is_nan() || reach <= 0.0 {
+            return Ok(false);
+        }
         let domain = *self.base.domain();
         let uv = self.uv();
         let surface = self.base.surface();
@@ -342,28 +354,53 @@ impl SurfPtSolveStepper<'_> {
                 continue;
             }
             let at = |s: f64| domain.clamp_point(Point2::new(uv.x + s * d.x, uv.y + s * d.y));
-            // golden-section search on [0, far], each step a fixed fraction of the bracket,
-            // until the bracket is below the rounding of its ends
             let ratio = 0.5 * (5.0_f64.sqrt() - 1.0);
-            let (mut lo, mut hi) = (0.0, far);
-            let mut x1 = hi - ratio * (hi - lo);
-            let mut x2 = lo + ratio * (hi - lo);
-            let mut f1 = value(at(x1))?;
-            let mut f2 = value(at(x2))?;
-            for _ in 0..GOLDEN_STEPS {
-                if f1 <= f2 {
-                    hi = x2;
-                    (x2, f2) = (x1, f1);
-                    x1 = hi - ratio * (hi - lo);
-                    f1 = value(at(x1))?;
-                } else {
-                    lo = x1;
-                    (x1, f1) = (x2, f2);
-                    x2 = lo + ratio * (hi - lo);
-                    f2 = value(at(x2))?;
+            // golden-section search on [lo, hi], each step a fixed fraction of the bracket,
+            // until the bracket is below the rounding of its ends: the lower of its last two
+            // points
+            let search = |mut lo: f64, mut hi: f64| -> Result<(f64, f64)> {
+                let mut x1 = hi - ratio * (hi - lo);
+                let mut x2 = lo + ratio * (hi - lo);
+                let mut f1 = value(at(x1))?;
+                let mut f2 = value(at(x2))?;
+                for _ in 0..GOLDEN_STEPS {
+                    if f1 <= f2 {
+                        hi = x2;
+                        (x2, f2) = (x1, f1);
+                        x1 = hi - ratio * (hi - lo);
+                        f1 = value(at(x1))?;
+                    } else {
+                        lo = x1;
+                        (x1, f1) = (x2, f2);
+                        x2 = lo + ratio * (hi - lo);
+                        f2 = value(at(x2))?;
+                    }
                 }
+                Ok(if f1 <= f2 { (x1, f1) } else { (x2, f2) })
+            };
+            let (mut s, mut f) = search(0.0, far)?;
+            // the search keeps one part of its window at each step, so it loses a fall
+            // close to the point where the distance rises again beyond it; the points
+            // `far 0.618^k` toward the point, down to where the model's fall is below the
+            // least fall, show such a fall, and one lower by the least fall than the
+            // search's answer brackets a search between its neighbours
+            let least = (2.0 * fall * distance / -low).sqrt();
+            let mut lowest: Option<(f64, f64)> = None;
+            let mut probe = far * ratio;
+            for _ in 0..GOLDEN_STEPS {
+                if probe.is_nan() || probe <= least {
+                    break;
+                }
+                let at_probe = value(at(probe))?;
+                if at_probe < f - fall && lowest.is_none_or(|(_, b)| at_probe < b) {
+                    lowest = Some((probe, at_probe));
+                }
+                probe *= ratio;
             }
-            let (s, f) = if f1 <= f2 { (x1, f1) } else { (x2, f2) };
+            if let Some((p, at_p)) = lowest {
+                let (q, at_q) = search(p * ratio, (p / ratio).min(far))?;
+                (s, f) = if at_q <= at_p { (q, at_q) } else { (p, at_p) };
+            }
             if f < distance - fall && best.is_none_or(|(b, _)| f < b) {
                 best = Some((f, at(s)));
             }
