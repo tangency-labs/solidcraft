@@ -12,8 +12,6 @@ workspace = true
 [dependencies]
 egui = { workspace = true }
 egui-wgpu = { workspace = true, features = ["winit", "capture"] }
-# The runner's input; winit's own platform features come from it.
-egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "serde", "wayland", "x11"] }
 log = { workspace = true }
 pollster = { workspace = true }
 thiserror = { workspace = true }
@@ -21,6 +19,11 @@ web-time = { workspace = true }
 wgpu = { workspace = true }
 # A window system to build against on Linux (the host picks the one it runs on).
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "x11"] }
+
+# The runner (native only: in a browser the page runs the loop). Its input; winit's own platform
+# features come from it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "serde", "wayland", "x11"] }
 
 [dev-dependencies]
 # Native backends, so the example opens a window (the app picks its own).
