@@ -273,7 +273,9 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         ];
         let mut shown = Vec::new();
         ui_kit::table_fitted(ui, "space_mouse_axes", &columns, "", |ui, table| {
-            table.headers(ui, |_, _| false);
+            if !ui_kit::settings_search::suppress_chrome(ui) {
+                table.headers(ui, |_, _| false);
+            }
             for (axis, (name, off)) in rows.iter().enumerate() {
                 ui.push_id(("space_mouse_axis", axis), |ui| {
                     let (value, zone) = meters[axis];

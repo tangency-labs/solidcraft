@@ -440,7 +440,9 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ];
     let mut shown = Vec::new();
     ui_kit::table_custom(ui, "nav_buttons", &columns, "", |ui, table| {
-        table.headers(ui, |_, _| false);
+        if !ui_kit::settings_search::suppress_chrome(ui) {
+            table.headers(ui, |_, _| false);
+        }
         for button in buttons {
             let name = button_label(button);
             ui_kit::settings_search::set_control(ui, &name);

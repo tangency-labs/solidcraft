@@ -3163,7 +3163,9 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut shown = Vec::new();
     ui_kit::table_fitted(ui, "space_mouse_buttons", &columns, solidcraft_ui_text::tr("ui.3d_mouse_buttons_hint"), |ui, table| {
-        table.headers(ui, |_, _| false);
+        if !ui_kit::settings_search::suppress_chrome(ui) {
+            table.headers(ui, |_, _| false);
+        }
         for number in numbers {
             let mut name = crate::space_mouse::button_name(&device, number, false);
             if app.space_mouse.buttons.contains(number) || app.space_mouse.long_buttons.contains(number) {
@@ -12396,7 +12398,7 @@ mod tests {
         assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
-        h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
+        scroll_to_and_click(&mut h, "prefs:mark_orbit_point");
         assert!(!h.app.preferences.mark_orbit_point);
         h.call("ui.prefs", json!({"button":"apply"}));
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
