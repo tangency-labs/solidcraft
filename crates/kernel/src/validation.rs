@@ -267,6 +267,35 @@ pub fn failing_check(body: &Body) -> Result<Option<CheckFailure>> {
     Ok(CheckFailure::of(&check))
 }
 
+/// [`failing_check`] of only some of the body's entities (indices in its record): the faces
+/// `faces` with their loops and the edges `edges` with the vertices at their ends; the tests the
+/// whole check runs of those entities, and none of the rest of the body nor its body-wide passes
+/// ([`solidcraft_smlib::Brep::check_local`]), so it takes the time of those entities, not the
+/// body's. For an edit of a body that passed the check, with `faces` the faces it changed (and
+/// those beside an edge it changed) and `edges` the edges it changed, it is the check's verdict
+/// on what the edit made; it proves nothing of the rest. It runs on the SMLib form the body keeps.
+/// `None` where they pass, or the body is not SMLib's to check; a check that cannot run is the
+/// error why. Where SMLib numbers the body unlike its record, it is the whole check.
+pub(crate) fn failing_check_local(body: &Body, faces: &[usize], edges: &[usize]) -> Result<Option<CheckFailure>> {
+    if body.is_mesh() || body.smlib_refusal().is_some() {
+        return Ok(None);
+    }
+    let (brep, order) = crate::native::smlib_operand_ordered(body)?;
+    // the record's numbering in SMLib's: as it is, or through the order, one entity each
+    let numbered = order.and_then(|o| {
+        if !o.pieces.is_empty() {
+            return None;
+        }
+        let at = |picked: &[usize], order: &[usize]| -> Option<Vec<usize>> {
+            picked.iter().map(|i| if order.is_empty() { Some(*i) } else { order.iter().position(|c| c == i) }).collect()
+        };
+        Some((at(faces, &o.faces)?, at(edges, &o.edges)?))
+    });
+    let Some((faces, edges)) = numbered else { return failing_check(body) };
+    let check = brep.check_local(&faces, &edges, CheckLevel::All).map_err(|e| KernelError::smlib("SMLib's check", e))?;
+    Ok(CheckFailure::of(&check))
+}
+
 /// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
 /// the check reports it (its site: the test's number and name, and the kind of entity it failed
 /// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test

@@ -445,11 +445,14 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Move this plane of the section, keeping the others (Edit on several planes).
                 edit: Option<u64>,
             },
-            /// Measure one or two picked items (vertices, edges, faces): the result of the last
-            /// measurement and the items it was for.
+            /// Measure one or two picked items (vertices, edges, faces), or the spacing of several
+            /// round ones: the result of the last measurement and the items it was for.
             Measure {
                 /// Show an additional metric or inch readout without changing design units.
                 dual_units: bool,
+                /// Picks add up past two, to measure the spacing of round edges and holes along
+                /// a row or round a bolt circle (#10170). Off, a third pick starts over.
+                spacing: bool,
                 result: Option<Value>,
                 of: Vec<Sel>,
                 /// The measure chosen in the panel (centre, min or max); `None` follows the result's
@@ -775,6 +778,8 @@ pub struct Dialog {
     pub(crate) started_from_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
+    /// Its handle drags, for Undo and Redo while it is open (#22838).
+    pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
 }
 
 #[derive(Clone, Debug)]
@@ -1019,6 +1024,11 @@ impl Dialog {
         dense::command(&self.kind)
     }
 
+    /// The value box that has, or last had, the keyboard.
+    pub(crate) fn value_focus(&self) -> Option<egui::Id> {
+        self.value_focus
+    }
+
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     pub(crate) fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
@@ -1064,6 +1074,7 @@ impl Dialog {
             started_from_sketch: None,
             auto: None,
             new_sketch: false,
+            drag_undo: Default::default(),
         }
     }
 
@@ -1269,7 +1280,7 @@ impl Dialog {
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
-                Kind::Measure { dual_units: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
+                Kind::Measure { dual_units: false, spacing: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
                 vec![SelInput::new(
                     "Items",
                     FACES
@@ -1546,7 +1557,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
-                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
+                    crate::dialogs_assembly::picked_whole_component(&mut d, path, &whole);
                 }
                 continue;
             }
@@ -2322,8 +2333,10 @@ impl Dialog {
         }
         inp.toggle(picked);
         self.focus = true;
-        // A measurement is between two items: a third pick starts over from the last one.
-        if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > 2 {
+        // A measurement is between two items: a third pick starts over from the last one. With
+        // the panel's spacing option on, picks add up instead, as far as one measurement takes.
+        let most = if matches!(self.kind, Kind::Measure { spacing: true, .. }) { MEASURE_SPACING_ITEMS } else { 2 };
+        if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > most {
             let keep = inp.items.split_off(inp.items.len() - 1);
             inp.items = keep;
         }
@@ -4970,6 +4983,9 @@ fn fill_cells_between(
     out
 }
 
+/// The most picks Measure keeps with its spacing option on: what `inspect.measure` takes.
+const MEASURE_SPACING_ITEMS: usize = 64;
+
 /// Measure again when the picked items changed.
 fn update_measure(app: &SolveApp, d: &mut Dialog) {
     let items: Vec<Sel> = sels(d, 0).to_vec();
@@ -5401,6 +5417,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
         // OK waits for values the engine takes; the drawing says why it does not.
         Kind::ShaftSpline(_) => built.unwrap_or_else(|| apply_commands(app, &d).is_ok()),
+        // A drawing whose Resolution was just changed is being measured again, and the Simplify
+        // distance is still the one fitted at the old resolution: OK waits for the new fit
+        // ([`dialogs_insert_drawing::remeasure`]), so it cannot send a distance that does not fit.
+        Kind::InsertDrawing(p) => {
+            p.dpi == p.measured_dpi && (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none())
+        }
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -9314,9 +9336,11 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
         "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
-        "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
-        }
+        "construct.axis.normal_to_face" => (
+            "construct.axis.normal_to_face",
+            "AXIS PERPENDICULAR TO FACE OR PLANE",
+            &[("Face or plane", FACES | PLANES, "face", false), ("Point", POINT, "point", false)],
+        ),
         "construct.axis.two_planes" => {
             ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
@@ -9773,7 +9797,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, to } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, join_profile_arcs, to } => {
             let mut d = start("solid.revolve")?;
             let frame = feature_frame(s, f.component);
             let stored_axis = match axis {
@@ -9784,6 +9808,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             };
             d.kind = Kind::Revolve { angle: shown_expr(angle, ValueKind::Angle), operation: op_index(operation), axis: stored_axis };
             d.extra.insert("convention".into(), json!(convention));
+            d.extra.insert("join_profile_arcs".into(), json!(join_profile_arcs));
             if let Some(a2) = angle2 {
                 d.extra.insert("angle2".into(), json!(a2));
             }

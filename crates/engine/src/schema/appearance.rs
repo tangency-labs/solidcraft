@@ -26,7 +26,7 @@ pub struct AppearanceAssignParams {
     /// Bodies, by name (a placed copy's name, `KB (K:2)`, means the body it shows).
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// Faces, by a point on each, at most 10000.
+    /// Faces, by a point on each or by name (as `model.faces` lists it), at most 10000.
     #[serde(default)]
     pub faces: Option<FaceSpots>,
     /// The body the `faces` points are on, for points that don't name one. Default: the
@@ -58,20 +58,21 @@ pub struct AppearanceAssignParams {
     pub pbr: Option<PbrParam>,
 }
 
-/// `appearance.assign`'s `faces`: at most 10000 points, each `[x, y, z]` (or `{x, y, z}`) or
-/// `{"point": [x, y, z], "body": name}`, read as the handler reads them.
+/// `appearance.assign`'s `faces`: at most 10000, each a point `[x, y, z]` (or `{x, y, z}`),
+/// `{"point": [x, y, z], "body": name}` or a face's name, read as the handler reads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceSpots(pub Vec<Value>);
 
 impl<'de> Deserialize<'de> for FaceSpots {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let fail = || D::Error::custom("must list points [x, y, z]");
+        let fail = || D::Error::custom("must list points [x, y, z] or face names");
         let list = match Value::deserialize(d)? {
             Value::Array(list) if list.len() <= 10_000 => list,
             _ => return Err(fail()),
         };
         let point = |v: &Value| params::vec3(v).or_else(|| v.get("point").and_then(params::vec3));
-        if list.iter().all(|v| point(v).is_some()) { Ok(FaceSpots(list)) } else { Err(fail()) }
+        // A name the handler can't use (empty, too long) is its to refuse.
+        if list.iter().all(|v| v.is_string() || point(v).is_some()) { Ok(FaceSpots(list)) } else { Err(fail()) }
     }
 }
 
@@ -87,9 +88,9 @@ impl JsonSchema for FaceSpots {
             "required": ["point"]
         });
         json_schema!({
-            "description": "Points in mm, one on each face: [x, y, z], or {\"point\": [x, y, z], \"body\": name} to say which body.",
+            "description": "One entry per face: a point on it in mm, [x, y, z] or {\"point\": [x, y, z], \"body\": name} to say which body, or its name from model.faces.",
             "type": "array",
-            "items": {"anyOf": [point, on_body]},
+            "items": {"anyOf": [point, on_body, {"type": "string", "minLength": 1, "maxLength": 512}]},
             "maxItems": 10000
         })
     }
@@ -311,7 +312,7 @@ pub struct StarterAppearance {
     pub future_texture_recipe: Value,
 }
 
-/// `appearance.list` takes one parameter, `body`, optional.
+/// `appearance.list` takes two optional parameters: `body` and `active_only`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppearanceListParams {
@@ -319,6 +320,10 @@ pub struct AppearanceListParams {
     /// `body`, its resolved look and its faces' looks.
     #[serde(default)]
     pub body: Option<String>,
+    /// When `true`, include only overrides whose body or component exists in the active model
+    /// (excluding removed, suppressed, rolled-back or orphaned targets). Default: `false`.
+    #[serde(default)]
+    pub active_only: Option<bool>,
 }
 
 /// What `appearance.list` returns: the looks the design assigns, by look and by target.
@@ -332,6 +337,10 @@ pub struct AppearanceListResult {
     pub faces: Vec<FaceLookReply>,
     /// The components with a look of their own.
     pub components: Vec<ComponentLookReply>,
+    /// Body names with saved overrides that are not in the active model (removed, suppressed,
+    /// rolled back or orphaned); `appearance.chain` cannot target them while inactive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inactive_bodies: Vec<String>,
     /// With `body`: that body's resolved look and its faces'.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<BodyLooks>,
@@ -453,14 +462,14 @@ pub struct AppearancePickUpResult {
 }
 
 /// An `appearance.chain` target, which is what `appearance.pick_up` takes: `{body}`,
-/// `{body, face}` (a zero-based `model.faces` index) or `{component}` (a name or id, or a
+/// `{body, face}` (a zero-based `model.faces` index or the name listed there) or `{component}` (a name or id, or a
 /// placement's name such as `K:2`). Read as `cmd::appearance_chain::chain` reads it, with its
 /// messages. The handler counts 4096 *bytes* of name; `maxLength` counts characters, so a name
 /// of multi-byte characters is refused later than the schema says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainTarget {
     Body(String),
-    Face { body: String, face: u64 },
+    Face { body: String, face: Value },
     Component(String),
 }
 
@@ -485,8 +494,10 @@ impl<'de> Deserialize<'de> for ChainTarget {
             (Some(body), None, None) if object.len() == 1 => Ok(ChainTarget::Body(chain_name(body).ok_or_else(bad_name)?.to_string())),
             (Some(body), Some(face), None) if object.len() == 2 => {
                 let body = chain_name(body).ok_or_else(bad_name)?.to_string();
-                let face = face.as_u64().ok_or_else(|| D::Error::custom(whole("face must be a zero-based unsigned index")))?;
-                Ok(ChainTarget::Face { body, face })
+                if !(face.is_u64() || face.is_string()) {
+                    return Err(D::Error::custom(whole("face must be a zero-based unsigned index or a face name")));
+                }
+                Ok(ChainTarget::Face { body, face: face.clone() })
             }
             (None, None, Some(component)) if object.len() == 1 => match component {
                 Value::String(_) => Ok(ChainTarget::Component(chain_name(component).ok_or_else(bad_name)?.to_string())),
@@ -507,11 +518,12 @@ impl JsonSchema for ChainTarget {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let name = json!({"type": "string", "minLength": 1, "maxLength": 4096});
+        let face = json!({"anyOf": [{"type": "integer", "minimum": 0}, {"type": "string", "minLength": 1, "maxLength": 512}]});
         json_schema!({
             "description": "A body, one of its faces, or a component: {body}, {body, face} or {component}.",
             "anyOf": [
                 {"type": "object", "properties": {"body": name}, "required": ["body"], "additionalProperties": false},
-                {"type": "object", "properties": {"body": name, "face": {"type": "integer", "minimum": 0}},
+                {"type": "object", "properties": {"body": name, "face": face},
                  "required": ["body", "face"], "additionalProperties": false},
                 {"type": "object", "properties": {"component": {"anyOf": [name, {"type": "integer", "minimum": 0}]}},
                  "required": ["component"], "additionalProperties": false}
@@ -805,7 +817,7 @@ pub struct AppearancePasteParams {
     /// Bodies, by name (a placed copy's name, `KB (K:2)`, means the body it shows).
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// Faces, by a point on each, at most 10000.
+    /// Faces, by a point on each or by name (as `model.faces` lists it), at most 10000.
     #[serde(default)]
     pub faces: Option<FaceSpots>,
     /// The body the `faces` points are on, for points that don't name one. Default: the

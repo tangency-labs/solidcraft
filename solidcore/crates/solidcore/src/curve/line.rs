@@ -2295,17 +2295,37 @@ impl Line {
         key: ObjectKey,
         trim_surface: Option<&Surface>,
     ) -> Result<bool> {
+        if !level_given {
+            self.ensure_nurb_for_assert()?;
+        }
+        self.assert_valid_on_prepared(k, list, level_given, key, trim_surface)
+    }
+
+    /// Materializes the cached NURB representation if missing (the only mutation
+    /// [`Self::assert_valid_on`] performs).
+    pub(crate) fn ensure_nurb_for_assert(&mut self) -> Result<()> {
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb())?;
+        }
+        Ok(())
+    }
+
+    /// Read-only body of [`Self::assert_valid_on`], once [`Self::ensure_nurb_for_assert`]
+    /// has run (when `!level_given`).
+    pub(crate) fn assert_valid_on_prepared(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         let mut rtn = true;
 
         // call the base class AssertValid
         if !level_given {
-            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb,
-            // status ignored)
-            if self.base.nurb.is_none() {
-                ignore_status(self.make_nurb())?;
-            }
-            let this = &*self;
+            let this = self;
             let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol, None));
             rtn &= this.base.assert_valid_with(
                 k,
