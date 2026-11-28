@@ -8261,8 +8261,7 @@ mod glass_tests {
         assert_eq!(pixel(&crossing, 26), white);
         assert_eq!(pixel(&crossing, 32), red);
 
-        let mut renderer =
-            Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false }, None);
+        let mut renderer = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false }, None);
         assert_eq!(pixel(&render(&mut renderer, 7, &[far_opaque, near_thin], false), 32), first);
     }
 
