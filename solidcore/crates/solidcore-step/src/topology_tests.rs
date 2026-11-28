@@ -538,6 +538,59 @@ fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     );
 }
 
+/// A disc of radius 30 from z -5 to 20 with a flat at y = 19.719 (solidcore#3256): its side is
+/// a trimmed cylindrical face whose arcs run from the flat's corners round through -y. The
+/// tight box of the body read from the file is the disc's: x and z from the arcs and the caps,
+/// y from -30 (the arcs at -y) to the flat. It took the whole cylinder's (y max 30); it is held
+/// to the file's own uncertainty (1e-7 mm).
+#[test]
+fn a_disc_with_a_flat_has_the_tight_box_of_the_disc_not_its_cylinder() {
+    let (r, c, z) = (30.0_f64, 19.719, [-5.0, 20.0]);
+    let x = (r * r - c * c).sqrt();
+    let mut w = W::default();
+    // a: the flat's corner at +x, b: at -x; 0 bottom, 1 top.
+    let (a0, b0) = ([x, c, z[0]], [-x, c, z[0]]);
+    let (a1, b1) = ([x, c, z[1]], [-x, c, z[1]]);
+    let (va0, vb0, va1, vb1) = (w.vertex(a0), w.vertex(b0), w.vertex(a1), w.vertex(b1));
+    // The arcs run counterclockwise about +z from b to a, through -y.
+    let arc0 = arc_about_z(&mut w, (vb0, va0), r, z[0]);
+    let arc1 = arc_about_z(&mut w, (vb1, va1), r, z[1]);
+    let flat0 = w.line_edge((va0, a0), (vb0, b0), true, 1.0);
+    let flat1 = w.line_edge((va1, a1), (vb1, b1), true, 1.0);
+    let up_a = w.line_edge((va0, a0), (va1, a1), true, 1.0);
+    let up_b = w.line_edge((vb0, b0), (vb1, b1), true, 1.0);
+    // Each loop runs counterclockwise about its face's outward normal.
+    let uses = [w.oe(flat0, false), w.oe(arc0, false)];
+    let bound = w.bound(&uses, true, true);
+    let plane = w.plane([0.0, 0.0, z[0]], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bound], plane, true);
+    let uses = [w.oe(arc1, true), w.oe(flat1, true)];
+    let bound = w.bound(&uses, true, true);
+    let plane = w.plane([0.0, 0.0, z[1]], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[bound], plane, true);
+    let uses = [w.oe(flat0, true), w.oe(up_b, true), w.oe(flat1, false), w.oe(up_a, false)];
+    let bound = w.bound(&uses, true, true);
+    let plane = w.plane([0.0, c, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+    let flat = w.face(&[bound], plane, true);
+    let uses = [w.oe(arc0, true), w.oe(up_a, true), w.oe(arc1, false), w.oe(up_b, false)];
+    let bound = w.bound(&uses, true, true);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    let wall = w.face(&[bound], cyl, true);
+    let shell = closed_shell(&mut w, &[bottom, top, flat, wall]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('disc',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(0.0, 15.0)]);
+    let mut k = solidcore::kernel::Kernel::default();
+    let body = solidcore_convert::brep::to_kernel_body(&mut k, &s.brep, true).unwrap();
+    let options = solidcore::query::brep::BoundingBoxOptions { approx: false, tight: true, expand_by_zone_tol_3d: false };
+    let bx = solidcore::query::brep::calculate_bounding_box(&k, &body, options).unwrap();
+    let (lo, hi) = (bx.min(), bx.max());
+    let got = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z];
+    let want = [-r, -r, z[0], r, c, z[1]];
+    assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 1e-7), "{got:?}, {want:?} expected");
+}
+
 #[test]
 fn a_ball_bounded_by_its_seam_alone() {
     for same_sense in [true, false] {
