@@ -2139,6 +2139,12 @@ impl SolveApp {
                         self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
+                // A linked design that couldn't be read keeps its bodies without history: say which and why.
+                "component.break_link" => {
+                    if let Some(w) = v.get("warnings").and_then(Value::as_array).and_then(|w| w.first()).and_then(Value::as_str) {
+                        self.set_status(w.to_string(), false);
+                    }
+                }
                 "mesh.reduce" => {
                     if let (Some(original), Some(target), Some(achieved)) = (
                         v.get("original_triangles").and_then(Value::as_u64),
