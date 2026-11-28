@@ -169,7 +169,7 @@ impl Body {
         &self,
         slot: &Body,
         planes: &[Plane],
-        near: Option<solidcore::Point3>,
+        near: Option<Point3>,
         tol: f64,
     ) -> Result<NearPair> {
         poisoned(&[self, slot])?;
@@ -355,7 +355,7 @@ impl Body {
                         spec.width,
                         spec.end_distance,
                         g_min,
-                        ts::stretch_seed(spec.seed, index),
+                        stretch_seed(spec.seed, index),
                         spec.width_jitter,
                     )
                     .map_err(status)?;
@@ -636,7 +636,7 @@ fn plan_joints(
     // (joint, slot plate, P, slot outline) of every made joint's slots.
     let mut cuts: Vec<(usize, usize, Plane, Region2)> = Vec::new();
     // The direction each plate takes and the joint that gave it.
-    let mut dirs: Vec<Option<(solidcore::Vec3, usize)>> = vec![None; plates.len()];
+    let mut dirs: Vec<Option<(Vec3, usize)>> = vec![None; plates.len()];
     let mut out = Vec::with_capacity(joints.len());
     for (j, (&(t, s, p), &spec)) in joints.iter().zip(specs).enumerate() {
         let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
@@ -1374,13 +1374,8 @@ mod tests {
             Err(PairSkip::SeveralContacts)
         );
         let pick = |q: [f64; 3]| {
-            t.plate_pair_near(
-                &s,
-                &planes,
-                Some(solidcore::Point3::new(q[0], q[1], q[2])),
-                TOL,
-            )
-            .unwrap()
+            t.plate_pair_near(&s, &planes, Some(Point3::new(q[0], q[1], q[2])), TOL)
+                .unwrap()
         };
         assert_eq!(pick([80.0, 33.0, 6.0]).unwrap().0, p);
         assert_eq!(pick([160.0, 33.0, 3.0]).unwrap().0, side);
