@@ -118,6 +118,11 @@ fn import_chains_are_checked_without_recursive_calls() {
     }
     let checked = check(&mut project, &dir.join("0.esc")).unwrap();
     assert_eq!(checked.diagnostics, []);
+    let mut project = Project::default();
+    for index in (0..count).rev() {
+        let checked = check(&mut project, &dir.join(format!("{index}.esc"))).unwrap();
+        assert_eq!(checked.diagnostics, []);
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -125,7 +125,8 @@ fn import_components(project: &mut Project, root: &Path) {
     while let Some(step) = pending.pop() {
         match step {
             Step::Load(path, key) => {
-                if !seen.insert(key.clone()) {
+                // Cached components include all reachable files, so they cannot cycle back to a new root.
+                if project.import_components.contains_key(&key) || !seen.insert(key.clone()) {
                     continue;
                 }
                 pending.push(Step::Finish(key.clone()));
