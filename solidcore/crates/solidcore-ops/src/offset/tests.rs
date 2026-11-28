@@ -1718,6 +1718,144 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
     assert_eq!(y.to_smb(false).unwrap(), before);
 }
 
+/// #23139's sections, at y = 0, 66, 160 and 240: the 16 control points of a closed uniform
+/// cubic spline round a superellipse of exponent 2.6 (half-widths 190, 200, 190 and 150,
+/// heights 95, 100, 90 and 70 above z = 0 and 75, 105, 100 and 80 below), as the report's
+/// script gives them to four decimals (x across, z up). Points 4 and 12 lie on x = 0 with
+/// their neighbours mirrored across it.
+const DOME_SECTIONS: [(f64, [[f64; 2]; 16]); 4] = [
+    (
+        0.0,
+        [
+            [190.0, 0.0],
+            [178.7738, 45.3765],
+            [145.5368, 72.7684],
+            [90.753, 89.3869],
+            [0.0, 95.0],
+            [-90.753, 89.3869],
+            [-145.5368, 72.7684],
+            [-178.7738, 45.3765],
+            [-190.0, 0.0],
+            [-178.7738, -35.8236],
+            [-145.5368, -57.4487],
+            [-90.753, -70.5686],
+            [0.0, -75.0],
+            [90.753, -70.5686],
+            [145.5368, -57.4487],
+            [178.7738, -35.8236],
+        ],
+    ),
+    (
+        66.0,
+        [
+            [200.0, 0.0],
+            [188.1829, 47.7647],
+            [153.1966, 76.5983],
+            [95.5295, 94.0915],
+            [0.0, 100.0],
+            [-95.5295, 94.0915],
+            [-153.1966, 76.5983],
+            [-188.1829, 47.7647],
+            [-200.0, 0.0],
+            [-188.1829, -50.153],
+            [-153.1966, -80.4282],
+            [-95.5295, -98.796],
+            [0.0, -105.0],
+            [95.5295, -98.796],
+            [153.1966, -80.4282],
+            [188.1829, -50.153],
+        ],
+    ),
+    (
+        160.0,
+        [
+            [190.0, 0.0],
+            [178.7738, 42.9883],
+            [145.5368, 68.9385],
+            [90.753, 84.6823],
+            [0.0, 90.0],
+            [-90.753, 84.6823],
+            [-145.5368, 68.9385],
+            [-178.7738, 42.9883],
+            [-190.0, 0.0],
+            [-178.7738, -47.7647],
+            [-145.5368, -76.5983],
+            [-90.753, -94.0915],
+            [0.0, -100.0],
+            [90.753, -94.0915],
+            [145.5368, -76.5983],
+            [178.7738, -47.7647],
+        ],
+    ),
+    (
+        240.0,
+        [
+            [150.0, 0.0],
+            [141.1372, 33.4353],
+            [114.8975, 53.6188],
+            [71.6471, 65.864],
+            [0.0, 70.0],
+            [-71.6471, 65.864],
+            [-114.8975, 53.6188],
+            [-141.1372, 33.4353],
+            [-150.0, 0.0],
+            [-141.1372, -38.2118],
+            [-114.8975, -61.2787],
+            [-71.6471, -75.2732],
+            [0.0, -80.0],
+            [71.6471, -75.2732],
+            [114.8975, -61.2787],
+            [141.1372, -38.2118],
+        ],
+    ),
+];
+
+/// #23139's dome: the cubic loft through the four [`DOME_SECTIONS`], each a
+/// [`closed_spline_section`] (it starts at control point 2, and the spline's points at
+/// control points 4 and 12, on x = 0, are joints of its Bézier pieces): one closed face with
+/// its seam at x > 0.
+fn dome() -> Body {
+    let sections = DOME_SECTIONS.map(|(y, cvs)| closed_spline_section(&cvs, y));
+    crate::sweep::loft_sheet(&sections, 3).unwrap().0
+}
+
+/// #23139: [`dome`] cut by the plane x = 0 before it is thickened 3.2 inwards. The plane
+/// meets every section at a joint of its Bézier pieces, so the two cuts run along knot lines
+/// of the loft's net, where its knots are triple (continuous by count only, smooth in fact),
+/// and the cuts and the seam leave three faces. Each thickens to its own four-sided shell
+/// piece: twelve faces, one closed solid that SMLib's full check takes, and the same solid
+/// as the uncut dome's, whose one face thickens to four: the volumes agree within twice
+/// their accuracy (1e-8 each). The trims along those knot lines cross them by rounding; the
+/// offset's jump there, enclosed from its two sides apart, kept each trim's bound from
+/// closing until it ran out of pieces (the report's 12 times slower thicken).
+#[test]
+fn a_closed_loft_cut_along_its_sections_joints_thickens_as_the_uncut_one() {
+    all_fixes();
+    let whole = dome();
+    let o = order(&whole);
+    let x0 = crate::split::Tool {
+        surface: solidcore_record::brep::Surface::Plane {
+            origin: [0.0, 0.0, 0.0],
+            u_axis: [0.0, 1.0, 0.0],
+            v_axis: [0.0, 0.0, 1.0],
+        },
+        domain: [[-10.0, 250.0], [-120.0, 120.0]],
+    };
+    let (cut, made) = crate::split::split_faces(&whole, &o, &[0], &[x0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(made, [2]);
+    thicken(&whole, -3.2, false).unwrap();
+    thicken(&cut, -3.2, false).unwrap();
+    assert_eq!(whole.counts().unwrap()[0], 4);
+    assert_eq!(cut.counts().unwrap()[0], 12);
+    assert!(cut.is_manifold_solid().unwrap());
+    let report = cut.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the cut dome: {}", report.text);
+    let (uncut, parts) = (volume(&whole), volume(&cut));
+    assert!(rel(parts, uncut) < 2e-8, "{parts} vs {uncut}");
+}
+
 /// The offset statuses as the operations' errors: walls that touch, a wall that folds (with
 /// the largest that works), a vertex moved past an edge's other end; others as the kernel's.
 #[test]
@@ -3228,6 +3366,64 @@ mod drafts {
     const THREE: f64 = 0.052_359_877_559_829_89;
     /// tan 3 degrees.
     const TAN_THREE: f64 = 0.052_407_779_283_041_21;
+
+    /// A body of revolution about z, R 20 at z = 0, H 60 tall, its side drafted about its
+    /// circle on z = 0 to rho = R - t z and its top rim rounded r 2 after (#22803). With
+    /// `q = sqrt(1 + t^2)`: the round's centre circle is at `z = H - r`,
+    /// `rho_c = R - t (H - r) - r q`; it meets the side at `z_s = H - r + r t / q`, where the
+    /// side's radius is `rho_s = R - t z_s`; the frustum below `z_s` is
+    /// `pi z_s (R^2 + R rho_s + rho_s^2) / 3` and the cap above it pi times the integral of
+    /// `(rho_c + sqrt(r^2 - u^2))^2` for u from `r t / q` to r. Each the
+    /// double nearest its expression, for t = tan 3 degrees (leaning in), -tan 3 degrees
+    /// (leaning out) and tan(atan(1/6) + 3 degrees) (the cone R 20 to 10 drafted 3 degrees
+    /// more).
+    const ROUNDED_RIM_IN: f64 = 64_086.644_031_166_45;
+    const ROUNDED_RIM_OUT: f64 = 87_735.999_129_625_95;
+    const ROUNDED_CONE_RIM: f64 = 36_435.608_305_851_325;
+
+    /// The side of a cylinder R 20 x 60 (and of a cone R 20 to 10 x 60) whose top rim is
+    /// rounded 2 drafted 3 degrees about its circle on z = 0 (#22803): the round can't be
+    /// extended to meet the drafted side (leaning in, the cone at z = 58 is at rho 16.95,
+    /// inside the round's torus, rho 18 to 20), so it follows the side as a face offset's
+    /// blends do: taken off, the side drafted, the new rim rounded 2 again. The body is the
+    /// one drafted first and rounded after ([`ROUNDED_RIM_IN`]): its volume to rounding, valid
+    /// at every check level, four faces (bottom, side, round, top).
+    #[test]
+    fn a_side_whose_rim_is_rounded_drafts_and_the_round_follows() {
+        all_fixes();
+        for (cone, angle, want) in [
+            (false, THREE, ROUNDED_RIM_IN),
+            (false, -THREE, ROUNDED_RIM_OUT),
+            (true, THREE, ROUNDED_CONE_RIM),
+        ] {
+            let b = if cone {
+                make_cone([0.0; 3], 20.0, 10.0, 60.0).unwrap()
+            } else {
+                make_cylinder([0.0; 3], 20.0, 60.0).unwrap()
+            };
+            let top_radius = if cone { 10.0 } else { 20.0 };
+            let rim = super::edge_at(&b, [0.0, -top_radius, 60.0]);
+            crate::blend::blend(
+                &b,
+                crate::blend::Blend::Round,
+                &[rim],
+                &[2.0],
+                &[],
+                crate::blend::Corners::Filled,
+            )
+            .unwrap();
+            let o = order(&b);
+            let side = face(&b, &o, |bx| {
+                bx.min().z.abs() < 1e-9 && bx.max().z < 60.0 - 1e-6 && bx.max().z > 50.0
+            });
+            draft(&b, &o, &[side], [0.0; 3], Z, Z, angle).unwrap();
+            let got = volume(&b);
+            assert!(rel(got, want) < 1e-9, "cone {cone} {angle}: {got} {want}");
+            let report = b.check(crate::CheckLevel::All).unwrap();
+            assert_eq!(report.failures, 0, "cone {cone} {angle}: {}", report.text);
+            assert_eq!(b.counts().unwrap()[0], 4, "cone {cone} {angle}");
+        }
+    }
 
     /// A boss r 10 about (20, 20), z 10 to 20, drawn as two faces: a circle extruded as two
     /// half arcs, so its wall is split along the rulings through (10, 20) and (30, 20) and its
