@@ -1,6 +1,7 @@
 //! Rational Bézier pieces: evaluation, halving, hulls, normal cones, and the
 //! tests that part two pieces or prove their pair loop-free.
 
+use solidcore::math::det;
 use std::cell::OnceCell;
 
 /// A homogeneous point (w x, w y, w z, w).
@@ -159,7 +160,7 @@ pub fn cone_of(vectors: &[V3]) -> Option<Cone> {
     }
     Some(Cone {
         axis,
-        angle: least.min(1.0).acos(),
+        angle: det::acos(least.min(1.0)),
     })
 }
 
@@ -651,7 +652,7 @@ pub fn loop_free(a: &Piece, b: &Piece) -> bool {
     let (Some(ca), Some(cb)) = (a.cone(), b.cone()) else {
         return false;
     };
-    let theta = dot(ca.axis, cb.axis).clamp(-1.0, 1.0).acos();
+    let theta = det::acos(dot(ca.axis, cb.axis).clamp(-1.0, 1.0));
     let spread = ca.angle + cb.angle + 1e-9;
     theta > spread && theta < std::f64::consts::PI - spread
 }

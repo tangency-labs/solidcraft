@@ -249,6 +249,7 @@ mod tests {
     use solidcore::surface::torus::{Torus, TorusOptions};
 
     use super::*;
+    use solidcore::math::det;
 
     fn x() -> Vec3 {
         Vec3::new(1.0, 0.0, 0.0)
@@ -321,8 +322,10 @@ mod tests {
                     let v = lo.y + (hi.y - lo.y) * f64::from(j) / 8.0;
                     let a = p.evaluate(u, v).unwrap();
                     let b = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
-                    let e =
-                        ((a[0] - b.x).powi(2) + (a[1] - b.y).powi(2) + (a[2] - b.z).powi(2)).sqrt();
+                    let e = (det::powi(a[0] - b.x, 2)
+                        + det::powi(a[1] - b.y, 2)
+                        + det::powi(a[2] - b.z, 2))
+                    .sqrt();
                     assert!(e < 1e-12, "{name} at ({u}, {v}): {e:e} apart");
                 }
             }
@@ -360,7 +363,9 @@ mod tests {
             let (u, v) = (lo.x + 0.45 * w, lo.y + 0.6 * h);
             let a = p.evaluate(u, v).unwrap();
             let b = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
-            let e = ((a[0] - b.x).powi(2) + (a[1] - b.y).powi(2) + (a[2] - b.z).powi(2)).sqrt();
+            let e =
+                (det::powi(a[0] - b.x, 2) + det::powi(a[1] - b.y, 2) + det::powi(a[2] - b.z, 2))
+                    .sqrt();
             assert!(e < 1e-12, "{name}: {e:e} apart");
         }
     }

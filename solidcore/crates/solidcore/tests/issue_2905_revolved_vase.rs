@@ -17,6 +17,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::brep_volume_default;
+use solidcore::math::det;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::topology::api_files::read_brep_from_file;
@@ -54,7 +55,7 @@ fn input_from_bytes(bytes: &[u8]) -> (Kernel, Brep) {
 fn arc_volume(a: f64, b: f64) -> f64 {
     let primitive = |z: f64| {
         let t = z - 33.0;
-        let j = 0.5 * (t * (1690.0 - t * t).sqrt() + 1690.0 * (t / 1690.0_f64.sqrt()).asin());
+        let j = 0.5 * (t * (1690.0 - t * t).sqrt() + 1690.0 * det::asin(t / 1690.0_f64.sqrt()));
         PI * (1946.0 * t - t * t * t / 3.0 - 32.0 * j)
     };
     primitive(b) - primitive(a)
@@ -72,8 +73,8 @@ fn chamfer_contacts() -> [[f64; 2]; 2] {
     let d = 2.995;
     let rho = 1690.0_f64.sqrt();
     let alpha =
-        ((27.0 / rho) * (0.15 / 1.0225_f64.sqrt()) - (31.0 / rho) / 1.0225_f64.sqrt()).acos();
-    let r = d * (1.0 - alpha.cos()) / alpha.sin();
+        det::acos((27.0 / rho) * (0.15 / 1.0225_f64.sqrt()) - (31.0 / rho) / 1.0225_f64.sqrt());
+    let r = d * (1.0 - det::cos(alpha)) / det::sin(alpha);
     let n = 1.0225_f64.sqrt();
     // Offset upper line: x - 0.15*z = 6 + r*sqrt(1.0225).
     let c = 6.0 + r * n;

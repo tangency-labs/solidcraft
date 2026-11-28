@@ -20,6 +20,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -84,7 +85,7 @@ fn the_fixture_tolerance_offsets_a_sphere_to_the_concentric_sphere() {
     body.refresh_cached_topology();
     assert!(brep_is_manifold_solid(&body).unwrap());
     let volume = offset_fixture::volume(&k, &mut body).unwrap();
-    let want = 4.0 / 3.0 * PI * (RADIUS + DISTANCE).powi(3);
+    let want = 4.0 / 3.0 * PI * det::powi(RADIUS + DISTANCE, 3);
     assert!(
         (volume - want).abs() <= 1e-6 * want,
         "volume {volume} vs closed form {want}"

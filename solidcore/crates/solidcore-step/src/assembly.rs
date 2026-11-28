@@ -39,6 +39,7 @@ use solidcore_record::brep::{
 use crate::geom::P3;
 use crate::read::R;
 use crate::topology::swept::Extent;
+use solidcore::math::det;
 
 mod extend;
 mod frames;
@@ -2941,8 +2942,8 @@ fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
     match label {
         BSurface::Cylinder { radius, .. } => [reach(radius.abs()), along(1.0)],
         BSurface::Cone { radius_at_origin, half_angle, .. } => {
-            let slope = half_angle.tan();
-            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), along(half_angle.cos().abs())]
+            let slope = det::tan(*half_angle);
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), along(det::cos(*half_angle).abs())]
         }
         BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
         BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],

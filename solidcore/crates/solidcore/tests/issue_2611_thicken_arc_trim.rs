@@ -28,6 +28,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -88,7 +89,7 @@ fn pipe(k: &mut Kernel) -> Brep {
 /// The end of the trim arc of radius `r` through `sweep` degrees, in (z, y).
 fn arc_end(r: f64, sweep: f64) -> (f64, f64) {
     let a = sweep.to_radians();
-    (r * a.sin(), 1.0 + r - r * a.cos())
+    (r * det::sin(a), 1.0 + r - r * det::cos(a))
 }
 
 /// The cut: the issue's profile in the plane x = -42 with (u, v) = (z, y), swept 84 along
@@ -191,7 +192,7 @@ fn thicken(k: &mut Kernel, sheet: &mut Brep, t: f64) -> solidcore::Result<Brep> 
 
 /// The integral over z of the sheet's angular width (radians).
 fn angular_integral(r: f64, sweep: f64) -> f64 {
-    let width = |y: f64| PI - 2.0 * (y / PIPE_R).asin();
+    let width = |y: f64| PI - 2.0 * det::asin(y / PIPE_R);
     let (ze, _) = arc_end(r, sweep);
     let f = |z: f64| width(1.0 + r - (r * r - z * z).sqrt());
     let n = 4000;

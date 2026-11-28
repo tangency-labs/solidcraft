@@ -16,6 +16,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -58,7 +59,7 @@ fn want() -> f64 {
     let t: f64 = 1.5;
     let r = 1.5 + t;
     let d = 2.5 - t; // the hole offset's centre from the front's offset
-    let segment = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let segment = r * r * det::acos(d / r) - d * (r * r - d * d).sqrt();
     let disc_inside = PI * r * r - segment;
     ((30.0 - 2.0 * t) * (20.0 - 2.0 * t) - disc_inside) * (6.0 - 2.0 * t)
 }
@@ -413,7 +414,7 @@ fn an_open_sheet_with_crossing_loops_offsets_only_merged() {
     };
     assert_eq!(cause.sm_status(), Some(1027));
 
-    let segment = (0.5_f64).acos() - 0.5 * (1.0_f64 - 0.25).sqrt();
+    let segment = det::acos(0.5_f64) - 0.5 * (1.0_f64 - 0.25).sqrt();
     let want = 18.0 * 10.0 - segment + 8.0 * 10.0;
     let mut k = Kernel::default();
     let mut result = offset(&mut k, true).unwrap();
@@ -522,7 +523,7 @@ fn a_ring_of_holes_whose_offsets_close_round_an_island_shells_closed() {
     assert!(brep_is_manifold_solid(&result).unwrap());
     let r: f64 = 1.45;
     let d = 1.5 * 3.0_f64.sqrt(); // between two hole centres
-    let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt();
+    let lens = 2.0 * r * r * det::acos(d / (2.0 * r)) - 0.5 * d * (4.0 * r * r - d * d).sqrt();
     let discs = 3.0 * PI * r * r - 3.0 * lens;
     let void = PI * 4.05 * 4.05 * 8.1 - discs * 4.0;
     let body = PI * 25.0 * 10.0 - 3.0 * PI * 0.25 * 4.0;
@@ -579,8 +580,8 @@ fn a_ring_of_holes_whose_offsets_cover_the_outer_loop_keeps_the_island() {
                                   // the inner crossing of two offsets, from the axis, and the side between two crossings
     let tip = 0.75 - (r * r - 0.25 * d * d).sqrt();
     let side = tip * 3.0_f64.sqrt();
-    let angle = 2.0 * (0.5 * side / r).asin();
-    let island = 0.25 * 3.0_f64.sqrt() * side * side - 1.5 * r * r * (angle - angle.sin());
+    let angle = 2.0 * det::asin(0.5 * side / r);
+    let island = 0.25 * 3.0_f64.sqrt() * side * side - 1.5 * r * r * (angle - det::sin(angle));
     let void = PI * 1.2 * 1.2 * 4.1 + island * 4.0;
     let body = PI * 2.15 * 2.15 * 10.0 - 3.0 * PI * 0.25 * 4.0;
     let want = body - void;

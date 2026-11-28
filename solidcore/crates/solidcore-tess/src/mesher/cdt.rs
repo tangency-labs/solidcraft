@@ -16,6 +16,7 @@ use spade::{
     AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation,
     RefinementParameters, Triangulation,
 };
+use solidcore::math::det;
 
 type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
 
@@ -28,13 +29,20 @@ const LONG: f64 = 1.5;
 /// boundary nodes are already there; a seed beside them makes a sliver).
 const CLEARANCE: f64 = 0.5;
 
+/// Spade's angle limit for `degrees`, built as `AngleLimit::from_deg` builds it (the
+/// circumradius to shortest edge ratio, `1 / (2 sin a)`), with the sine from `det`.
+fn angle_limit(degrees: f64) -> AngleLimit {
+    let sin = det::sin(degrees.to_radians());
+    AngleLimit::from_radius_to_shortest_edge_ratio(if sin == 0.0 { f64::INFINITY } else { 0.5 / sin })
+}
+
 /// The smallest triangle (mm²) shaping still splits, for the chord tolerance `tol`: a side a
 /// thousandth of the tolerance (as [`super::sag`] stops), squared. Round a corner sharper than the
 /// angle aimed for, refinement would otherwise crowd points ever closer to it, down to triangles
 /// with no area; a larger floor leaves the slivers of flat faces with no size unshaped.
 pub(crate) fn smallest_area(tol: f64) -> f64 {
     if tol.is_finite() && tol > 0.0 {
-        (1e-3 * tol).powi(2)
+        det::powi(1e-3 * tol, 2)
     } else {
         0.0
     }
@@ -134,7 +142,7 @@ fn triangulate_impl(
         let params = RefinementParameters::<f64>::new()
             .keep_constraint_edges()
             .exclude_outer_faces(true)
-            .with_angle_limit(AngleLimit::from_deg(flat.min_angle))
+            .with_angle_limit(angle_limit(flat.min_angle))
             .with_min_required_area(flat.min_area)
             .with_max_additional_vertices(flat.max_points);
         cdt.refine(params);
@@ -149,7 +157,7 @@ fn triangulate_impl(
             let params = RefinementParameters::<f64>::new()
                 .keep_constraint_edges()
                 .exclude_outer_faces(true)
-                .with_angle_limit(AngleLimit::from_deg(MIN_ANGLE_DEG))
+                .with_angle_limit(angle_limit(MIN_ANGLE_DEG))
                 // Around a corner sharper than the angle (where two pieces' cuts meet) the
                 // refinement would crowd points ever closer to it, down to triangles with no area.
                 .with_min_required_area(smallest_area(sag.tol))
@@ -951,7 +959,7 @@ fn refine_sag(
     let spread = |n: [Option<Vec3>; 3]| match n {
         [Some(a), Some(b), Some(c)] => [(a, b), (b, c), (c, a)]
             .iter()
-            .map(|(x, y)| x.dot(*y).clamp(-1.0, 1.0).acos())
+            .map(|(x, y)| det::acos(x.dot(*y).clamp(-1.0, 1.0)))
             .fold(0.0, f64::max),
         _ => 0.0,
     };
@@ -1339,7 +1347,7 @@ fn dist_to_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     } else {
         0.0
     };
-    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+    det::hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
 }
 
 #[cfg(test)]
@@ -1453,9 +1461,8 @@ mod tests {
                     .map(|k| {
                         let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
                         let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - a[0], c[1] - a[1]]);
-                        (u[0] * v[1] - u[1] * v[0])
-                            .abs()
-                            .atan2(u[0] * v[0] + u[1] * v[1])
+                        det::atan2((u[0] * v[1] - u[1] * v[0])
+                            .abs(), u[0] * v[0] + u[1] * v[1])
                             .to_degrees()
                     })
                     .fold(180.0, f64::min)
@@ -1469,7 +1476,7 @@ mod tests {
         // angle, the rim stays whole and the points added stay within the bound.
         let n = 128;
         let rim: Vec<[f64; 2]> = (0..n)
-            .map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos())
+            .map(|k| det::sin_cos(k as f64 * std::f64::consts::TAU / n as f64))
             .map(|(s, c)| [10.0 * c, 10.0 * s])
             .collect();
         let whole = std::iter::once(0..n).collect::<Vec<_>>();
@@ -1512,7 +1519,7 @@ mod tests {
         assert!(extra.len() <= n);
         let mut uv = rim.clone();
         uv.extend(extra);
-        let exact = 0.5 * n as f64 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+        let exact = 0.5 * n as f64 * 100.0 * det::sin(std::f64::consts::TAU / n as f64);
         assert!((area(&uv, &tris) - exact).abs() < 1e-9);
         let worst = smallest_angles(&uv, &tris)
             .into_iter()
@@ -1541,14 +1548,14 @@ mod tests {
         let near = |p: [f64; 2]| {
             seeds
                 .iter()
-                .filter(|q| ((q[0] - p[0]).hypot(q[1] - p[1]) - 1.0).abs() < 1e-9)
+                .filter(|q| (det::hypot(q[0] - p[0], q[1] - p[1]) - 1.0).abs() < 1e-9)
                 .count()
         };
         assert!(seeds.iter().any(|p| near(*p) == 6));
         assert!(seeds.iter().all(|p| {
             seeds
                 .iter()
-                .all(|q| p == q || (q[0] - p[0]).hypot(q[1] - p[1]) > 1.0 - 1e-9)
+                .all(|q| p == q || det::hypot(q[0] - p[0], q[1] - p[1]) > 1.0 - 1e-9)
         }));
     }
 

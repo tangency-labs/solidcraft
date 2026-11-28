@@ -1,6 +1,7 @@
 //! Small vector helpers and the curve evaluation the mapper needs to find the
 //! parameters of an edge's vertices on its curve.
 
+use solidcore::math::det;
 use solidcore_record::step::model::{BSplineCurve, Frame, P3};
 
 /// `a - b`.
@@ -178,7 +179,7 @@ pub(crate) fn conic_angle(frame: &Frame, a: f64, b: f64, q: P3) -> f64 {
     let d = sub(q, frame.origin);
     let x = dot(d, frame.x) / a;
     let y = dot(d, frame.y) / b;
-    y.atan2(x).to_degrees()
+    det::atan2(y, x).to_degrees()
 }
 
 #[cfg(test)]

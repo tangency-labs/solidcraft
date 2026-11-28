@@ -7,6 +7,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use crate::math::Vec2;
 
 /// Below this length (mm) a vector has no direction ([`Planar::normalized`]).
@@ -48,7 +49,7 @@ impl Planar for Vec2 {
         self.x * o.y - self.y * o.x
     }
     fn len(self) -> f64 {
-        self.x.hypot(self.y)
+        det::hypot(self.x, self.y)
     }
     fn len2(self) -> f64 {
         self.dot(self)
@@ -64,7 +65,7 @@ impl Planar for Vec2 {
         Vec2::new(-self.y, self.x)
     }
     fn angle(self) -> f64 {
-        self.y.atan2(self.x)
+        det::atan2(self.y, self.x)
     }
     fn lerp(self, o: Vec2, t: f64) -> Vec2 {
         self + (o - self) * t
@@ -79,7 +80,7 @@ impl Planar for Vec2 {
 
 /// The unit vector at `a` radians from x.
 pub(crate) fn from_angle(a: f64) -> Vec2 {
-    Vec2::new(a.cos(), a.sin())
+    Vec2::new(det::cos(a), det::sin(a))
 }
 
 /// A box in the plane, grown round finite points; empty (its least corner above its greatest)

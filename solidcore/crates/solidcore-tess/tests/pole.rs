@@ -3,6 +3,7 @@
 //! the planner's layout either way, named in the plan's stats.
 
 #![allow(clippy::panic, clippy::indexing_slicing)] // test helpers
+use solidcore::math::det;
 
 mod pole_faces;
 
@@ -43,7 +44,7 @@ fn angle(a: Vec3, b: [f64; 3]) -> f64 {
         a.x * b.y - a.y * b.x,
     );
     let sin = (cross.x * cross.x + cross.y * cross.y + cross.z * cross.z).sqrt();
-    sin.atan2(a.x * b.x + a.y * b.y + a.z * b.z)
+    det::atan2(sin, a.x * b.x + a.y * b.y + a.z * b.z)
 }
 
 /// The parameters of `f`'s pole nodes.
@@ -277,7 +278,7 @@ fn a_pole_across_a_closed_spline_s_end_has_the_limit_normal_between_its_corners(
                 }
                 let th = pole_faces::closed_angle(vs.iter().sum::<f64>() / vs.len() as f64);
                 let r = std::f64::consts::FRAC_1_SQRT_2;
-                let exact = [-th.cos() * r, -th.sin() * r, r].map(|x| x * sign);
+                let exact = [-det::cos(th) * r, -det::sin(th) * r, r].map(|x| x * sign);
                 worst = worst.max(angle(m.normals[mt[c] as usize], exact));
             }
         }

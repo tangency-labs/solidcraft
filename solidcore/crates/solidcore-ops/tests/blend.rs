@@ -8,6 +8,7 @@
     clippy::panic,
     clippy::expect_used
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -171,15 +172,16 @@ fn neighbouring_chamfer_measures(l: f64, a: f64, b: f64, c: f64, d: f64) -> (f64
     let m = b.min(d);
     let overlap = a * c * (m - m * m * (1.0 / b + 1.0 / d) / 2.0 + m * m * m / (3.0 * b * d));
     let volume = l * l * l - l * a * b / 2.0 - l * c * d / 2.0 + overlap;
-    let area = l * l + (l - c) * (l - a) + l * (l - b) - c * (d - b).max(0.0).powi(2) / (2.0 * d)
+    let area = l * l + (l - c) * (l - a) + l * (l - b)
+        - c * det::powi((d - b).max(0.0), 2) / (2.0 * d)
         + l * l
         - c * d / 2.0
         + l * l
         - a * b / 2.0
         + l * (l - d)
-        - a * (b - d).max(0.0).powi(2) / (2.0 * b)
-        + a.hypot(b) * (l - c / b * (m - m * m / (2.0 * d)))
-        + c.hypot(d) * (l - a / d * (m - m * m / (2.0 * b)));
+        - a * det::powi((b - d).max(0.0), 2) / (2.0 * b)
+        + det::hypot(a, b) * (l - c / b * (m - m * m / (2.0 * d)))
+        + det::hypot(c, d) * (l - a / d * (m - m * m / (2.0 * b)));
     (volume, area)
 }
 
@@ -222,7 +224,7 @@ fn neighbouring_unequal_chamfers_build_in_either_history_order() {
                         failures.push((case, error));
                         continue;
                     }
-                    let depth = scale * (PI / 6.0).tan();
+                    let depth = scale * det::tan(PI / 6.0);
                     let (a, front) = if flip_angle {
                         (depth, scale)
                     } else {
@@ -328,13 +330,13 @@ fn post_foot_blends_stop_at_a_through_cut_corner() {
         (
             Blend::Chamfer,
             chamfer,
-            chamfer.powi(2) / 2.0,
+            det::powi(chamfer, 2) / 2.0,
             chamfer / 2.0,
         ),
         (
             Blend::Round,
             round,
-            round.powi(2) * (1.0 - PI / 4.0),
+            det::powi(round, 2) * (1.0 - PI / 4.0),
             round * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
         ),
     ] {
@@ -418,7 +420,7 @@ fn post_foot_blends_end_separately_with_auto_turns() {
         assert!(made.holes.is_empty());
         assert!(body.check(CheckLevel::All).unwrap().is_valid());
         assert_eq!(body.solid_count().unwrap(), 1);
-        let expected = 12_900.0 + 20.0 * area * size.powi(2);
+        let expected = 12_900.0 + 20.0 * area * det::powi(size, 2);
         assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
     }
 }
@@ -449,8 +451,8 @@ fn post_foot_blends_at_a_triangular_opening() {
     let base = 50.0 * 50.0 * 4.0 + 10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0 / 2.0;
     let to_blend = 4.2_f64;
     for (kind, area) in [
-        (Blend::Chamfer, to_blend.powi(2) / 2.0),
-        (Blend::Round, to_blend.powi(2) * (1.0 - PI / 4.0)),
+        (Blend::Chamfer, det::powi(to_blend, 2) / 2.0),
+        (Blend::Round, det::powi(to_blend, 2) * (1.0 - PI / 4.0)),
     ] {
         let (body, _) = Body::from_record(&record, true).unwrap();
         let edges = post_foot_edges(&body);
@@ -487,7 +489,10 @@ fn post_foot_blends_keep_their_clearance_after_rotation() {
             assert_eq!(clear.to_record().unwrap().0.shells.len(), 1);
             assert!(clear.check(CheckLevel::All).unwrap().is_valid());
             assert!(
-                rel(volume(&clear), 12_900.0 + 20.0 * section * width.powi(2)) < 1e-9,
+                rel(
+                    volume(&clear),
+                    12_900.0 + 20.0 * section * det::powi(width, 2)
+                ) < 1e-9,
                 "{kind:?}"
             );
         }
@@ -645,7 +650,12 @@ fn post_foot_blends_report_a_usable_limit_after_rotation() {
         let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
         assert_eq!(made.dropped, [false; 2]);
         assert!(body.check(CheckLevel::All).unwrap().is_valid());
-        assert!(rel(volume(&body), 12_900.0 + 20.0 * section * size.powi(2)) < 1e-9);
+        assert!(
+            rel(
+                volume(&body),
+                12_900.0 + 20.0 * section * det::powi(size, 2)
+            ) < 1e-9
+        );
     }
 }
 
@@ -673,7 +683,7 @@ fn post_foot_blends_clear_a_distant_cylindrical_bore_after_rotation() {
         original.transform(&map).unwrap();
         let record = original.to_record().unwrap().0;
         let bore_volume = if with_bore {
-            4.0 * PI * radius.powi(2)
+            4.0 * PI * det::powi(radius, 2)
         } else {
             0.0
         };
@@ -685,7 +695,7 @@ fn post_foot_blends_clear_a_distant_cylindrical_bore_after_rotation() {
             assert_eq!(body.solid_count().unwrap(), 1);
             assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
             assert!(body.check(CheckLevel::All).unwrap().is_valid());
-            let expected = 12_900.0 - bore_volume + 20.0 * section * width.powi(2);
+            let expected = 12_900.0 - bore_volume + 20.0 * section * det::powi(width, 2);
             assert!(
                 rel(volume(&body), expected) < 1e-9,
                 "{kind:?}, bore={with_bore}"
@@ -751,7 +761,7 @@ fn post_foot_blends_clear_distant_pockets_at_the_same_level_after_rotation() {
             assert_eq!(body.solid_count().unwrap(), 1);
             assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
             assert!(body.check(CheckLevel::All).unwrap().is_valid());
-            let expected = 12_900.0 - pocket_volume + 20.0 * section * width.powi(2);
+            let expected = 12_900.0 - pocket_volume + 20.0 * section * det::powi(width, 2);
             assert!(
                 rel(volume(&body), expected) < 1e-9,
                 "{kind:?}, pockets={with_pockets}"
@@ -826,7 +836,7 @@ fn post_foot_blends_clear_a_distant_ramped_pocket_after_rotation() {
             .unwrap_or_else(|error| panic!("{kind:?}: {error:?}"));
         assert_eq!(result.dropped, [false, false]);
         assert!(body.check(CheckLevel::All).unwrap().is_valid());
-        let expected = 12_900.0 - cut_volume + 20.0 * section * width.powi(2);
+        let expected = 12_900.0 - cut_volume + 20.0 * section * det::powi(width, 2);
         assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
     }
 }
@@ -979,8 +989,8 @@ fn post_foot_blends_check_clearance_when_the_rail_coordinate_rounds() {
     all_fixes();
     let width = 4.2_f64;
     for (kind, section) in [
-        (Blend::Chamfer, width.powi(2) / 2.0),
-        (Blend::Round, width.powi(2) * (1.0 - PI / 4.0)),
+        (Blend::Chamfer, det::powi(width, 2) / 2.0),
+        (Blend::Round, det::powi(width, 2) * (1.0 - PI / 4.0)),
     ] {
         let clear = post_foot(true);
         blend(
@@ -1180,8 +1190,8 @@ fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
     let chamfer = 5.0_f64;
     let round = 2.0_f64;
     for (kind, size, section) in [
-        (Blend::Chamfer, chamfer, chamfer.powi(2) / 2.0),
-        (Blend::Round, round, round.powi(2) * (1.0 - PI / 4.0)),
+        (Blend::Chamfer, chamfer, det::powi(chamfer, 2) / 2.0),
+        (Blend::Round, round, det::powi(round, 2) * (1.0 - PI / 4.0)),
     ] {
         // Reflect the post and aperture across x = 25, leaving both on one plate.
         let post = make_box([40.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
@@ -1473,7 +1483,7 @@ fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
 /// else), with the record indices of those two top edges.
 fn shallow_corner_plate(kink: f64, convex: bool) -> (Body, [usize; 2]) {
     let t = if convex { -kink } else { kink }.to_radians();
-    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
     let p = [
         [0.0, 0.0],
         [50.0, 0.0],
@@ -1530,7 +1540,7 @@ fn blends_turn_round_a_shallow_sharp_corner() {
                 blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
                     panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
                 });
-                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let corner = 2.0 * m * det::tan(kink.to_radians() / 2.0);
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);
                 assert!(
@@ -1553,7 +1563,7 @@ fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
     let (a, k) = (tilt.to_radians(), crease.to_radians());
     // p' = p A + t: rows the images of x, y, z, then the translation
     let about_z = |th: f64, at: [f64; 3]| {
-        let (cs, sn) = (th.cos(), th.sin());
+        let (cs, sn) = (det::cos(th), det::sin(th));
         let m = [[cs, sn, 0.0], [-sn, cs, 0.0], [0.0, 0.0, 1.0]];
         let tr = [0, 1, 2].map(|j| at[j] - (0..3).map(|i| at[i] * m[i][j]).sum::<f64>());
         [
@@ -1575,20 +1585,20 @@ fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
         .unwrap();
     let slab = make_box([-271.5, -271.5, -t], [543.0, 543.0, t]).unwrap();
     slab.transform(&[
-        [a.cos(), 0.0, -a.sin(), 0.0],
+        [det::cos(a), 0.0, -det::sin(a), 0.0],
         [0.0, 1.0, 0.0, 0.0],
-        [a.sin(), 0.0, a.cos(), 0.0],
+        [det::sin(a), 0.0, det::cos(a), 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ])
     .unwrap();
     let b = solidcore_ops::boolean::boolean(slab, outer, solidcore_ops::BooleanOp::Intersect)
         .unwrap()
         .unwrap();
-    let top = |x: f64| -x * a.tan();
-    let (xl, xr) = (-l / 2.0, l / 2.0 * k.cos());
+    let top = |x: f64| -x * det::tan(a);
+    let (xl, xr) = (-l / 2.0, l / 2.0 * det::cos(k));
     let edges = [
         edge_at(&b, [xl, -d, top(xl)]),
-        edge_at(&b, [xr, -d - l / 2.0 * k.sin(), top(xr)]),
+        edge_at(&b, [xr, -d - l / 2.0 * det::sin(k), top(xr)]),
     ];
     (b, edges)
 }
@@ -1638,7 +1648,7 @@ fn rounds_overflowing_a_shallow_concave_crease_build() {
 fn rounds_on_their_cylinders(b: &Body, kink: f64, convex: bool) {
     use solidcore::topology::face::p2 as face;
     let t = if convex { -kink } else { kink }.to_radians();
-    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
     // (a point, the direction) of each round's axis
     let axes = [
         (Vec3::new(0.0, -1.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
@@ -1713,7 +1723,7 @@ fn blends_turn_round_a_corner_a_ten_thousandth_of_a_degree_off_straight() {
                 if kind == Blend::Round {
                     rounds_on_their_cylinders(&b, kink, convex);
                 }
-                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let corner = 2.0 * m * det::tan(kink.to_radians() / 2.0);
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);
                 assert!(
@@ -1784,7 +1794,7 @@ fn blends_join_at_a_near_straight_corner_only_within_the_vertex_check() {
                 if kind == Blend::Round {
                     rounds_on_their_cylinders(&b, kink, convex);
                 }
-                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let corner = 2.0 * m * det::tan(kink.to_radians() / 2.0);
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);
                 assert!(
@@ -1812,7 +1822,7 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
     let p = [
         [0.0, 0.0],
         [40.0, 0.0],
-        [40.0 + 40.0 * t.cos(), 40.0 * t.sin()],
+        [40.0 + 40.0 * det::cos(t), 40.0 * det::sin(t)],
         [0.0, -30.0],
     ];
     let side = |i: usize| {
@@ -1826,7 +1836,7 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
         .map(|i| {
             let (a, b) = (side((i + 3) % 4), side(i));
             let cos = (a[0] * b[0] + a[1] * b[1]) / (len(a) * len(b));
-            (cos.acos() / 2.0).tan()
+            det::tan(det::acos(cos) / 2.0)
         })
         .sum();
     let area = 0.5
@@ -1869,7 +1879,7 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
         assert_eq!(b.counts().unwrap()[0], 10, "r {r}");
         let want = (1.0 - PI / 4.0) * r * r * perimeter
-            - 2.0 * (5.0 / 6.0 - PI / 4.0) * r.powi(3) * half_turns;
+            - 2.0 * (5.0 / 6.0 - PI / 4.0) * det::powi(r, 3) * half_turns;
         let off = before - b.volume(1e-10).unwrap();
         assert!(rel(off, want) < 1e-9, "r {r}: {off} off, want {want}");
     }
@@ -1955,7 +1965,7 @@ fn window_plate(d: f64) -> (Body, [usize; 2], f64) {
                     c[j] = [0, 1].map(|x| (1.0 - a) * c[j - 1][x] + a * c[j][x]);
                 }
             }
-            c[2][0].hypot(c[2][1])
+            det::hypot(c[2][0], c[2][1])
         };
         (0..6)
             .map(|i| gauss(&speed, f64::from(i) / 6.0, f64::from(i + 1) / 6.0, 8, 4))
@@ -1997,8 +2007,8 @@ fn a_window_rim_round_runs_through_its_near_tangent_joins() {
             .unwrap_or_else(|e| panic!("d {d}: {e:?}"));
         let report = b.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "d {d}: {report}");
-        let want =
-            (1.0 - PI / 4.0) * r * r * outline + 2.0 * PI * (5.0 / 6.0 - PI / 4.0) * r.powi(3);
+        let want = (1.0 - PI / 4.0) * r * r * outline
+            + 2.0 * PI * (5.0 / 6.0 - PI / 4.0) * det::powi(r, 3);
         let off = before - volume(&b);
         assert!(rel(off, want) < 1e-6, "d {d}: {off} off, want {want}");
         // every trim maps onto its edge: the section a Join shares runs across the second
@@ -2285,7 +2295,7 @@ fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     let r: f64 = 2.8;
     let want =
-        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * det::powi(r, 3) * (5.0 / 6.0 - PI / 4.0);
     let v = b.volume(1e-10).unwrap();
     assert!(rel(v, want) < 1e-9, "{v} against {want}");
     // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
@@ -2352,7 +2362,7 @@ fn auto_turns_swept_at_a_notch_far_from_the_origin_pass_the_check() {
     assert!(back.check(CheckLevel::All).unwrap().is_valid());
     let r: f64 = 0.2;
     let want = 19999.75 - 601.0 * r * r * (1.0 - PI / 4.0)
-        + (12.0 - PI) * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+        + (12.0 - PI) * det::powi(r, 3) * (5.0 / 6.0 - PI / 4.0);
     let v = b.volume(1e-10).unwrap();
     assert!(rel(v, want) < 1e-9, "{v} against {want}");
     // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
@@ -2373,7 +2383,7 @@ fn a_round_past_a_short_notch_edge_and_into_a_hole_builds() {
     all_fixes();
     let r: f64 = 2.8;
     let mitred =
-        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * det::powi(r, 3) * (5.0 / 6.0 - PI / 4.0);
     let taken = |x: f64| {
         let c = 4.0 - (x + 26.0) * (x + 26.0);
         let s = r * r - (x + 30.0 - r) * (x + 30.0 - r);
@@ -3691,7 +3701,7 @@ fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
     let ellipse = |cos_w: f64| {
         let sin_w = (1.0 - cos_w * cos_w).sqrt();
         let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
-        let s = c.acos().sin();
+        let s = det::sin(det::acos(c));
         let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
         let radius = 5.0 - r_wall;
         let half_x = radius * SQRT_5 / 2.0;
@@ -4035,7 +4045,7 @@ fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
         assert_eq!(b.counts().unwrap(), [7, 15, 10], "{r}");
     }
     // a prism whose edge at the origin turns its faces by 120 degrees
-    let a = 10.0 / 60f64.to_radians().tan();
+    let a = 10.0 / det::tan(60f64.to_radians());
     let prism = || {
         swept(
             &[
@@ -4048,7 +4058,7 @@ fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
         )
     };
     let turn = 120f64.to_radians();
-    let floor = 8e-5 / (2.0 * (0.5 * turn).sin()) * (1.0 + 1e-6);
+    let floor = 8e-5 / (2.0 * det::sin(0.5 * turn)) * (1.0 + 1e-6);
     let b = prism();
     let before = volume(&b);
     let e = edge_at(&b, [0.0, 0.0, 5.0]);
@@ -4068,7 +4078,7 @@ fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
         let e = edge_at(&b, [0.0, 0.0, 5.0]);
         blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
             .unwrap_or_else(|err| panic!("a round of {r} at 120 degrees builds: {err}"));
-        let removed = 10.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+        let removed = 10.0 * r * r * (det::tan(0.5 * turn) - 0.5 * turn);
         assert!(
             ((before - volume(&b)) - removed).abs() < 1e-3 * removed,
             "{r}"
@@ -4127,7 +4137,8 @@ fn a_round_on_an_arc_shorter_than_its_diameter_meets_the_next_side_at_its_own_cr
             .iter()
             .map(|&v| {
                 let q = solidcore::query::api_queries::vertex_get_point(&brep, v).unwrap();
-                ((q.x - p[0]).powi(2) + (q.y - p[1]).powi(2) + (q.z - p[2]).powi(2)).sqrt()
+                (det::powi(q.x - p[0], 2) + det::powi(q.y - p[1], 2) + det::powi(q.z - p[2], 2))
+                    .sqrt()
             })
             .fold(f64::INFINITY, f64::min)
     };
@@ -4240,7 +4251,7 @@ fn a_distance_angle_chamfer_on_a_curved_tip_names_its_distance_edge_and_limiting
     let mut distance_fit = None;
     for second in [
         ChamferSecond::Angle(angle),
-        ChamferSecond::Distance(angle.tan()),
+        ChamferSecond::Distance(det::tan(angle)),
     ] {
         let b = outline();
         let before = b.to_record().unwrap().0;
@@ -4697,7 +4708,7 @@ fn a_ledge_rounded_concave_first_refuses_its_convex_chain_with_its_reason() {
 
 /// `int_a^b sqrt(r^2 - x^2) dx`, in closed form.
 fn disc_strip(a: f64, b: f64, r: f64) -> f64 {
-    let f = |x: f64| 0.5 * x * (r * r - x * x).sqrt() + 0.5 * r * r * (x / r).asin();
+    let f = |x: f64| 0.5 * x * (r * r - x * x).sqrt() + 0.5 * r * r * det::asin(x / r);
     f(b) - f(a)
 }
 
@@ -4752,35 +4763,35 @@ fn ledge_rolled_change(r: f64) -> f64 {
     // A1: the loop top (ua, 0) -> corner (0, 0) -> T along the bore's circle -> back along
     // the round's arc, counter-clockwise; 1/2 the integral of u dw - w du
     let d = rb + r;
-    let phi_t = (-r / d).asin(); // T's angle about the bore's axis, below w = 0
-    let along_bore = rb * rb * (phi_t - phi_t.sin());
+    let phi_t = det::asin(-r / d); // T's angle about the bore's axis, below w = 0
+    let along_bore = rb * rb * (phi_t - det::sin(phi_t));
     // the round's arc about (ua, -r) from T's direction psi_t to the top's tangent point at
     // pi/2: with u = ua + r cos psi, w = -r + r sin psi, u dw - w du = (ua r cos psi + r^2 -
     // r^2 sin psi) d psi, whose integral is ua r sin psi + r^2 psi + r^2 cos psi. T lies on the
     // line from the bore's axis to the round's centre, so its direction from the centre is
     // the opposite of (RB + ua, -r)
-    let psi_t = r.atan2(-(ua + rb));
-    let arc = |psi: f64| ua * r * psi.sin() + r * r * psi + r * r * psi.cos();
+    let psi_t = det::atan2(r, -(ua + rb));
+    let arc = |psi: f64| ua * r * det::sin(psi) + r * r * psi + r * r * det::cos(psi);
     let along_round = arc(PI / 2.0) - arc(psi_t);
     let a1 = 0.5 * (along_bore + along_round);
     let strip = (1.0 - PI / 4.0) * r * r;
     // the torus's material past the concave strip
     let big_r = 2.0 * r;
     let rho_w = (ua * ua + r * r).sqrt();
-    let beta = r.atan2(rb + ua);
+    let beta = det::atan2(r, rb + ua);
     let theta_max = |rho: f64| {
         if rho >= rho_w {
-            (ua / rho).min(1.0).asin()
+            det::asin((ua / rho).min(1.0))
         } else {
             let s = (d * d - rb * rb + rho * rho) / (2.0 * rho * d);
-            s.min(1.0).asin() - beta
+            det::asin(s.min(1.0)) - beta
         }
     };
     let f = |phi: f64| {
-        let rho = big_r - r * phi.cos();
-        rho * r * r * (1.0 - phi.sin()) * phi.sin() * theta_max(rho)
+        let rho = big_r - r * det::cos(phi);
+        rho * r * r * (1.0 - det::sin(phi)) * det::sin(phi) * theta_max(rho)
     };
-    let phi_w = ((big_r - rho_w) / r).acos();
+    let phi_w = det::acos((big_r - rho_w) / r);
     let both = |a: f64, b: f64| {
         let x = gauss(&f, a, b, 20, 8);
         let y = gauss(&f, a, b, 30, 16);
@@ -4954,7 +4965,7 @@ fn stair_twin() -> Body {
 fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     for i in 1..=n {
-        let mut x = (PI * (i as f64 - 0.25) / (n as f64 + 0.5)).cos();
+        let mut x = det::cos(PI * (i as f64 - 0.25) / (n as f64 + 0.5));
         let mut dp = 1.0;
         for _ in 0..100 {
             let (mut p0, mut p1) = (1.0, x);
@@ -5005,8 +5016,8 @@ fn gauss(f: &dyn Fn(f64) -> f64, a: f64, b: f64, n: usize, panels: usize) -> f64
 fn roll_over_material(r1: f64, r2: f64) -> f64 {
     let big_r = r1 + r2;
     let f = |phi: f64| {
-        let rho = big_r - r2 * phi.cos();
-        rho * r2 * r2 * (1.0 - phi.sin()) * phi.sin() * (r1 / rho).min(1.0).asin()
+        let rho = big_r - r2 * det::cos(phi);
+        rho * r2 * r2 * (1.0 - det::sin(phi)) * det::sin(phi) * det::asin((r1 / rho).min(1.0))
     };
     let a = gauss(&f, 0.0, PI / 2.0, 20, 8);
     let b = gauss(&f, 0.0, PI / 2.0, 30, 16);
@@ -5619,7 +5630,7 @@ fn a_round_passing_over_the_face_it_ends_on_is_refused_naming_the_radius_that_fi
     let before = b.volume(1e-12).unwrap();
     let foot = 5.0 + 21.0_f64.sqrt();
     // a corner arc's half, an eighth of a turn from the front's line about the corner's axis
-    let (s, c) = (PI / 8.0).sin_cos();
+    let (s, c) = det::sin_cos(PI / 8.0);
     let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
     let chain = [
         nearest_edge(&b, [10.0, 3.0, foot]),
@@ -5657,7 +5668,7 @@ fn a_round_ending_on_a_ridge_names_the_largest_ball_along_its_end_faces_crossing
     let got = blend(&b, Blend::Round, &[line], &[1.0], &[], Corners::Filled);
     let fits = passes_over_its_end_face(&b, got, 2.0 / 3.0, line);
     assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
-    let (s, c) = (PI / 8.0).sin_cos();
+    let (s, c) = det::sin_cos(PI / 8.0);
     let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
     let chain = [line, nearest_edge(&b, [36.0 + s, 4.0 - c, on_arc])];
     let got = blend(&b, Blend::Round, &chain, &[0.5], &[], Corners::Filled);
@@ -5694,12 +5705,15 @@ fn tetrahedron_rounded_all_over(v: &[Vec3; 4], r: f64) -> f64 {
                 .copied()
                 .filter(|a| faces[j].contains(a))
                 .collect();
-            let turn = normals[i].dot(normals[j]).clamp(-1.0, 1.0).acos();
+            let turn = det::acos(normals[i].dot(normals[j]).clamp(-1.0, 1.0));
             mean += 0.5 * (v[shared[0]] - v[shared[1]]).length() * turn;
         }
     }
     let k = (3.0 * volume / area - r) / (3.0 * volume / area);
-    volume * k.powi(3) + area * k * k * r + mean * k * r * r + 4.0 * PI * r.powi(3) / 3.0
+    volume * det::powi(k, 3)
+        + area * k * k * r
+        + mean * k * r * r
+        + 4.0 * PI * det::powi(r, 3) / 3.0
 }
 
 /// A tetrahedron's corner is sharp: its three faces' normals stand far apart, and so do the
@@ -5722,7 +5736,7 @@ fn every_edge_of_a_tetrahedron_rounds_to_its_closed_form() {
     rig_fixes();
     let base: [[f64; 2]; 3] = [-30.0_f64, 90.0, 210.0].map(|a| {
         let a = a.to_radians();
-        [16.3 * a.cos(), 16.3 * a.sin()]
+        [16.3 * det::cos(a), 16.3 * det::sin(a)]
     });
     for (height, faces) in [(16.33, 20), (16.3 * 2.0_f64.sqrt(), 22)] {
         let apex = [0.0, 0.0, height];
@@ -5998,8 +6012,8 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     let base = boolean(ring, tab, BooleanOp::Union).unwrap().unwrap();
     // the tab's two upright edges and four arcs at the ring, and its four long edges
     let x = (outer * outer - half * half).sqrt();
-    let mid = (half / outer).asin() / 2.0;
-    let (ax, ay) = (outer * mid.cos(), outer * mid.sin());
+    let mid = det::asin(half / outer) / 2.0;
+    let (ax, ay) = (outer * det::cos(mid), outer * det::sin(mid));
     let mut at = vec![[x, -half, 0.0], [x, half, 0.0]];
     for z in [-5.0, 5.0] {
         at.extend([[ax, -ay, z], [ax, ay, z], [35.0, -half, z], [35.0, half, z]]);
@@ -6028,8 +6042,8 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
                             for j in 0..9 {
                                 let uv = step.evaluate(f64::from(i) / 8.0, f64::from(j) / 8.0);
                                 let p = s.evaluate_step_point(&k, uv).unwrap();
-                                let rho = p.x.hypot(p.y) - (outer - r);
-                                off = off.max((rho.hypot(p.z - centre_z) - r).abs());
+                                let rho = det::hypot(p.x, p.y) - (outer - r);
+                                off = off.max((det::hypot(rho, p.z - centre_z) - r).abs());
                             }
                         }
                     }
@@ -6155,7 +6169,7 @@ fn both_flat_face_loops_of_a_notched_half_torus_round() {
         Body::from_record(&record, true).unwrap().0
     };
     let cylinder = |base, radius, height| {
-        let (s, c) = 0.6131_f64.sin_cos();
+        let (s, c) = det::sin_cos(0.6131_f64);
         extrude(
             &[Curve::Arc {
                 center: base,
@@ -6277,19 +6291,19 @@ fn both_flat_face_loops_of_a_notched_half_torus_round() {
 /// region between the blend and the corner, integrated over z (the substitution
 /// z = h (1 - cos t) / 2 takes the square roots' ends smoothly).
 fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) -> f64 {
-    let x = a + side * ((b - r).powi(2) - r * r).sqrt();
+    let x = a + side * (det::powi(b - r, 2) - r * r).sqrt();
     let foot = [a + (x - a) * b / (b - r), r * b / (b - r)];
     let n = 20_000;
     let mut moment = 0.0;
     for i in 0..n {
         let t = (f64::from(i) + 0.5) * PI / f64::from(n);
-        let z = foot[1] * (1.0 - t.cos()) / 2.0;
-        let dz = foot[1] * t.sin() / 2.0 * PI / f64::from(n);
+        let z = foot[1] * (1.0 - det::cos(t)) / 2.0;
+        let dz = foot[1] * det::sin(t) / 2.0 * PI / f64::from(n);
         let tube = a + side * (b * b - z * z).sqrt();
         let blend = if chamfer {
             x + (foot[0] - x) * z / foot[1]
         } else {
-            x + side * (r * r - (z - r).powi(2)).max(0.0).sqrt()
+            x + side * (r * r - det::powi(z - r, 2)).max(0.0).sqrt()
         };
         moment += (tube * tube - blend * blend).abs() / 2.0 * dz;
     }
@@ -6388,7 +6402,7 @@ fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
             reference: radial,
             radius: 8.0,
             start: 0.0,
-            end: 0.6_f64.asin(),
+            end: det::asin(0.6_f64),
         },
     ];
     // Independent torus/plane/canal flux integration with div(x+10,0,0)=1.
@@ -6443,8 +6457,8 @@ fn bezier_circle(x: f64, r: f64, phase: f64, skew: f64) -> Vec<Curve> {
             _ => 0.0,
         };
         (
-            Vec3::new(x, r * t.sin(), 20.0 - r * t.cos()),
-            Vec3::new(0.0, t.cos(), t.sin()),
+            Vec3::new(x, r * det::sin(t), 20.0 - r * det::cos(t)),
+            Vec3::new(0.0, det::cos(t), det::sin(t)),
             skew * sign,
         )
     };
@@ -6489,7 +6503,7 @@ fn a_round_runs_over_knot_lines_where_a_loft_face_s_normal_turns() {
     let before = volume(&b);
     let rim = edge_at(
         &b,
-        [30.0, 20.0 * f64::sin(0.01), 20.0 - 20.0 * f64::cos(0.01)],
+        [30.0, 20.0 * det::sin(0.01), 20.0 - 20.0 * det::cos(0.01)],
     );
     let made = blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled).unwrap();
     assert_eq!(made.dropped, vec![false]);
@@ -6502,7 +6516,7 @@ fn a_round_runs_over_knot_lines_where_a_loft_face_s_normal_turns() {
 /// that cap at the kink.
 fn drafted_corner_plate(kink: f64, draft: f64) -> (Body, [usize; 2]) {
     let t = kink.to_radians();
-    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
     let p = [
         [0.0, 0.0],
         [50.0, 0.0],
@@ -6553,15 +6567,16 @@ fn chamfers_join_at_a_near_straight_corner_within_their_offsets() {
     for draft in [30.0_f64, -30.0] {
         // the walls meet the cap at w: cos w = -n_cap . n_wall
         let w = (90.0 - draft).to_radians();
-        let (cw, sw) = (w.cos(), w.sin());
+        let (cw, sw) = (det::cos(w), det::sin(w));
         let d = draft.to_radians();
         for (top, side) in [(1.0, 1.0), (1.0, 0.5), (0.5, 1.0)] {
             let offsets = [(side - cw * top) / sw, (top - cw * side) / sw];
             let size = offsets[0].max(offsets[1]);
-            let a_max = 2.0 * (2e-5 / (2.0 * size)).atan();
-            let k_max = ((a_max.cos() - d.sin().powi(2)) / d.cos().powi(2))
-                .acos()
-                .to_degrees();
+            let a_max = 2.0 * det::atan(2e-5 / (2.0 * size));
+            let k_max = det::acos(
+                (det::cos(a_max) - det::powi(det::sin(d), 2)) / det::powi(det::cos(d), 2),
+            )
+            .to_degrees();
             for f in [0.97, 1.03, 1.5] {
                 let kink = f * k_max;
                 let (b, edges) = drafted_corner_plate(kink, draft);
@@ -6673,7 +6688,7 @@ fn issue_13911_loop(b: &Body, edges: &[usize]) -> (f64, Vec<f64>) {
     for (i, &(p, t)) in ends.iter().enumerate() {
         for &(q, u) in &ends[i + 1..] {
             if p.distance(q) < 1e-4 {
-                kinks.push(t.cross(u).length().atan2(-t.dot(u)));
+                kinks.push(det::atan2(t.cross(u).length(), -t.dot(u)));
             }
         }
     }
@@ -6823,13 +6838,13 @@ fn fit_point_ellipse(x: f64, a: f64, b: f64, phase: f64) -> Vec<Curve> {
     let p: Vec<[f64; 3]> = (0..12)
         .map(|i| {
             let t = phase + f64::from(i) * PI / 6.0;
-            [x, a * t.sin(), 20.0 - b * t.cos()]
+            [x, a * det::sin(t), 20.0 - b * det::cos(t)]
         })
         .collect();
     let at = |i: usize| p[i % 12];
     let chord = |i: usize| {
         let (q, r) = (at(i), at(i + 1));
-        ((r[1] - q[1]).powi(2) + (r[2] - q[2]).powi(2)).sqrt()
+        (det::powi(r[1] - q[1], 2) + det::powi(r[2] - q[2], 2)).sqrt()
     };
     // the tangent at point i over the chord-length parameter
     let tangent = |i: usize| {
@@ -6921,8 +6936,8 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
 fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() {
     all_fixes();
     let (c, r, w, h) = (330.0_f64, 0.2, 12.2, 2.2);
-    let big = 15.0_f64.hypot(c);
-    let theta = 2.0 * (15.0 / big).asin();
+    let big = det::hypot(15.0_f64, c);
+    let theta = 2.0 * det::asin(15.0 / big);
     let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
     let profile = [
         line([0.0, 0.0, 0.0], [0.0, 0.0, h]),
@@ -7038,7 +7053,7 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
         .min_by(|a, c| a.1.distance.total_cmp(&c.1.distance))
         .unwrap();
     assert!(
-        (near.point.x.hypot(near.point.y) - 6.0).abs() < 1e-6 && near.point.z > 25.0,
+        (det::hypot(near.point.x, near.point.y) - 6.0).abs() < 1e-6 && near.point.z > 25.0,
         "the edge picked is not the boss's foot: {near:?}"
     );
     drop(k);
@@ -7190,7 +7205,7 @@ fn ring_and_wedge() -> Body {
     use solidcore_ops::BooleanOp;
 
     let meridian = |theta: f64| {
-        let e = [0.0, theta.sin(), -theta.cos()];
+        let e = [0.0, det::sin(theta), -det::cos(theta)];
         let at = move |x: f64, rho: f64| [x, rho * e[1], rho * e[2]];
         let arc = move |from: f64, to: f64| Curve::Arc {
             center: at(0.0, 40.0),
@@ -7207,7 +7222,7 @@ fn ring_and_wedge() -> Body {
     let (at, arc) = meridian(0.0);
     let t = |deg: f64| {
         let r = f64::to_radians(deg);
-        (5.0 * r.cos(), 40.0 + 5.0 * r.sin())
+        (5.0 * det::cos(r), 40.0 + 5.0 * det::sin(r))
     };
     let (x0, r0) = t(175.0);
     let (x1, r1) = t(210.0);
@@ -7261,15 +7276,15 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
     let b = ring_and_wedge();
     let before = volume(&b);
     let theta = 28.0_f64.to_radians();
-    let on_cap = |x: f64, rho: f64| Vec3::new(x, rho * theta.sin(), -rho * theta.cos());
+    let on_cap = |x: f64, rho: f64| Vec3::new(x, rho * det::sin(theta), -rho * det::cos(theta));
     // the arc's chord's middle picks the arc, whose ends are the generating circle's points at
     // 210 and 180 degrees
     let e = nearest_edge(
         &b,
         [
             -4.665063509461097,
-            38.75 * theta.sin(),
-            -38.75 * theta.cos(),
+            38.75 * det::sin(theta),
+            -38.75 * det::cos(theta),
         ],
     );
     let (k, brep) = kernel_copy(&b);
@@ -7296,12 +7311,12 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
 /// two feet at `r cot(phi / 2)` along the rays and the ball's centre, less the ball's sector
 /// between the feet, of angle `pi - phi`.
 fn corner_round(c: [f64; 2], d1: [f64; 2], d2: [f64; 2], r: f64) -> (f64, f64) {
-    let phi = (d1[0] * d2[0] + d1[1] * d2[1]).acos();
-    let t = r / (phi / 2.0).tan();
+    let phi = det::acos(d1[0] * d2[0] + d1[1] * d2[1]);
+    let t = r / det::tan(phi / 2.0);
     let bisector = [d1[0] + d2[0], d1[1] + d2[1]];
-    let length = bisector[0].hypot(bisector[1]);
+    let length = det::hypot(bisector[0], bisector[1]);
     let b = [bisector[0] / length, bisector[1] / length];
-    let reach = r / (phi / 2.0).sin();
+    let reach = r / det::sin(phi / 2.0);
     let centre = c[1] + b[1] * reach;
     let foot = |d: [f64; 2]| c[1] + d[1] * t;
     // each of the kite's two triangles c, foot, centre has area r t / 2
@@ -7310,7 +7325,7 @@ fn corner_round(c: [f64; 2], d1: [f64; 2], d2: [f64; 2], r: f64) -> (f64, f64) {
     let half = (PI - phi) / 2.0;
     let sector = r * r * half;
     // a sector's centroid lies 2 r sin(half) / (3 half) from its centre, towards c
-    let sector_rho = centre - b[1] * 2.0 * r * half.sin() / (3.0 * half);
+    let sector_rho = centre - b[1] * 2.0 * r * det::sin(half) / (3.0 * half);
     let area = kite - sector;
     (area, (kite * kite_rho - sector * sector_rho) / area)
 }
@@ -7393,13 +7408,13 @@ fn a_round_on_a_short_rib_s_cones_reads_back_from_its_record() {
         (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
     let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * theta;
     let unit = |d: [f64; 2]| {
-        let l = d[0].hypot(d[1]);
+        let l = det::hypot(d[0], d[1]);
         [d[0] / l, d[1] / l]
     };
     let towards = |from: [f64; 2], to: [f64; 2]| unit([to[0] - from[0], to[1] - from[1]]);
     let along_cone = unit([1.0, 0.25]);
     let up_rib = towards(p[0], p[1]);
-    let turn = (along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]).acos();
+    let turn = det::acos(along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]);
     assert!(
         (turn.to_degrees() - 15.0).abs() < 1e-5,
         "{}",
@@ -7601,16 +7616,17 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
 /// `sqrt(r^2 - z^2)`, to the ball, `rho - sqrt(f^2 - (z - f)^2)`, up to the sphere's contact
 /// at `zt = f r / (r + f)`.
 fn sphere_on_plane_round(r: f64, f: f64) -> f64 {
-    let rho = ((r + f).powi(2) - f * f).sqrt();
+    let rho = (det::powi(r + f, 2) - f * f).sqrt();
     let zt = f * r / (r + f);
     // the integral of sqrt(f^2 - t^2)
-    let circle = |t: f64| t / 2.0 * (f * f - t * t).max(0.0).sqrt() + f * f / 2.0 * (t / f).asin();
+    let circle =
+        |t: f64| t / 2.0 * (f * f - t * t).max(0.0).sqrt() + f * f / 2.0 * det::asin(t / f);
     PI * (2.0 * r * f * zt + f * zt * zt - 2.0 * rho * (circle(zt - f) - circle(-f)))
 }
 
 /// A turn of `degrees` about axis `axis` (0, 1, 2 for x, y, z), as `Body::transform` takes it.
 fn turn_about(axis: usize, degrees: f64) -> [[f64; 4]; 4] {
-    let (s, c) = degrees.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(degrees.to_radians());
     let (i, j) = [(1, 2), (2, 0), (0, 1)][axis];
     let mut m = [[0.0; 4]; 4];
     for (d, row) in m.iter_mut().enumerate() {
@@ -7661,8 +7677,8 @@ fn circle_edges(b: &Body, r: f64, axis: usize, keep: impl Fn([f64; 3]) -> bool) 
     for i in 0..360 {
         let a = (0.5 + f64::from(i)).to_radians();
         let mut p = [0.0; 3];
-        p[u] = r * a.cos();
-        p[v] = r * a.sin();
+        p[u] = r * det::cos(a);
+        p[v] = r * det::sin(a);
         if !keep(p) {
             continue;
         }
@@ -7815,8 +7831,8 @@ fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
         for i in 0..360_u32 {
             let a = (0.5 + f64::from(i)).to_radians();
             let mut p = [0.0; 3];
-            p[u] = r * a.cos();
-            p[v] = r * a.sin();
+            p[u] = r * det::cos(a);
+            p[v] = r * det::sin(a);
             let q = Vec3::new(p[0], p[1], p[2]);
             let on: Vec<usize> = (0..all.len())
                 .filter(|&e| {
@@ -7954,8 +7970,8 @@ fn a_round_on_a_rim_through_a_spheres_poles_joins_at_the_poles() {
     let mut edges = Vec::new();
     for degrees in [20.0_f64, -45.0, -135.0, 200.0] {
         let t = degrees.to_radians();
-        let q = Vec3::new(t.cos(), 0.0, 5.0 + t.sin());
-        assert!(t.sin() < 0.0 || t.cos().abs() > half_width);
+        let q = Vec3::new(det::cos(t), 0.0, 5.0 + det::sin(t));
+        assert!(det::sin(t) < 0.0 || det::cos(t).abs() > half_width);
         let e = brep
             .edge_list()
             .iter()
@@ -7994,8 +8010,8 @@ fn twisted_tower(turn: f64) -> Body {
         let corner = |i: usize| {
             let a = (from + 90.0 * i as f64).to_radians();
             [
-                20.0 * 2.0_f64.sqrt() * a.cos(),
-                20.0 * 2.0_f64.sqrt() * a.sin(),
+                20.0 * 2.0_f64.sqrt() * det::cos(a),
+                20.0 * 2.0_f64.sqrt() * det::sin(a),
                 z,
             ]
         };
@@ -8180,14 +8196,14 @@ fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
     // a circle's segment between angles a0 and a1: area, and its centroid's x about the centre
     let segment = |radius: f64, a0: f64, a1: f64| {
         let t = a1 - a0;
-        let area = 0.5 * radius * radius * (t - t.sin());
-        let d = 4.0 * radius * (0.5 * t).sin().powi(3) / (3.0 * (t - t.sin()));
-        (area, d * (0.5 * (a0 + a1)).cos())
+        let area = 0.5 * radius * radius * (t - det::sin(t));
+        let d = 4.0 * radius * det::powi(det::sin(0.5 * t), 3) / (3.0 * (t - det::sin(t)));
+        (area, d * det::cos(0.5 * (a0 + a1)))
     };
-    let cx = ((r - round).powi(2) - plane * plane).sqrt();
+    let cx = (det::powi(r - round, 2) - plane * plane).sqrt();
     let s = r / (r - round);
     let foot = (cx * s, plane * s);
-    let th = foot.1.atan2(foot.0);
+    let th = det::atan2(foot.1, foot.0);
     let triangle = 0.5 * (r - cx) * foot.1;
     let (sa, sx) = segment(r, 0.0, th);
     let mut area = triangle + sa;
@@ -8306,7 +8322,7 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
     let corners: Vec<[f64; 2]> = (0..6)
         .map(|i| {
             let a = (90.0 - 60.0 * f64::from(i)).to_radians();
-            [HEX_RC * a.cos(), -69.5 + HEX_RC * a.sin()]
+            [HEX_RC * det::cos(a), -69.5 + HEX_RC * det::sin(a)]
         })
         .collect();
     // the arc about corner `i`: its middle, one out from the axis, away from the centre
@@ -8320,7 +8336,7 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
         let (c, n) = (corners[i], corners[(i + 1) % 6]);
         let m = [0.5 * (c[0] + n[0]), 0.5 * (c[1] + n[1])];
         let (mx, my) = (m[0], m[1] + 69.5);
-        let len = mx.hypot(my);
+        let len = det::hypot(mx, my);
         nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top])
     };
     // in SolidCraft's order: the picked side x = 6.928, then its tangent chain outward both
@@ -8395,8 +8411,8 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
             .iter()
             .enumerate()
             .min_by(|a, b| {
-                let da = (a.1[0] - mid.x).hypot(a.1[1] - mid.y);
-                let db = (b.1[0] - mid.x).hypot(b.1[1] - mid.y);
+                let da = det::hypot(a.1[0] - mid.x, a.1[1] - mid.y);
+                let db = det::hypot(b.1[0] - mid.x, b.1[1] - mid.y);
                 da.total_cmp(&db)
             })
             .unwrap();
@@ -8530,15 +8546,15 @@ fn tangent_box_round_volume(d: f64) -> f64 {
     let cylinder = PI * big * big * height;
     let block = length * (2.0 * big - d) * top;
     let segment = if d > 0.0 {
-        big * big * (lo / big).acos() - lo * (big * big - lo * lo).sqrt()
+        big * big * det::acos(lo / big) - lo * (big * big - lo * lo).sqrt()
     } else {
         0.0
     };
     let shared = (PI * big * big / 2.0 - segment / 2.0) * top;
     let spandrel = |phi: f64| {
-        let rho = big + r - r * phi.sin();
-        let angles = (big / rho).asin() + (lo / rho).min(1.0).asin();
-        angles * rho * r * (1.0 - phi.cos()) * r * phi.cos()
+        let rho = big + r - r * det::sin(phi);
+        let angles = det::asin(big / rho) + det::asin((lo / rho).min(1.0));
+        angles * rho * r * (1.0 - det::cos(phi)) * r * det::cos(phi)
     };
     let nodes = [
         (0.0, 0.568_888_888_888_888_9),
@@ -8657,7 +8673,7 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
     assert_eq!(b.counts().unwrap(), [7, 15, 10]);
     let before = b.volume(1e-10).unwrap();
     // on the wall y = 24, the cone at z = 1 (rho = R - 1)
-    let wall_edge = edge_at(&b, [r - ((r - 1.0).powi(2) - 400.0).sqrt(), 24.0, 1.0]);
+    let wall_edge = edge_at(&b, [r - (det::powi(r - 1.0, 2) - 400.0).sqrt(), 24.0, 1.0]);
     let made = blend(
         &b,
         Blend::Chamfer,
@@ -8841,10 +8857,10 @@ fn a_notch_s_round_and_chamfer_end_across_the_cylinder_s_seam() {
     };
     let chord = |y: f64| 2.0 * (big_r * big_r - y * y).sqrt();
     let notched = PI * big_r * big_r * 30.0
-        - 4.0 * (big_r * big_r * (d / big_r).acos() - d * (big_r * big_r - d * d).sqrt());
+        - 4.0 * (big_r * big_r * det::acos(d / big_r) - d * (big_r * big_r - d * d).sqrt());
     let round = notched
         + simpson(
-            &|a: f64| chord(d + r - r * a.sin()) * (r - r * a.cos()) * r * a.cos(),
+            &|a: f64| chord(d + r - r * det::sin(a)) * (r - r * det::cos(a)) * r * det::cos(a),
             0.0,
             PI / 2.0,
         );
@@ -8957,9 +8973,9 @@ fn open_shaft_flat_end_refusals_name_the_interior_peak_that_fits() {
     let base = solidcore_ops::boolean::boolean(c, cut, solidcore_ops::BooleanOp::Subtract)
         .unwrap()
         .unwrap();
-    let x = 5.0 * 30_f64.to_radians().cos();
-    let p = [x, 2.5, (x - 3.0) / 8_f64.to_radians().tan()];
-    let cos8 = 8_f64.to_radians().cos();
+    let x = 5.0 * det::cos(30_f64.to_radians());
+    let p = [x, 2.5, (x - 3.0) / det::tan(8_f64.to_radians())];
+    let cos8 = det::cos(8_f64.to_radians());
     let dflat_peak = 8.0 * cos8 / (1.0 + cos8);
 
     let ok_body = base.copy().unwrap();
@@ -9174,7 +9190,7 @@ fn a_variable_round_with_a_small_corner_in_its_law_is_split_there() {
             "{radii:?}, read back {read_back}:\n{}",
             report.text
         );
-        let removed = 60.0_f64.powi(3) - volume(&b);
+        let removed = det::powi(60.0_f64, 3) - volume(&b);
         assert!(
             (removed - want).abs() <= 1e-4 * want,
             "{radii:?}, read back {read_back}: removed {removed}, want {want}"
@@ -9278,7 +9294,7 @@ fn leaning_block(w: f64, h: f64, taper: f64, height: f64) -> Body {
 /// closed form, whatever the ends' slant (the walls are planes, and S lies inside them).
 fn leaning_end_cut(round: bool, size: f64, l: f64, taper: f64) -> f64 {
     let a = std::f64::consts::FRAC_PI_2 - taper;
-    let (u1, u2) = ([-1.0, 0.0], [taper.sin(), -taper.cos()]);
+    let (u1, u2) = ([-1.0, 0.0], [det::sin(taper), -det::cos(taper)]);
     // area and first moment of depth of a triangle
     let triangle = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
         let area = ((q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1])).abs() / 2.0;
@@ -9286,22 +9302,22 @@ fn leaning_end_cut(round: bool, size: f64, l: f64, taper: f64) -> f64 {
     };
     let o = [0.0, 0.0];
     let (area, moment) = if round {
-        let t = size * (a / 2.0).tan();
+        let t = size * det::tan(a / 2.0);
         let bisector = [u1[0] + u2[0], u1[1] + u2[1]];
-        let n = bisector[0].hypot(bisector[1]);
+        let n = det::hypot(bisector[0], bisector[1]);
         let b = [bisector[0] / n, bisector[1] / n];
-        let oc = size / (a / 2.0).cos();
+        let oc = size / det::cos(a / 2.0);
         let c = [oc * b[0], oc * b[1]];
         let (a1, m1) = triangle(o, [t * u1[0], t * u1[1]], c);
         let (a2, m2) = triangle(o, [t * u2[0], t * u2[1]], c);
         let sector = size * size * a / 2.0;
-        let centroid = c[1] - b[1] * 2.0 * size * (a / 2.0).sin() / (3.0 * a / 2.0);
+        let centroid = c[1] - b[1] * 2.0 * size * det::sin(a / 2.0) / (3.0 * a / 2.0);
         (a1 + a2 - sector, m1 + m2 + sector * centroid)
     } else {
         let d = size;
         triangle(o, [d * u1[0], d * u1[1]], [d * u2[0], d * u2[1]])
     };
-    area * l + 2.0 * taper.tan() * moment
+    area * l + 2.0 * det::tan(taper) * moment
 }
 
 /// #22336: a round or a chamfer on the short end edge of a ridge whose walls lean out below
@@ -9334,9 +9350,9 @@ fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
     ];
     for row in rows {
         let (_, h, taper, height, cutoff) = row;
-        let l = 2.0 * (h - height * taper.to_radians().tan());
+        let l = 2.0 * (h - height * det::tan(taper.to_radians()));
         // a chamfer's old cutoff: d sin(taper) = 2 l
-        let chamfer_cutoff = 2.0 * l / taper.to_radians().sin();
+        let chamfer_cutoff = 2.0 * l / det::sin(taper.to_radians());
         for f in [0.95, 1.05, 1.5] {
             cases.push((row, true, f * cutoff));
             cases.push((row, false, f * chamfer_cutoff));
@@ -9344,7 +9360,7 @@ fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
     }
     for ((w, h, taper, height, _), round, size) in cases {
         let lean = taper.to_radians();
-        let (top_w, top_h) = (w - height * lean.tan(), h - height * lean.tan());
+        let (top_w, top_h) = (w - height * det::tan(lean), h - height * det::tan(lean));
         // the prismatoid: h/6 (bottom + top + 4 middle)
         let middle = (w + top_w) * (h + top_h);
         let frustum = height / 6.0 * (4.0 * w * h + 4.0 * top_w * top_h + 4.0 * middle);

@@ -1,5 +1,6 @@
 //! The outline of a toothed part: one tooth as a chain of pieces, repeated around the axis.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::blend::fillet_section::interval::Ivl;
@@ -212,7 +213,7 @@ impl Piece {
     fn radii(&self, chain: &[Point]) -> (f64, f64) {
         let of = |points: &mut dyn Iterator<Item = Point>| {
             points.fold((f64::INFINITY, 0.0_f64), |(lo, hi), [x, y]| {
-                (lo.min(x.hypot(y)), hi.max(x.hypot(y)))
+                (lo.min(det::hypot(x, y)), hi.max(det::hypot(x, y)))
             })
         };
         let ends = [self.start(), self.end()].into_iter().flatten();
@@ -225,7 +226,10 @@ impl Piece {
                 ..
             } => {
                 let (low, high) = of(&mut ends.clone());
-                let (away, off) = (centre[1].atan2(centre[0]), centre[0].hypot(centre[1]));
+                let (away, off) = (
+                    det::atan2(centre[1], centre[0]),
+                    det::hypot(centre[0], centre[1]),
+                );
                 // The circle's farthest point from the origin lies away from it, the nearest
                 // towards it.
                 let within =
@@ -255,7 +259,7 @@ impl Piece {
 /// The point of a circle at an angle.
 pub(super) fn on_circle(centre: Point, radius: f64, angle: f64) -> Point {
     let [cx, cy] = centre;
-    [cx + radius * angle.cos(), cy + radius * angle.sin()]
+    [cx + radius * det::cos(angle), cy + radius * det::sin(angle)]
 }
 
 /// Into how many chords an arc is cut, proved: each chord between two of the points
@@ -300,7 +304,7 @@ pub(super) fn arc_steps(
     }
     let ratio = (tolerance / radius).clamp(1e-15, 1.0);
     // The angle of a chord that is this far from its arc in the middle: no cancellation.
-    let step = 4.0 * (0.5 * ratio).sqrt().asin();
+    let step = 4.0 * det::asin((0.5 * ratio).sqrt());
     let steps = if step > 0.0 {
         (sweep.abs() / step).ceil()
     } else {
@@ -516,7 +520,7 @@ pub(super) fn stretch_bends<'a>(
 
 /// A point turned about the origin.
 pub fn rotated(p: Point, angle: f64) -> Point {
-    let (s, c) = angle.sin_cos();
+    let (s, c) = det::sin_cos(angle);
     let [x, y] = p;
     [x * c - y * s, x * s + y * c]
 }
@@ -524,7 +528,7 @@ pub fn rotated(p: Point, angle: f64) -> Point {
 /// The distance between two points.
 pub(super) fn distance(a: Point, b: Point) -> f64 {
     let ([ax, ay], [bx, by]) = (a, b);
-    (ax - bx).hypot(ay - by)
+    det::hypot(ax - bx, ay - by)
 }
 
 /// How far `p` is from the chord between `a` and `b`.
@@ -714,7 +718,7 @@ impl Ring<'_> {
         let reach = 2.0 * root.radius + eps;
         for turns in 0..=self.teeth / 2 {
             // The teeth whose circles cannot meet the first tooth's are passed by.
-            let (s, c) = (self.pitch() * f64::from(turns)).sin_cos();
+            let (s, c) = det::sin_cos(self.pitch() * f64::from(turns));
             let moved = |p: Point| [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
             if turns > 0 && distance(root.centre, moved(root.centre)) > reach {
                 continue;
@@ -839,7 +843,10 @@ fn chords_cross(a: &[Point], b: &[Point], i: usize, j: usize, same: bool, eps: f
     // the second pass's neighbours lies on each side of the first pass.
     if distance(p, u) <= 2.0 * eps {
         let directions = [o, q, t, v].map(|x| [x[0] - p[0], x[1] - p[1]]);
-        if directions.iter().any(|d| !(d[0].hypot(d[1]) > 2.0 * eps)) {
+        if directions
+            .iter()
+            .any(|d| !(det::hypot(d[0], d[1]) > 2.0 * eps))
+        {
             return false;
         }
         let [back, ahead, other_back, other_ahead] = directions;
@@ -847,7 +854,7 @@ fn chords_cross(a: &[Point], b: &[Point], i: usize, j: usize, same: bool, eps: f
         let turn_to = |d: Point| {
             let cross = back[0] * d[1] - back[1] * d[0];
             let dot = back[0] * d[0] + back[1] * d[1];
-            cross.atan2(dot).rem_euclid(TAU)
+            det::atan2(cross, dot).rem_euclid(TAU)
         };
         let (sector, x, y) = (turn_to(ahead), turn_to(other_back), turn_to(other_ahead));
         let close =
@@ -1276,7 +1283,7 @@ fn top_arc(piece: &Piece, top: f64) -> Option<(f64, f64, f64)> {
             start,
             sweep,
             ..
-        } if centre[0].hypot(centre[1]) <= 1e-9 * (1.0 + top)
+        } if det::hypot(centre[0], centre[1]) <= 1e-9 * (1.0 + top)
             && (radius - top).abs() <= 1e-6 * (1.0 + top)
             && *sweep > 1e-12 =>
         {
@@ -1434,7 +1441,7 @@ pub(crate) fn space_section_of_typed(
             Some((k, (near_angle(middle, tooth_at) - tooth_at).abs()))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1));
-    let near_point = |p: Point| (p[0].hypot(p[1]) - top).abs() <= 1e-6 * (1.0 + top);
+    let near_point = |p: Point| (det::hypot(p[0], p[1]) - top).abs() <= 1e-6 * (1.0 + top);
     let (inner, from, to, apart) = if let Some((first, _)) = nearest {
         // The last top of the run this one begins.
         let mut k = first;
@@ -1481,8 +1488,12 @@ pub(crate) fn space_section_of_typed(
         let point_start = (0..total)
             .filter_map(|k| {
                 let p = piece_at(k)?.start()?;
-                near_point(p)
-                    .then(|| (k, (near_angle(p[1].atan2(p[0]), tooth_at) - tooth_at).abs()))
+                near_point(p).then(|| {
+                    (
+                        k,
+                        (near_angle(det::atan2(p[1], p[0]), tooth_at) - tooth_at).abs(),
+                    )
+                })
             })
             .min_by(|a, b| a.1.total_cmp(&b.1));
         let (k, _) = point_start.ok_or(NO_TOP)?;
@@ -1503,7 +1514,12 @@ pub(crate) fn space_section_of_typed(
             }
         }
         let p1 = inner.last().and_then(Piece::end).ok_or(NO_TOP)?;
-        (inner, p0[1].atan2(p0[0]), p1[1].atan2(p1[0]), false)
+        (
+            inner,
+            det::atan2(p0[1], p0[0]),
+            det::atan2(p1[1], p1[0]),
+            false,
+        )
     };
     // The end a little less than a whole turn on from the start.
     let to = from + (to - from).rem_euclid(TAU);

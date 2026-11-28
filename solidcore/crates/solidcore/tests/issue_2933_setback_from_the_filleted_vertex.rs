@@ -11,6 +11,7 @@
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::mass::integrator::properties::brep_volume_default;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -157,7 +158,7 @@ fn max_seam_angle(k: &Kernel, b: &Brep, patch: &[FaceId]) -> f64 {
                 s.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap()
             };
             let (n1, n2) = (normal(s1), normal(s2));
-            worst = worst.max(n1.cross(n2).length().atan2(n1.dot(n2).abs()).to_degrees());
+            worst = worst.max(det::atan2(n1.cross(n2).length(), n1.dot(n2).abs()).to_degrees());
         }
     }
     worst

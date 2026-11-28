@@ -18,6 +18,7 @@
     clippy::unwrap_used,
     dead_code
 )]
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -222,7 +223,7 @@ fn case(name: &str) -> Case {
         // Leaning in by θ, the walls' offsets overlap at the corners and are trimmed where they
         // cross, under every rule: the frustum from side 20 to 20 - 2 h tanθ.
         "extrude_square_drafted_round" => {
-            let top = 20.0 - 2.0 * 10.0 * theta.tan();
+            let top = 20.0 - 2.0 * 10.0 * det::tan(theta);
             c(
                 Op::Extrude(
                     square(0.0, 0.0, 20.0, 0.0),
@@ -236,7 +237,7 @@ fn case(name: &str) -> Case {
             )
         }
         "extrude_square_drafted_curvature" => {
-            let top = 20.0 - 2.0 * 10.0 * theta.tan();
+            let top = 20.0 - 2.0 * 10.0 * det::tan(theta);
             c(
                 Op::Extrude(
                     square(0.0, 0.0, 20.0, 0.0),
@@ -251,7 +252,7 @@ fn case(name: &str) -> Case {
         }
         // No corner: the cone frustum from radius 5 to 5 - h tanθ.
         "extrude_circle_drafted" => {
-            let r2 = 5.0 - 10.0 * theta.tan();
+            let r2 = 5.0 - 10.0 * det::tan(theta);
             c(
                 Op::Extrude(disc(), Z, 10.0, theta, DraftCorner::default(), true),
                 Expect::Volume(frustum(PI * 25.0, PI * r2 * r2, 10.0)),
@@ -274,7 +275,7 @@ fn case(name: &str) -> Case {
                 DraftCorner::Curvature,
                 true,
             ),
-            Expect::Volume(4.0 * (3.0 * 20.0 - 2.0) / (12.0 * 10f64.to_radians().tan())),
+            Expect::Volume(4.0 * (3.0 * 20.0 - 2.0) / (12.0 * det::tan(10f64.to_radians()))),
         ),
         // The same strip leaning in so that its long walls meet just at the far end
         // (10 tan θ = 1): the far end would pinch to the ridge, so it is refused.
@@ -288,7 +289,7 @@ fn case(name: &str) -> Case {
                 ]),
                 Z,
                 10.0,
-                0.1f64.atan(),
+                det::atan(0.1f64),
                 DraftCorner::Curvature,
                 true,
             ),
@@ -771,7 +772,7 @@ fn an_uncertified_wraparound_join_keeps_the_original_profile_order() {
     let arcs = vec![arc(start, start + 0.25), arc(start + 0.25, start + 0.5)];
     let tol = solidcore_ops::sweep::zone_tolerance().unwrap();
     assert!(join_arcs(&arcs, Join::Open, tol).is_err());
-    let point = |t: f64| [radius * t.cos(), radius * t.sin(), 0.0];
+    let point = |t: f64| [radius * det::cos(t), radius * det::sin(t), 0.0];
     let profile = vec![
         arcs[1].clone(),
         line(point(start + 0.5), point(start)),
@@ -881,8 +882,8 @@ fn area_bounded(profile: &[Curve]) -> f64 {
                 let v = [-u[1] * s, u[0] * s];
                 let at = |t: f64| {
                     [
-                        radius * (t.cos() * u[0] + t.sin() * v[0]),
-                        radius * (t.cos() * u[1] + t.sin() * v[1]),
+                        radius * (det::cos(t) * u[0] + det::sin(t) * v[0]),
+                        radius * (det::cos(t) * u[1] + det::sin(t) * v[1]),
                     ]
                 };
                 let (p, q) = (at(*start), at(*end));
@@ -1751,7 +1752,7 @@ fn assert_slot_rims(sheet: &Body, rims: &[usize]) {
                 .unwrap()
                 .unwrap();
             let (da, db) = (a - c, b - c);
-            angles[j] += (turn * da.cross(db).z.atan2(da.dot(db))).rem_euclid(TAU);
+            angles[j] += (turn * det::atan2(da.cross(db).z, da.dot(db))).rem_euclid(TAU);
         }
     }
     assert_eq!(rims.len(), 8);
@@ -2002,7 +2003,7 @@ fn loft_to_point_through_corners_of_different_weights_stitch() {
 /// by 1e-15 to 1e-14 and `from_record` refused it).
 #[test]
 fn a_swept_circle_s_record_opens_again() {
-    let (s, c) = 15f64.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(15f64.to_radians());
     let mut failed = Vec::new();
     for (r, start, dir) in [
         (1.0, [0.0, 0.0, 0.0], [c, s, 0.0]),
@@ -2186,7 +2187,7 @@ fn bezier_profile(p: impl Fn(f64, f64) -> [f64; 3], leg: [f64; 2]) -> Vec<Curve>
 /// of curvature falls to 1.2e-4 mm there.
 fn sharp_leg() -> [f64; 2] {
     let ang = 225.0_f64.to_radians();
-    [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()]
+    [30.0 + 0.05 * det::cos(ang), 15.0 + 0.05 * det::sin(ang)]
 }
 
 /// A profile whose cubic Bézier turns sharply at its end (#22184), extruded 10 mm: a closed
@@ -2527,12 +2528,12 @@ fn closed_sweeps_round_circles_and_rounded_polygons_to_the_centres_are_solids() 
     let corner = [[0.0, 0.0], [s, 0.0], [s / 2.0, s * 3f64.sqrt() / 2.0]];
     let out = |i: usize, deg: f64| {
         let (c, t) = (corner[i % 3], deg.to_radians());
-        [c[0] + r * t.cos(), c[1] + r * t.sin(), 0.0]
+        [c[0] + r * det::cos(t), c[1] + r * det::sin(t), 0.0]
     };
     let turn = |i: usize, deg: f64| Curve::Arc {
         center: [corner[i][0], corner[i][1], 0.0],
         axis: Z,
-        reference: [deg.to_radians().cos(), deg.to_radians().sin(), 0.0],
+        reference: [det::cos(deg.to_radians()), det::sin(deg.to_radians()), 0.0],
         radius: r,
         start: 0.0,
         end: TAU / 3.0,

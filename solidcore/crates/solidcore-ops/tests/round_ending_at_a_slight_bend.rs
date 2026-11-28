@@ -20,6 +20,7 @@
 
 #![allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
+use solidcore::math::det;
 
 mod common;
 
@@ -45,7 +46,7 @@ const SWEEP: f64 = 48.0 * PI / 180.0;
 
 /// V, on the rim (before mirroring).
 fn vertex() -> [f64; 2] {
-    [DISC * AT.cos(), DISC * AT.sin()]
+    [DISC * det::cos(AT), DISC * det::sin(AT)]
 }
 
 /// What the round takes along exactly its two edges: its section, `(1 - pi/4) r^2`, straight
@@ -74,13 +75,16 @@ impl Part {
     fn centre(&self) -> [f64; 2] {
         let v = vertex();
         let a = AT + self.bend;
-        [v[0] + ARC * a.cos(), v[1] + ARC * a.sin()]
+        [v[0] + ARC * det::cos(a), v[1] + ARC * det::sin(a)]
     }
 
     /// The point at `radius` from the arc's centre, at `angle` about it.
     fn about_centre(&self, radius: f64, angle: f64) -> [f64; 2] {
         let c = self.centre();
-        [c[0] + radius * angle.cos(), c[1] + radius * angle.sin()]
+        [
+            c[0] + radius * det::cos(angle),
+            c[1] + radius * det::sin(angle),
+        ]
     }
 
     /// The angles about the arc's centre of the arc's start (where the handle's top runs
@@ -95,7 +99,7 @@ impl Part {
         let (start, _) = self.arc_angles();
         let end = self.about_centre(ARC, start);
         // the arc runs clockwise about its centre from its start
-        let dir = [start.sin(), -start.cos()];
+        let dir = [det::sin(start), -det::cos(start)];
         (
             [end[0] - HANDLE * dir[0], end[1] - HANDLE * dir[1]],
             end,
@@ -110,9 +114,10 @@ impl Part {
         let corner = [far[0] - WIDTH * dir[1], far[1] + WIDTH * dir[0]];
         // corner + t dir on the rim: t^2 + 2 t (corner . dir) + |corner|^2 - DISC^2 = 0
         let along = corner[0] * dir[0] + corner[1] * dir[1];
-        let t = -along - (along * along - corner[0].hypot(corner[1]).powi(2) + DISC * DISC).sqrt();
+        let t = -along
+            - (along * along - det::powi(det::hypot(corner[0], corner[1]), 2) + DISC * DISC).sqrt();
         let foot = [corner[0] + t * dir[0], corner[1] + t * dir[1]];
-        let foot_angle = foot[1].atan2(foot[0]);
+        let foot_angle = det::atan2(foot[1], foot[0]);
         let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
             start: self.point(a, 0.0),
             end: self.point(b, 0.0),
@@ -202,7 +207,7 @@ impl Part {
     /// and the crossing.
     fn rail_meets_rim(&self) -> [f64; 2] {
         let c = self.centre();
-        let apart = c[0].hypot(c[1]);
+        let apart = det::hypot(c[0], c[1]);
         let rail = ARC + ROUND;
         let along = (apart * apart + DISC * DISC - rail * rail) / (2.0 * apart);
         let across = (DISC * DISC - along * along).sqrt();
@@ -217,7 +222,7 @@ fn has_vertex(b: &Body, p: [f64; 3]) -> bool {
     let (_, brep) = kernel_copy(b);
     brep.vertex_list().iter().any(|&v| {
         let q = vertex_get_point(&brep, v).unwrap();
-        (q.x - p[0]).hypot(q.y - p[1]).hypot(q.z - p[2]) < 1e-6
+        det::hypot(det::hypot(q.x - p[0], q.y - p[1]), q.z - p[2]) < 1e-6
     })
 }
 

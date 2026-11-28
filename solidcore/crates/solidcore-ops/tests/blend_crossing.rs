@@ -6,6 +6,7 @@
 //! along a tab's two top edges, the outer one's tangent chain running on round a ring's top edge
 //! to meet the inner one at a corner (SolidCraft #21749).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
+use solidcore::math::det;
 
 mod common;
 /// #16735's leak checks on a result body read into the kernel: test code measuring geometry,
@@ -176,7 +177,7 @@ fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
 /// tan 4 degrees: the slope of the creased wall's turned piece.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn crease_t() -> f64 {
-    4.0_f64.to_radians().tan()
+    det::tan(4.0_f64.to_radians())
 }
 
 /// The creased wall and arm of SolidCraft #16729: a block x -10..12, y 0..12, z 0..16 cut back
@@ -414,7 +415,7 @@ fn mitred_sphere_block_volume(r: f64, rounded: [bool; 4]) -> f64 {
     // the area under the circle y = sqrt(rho^2 - x^2) from 0 to x
     let f = |x: f64, rho: f64| {
         let x = x.clamp(-rho, rho);
-        0.5 * (x * (rho * rho - x * x).max(0.0).sqrt() + rho * rho * (x / rho).asin())
+        0.5 * (x * (rho * rho - x * x).max(0.0).sqrt() + rho * rho * det::asin(x / rho))
     };
     // the area of [xl, xh] x [yl, yh] inside the disc of radius rho
     let area = |rho: f64, [xl, xh, yl, yh]: [f64; 4]| {
@@ -453,7 +454,9 @@ fn mitred_sphere_block_volume(r: f64, rounded: [bool; 4]) -> f64 {
         sum
     };
     let section = |z: f64, g: f64| {
-        let rho = (35.75_f64.powi(2) - (z - 12.5).powi(2)).max(0.0).sqrt();
+        let rho = (det::powi(35.75_f64, 2) - det::powi(z - 12.5, 2))
+            .max(0.0)
+            .sqrt();
         let [px, mx, py, my] = rounded.map(|on| if on { g } else { 0.0 });
         area(rho, [-30.0 + mx, 30.0 - px, -20.0 + my, 20.0 - py])
     };
@@ -468,7 +471,7 @@ fn mitred_sphere_block_volume(r: f64, rounded: [bool; 4]) -> f64 {
     };
     let below = simpson(&|z| section(z, 0.0), 0.0, 25.0 - r);
     let across = simpson(
-        &|t: f64| section(25.0 - r + r * t.sin(), r - r * t.cos()) * r * t.cos(),
+        &|t: f64| section(25.0 - r + r * det::sin(t), r - r * det::cos(t)) * r * det::cos(t),
         0.0,
         core::f64::consts::FRAC_PI_2,
     );
@@ -496,7 +499,7 @@ fn mitred_sphere_block_volume(r: f64, rounded: [bool; 4]) -> f64 {
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred() {
-    let rho2 = 35.75_f64.powi(2) - 12.5_f64.powi(2);
+    let rho2 = det::powi(35.75_f64, 2) - det::powi(12.5_f64, 2);
     let fit = 25.0 - (625.0 - (1300.0 - rho2) / 2.0).sqrt();
     assert!((fit - 1.850).abs() < 1e-3, "{fit}");
     let all = [true; 4];
@@ -506,7 +509,7 @@ fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred() {
     for s in [1.0, 40.0] {
         let (part, top) = sphere_trimmed_block(s);
         assert_eq!(part.counts().unwrap(), [10, 26, 18], "part at scale {s}");
-        let s3 = s.powi(3);
+        let s3 = det::powi(s, 3);
         // top: +x, -x, -y, +y
         let neighbours = [top[0], top[3]];
         let cases: [(&[usize], [bool; 4], [usize; 3]); 4] = [
@@ -548,13 +551,14 @@ fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred() {
                 if r > fit && s == 1.0 && rounded[0] && rounded[2] {
                     let m = |t: f64| {
                         [
-                            30.0 - r + r * t.sin(),
-                            20.0 - r + r * t.sin(),
-                            25.0 - r + r * t.cos(),
+                            30.0 - r + r * det::sin(t),
+                            20.0 - r + r * det::sin(t),
+                            25.0 - r + r * det::cos(t),
                         ]
                     };
                     let outside = |p: [f64; 3]| {
-                        p[0] * p[0] + p[1] * p[1] + (p[2] - 12.5).powi(2) > 35.75_f64.powi(2)
+                        p[0] * p[0] + p[1] * p[1] + det::powi(p[2] - 12.5, 2)
+                            > det::powi(35.75_f64, 2)
                     };
                     let (mut lo, mut hi) = (0.0, core::f64::consts::FRAC_PI_2);
                     assert!(!outside(m(lo)) && outside(m(hi)), "round {r}");
@@ -821,7 +825,7 @@ fn rounds_meeting_a_tangent_chain_at_a_tab_corner_build() {
     assert_eq!(part.counts().unwrap(), [8, 18, 12]);
     // 0.45.0's body before the round
     assert!((volume(&part) - 2897.31).abs() < 1e-4, "{}", volume(&part));
-    let y0 = (13.0_f64.powi(2) - 10.0_f64.powi(2)).sqrt();
+    let y0 = (det::powi(13.0_f64, 2) - det::powi(10.0_f64, 2)).sqrt();
     let a = 1.0 - std::f64::consts::FRAC_PI_4;
     for (r, want) in [(1.4, 2844.9272), (1.45, 2841.1111)] {
         let c = part.copy().unwrap();
@@ -854,7 +858,7 @@ fn rounds_meeting_a_tangent_chain_at_a_tab_corner_build() {
         let v = volume(&c);
         assert!((v - want).abs() < 1e-4, "round {r}: {v}, 0.45.0 {want}");
         let section = a * r * r;
-        let kept_turn = 2.0 * std::f64::consts::PI - (10.0_f64 / 13.0).acos();
+        let kept_turn = 2.0 * std::f64::consts::PI - det::acos(10.0_f64 / 13.0);
         let swept = section * (30.0 + 30.0 - y0) + section * kept_turn * (13.0 - r + r / (6.0 * a));
         assert!(v < volume(&part) - swept, "round {r}: {v}");
     }

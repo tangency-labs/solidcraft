@@ -12,6 +12,7 @@
 
 use solidcore_ops::curve::{closest_point, offset_planar, OffsetSide};
 
+use solidcore::math::det;
 use solidcore_ops::Error;
 use solidcore_record::brep::{Curve, Natural};
 
@@ -107,7 +108,7 @@ fn a_circle_offsets_outward_and_inward() {
         let o = offset_planar(&c, 3.0, side, 1e-4).unwrap();
         lies_at(&o.curves, &c, 3.0, 1e-4);
         let p = points_of(&o.curves[0], 1)[0];
-        radii.push(p[0].hypot(p[1]));
+        radii.push(det::hypot(p[0], p[1]));
     }
     radii.sort_by(f64::total_cmp);
     assert!(

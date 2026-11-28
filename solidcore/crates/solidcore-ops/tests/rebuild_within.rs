@@ -12,6 +12,7 @@
     clippy::disallowed_methods
 )]
 
+use solidcore::math::det;
 use solidcore_ops::curve_fit::{closed_cv_curve, ep_curve, ep_curve_with_ends, rebuild_within};
 use solidcore_ops::Error;
 use solidcore_record::brep::{Curve, Natural, MAX_SPLINE_DEGREE};
@@ -21,7 +22,7 @@ fn arc_points() -> Vec<[f64; 3]> {
     (0..=8)
         .map(|i| {
             let t = f64::from(i) / 8.0 * 2.0 * std::f64::consts::FRAC_PI_3;
-            [50.0 * t.cos(), 50.0 * t.sin(), 0.0]
+            [50.0 * det::cos(t), 50.0 * det::sin(t), 0.0]
         })
         .collect()
 }
@@ -159,8 +160,8 @@ fn a_tolerance_below_the_rounding_of_the_curve_is_past_the_tolerance() {
 /// the origin, a unit each, are rebuilt with the first leg along the direction.
 #[test]
 fn an_end_leg_a_few_roundings_long_is_refused_not_turned() {
-    let g = 2.0_f64.powi(-23);
-    let base = 2.0_f64.powi(29);
+    let g = det::powi(2.0_f64, -23);
+    let base = det::powi(2.0_f64, 29);
     let steps = [[0.0, 0.0], [14.0, 3.0], [28.0, 12.0], [40.0, 40.0]];
     let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
     let d = [1.0, 2.0_f64.sqrt() - 1.2, 0.0];

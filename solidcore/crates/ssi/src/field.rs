@@ -17,6 +17,7 @@ use crate::surface3::Surf;
 
 use crate::algebraic::Algebraic;
 use crate::piece::Piece;
+use solidcore::math::det;
 
 /// A tensor Bernstein polynomial of degree (du, dv), coefficient (i, j) at i * (dv + 1) + j.
 #[derive(Clone, Debug)]
@@ -670,7 +671,7 @@ pub fn compose(piece: &Piece, surf: &Surf) -> Option<(Bern, f64)> {
         Surf::Cylinder { r, .. } => Bern::sum(&[(1.0, &radial()), (-r * r, &square(&w))]),
         Surf::Cone { r, a, .. } => {
             // STEP's cone: radius r + v tan a at height v.
-            let rim = Bern::sum(&[(*r, &w), (a.tan(), &lz)]);
+            let rim = Bern::sum(&[(*r, &w), (det::tan(*a), &lz)]);
             Bern::sum(&[(1.0, &radial()), (-1.0, &square(&rim))])
         }
         Surf::Torus { major, minor, .. } => {
@@ -692,7 +693,7 @@ pub fn compose(piece: &Piece, surf: &Surf) -> Option<(Bern, f64)> {
     } else {
         2
     };
-    Some((g, m.powi(k)))
+    Some((g, det::powi(m, k)))
 }
 
 /// A surface with an implicit equation: analytic, or a B-spline patch's proved

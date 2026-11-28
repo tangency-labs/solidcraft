@@ -25,6 +25,7 @@ use solidcore::error::offset::OffsetFailure;
 use solidcore::error::Reason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::offset::offset_faces::OffsetFacesExecutive;
 use solidcore::primitive::api_primitives::{create_box, create_sphere};
@@ -101,13 +102,13 @@ fn rounded_ball(k: &mut Kernel, radius: f64, h: f64, round: f64) -> Brep {
 /// edge rounded `r`.
 fn closed_form(big: f64, h: f64, r: f64) -> f64 {
     let zc = h - r;
-    let rho = ((big - r).powi(2) - zc * zc).sqrt();
+    let rho = (det::powi(big - r, 2) - zc * zc).sqrt();
     let zs = big * zc / (big - r);
     let cap = |z: f64| big * big * z - z * z * z / 3.0;
     // the antiderivative of (rho + sqrt(r^2 - u^2))^2
     let round = |u: f64| {
         let w = (r * r - u * u).max(0.0).sqrt();
-        rho * rho * u + rho * (u * w + r * r * (u / r).asin()) + r * r * u - u * u * u / 3.0
+        rho * rho * u + rho * (u * w + r * r * det::asin(u / r)) + r * r * u - u * u * u / 3.0
     };
     PI * (cap(zs) - cap(-big)) + PI * (round(r) - round(zs - zc))
 }

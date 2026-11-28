@@ -9,6 +9,7 @@ use crate::geom::{Associated, Curve, CurveForm, KnotSpec, Logical, P3, Preferred
 use crate::p21::{self, Exchange};
 use crate::read::{Reader, Units};
 use crate::write::{GeomWriter, Writer, real, string};
+use solidcore::math::det;
 
 const MM: Units = Units { len: 1.0, ang: 1.0 };
 
@@ -133,7 +134,7 @@ fn circle_and_ellipse() {
 #[test]
 fn hyperbola_and_parabola() {
     let h = curve("#10=HYPERBOLA('',#4,2.,3.);", 10, MM);
-    at_curve(&h, 1.0, [2.0 * 1f64.cosh(), 3.0 * 1f64.sinh(), 0.0]);
+    at_curve(&h, 1.0, [2.0 * det::cosh(1f64), 3.0 * det::sinh(1f64), 0.0]);
     round_trip_curve(&h, &TS);
     let p = curve("#10=PARABOLA('',#4,0.5);", 10, MM);
     at_curve(&p, 2.0, [2.0, 2.0, 0.0]);
@@ -174,7 +175,7 @@ fn rational_bspline_curve_is_an_exact_quarter_circle() {
     assert!(b.weights.is_some());
     for t in [0.1, 0.5, 0.9] {
         let p = c.point(t).unwrap_or_default();
-        assert!((p[0].hypot(p[1]) - 1.0).abs() < 1e-12, "{p:?}");
+        assert!((det::hypot(p[0], p[1]) - 1.0).abs() < 1e-12, "{p:?}");
     }
     round_trip_curve(&c, &[0.0, 0.3, 0.7, 1.0]);
 }
@@ -429,7 +430,7 @@ fn topology_curve_normalizes_minor_major_ellipse() {
     assert!(close(position.axis, [1.0, 0.0, 0.0]));
     assert!(close(position.ref_direction, [0.0, 0.0, 1.0]));
     for t in [0.0, 0.4, FRAC_PI_2, 2.1, PI] {
-        let want = [1.0, 2.0 + 5.0 * t.cos(), 3.0 + 8.0 * t.sin()];
+        let want = [1.0, 2.0 + 5.0 * det::cos(t), 3.0 + 8.0 * det::sin(t)];
         let got = step_curve.point(t - FRAC_PI_2).unwrap_or_else(|| panic!("no point at {t}"));
         assert!(close(got, want), "t={t}: got {got:?}, want {want:?}");
     }
@@ -442,8 +443,8 @@ fn topology_curve_normalizes_minor_major_ellipse() {
     let Surface::Revolution { profile: rev_profile, .. } = &step_surf else { panic!("{step_surf:?}") };
     assert!(matches!(**rev_profile, Curve::Ellipse { semi_axis_1, semi_axis_2, .. } if semi_axis_1 == 4.0 && semi_axis_2 == 2.0));
     for (t, ang) in [(0.0_f64, 0.3_f64), (FRAC_PI_4, 1.1), (FRAC_PI_2, 2.0)] {
-        let r = 10.0 + 2.0 * t.cos();
-        let want = [r * ang.cos(), r * ang.sin(), 4.0 * t.sin()];
+        let r = 10.0 + 2.0 * det::cos(t);
+        let want = [r * det::cos(ang), r * det::sin(ang), 4.0 * det::sin(t)];
         let [u, v] = map.apply([t, ang]);
         let got = step_surf.point(u, v).unwrap_or_else(|| panic!("no point at ({u}, {v})"));
         assert!(close(got, want), "t={t}, ang={ang}: got {got:?}, want {want:?}");

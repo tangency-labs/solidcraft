@@ -25,6 +25,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -371,7 +372,7 @@ fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
         circles += 1;
         for i in 0..=32 {
             let p = at(i);
-            let off = (p.x - ax).hypot(p.y - ay) - radius;
+            let off = det::hypot(p.x - ax, p.y - ay) - radius;
             assert!(
                 (p.z - 2.0).abs() <= 1e-11 && off.abs() <= 1e-11,
                 "edge {e:?} at {p:?}: z - 2 = {:e}, r off {off:e}",
@@ -381,7 +382,7 @@ fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
     }
     assert_eq!(circles, 4, "one circle at each corner");
     let d = 3.0 + 2.0 * SQRT_2;
-    let floor_area = (50.0 - 2.0 * d).powi(2) - (4.0 - PI) * (10.0 - d).powi(2);
+    let floor_area = det::powi(50.0 - 2.0 * d, 2) - (4.0 - PI) * det::powi(10.0 - d, 2);
     let area = face_area(&k, &mut got, floor[0], 1e-12).unwrap();
     assert!(
         (area - floor_area).abs() <= 1e-10 * floor_area,

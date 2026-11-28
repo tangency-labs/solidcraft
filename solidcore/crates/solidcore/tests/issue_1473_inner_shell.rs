@@ -11,6 +11,7 @@
 use solidcore::boolean::api_brep as sm;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::{create_box, create_sphere};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -182,7 +183,7 @@ fn sample_ray_azimuths() -> Vec<(f64, f64)> {
     let points = points_in_face(&mut k, &mut b, face, 3).unwrap();
     let mut azimuths = Vec::new();
     for normal in points.pv.iter().skip(1).step_by(2) {
-        let horizontal = normal.x.hypot(normal.y);
+        let horizontal = det::hypot(normal.x, normal.y);
         assert!(horizontal > 0.5, "a sample at a pole: {normal:?}");
         azimuths.push((normal.x / horizontal, normal.y / horizontal));
         azimuths.push((-normal.x / horizontal, -normal.y / horizontal));

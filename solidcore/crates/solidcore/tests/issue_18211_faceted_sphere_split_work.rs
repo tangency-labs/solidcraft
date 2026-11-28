@@ -21,6 +21,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::heal::stitch::p2::stitch_into_solid;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::brep_volume_default;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
@@ -40,8 +41,12 @@ fn faceted_uv_sphere(k: &mut Kernel, nlat: usize, r: f64) -> Brep {
     let ring_pt = |i: usize, j: usize| -> Point3 {
         let phi = PI * (i as f64) / (nlat as f64);
         let theta = 2.0 * PI * (j as f64 + 0.5) / (nlon as f64);
-        let sp = phi.sin();
-        Point3::new(r * sp * theta.cos(), r * sp * theta.sin(), r * phi.cos())
+        let sp = det::sin(phi);
+        Point3::new(
+            r * sp * det::cos(theta),
+            r * sp * det::sin(theta),
+            r * det::cos(phi),
+        )
     };
     let north = Point3::new(0.0, 0.0, r);
     let south = Point3::new(0.0, 0.0, -r);

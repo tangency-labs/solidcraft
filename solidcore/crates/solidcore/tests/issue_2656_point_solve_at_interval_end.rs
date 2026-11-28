@@ -17,6 +17,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
@@ -84,7 +85,7 @@ fn closest(p: Vec3, lo: f64, hi: f64) -> Vec<f64> {
 /// The point 1 mm from the line of the span, `s` along it from A: 1 mm to its side, 1 mm below.
 fn beside(s: f64) -> Vec3 {
     let (dx, dy) = (B[0] - A[0], B[1] - A[1]);
-    let len = dx.hypot(dy);
+    let len = det::hypot(dx, dy);
     Vec3::new(
         A[0] + (dx * s - dy) / len,
         A[1] + (dy * s + dx) / len,
@@ -93,7 +94,7 @@ fn beside(s: f64) -> Vec3 {
 }
 
 fn len() -> f64 {
-    (B[0] - A[0]).hypot(B[1] - A[1])
+    det::hypot(B[0] - A[0], B[1] - A[1])
 }
 
 #[test]

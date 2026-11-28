@@ -12,6 +12,7 @@
 //! How an arc's ends move: `plan/findings/develop.contour--long-arc-cut-short-at-its-corners.md`.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
+use crate::math::det;
 use std::collections::BTreeSet;
 use std::f64::consts::TAU;
 
@@ -106,7 +107,7 @@ fn offset_profile(
             a.end_tangent().normalized().ok_or_else(short)?,
             b.start_tangent().normalized().ok_or_else(short)?,
         );
-        let turn = da.cross(db).abs().atan2(da.dot(db));
+        let turn = det::atan2(da.cross(db).abs(), da.dot(db));
         let corner = a.end();
         Ok(if turn <= smooth {
             (corner + na * depth, false)
@@ -346,7 +347,7 @@ mod tests {
         else {
             panic!("{out:?}")
         };
-        let begin = 1f64.atan2(x);
+        let begin = det::atan2(1f64, x);
         assert_eq!((center, radius), (Vec2::ZERO, 9.0));
         assert!(
             (start - begin).abs() < 1e-12 && (sweep - (PI / 2.0 - begin)).abs() < 1e-12,
@@ -360,7 +361,7 @@ mod tests {
         };
         assert_eq!(radius, 11.0);
         assert!(
-            (start - (-1f64).atan2(120f64.sqrt())).abs() < 1e-12,
+            (start - det::atan2(-1f64, 120f64.sqrt())).abs() < 1e-12,
             "{start}"
         );
     }
@@ -399,7 +400,7 @@ mod tests {
         };
         assert_eq!((radius, start), (9.0, -PI / 2.0));
         assert!(
-            (sweep - (meet.y.atan2(meet.x) + PI / 2.0)).abs() < 1e-12,
+            (sweep - (det::atan2(meet.y, meet.x) + PI / 2.0)).abs() < 1e-12,
             "{sweep}"
         );
         let Seg2::Arc {
@@ -411,7 +412,7 @@ mod tests {
         else {
             panic!("{out:?}")
         };
-        let begin = (meet.y - 10.0).atan2(meet.x - 10.0);
+        let begin = det::atan2(meet.y - 10.0, meet.x - 10.0);
         assert_eq!(radius, 9.0);
         assert!(
             (start - begin).abs() < 1e-12 && (start + sweep).abs() < 1e-12,
@@ -512,9 +513,9 @@ mod tests {
             panic!("{out:?}")
         };
         assert_eq!((center, radius), (Vec2::ZERO, 9.0));
-        let begin = 1f64.atan2(s);
+        let begin = det::atan2(1f64, s);
         assert!(
-            (start - begin).abs() < 1e-12 && (sweep - (s.atan2(1.0) - begin)).abs() < 1e-12,
+            (start - begin).abs() < 1e-12 && (sweep - (det::atan2(s, 1.0) - begin)).abs() < 1e-12,
             "{start} {sweep}"
         );
         assert!(near(a1, 1.0, s) && near(b1, 1.0, 1.0), "{a1:?} {b1:?}");
@@ -530,10 +531,10 @@ mod tests {
         else {
             panic!("{out:?}")
         };
-        let begin = (-1f64).atan2(s);
+        let begin = det::atan2(-1f64, s);
         assert_eq!(radius, 11.0);
         assert!(
-            (start - begin).abs() < 1e-12 && (sweep - (s.atan2(-1.0) - begin)).abs() < 1e-12,
+            (start - begin).abs() < 1e-12 && (sweep - (det::atan2(s, -1.0) - begin)).abs() < 1e-12,
             "{start} {sweep}"
         );
         assert!(near(a1, -1.0, s) && near(b1, -1.0, -1.0), "{a1:?} {b1:?}");
@@ -557,7 +558,7 @@ mod tests {
     /// longer.
     #[test]
     fn a_long_arc_cut_short_by_its_corners_keeps_less_than_a_turn() {
-        let k = 6f64.atan2(8.0);
+        let k = det::atan2(6f64, 8.0);
         let cut = [
             Seg2::Arc {
                 center: Vec2::ZERO,
@@ -580,10 +581,11 @@ mod tests {
         else {
             panic!("{out:?}")
         };
-        let begin = 1.875f64.atan2(1.0);
+        let begin = det::atan2(1.875f64, 1.0);
         assert_eq!((center, radius), (Vec2::ZERO, 2.125));
         assert!(
-            (start - begin).abs() < 1e-12 && (sweep - (1.875f64.atan2(-1.0) - begin)).abs() < 1e-12,
+            (start - begin).abs() < 1e-12
+                && (sweep - (det::atan2(1.875f64, -1.0) - begin)).abs() < 1e-12,
             "{start} {sweep}"
         );
         assert!(
@@ -599,7 +601,7 @@ mod tests {
     /// circle closes smoothly on itself and stays a whole circle of radius 9.
     #[test]
     fn a_closed_lens_of_two_arcs_meets_where_the_shifted_circles_cross() {
-        let k = 3f64.atan2(4.0);
+        let k = det::atan2(3f64, 4.0);
         let lens = [
             Seg2::Arc {
                 center: Vec2::new(0.0, 3.0),
@@ -634,13 +636,13 @@ mod tests {
             (c0, r0, c1, r1),
             (Vec2::new(0.0, 3.0), 4.0, Vec2::new(0.0, -3.0), 4.0)
         );
-        let (b0, b1) = ((-3f64).atan2(-r7), 3f64.atan2(r7));
+        let (b0, b1) = (det::atan2(-3f64, -r7), det::atan2(3f64, r7));
         assert!(
-            (s0 - b0).abs() < 1e-12 && (w0 - ((-3f64).atan2(r7) - b0)).abs() < 1e-12,
+            (s0 - b0).abs() < 1e-12 && (w0 - (det::atan2(-3f64, r7) - b0)).abs() < 1e-12,
             "{s0} {w0}"
         );
         assert!(
-            (s1 - b1).abs() < 1e-12 && (w1 - (3f64.atan2(-r7) - b1)).abs() < 1e-12,
+            (s1 - b1).abs() < 1e-12 && (w1 - (det::atan2(3f64, -r7) - b1)).abs() < 1e-12,
             "{s1} {w1}"
         );
         let circle = [Seg2::Arc {

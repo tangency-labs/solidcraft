@@ -3,6 +3,7 @@
 //! are answered by hand, and hostile numbers (not finite, no frame, probes that cannot be read)
 //! refused or answered plainly, never a panic.
 
+use crate::math::det;
 use std::cell::Cell;
 
 use crate::eval::Frame;
@@ -526,7 +527,7 @@ fn a_band_is_whole_only_with_rims_and_seams() {
     let rim: Vec<Vec3> = (1..24)
         .map(|i| {
             let t = f64::from(i) / 24.0 * std::f64::consts::TAU;
-            Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 0.0)
+            Vec3::new(10.0 * det::cos(t), 10.0 * det::sin(t), 0.0)
         })
         .collect();
     let (a, b) = (Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 30.0));
@@ -553,7 +554,7 @@ fn a_band_is_whole_only_with_rims_and_seams() {
     let helix: Vec<Vec3> = (1..24)
         .map(|i| {
             let t = f64::from(i) / 24.0;
-            Vec3::new(10.0 * (t * 3.0).cos(), 10.0 * (t * 3.0).sin(), 30.0 * t)
+            Vec3::new(10.0 * det::cos(t * 3.0), 10.0 * det::sin(t * 3.0), 30.0 * t)
         })
         .collect();
     let mut edges = rims_and_seam();
@@ -561,7 +562,7 @@ fn a_band_is_whole_only_with_rims_and_seams() {
         index: 3,
         ends: Some([
             a,
-            Vec3::new(10.0 * 3.0_f64.cos(), 10.0 * 3.0_f64.sin(), 30.0),
+            Vec3::new(10.0 * det::cos(3.0_f64), 10.0 * det::sin(3.0_f64), 30.0),
         ]),
         points: helix,
         ..BandEdge::default()

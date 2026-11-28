@@ -58,6 +58,7 @@
 //! linear in it, so the check is the one for a built record, without [`Brep::validate`]'s item
 //! budget, which bounds a record parsed from outside before anything walks it: a caller holding a
 //! record it has not checked (pasted data, a file's) runs [`Brep::validate`] on it first.
+use solidcore::math::det;
 
 mod geometry;
 
@@ -878,14 +879,14 @@ fn named_interval(
     };
     let angle = |[x, y, z]: [f64; 3]| {
         let [u, v] = plane([x, y, z, 1.0]);
-        v.atan2(u)
+        det::atan2(v, u)
     };
     // How far `plane`'s image of `h` can be from its image of the point `h` stands for, where
     // each of `h`'s coordinates is within `e` of that point's (x, y and z within the most of
     // theirs, w within its own): `r` moves at most `√3 e_xyz + e_w |o|`, each image coordinate
     // that times its axis over its radius; `plane`'s own rounding (a few ulps of its terms) is
     // the second sum, taken at 8 ulps.
-    let scale = (norm(frame.x_axis) / radii[0]).hypot(norm(frame.y_axis) / radii[1]);
+    let scale = det::hypot(norm(frame.x_axis) / radii[0], norm(frame.y_axis) / radii[1]);
     let reach = |[x, y, z, w]: [f64; 4], e: [f64; 4]| {
         let e_xyz = e[0].max(e[1]).max(e[2]);
         let moved = 3f64.sqrt() * e_xyz + e[3] * norm(o);
@@ -981,7 +982,7 @@ fn sweep_along(
         // Within the form's knots (`lo < hi`, both finite: max/min, not clamp, cannot panic).
         curve.eval(t.max(lo).min(hi)).and_then(|(p, _)| {
             let [u, v] = plane([p.x, p.y, p.z, 1.0]);
-            let a = v.atan2(u);
+            let a = det::atan2(v, u);
             a.is_finite().then_some(a)
         })
     };
@@ -1002,8 +1003,8 @@ fn sweep_along(
         let within = |h: [f64; 4], e: [f64; 4]| {
             let [u, v] = plane(h);
             h[3] > e[3]
-                && reach(h, e) <= ROUNDING_SHARE * u.hypot(v)
-                && turn(aa, v.atan2(u)).abs() <= MAX_STEP
+                && reach(h, e) <= ROUNDING_SHARE * det::hypot(u, v)
+                && turn(aa, det::atan2(v, u)).abs() <= MAX_STEP
         };
         if whole.abs() <= MAX_STEP && curve.bezier(ta, tb)?.into_iter().all(|(h, e)| within(h, e)) {
             sweep += whole;

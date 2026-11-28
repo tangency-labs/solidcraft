@@ -31,6 +31,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::primitive::api_curves::create_arc;
@@ -619,7 +620,7 @@ fn crease_degrees(
     // atan2 of the sine and the cosine, not the cosine's acos: near 0 the acos of a dot
     // rounded one ulp short of 1 is already 8.5e-7 degrees (two ulps 1.2e-6), so a crease
     // of none read as one at the 1e-6 bound
-    a.cross(b).length().atan2(a.dot(b)).to_degrees()
+    det::atan2(a.cross(b).length(), a.dot(b)).to_degrees()
 }
 
 /// #16651: the half rim's chamfer with the rounds as their definitions. Where the chamfer
@@ -639,7 +640,7 @@ fn crease_degrees(
 /// enclosure; and by its definitions in `issue_880_one_half_chamfer_volume_by_its_definitions`.)
 #[test]
 fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
-    let sin_g1 = (0.5_f64).to_radians().sin(); // SM_CONTINUITY_ANGLE
+    let sin_g1 = det::sin((0.5_f64).to_radians()); // SM_CONTINUITY_ANGLE
     for offsets in [
         (1.0, 2.0),
         (1.443_730_684_954_035_7, 1.443_730_684_954_035_7),
@@ -781,7 +782,7 @@ fn original_volume() -> f64 {
 fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     for i in 0..n {
-        let mut x = (PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+        let mut x = det::cos(PI * (i as f64 + 0.75) / (n as f64 + 0.5));
         let mut dp = 0.0;
         for _ in 0..100 {
             let (mut p0, mut p1) = (1.0, x);
@@ -1133,7 +1134,7 @@ fn ruled_flux_matches_closed_forms_across_a_cap_cylinder_switch() {
     };
     let at = |u: f64, v: f64| Point3::new(2.0 * v, u, 0.0);
     let g = |_u: f64, v: f64| 1.0 + v;
-    let a = |u: f64| 0.5 * (u * (1.0 - u * u).sqrt() + u.asin());
+    let a = |u: f64| 0.5 * (u * (1.0 - u * u).sqrt() + det::asin(u));
     let cube = |u: f64| (u - u * u * u / 3.0) / 8.0;
     let exact = 0.8 * (0.25 + 0.04375) + 0.5 * (a(0.95) - a(0.8)) - 0.05 * 0.15
         + (cube(0.95) - cube(0.8))

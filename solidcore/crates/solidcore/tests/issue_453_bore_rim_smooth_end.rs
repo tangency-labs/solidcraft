@@ -51,6 +51,7 @@ use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -161,23 +162,23 @@ fn round_takes(rr: f64) -> f64 {
             return 0.0;
         }
         simpson(
-            |p| (5.0 + rr - rr * p.cos()) * rr * (1.0 - p.sin()) * rr * p.sin(),
+            |p| (5.0 + rr - rr * det::cos(p)) * rr * (1.0 - det::sin(p)) * rr * det::sin(p),
             0.0,
-            (1.0 - up / rr).acos(),
+            det::acos(1.0 - up / rr),
             INNER,
         )
     };
-    let g0 = (5.0 / (5.0 + rr)).acos();
+    let g0 = det::acos(5.0 / (5.0 + rr));
     section(rr) * (1.5 * PI - g0)
-        + simpson(|g| section(rr.min(5.0 / g.cos() - 5.0)), 0.0, g0, OUTER)
+        + simpson(|g| section(rr.min(5.0 / det::cos(g) - 5.0)), 0.0, g0, OUTER)
 }
 
 /// What a chamfer of legs `d` takes off the rim (the file header).
 fn chamfer_takes(d: f64) -> f64 {
     use core::f64::consts::PI;
-    let g0 = (5.0 / (5.0 + d)).acos();
+    let g0 = det::acos(5.0 / (5.0 + d));
     let clipped = |g: f64| {
-        let t = 5.0 / g.cos() - 5.0;
+        let t = 5.0 / det::cos(g) - 5.0;
         5.0 * d * t - 2.5 * t * t + 0.5 * d * t * t - t * t * t / 3.0
     };
     (2.5 * d * d + d * d * d / 6.0) * (1.5 * PI - g0) + simpson(clipped, 0.0, g0, 10_000)

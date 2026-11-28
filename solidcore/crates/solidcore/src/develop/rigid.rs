@@ -6,6 +6,7 @@
 
 use super::plane::Planar;
 use crate::eval::vec::VecExt;
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
@@ -36,8 +37,8 @@ impl Rigid2 {
     #[must_use]
     pub fn turn(angle: f64) -> Rigid2 {
         Rigid2 {
-            cos: angle.cos(),
-            sin: angle.sin(),
+            cos: det::cos(angle),
+            sin: det::sin(angle),
             shift: Vec2::ZERO,
         }
     }
@@ -62,7 +63,7 @@ impl Rigid2 {
     /// The turn this motion makes, in radians.
     #[must_use]
     pub fn angle(&self) -> f64 {
-        self.sin.atan2(self.cos)
+        det::atan2(self.sin, self.cos)
     }
 
     /// A vector turned.
@@ -249,6 +250,6 @@ impl Rigid3 {
     #[must_use]
     pub fn angle_to(&self, other: &Rigid3) -> f64 {
         let trace = self.x.dot(other.x) + self.y.dot(other.y) + self.z.dot(other.z);
-        ((trace - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
+        det::acos(((trace - 1.0) / 2.0).clamp(-1.0, 1.0))
     }
 }

@@ -21,6 +21,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::surface::plane::Plane;
@@ -35,7 +36,7 @@ const SLACK: f64 = 1.0e-12;
 
 /// The sweeps/4305 wall: 1 mm along u, `SPAN` along v leaning by `TURN`, on u 0..1, v 4..5.
 fn groove_wall() -> BSplineSurface {
-    let lean = SPAN * TURN.tan();
+    let lean = SPAN * det::tan(TURN);
     let mut wall = BSplineSurface::create_bilinear_surface(
         Point3::new(0.0, 0.0, 0.0),
         Point3::new(1.0, 0.0, 0.0),

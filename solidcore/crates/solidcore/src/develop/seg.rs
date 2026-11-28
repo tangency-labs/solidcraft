@@ -13,6 +13,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use super::plane::{from_angle, Planar, X};
@@ -422,7 +423,7 @@ impl SegMeasure for Seg2 {
             Seg2::Arc { radius, sweep, .. } => {
                 let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
                 let step = if tol < radius {
-                    2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos()
+                    2.0 * det::acos((1.0 - tol / radius).clamp(-1.0, 1.0))
                 } else {
                     TAU / 8.0
                 };

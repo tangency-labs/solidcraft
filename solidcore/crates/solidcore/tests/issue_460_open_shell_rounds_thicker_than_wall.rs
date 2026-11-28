@@ -24,6 +24,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -401,7 +402,7 @@ fn issue_22785_a_boss_tangent_to_the_outer_edge_stays_solid_in_a_closed_shell() 
 /// `body` turned by `deg` about the vertical axis through the origin, then moved `dx` along x,
 /// with the affine matrix a body move hands the kernel (`p' = p A + t`).
 fn turned(k: &mut Kernel, mut body: Brep, deg: f64, dx: f64) -> Brep {
-    let (s, c) = deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(deg.to_radians());
     let m = [
         [c, s, 0.0, 0.0],
         [-s, c, 0.0, 0.0],

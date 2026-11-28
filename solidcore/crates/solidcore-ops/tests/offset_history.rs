@@ -9,6 +9,7 @@
 
 use std::f64::consts::PI;
 
+use solidcore::math::det;
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::history::{recorded, Change, FaceOrigin, History, Made};
 use solidcore_ops::sweep::{planar_faces, Curve};
@@ -146,7 +147,7 @@ fn an_offset_whose_loops_cross_keeps_the_rebuilt_faces_roles() {
     let h = recorded(&b, &o, Made::Offset, || offset_sheet(&b, -1.5)).unwrap();
     let (t, r) = (1.5_f64, 3.0_f64);
     let d = 2.5 - t;
-    let segment = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let segment = r * r * det::acos(d / r) - d * (r * r - d * d).sqrt();
     let want = (27.0 * 17.0 - (PI * r * r - segment)) * 3.0;
     assert!(near(b.volume(1e-8).unwrap(), want, 1e-6), "{}", want);
     assert!(

@@ -19,6 +19,7 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
@@ -174,7 +175,7 @@ fn corner_union_report(depth: Option<f64>, counts: [usize; 3]) -> Vec<String> {
     }
 
     let pi = core::f64::consts::PI;
-    let sum = size[0] * size[1] * size[2] + 4.0 / 3.0 * pi * radius.powi(3);
+    let sum = size[0] * size[1] * size[2] + 4.0 / 3.0 * pi * det::powi(radius, 3);
     let overlap_bound = t[0] * t[1] * t[2];
 
     let mut k = Kernel::default();

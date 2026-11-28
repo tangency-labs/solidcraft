@@ -25,6 +25,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -407,7 +408,7 @@ fn gauss_legendre(n: usize) -> (Vec<f64>, Vec<f64>) {
     let mut ws = Vec::new();
     let nf = n as f64;
     for i in 1..=n {
-        let mut x = (PI * (i as f64 - 0.25) / (nf + 0.5)).cos();
+        let mut x = det::cos(PI * (i as f64 - 0.25) / (nf + 0.5));
         let mut dp = 1.0;
         for _ in 0..100 {
             let (mut p0, mut p1) = (1.0, x);
@@ -440,8 +441,8 @@ fn crease_kites(a: &Patch, b: &Patch, d: f64, order: usize) -> f64 {
         let u = (x + 1.0) / 2.0;
         let (na, ..) = a.normal(u, 0.0);
         let (nb, ..) = b.normal(u, b.v_max);
-        let theta = na.cross(nb).length().atan2(na.dot(nb));
-        total += d * d * (theta / 2.0).tan() * w * 0.5 * len;
+        let theta = det::atan2(na.cross(nb).length(), na.dot(nb));
+        total += d * d * det::tan(theta / 2.0) * w * 0.5 * len;
     }
     total
 }

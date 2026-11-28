@@ -10,6 +10,7 @@
 //! fine as the outlines are: with chords of a few thousandths of a millimetre it is good to a
 //! millionth.
 
+use crate::math::det;
 use std::cell::Cell;
 
 use crate::error::teeth::{TeethFailure, Why};
@@ -200,7 +201,7 @@ pub(crate) fn gap_typed(a: &Body, b: &Body, reach: f64) -> Result<Option<Gap>, T
         corners(f64::min, f64::INFINITY),
         corners(f64::max, f64::NEG_INFINITY),
     );
-    let reach = reach.min(2.0 * (high[0] - low[0]).hypot(high[1] - low[1]) + finest);
+    let reach = reach.min(2.0 * det::hypot(high[0] - low[0], high[1] - low[1]) + finest);
     let (grid_a, grid_b) = (Grid::new(a, reach), Grid::new(b, reach));
     let too_much = || grid_a.work.get().saturating_add(grid_b.work.get()) > MOST_WORK;
     let stride = stride(a, b, reach);
@@ -215,7 +216,7 @@ pub(crate) fn gap_typed(a: &Body, b: &Body, reach: f64) -> Result<Option<Gap>, T
         // Between two points looked from, the outline is straight. It can reach the other part's
         // surface there only if the two distances together are no more than the piece is long.
         let mut note = |chord: usize, was: f64, from_point: Point, is: f64, to_point: Point| {
-            let piece = (from_point[0] - to_point[0]).hypot(from_point[1] - to_point[1]);
+            let piece = det::hypot(from_point[0] - to_point[0], from_point[1] - to_point[1]);
             if stride > reach || was + is <= piece * (1.0 + 1e-9) {
                 if let Ok(index) = u32::try_from(chord) {
                     if may_cross.last() != Some(&index) {
@@ -285,7 +286,7 @@ const TOO_INTRICATE: TeethFailure = TeethFailure::Invalid(Why::MeasureTooIntrica
 fn stride(a: &Body, b: &Body, reach: f64) -> f64 {
     let total: f64 = edges(&a.points)
         .chain(edges(&b.points))
-        .map(|(p, q)| (p[0] - q[0]).hypot(p[1] - q[1]))
+        .map(|(p, q)| det::hypot(p[0] - q[0], p[1] - q[1]))
         .sum();
     let most = 4.0 * (a.points.len() + b.points.len()) as f64 + 1_000_000.0;
     reach.max(total / most)
@@ -298,14 +299,18 @@ pub(super) fn looked_from(a: &Body, b: &Body, reach: f64) -> f64 {
     let stride = stride(a, b, reach);
     edges(&a.points)
         .chain(edges(&b.points))
-        .map(|(p, q)| ((p[0] - q[0]).hypot(p[1] - q[1]) / stride).ceil().max(1.0))
+        .map(|(p, q)| {
+            (det::hypot(p[0] - q[0], p[1] - q[1]) / stride)
+                .ceil()
+                .max(1.0)
+        })
         .sum()
 }
 
 /// The points a chord is looked at from: its start, and points along it no farther apart than
 /// `stride` (not its end, which is the next chord's start).
 fn along(p: Point, q: Point, stride: f64) -> impl Iterator<Item = Point> {
-    let length = (p[0] - q[0]).hypot(p[1] - q[1]);
+    let length = det::hypot(p[0] - q[0], p[1] - q[1]);
     // The stride keeps the count of all of them bounded (see `stride`), so the count is in range.
     let pieces = (length / stride).ceil().max(1.0).min(f64::from(u32::MAX)) as u32;
     (0..pieces).map(move |i| {
@@ -355,8 +360,8 @@ fn crossing(
                 let step = step / f64::from(1_u32 << halving);
                 let mut deepest: Option<Gap> = None;
                 for (onto, from, to) in [(grid_b, p, q), (grid_a, u, v)] {
-                    let length = (to[0] - from[0]).hypot(to[1] - from[1]);
-                    let reached = (x[0] - from[0]).hypot(x[1] - from[1]);
+                    let length = det::hypot(to[0] - from[0], to[1] - from[1]);
+                    let reached = det::hypot(x[0] - from[0], x[1] - from[1]);
                     for place in [reached - step, reached + step] {
                         if !(length > 0.0 && place >= 0.0 && place <= length) {
                             continue;
@@ -422,7 +427,7 @@ impl<'a> Grid<'a> {
             fold(f64::max, f64::NEG_INFINITY),
         );
         let extent = (high[0] - low[0]).max(high[1] - low[1]);
-        let lengths = || edges(&body.points).map(|(p, q)| (p[0] - q[0]).hypot(p[1] - q[1]));
+        let lengths = || edges(&body.points).map(|(p, q)| det::hypot(p[0] - q[0], p[1] - q[1]));
         // A chord is entered in every cell it passes through, so a long straight piece (a long
         // flank, the flat of a polygon) does not force large cells. Cells no smaller than the reach
         // keep the search to a point's own cell and the eight around it; they grow only until the
@@ -461,7 +466,7 @@ impl<'a> Grid<'a> {
         let mut of_chord: Vec<u32> = Vec::new();
         for (i, (p, q)) in edges(&body.points).enumerate() {
             let Ok(index) = u32::try_from(i) else { break };
-            let length = (p[0] - q[0]).hypot(p[1] - q[1]);
+            let length = det::hypot(p[0] - q[0], p[1] - q[1]);
             let steps = (length / cell).ceil().max(1.0).min(allowed) as usize;
             of_chord.clear();
             let mut from = p;
@@ -576,7 +581,7 @@ impl<'a> Grid<'a> {
         }
         let point = |t: f64| [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
         let (from, to) = (point(enter), point(leave));
-        let length = (from[0] - to[0]).hypot(from[1] - to[1]);
+        let length = det::hypot(from[0] - to[0], from[1] - to[1]);
         // Within the box a chord passes at most this many cells.
         let limit = 2.0 * (self.columns + self.rows) as f64 + 4.0;
         let steps = (length / self.cell).ceil().max(1.0).min(limit) as usize;
@@ -688,7 +693,7 @@ impl<'a> Grid<'a> {
         let normal = |k: usize| {
             let (a, b) = (self.point(k), self.point(k + 1));
             let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
-            let length = ex.hypot(ey);
+            let length = det::hypot(ex, ey);
             if length > 0.0 {
                 [ey / length, -ex / length]
             } else {

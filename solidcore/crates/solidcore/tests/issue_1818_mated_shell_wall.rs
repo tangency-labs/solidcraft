@@ -23,6 +23,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -69,8 +70,8 @@ fn loft(k: &mut Kernel, square: bool) -> Brep {
                     / 180.0;
                 let frame = Axis2Placement::new(
                     Vec3::new(0.0, 0.0, f64::from(section) * 60.0),
-                    Vec3::new(start.cos(), start.sin(), 0.0),
-                    Vec3::new(-start.sin(), start.cos(), 0.0),
+                    Vec3::new(det::cos(start), det::sin(start), 0.0),
+                    Vec3::new(-det::sin(start), det::cos(start), 0.0),
                 );
                 Curve::from(
                     Ellipse::create_canonical_circle(

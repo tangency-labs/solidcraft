@@ -3,6 +3,7 @@
 //! itself, quickly even when it is large. Each refusal and each acceptance is checked against the
 //! slow way: every chord against every other.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::common::{why, Dice};
@@ -66,8 +67,8 @@ fn shapes_that_cross_themselves_or_run_the_wrong_way_are_refused() {
     let star: Vec<Point> = (0..5)
         .map(|k| {
             [
-                10.0 * (TAU * f64::from(2 * k) / 5.0).cos(),
-                10.0 * (TAU * f64::from(2 * k) / 5.0).sin(),
+                10.0 * det::cos(TAU * f64::from(2 * k) / 5.0),
+                10.0 * det::sin(TAU * f64::from(2 * k) / 5.0),
             ]
         })
         .collect();
@@ -192,7 +193,7 @@ fn shapes_that_only_touch_themselves_are_accepted() -> crate::Result<()> {
     // point where the outline passes from one tooth to the next.
     for teeth in [2_u32, 3, 8, 40, 2000] {
         let pitch = TAU / f64::from(teeth);
-        let radius = 10.0 * (pitch / 2.0).sin();
+        let radius = 10.0 * det::sin(pitch / 2.0);
         let start = -(PI / 2.0 + pitch / 2.0);
         let tooth = vec![Piece::Arc {
             centre: [10.0, 0.0],
@@ -258,7 +259,7 @@ fn random_polygons_are_judged_as_the_slow_way_judges_them() {
                     let angle =
                         TAU * (k as f64 + 0.4 * (dice.roll() % 1000) as f64 / 1000.0) / n as f64;
                     let radius = 1.0 + (dice.roll() % 1000) as f64 / 100.0;
-                    [radius * angle.cos(), radius * angle.sin()]
+                    [radius * det::cos(angle), radius * det::sin(angle)]
                 })
                 .collect()
         };
@@ -305,7 +306,7 @@ fn large_outlines_are_checked_in_good_time() -> crate::Result<()> {
                 .map(|i| {
                     let a = TAU * (f64::from(k) + f64::from(i) / f64::from(each - 1))
                         / f64::from(pieces);
-                    [100.0 * a.cos(), 100.0 * a.sin()]
+                    [100.0 * det::cos(a), 100.0 * det::sin(a)]
                 })
                 .collect();
             Piece::Curve {
@@ -322,8 +323,8 @@ fn large_outlines_are_checked_in_good_time() -> crate::Result<()> {
         .map(|i| {
             let t = f64::from(i) / 3999.0;
             let a = pitch * t;
-            let r = 1000.0 + 2.0 * (PI * t).sin();
-            [r * a.cos(), r * a.sin()]
+            let r = 1000.0 + 2.0 * det::sin(PI * t);
+            [r * det::cos(a), r * det::sin(a)]
         })
         .collect();
     let outline = Outline::new(

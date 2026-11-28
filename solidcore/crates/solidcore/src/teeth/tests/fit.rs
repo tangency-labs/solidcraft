@@ -6,6 +6,7 @@
 //! or fillet must lie within the tolerance of the rack's surface at the instant the rack passes
 //! closest.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::basics::old_sampled;
@@ -174,13 +175,13 @@ fn spline_off_curve(piece: &Piece, source: &[Point]) -> f64 {
 
 fn end_direction(piece: &Piece, at_end: bool) -> Point {
     let unit = |v: Point| {
-        let l = v[0].hypot(v[1]);
+        let l = det::hypot(v[0], v[1]);
         [v[0] / l, v[1] / l]
     };
     match piece {
         Piece::Arc { start, sweep, .. } => {
             let a = if at_end { start + sweep } else { *start };
-            [-a.sin() * sweep.signum(), a.cos() * sweep.signum()]
+            [-det::sin(a) * sweep.signum(), det::cos(a) * sweep.signum()]
         }
         Piece::Line { from, to, .. } => unit([to[0] - from[0], to[1] - from[1]]),
         Piece::Spline { control, .. } => {
@@ -399,7 +400,7 @@ fn an_external_fitted_tooth_is_what_the_rack_leaves() -> crate::Result<()> {
     ] {
         let rack = Rack::of(&e);
         let outline = fitted(&e.outline(tolerance * 1e-2)?, tolerance)?;
-        let window = (e.root_radius()? / e.tip_radius()?).acos() + 0.2;
+        let window = det::acos(e.root_radius()? / e.tip_radius()?) + 0.2;
         for piece in outline.tooth() {
             let Piece::Spline {
                 degree,
@@ -453,7 +454,7 @@ fn fitted_pair(pair: &Pair, tolerance: f64) -> crate::Result<Pair> {
 #[test]
 fn a_fitted_shaft_and_hub_keep_their_gap_within_twice_the_tolerance() -> crate::Result<()> {
     let spline = spline_pair(&shaft(), &hub_fit(), SOURCE)?;
-    let side = 0.06 * 30f64.to_radians().cos() / 2.0;
+    let side = 0.06 * det::cos(30f64.to_radians()) / 2.0;
     // Each part may be the tolerance off its true curve, and its chords for measuring off its
     // spline.
     assert_gap(
@@ -757,8 +758,8 @@ fn what_cannot_be_fitted_is_refused() -> crate::Result<()> {
         .map(|i| PI * f64::from(i) / 40_000.0)
         .map(|t| {
             [
-                (10.0 + 0.3 * (150.0 * t).sin()) * t.cos(),
-                (10.0 + 0.3 * (150.0 * t).sin()) * t.sin(),
+                (10.0 + 0.3 * det::sin(150.0 * t)) * det::cos(t),
+                (10.0 + 0.3 * det::sin(150.0 * t)) * det::sin(t),
             ]
         })
         .collect();
@@ -889,17 +890,17 @@ fn lens(smooth_top: bool, smooth_bottom: bool) -> crate::Result<Outline> {
     let lower: Vec<Point> = (0..=n)
         .map(|k| {
             let a = -0.5 + 0.5 * k as f64 / n as f64;
-            [R * a.cos(), R * a.sin()]
+            [R * det::cos(a), R * det::sin(a)]
         })
         .collect();
     let upper: Vec<Point> = lower.iter().rev().map(|&[x, y]| [x, -y]).collect();
     let (top, bottom) = (*upper.last().unwrap(), lower[0]);
     let leaving = rotated(
-        [-(0.5f64).sin(), (0.5f64).cos()],
+        [-det::sin(0.5f64), det::cos(0.5f64)],
         if smooth_top { 0.0 } else { 0.3 },
     );
     let arriving = rotated(
-        [(0.5f64).sin(), (0.5f64).cos()],
+        [det::sin(0.5f64), det::cos(0.5f64)],
         if smooth_bottom { 0.0 } else { -0.3 },
     );
     let (q1, q2) = (
@@ -1038,9 +1039,9 @@ fn hostile_numbers_never_panic() -> crate::Result<()> {
     for points in odd {
         let (a, b) = (points[0], *points.last().unwrap());
         let (r, a0, a1) = (
-            a[0].hypot(a[1]),
-            b[1].atan2(b[0]),
-            a[1].atan2(a[0]) + PI / 2.0,
+            det::hypot(a[0], a[1]),
+            det::atan2(b[1], b[0]),
+            det::atan2(a[1], a[0]) + PI / 2.0,
         );
         let tooth = vec![
             Piece::Curve {
@@ -1933,9 +1934,9 @@ fn odd_outlines() -> Vec<Outline> {
         .filter_map(|points| {
             let (a, b) = (points[0], *points.last().unwrap());
             let (r, a0, a1) = (
-                a[0].hypot(a[1]),
-                b[1].atan2(b[0]),
-                a[1].atan2(a[0]) + PI / 2.0,
+                det::hypot(a[0], a[1]),
+                det::atan2(b[1], b[0]),
+                det::atan2(a[1], a[0]) + PI / 2.0,
             );
             let tooth = vec![
                 Piece::Curve {
@@ -1993,10 +1994,13 @@ fn corpus_hostile() -> Vec<FitCase> {
 /// closed by an arc, with the outline's tolerance the largest true sag of its chords rounded up.
 fn spaced_arc(at: &[f64]) -> Option<Outline> {
     const R: f64 = 10.0;
-    let points: Vec<Point> = at.iter().map(|&t| [R * t.cos(), R * t.sin()]).collect();
+    let points: Vec<Point> = at
+        .iter()
+        .map(|&t| [R * det::cos(t), R * det::sin(t)])
+        .collect();
     let sag = at
         .windows(2)
-        .map(|w| 2.0 * R * (0.25 * (w[1] - w[0])).sin().powi(2))
+        .map(|w| 2.0 * R * det::powi(det::sin(0.25 * (w[1] - w[0])), 2))
         .fold(0.0, f64::max);
     let tooth = vec![
         Piece::Curve {
@@ -2019,7 +2023,7 @@ fn spaced_arc(at: &[f64]) -> Option<Outline> {
 fn corpus_spacing() -> Vec<FitCase> {
     const CLUSTERED: usize = 2000;
     let clustered: Vec<f64> = (0..=CLUSTERED)
-        .map(|i| (i as f64 / CLUSTERED as f64).powi(3))
+        .map(|i| det::powi(i as f64 / CLUSTERED as f64, 3))
         .collect();
     let mut alternating = vec![0.0];
     let (mut t, mut small) = (0.0, true);
@@ -2393,7 +2397,7 @@ struct Rack {
 
 impl Rack {
     fn of(e: &External) -> Rack {
-        let (sin, cos) = e.pressure_angle.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(e.pressure_angle.to_radians());
         let (m, pitch) = (e.module, PI * e.module);
         let thickness = pitch / 2.0 + 2.0 * e.shift * m * sin / cos - e.thinning;
         let (rho, depth) = (e.tool_tip_radius * m, (e.dedendum - e.shift) * m);
@@ -2413,10 +2417,12 @@ impl Rack {
     fn one_tooth(&self, u: f64, v: f64) -> f64 {
         let ray = |c: Point, dir: Point| {
             let t = ((u - c[0]) * dir[0] + (v - c[1]) * dir[1]).max(0.0);
-            (u - c[0] - t * dir[0]).hypot(v - c[1] - t * dir[1])
+            det::hypot(u - c[0] - t * dir[0], v - c[1] - t * dir[1])
         };
-        let between =
-            (u - u.clamp(self.left[0], self.right[0].max(self.left[0]))).hypot(v - self.left[1]);
+        let between = det::hypot(
+            u - u.clamp(self.left[0], self.right[0].max(self.left[0])),
+            v - self.left[1],
+        );
         let to_drawn_in = ray(self.left, [-self.sin, self.cos])
             .min(ray(self.right, [self.sin, self.cos]))
             .min(between);
@@ -2431,7 +2437,7 @@ impl Rack {
     }
 
     fn distance(&self, g: Point, phi: f64) -> f64 {
-        let (sn, cs) = phi.sin_cos();
+        let (sn, cs) = det::sin_cos(phi);
         let u = self.r * phi + (-g[0] * sn + g[1] * cs);
         let v = g[0] * cs + g[1] * sn - self.r;
         let u = u.rem_euclid(self.pitch);
@@ -2442,7 +2448,7 @@ impl Rack {
 
     fn closest(&self, g: Point, window: f64) -> f64 {
         const STEPS: usize = 20_000;
-        let middle = g[1].atan2(g[0]);
+        let middle = det::atan2(g[1], g[0]);
         let at = |i: usize| middle - window + 2.0 * window * (i as f64) / (STEPS as f64);
         let (mut best, mut best_i) = (f64::INFINITY, 0);
         for i in 0..=STEPS {
@@ -2564,7 +2570,7 @@ fn wave(degree: usize, count: usize) -> (Vec<f64>, Vec<Point>) {
     let control: Vec<Point> = (0..count)
         .map(|i| {
             let x = i as f64 / (count - 1) as f64;
-            [10.0 * x, (3.0 * PI * x).sin()]
+            [10.0 * x, det::sin(3.0 * PI * x)]
         })
         .collect();
     (knots, control)

@@ -20,6 +20,7 @@
 use crate::error::teeth::{
     PlanRefusal, RequiredUnit, SplineQuantity, TeethFailure, Why, FILLET_SEPARATION,
 };
+use crate::math::det;
 use crate::teeth::involute::{self, External};
 use crate::teeth::master_spline::{self, Form};
 use crate::teeth::straight::{self, Serration, StraightSpline, TipCorner};
@@ -852,7 +853,7 @@ fn chamfer_size(
     };
     let radial = match (distance2, angle) {
         (Some(across), _) => across,
-        (None, Some(degrees)) => size * degrees.to_radians().tan(),
+        (None, Some(degrees)) => size * det::tan(degrees.to_radians()),
         (None, None) => size,
     };
     Ok(Some(ChamferSize {

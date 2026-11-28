@@ -30,6 +30,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 const R: f64 = 37.0;
@@ -67,7 +68,7 @@ fn arcs(z: f64, start: f64, end: f64) -> Vec<Curve> {
 /// The region of the r 37 circle in z between the chords `y = lo` and `y = hi` (`None`:
 /// the circle itself), counterclockwise.
 fn region(z: f64, lo: Option<f64>, hi: Option<f64>) -> Vec<Curve> {
-    let angle = |y: f64| (y / R).asin().to_degrees();
+    let angle = |y: f64| det::asin(y / R).to_degrees();
     let x = |y: f64| (R * R - y * y).sqrt();
     let mut curves = Vec::new();
     match (lo, hi) {

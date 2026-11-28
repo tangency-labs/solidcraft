@@ -9,6 +9,7 @@
     clippy::float_arithmetic,
     clippy::disallowed_methods
 )] // test: the pyramid's setback is a square root
+use solidcore::math::det;
 
 mod common;
 
@@ -479,11 +480,11 @@ fn unequal_chamfers_at_a_vertex_beside_a_cylinder_build() {
         let cyl = create_cylinder(k, Point3::new(0.0, 0.0, -5.0), 45.0, 30.0)?;
         boolean_intersection(k, block, cyl)
     });
-    let y = (45.0_f64.powi(2) - 1600.0).sqrt();
+    let y = (det::powi(45.0_f64, 2) - 1600.0).sqrt();
     let e = [
         [40.0, y, 10.0],
         [40.0, y / 2.0, 20.0],
-        [45.0 * 0.55_f64.cos(), 45.0 * 0.55_f64.sin(), 20.0],
+        [45.0 * det::cos(0.55_f64), 45.0 * det::sin(0.55_f64), 20.0],
     ]
     .map(|p| edge_at(&b, p));
     blend(

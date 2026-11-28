@@ -19,6 +19,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -201,12 +202,12 @@ fn opposite_twist_cuts(profile: &[Curve], inner_radius: f64) {
             let end = face_points(&record, faces.end[0]);
             let corners: Vec<_> = end
                 .iter()
-                .filter(|p| (p[0].hypot(p[1]) - inner_radius).abs() < 1e-8)
+                .filter(|p| (det::hypot(p[0], p[1]) - inner_radius).abs() < 1e-8)
                 .collect();
             assert!(!corners.is_empty(), "twist {twist}: end {end:?}");
             for p in corners {
                 assert!((p[2] - L).abs() < 1e-9, "twist {twist}: {p:?}");
-                let angle = p[1].atan2(p[0]);
+                let angle = det::atan2(p[1], p[0]);
                 let error = (angle - twist).rem_euclid(TAU);
                 assert!(
                     error.min(TAU - error) < 1e-9,
@@ -268,7 +269,7 @@ fn opposite_axial_twists_cut_a_cylinder_with_equal_volumes() {
 #[test]
 fn opposite_axial_twists_cut_a_profile_touching_the_cylinder() {
     let half_angle = PI / 9.0;
-    let (s, c) = half_angle.sin_cos();
+    let (s, c) = det::sin_cos(half_angle);
     let inner = [4.0, 0.0, 0.0];
     let lower = [6.0 * c, -6.0 * s, 0.0];
     let upper = [6.0 * c, 6.0 * s, 0.0];

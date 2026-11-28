@@ -34,6 +34,7 @@
 use solidcore::boolean::api_brep::boolean_intersection;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::{create_box, create_sphere};
@@ -97,7 +98,7 @@ fn outward_thicken_is_the_sector() {
     use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     // the shell between the radii 10 and 11 over the cap's cone of half-angle 60 degrees
-    let want = std::f64::consts::PI / 3.0 * (11.0_f64.powi(3) - 10.0_f64.powi(3));
+    let want = std::f64::consts::PI / 3.0 * (det::powi(11.0_f64, 3) - det::powi(10.0_f64, 3));
     for side_walls in [false, true] {
         let mut b = thicken_out(side_walls);
         let counts = (

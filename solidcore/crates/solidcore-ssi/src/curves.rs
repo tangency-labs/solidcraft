@@ -34,6 +34,7 @@ use solidcore::surface::surface::Surface;
 use ssi::{CurvePoint, Intersection, Patch};
 
 use crate::Error;
+use solidcore::math::det;
 
 /// Below this sine of the angle between the normals the surfaces are tangent at a
 /// point: the 3D tangent comes from the neighboring points, not the normals.
@@ -837,7 +838,7 @@ fn dedup(run: Vec<Node>, link: f64) -> Vec<Node> {
 
 /// The run split at its corners: nodes where the curve turns by more than [`CORNER`].
 fn at_corners(run: &[Node]) -> Vec<Vec<Node>> {
-    let cos = CORNER.cos();
+    let cos = det::cos(CORNER);
     let mut out = Vec::new();
     let mut piece: Vec<Node> = Vec::new();
     for (i, &node) in run.iter().enumerate() {

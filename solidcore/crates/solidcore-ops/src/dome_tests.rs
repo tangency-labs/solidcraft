@@ -20,6 +20,7 @@ use crate::dome::dome;
 use crate::session;
 use crate::sweep::{extrude, Curve, DraftCorner};
 use crate::{make_box, make_cylinder, Body, BooleanOp, Error, Order};
+use solidcore::math::det;
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -104,7 +105,7 @@ fn pentagon(radius: f64, z: f64) -> Vec<Curve> {
     let corners: Vec<[f64; 2]> = (0..5)
         .map(|k| {
             let a = FRAC_PI_2 + 2.0 * PI * f64::from(k) / 5.0;
-            [radius * a.cos(), radius * a.sin()]
+            [radius * det::cos(a), radius * det::sin(a)]
         })
         .collect();
     polygon(&corners, z)
@@ -173,7 +174,7 @@ fn a_pentagon_top_domed_matches_two_thirds_a_h() {
     let top = flat_at(&b, &o, 10.0);
     let domed = dome(&b, &o, top, 10.0, DomeShape::Elliptical, false).unwrap();
     // a regular pentagon of circumradius R has area (5/2) R^2 sin 72 degrees
-    let area = 2.5 * 100.0 * (2.0 * PI / 5.0).sin();
+    let area = 2.5 * 100.0 * det::sin(2.0 * PI / 5.0);
     let exact = area * 10.0 + (2.0 / 3.0) * area * 10.0;
     assert!(
         (volume(&domed) - exact).abs() <= exact * 1e-9,
@@ -314,8 +315,8 @@ fn a_teardrop_top_domed_matches_two_thirds_a_h() {
     // tangent points are at -30 and 210 degrees, the tangents sqrt(75) long
     let r = 5.0_f64;
     let (from, to) = (-PI / 6.0, 7.0 * PI / 6.0);
-    let start = [r * from.cos(), r * from.sin()];
-    let end = [r * to.cos(), r * to.sin()];
+    let start = [r * det::cos(from), r * det::sin(from)];
+    let end = [r * det::cos(to), r * det::sin(to)];
     let profile = vec![
         line([0.0, -10.0], start, 0.0),
         Curve::Arc {

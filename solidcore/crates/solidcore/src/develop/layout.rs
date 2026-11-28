@@ -6,6 +6,7 @@
 //! breadth-first walk over the joints, each joint followed once, and every subdivision
 //! ([`roots`], [`span_crossings`]) runs on an explicit stack with a budget.
 
+use crate::math::det;
 use std::collections::VecDeque;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
@@ -512,7 +513,8 @@ pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
 /// (counter-clockwise where above 0): at most the sweep round from the start, the way the arc
 /// turns.
 fn on_arc(d: Vec2, start: f64, sweep: f64) -> bool {
-    sweep.abs() >= TAU || ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
+    sweep.abs() >= TAU
+        || ((det::atan2(d.y, d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
 }
 
 /// The parameters of curve `s` where its way runs square to `way`: where it reaches furthest
@@ -551,7 +553,7 @@ fn square_to(s: &Seg2, way: Vec2) -> Vec<f64> {
             let (c0, c1, c2) = (n1, 2.0 * n2, n2 * e1 - n1 * e2);
             roots(
                 &[c0, c0 + 0.5 * c1, c0 + c1 + c2],
-                16.0 * (1.0 + w.abs()).powi(2) * size([a, apex, b].as_slice()),
+                16.0 * det::powi(1.0 + w.abs(), 2) * size([a, apex, b].as_slice()),
             )
         }
     }
@@ -2034,10 +2036,11 @@ fn obround(frame: &JointFrame, (s0, s1): (f64, f64), (l0, l1): (f64, f64), sign:
         frame.at(s1, mid),
         frame.at(along, l0),
     );
-    let start = (b.y - c.y).atan2(b.x - c.x);
+    let start = det::atan2(b.y - c.y, b.x - c.x);
     // The half turn from `b` to `a` through the slot's deepest point.
-    let halfway =
-        |sweep: f64| c + Vec2::new((start + sweep / 2.0).cos(), (start + sweep / 2.0).sin()) * r;
+    let halfway = |sweep: f64| {
+        c + Vec2::new(det::cos(start + sweep / 2.0), det::sin(start + sweep / 2.0)) * r
+    };
     let sweep = if halfway(PI).dist(deep) <= halfway(-PI).dist(deep) {
         PI
     } else {
@@ -2179,7 +2182,7 @@ impl BendMap {
     /// Where a point of a panel's surface `past` its tangent line toward the sharp lands in the
     /// flat, past the same tangent line.
     fn in_zone(&self, past: f64) -> f64 {
-        self.neutral * (past / self.surface_radius).atan()
+        self.neutral * det::atan(past / self.surface_radius)
     }
 
     /// Bounds on the lengths of the map's first four derivatives anywhere under the bend, as
@@ -2190,7 +2193,7 @@ impl BendMap {
     fn bounds(&self) -> [f64; 4] {
         let (k, r) = (self.neutral / self.surface_radius, self.surface_radius);
         let x2 = 1.0 - 2.0 / 5f64.sqrt();
-        let fourth = 24.0 * x2.sqrt() * (1.0 - x2) / (1.0 + x2).powi(4);
+        let fourth = 24.0 * x2.sqrt() * (1.0 - x2) / det::powi(1.0 + x2, 4);
         [
             k.max(1.0),
             k / r * 3.0 * 3f64.sqrt() / 8.0,
@@ -2832,7 +2835,7 @@ fn gap_span(a: &Zone, b: &Zone, c: Vec2, r: f64) -> Option<[f64; 2]> {
         };
         let out = way.normalized()?;
         let d = (far - c).dot(out);
-        (d < r).then(|| (out.angle(), (d / r).max(-1.0).acos()))
+        (d < r).then(|| (out.angle(), det::acos((d / r).max(-1.0))))
     };
     let ((ta, wa), (tb, wb)) = (past(a)?, past(b)?);
     // `b`'s way taken within a half turn of `a`'s.
@@ -2994,6 +2997,7 @@ fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, Refusal> {
 
 #[cfg(test)]
 mod tests {
+    use crate::math::det;
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     use super::{band_extent, crossings, JointFrame};
@@ -3062,7 +3066,7 @@ mod tests {
             "{whole:?}"
         );
         let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
-        let reach = 93.0 + (9.0 - (2.0 - 1e-6f64).powi(2)).sqrt();
+        let reach = 93.0 + (9.0 - det::powi(2.0 - 1e-6f64, 2)).sqrt();
         assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach))), "{top:?}");
     }
 

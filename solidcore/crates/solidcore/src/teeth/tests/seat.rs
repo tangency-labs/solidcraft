@@ -2,6 +2,7 @@
 //! numbers worked out by hand, and hostile numbers (not finite, no length) refused or answered
 //! plainly, never a panic.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::common::HOSTILE;
@@ -249,7 +250,7 @@ fn a_copy_turned_about_the_axis_shows_which_way_it_went() {
     // A tool about angle 0 turned to the space at a quarter turn: a box about +Y lies where it
     // should, a box about -Y (the quarter turn the other way) lies turned back.
     let about = |angle: f64| {
-        let (s, c) = angle.sin_cos();
+        let (s, c) = det::sin_cos(angle);
         let centre = Vec3::new(10.0 * c, 10.0 * s, 2.0);
         (
             centre - Vec3::new(1.0, 1.0, 1.0),

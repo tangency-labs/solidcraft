@@ -22,6 +22,7 @@ use solidcore::curve::line::Line;
 use solidcore::curve::path::PathPiece;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
@@ -274,7 +275,7 @@ fn a_chamfer_on_a_cut_rounded_bar_keeps_its_setbacks() {
         assert!(volume(&k, &mut body) < before);
 
         // In each plane, the rail is the requested width from the original straight rim.
-        let normal_scale = 1.0_f64.hypot(slope);
+        let normal_scale = det::hypot(1.0_f64, slope);
         let mut rails = vec![
             Point3::new(0.0, 20.0 + width * normal_scale, 6.0),
             Point3::new(0.0, 20.0, 6.0 - width),
@@ -296,8 +297,8 @@ fn a_chamfer_on_a_cut_rounded_bar_keeps_its_setbacks() {
         let across = std::f64::consts::FRAC_1_SQRT_2;
         for side in [-1.0, 1.0] {
             let lateral_inward = Vec3::new(-side * across, 0.0, -across);
-            let wedge = (-lateral_inward.dot(cap_inward)).acos();
-            let radius = width * (0.5 * wedge).tan();
+            let wedge = det::acos(-lateral_inward.dot(cap_inward));
+            let radius = width * det::tan(0.5 * wedge);
             let x = side * (19.0 + across);
             let y = 20.0 + slope * (x + radius * lateral_inward.x) + radius * normal_scale;
             let lateral = Point3::new(x, y, 5.0 + across);

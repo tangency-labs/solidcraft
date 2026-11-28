@@ -14,6 +14,7 @@ use crate::patch::Patch;
 use crate::piece::{cross, dot, norm, scale, sub, unit, Piece, V3};
 use crate::small::{solve_regularized, System};
 use crate::Error;
+use solidcore::math::det;
 
 /// Each patch's pieces, to evaluate derivatives at patch parameters.
 struct Pieces(Vec<Vec<Piece>>);
@@ -163,7 +164,7 @@ fn densify_curve(curve: &Curve, a: &Pieces, b: &Pieces, max_turn: f64) -> Curve 
         let (Some(t0), Some(t1)) = (tangent(a, b, &q0, chord), tangent(a, b, &q1, chord)) else {
             continue;
         };
-        let turn = dot(t0.0, t1.0).clamp(-1.0, 1.0).acos();
+        let turn = det::acos(dot(t0.0, t1.0).clamp(-1.0, 1.0));
         let pieces = (turn / max_turn).ceil() as usize;
         if !(length > 0.0) || !(2..=1000).contains(&pieces) {
             continue;

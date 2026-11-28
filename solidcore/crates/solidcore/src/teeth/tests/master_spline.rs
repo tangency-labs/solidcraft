@@ -1,6 +1,7 @@
 //! Master splines: one tooth left out or one wide tooth, so that the hub goes on its shaft one way
 //! only.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use super::common::{check_outline, operation, out_of_range, why, HOSTILE};
@@ -428,7 +429,7 @@ fn material_around(outline: &Outline, radius: f64, angle: f64, samples: u32) -> 
             let a = angle + off;
             (
                 wrapped(off),
-                inside(&points, [radius * a.cos(), radius * a.sin()]),
+                inside(&points, [radius * det::cos(a), radius * det::sin(a)]),
             )
         })
         .collect()
@@ -623,7 +624,7 @@ fn curved(teeth: u32, middle: f64, two: bool) -> Outline {
     let pitch = TAU / f64::from(teeth);
     let at = |share: f64| {
         let r = 10.0 + (middle - 10.0) * (1.0 - (2.0 * share - 1.0).abs());
-        [r * (share * pitch).cos(), r * (share * pitch).sin()]
+        [r * det::cos(share * pitch), r * det::sin(share * pitch)]
     };
     let up: Vec<Point> = (0..=8).map(|i| at(f64::from(i) / 16.0)).collect();
     let down: Vec<Point> = (8..=16).map(|i| at(f64::from(i) / 16.0)).collect();
@@ -740,7 +741,7 @@ fn a_tip_rounded_all_across_still_has_a_corner_on_the_major_circle_and_takes_a_w
             .outline
             .tooth()
             .iter()
-            .any(|p| matches!(p, Piece::Arc { centre, .. } if centre[0].hypot(centre[1]) < 1e-9 && p.role() == Role::Tip))
+            .any(|p| matches!(p, Piece::Arc { centre, .. } if det::hypot(centre[0], centre[1]) < 1e-9 && p.role() == Role::Tip))
     );
     let (keyed, shaft_arc, _) = master_pair(&pair, Form::WideTooth, 0).expect("a wide tooth");
     check_outline("rounded", &keyed.first.outline);

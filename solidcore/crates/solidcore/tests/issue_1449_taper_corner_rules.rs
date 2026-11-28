@@ -28,6 +28,7 @@ use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::sweep::api_brep::{
     create_taper_extrude, create_taper_extrude_with_corner, OffsetCornerType, TaperCornerRefusal,
     TaperExtrude,
@@ -119,7 +120,7 @@ fn assert_rel(a: f64, b: f64, rel: f64) {
 /// h (ab + s o (a + b) + 4 o^2 / 3), s = +1 outward, -1 inward.
 fn drafted_rectangle_volume(outward: bool) -> f64 {
     let (a, b, h) = (20.0_f64, 10.0_f64, 10.0_f64);
-    let o = h * 10.0_f64.to_radians().tan();
+    let o = h * det::tan(10.0_f64.to_radians());
     let s = if outward { 1.0 } else { -1.0 };
     h * (a * b + s * o * (a + b) + 4.0 * o * o / 3.0)
 }
@@ -129,7 +130,7 @@ fn drafted_rectangle_volume(outward: bool) -> f64 {
 /// V = integral (a - 2 t z)(b - 2 t z) dz = b^2 (3 a - b) / (12 t).
 fn strip_volume() -> f64 {
     let (a, b) = (20.0_f64, 2.0_f64);
-    let t = 10.0_f64.to_radians().tan();
+    let t = det::tan(10.0_f64.to_radians());
     b * b * (3.0 * a - b) / (12.0 * t)
 }
 
@@ -169,7 +170,7 @@ fn a_ridge_on_the_far_end_is_still_refused() {
     let curves = strip();
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     // 10 tan(angle) = 1, the half-width
-    let angle = 0.1_f64.atan().to_degrees();
+    let angle = det::atan(0.1_f64).to_degrees();
     let TaperExtrude::Refused(refusal) = create_taper_extrude_with_corner(
         &mut k,
         &refs,
@@ -366,10 +367,10 @@ fn a_drafted_rectangle_has_six_faces() {
 /// wall), so its area is pi r^2 / 2 + d sqrt(r^2 - d^2) + r^2 asin(d / r); Simpson's rule
 /// over the height.
 fn half_disc_cone_volume() -> f64 {
-    let o = 3.0_f64.to_radians().tan();
+    let o = det::tan(3.0_f64.to_radians());
     let area = |t: f64| {
         let (r, d) = (20.0 + t * o, t * o);
-        std::f64::consts::PI * r * r / 2.0 + d * (r * r - d * d).sqrt() + r * r * (d / r).asin()
+        std::f64::consts::PI * r * r / 2.0 + d * (r * r - d * d).sqrt() + r * r * det::asin(d / r)
     };
     let n = 200;
     let h = 10.0 / f64::from(n);

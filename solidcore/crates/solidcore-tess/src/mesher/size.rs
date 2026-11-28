@@ -16,6 +16,7 @@ use solidcore_convert as kernel;
 use solidcore_record::brep;
 
 use super::uv::Domain;
+use solidcore::math::det;
 
 /// Longest side, as a fraction of the body's extent.
 const MAX_LEN_FRACTION: f64 = 1.0 / 5.0;
@@ -86,7 +87,7 @@ impl Rules {
         let r = 1.0 / k;
         let mut across = (8.0 * r * self.tol).sqrt();
         if let Some(t) = self.turn
-            && r * (1.0 - (0.5 * t.angle).cos()) > t.floor
+            && r * (1.0 - det::cos(0.5 * t.angle)) > t.floor
         {
             across = across.min(r * t.angle);
         }

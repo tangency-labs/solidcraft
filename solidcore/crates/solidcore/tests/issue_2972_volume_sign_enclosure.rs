@@ -42,6 +42,7 @@ use solidcore::mass::enclosure::{
     enclose_face_area, enclose_face_area_relative, enclose_mass_properties, enclose_volume,
     volume_sign, Bounds, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
 use solidcore::query::api_queries::edge_closest_point;
@@ -247,7 +248,8 @@ fn mass_properties_are_enclosed_around_their_closed_forms() {
     // the box [1, 5] x [2, 7] x [3, 9]
     let mut b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
     let (lo, hi): ([f64; 3], [f64; 3]) = ([1.0, 2.0, 3.0], [5.0, 7.0, 9.0]);
-    let int = |i: usize, p: i32| (hi[i].powi(p + 1) - lo[i].powi(p + 1)) / f64::from(p + 1);
+    let int =
+        |i: usize, p: i32| (det::powi(hi[i], p + 1) - det::powi(lo[i], p + 1)) / f64::from(p + 1);
     // int x_i^pi x_j^pj over the box (the third side's length)
     let m = |p: [i32; 3]| int(0, p[0]) * int(1, p[1]) * int(2, p[2]);
     let (xx, yy, zz) = (m([2, 0, 0]), m([0, 2, 0]), m([0, 0, 2]));

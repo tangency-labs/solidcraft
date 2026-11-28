@@ -5,6 +5,7 @@
 //! must run clear; each they refuse for an overlap is put together by hand, turned, and must
 //! overlap.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::basics::old_sampled;
@@ -83,14 +84,14 @@ fn cases() -> Vec<(&'static str, External)> {
 }
 
 fn dist(a: Point, b: Point) -> f64 {
-    (a[0] - b[0]).hypot(a[1] - b[1])
+    det::hypot(a[0] - b[0], a[1] - b[1])
 }
 
 #[test]
 fn the_circles_of_a_plain_shaft() -> crate::Result<()> {
     let g = shaft_of(2.0, 20, 0.0);
     assert!((g.pitch_radius()? - 20.0).abs() < 1e-12);
-    assert!((g.base_radius()? - 20.0 * 20f64.to_radians().cos()).abs() < 1e-12);
+    assert!((g.base_radius()? - 20.0 * det::cos(20f64.to_radians())).abs() < 1e-12);
     assert!((g.tip_radius()? - 22.0).abs() < 1e-12);
     assert!((g.root_radius()? - 17.5).abs() < 1e-12);
     assert!((g.tooth_thickness()? - PI).abs() < 1e-12);
@@ -98,7 +99,7 @@ fn the_circles_of_a_plain_shaft() -> crate::Result<()> {
     let shifted = shaft_of(2.0, 20, 0.5);
     assert!((shifted.tip_radius()? - 23.0).abs() < 1e-12);
     assert!((shifted.root_radius()? - 18.5).abs() < 1e-12);
-    assert!((shifted.tooth_thickness()? - (PI + 2.0 * 20f64.to_radians().tan())).abs() < 1e-12);
+    assert!((shifted.tooth_thickness()? - (PI + 2.0 * det::tan(20f64.to_radians()))).abs() < 1e-12);
     Ok(())
 }
 
@@ -193,15 +194,15 @@ fn the_flank_is_the_involute_of_the_base_circle() -> crate::Result<()> {
                 continue;
             };
             for &[x, y] in points {
-                let radius = x.hypot(y);
+                let radius = det::hypot(x, y);
                 assert!(
                     radius >= rb * (1.0 - 1e-12),
                     "{name}: a flank point below the base circle"
                 );
-                let at_radius = (rb / radius).min(1.0).acos();
+                let at_radius = det::acos((rb / radius).min(1.0));
                 let expected = half_at_pitch + inv(e.pressure_angle.to_radians()) - inv(at_radius);
                 assert!(
-                    (y.atan2(x).abs() - expected).abs() < 1e-11,
+                    (det::atan2(y, x).abs() - expected).abs() < 1e-11,
                     "{name}: off the involute at radius {radius}"
                 );
                 assert!(
@@ -229,9 +230,11 @@ fn the_fillet_runs_into_the_flank_smoothly_unless_the_tooth_is_undercut() -> cra
             fillet[n - 1][1] - fillet[n - 2][1],
         ];
         let out_of = [flank[1][0] - flank[0][0], flank[1][1] - flank[0][1]];
-        let turn = (into[0] * out_of[1] - into[1] * out_of[0])
-            .atan2(into[0] * out_of[0] + into[1] * out_of[1])
-            .abs();
+        let turn = det::atan2(
+            into[0] * out_of[1] - into[1] * out_of[0],
+            into[0] * out_of[0] + into[1] * out_of[1],
+        )
+        .abs();
         if e.is_undercut()? {
             assert!(
                 turn > 0.05,
@@ -270,7 +273,7 @@ struct Rack {
 
 impl Rack {
     fn of(e: &External) -> Rack {
-        let (sin, cos) = e.pressure_angle.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(e.pressure_angle.to_radians());
         let (m, pitch) = (e.module, PI * e.module);
         let thickness = pitch / 2.0 + 2.0 * e.shift * m * sin / cos - e.thinning;
         let (rho, depth) = (e.tool_tip_radius * m, (e.dedendum - e.shift) * m);
@@ -297,10 +300,12 @@ impl Rack {
         // centres.
         let ray = |c: Point, dir: Point| {
             let t = ((u - c[0]) * dir[0] + (v - c[1]) * dir[1]).max(0.0);
-            (u - c[0] - t * dir[0]).hypot(v - c[1] - t * dir[1])
+            det::hypot(u - c[0] - t * dir[0], v - c[1] - t * dir[1])
         };
-        let between =
-            (u - u.clamp(self.left[0], self.right[0].max(self.left[0]))).hypot(v - self.left[1]);
+        let between = det::hypot(
+            u - u.clamp(self.left[0], self.right[0].max(self.left[0])),
+            v - self.left[1],
+        );
         let to_drawn_in = ray(self.left, [-self.sin, self.cos])
             .min(ray(self.right, [self.sin, self.cos]))
             .min(between);
@@ -317,7 +322,7 @@ impl Rack {
     /// The distance from a point of the shaft to the rack when the rack has rolled to the angle
     /// `phi`.
     fn distance(&self, g: Point, phi: f64) -> f64 {
-        let (sn, cs) = phi.sin_cos();
+        let (sn, cs) = det::sin_cos(phi);
         let u = self.r * phi + (-g[0] * sn + g[1] * cs);
         let v = g[0] * cs + g[1] * sn - self.r;
         let u = u.rem_euclid(self.pitch);
@@ -329,7 +334,7 @@ impl Rack {
     /// The closest the rack ever comes to a point of the shaft while it rolls past.
     fn closest(&self, g: Point, window: f64) -> f64 {
         const STEPS: usize = 20_000;
-        let middle = g[1].atan2(g[0]);
+        let middle = det::atan2(g[1], g[0]);
         let at = |i: usize| middle - window + 2.0 * window * (i as f64) / (STEPS as f64);
         let (mut best, mut best_i) = (f64::INFINITY, 0);
         for i in 0..=STEPS {
@@ -357,7 +362,7 @@ fn an_external_tooth_is_exactly_what_the_rack_leaves() -> crate::Result<()> {
     for (name, e) in cases() {
         let rack = Rack::of(&e);
         let outline = e.outline(2e-3)?;
-        let window = (e.root_radius()? / e.tip_radius()?).acos() + 0.2;
+        let window = det::acos(e.root_radius()? / e.tip_radius()?) + 0.2;
         let tolerance = 2e-8 * e.module;
         for piece in outline.tooth() {
             let points: Vec<Point> = match piece {
@@ -367,11 +372,11 @@ fn an_external_tooth_is_exactly_what_the_rack_leaves() -> crate::Result<()> {
                 }
                 Piece::Arc { .. } => {
                     let (start, end) = (piece.start().unwrap(), piece.end().unwrap());
-                    let (a0, a1) = (start[1].atan2(start[0]), end[1].atan2(end[0]));
-                    let radius = start[0].hypot(start[1]);
+                    let (a0, a1) = (det::atan2(start[1], start[0]), det::atan2(end[1], end[0]));
+                    let radius = det::hypot(start[0], start[1]);
                     (0..=8)
                         .map(|i| a0 + (a1 - a0) * f64::from(i) / 8.0)
-                        .map(|a| [radius * a.cos(), radius * a.sin()])
+                        .map(|a| [radius * det::cos(a), radius * det::sin(a)])
                         .collect()
                 }
             };
@@ -488,13 +493,15 @@ fn an_internal_outline_is_a_closed_chain_with_round_corners_that_touch() -> crat
             else {
                 continue;
             };
-            let tangent =
-                |angle: f64| [-angle.sin() * sweep.signum(), angle.cos() * sweep.signum()];
+            let tangent = |angle: f64| {
+                [
+                    -det::sin(angle) * sweep.signum(),
+                    det::cos(angle) * sweep.signum(),
+                ]
+            };
             let (leaving, arriving) = (tangent(*start), tangent(start + sweep));
             let angle_between = |a: Point, b: Point| {
-                (a[0] * b[1] - a[1] * b[0])
-                    .atan2(a[0] * b[0] + a[1] * b[1])
-                    .abs()
+                det::atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]).abs()
             };
             // The neighbour that is a flank: compare with the flank's own direction there.
             for (neighbour, mine, at_start) in
@@ -518,7 +525,7 @@ fn an_internal_outline_is_a_closed_chain_with_round_corners_that_touch() -> crat
                 );
             }
             // The round touches the root circle from inside.
-            assert!((centre[0].hypot(centre[1]) + radius - hub.major_radius).abs() < 1e-9);
+            assert!((det::hypot(centre[0], centre[1]) + radius - hub.major_radius).abs() < 1e-9);
         }
     }
     Ok(())
@@ -685,15 +692,13 @@ fn a_tooth_the_rack_would_cut_through_at_its_root_is_refused_exactly_there() -> 
         };
         let nearest = points
             .iter()
-            .min_by(|a, b| a[1].atan2(a[0]).total_cmp(&b[1].atan2(b[0])))
+            .min_by(|a, b| det::atan2(a[1], a[0]).total_cmp(&det::atan2(b[1], b[0])))
             .unwrap();
-        let radius = nearest[0].hypot(nearest[1]);
+        let radius = det::hypot(nearest[0], nearest[1]);
         let deepest = |e: &External| {
             let rack = Rack::of(e);
-            let window = (e.root_radius().unwrap_or(radius * 0.5) / radius)
-                .min(1.0)
-                .acos()
-                + 0.3;
+            let window =
+                det::acos((e.root_radius().unwrap_or(radius * 0.5) / radius).min(1.0)) + 0.3;
             (0..=100)
                 .map(|i| radius * (0.9 + 0.2 * f64::from(i) / 100.0))
                 .map(|along| rack.closest([along, 0.0], window))
@@ -706,7 +711,7 @@ fn a_tooth_the_rack_would_cut_through_at_its_root_is_refused_exactly_there() -> 
             "{family:?}: the rack reaches the middle of a tooth that is kept"
         );
         let lost_rack = Rack::of(&lost);
-        let window = (lost_root.max(1e-3) / radius).min(1.0).acos() + 0.3;
+        let window = det::acos((lost_root.max(1e-3) / radius).min(1.0)) + 0.3;
         let through_the_middle = (0..=100)
             .map(|i| radius * (0.9 + 0.2 * f64::from(i) / 100.0))
             .map(|along| lost_rack.closest([along, 0.0], window))
@@ -892,7 +897,7 @@ fn a_hub_whose_root_rounds_would_reach_the_shafts_tips_is_refused_exactly_there(
                 reaches = mid;
             }
         }
-        let play = side * 30f64.to_radians().cos() / 2.0;
+        let play = side * det::cos(30f64.to_radians()) / 2.0;
         let small = spline_pair(&shaft, &fit(0.2 * fits), 1e-6)?.through_a_cycle(4, 0.3)?;
         assert!(
             (least(&small) - play).abs() < 2e-5,
@@ -978,7 +983,7 @@ fn old_fillet_angles(fillet: &Fillet) -> (f64, f64) {
     const STEPS: u32 = 256;
     let angle = |phi: f64| {
         let [x, y] = fillet.point(phi);
-        y.atan2(x)
+        det::atan2(y, x)
     };
     let at = |i: u32| {
         fillet.phi_root + (fillet.phi_join - fillet.phi_root) * f64::from(i) / f64::from(STEPS)
@@ -1088,7 +1093,7 @@ fn a_fillet_near_the_edge_is_proved_or_named_unproved() -> crate::Result<()> {
     for (teeth, pressure_angle) in [(24, 20.0), (30, 25.0), (40, 30.0)] {
         for eps in [1e-6, 1e-8, 1e-12] {
             let (m, z) = (1.0, f64::from(teeth));
-            let (sin, cos) = f64::to_radians(pressure_angle).sin_cos();
+            let (sin, cos) = det::sin_cos(f64::to_radians(pressure_angle));
             // No shift and no thinning: the tooth is half the pitch thick.
             let half_pitch = PI * m / 2.0;
             let s = half_pitch;
@@ -1209,12 +1214,12 @@ fn the_fillet_enclosures_hold_every_dense_point() {
                 let t = p0 + (p1 - p0) * f64::from(j) / 999.0;
                 let [x, y] = curve(t);
                 let slack = 1e-12 * (1.0 + x.abs() + y.abs());
-                let across = beta.sin() * x - beta.cos() * y;
+                let across = det::sin(beta) * x - det::cos(beta) * y;
                 assert!(
                     holds(above, y, slack) && holds(below, across, slack),
                     "{fillet:?} [{p0}, {p1}] at {t}: {y} in {above:?}, {across} in {below:?}"
                 );
-                let scale = ((fillet.r * t - fillet.uc).hypot(fillet.vc) / fillet.r).min(1.0);
+                let scale = (det::hypot(fillet.r * t - fillet.uc, fillet.vc) / fillet.r).min(1.0);
                 let [(first, first_error), (second, second_error)] = derivatives(&curve, t, scale);
                 let fits = |i: usize| {
                     let (f, s) = (bend.first[i], bend.second[i]);
@@ -1364,7 +1369,12 @@ fn assert_within(
     // taken.
     let sag = dense
         .windows(3)
-        .map(|w| (w[0][0] - 2.0 * w[1][0] + w[2][0]).hypot(w[0][1] - 2.0 * w[1][1] + w[2][1]))
+        .map(|w| {
+            det::hypot(
+                w[0][0] - 2.0 * w[1][0] + w[2][0],
+                w[0][1] - 2.0 * w[1][1] + w[2][1],
+            )
+        })
         .fold(0.0_f64, f64::max)
         / 4.0;
     let mut k = 0;
@@ -1524,9 +1534,9 @@ fn a_fillet_close_to_the_line_of_rolling_counts_its_conditioning() {
     // The point as `Fillet::point` computes it, with the rolling rounded once instead of twice.
     let reference = |f: &Fillet, phi: f64| -> Point {
         let (du, dv) = (f.r.mul_add(phi, -f.uc), -f.vc);
-        let len = du.hypot(dv);
+        let len = det::hypot(du, dv);
         let (qu, qv) = (f.uc - f.rho * du / len, f.vc - f.rho * dv / len);
-        let (sn, cs) = phi.sin_cos();
+        let (sn, cs) = det::sin_cos(phi);
         let along = qu - f.r * phi;
         [(f.r + qv) * cs - along * sn, (f.r + qv) * sn + along * cs]
     };
@@ -1537,7 +1547,7 @@ fn a_fillet_close_to_the_line_of_rolling_counts_its_conditioning() {
     for k in -steps..=steps {
         let phi = angle(k);
         let (p, q) = (close.point(phi), reference(&close, phi));
-        let moved = (p[0] - q[0]).hypot(p[1] - q[1]);
+        let moved = det::hypot(p[0] - q[0], p[1] - q[1]);
         let proved = close.off(phi, p);
         assert!(
             moved <= proved + 1e-13,

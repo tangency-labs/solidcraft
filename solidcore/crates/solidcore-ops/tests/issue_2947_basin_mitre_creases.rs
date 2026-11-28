@@ -16,6 +16,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -74,7 +75,7 @@ fn angle_at(k: &Kernel, b: &Brep, e: EdgeId, p: Point3) -> f64 {
     };
     let n = normal(face::surface(b, *f).unwrap().unwrap());
     let m = normal(face::surface(b, *g).unwrap().unwrap());
-    n.cross(m).length().atan2(n.dot(m).abs())
+    det::atan2(n.cross(m).length(), n.dot(m).abs())
 }
 
 /// `body` with the entry's edges rounded 4, picked at their points.

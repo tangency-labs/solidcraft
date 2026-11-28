@@ -25,6 +25,7 @@
 use crate::eval::query::bezier_spans;
 use crate::eval::vec::{v3, VecExt};
 use crate::eval::{Curve, Frame};
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::Seg2;
 
@@ -140,7 +141,7 @@ impl Smooth {
         let (p, d) = match &self.form {
             Form::Line { a, d, from } => (*a + *d * (t - *from), *d),
             Form::Conic { o, x, y } => {
-                let (s, c) = t.sin_cos();
+                let (s, c) = det::sin_cos(t);
                 (*o + *x * c + *y * s, *y * c - *x * s)
             }
             Form::Bezier { over, ctrl } => {
@@ -349,7 +350,7 @@ fn bezier_rates(ctrl: &[Hom], width: f64) -> Option<([f64; 4], f64, f64)> {
             .map(|(x, y)| y - x)
             .collect();
         falling *= (p + 1 - k) as f64;
-        let scale = falling / width.powi(k as i32);
+        let scale = falling / det::powi(width, k as i32);
         let spread = f64::from(1u32 << k) * ROUNDING;
         *ra = scale * (da.iter().map(|v| v.len()).fold(0.0, f64::max) + spread * size);
         *rw = scale * (dw.iter().map(|v| v.abs()).fold(0.0, f64::max) + spread * heavy);
@@ -384,7 +385,10 @@ fn choose(k: usize, j: usize) -> f64 {
 #[must_use]
 pub fn fourth(c: [f64; 4], g: [f64; 4]) -> f64 {
     let ([c1, c2, c3, c4], [g1, g2, g3, g4]) = (c, g);
-    (g1 * c4 + g2 * (4.0 * c1 * c3 + 3.0 * c2 * c2) + 6.0 * g3 * c1 * c1 * c2 + g4 * c1.powi(4))
+    (g1 * c4
+        + g2 * (4.0 * c1 * c3 + 3.0 * c2 * c2)
+        + 6.0 * g3 * c1 * c1 * c2
+        + g4 * det::powi(c1, 4))
         * (1.0 + ROUNDING)
 }
 
@@ -392,7 +396,7 @@ pub fn fourth(c: [f64; 4], g: [f64; 4]) -> f64 {
 /// the curve's fourth derivative is at most `fourth` long over the step (module docs).
 #[must_use]
 pub fn remainder(h: f64, fourth: f64) -> f64 {
-    h.powi(4) / 384.0 * fourth * (1.0 + ROUNDING)
+    det::powi(h, 4) / 384.0 * fourth * (1.0 + ROUNDING)
 }
 
 /// The parameters from `a` to `b`, in order, between which cubic pieces stand proved within `tol`

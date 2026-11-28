@@ -18,6 +18,7 @@ use solidcore_record::brep::*;
 use solidcore_record::Vec3;
 
 use super::*;
+use solidcore::math::det;
 
 /// A record vector's length.
 fn len(v: Vec3) -> f64 {
@@ -588,7 +589,7 @@ fn a_point_a_hair_inside_a_round_trim_is_on_its_face() {
     let q = Query::new(&b);
     assert!(q.face_contains(0, Vec3::ZERO, 1e-9), "the center");
     for k in 0..360 {
-        let (s, c) = f64::from(k).to_radians().sin_cos();
+        let (s, c) = det::sin_cos(f64::from(k).to_radians());
         let at = |r: f64| Vec3::new(r * c, r * s, 0.);
         assert!(
             q.face_contains(0, at(100. - 1e-6), 1e-9),

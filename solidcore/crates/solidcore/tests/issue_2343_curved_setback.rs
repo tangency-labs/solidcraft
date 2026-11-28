@@ -37,6 +37,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
@@ -123,7 +124,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
     let axis = Vec3::Z;
     let reference = Vec3::X;
     let y = axis.cross(reference);
-    let x0 = reference * a0.cos() + y * a0.sin();
+    let x0 = reference * det::cos(a0) + y * det::sin(a0);
     let y0 = axis.cross(x0);
     let frame = Axis2Placement::new(c, x0, y0);
     let interval = Extent1d::from_min_max(0.0, (a1 - a0) * 180.0 / PI);
@@ -132,7 +133,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
 
 /// The disc of radius `rr` about (`cx`, `cy`) less x > cx + a, from z0 up `height`.
 fn d_prism(k: &mut Kernel, cx: f64, cy: f64, rr: f64, a: f64, z0: f64, height: f64) -> Brep {
-    let al = (a / rr).acos();
+    let al = det::acos(a / rr);
     let h = (rr * rr - a * a).sqrt();
     let l = line(
         Point3::new(cx + a, cy - h, z0),
@@ -400,7 +401,7 @@ struct Case {
 }
 
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The parameters of `s` nearest `x`, and how far `x` is from it there.
@@ -811,7 +812,7 @@ fn d_prism_corner_room_is_measured_along_its_edges() {
     let mut want = [
         2.0 * (rr * rr - a * a).sqrt(),
         10.0,
-        rr * (2.0 * PI - 2.0 * (a / rr).acos()),
+        rr * (2.0 * PI - 2.0 * det::acos(a / rr)),
     ];
     want.sort_by(f64::total_cmp);
     let mut room = r.room.clone();
@@ -975,8 +976,8 @@ fn knife_edge_corner_is_a_setback_no_more_concave_than_its_wall() {
                 2.0,
             ),
             mid(
-                Point3::new(tip + 23.5 * q.cos(), -21.0 + 23.5 * q.sin(), 7.5),
-                Point3::new(tip + 21.0 * q.cos(), -21.0 + 21.0 * q.sin(), 10.0),
+                Point3::new(tip + 23.5 * det::cos(q), -21.0 + 23.5 * det::sin(q), 7.5),
+                Point3::new(tip + 21.0 * det::cos(q), -21.0 + 21.0 * det::sin(q), 10.0),
                 2.5,
             ),
             mid(
@@ -1086,8 +1087,8 @@ fn middle(c: [f64; 3], n1: [f64; 3], n2: [f64; 3], r: f64) -> Point3 {
 /// top's arc rounded 1.25, 1.5 and 2 (k = 0). Faces: the part's 5, 4 rounds, 6 patches (15).
 fn cone_frustum_case() -> (Kernel, Brep, Vec<EdgeId>, Vec<f64>, Case) {
     let mut k = all_fixes();
-    let tb = (PI / 6.0).tan();
-    let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
+    let tb = det::tan(PI / 6.0);
+    let (cb, sb) = (det::cos(PI / 6.0), det::sin(PI / 6.0));
     let rt = 10.0 - 6.0 * tb;
     let rm = 10.0 - 3.0 * tb;
     let cone = solidcore::primitive::api_primitives::create_cone(
@@ -1103,7 +1104,7 @@ fn cone_frustum_case() -> (Kernel, Brep, Vec<EdgeId>, Vec<f64>, Case) {
     let mut edges = vec![pick(&k, &b, [0.0, 0.0, 6.0]), pick(&k, &b, [0.0, rm, 3.0])];
     let mut radii = vec![1.25, 1.5];
     for e in edges_on(&k, &b, |p| {
-        (p.z - 6.0).abs() <= 1e-7 && (p.x.hypot(p.y) - rt).abs() <= 1e-7
+        (p.z - 6.0).abs() <= 1e-7 && (det::hypot(p.x, p.y) - rt).abs() <= 1e-7
     }) {
         edges.push(e);
         radii.push(2.0);
@@ -1173,7 +1174,7 @@ fn countersink_case(k: &mut Kernel) -> (Brep, Vec<EdgeId>, Vec<f64>, Case) {
     ];
     let mut radii = vec![1.25, 1.0];
     for e in edges_on(k, &b, |p| {
-        (p.z - 20.0).abs() <= 1e-7 && ((p.x - 4.0).hypot(p.y) - 8.0).abs() <= 1e-7
+        (p.z - 20.0).abs() <= 1e-7 && (det::hypot(p.x - 4.0, p.y) - 8.0).abs() <= 1e-7
     }) {
         edges.push(e);
         radii.push(1.5);
@@ -1202,9 +1203,9 @@ fn countersink_case(k: &mut Kernel) -> (Brep, Vec<EdgeId>, Vec<f64>, Case) {
                 1.25,
             ),
             middle(
-                [4.0 + rr * a3.cos(), rr * a3.sin(), zr],
+                [4.0 + rr * det::cos(a3), rr * det::sin(a3), zr],
                 [0.0, 0.0, 1.0],
-                [-c45 * a3.cos(), -c45 * a3.sin(), c45],
+                [-c45 * det::cos(a3), -c45 * det::sin(a3), c45],
                 1.5,
             ),
             middle(
@@ -1588,15 +1589,15 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
 /// parameter (each a few millionths long).
 fn top_spring_least_rho(s: f64) -> f64 {
     let p = (7.0, 6.0 - s);
-    let psi = 6.0f64.atan2(8.0) + s / 10.0;
-    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
-    let along = (7.0 - q.0) / psi.sin();
-    let x = (7.0, q.1 - along * psi.cos());
+    let psi = det::atan2(6.0f64, 8.0) + s / 10.0;
+    let q = (8.0 * det::cos(psi), 8.0 * det::sin(psi));
+    let along = (7.0 - q.0) / det::sin(psi);
+    let x = (7.0, q.1 - along * det::cos(psi));
     (0..=20000)
         .map(|i| {
             let t = f64::from(i) / 20000.0;
             let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
-            (a * p.0 + b * x.0 + c * q.0).hypot(a * p.1 + b * x.1 + c * q.1)
+            det::hypot(a * p.0 + b * x.0 + c * q.0, a * p.1 + b * x.1 + c * q.1)
         })
         .fold(f64::INFINITY, f64::min)
 }
@@ -1694,12 +1695,12 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
 /// steps of its parameter), the arc round's end section out to rho = 10, and the arc back to V
 /// (200 steps).
 fn top_piece(s: f64) -> Vec<(f64, f64)> {
-    let psi_v = 6.0f64.atan2(8.0);
+    let psi_v = det::atan2(6.0f64, 8.0);
     let p = (7.0, 6.0 - s);
     let psi = psi_v + s / 10.0;
-    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
-    let along = (7.0 - q.0) / psi.sin();
-    let x = (7.0, q.1 - along * psi.cos());
+    let q = (8.0 * det::cos(psi), 8.0 * det::sin(psi));
+    let along = (7.0 - q.0) / det::sin(psi);
+    let x = (7.0, q.1 - along * det::cos(psi));
     let mut out = vec![(8.0, 6.0), (8.0, 6.0 - s)];
     for i in 0..=2000 {
         let t = f64::from(i) / 2000.0;
@@ -1708,7 +1709,7 @@ fn top_piece(s: f64) -> Vec<(f64, f64)> {
     }
     for i in 0..=200 {
         let a = psi + (psi_v - psi) * f64::from(i) / 200.0;
-        out.push((10.0 * a.cos(), 10.0 * a.sin()));
+        out.push((10.0 * det::cos(a), 10.0 * det::sin(a)));
     }
     out
 }
@@ -1725,7 +1726,7 @@ fn placed(piece: &[(f64, f64)], c: (f64, f64)) -> (bool, f64) {
         }
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
         let t = (((c.0 - a.0) * dx + (c.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-        least = least.min((a.0 + t * dx - c.0).hypot(a.1 + t * dy - c.1));
+        least = least.min(det::hypot(a.0 + t * dx - c.0, a.1 + t * dy - c.1));
     }
     (inside, least)
 }
@@ -1815,7 +1816,7 @@ fn a_bore_inside_the_corners_piece_of_the_top_is_refused_naming_the_setback_that
     kept_definitions(&k, &b, &case, 3);
     let top_circle = |k: &Kernel, b: &Brep, c: (f64, f64)| {
         edges_on(k, b, |p| {
-            (p.z - 20.0).abs() < 1e-9 && ((p.x - c.0).hypot(p.y - c.1) - radius).abs() < 1e-9
+            (p.z - 20.0).abs() < 1e-9 && (det::hypot(p.x - c.0, p.y - c.1) - radius).abs() < 1e-9
         })
         .len()
     };
@@ -1842,7 +1843,7 @@ fn a_bore_inside_the_corners_piece_of_the_top_is_refused_naming_the_setback_that
 /// angle `a0` to `a1` (radians, from `xref` toward `yref`).
 fn arc_in(k: &Kernel, c: Point3, xref: Vec3, yref: Vec3, r: f64, a0: f64, a1: f64) -> Curve {
     let axis = xref.cross(yref);
-    let x0 = xref * a0.cos() + yref * a0.sin();
+    let x0 = xref * det::cos(a0) + yref * det::sin(a0);
     let y0 = axis.cross(x0);
     let frame = Axis2Placement::new(c, x0, y0);
     let interval = Extent1d::from_min_max(0.0, (a1 - a0) * 180.0 / PI);
@@ -1867,8 +1868,8 @@ fn hip_roof(k: &mut Kernel, curved: bool) -> Brep {
         Vec3::Y,
         Vec3::Z,
         5.0,
-        (-2.0f64).atan2(21.0f64.sqrt()),
-        4.0f64.atan2(3.0),
+        det::atan2(-2.0f64, 21.0f64.sqrt()),
+        det::atan2(4.0f64, 3.0),
     );
     let along_x = if curved {
         let floor = line(p(yb, 0.0), p(-8.0, 0.0));
@@ -2054,8 +2055,8 @@ fn cone_frustum_named_and_twice_asked_setbacks_build() {
     let named = 1.102 * CONE_ASKED;
     // points on the rounds past twice the ask (3.431 along each edge from V): the top's
     // diameter's at y = 1.5, the generator's ball at z = 1.5, the top's arc's at 30 degrees
-    let tb = (PI / 6.0).tan();
-    let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
+    let tb = det::tan(PI / 6.0);
+    let (cb, sb) = (det::cos(PI / 6.0), det::sin(PI / 6.0));
     let rg = 10.0 - 1.5 * tb - 1.5 / cb;
     let yg = (rg * rg - 2.25).sqrt();
     let ra = 10.0 - 4.0 * tb - 2.0 / cb;
@@ -2101,7 +2102,7 @@ fn double_d_prism(
     height: f64,
 ) -> Brep {
     let [ox, oy, oz] = origin;
-    let alpha = (d / rr).asin();
+    let alpha = det::asin(d / rr);
     let x_end = (rr * rr - d * d).sqrt();
     let p0 = Point3::new(ox + x_back, oy - d, oz);
     let p1 = Point3::new(ox + x_end, oy - d, oz);
@@ -2273,11 +2274,11 @@ fn arc_edge_far_mitre_cut_names_arc_length_reach_and_builds() {
     for v_cfg in &variants {
         let [ox, oy, oz] = v_cfg.origin;
         let (rr, d, x_back, hh, r_far) = (v_cfg.rr, v_cfg.d, v_cfg.x_back, v_cfg.hh, v_cfg.r_far);
-        let alpha = (d / rr).asin();
+        let alpha = det::asin(d / rr);
         let x_end = (rr * rr - d * d).sqrt();
         let y_up_c = d - r_up;
         let x_up_c = ((rr - r_up) * (rr - r_up) - y_up_c * y_up_c).sqrt();
-        let phi_cut = ((d - r_far) / (rr - r_arc)).asin();
+        let phi_cut = det::asin((d - r_far) / (rr - r_arc));
         let l_cut = rr * (alpha + phi_cut);
         let s = if v_cfg.at_end { 1.0f64 } else { -1.0f64 };
         let build_case = || {
@@ -2308,12 +2309,12 @@ fn arc_edge_far_mitre_cut_names_arc_length_reach_and_builds() {
                 ),
                 middle(
                     [
-                        ox + (rr - r_arc) * phi_mid.cos(),
-                        oy + (rr - r_arc) * phi_mid.sin(),
+                        ox + (rr - r_arc) * det::cos(phi_mid),
+                        oy + (rr - r_arc) * det::sin(phi_mid),
                         oz + hh - r_arc,
                     ],
                     [0.0, 0.0, 1.0],
-                    [phi_mid.cos(), phi_mid.sin(), 0.0],
+                    [det::cos(phi_mid), det::sin(phi_mid), 0.0],
                     r_arc,
                 ),
                 middle(
@@ -2580,8 +2581,8 @@ fn curved_setback_growth_uncertified_within_rail_reach_is_refused_as_data() {
         let p_flat = [ox + 0.5 * (cfg.x_min + 20.0), oy + 40.0, oz + 20.0];
         let p_up = [ox + 20.0, oy + 40.0, oz + 10.0];
         let p_arc = [
-            ox + 40.0 - 20.0 * (PI / 4.0).cos(),
-            oy + 40.0 - 20.0 * (PI / 4.0).sin(),
+            ox + 40.0 - 20.0 * det::cos(PI / 4.0),
+            oy + 40.0 - 20.0 * det::sin(PI / 4.0),
             oz + 20.0,
         ];
         let p_back = [ox + cfg.x_min, oy + 20.0, oz + 20.0];
@@ -2673,13 +2674,13 @@ fn curved_setback_growth_uncertified_within_rail_reach_is_refused_as_data() {
 fn curved_setback_asked_growth_bounded_by_arc_rail_reach_names_and_builds() {
     let (rr, d, x_back, hh) = (30.0f64, 2.5f64, 20.0f64, 15.0f64);
     let (r_flat, r_up, r_arc, r_far) = (1.0f64, 1.5f64, 2.0f64, 2.5f64);
-    let alpha = (d / rr).asin();
+    let alpha = det::asin(d / rr);
     let x_end = (rr * rr - d * d).sqrt();
     let x_pick = 0.5 * (x_back + x_end);
     let y_up_c = d - r_up;
     let x_up_c = ((rr - r_up) * (rr - r_up) - y_up_c * y_up_c).sqrt();
     // where the far round at `r_far` cuts the arc round's rail, along the arc from `V`
-    let cut_at = |r_far: f64| rr * (alpha + ((d - r_far) / (rr - r_arc)).asin());
+    let cut_at = |r_far: f64| rr * (alpha + det::asin((d - r_far) / (rr - r_arc)));
     let l_cut = cut_at(r_far);
 
     let build_case = |r_far: f64| {
@@ -2710,12 +2711,12 @@ fn curved_setback_asked_growth_bounded_by_arc_rail_reach_names_and_builds() {
             ),
             middle(
                 [
-                    (rr - r_arc) * phi_mid.cos(),
-                    (rr - r_arc) * phi_mid.sin(),
+                    (rr - r_arc) * det::cos(phi_mid),
+                    (rr - r_arc) * det::sin(phi_mid),
                     hh - r_arc,
                 ],
                 [0.0, 0.0, 1.0],
-                [phi_mid.cos(), phi_mid.sin(), 0.0],
+                [det::cos(phi_mid), det::sin(phi_mid), 0.0],
                 r_arc,
             ),
             middle(
@@ -2870,10 +2871,10 @@ fn curved_setback_asked_growth_bounded_by_arc_rail_reach_names_and_builds() {
 fn curved_setback_asked_growth_uncertified_within_arc_rail_reach_is_refused() {
     let (rr, d, x_back, hh) = (30.0f64, 2.5f64, 20.0f64, 15.0f64);
     let (r_flat, r_up, r_arc, r_far_tight) = (1.0f64, 1.5f64, 2.0f64, 2.78f64);
-    let alpha = (d / rr).asin();
+    let alpha = det::asin(d / rr);
     let x_end = (rr * rr - d * d).sqrt();
     let x_pick = 0.5 * (x_back + x_end);
-    let phi_tight = ((d - r_far_tight) / (rr - r_arc)).asin();
+    let phi_tight = det::asin((d - r_far_tight) / (rr - r_arc));
     let l_cut_tight = rr * (alpha + phi_tight);
 
     let mut k = all_fixes();

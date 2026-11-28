@@ -12,6 +12,7 @@
     clippy::disallowed_methods // the test's own sampling and radii, not ops computing geometry
 )]
 
+use solidcore::math::det;
 use solidcore_ops::curve::{circle, tube_on_surface};
 use solidcore_ops::sweep::{loft, Curve as Sweep};
 use solidcore_ops::Error;
@@ -109,7 +110,7 @@ fn a_tube_round_a_circle_on_a_cylinder_meets_it_above_and_below() {
     for f in &found {
         let pts = points_of(f, 60);
         for p in &pts {
-            assert!((p[0].hypot(p[1]) - 50.0).abs() <= 1e-3, "{p:?}");
+            assert!((det::hypot(p[0], p[1]) - 50.0).abs() <= 1e-3, "{p:?}");
             assert!(((p[2] - 50.0).abs() - 5.0).abs() <= 1e-3, "{p:?}");
         }
         heights.push(pts[0][2]);

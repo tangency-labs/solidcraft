@@ -2,6 +2,7 @@
 //! chord of the other. Parts with long straight pieces among short ones are the case the cells of
 //! the search must not get wrong.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use super::common::Dice;
@@ -12,7 +13,7 @@ use crate::teeth::Point;
 fn to_chord(p: Point, a: Point, b: Point) -> f64 {
     let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
     let t = (((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / (ex * ex + ey * ey)).clamp(0.0, 1.0);
-    (p[0] - a[0] - t * ex).hypot(p[1] - a[1] - t * ey)
+    det::hypot(p[0] - a[0] - t * ex, p[1] - a[1] - t * ey)
 }
 
 /// The smallest distance between two closed chains that do not overlap, the slow way.
@@ -40,8 +41,8 @@ fn star(dice: &mut Dice, centre: Point, corners: usize, low: f64, high: f64) -> 
             let angle = TAU * (k as f64 + uneven) / corners as f64;
             let radius = low + (high - low) * (dice.roll() % 1000) as f64 / 1000.0;
             [
-                centre[0] + radius * angle.cos(),
-                centre[1] + radius * angle.sin(),
+                centre[0] + radius * det::cos(angle),
+                centre[1] + radius * det::sin(angle),
             ]
         })
         .collect()
@@ -59,7 +60,7 @@ fn the_gap_is_the_gap_found_the_slow_way() -> crate::Result<()> {
         let direction = (dice.roll() % 628) as f64 / 100.0;
         let b = star(
             &mut dice,
-            [apart * direction.cos(), apart * direction.sin()],
+            [apart * det::cos(direction), apart * det::sin(direction)],
             corners[(round / 6) % 6],
             6.0,
             10.0,
@@ -115,7 +116,7 @@ fn a_corner_at_a_repeated_point_is_judged_by_the_chords_on_either_side() -> crat
         Material::Inside,
     )?;
     // The parts do not overlap: the square's nearest corner is this far from the tip.
-    let expected = 0.009_f64.hypot(0.099);
+    let expected = det::hypot(0.009_f64, 0.099);
     for (a, b) in [(&triangle, &square), (&square, &triangle)] {
         let found = gap(a, b, 0.2)?.expect("within reach");
         assert!(
@@ -141,7 +142,7 @@ fn a_long_bar_beside_a_fine_wheel_is_measured_rightly() -> crate::Result<()> {
     )?;
     let wheel: Vec<Point> = (0..20_000)
         .map(|i| TAU * f64::from(i) / 20_000.0)
-        .map(|a| [10.0 * a.cos(), 10.0 * a.sin()])
+        .map(|a| [10.0 * det::cos(a), 10.0 * det::sin(a)])
         .collect();
     let wheel = Body::new(wheel, Material::Inside)?;
     for step in 0..200 {

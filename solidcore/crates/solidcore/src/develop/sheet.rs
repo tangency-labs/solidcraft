@@ -7,6 +7,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{Region2, Seg2};
 
@@ -327,7 +328,7 @@ impl Lap {
                 amount,
                 gap,
             } => {
-                let (sin, cos) = turn.sin_cos();
+                let (sin, cos) = det::sin_cos(turn);
                 let face = if turn > 0.0 { thickness } else { 0.0 };
                 let slope = (turn.signum() * thickness * cos).min(0.0);
                 let amount = amount.unwrap_or(thickness);
@@ -342,7 +343,7 @@ impl Lap {
                     } else {
                         inward
                     };
-                    let reach = gap * (1.0 - (offset / gap).powi(2)).max(0.0).sqrt();
+                    let reach = gap * (1.0 - det::powi(offset / gap, 2)).max(0.0).sqrt();
                     -covering * cos + depth * sin + reach
                 } else {
                     (face - slope + gap) / across
@@ -357,7 +358,7 @@ impl Lap {
                 // In the `a` panel's frame at the edge: y toward its material, z on toward the
                 // `b` panel. Into `a` is -z; into `b`, turned by `turn` toward the material, and
                 // `b`'s material normal turns with it.
-                let (sin, cos) = turn.sin_cos();
+                let (sin, cos) = det::sin_cos(turn);
                 let (into_a, into_b, up_b) = (
                     Vec3::new(0.0, 0.0, -1.0),
                     Vec3::new(0.0, sin, cos),
@@ -404,7 +405,7 @@ impl Bend {
                 } else {
                     self.radius
                 };
-                surface_radius * (self.angle / 2.0).tan()
+                surface_radius * det::tan(self.angle / 2.0)
             }
         }
     }

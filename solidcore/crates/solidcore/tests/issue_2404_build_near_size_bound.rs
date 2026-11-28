@@ -28,6 +28,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -85,7 +86,7 @@ fn bossed_can(k: &mut Kernel) -> (Brep, Point3) {
     let at = 100.0_f64.to_radians();
     (
         boolean_union(k, can, boss).unwrap(),
-        Point3::new(7.0 * at.cos(), 7.0 * at.sin(), 48.2),
+        Point3::new(7.0 * det::cos(at), 7.0 * det::sin(at), 48.2),
     )
 }
 

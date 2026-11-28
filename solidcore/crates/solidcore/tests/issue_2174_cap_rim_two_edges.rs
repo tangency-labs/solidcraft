@@ -48,6 +48,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{Kernel, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::{create_box, create_sphere};
@@ -163,9 +164,9 @@ fn thicken(k: &mut Kernel, sheet: &Brep, distance: f64) -> solidcore::Result<Bre
 /// The shell's sector over the cap's solid angle pi.
 fn want(distance: f64) -> f64 {
     if distance > 0.0 {
-        PI / 3.0 * (11.0_f64.powi(3) - 10.0_f64.powi(3))
+        PI / 3.0 * (det::powi(11.0_f64, 3) - det::powi(10.0_f64, 3))
     } else {
-        PI / 3.0 * (10.0_f64.powi(3) - 9.0_f64.powi(3))
+        PI / 3.0 * (det::powi(10.0_f64, 3) - det::powi(9.0_f64, 3))
     }
 }
 

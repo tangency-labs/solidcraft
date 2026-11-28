@@ -26,6 +26,7 @@ use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve2, Surface as BSurface};
 
 use super::{EDGE_GAP_SAMPLES, EdgeB, MAX_SPLINE_POINTS, R};
+use solidcore::math::det;
 
 /// How far (mm) a pcurve's surface lies off its edge before it is made again.
 const FAR: f64 = 0.1;
@@ -115,7 +116,7 @@ fn near(on: &SurfaceEval, p: Vec3, from: [f64; 2]) -> Option<([f64; 2], f64)> {
         }
         let (g0, g1) = (su.dot(r), sv.dot(r));
         let mut step = [(c * g0 - b * g1) / det, (a * g1 - b * g0) / det];
-        let length = step[0].hypot(step[1]);
+        let length = det::hypot(step[0], step[1]);
         if !length.is_finite() {
             return None;
         }
@@ -130,7 +131,7 @@ fn near(on: &SurfaceEval, p: Vec3, from: [f64; 2]) -> Option<([f64; 2], f64)> {
                 *x = x.max(lo).min(hi);
             }
         }
-        let moved = (next[0] - q[0]).hypot(next[1] - q[1]);
+        let moved = det::hypot(next[0] - q[0], next[1] - q[1]);
         q = next;
         if moved < 1e-12 {
             break;

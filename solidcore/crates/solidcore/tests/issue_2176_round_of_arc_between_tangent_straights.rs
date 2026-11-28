@@ -27,6 +27,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -112,7 +113,7 @@ fn arc(c: (f64, f64), r: f64, from: f64, to: f64) -> Curve {
 
 /// R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2), 2 thick.
 fn plate(k: &mut Kernel) -> Brep {
-    let t = (4.0_f64 / 25.0).acos();
+    let t = det::acos(4.0_f64 / 25.0);
     let y = (625.0_f64 - 16.0).sqrt();
     let cy = 280.0 / 9.0;
     let curves = [

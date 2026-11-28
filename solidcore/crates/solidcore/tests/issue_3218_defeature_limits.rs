@@ -26,6 +26,7 @@ use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::enclose_volume;
+use solidcore::math::det;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
@@ -379,8 +380,8 @@ fn the_bevel_between_a_ball_and_a_plate_leaves_one_sharp_circle() {
         for (body, volume, area) in [
             (
                 &mut b,
-                (464.0 - 4.0 * radius.powi(3)) * PI / 3.0,
-                (176.0 + 4.0 * radius.powi(2)) * PI,
+                (464.0 - 4.0 * det::powi(radius, 3)) * PI / 3.0,
+                (176.0 + 4.0 * det::powi(radius, 2)) * PI,
             ),
             (
                 &mut removed,
@@ -1243,7 +1244,7 @@ fn assert_within_r0(k: &Kernel, b: &Brep) {
             );
         }
         let corner = (0..3)
-            .map(|i| bx.min_at(i).abs().max(bx.max_at(i).abs()).powi(2))
+            .map(|i| det::powi(bx.min_at(i).abs().max(bx.max_at(i).abs()), 2))
             .sum::<f64>()
             .sqrt();
         assert!(corner <= 45.0, "{bx:?}");
@@ -1472,6 +1473,7 @@ mod ring_grooves {
     use solidcore::geom::vector3d::Vec3;
     use solidcore::kernel::UpstreamFixes;
     use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::math::det;
     use solidcore::nurbs::b_spline_curve::{p1::BSplineCurve, NurbCircleParam};
     use solidcore::primitive::api_primitives::create_sphere;
     use solidcore::surface::implicit::AnalyticSupport;
@@ -1734,7 +1736,7 @@ mod ring_grooves {
         // down can leave their axial projections just short of 4 mm on the retry.
         let mut body = TAPERED.body(&mut k);
         let sufficient = sufficient_reach(&mut k, &mut body, &TAPERED, [0.001, 0.003]);
-        let axial = sufficient.map(|s| s / 1.0_f64.hypot(0.1));
+        let axial = sufficient.map(|s| s / det::hypot(1.0_f64, 0.1));
         assert!(axial[0] + axial[1] >= 4.0);
         remove(&mut k, &mut body, &TAPERED, Some(sufficient)).unwrap();
         solid(&mut k, &mut body, 3, PI * 20.0 / 3.0 * (25.0 + 35.0 + 49.0));
@@ -1868,7 +1870,11 @@ mod ring_grooves {
             let mut body = turned_part(&mut k, &profile, false);
             let blocked: Vec<_> = faces_in_band(&body, 7.5, 12.5)
                 .into_iter()
-                .filter(|&f| face_points(&body, f).iter().any(|p| p.x.hypot(p.y) < 4.25))
+                .filter(|&f| {
+                    face_points(&body, f)
+                        .iter()
+                        .any(|p| det::hypot(p.x, p.y) < 4.25)
+                })
                 .collect();
             let free = faces_in_band(&body, 14.5, 17.5);
             let kept = remove_two(&mut k, &mut body, &blocked, &free, blocked_first);
@@ -1880,10 +1886,11 @@ mod ring_grooves {
             }
             let lip = face_points(&body, face);
             assert!(lip.iter().all(|p| (9.5..11.5).contains(&p.z)));
-            assert!(lip.iter().any(|p| p.x.hypot(p.y) < 5.0));
-            assert!(lip.iter().any(|p| p.x.hypot(p.y) > 5.0));
+            assert!(lip.iter().any(|p| det::hypot(p.x, p.y) < 5.0));
+            assert!(lip.iter().any(|p| det::hypot(p.x, p.y) > 5.0));
             // Shaft with the 4 mm groove, plus the sleeve's three annular sections.
-            let volume = PI * (500.0 - 4.0 * 9.0 + 39.0 + 9.0 * 15.0 + (64.0 - 4.5_f64.powi(2)));
+            let volume =
+                PI * (500.0 - 4.0 * 9.0 + 39.0 + 9.0 * 15.0 + (64.0 - det::powi(4.5_f64, 2)));
             solid(&mut k, &mut body, 13, volume);
         }
     }
@@ -1911,7 +1918,7 @@ mod ring_grooves {
             failure.reason,
             Reason::Defeature(DefeatureFailure::PatchEnclosesFace { face: ball_face })
         );
-        let original = PI * (500.0 - 4.0 * 9.0 + 4.0 / 3.0 * radius.powi(3));
+        let original = PI * (500.0 - 4.0 * 9.0 + 4.0 / 3.0 * det::powi(radius, 3));
         solid(&mut k, &mut body, 8, original);
     }
 }

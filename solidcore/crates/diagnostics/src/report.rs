@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use crate::body::{Body, EdgeInfo, FaceInfo, Mesh};
 use crate::render::{Frame, View};
+use solidcore::math::det;
 
 /// How many of the largest edge tolerances the summary prints.
 const LARGEST: usize = 8;
@@ -127,7 +128,7 @@ fn triangle_area(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
 }
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
-    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+    (det::powi(b[0] - a[0], 2) + det::powi(b[1] - a[1], 2) + det::powi(b[2] - a[2], 2)).sqrt()
 }
 
 fn length(points: &[[f64; 3]]) -> f64 {

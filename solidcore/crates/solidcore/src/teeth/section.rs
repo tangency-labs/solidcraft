@@ -15,6 +15,7 @@
 //! outline has, a curve that is not a spline, numbers that are not finite give a refusal or a
 //! plain answer, never a panic.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::error::teeth::{PlanRefusal, ProfileWhy, TeethFailure, Why};
@@ -216,7 +217,7 @@ fn piece_segs(
 ) -> Result<(), TeethFailure> {
     match piece {
         Piece::Line { from, to, .. } => {
-            if (from[0] - to[0]).hypot(from[1] - to[1])
+            if det::hypot(from[0] - to[0], from[1] - to[1])
                 > 1e-12 * (1.0 + from[0].abs() + from[1].abs())
             {
                 out.push(Seg2::Line {
@@ -282,7 +283,7 @@ fn turned_seg(seg: &Seg2, s: f64, c: f64) -> Seg2 {
         } => Seg2::Arc {
             center: t(center),
             radius,
-            start: start + s.atan2(c),
+            start: start + det::atan2(s, c),
             sweep,
         },
         Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
@@ -363,7 +364,7 @@ fn outline_loop_typed(
                 start,
                 sweep,
                 ..
-            } if centre[0].hypot(centre[1]) <= 1e-9 * (1.0 + top)
+            } if det::hypot(centre[0], centre[1]) <= 1e-9 * (1.0 + top)
                 && (radius - top).abs() <= 1e-6 * (1.0 + top)
                 && sweep.abs() > 1e-12 =>
             {
@@ -376,8 +377,8 @@ fn outline_loop_typed(
         let corner = template
             .get(first)
             .and_then(seg_start)
-            .filter(|p| (p.x.hypot(p.y) - top).abs() <= 1e-6 * (1.0 + top))
-            .map(|p| p.y.atan2(p.x));
+            .filter(|p| (det::hypot(p.x, p.y) - top).abs() <= 1e-6 * (1.0 + top))
+            .map(|p| det::atan2(p.y, p.x));
         one.push(LoopPiece {
             top: arc_on_top.is_some(),
             role: piece.role(),
@@ -392,7 +393,7 @@ fn outline_loop_typed(
     let mut joints = Vec::new();
     for k in 0..teeth {
         let by = turn + pitch * f64::from(k);
-        let (s, c) = by.sin_cos();
+        let (s, c) = det::sin_cos(by);
         let start = segs.len();
         segs.extend(template.iter().map(|g| turned_seg(g, s, c)));
         pieces.extend(one.iter().map(|p| LoopPiece {
@@ -437,8 +438,8 @@ fn floor_segs(floor: &[Piece], tolerance: f64) -> Result<Floor, TeethFailure> {
 /// corner `after`, counter-clockwise (0 up to a full turn). Refused: corners whose angles are not
 /// numbers, and a space of no width.
 fn space_width(after: Point, before: Point) -> Result<(f64, f64), TeethFailure> {
-    let from = before[1].atan2(before[0]);
-    let wide = (after[1].atan2(after[0]) - from).rem_euclid(TAU);
+    let from = det::atan2(before[1], before[0]);
+    let wide = (det::atan2(after[1], after[0]) - from).rem_euclid(TAU);
     if !(from.is_finite() && wide.is_finite()) {
         return Err(TeethFailure::Invalid(Why::OutlineNotFinite));
     }
@@ -492,7 +493,7 @@ fn cutter_section_typed(
         return Ok(None);
     }
     let middle = from + 0.5 * wide;
-    let (s, c) = middle.sin_cos();
+    let (s, c) = det::sin_cos(middle);
     let (mut segs, spans, joints) = floor_segs(floor, tolerance)?;
     // Up from a corner along the middle line to `out_to` from the axis.
     let up = |p: Point| {
@@ -568,8 +569,8 @@ fn space_region_typed(
     }
     let (mut segs, spans, joints) = floor_segs(floor, tolerance)?;
     // The circle's points straight out from each corner: the arc starts and ends there.
-    let (s0, c0) = from.sin_cos();
-    let (s1, c1) = (from + wide).sin_cos();
+    let (s0, c0) = det::sin_cos(from);
+    let (s1, c1) = det::sin_cos(from + wide);
     let (out_before, out_after) = (
         Vec2::new(out_to * c0, out_to * s0),
         Vec2::new(out_to * c1, out_to * s1),
@@ -687,7 +688,7 @@ pub fn chamfer_section(
 /// x towards its y, y along the axis into the face (the plane's normal times `inward`).
 #[must_use]
 pub fn chamfer_plane(plane: &Frame, inward: f64, seam: f64) -> Frame {
-    let (s, c) = seam.sin_cos();
+    let (s, c) = det::sin_cos(seam);
     let (x, y) = (
         Vec3::from_array(plane.x_axis),
         Vec3::from_array(plane.y_axis),

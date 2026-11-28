@@ -2,6 +2,7 @@
 //! puts it, the hub at the clearance asked for all round, and the turning play the same as the play
 //! found by turning the hub.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::common::{check_outline, dist, sound, HOSTILE, HOSTILE_COUNTS};
@@ -253,8 +254,8 @@ fn on_construction(
                 } else {
                     [-normal[1], -normal[0]]
                 };
-                let cos =
-                    (way[0] * flank_way[0] + way[1] * flank_way[1]).abs() / way[0].hypot(way[1]);
+                let cos = (way[0] * flank_way[0] + way[1] * flank_way[1]).abs()
+                    / det::hypot(way[0], way[1]);
                 assert!(
                     (cos - 0.5f64.sqrt()).abs() < 1e-9,
                     "{name}: chamfer not at 45 degrees"
@@ -318,11 +319,11 @@ fn every_piece_of_a_serration_is_exact_and_where_its_construction_puts_it() -> c
         check_outline(name, &outline);
         all_exact(name, &outline);
         let half = shaft.flank_angle.to_radians() / 2.0;
-        let normal = [half.sin(), half.cos()];
+        let normal = [det::sin(half), det::cos(half)];
         // The flank crosses the mean circle a quarter of a pitch from the middle of the tooth.
         let mean = (shaft.major_diameter + shaft.minor_diameter) / 4.0;
         let quarter = PI / (2.0 * f64::from(shaft.teeth));
-        let level = normal[0] * mean * quarter.cos() + normal[1] * mean * quarter.sin();
+        let level = normal[0] * mean * det::cos(quarter) + normal[1] * mean * det::sin(quarter);
         on_construction(
             name,
             &outline,

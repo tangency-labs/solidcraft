@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 
+use solidcore::math::det;
 use solidcore_ops::check::CheckLevel;
 use solidcore_ops::Body;
 use solidcore_record::brep::{
@@ -426,7 +427,7 @@ fn failed(body: &Body) -> Vec<u32> {
 /// edges): the heal grew no tolerance.
 fn no_tolerance_grew(before: &Record, after: &Record, moved: f64) {
     let dist = |a: [f64; 3], b: [f64; 3]| {
-        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        (det::powi(a[0] - b[0], 2) + det::powi(a[1] - b[1], 2) + det::powi(a[2] - b[2], 2)).sqrt()
     };
     for v in &after.vertices {
         let near: Vec<f64> = before
@@ -726,7 +727,7 @@ fn a_block_notched_twice_the_tolerance_deep_is_valid() {
             assert_eq!(failed(&body), [0_u32; 0], "{case}");
             // the block's six faces and the notch's three, with the front face in two
             assert_eq!(body.counts().unwrap(), [10, 24, 16], "{case}");
-            let notch = 50.0_f64.powi(3) - body.volume(1e-9).unwrap();
+            let notch = det::powi(50.0_f64, 3) - body.volume(1e-9).unwrap();
             let want = 10.0 * 50.0 * depth;
             assert!(
                 (notch - want).abs() <= 1e-6 * want,

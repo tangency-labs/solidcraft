@@ -29,6 +29,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -149,7 +150,7 @@ fn the_put_back_rounds_past_the_one_high_walls_have_their_closed_form() {
     }
     assert!(unmatched.is_empty());
 
-    let s1 = 9.0 * std::f64::consts::PI / 4.0 - 5.0_f64.sqrt() - 4.5 * (2.0_f64 / 3.0).asin();
+    let s1 = 9.0 * std::f64::consts::PI / 4.0 - 5.0_f64.sqrt() - 4.5 * det::asin(2.0_f64 / 3.0);
     let s2 = 8.0 / 3.0;
     let closed = 816.0 + 116.0 * s1 + 4.0 * s2;
     let store = AttributeStore::default();

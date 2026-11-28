@@ -113,6 +113,7 @@ mod box_w_slot {
     use solidcore::geom::extent1d::Extent1d;
     use solidcore::geom::extent3d::Extent3d;
     use solidcore::mass::integrator::properties::{brep_mass_properties_default, face_properties};
+    use solidcore::math::det;
     use solidcore::math::{Point2, Vec3};
     use solidcore::query::brep::calculate_tight_bounding_box;
     use solidcore::surface::surface::SurfaceKind;
@@ -164,7 +165,7 @@ mod box_w_slot {
         (1..=n)
             .map(|i| {
                 let nf = n as f64;
-                let mut x = (std::f64::consts::PI * (i as f64 - 0.25) / (nf + 0.5)).cos();
+                let mut x = det::cos(std::f64::consts::PI * (i as f64 - 0.25) / (nf + 0.5));
                 let mut dp = 1.0;
                 for _ in 0..100 {
                     let (mut p0, mut p1) = (1.0, x);

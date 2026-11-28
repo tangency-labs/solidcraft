@@ -24,6 +24,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::ZONE_TOL_3D;
 use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -437,7 +438,7 @@ fn the_cylinder(b: &Brep) -> (Axis2Placement, f64) {
 /// where `θ − sin θ` cancels. Used for `θ <= 0.5`, where 12 terms are exact to the last bit.
 fn segment_area(r: f64, theta: f64) -> f64 {
     assert!(theta <= 0.5, "{theta}");
-    let (mut term, mut sum) = (theta.powi(3) / 6.0, 0.0);
+    let (mut term, mut sum) = (det::powi(theta, 3) / 6.0, 0.0);
     for n in 0..12 {
         sum += term;
         term *= -theta * theta / f64::from((2 * n + 4) * (2 * n + 5));
@@ -467,7 +468,7 @@ fn integrated_volume(k: &mut Kernel, b: &mut Brep) -> f64 {
 /// The sagitta `r (1 - cos(θ / 2))` of an arc of radius `r` and sweep `theta`: the width
 /// of the segment between the arc and its chord.
 fn sagitta(r: f64, theta: f64) -> f64 {
-    2.0 * r * (theta / 4.0).sin().powi(2)
+    2.0 * r * det::powi(det::sin(theta / 4.0), 2)
 }
 
 /// A segment whose width is under the zone tolerance is a sliver: its arc and chord are one
@@ -561,7 +562,7 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         let case = format!("r {r} span {span} tilt {tilt:e} distance {distance}");
         let mut k = Kernel::default();
         k.fixes.linear_sweep_arc_is_cylinder = true;
-        let (s, c) = (tilt.sin(), tilt.cos());
+        let (s, c) = (det::sin(tilt), det::cos(tilt));
         let frame = Axis2Placement::new(Vec3::ZERO, Vec3::new(c, 0.0, -s), Vec3::Y);
         let arc = circle(&k, &frame, r, 0.0, span);
         let ends = arc.ends(&k).unwrap();
@@ -584,7 +585,7 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         // they share within the zone).
         let theta = span.to_radians();
         let want = c * distance * segment_area(r, theta)
-            + c * s * r * theta.sin() * distance * distance / 2.0;
+            + c * s * r * det::sin(theta) * distance * distance / 2.0;
         // a sliver is checked last: its check turns the body
         let sliver = sagitta(r, theta) < ZONE_TOL_3D;
         if !sliver {
@@ -603,7 +604,7 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         let axis = placement.z_axis();
         for i in 0..=8 {
             let u = (span * f64::from(i) / 8.0).to_radians();
-            let p = frame.x_axis() * (r * u.cos()) + frame.y_axis() * (r * u.sin());
+            let p = frame.x_axis() * (r * det::cos(u)) + frame.y_axis() * (r * det::sin(u));
             let off = (p - placement.origin()).cross(axis).length() - radius;
             assert!(
                 off.abs() < 1e-9,
@@ -618,7 +619,7 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         if sliver {
             // the chord's normal in the profile's plane: the arc's middle direction
             let normal =
-                frame.x_axis() * (theta / 2.0).cos() + frame.y_axis() * (theta / 2.0).sin();
+                frame.x_axis() * det::cos(theta / 2.0) + frame.y_axis() * det::sin(theta / 2.0);
             assert_sliver(&mut k, b, r, theta, normal, want, &case);
         }
     }
@@ -633,9 +634,9 @@ const SHORT_ARC_START: f64 = -1.4235;
 fn short_arc() -> Curve {
     let (cx, cy, r) = (-8.185_840_780_2, 145.979_194_294, 88.295_980_686);
     let (a0, sweep) = (SHORT_ARC_START, 0.005_f64.to_radians());
-    let on = |a: f64| (cx + r * a.cos(), cy + r * a.sin());
-    let tangent = |a: f64| (-a.sin(), a.cos());
-    let h = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let on = |a: f64| (cx + r * det::cos(a), cy + r * det::sin(a));
+    let tangent = |a: f64| (-det::sin(a), det::cos(a));
+    let h = 4.0 / 3.0 * det::tan(sweep / 4.0) * r;
     let (p0, p3) = (on(a0), on(a0 + sweep));
     let (t0, t3) = (tangent(a0), tangent(a0 + sweep));
     let points = [
@@ -673,7 +674,7 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
         normal.x != 0.0 || normal.y != 0.0,
         "the fitted normal is exact: {normal:?}"
     );
-    assert!(normal.x.hypot(normal.y) < 1e-6, "{normal:?}");
+    assert!(det::hypot(normal.x, normal.y) < 1e-6, "{normal:?}");
 
     let ends = arc.ends(&k).unwrap();
     let chord = seg(ends.end, ends.start);
@@ -711,7 +712,7 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
     // last, as its check turns the body; the chord's normal is the arc's middle direction
     // (`short_arc`'s start angle plus half its sweep)
     let middle = SHORT_ARC_START + theta / 2.0;
-    let chord_normal = Vec3::new(middle.cos(), middle.sin(), 0.0);
+    let chord_normal = Vec3::new(det::cos(middle), det::sin(middle), 0.0);
     assert_sliver(&mut k, b, r, theta, chord_normal, want, "short arc");
 }
 
@@ -766,7 +767,7 @@ fn issue_17462_a_profile_tilted_across_the_sweep_stays_on_its_cylinder() {
         let axis = placement.z_axis();
         for i in 0..=36 {
             let a = (end * f64::from(i) / 36.0).to_radians();
-            let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+            let p = Vec3::new(r * det::cos(a), r * det::sin(a), 0.0);
             let along = (p - placement.origin()).dot(axis);
             assert!(
                 along.abs() < 1e-9,

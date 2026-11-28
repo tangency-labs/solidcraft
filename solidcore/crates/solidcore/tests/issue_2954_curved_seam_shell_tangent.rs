@@ -23,6 +23,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -136,7 +137,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
             let Ok(p) = s.evaluate_point(&k, mid) else {
                 return false;
             };
-            (p.x.hypot(p.y) - 10.0).abs() < 0.2 && p.z > 2.0 && p.z < 15.0
+            (det::hypot(p.x, p.y) - 10.0).abs() < 0.2 && p.z > 2.0 && p.z < 15.0
         })
         .map(|(id, _)| id)
         .collect();
@@ -194,7 +195,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
         if (p_mid.z - 17.0).abs() >= 1e-2 || p_mid.x < 2.0 || p_mid.y < 2.0 {
             continue;
         }
-        let r_mid = p_mid.x.hypot(p_mid.y);
+        let r_mid = det::hypot(p_mid.x, p_mid.y);
         let expected_r = if (r_mid - 10.0).abs() < 0.2 {
             found_outer_rail = true;
             10.0_f64
@@ -220,7 +221,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
         );
         for frac in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
             let p = curve.evaluate_point(&k, ivl.evaluate(frac))?;
-            let r = p.x.hypot(p.y);
+            let r = det::hypot(p.x, p.y);
             assert!(
                 (r - expected_r).abs() <= edge.tolerance,
                 "sample {frac} radius {r} deviates from {expected_r} by {:.3e} > edge tol {:.3e}",
@@ -313,10 +314,10 @@ fn shelled_box_open_inner_wall_shared_vertex_consistency() -> solidcore::Result<
 /// on to its outer side at z = 0, the wall x = 18 + `r` up to z = 33 and the top back in.
 fn ring_volume(x0: f64, z0: f64, r: f64) -> f64 {
     let (c, top) = (18.0, 33.0);
-    let start = z0.atan2(-(r * r - z0 * z0).sqrt());
+    let start = det::atan2(z0, -(r * r - z0 * z0).sqrt());
     // the round's integral of (c + r cos t)^2 r cos t / 2 dt
     let arc = |t: f64| {
-        let (s, co) = (t.sin(), t.cos());
+        let (s, co) = (det::sin(t), det::cos(t));
         r / 2.0 * (c * c * s + c * r * (t + s * co) + r * r * (s - s * s * s / 3.0))
     };
     let walls = (c + r) * (c + r) / 2.0 * top - x0 * x0 / 2.0 * (top - z0);
@@ -358,7 +359,7 @@ fn shelled_ring_floor_grazing_its_round_ends_the_seam_at_the_floor() -> solidcor
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 0.0, -1.0),
     );
-    let to_floor = (-floor).atan2(-inset).to_degrees();
+    let to_floor = det::atan2(-floor, -inset).to_degrees();
     let round = Ellipse::create_canonical_circle(
         &k,
         &frame,

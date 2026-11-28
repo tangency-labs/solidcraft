@@ -22,6 +22,7 @@
     clippy::print_stderr,
     clippy::disallowed_methods
 )] // test (the turn's cos and sin)
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -233,7 +234,7 @@ fn a_torus_label_turned_past_its_bound_is_refused() {
         else {
             panic!()
         };
-        let (c, sn) = (t.cos(), t.sin());
+        let (c, sn) = (det::cos(t), det::sin(t));
         let (px, py) = (placement.x_axis(), placement.y_axis());
         AnalyticSupport::Torus {
             placement: Axis2Placement::from_stored(

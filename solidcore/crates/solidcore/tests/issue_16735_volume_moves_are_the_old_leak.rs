@@ -7,6 +7,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test code
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -63,15 +64,15 @@ fn closure_work(k: &Kernel, b: &mut Brep) -> (u64, MassProperties) {
 fn assert_cube_20(m: &MassProperties, rel: f64) {
     let a: f64 = 20.0;
     let close = |got: f64, want: f64| (got - want).abs() <= rel * want.abs();
-    assert!(close(m.properties.volume, a.powi(3)), "{m:?}");
+    assert!(close(m.properties.volume, det::powi(a, 3)), "{m:?}");
     for c in [m.centroid.x, m.centroid.y, m.centroid.z] {
         assert!(close(c, a / 2.0), "{m:?}");
     }
     for i in [m.inertia.x, m.inertia.y, m.inertia.z] {
-        assert!(close(i, 2.0 * a.powi(5) / 3.0), "{m:?}");
+        assert!(close(i, 2.0 * det::powi(a, 5) / 3.0), "{m:?}");
     }
     for p in [m.products.x, m.products.y, m.products.z] {
-        assert!(close(p, a.powi(5) / 4.0), "{m:?}");
+        assert!(close(p, det::powi(a, 5) / 4.0), "{m:?}");
     }
 }
 

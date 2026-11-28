@@ -19,6 +19,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
@@ -135,7 +136,7 @@ fn a_small_round_up_a_chamfer_into_a_rounded_top_is_set_back() {
     assert_eq!(event, Some(BlendCornerEvent::Setback));
     assert_eq!(faces, 25);
     let r = 0.327_f64;
-    let section = r * r * ((std::f64::consts::PI / 8.0).tan() - std::f64::consts::PI / 8.0);
+    let section = r * r * (det::tan(std::f64::consts::PI / 8.0) - std::f64::consts::PI / 8.0);
     let off = top_only - v;
     assert!(
         off > section * (20.0 - 2.262_862_25 - 2.0),

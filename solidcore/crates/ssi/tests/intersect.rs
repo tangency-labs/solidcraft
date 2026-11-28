@@ -4,6 +4,7 @@
 // Test code, as Solidcore's test files: indexing and unwrap fail the test.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use ssi::piece::{norm, sub, V3};
 use ssi::{intersect_bodies, shapes, Intersection, Options, Patch};
 
@@ -92,7 +93,7 @@ fn bezier_pieces_reproduce_the_bspline_they_came_from_rational_and_clamped_or_no
     for i in 0..6 {
         for j in 0..5 {
             let (x, y) = (f64::from(i), f64::from(j));
-            poles.push([x, y, (x + 2.0 * y).sin()]);
+            poles.push([x, y, det::sin(x + 2.0 * y)]);
         }
     }
     let unclamped = Patch {
@@ -166,7 +167,7 @@ fn two_exact_spheres_meet_in_the_circle_x_one_half_across_both_seams_and_every_s
     assert!(curve.closed);
     for q in &curve.points {
         assert!((q.p[0] - 0.5).abs() < 1e-10);
-        assert!((q.p[1].hypot(q.p[2]) - 0.75_f64.sqrt()).abs() < 1e-10);
+        assert!((det::hypot(q.p[1], q.p[2]) - 0.75_f64.sqrt()).abs() < 1e-10);
     }
     assert!(worst_residual(&result, &a, &b) < 1e-10);
     // Seen from outside A, B's inside lies to the left: T × nA points out of B.
@@ -321,7 +322,7 @@ fn one_loop_about_z(result: &Intersection, z: f64, radius: f64, within: f64) {
     assert!(result.points.is_empty());
     for q in &result.curves[0].points {
         assert!(
-            (q.p[0].hypot(q.p[1]) / radius - 1.0).abs() < within,
+            (det::hypot(q.p[0], q.p[1]) / radius - 1.0).abs() < within,
             "at {:?}",
             q.p
         );

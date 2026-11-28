@@ -15,6 +15,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -71,7 +72,7 @@ fn operand() -> Record {
 fn the_rounds_together_are_refused_at_the_cusp() {
     session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (body, _) = Body::from_record(&operand(), true).unwrap();
-    let y0 = 10.0 * 5.0_f64.to_radians().tan();
+    let y0 = 10.0 * det::tan(5.0_f64.to_radians());
     let picks = [
         edge_at(&body, [20.0, y0, 10.0]),
         edge_at(&body, [32.0 + y0, 8.0, 10.0]),
@@ -83,6 +84,6 @@ fn the_rounds_together_are_refused_at_the_cusp() {
     let why = why.as_deref().unwrap_or_default();
     assert!(why.contains("narrows to zero width"), "{why}");
     let [x, y, z] = at.unwrap();
-    let off = (x - 40.0).hypot(y - y0).hypot(z - 10.0);
+    let off = det::hypot(det::hypot(x - 40.0, y - y0), z - 10.0);
     assert!(off < 1e-6, "refused at ({x}, {y}, {z})");
 }
