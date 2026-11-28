@@ -373,6 +373,33 @@ Every face is in one of three classes:
 | **certified** | B is within a proved ε of S | > 0, stored | `ProceduralBlend` (traced spines, Gⁿ sections, radius laws, rounds on rounds); `ProceduralSweep`; Mixed corners (the construction's tolerance); B-spline extensions past a side (§6) |
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
+One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
+`blend::foot_blend`). Its feet are proved between its stations (Krawczyk on the foot
+equations over each piece, `generic-blend.md` §2.5; at a tapered or rounded end only where the legs
+are at least a quarter of the full ones), each on the branch of its support's section that leaves
+the root along the face where the leg holds over the piece (not in a shaped end's zone): a chain
+of Krawczyk boxes over the leg, `t` over the piece and the distance `ρ` from the root over each
+step (the first to an eighth of the leg, each further one a quarter longer than its start's
+distance from the root), from the root (in `(S − e)/ρ` near it, from 64 times the bound on the
+root's own gap from the support) to the toe, two boxes joined by the branch's point where they
+meet (proved to rounding, strictly inside both boxes' regions, each of which holds one root
+only), the last joined to the foot's own box the same way (`FootBlend::prove_chain`); and the
+corner's rise `(n₁ × n₂)·e′` keeps one sign over every such piece, so the corner read at the
+stations stays an inside corner between them. The chord's net (sagitta 0) is proved: on
+each span between two stations it is the cubic Hermite through the feet and their rates, and its
+distance from the section is bounded by the Hermite remainder `h⁴/16 · max |a_4|` from the feet's
+Taylor series enclosed over the span (`FootBlend::feet_series`, solved order by order from the
+foot's equations in intervals), plus the stations' and the rates' distance from their enclosures
+and a rounding floor, within the fit tolerance (`FootBlend::chord_net`). An arc's net (a
+convex or concave bead) is proved the same way on its five rows in homogeneous form, the rows
+in their algebraic form (apex `m + h (e′ × c)/|e′ × c|`, corners the apex `∓ c (1/4 + h²/L²)`,
+weight `1/√(1 + 4h²/L²)`) as series from the feet's, its bound `(E_p + |S − c₀| E_w) / W`
+over the rows' point and weight bounds and their least weight (`FootBlend::arc_net`). Where a
+span's series are not enclosed (a support with no NURBS form, a foot's box across a knot line
+of a free-form support), and in a tapered or rounded end's zone (its legs and sagitta change
+along it), the net is still checked at samples, 0.01 mm at the midpoints between
+its stations, and is not certified.
+
 There is no fourth class. A face that is none of these (a bare NURBS a blend made) is a defect, and
 `blend::definition_check::bare_blend_faces` lists it. The kinds still bare are named in the ledger
 `crates/solidcore/tests/data/blend_definition_ledger/` (today `offset.md`: the offset of a round is
@@ -537,7 +564,12 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    but no construction yet: reading one is refused, never read as offsets.
    `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
-(or take the proof the kernel already finished for the same record, §4.5).
+   (or take the proof the kernel already finished for the same record, §4.5).
+   A weld bead's foot blend is a record of its own kind (`FootBlendRecord`: supports, sides,
+   leader and piece, legs, sagitta, spans, ends, a shaped end's leg law, tolerance, motions,
+   net); `foot_blend_rebuild`
+   makes it and compares the net with its rebuild, to rounding (invariant 9 does not hold for it
+   yet: its feet are solved again, and its arcs' weights come from trigonometric functions).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.

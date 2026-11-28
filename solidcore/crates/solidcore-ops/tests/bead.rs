@@ -399,7 +399,7 @@ fn beads_meeting_at_a_vertex_are_refused_and_the_part_left() {
     );
     assert!(
         matches!(&got, Err(Error::BlendFailed { phrase, .. })
-            if phrase.ends_with("weld beads that meet at a vertex are not built yet (their corner, #17916)")),
+            if phrase.ends_with("this corner of weld beads meeting at a vertex is not built yet (#17916)")),
         "{got:?}"
     );
     assert_eq!(part.to_smb(false).unwrap(), before, "the part changed");

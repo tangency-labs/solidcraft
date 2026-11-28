@@ -298,9 +298,9 @@ pub enum NoRoomReason {
     /// the blend keeps nothing (a knife edge's chamfer between a plane and a cylinder tangent
     /// to it) or where its rails stay on their faces, less the fit margin.
     OverflowKeepsNothing,
-    /// A weld bead's toe at its leg lies off its face (#15129): the face ends nearer the joint
-    /// line than the leg. The fit is the largest leg on that side whose toe stays on the face
-    /// at the stations checked.
+    /// A weld bead's toe at its leg lies off its face (#15129, the foot blend,
+    /// [`crate::blend::foot_blend`]): the face ends nearer the joint line than the leg. The fit
+    /// is the largest leg on that side whose toe stays on the face at the stations checked.
     LegPastFace,
     /// A weld bead's face has no point at the leg's distance from the joint line on its side
     /// in a station's plane (#15129): the face turns away or back within the leg, so no toe
