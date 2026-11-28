@@ -1,0 +1,74 @@
+{
+  "ar": {
+    "ui.view_compass.back": "خلف",
+    "ui.view_compass.bottom": "أسفل",
+    "ui.view_compass.front": "أمام",
+    "ui.view_compass.left": "يسار",
+    "ui.view_compass.right": "يمين",
+    "ui.view_compass.top": "أعلى",
+    "ui.view_compass_reverse": "{view} · انقر لعرض {opposite}"
+  },
+  "de": {
+    "ui.view_compass.back": "Hinten",
+    "ui.view_compass.bottom": "Unten",
+    "ui.view_compass.front": "Vorne",
+    "ui.view_compass.left": "Links",
+    "ui.view_compass.right": "Rechts",
+    "ui.view_compass.top": "Oben",
+    "ui.view_compass_reverse": "{view} · Klick für {opposite}"
+  },
+  "en": {
+    "ui.view_compass.back": "Back",
+    "ui.view_compass.bottom": "Bottom",
+    "ui.view_compass.front": "Front",
+    "ui.view_compass.left": "Left",
+    "ui.view_compass.right": "Right",
+    "ui.view_compass.top": "Top",
+    "ui.view_compass_reverse": "{view} · click for {opposite}"
+  },
+  "he": {
+    "ui.view_compass.back": "אחור",
+    "ui.view_compass.bottom": "תחתון",
+    "ui.view_compass.front": "חזית",
+    "ui.view_compass.left": "שמאל",
+    "ui.view_compass.right": "ימין",
+    "ui.view_compass.top": "עליון",
+    "ui.view_compass_reverse": "{view} · לחצו למעבר אל {opposite}"
+  },
+  "ja": {
+    "ui.view_compass.back": "背面",
+    "ui.view_compass.bottom": "下",
+    "ui.view_compass.front": "正面",
+    "ui.view_compass.left": "左",
+    "ui.view_compass.right": "右",
+    "ui.view_compass.top": "上",
+    "ui.view_compass_reverse": "{view} · クリックで{opposite}"
+  },
+  "ko": {
+    "ui.view_compass.back": "뒤",
+    "ui.view_compass.bottom": "아래",
+    "ui.view_compass.front": "앞",
+    "ui.view_compass.left": "왼쪽",
+    "ui.view_compass.right": "오른쪽",
+    "ui.view_compass.top": "위",
+    "ui.view_compass_reverse": "{view} · 클릭하면 {opposite}"
+  },
+  "vi": {
+    "ui.view_compass.back": "Sau",
+    "ui.view_compass.bottom": "Dưới",
+    "ui.view_compass.front": "Trước",
+    "ui.view_compass.left": "Trái",
+    "ui.view_compass.right": "Phải",
+    "ui.view_compass.top": "Trên",
+    "ui.view_compass_reverse": "{view} · bấm để xem {opposite}"
+  },
+  "zh": {
+    "ui.view_compass.back": "后",
+    "ui.view_compass.bottom": "下",
+    "ui.view_compass.front": "前",
+    "ui.view_compass.left": "左",
+    "ui.view_compass.right": "右",
+    "ui.view_compass.top": "上",
+    "ui.view_compass_reverse": "{view} · 点击切换到{opposite}"
+  }
+}

@@ -11950,6 +11950,8 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
+            // A press on a roll arrow may start an orbit too: a click on it still rolls (egui
+            // takes a press that moves past the drag threshold as a drag, not a click).
             crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
         }
     });
@@ -12006,6 +12008,31 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focus
     }
 }
 
+/// Where the axes navigator may paint, its hovered end's label included: the view, less any panel
+/// beside the navigator at its height (the Browser docks right of it in a right-to-left layout), so
+/// the label grows the other way instead of over the panel.
+fn label_room(app: &SolveApp, rect: Rect) -> Rect {
+    let nav = axis_rect(app, rect);
+    let c = nav.center();
+    let mut room = rect;
+    for r in crate::shell::covered_rects(app) {
+        if r.max.y < nav.min.y || r.min.y > nav.max.y || r.contains(c) {
+            continue;
+        }
+        if r.min.x >= c.x {
+            room.max.x = room.max.x.min(r.min.x);
+        } else if r.max.x <= c.x {
+            room.min.x = room.min.x.max(r.max.x);
+        }
+    }
+    room
+}
+
+/// `p` is on one of the axes navigator's roll arrows, which take it from the axis tips and the drag.
+fn on_axes_arrow(app: &SolveApp, rect: Rect, p: Pos2) -> bool {
+    navigator_controls::on_axes_roll_arrow(axis_center(app, rect), p)
+}
+
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
@@ -12015,15 +12042,22 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_v
     crate::scenario::publish_rect("axis_view:outer", axis_rect(app, rect));
     let orbiting = axis_view_orbit(app, ui, rect);
     let compass = crate::view_compass::Compass {
-        clip: rect,
+        clip: label_room(app, rect),
         centre: axis_center(app, rect),
         axes: view_axes(&app.cam),
-        hover: ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p)),
+        hover: ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p) && !on_axes_arrow(app, rect, *p)),
         orbiting,
-        snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
         turn_around_label: (focused_view && app.preferences.navigator_turn_around).then(|| app.tr("ui.navigator_turn_around").to_owned()),
     };
+    // The two roll arrows round the compass's lower-right edge, inside the navigator's box; shown
+    // while the pointer is over the navigator or it is orbiting. Drawn before the compass, so a
+    // hovered end's label covers them rather than the other way round.
+    let outer = axis_rect(app, rect);
+    let active = orbiting || ui.rect_contains_pointer(outer);
+    navigator_controls::axes_roll_arrows(app, ui, &ui.painter_at(outer), axis_center(app, rect), active, Tokens::get().navigator(active));
     // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
@@ -20264,6 +20298,63 @@ mod tests {
             h.call("ui.click", json!({"x": p.x, "y": p.y}));
             assert_ne!(serde_json::to_value(h.app.cam).unwrap(), camera);
         }
+    }
+
+    /// The axes navigator has two roll arrows, not the custom navigator's orbit arrows: each
+    /// turns the picture a quarter turn. The arrows never cover an axis tip.
+    #[test]
+    fn the_axes_navigator_has_the_roll_arrows() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+        h.frames(2);
+        let rect = h.app.viewport.rect.unwrap();
+        let outer = axis_rect(&h.app, rect);
+        for spin in ["clockwise", "counterclockwise"] {
+            let p = crate::scenario::handle_at(&format!("navigator:control:{spin}")).unwrap();
+            assert!(outer.shrink(4.0).contains(p), "the {spin} arrow stays inside the navigator's box");
+            assert!(p.distance(axis_center(&h.app, rect)) > crate::view_compass::RADIUS, "and outside the compass circle");
+        }
+        for (axis, _) in crate::view_compass::AXES {
+            let tip = crate::scenario::handle_at(&format!("axis_view:{axis}")).unwrap();
+            assert!(!on_axes_arrow(&h.app, rect, tip), "the {axis} tip is clear of the arrows");
+        }
+        let p = crate::scenario::handle_at("navigator:control:clockwise").expect("the roll arrows are there");
+        let camera = h.app.cam;
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        h.settle();
+        let turned = (h.app.cam.roll - camera.roll).rem_euclid(std::f64::consts::TAU);
+        assert!((turned - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "rolled {turned}");
+        let p = crate::scenario::handle_at("navigator:control:counterclockwise").expect("both roll arrows are there");
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        h.settle();
+        let left = (h.app.cam.roll - camera.roll).rem_euclid(std::f64::consts::TAU);
+        assert!(left.min(std::f64::consts::TAU - left) < 1e-6, "and the other rolls it back, {left}");
+        for side in ["left", "right", "up", "down"] {
+            assert!(crate::scenario::handle_at(&format!("navigator:control:{side}")).is_none(), "no {side} orbit arrow");
+        }
+        // A drag that starts on a roll arrow orbits, as one anywhere else on the navigator does.
+        let p = crate::scenario::handle_at("navigator:control:clockwise").unwrap();
+        let before = h.app.cam;
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x - 40.0, "y1": p.y + 10.0, "steps": 8}));
+        assert!(h.app.cam.back().dist(before.back()) > 1e-3, "the drag orbits the view");
+    }
+
+    /// A hovered end's label never covers a panel: in a right-to-left layout the Browser docks
+    /// right of the navigator, and the label grows left of it instead.
+    #[test]
+    fn the_axes_label_stays_off_the_panels_in_a_right_to_left_layout() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "language":"he", "look_at_anim":false}));
+        h.call("ui.view", json!({"view":"iso"}));
+        h.frames(3);
+        let tip = crate::scenario::handle_at("axis_view:x").unwrap();
+        h.call("ui.move", json!({"x": tip.x, "y": tip.y}));
+        h.frames(2);
+        let label = crate::scenario::rect_of("axis_view:label").expect("the hovered end is labelled");
+        for panel in crate::shell::covered_rects(&h.app) {
+            assert!(!panel.intersects(label.shrink(0.5)), "the label {label:?} covers a panel {panel:?}");
+        }
+        assert!(h.app.viewport.rect.unwrap().contains_rect(label));
     }
 
     /// #10091: an axis tip turns the view in place by default; with Preferences › Navigation
