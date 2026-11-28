@@ -338,16 +338,17 @@ something new in a design (a field, a feature type, a new kind of name), or make
 mean something else, it needs a format change. **Add one file, and edit nothing shared:**
 
 1. Create `crates/doc/src/format/pending/<what-it-is>.rs` (lowercase, dashes). Start it with a
-   `//!` note: what is saved, what older designs get without it, and that the last release asks
-   for an update instead of meeting it.
+   `//!` note that explains what is saved, what older designs get without it, and how the
+   latest release handles designs that use the change. It warns about the newer format, opens
+   the parts it understands, and restores unreadable data where possible when saving.
 2. If older designs must be rewritten as they open, put `pub fn step(v: &mut Value) ->
    crate::Result<()>` in the same file. Pending steps run in file-name order, after the older
    formats' steps.
 3. Don't touch `FORMAT`, `JSON_STEPS`, the history in `crates/doc/src/format.rs`, another
    change's file, or any `v<N>/` folder: those are fixed once released.
 
-That's all. The build counts the files: while any are pending it writes the next format number,
-which no release reads, so a release warns about a design that has your change and keeps what it can't read of it.
+That's all. While any changes are pending, the build writes the next format number. The
+latest release reports that number as a newer format.
 A file also lists the pending changes it has (`format_pending`), so a later development build
 runs only the steps that file is missing. Two pull requests that each add a change merge without
 a conflict. `crates/doc/src/format/pending/README.md` has an example.
