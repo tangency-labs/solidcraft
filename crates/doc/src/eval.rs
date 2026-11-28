@@ -695,9 +695,9 @@ impl ModelBody {
     /// (once, however often this is asked) and `None` comes back meanwhile, so a caller drawing a
     /// frame (a face highlighted under the pointer) is not held up by a large body's plan
     /// (#3745): the plan mesh of a long modelled thread takes most of a second. The browser
-    /// build has no threads: there it is made now.
-    pub fn plan_mesh_soon(&self) -> Option<Arc<Mesh>> {
-        let q = crate::display_quality::current();
+    /// build has no threads: there it is made now. At `q`, the display quality the window asking
+    /// draws at (another window in the process may have set the process-wide level since).
+    pub fn plan_mesh_soon(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<Mesh>> {
         let cell = self.plan_mesh.get(q.index())?;
         if let Some(mesh) = cell.get() {
             return mesh.clone();
@@ -789,14 +789,14 @@ impl ModelBody {
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
     /// spaced across the face (faces on one surface spaced together, so they share them), exact
     /// and cut to its trims ([`kernel::iso_grid`]), their points at the chord
-    /// tolerance of the viewport's display quality. Worked out once per face, count and display
-    /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
-    /// body has no surfaces, so none.
-    pub fn iso_lines(&self, face: usize, count: usize) -> Result<Arc<[kernel::IsoLine]>> {
+    /// tolerance of display quality `quality` (a viewport's: the one its window draws at, which
+    /// another window in the process may have changed the process-wide level from). Worked out
+    /// once per face, count and display quality, and shared by every clone of this body (timeline
+    /// snapshots, world states). A mesh body has no surfaces, so none.
+    pub fn iso_lines(&self, face: usize, count: usize, quality: crate::display_quality::DisplayQuality) -> Result<Arc<[kernel::IsoLine]>> {
         if self.body.is_mesh() {
             return Err(DocError::Invalid(format!("{} is a mesh body: its faces have no surface parameters, so no isoparametric curves", self.name)));
         }
-        let quality = crate::display_quality::current();
         let key = (face, count, quality.index());
         let make = || kernel::iso_grid(&self.body, face, count, quality.chord(self.body.size())).map(Arc::from);
         let Ok(mut cache) = self.iso.lock() else { return Ok(make()?) };
@@ -6576,6 +6576,12 @@ impl Model {
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
+                // The snapshots of the features that are evaluated again predate the refused
+                // results: they are dropped, so that a pattern that copies one of them reads no
+                // state of the refused pass.
+                for f in doc.features.iter().skip(start) {
+                    before_states.remove(&f.id);
+                }
             }
             for (i, f) in doc.features.iter().enumerate().skip(start) {
                 if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
@@ -8487,7 +8493,8 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 }
 
 /// A Join whose material meets none of its targets still joins it, to the first target as a
-/// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
+/// separate piece (see `apply_traced`), and so does an Emboss, which raises its profiles with a Join
+/// and has no operation to pick (#23375): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
@@ -8495,14 +8502,14 @@ fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &
     if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
         !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
     }));
-    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
+    let emboss = matches!(&f.kind, FeatureKind::Emboss { deboss: false, .. });
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join && !emboss {
         return;
     }
+    // The Emboss window has no New Body to point to.
+    let hint = if emboss { "" } else { " (New Body makes it a body of its own)" };
     for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
+        append_warning(warning, format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces{hint}"));
     }
 }
 
@@ -12747,6 +12754,9 @@ fn feature_tools_with_constructor(
                 && val(vals, tp, Kind::Angle)? != 0.0
             {
                 let taper = val(vals, tp, Kind::Angle)?;
+                if extent.extend_to_face && curved.is_some() {
+                    return Err(DocError::Invalid("not supported yet: extending the To face with a taper".into()));
+                }
                 if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
                     return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
                 }
@@ -12815,7 +12825,7 @@ fn feature_tools_with_constructor(
                     tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
-                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
+                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len, extent.extend_to_face)?;
                 }
                 return Ok(tools);
             }
@@ -12862,6 +12872,17 @@ fn feature_tools_with_constructor(
                 if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
                     let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off)?;
                     hs.extend([rise_lo, rise_hi]);
+                }
+                // The To face's surface carried on past its edges can lie farther along than the
+                // target does: the tool runs out to where it meets the profile's footprint.
+                if extent.extend_to_face {
+                    let surface = to_face.and_then(|(_, face)| kernel::face_surface(&tb.body, face));
+                    let Some(surface) = surface else {
+                        return Err(DocError::Invalid(
+                            "not supported yet: extending a To face that is not a plane, cylinder, cone, sphere or torus".into(),
+                        ));
+                    };
+                    hs.extend(kernel::extended_levels(&surface, &ss.plane, &footprint_points(&ss.plane, &regions)).into_iter().map(|h| h - off));
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
@@ -12970,7 +12991,7 @@ fn feature_tools_with_constructor(
             {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
-                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
+                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far, extent.extend_to_face)?;
             }
             if let Some((s_lo, s_hi)) = side_two {
                 let mut second = Vec::new();
@@ -16542,6 +16563,10 @@ fn replay(
                 // the model as it was then, so that it is the source's own tool, moved (#14305).
                 Err(e) => {
                     let Some(before) = sources.and_then(|s| s.get(&src.id)) else { return Err(e) };
+                    // The retry is built against the model as it was before the source ran, with
+                    // that model's frames: a target the source's own result consumed is measured
+                    // where it is shown, and not in the frames of the model as it is now (#14305).
+                    let _retry_frames = ToolFrames::install(doc, src, before).unwrap_or_else(ToolFrames::clear);
                     feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), before, &mut None, &mut Vec::new(), &mut None)?
                 }
             };
@@ -17701,7 +17726,19 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 /// at the face's surface extended past them ([`trim_to_offset_face`] with no offset), refused
 /// when a piece still runs out to `far`. `near` is a point on the face (the To pick).
 #[allow(clippy::too_many_arguments)]
-fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+fn trim_to_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    plane: &Plane,
+    start: f64,
+    far: f64,
+    extend: bool,
+) -> Result<Vec<Traced>> {
+    if extend {
+        return trim_to_extended_face(tools, target, face, plane, start, far);
+    }
     let mut out = Vec::new();
     let mut on_face = true;
     for t in &tools {
@@ -17742,6 +17779,47 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3,
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run to the To face's surface carried on past the face's edges (the Extend the To face
+/// option): each tool's prism split by that surface (the kernel's
+/// [`kernel::face_split_extended`], no on-face test), the pieces that start at `start` kept. Refused
+/// where the surface does not cross the tool's path over some of the profile (a cone's apex side,
+/// a plane that runs along the extrusion), which leaves that part with no end.
+fn trim_to_extended_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let mut out = Vec::new();
+    for t in &tools {
+        let Some(parts) = kernel::face_split_extended(&t.body, &target.body, face, plane, start, far)? else {
+            return Err(DocError::Invalid(
+                "the To face, extended, does not meet the whole profile: its surface never crosses the extrusion's path over part of it (the far side of a cone's apex, or a plane that runs along the extrusion)".into(),
+            ));
+        };
+        out.extend(parts.into_iter().map(|part| Traced::step(part, &[t])));
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// Points over `regions` in `plane`'s frame, in the plane: the outlines and a grid across their box.
+fn footprint_points(plane: &Plane, regions: &[Region2]) -> Vec<Vec3> {
+    let outline: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in &outline {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    let mut pts = outline;
+    if lo.x <= hi.x && lo.y <= hi.y {
+        const N: usize = 16;
+        for i in 0..=N {
+            for j in 0..=N {
+                pts.push(Vec2::new(lo.x + (hi.x - lo.x) * i as f64 / N as f64, lo.y + (hi.y - lo.y) * j as f64 / N as f64));
+            }
+        }
+    }
+    pts.into_iter().map(|p| plane.to_world(p)).collect()
 }
 
 /// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
@@ -17801,9 +17879,10 @@ fn trim_to_curved_face(
     plane: &Plane,
     start: f64,
     far: f64,
+    extend: bool,
 ) -> Result<Vec<Traced>> {
     if to_offset.abs() <= 1e-9 {
-        return trim_to_face(tools, target, face, to, plane, start, far);
+        return trim_to_face(tools, target, face, to, plane, start, far, extend);
     }
     let n = plane.normal();
     let travel = if far > start { n } else { n * -1.0 };
@@ -17867,7 +17946,7 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
-    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through, false) {
         Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
         cut => cut?,
     };
@@ -20772,6 +20851,13 @@ impl ToolFrames {
             return None;
         }
         Some(ToolFrames(TOOL_FRAMES.with(|t| std::mem::replace(&mut *t.borrow_mut(), frames))))
+    }
+
+    /// The frames of [`TOOL_FRAMES`] cleared: what was there before is put back when it is
+    /// dropped. A model with no body placed differently has no frames of its own, so a tool
+    /// built against it must not meet the bodies in the frames of another model.
+    fn clear() -> ToolFrames {
+        ToolFrames(TOOL_FRAMES.with(|t| std::mem::take(&mut *t.borrow_mut())))
     }
 }
 

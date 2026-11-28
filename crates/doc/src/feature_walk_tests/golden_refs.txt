@@ -269,6 +269,8 @@ surface_extend_to_plane
   remap_bodies: body
 surface_extend_to_face
   remap_bodies: body, up_to.face.body
+surface_extend_law
+  remap_bodies: body
 surface_ruled
   remap_bodies: body
 surface_trim
