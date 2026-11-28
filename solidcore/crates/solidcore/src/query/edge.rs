@@ -1530,6 +1530,7 @@ fn euclid_step_off(
 mod tests {
     use super::*;
     use crate::curve::line::{BoundedLineOptions, Line};
+    use crate::math::det;
     use crate::topology::{
         Edge, Edgeuse, EdgeuseOwner, Region, Shell, Vertex, Vertexuse, VertexuseOwner,
     };
@@ -1693,7 +1694,7 @@ mod tests {
         assert!((gap(c.point) - c.distance).abs() < 1e-6, "{c:?}");
         for i in 0..360 {
             let a = f64::from(i).to_radians();
-            let p = Point3::new(5.0 * a.cos(), 5.0 * a.sin(), 0.0);
+            let p = Point3::new(5.0 * det::cos(a), 5.0 * det::sin(a), 0.0);
             assert!(c.distance <= gap(p) + 1e-6, "{p:?} is nearer than {c:?}");
         }
     }

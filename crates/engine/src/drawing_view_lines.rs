@@ -343,6 +343,9 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
 pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<Option<usize>>) {
     let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
+        if omit_short_stroke(&piece.path, &path) {
+            return None;
+        }
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
@@ -390,6 +393,23 @@ pub(super) fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
 /// started so the first long dash is centred on the line's middle.
 pub(super) fn chain_line(dots: usize, group: LineGroup, length_mm: f64) -> Dashes {
     centred(chain_dashes_mm(dots, group), length_mm)
+}
+
+/// Paper length below which a whole stroke is a crossing spur, not an edge. The spurs seen are
+/// single lines of about 1e-6 mm; ISO 128's thinnest line is 0.13 mm wide.
+const MIN_PAPER_STROKE_MM: f64 = 1e-4;
+
+/// Whether a stroke is under [`MIN_PAPER_STROKE_MM`] long and so left out. Segments of a longer path
+/// stay. An arc too short to sweep is still its chord, which the line tests keep.
+fn omit_short_stroke(raw: &[Seg2], path: &[Seg2]) -> bool {
+    let len: f64 = path.iter().map(Seg2::length).sum();
+    if len.is_finite() && len >= MIN_PAPER_STROKE_MM {
+        return false;
+    }
+    !matches!(
+        raw,
+        [Seg2::Arc { radius, sweep, .. }] if radius.is_finite() && sweep.is_finite() && (radius.abs() < EPS || sweep.abs() < EPS)
+    )
 }
 
 /// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle. A

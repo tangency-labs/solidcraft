@@ -36,6 +36,7 @@
 //! use's binormal at a parameter once while the B-rep is unwritten (`Binormals`): the
 //! edge-use check, the radial walk and the radial order read the same ones.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{base, class, curves, geometry_key, seams, Cx};
@@ -270,7 +271,7 @@ pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<EdgeEnds> {
 /// `false`. `Err` only for [`crate::SolidError::Unported`] and arena lookups.
 fn faces_tangent_at(k: &Kernel, b: &Brep, e: EdgeId, edge_end: f64) -> Result<bool> {
     // SM_CONTINUITY_ANGLE is SM_ANG_TOL_DEG
-    let sin_tol = (ANG_TOL_DEG * (PI / 180.0)).sin();
+    let sin_tol = det::sin(ANG_TOL_DEG * (PI / 180.0));
     let mut faces = 0usize;
     let mut first_normal = crate::math::Vec3::ZERO;
     for &eu in &b.edge(e)?.edgeuses {
@@ -606,7 +607,7 @@ fn radial_order(
     let seq_param = extent.evaluate(0.456);
     let edge_tol = tedge::tolerance(b, e)?;
     let step_off_dist = 20.0 * edge_tol;
-    let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
+    let tie_dot = det::cos(ANG_TOL_DEG * PI / 180.0);
     let num_eus = b.edge(e)?.edgeuses.len();
     let mut walked: Vec<(EdgeuseId, EdgeuseId, bool)> = Vec::new();
     let mut eu = target;

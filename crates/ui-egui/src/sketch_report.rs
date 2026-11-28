@@ -100,10 +100,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     let heading = format!("{} ({})", solidcraft_ui_text::tr_label("Not fully constrained"), curves.len() + points.len());
                     ui_kit::section(ui, "sc_sketch_report_loose", &heading, true, |ui| {
-                        egui::ScrollArea::vertical().max_height(ui_kit::row_height() * LIST_ROWS).show(ui, |ui| {
+                        let columns = [
+                            ui_kit::Column::new(solidcraft_ui_text::tr("report.type"), 1.0).flex(),
+                            ui_kit::Column::new(solidcraft_ui_text::tr_label("Name"), 2.0).flex(),
+                        ];
+                        ui_kit::report_list(ui, "sketch_loose", ui_kit::table_row_height() * LIST_ROWS, &columns, "", |ui, table| {
                             for (label, ids) in [("Curve", &curves), ("Point", &points)] {
                                 for id in ids {
-                                    ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, id, ui_kit::Text::Cell));
+                                    table.row(ui, &format!("{label}:{id}"), false, |row| {
+                                        row.cell(|ui| ui_kit::text(ui, solidcraft_ui_text::tr_label(label), ui_kit::Text::Cell));
+                                        row.cell(|ui| ui_kit::text(ui, id, ui_kit::Text::Cell));
+                                    });
                                 }
                             }
                         });
@@ -142,6 +149,10 @@ mod tests {
         h.frames(2);
         let v = h.app.sketch_report.as_ref().unwrap().result.as_ref().unwrap();
         assert_eq!(v["curves"].as_array().map(Vec::len), Some(2), "the report follows edits");
+        let loose = super::loose(v, "curves");
+        for id in loose {
+            assert!(crate::scenario::rect_of(&format!("dialog:table:sketch_loose:Curve:{id}")).is_some(), "the live report keeps every free curve");
+        }
         // Closing it changes nothing in the design.
         let undo = h.app.session.undo.len();
         h.frames(4);

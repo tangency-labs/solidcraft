@@ -8,6 +8,7 @@
 
 use super::profile::{Loop2, Seg2};
 use crate::geom::certified::{next_down, next_up};
+use crate::math::det;
 use crate::math::Vec2;
 use std::f64::consts::{PI, TAU};
 
@@ -29,13 +30,13 @@ impl RecognitionVector for Vec2 {
         self.x * rhs.y - self.y * rhs.x
     }
     fn length_hypot(self) -> f64 {
-        self.x.hypot(self.y)
+        det::hypot(self.x, self.y)
     }
     fn perp(self) -> Self {
         Self::new(-self.y, self.x)
     }
     fn angle(self) -> f64 {
-        self.y.atan2(self.x)
+        det::atan2(self.y, self.x)
     }
     #[cfg(test)]
     fn dist(self, rhs: Self) -> f64 {
@@ -70,13 +71,13 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
     let m = (a + b) * 0.5;
     let factor = w * w / (1.0 - w * w);
     let center = m - (apex - m) * factor;
-    let alpha = w.acos();
+    let alpha = det::acos(w);
     let left = m - center;
     let right = b - m;
     if !conic_local_displacements_certified(a, apex, b, factor, left, right)? {
         return None;
     }
-    let sin_alpha = alpha.sin();
+    let sin_alpha = det::sin(alpha);
     let (u, v) = (
         Vec2::new(left.x / w, left.y / w),
         Vec2::new(right.x / sin_alpha, right.y / sin_alpha),
@@ -187,12 +188,12 @@ fn ellipse_axes(u: Vec2, v: Vec2) -> Option<(Vec2, Vec2, f64, f64)> {
     {
         return None;
     }
-    let t = 0.5 * (2.0 * uv).atan2(uu - vv);
+    let t = 0.5 * det::atan2(2.0 * uv, uu - vv);
     if !(2.0 * uv).is_finite() || !(uu - vv).is_finite() {
         return None;
     }
-    let major = u * t.cos() + v * t.sin();
-    let minor = v * t.cos() - u * t.sin();
+    let major = u * det::cos(t) + v * det::sin(t);
+    let minor = v * det::cos(t) - u * det::sin(t);
     let ratio = minor.length_hypot() / major.length_hypot();
     (major.is_finite() && minor.is_finite() && ratio.is_finite() && ratio > 0.0 && ratio <= 1.0)
         .then_some((major, minor, ratio, t))

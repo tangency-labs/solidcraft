@@ -3462,6 +3462,78 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
     }
 }
 
+/// #18048: a pattern or mirror of a Draft drafts the copied face instead of failing with
+/// "Draft1 cannot be patterned or mirrored yet". A 20 x 20 x 20 pad joined on a 100 x 40 x 10
+/// plate has its side at x = 10 drafted 5 deg about its bottom edge (neutral plane z = 10): the
+/// side sweeps a wedge of 0.5 * 20 * (20 tan 5 deg) * 20 = 4000 tan 5 deg. Each copy of the pad
+/// is drafted by the same wedge, whether the pad is copied with the draft or was copied before.
+#[test]
+fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let pattern = json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": 50});
+    let with = |features: Value, mut p: Value| {
+        p["features"] = features;
+        p
+    };
+    let cases = [
+        ("mirror", None, ("solid.mirror", json!({"features": ["Pad1", "Draft1"], "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}))),
+        ("pattern", None, ("solid.pattern.rectangular", with(json!(["Pad1", "Draft1"]), pattern.clone()))),
+        (
+            "pattern of the draft alone",
+            Some(with(json!(["Pad1"]), pattern.clone())),
+            ("solid.pattern.rectangular", with(json!(["Draft1"]), pattern.clone())),
+        ),
+    ];
+    for (what, before, (copy, params)) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        let pad_copied_before = before.is_some();
+        if let Some(p) = before {
+            let r = run(&mut s, "solid.pattern.rectangular", p);
+            assert!(r["error"].is_null(), "{what}: {r}");
+        }
+        let pads = volume(&mut s);
+        run(
+            &mut s,
+            "solid.draft",
+            json!({"faces": [[10, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+        );
+        let drafted = volume(&mut s) - pads;
+        assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{what}: {r}");
+        // Both pads undrafted: the second pad is either there already or copied now.
+        let pads = if pad_copied_before { pads } else { 48000.0 + 8000.0 };
+        let want = pads + 2.0 * drafted;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+    }
+}
+
+/// #18048: a pattern of a Draft drafts the copied face where the draft finds it now. The pad's
+/// side at x = 30 is drafted 5 deg about its bottom edge and the pad and draft are patterned
+/// 50 apart; making the pad 30 long moves that side to x = 40, so the copy's side is at x = 90,
+/// not at x = 80 where it was picked. Each pad is 30 x 20 x 20 less the wedge 4000 tan 5 deg.
+#[test]
+fn pattern_of_a_draft_follows_its_face_after_an_edit() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+    run(
+        &mut s,
+        "solid.draft",
+        json!({"faces": [[30, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+    );
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pad1", "Draft1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(rel(volume(&mut s), 40000.0 + 2.0 * (8000.0 - wedge)) < 1e-6, "20 long: {}", volume(&mut s));
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Pad1", "set": {"length": "30 mm"}}));
+    assert!(r["error"].is_null(), "{r}");
+    let want = 40000.0 + 2.0 * (12000.0 - wedge);
+    assert!(rel(volume(&mut s), want) < 1e-6, "30 long: {} vs {want}", volume(&mut s));
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
@@ -4786,7 +4858,297 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/711.diff
+/// The pattern repeats the full cut, including the tapered bore, helical groove, and any lead-in.
+fn check_modelled_tapered_hole_patterns(circular: bool, lead_in: bool) {
+    use solidcore_record::Vec3;
+    for designation in ["Rc 1/2", "1/2-14 NPT"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 120, "height": 16, "body_name": "Plate"}));
+        let stock = volume(&mut s);
+        let mut hole = json!({
+            "position": [15, 50, 16], "direction": [0, 0, -1], "diameter": 18, "thread_depth": 10,
+            "thread": designation, "modeled": true, "name": "Tap"
+        });
+        if lead_in {
+            hole["chamfer_distance"] = json!(1);
+        }
+        run(&mut s, "solid.hole", hole);
+        let drilled = volume(&mut s);
+        let one_cut = stock - drilled;
+        assert!(one_cut > 0.0, "{designation}: the seed hole must remove material");
+
+        for count in [2, 4, 6] {
+            let (command, params) = if circular {
+                (
+                    "solid.pattern.circular",
+                    json!({"features": ["Tap"], "axis": {"origin": [50, 50, 0], "dir": [0, 0, 1]}, "count": count, "angle": 360}),
+                )
+            } else {
+                (
+                    "solid.pattern.rectangular",
+                    json!({"features": ["Tap"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 35,
+                        "dir2": [0, 1, 0], "count2": count / 2, "spacing2": 28}),
+                )
+            };
+            let case = format!("{designation}, {command}, count {count}, lead-in {lead_in}");
+            let result = s.execute(command, &params).unwrap_or_else(|err| panic!("{case}: {err}"));
+            assert!(result["error"].is_null() && result["warning"].is_null(), "{case}: {result}");
+            // Rigid copies of disjoint cuts in the same stock remove additive volumes.
+            // The command count includes the seed, which is already removed from drilled.
+            let removed = drilled - volume(&mut s);
+            let expected = f64::from(count - 1) * one_cut;
+            assert!(rel(removed, expected) < 1e-3, "{case}: removed {removed} mm³, expected {expected} mm³");
+
+            let state = s.world_state().unwrap();
+            assert_eq!(state.bodies.len(), 1, "{case}");
+            for index in 0..count {
+                let (x, y) = if circular {
+                    let theta = 2.0 * PI * f64::from(index) / f64::from(count);
+                    (50.0 - 35.0 * theta.cos(), 50.0 - 35.0 * theta.sin())
+                } else {
+                    (15.0 + 35.0 * f64::from(index % 2), 50.0 + 28.0 * f64::from(index / 2))
+                };
+                let point = Vec3::new(x, y, 8.0);
+                assert_eq!(
+                    state.bodies[0].body.classify_point(point).unwrap(),
+                    solidcraft_kernel::PointClass::Outside,
+                    "{case}: missing hole at {point:?}"
+                );
+            }
+            run(&mut s, "edit.undo", json!({}));
+        }
+    }
+}
+
+#[test]
+fn rectangular_patterns_repeat_modelled_tapered_holes() {
+    check_modelled_tapered_hole_patterns(false, false);
+}
+
+#[test]
+fn rectangular_patterns_repeat_modelled_tapered_holes_with_lead_in() {
+    check_modelled_tapered_hole_patterns(false, true);
+}
+
+#[test]
+fn circular_patterns_repeat_modelled_tapered_holes() {
+    check_modelled_tapered_hole_patterns(true, false);
+}
+
+#[test]
+fn circular_patterns_repeat_modelled_tapered_holes_with_lead_in() {
+    check_modelled_tapered_hole_patterns(true, true);
+}
+
+/// A spacing expression that places a copy past the brep coordinate ceiling is an error,
+/// and the design stays as it was. `Brep::validate_built` rejects a vertex with absolute value
+/// above 1e12. This shaft's radius is 4, so a spacing of 1e12 cannot fit; a spacing of 1e9 plus
+/// a few millimetres of the body is still below 1e12.
+#[test]
+fn a_rectangular_pattern_spacing_expression_past_the_coordinate_ceiling_is_refused() {
+    // `Brep::validate_built`'s coordinate ceiling.
+    const CEILING: f64 = 1e12;
+
+    fn fresh() -> Session {
+        let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
+        run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 8, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [4, 0, 4], "designation": "M8"}));
+        s
+    }
+
+    fn feature_list(s: &Session) -> Vec<(u64, String)> {
+        s.doc.features.iter().map(|f| (f.id, f.name.clone())).collect()
+    }
+
+    fn body_names(s: &Session) -> Vec<String> {
+        s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+
+    fn threads(s: &mut Session) -> Vec<Value> {
+        run(s, "model.threads", json!({}))["threads"].as_array().cloned().unwrap_or_default()
+    }
+
+    fn axis_within_ceiling(thread: &Value) -> bool {
+        thread["axis_point"]
+            .as_array()
+            .is_some_and(|point| point.len() == 3 && point.iter().all(|c| c.as_f64().is_some_and(|c| c.is_finite() && c.abs() <= CEILING)))
+    }
+
+    fn pattern(spacing: Value, count: i64) -> Value {
+        json!({"bodies": ["Shaft"], "dir1": [1, 0, 0], "count1": count, "spacing1": spacing})
+    }
+
+    fn copy_name(reply: &Value) -> String {
+        let created = reply["created_bodies"].as_array().unwrap_or_else(|| panic!("{reply}"));
+        assert_eq!(created.len(), 1, "{reply}");
+        let copy = created[0].as_str().unwrap_or_else(|| panic!("{reply}")).to_string();
+        assert_ne!(copy, "Shaft");
+        copy
+    }
+
+    // Spacing 20 mm: one copy. The shaft's M8 stays. A thread row for the copy, when the
+    // pattern records one, stays finite and within the ceiling.
+    {
+        let mut s = fresh();
+        let before = body_names(&s);
+        let reply = run(&mut s, "solid.pattern.rectangular", pattern(json!("20"), 2));
+        let copy = copy_name(&reply);
+        assert_eq!(body_names(&s).len(), before.len() + 1, "{:?}", body_names(&s));
+        let listed = threads(&mut s);
+        assert!(listed.iter().any(|t| t["body"] == "Shaft" && t["designation"] == "M8"), "{listed:?}");
+        // Every listed axis, including a copy's when the pattern records one on that body.
+        assert!(listed.iter().all(axis_within_ceiling), "{listed:?}");
+        assert!(listed.iter().filter(|t| t["body"] == copy).all(axis_within_ceiling), "{listed:?}");
+    }
+
+    // 1e9 mm along X plus this body's extent (radius 4, height 8) is still under 1e12.
+    {
+        let mut s = fresh();
+        let reply = run(&mut s, "solid.pattern.rectangular", pattern(json!("1e9"), 2));
+        let copy = copy_name(&reply);
+        let state = s.model.state();
+        let body = state.body(&copy).unwrap_or_else(|| panic!("copy {copy} was not stored: {reply}"));
+        let vertices: Vec<[f64; 3]> = body.body.record().vertices.iter().map(|v| v.point).collect();
+        assert!(!vertices.is_empty(), "{copy} has no vertices to read");
+        // The spacing is applied: some coordinate is far past the shaft, and none crosses 1e12.
+        assert!(
+            vertices.iter().any(|point| point.iter().any(|coordinate| coordinate.abs() > 1e8)),
+            "{copy} vertices were not placed at the 1e9 spacing: {vertices:?}"
+        );
+        for point in &vertices {
+            for coordinate in point {
+                assert!(coordinate.is_finite() && coordinate.abs() <= CEILING, "{copy} vertex {point:?}");
+            }
+        }
+        drop(state);
+        let listed = threads(&mut s);
+        assert!(listed.iter().any(|t| t["body"] == "Shaft" && t["designation"] == "M8"), "{listed:?}");
+        assert!(listed.iter().filter(|t| t["body"] == copy).all(axis_within_ceiling), "{listed:?}");
+    }
+
+    fn refused(spacing: Value, count: i64) {
+        let mut s = fresh();
+        let features = feature_list(&s);
+        let bodies = body_names(&s);
+        let params = pattern(spacing, count);
+        let _err = s.execute("solid.pattern.rectangular", &params).unwrap_err();
+        assert_eq!(feature_list(&s), features, "{params}");
+        assert_eq!(body_names(&s), bodies, "{params}");
+        let listed = threads(&mut s);
+        assert!(listed.iter().all(axis_within_ceiling), "a thread copy is past the ceiling: {listed:?}");
+        assert!(listed.iter().any(|t| t["body"] == "Shaft" && t["designation"] == "M8"), "the shaft's M8 thread is gone: {listed:?}");
+        assert_eq!(listed.len(), 1, "a thread copy was stored: {listed:?}");
+    }
+
+    // A JSON number, not an expression: the length cap already refuses 1e20.
+    refused(json!(1e20), 2);
+    // The second step is 2 * 9e307, which is not finite.
+    refused(json!("9e307"), 3);
+    for spacing in ["1e20", "1e308", "-1e308", "1e12"] {
+        refused(json!(spacing), 2);
+    }
+}
+const PATTERN_COORDINATE_CEILING: f64 = 1e12;
+
+fn shaft_for_coordinate_ceiling_patterns() -> Session {
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 8, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 4], "designation": "M8"}));
+    s
+}
+
+fn shaft_pattern_row(spacing: Value, count: Value) -> Value {
+    json!({"bodies": ["Shaft"], "dir1": [1, 0, 0], "count1": count, "spacing1": spacing})
+}
+
+fn reject_pattern_without_changing_design(s: &mut Session, command: &str, params: &Value) -> String {
+    let doc = s.doc.to_json();
+    let undo = s.undo.clone();
+    let body_names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let bodies = body_names(s);
+
+    let error = s.execute(command, params).unwrap_err();
+    assert!(!matches!(error, crate::EngineError::Internal(..)), "{command} {params}: {error}");
+    assert_eq!(s.doc.to_json(), doc);
+    assert_eq!(body_names(s), bodies);
+    assert_eq!(s.undo.len(), undo.len());
+    assert!(s.undo.iter().zip(&undo).all(|(after, before)| after.label == before.label && Arc::ptr_eq(&after.doc, &before.doc)));
+    error.to_string()
+}
+
+fn assert_pattern_coordinate_message(message: &str, adjustment: &str) {
+    let text = message.to_ascii_lowercase();
+    assert!(!text.contains("portable b-rep"), "{message}");
+    assert!(text.contains("coordinate"), "{message}");
+    assert!(text.contains("range") || text.contains("limit") || text.contains("ceiling"), "{message}");
+    assert!(text.contains(adjustment), "{message}");
+}
+
+#[test]
+fn pattern_coordinate_ceiling_reports_the_rectangular_threaded_shaft_refusal() {
+    let mut s = shaft_for_coordinate_ceiling_patterns();
+    let error = reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &shaft_pattern_row(json!("999999999996"), json!(2)));
+    assert_pattern_coordinate_message(&error, "spacing");
+}
+
+#[test]
+fn pattern_coordinate_ceiling_covers_the_rectangular_and_circular_cap_origins() {
+    let mut s = shaft_for_coordinate_ceiling_patterns();
+    let ceiling = PATTERN_COORDINATE_CEILING;
+    let inside = ceiling - 10.0;
+    let outside = ceiling - 8.0;
+    let state = s.model.state();
+    let shaft = state.body("Shaft").unwrap().body.record();
+    // The shaft lies within radius 4 of its axis. The stored cap plane origin can lie
+    // outside the cap. Compare both offsets with the source record to prove that the
+    // outside case crosses the ceiling at a cap origin while the vertices still fit.
+    assert!(shaft.vertices.iter().all(|v| (v.point[0] + outside).abs() <= ceiling));
+    let cap_x = shaft
+        .faces
+        .iter()
+        .filter_map(|face| match face.surface {
+            solidcore_record::brep::Surface::Plane { origin, .. } | solidcore_record::brep::Surface::PlaneThrough { origin, .. } => Some(origin[0]),
+            _ => None,
+        })
+        .max_by(f64::total_cmp)
+        .unwrap();
+    assert!(cap_x + inside < ceiling && cap_x + outside > ceiling, "{cap_x}");
+
+    let row = |offset: f64| shaft_pattern_row(json!(offset.to_string()), json!(2));
+    let placed = run(&mut s, "solid.pattern.rectangular", row(inside));
+    let copies = placed["created_bodies"].as_array().unwrap();
+    assert_eq!(copies.len(), 1);
+    let copy = copies[0].as_str().unwrap();
+
+    // A half-turn about the Z direction through x = a sends x to 2*a - x.
+    // The copy at the inside offset stays in range about x = 0. Moving the
+    // axis to x = -1 makes the same cap origin cross the negative ceiling.
+    let ring = |axis_x: i32| json!({"bodies": [copy], "axis": {"origin": [axis_x, 0, 0], "dir": [0, 0, 1]}, "count": 2, "angle": "180 deg"});
+    let rotated = run(&mut s, "solid.pattern.circular", ring(0));
+    assert_eq!(rotated["created_bodies"].as_array().unwrap().len(), 1);
+
+    let rect_error = reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &row(outside));
+    let circ_error = reject_pattern_without_changing_design(&mut s, "solid.pattern.circular", &ring(-1));
+    assert_pattern_coordinate_message(&rect_error, "spacing");
+    assert_pattern_coordinate_message(&circ_error, "count");
+}
+
+#[test]
+fn pattern_coordinate_ceiling_hostile_spacing_angle_and_counts_are_refused() {
+    let mut s = shaft_for_coordinate_ceiling_patterns();
+    for spacing in ["NaN", "inf", "1e309"] {
+        reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &shaft_pattern_row(json!(spacing), json!(2)));
+        reject_pattern_without_changing_design(
+            &mut s,
+            "solid.pattern.circular",
+            &json!({"bodies": ["Shaft"], "axis": "Z", "count": 2, "angle": spacing}),
+        );
+    }
+    reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &shaft_pattern_row(json!(10), json!(u64::MAX)));
+    reject_pattern_without_changing_design(&mut s, "solid.pattern.circular", &json!({"bodies": ["Shaft"], "axis": "Z", "count": u64::MAX}));
+}
+
+// ---- no-cache model helpers
 fn fresh_no_cache_model(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
     let mut m = solidcraft_doc::Model::new();
     m.no_cache = true;
@@ -4951,7 +5313,7 @@ fn moving_component_with_planar_sweep_rail_recomputes_railed_sweep() {
     assert!((cached.area - expected.area).abs() < 1e-3, "cached area {} vs fresh {}", cached.area, expected.area);
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/726.diff
+// ---- moved-component path/rail tests
 
 /// Scene: `Tube` pipe in C1 along a planar XZ path owned by C2 (nested under `Asm` when
 /// `nested`). Returns the session and the occurrence id to move (C2, or `Asm` when nested).
@@ -5026,4 +5388,80 @@ fn save_reload_after_moving_planar_path_owner_matches_live_pipe() {
     let (lmin, lmax) = tube_box(&s.model);
     let (rmin, rmax) = tube_box(&reopened.model);
     assert!(lmin.dist(rmin) < 1e-3 && lmax.dist(rmax) < 1e-3, "live ({lmin:?},{lmax:?}) vs reopened ({rmin:?},{rmax:?})");
+}
+
+/// A plate with a hole, moved into another component, where the hole
+/// is patterned afterwards. The copies are drilled from the carried hole, not from its authored
+/// spot, so every copy cuts (or the command refuses): never a success that cuts nothing.
+fn plate_with_hole_in_a_moved_component() -> (Session, f64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 8], "diameter": 6, "depth": 2, "name": "H"}));
+    let one = PLATE_574 - volume(&mut s);
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+    let arm = c["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let occ = s.doc.occurrences.iter().find(|o| o.component == arm).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 80, 0]}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Plate"], "component": arm}));
+    (s, one)
+}
+
+const PLATE_574: f64 = 100.0 * 30.0 * 8.0;
+
+#[test]
+fn patterns_of_a_hole_after_a_body_transfer_cut_every_copy() {
+    for circular in [false, true] {
+        for arm_active in [true, false] {
+            let (mut s, one) = plate_with_hole_in_a_moved_component();
+            let seen = volume(&mut s);
+            assert!((PLATE_574 - seen - one).abs() < 1e-3 * one, "the transfer keeps the hole");
+            let (cmd, mut p) = if circular {
+                (
+                    "solid.pattern.circular",
+                    // World coordinates: the transfer keeps the plate where it is shown.
+                    json!({"features": ["H"], "axis": {"origin": [20, 15, 0], "dir": [0, 0, 1]}, "count": 3, "angle": 90}),
+                )
+            } else {
+                ("solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}))
+            };
+            if arm_active {
+                run(&mut s, "component.activate", json!({"component": "Arm"}));
+            } else {
+                p["participants"] = json!(["Plate"]);
+            }
+            let tag = format!("circular {circular}, arm active {arm_active}");
+            match s.execute(cmd, &p) {
+                Ok(_) => {
+                    let cut = PLATE_574 - volume(&mut s);
+                    assert!((cut - 3.0 * one).abs() < 1e-3 * one, "{tag}: success must cut 3 holes: {cut} vs 3 x {one}");
+                    run(&mut s, "edit.undo", json!({}));
+                    assert!((PLATE_574 - volume(&mut s) - one).abs() < 1e-3 * one, "{tag}: undo");
+                    run(&mut s, "edit.redo", json!({}));
+                    assert!((PLATE_574 - volume(&mut s) - 3.0 * one).abs() < 1e-3 * one, "{tag}: redo");
+                }
+                Err(e) => assert!(!e.to_string().is_empty(), "{tag}"),
+            }
+        }
+    }
+}
+
+/// The other order: the pattern first, then the transfer, keeps every copy.
+#[test]
+fn patterns_of_a_hole_before_a_body_transfer_keep_every_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 8], "diameter": 6, "depth": 2, "name": "H"}));
+    let one = PLATE_574 - volume(&mut s);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+    let arm = c["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let occ = s.doc.occurrences.iter().find(|o| o.component == arm).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 80, 0]}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Plate"], "component": arm}));
+    assert!((PLATE_574 - volume(&mut s) - 3.0 * one).abs() < 1e-3 * one);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert!((PLATE_574 - volume(&mut s) - 3.0 * one).abs() < 1e-3 * one);
 }

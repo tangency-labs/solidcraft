@@ -514,7 +514,7 @@ impl<'a> Grid<'a> {
         {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) {
+        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) && !crate::Menu::any_open(&ctx) {
             navigate(ui, &mut state, source, &shown, &columns, &mut out);
         }
         if !source.cell_ranges() {
@@ -983,7 +983,7 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
     if editor.taken {
         return;
     }
-    let escape = focused && ui.input(|i| i.raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
+    let escape = focused && ui.input(|i| i.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
     if escape {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
         out.cancelled = Some((cell.key.to_owned(), cell.col));

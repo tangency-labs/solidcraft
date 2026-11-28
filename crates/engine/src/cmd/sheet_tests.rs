@@ -11659,3 +11659,38 @@ fn a_fold_carries_a_slot_lip_without_filling_its_root() {
         assert!((flat_area(&after) - want).abs() < 1e-6);
     }
 }
+
+/// #23209: a fold builds when the outline has a vertex, in line with its neighbours, a hair
+/// beside the bend zone's edge, as it does with the vertex on that edge or left out, and folds
+/// the same part. Blank 200 x 100, t 2, r 3, K 0.44, folded 90° at y 30 (centerline): the zone's
+/// lower edge is at y 26.952655126018.
+#[test]
+fn a_fold_builds_with_an_outline_vertex_a_hair_beside_the_zone_edge() {
+    let edge = 26.952655126018;
+    let folded = |vertex: Option<f64>| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "active": true, "thickness": "2 mm", "bend_radius": "3 mm", "k_factor": 0.44}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let mut points = vec![json!([0, 0]), json!([200, 0]), json!([200, 100]), json!([0, 100])];
+        if let Some(d) = vertex {
+            points.insert(2, json!([200, edge + d]));
+        }
+        let lines: Vec<String> = (1..=points.len()).map(|i| format!("l{i}")).collect();
+        run(&mut s, "sketch.line", json!({"closed": true, "points": points}));
+        run(&mut s, "sketch.constraint.fix", json!({"entities": lines}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "S", "rule": "Rule", "name": "Base"}));
+        run(
+            &mut s,
+            "sheet.fold",
+            json!({"points": [[0, 30, 0], [200, 30, 0]], "angle": "90 deg", "position": "centerline", "fixed": [100, 10, 0], "name": "Fold"}),
+        );
+        volume(&mut s)
+    };
+    let plain = folded(None);
+    assert!(plain > 40_000.0 + 1.0, "{plain}");
+    for d in [0.0, 2e-7, -2e-7, -1e-6, 1e-4] {
+        let v = folded(Some(d));
+        assert!(rel(v, plain) < 1e-9, "vertex {d:e} beside the zone's edge: volume {v}, {plain} without it");
+    }
+}

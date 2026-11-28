@@ -1919,7 +1919,7 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
     assert_eq!(labels, crate::prefs::UNITS);
     // The list opens above the bar, inside the window.
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    let list = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
     h.call("ui.menuPick", json!({"item":"in"}));
@@ -2097,7 +2097,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
     assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    let list = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
     for preset in crate::prefs::NAV_PRESETS {

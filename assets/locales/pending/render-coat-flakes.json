@@ -1,0 +1,92 @@
+{
+  "en": {
+    "render.flakes.enable": "Metallic flakes under the coat",
+    "render.flakes.coverage": "Coverage",
+    "render.flakes.spread": "Tilt",
+    "render.flakes.depth": "Depth",
+    "render.flakes.size": "Flake size",
+    "render.flakes.color": "Flake color",
+    "render.flakes.help": "Small tilted mirrors in the paint that sparkle as the view turns. Shown in CPU ray-traced and GPU path-traced images."
+  },
+  "en-GB": {
+    "render.flakes.enable": "Metallic flakes under the coat",
+    "render.flakes.coverage": "Coverage",
+    "render.flakes.spread": "Tilt",
+    "render.flakes.depth": "Depth",
+    "render.flakes.size": "Flake size",
+    "render.flakes.color": "Flake colour",
+    "render.flakes.help": "Small tilted mirrors in the paint that sparkle as the view turns. Shown in CPU ray-traced and GPU path-traced images."
+  },
+  "fr": {
+    "render.flakes.enable": "Paillettes métalliques sous le vernis",
+    "render.flakes.coverage": "Couverture",
+    "render.flakes.spread": "Inclinaison",
+    "render.flakes.depth": "Profondeur",
+    "render.flakes.size": "Taille des paillettes",
+    "render.flakes.color": "Couleur des paillettes",
+    "render.flakes.help": "De petits miroirs inclinés dans la peinture, qui scintillent quand la vue tourne. Visibles dans les images CPU en lancer de rayons et GPU en tracé de chemins."
+  },
+  "ar": {
+    "render.flakes.enable": "رقائق معدنية تحت الطبقة الشفافة",
+    "render.flakes.coverage": "التغطية",
+    "render.flakes.spread": "الميل",
+    "render.flakes.depth": "العمق",
+    "render.flakes.size": "حجم الرقائق",
+    "render.flakes.color": "لون الرقائق",
+    "render.flakes.help": "مرايا صغيرة مائلة داخل الطلاء تتلألأ عند تدوير العرض. تظهر في صور تتبع الأشعة على المعالج المركزي وصور تتبع المسارات على معالج الرسوميات."
+  },
+  "he": {
+    "render.flakes.enable": "פתיתים מתכתיים מתחת לציפוי השקוף",
+    "render.flakes.coverage": "כיסוי",
+    "render.flakes.spread": "הטיה",
+    "render.flakes.depth": "עומק",
+    "render.flakes.size": "גודל הפתיתים",
+    "render.flakes.color": "צבע הפתיתים",
+    "render.flakes.help": "מראות קטנות ומוטות בתוך הצבע שמנצנצות כשהתצוגה מסתובבת. מוצגות בתמונות מעקב קרניים במעבד ובתמונות מעקב מסלולים במעבד הגרפי."
+  },
+  "ja": {
+    "render.flakes.enable": "クリアコート下のメタリックフレーク",
+    "render.flakes.coverage": "被覆率",
+    "render.flakes.spread": "傾き",
+    "render.flakes.depth": "深さ",
+    "render.flakes.size": "フレークのサイズ",
+    "render.flakes.color": "フレークの色",
+    "render.flakes.help": "塗装の中の傾いた小さな鏡で、視点を回すときらめきます。CPU レイトレーシングと GPU パストレーシングの画像に表示されます。"
+  },
+  "vi": {
+    "render.flakes.enable": "Vảy kim loại dưới lớp phủ",
+    "render.flakes.coverage": "Độ phủ",
+    "render.flakes.spread": "Độ nghiêng",
+    "render.flakes.depth": "Độ sâu",
+    "render.flakes.size": "Kích thước vảy",
+    "render.flakes.color": "Màu vảy",
+    "render.flakes.help": "Những tấm gương nhỏ nghiêng trong lớp sơn, lấp lánh khi xoay góc nhìn. Hiển thị trong ảnh dò tia bằng CPU và ảnh dò đường đi bằng GPU."
+  },
+  "zh": {
+    "render.flakes.enable": "涂层下的金属闪片",
+    "render.flakes.coverage": "覆盖率",
+    "render.flakes.spread": "倾斜",
+    "render.flakes.depth": "深度",
+    "render.flakes.size": "闪片大小",
+    "render.flakes.color": "闪片颜色",
+    "render.flakes.help": "漆层中倾斜的小镜面，随视角转动而闪烁。显示在 CPU 光线追踪和 GPU 路径追踪图像中。"
+  },
+  "de": {
+    "render.flakes.enable": "Metallic-Flakes unter dem Klarlack",
+    "render.flakes.coverage": "Bedeckung",
+    "render.flakes.spread": "Neigung",
+    "render.flakes.depth": "Tiefe",
+    "render.flakes.size": "Flake-Größe",
+    "render.flakes.color": "Flake-Farbe",
+    "render.flakes.help": "Kleine geneigte Spiegel im Lack, die beim Drehen der Ansicht funkeln. Sichtbar in CPU-Raytracing- und GPU-Pathtracing-Bildern."
+  },
+  "ko": {
+    "render.flakes.enable": "클리어 코트 아래 메탈릭 플레이크",
+    "render.flakes.coverage": "덮임률",
+    "render.flakes.spread": "기울기",
+    "render.flakes.depth": "깊이",
+    "render.flakes.size": "플레이크 크기",
+    "render.flakes.color": "플레이크 색상",
+    "render.flakes.help": "도장 속의 기울어진 작은 거울로, 시점을 돌리면 반짝입니다. CPU 레이 트레이싱과 GPU 경로 추적 이미지에 표시됩니다."
+  }
+}

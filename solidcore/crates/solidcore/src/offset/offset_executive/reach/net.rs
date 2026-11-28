@@ -29,12 +29,15 @@
 //! and nothing past it is enclosed.
 //!
 //! A surface of revolution is the net of its generator turned and weighted, exactly. The
-//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`); past
-//! them its end span continued is the surface turned on (a rational quadratic piece
-//! continued stays on its conic, the circle each row's point sweeps), which Krawczyk's boxes
-//! may straddle. A meeting is taken only where the box proved to hold it is within the
-//! B-rep's tolerance of the side as built ([`Net::jet_as_built`]): one past the turn's end
-//! by more is not on the executive's surfaces, and is not proved. Its partials are enclosed
+//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`), but
+//! for one whose generator is an arc of one circle (a torus but for its label), which it
+//! turns on as a torus's, up to a quarter of the turn it leaves open; past them its end span
+//! continued is the surface turned on (a rational quadratic piece continued stays on its
+//! conic, the circle each row's point sweeps), which Krawczyk's boxes may straddle. A meeting
+//! is taken only where the box proved to hold it is within the B-rep's tolerance of the side
+//! as built ([`Net::jet_as_built`]): one past the turn's end by more is not proved, though on
+//! a revolved circle it may be on the executive's turned-on surface (the reach then falls
+//! short of it: the operation is refused, it builds nothing wrong). Its partials are enclosed
 //! about a point near the box ([`Net::jet_near`]): its rows' weights vary round the axis,
 //! and taken about the origin the quotient's enclosure grows with the point's distance from
 //! it.
@@ -228,8 +231,9 @@ impl Net {
     /// generator's exact form) or a surface of revolution (its net is its generator turned
     /// and weighted, exactly), with no analytic label and no definition (a blend's or sweep's
     /// net is only its approximation); or an offset surface of such a net ([`Net::offset`]);
-    /// `None` for any other. A revolution's sides round its
-    /// axis are not extended, as the executive leaves them (`SideExtension::AroundAxis`):
+    /// `None` for any other. A revolution's sides round its axis are not extended, as the
+    /// executive leaves them (`SideExtension::AroundAxis`; one of a single circle arc it turns
+    /// on, which only makes this enclosure short of it):
     /// past them the net's end span continued is enclosed only within `tolerance` of the side
     /// ([`Net::continues`]).
     ///
@@ -318,8 +322,8 @@ impl Net {
                 continue;
             }
             // (as the executive's extension decides: a closed direction, a collapsed side
-            // and a revolution's side round its axis are left; the last continues as its
-            // net's end span, round the axis)
+            // and a revolution's side round its axis are left, but for one of a single circle
+            // arc; the last continues as its net's end span, round the axis)
             if crate::surface::extend::round_the_axis(surface, side) == Some(true) {
                 *c = true;
             } else {
@@ -966,8 +970,8 @@ impl Net {
     /// ([`Part::Beyond`]) is not within [`Net::tolerance`] of the side ([`Net::near_as_built`]).
     /// Krawczyk's boxes are taken over the continuation (the net's end span continued is the
     /// surface's own, a revolution turned on), and only the box it proves is asked to be
-    /// built: a meeting past the side by more than the tolerance is one the executive's
-    /// surfaces do not hold.
+    /// built: a meeting past the side by more than the tolerance is not taken, whether or not
+    /// the executive's surface holds it (a revolved circle's, turned on, may).
     ///
     /// # Errors
     ///

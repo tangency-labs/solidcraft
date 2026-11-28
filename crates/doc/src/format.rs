@@ -2372,6 +2372,7 @@ mod tests {
                         through_all: false,
                         second_follows_first: false,
                         taper: Some("0 deg".into()),
+                        taper2: None,
                         corner: Default::default(),
                         to: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),

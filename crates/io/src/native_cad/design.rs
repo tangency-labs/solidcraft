@@ -410,6 +410,7 @@ impl Builder {
                 symmetric_offset: false,
                 through_all: through,
                 taper: None,
+                taper2: None,
                 to: None,
                 to_offset: None,
                 from: None,

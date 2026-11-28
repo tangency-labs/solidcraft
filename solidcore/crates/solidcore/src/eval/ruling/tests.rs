@@ -1,5 +1,6 @@
 use super::*;
 use crate::eval::geometry::{Curve, Frame};
+use crate::math::det;
 
 /// A circle of radius 2 about +z through (1, 1, 3), its angle from +x.
 fn circle() -> CurveEval {
@@ -33,7 +34,8 @@ fn a_piece_across_the_angle_meets_it_where_its_angle_is_that() {
     };
     assert!((t - 1.0).abs() < 1e-12, "{t}");
     assert!(
-        (point - Vec3::new(1.0 + 2.0 * 1f64.cos(), 1.0 + 2.0 * 1f64.sin(), 3.0)).length() < 1e-12
+        (point - Vec3::new(1.0 + 2.0 * det::cos(1f64), 1.0 + 2.0 * det::sin(1f64), 3.0)).length()
+            < 1e-12
     );
 }
 

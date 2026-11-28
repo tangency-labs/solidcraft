@@ -270,3 +270,59 @@ fn a_solid_pattern_second_direction_boxes_stay_while_their_text_is_incomplete() 
         assert!(shown(&h, "sc_canvas_value_extent2"), "Extent 2's box went away at {text:?}");
     }
 }
+
+/// Each floating dimension clears all four actual arrows, even those drawn later in the frame.
+#[test]
+fn floating_pattern_fields_clear_the_primary_and_secondary_spacing_and_extent_grips() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1200}));
+    h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+    h.run(&json!([
+        {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}},
+        {"call":"ui.view","params":{"view":"iso"}},
+        {"start":"solid.pattern.rectangular"},
+        {"click":{"world":[5,5,10]}},
+        {"call":"ui.dialogInput","params":{"index":1}},{"click":{"axis":"X"}},
+        {"call":"ui.dialogInput","params":{"index":2}},{"click":{"axis":"Y"}}
+    ]))
+    .unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.extra.insert("distance1".into(), json!("spacing_extent"));
+    d.extra.insert("distance2".into(), json!("spacing_extent"));
+    if let Kind::PatternRect { count, spacing, extent, count2, spacing2, extent2, .. } = &mut d.kind {
+        (*count, *spacing, *extent, *count2, *spacing2, *extent2) =
+            ("4".into(), "10 mm".into(), "30 mm".into(), "4".into(), "8 mm".into(), "24 mm".into());
+    }
+    h.call("ui.camera", json!({"target":[15,15,5],"distance":100}));
+    h.settle();
+    let tip = handle_at("arrow2").expect("second spacing grip");
+    let window = h.app.viewport.dialog_rect.unwrap();
+    let title = handle_at("dialog:title").unwrap();
+    let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+    h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+    h.frames(24);
+    let tip = handle_at("arrow2").unwrap();
+    let window = h.app.viewport.dialog_rect.unwrap();
+    assert!(
+        (window.left() - tip.x - 30.0).abs() < 3.0 && window.y_range().contains(tip.y),
+        "window beside the actual secondary grip: {window:?}, {tip:?}"
+    );
+    let grips: Vec<_> = ["arrow", "arrow_extent", "arrow2", "arrow2_extent"]
+        .into_iter()
+        .map(|name| (name, egui::Rect::from_center_size(handle_at(name).unwrap_or_else(|| panic!("no {name}")), egui::vec2(20.0, 20.0))))
+        .collect();
+    for id in ["sc_canvas_area", "sc_canvas_area_extent", "sc_canvas_area_spacing2", "sc_canvas_area_extent2"] {
+        let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(id))).unwrap_or_else(|| panic!("no {id}"));
+        for (name, grip) in &grips {
+            assert!(!field.intersects(*grip), "{id} at {field:?} covers {name} at {grip:?}");
+        }
+    }
+    // Enter text through the actual secondary response and check the other dimension is intact.
+    let input = h.ctx.read_response(egui::Id::unique("sc_canvas_value_spacing2")).unwrap().rect;
+    h.step(&json!({"click":[input.center().x,input.center().y]})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"9 mm"})).unwrap();
+    h.frames(3);
+    assert_eq!(spacings(&h), ("10 mm".into(), "9 mm".into()));
+}

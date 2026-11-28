@@ -49,6 +49,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::Direction;
@@ -70,7 +71,7 @@ const MEET: f64 = 1e-12;
 
 /// The angle between `a` and `b`, in radians.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The largest angle (radians) from the pole direction `p` to a point of the great-circle
@@ -94,7 +95,7 @@ fn farthest_from_pole(p: Vec3, a: Vec3, b: Vec3) -> f64 {
     let mut theta = angle(p, a).max(angle(p, b));
     let foot = m * m.dot(p) - p * m.dot(m);
     if a.cross(foot).dot(m) >= 0.0 && foot.cross(b).dot(m) >= 0.0 {
-        theta = theta.max(PI - m.dot(p).abs().atan2(p.cross(m).length()));
+        theta = theta.max(PI - det::atan2(m.dot(p).abs(), p.cross(m).length()));
     }
     theta
 }
@@ -385,7 +386,7 @@ fn extend_side_world(
         let x1 = s.evaluate_point(at(s, 1.0))? - c;
         let cc = n * n.dot(x0);
         let (u0, u1) = (x0 - cc, x1 - cc);
-        let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+        let mut phi = det::atan2(u0.cross(u1).dot(n), u0.dot(u1));
         if phi < 0.0 {
             phi += 2.0 * PI;
         }
@@ -603,7 +604,7 @@ fn extend_side_local(
         let x1 = s.evaluate_point(at(s, 1.0))?;
         let cc = n * n.dot(x0);
         let (u0, u1) = (x0 - cc, x1 - cc);
-        let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+        let mut phi = det::atan2(u0.cross(u1).dot(n), u0.dot(u1));
         if phi < 0.0 {
             phi += 2.0 * PI;
         }
@@ -1051,7 +1052,11 @@ mod tests {
         let b = Vec3::new(-3.0, 0.0, 0.0);
         for t in [1e-9_f64, 1e-6, 1e-3, 0.3] {
             // tilted towards (1, 0, -1): the farthest point is (-1, 0, 1) / sqrt 2, inside the arc
-            let p = Vec3::new(t.sin() / 2f64.sqrt(), t.cos(), -t.sin() / 2f64.sqrt()) * 3.0;
+            let p = Vec3::new(
+                det::sin(t) / 2f64.sqrt(),
+                det::cos(t),
+                -det::sin(t) / 2f64.sqrt(),
+            ) * 3.0;
             let theta = farthest_from_pole(p, a, b);
             assert!((theta - (0.5 * PI + t)).abs() <= 1e-14, "{t}: {theta}");
         }

@@ -18,6 +18,7 @@
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
 //! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`], [`min4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max`, `smos_4Min` |
 //! | [`rad_to_deg`]               | `SM_RAD2DEG`                                   |
+//! | [`det`]                      | the C library's `sin`, `cos`, `atan2`, `pow`, ... |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -27,6 +28,8 @@
 //! (e.g. `Unitize` of a zero vector). These hand-written types spell every expression
 //! in upstream order, so results are bit-identical to the C++ (built with
 //! `-ffp-contract=off`).
+
+pub mod det;
 
 pub use crate::geom::vector2d::{Point2, Vec2};
 pub use crate::geom::vector3d::{Point3, Vec3};
@@ -156,6 +159,32 @@ pub(crate) fn det3(m: &[[f64; 4]; 3]) -> f64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
+/// The axis and radians of a turn followed by a turn about a fixed world axis.
+/// Collinear turns retain the first axis and the full signed angle (including winding).
+pub fn compose_turn(first: Vec3, radians: f64, world: Vec3, turn: f64) -> Option<(Vec3, f64)> {
+    if !radians.is_finite() || !turn.is_finite() {
+        return None;
+    }
+    let (_, a) = first.length_and_unit()?;
+    let (_, b) = world.length_and_unit()?;
+    if a == b || a == -b {
+        let sum = radians + if a == b { turn } else { -turn };
+        return sum.is_finite().then_some((a, sum));
+    }
+    if radians == 0.0 {
+        return Some((b, turn));
+    }
+    // Quaternion product: the new world turn acts last, hence multiplies on the left.
+    let (s, c) = (radians * 0.5).sin_cos();
+    let (t, d) = (turn * 0.5).sin_cos();
+    let (u, v) = (a * s, b * t);
+    let vector = u * d + v * c + v.cross(u);
+    Some(match vector.length_and_unit() {
+        Some((len, axis)) => (axis, 2.0 * len.atan2(c * d - v.dot(u))),
+        None => (b, 0.0),
+    })
+}
+
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix
 /// (`SmTransform::m_adT`): `out = [p.x p.y p.z 1] * m`.
 ///
@@ -173,6 +202,12 @@ impl Default for Transform {
 }
 
 impl Transform {
+    /// Signed volume scale of the linear part. A reflection reverses its sign.
+    #[must_use]
+    pub fn linear_determinant(&self) -> f64 {
+        self.x_axis().triple_product(self.y_axis(), self.z_axis())
+    }
+
     /// The identity transform.
     pub const IDENTITY: Self = Self {
         m: [
@@ -404,12 +439,12 @@ impl Transform {
         // One power of two for the whole linear part (exact; two steps for a subnormal
         // largest entry, whose inverse power alone would overflow).
         let pre = if big < f64::MIN_POSITIVE {
-            2.0_f64.powi(600)
+            det::powi(2.0_f64, 600)
         } else {
             1.0
         };
         #[allow(clippy::cast_possible_truncation)] // an exponent of a finite double
-        let scale = 2.0_f64.powi(-((big * pre).log2().floor() as i32));
+        let scale = det::powi(2.0_f64, -(det::log2(big * pre).floor() as i32));
         let mut m = [[0.0_f64; 3]; 3];
         let mut tiny_entry = false;
         for (row, src) in m.iter_mut().zip(&self.m) {
@@ -1040,7 +1075,7 @@ impl Transform {
         let k = axis
             .unitize()
             .map_err(|_| SolidError::invalid_input(OP_MAPS, "a turn's axis of no length"))?;
-        let (s, c) = angle.sin_cos();
+        let (s, c) = det::sin_cos(angle);
         let v = 1.0 - c;
         let (x, y, z) = (k.x, k.y, k.z);
         Ok(Self::about(
@@ -1190,7 +1225,7 @@ fn dot_2d([ax, ay]: [f64; 2], [bx, by]: [f64; 2]) -> f64 {
 
 /// The length.
 fn length_2d([x, y]: [f64; 2]) -> f64 {
-    x.hypot(y)
+    det::hypot(x, y)
 }
 
 /// `v` turned a quarter turn counter-clockwise.
@@ -1314,7 +1349,7 @@ pub fn three_point_circle_2d(
         return None;
     }
     let mid = midpoint_2d(s, e);
-    let minor = 2.0 * (length_2d(chord) / (2.0 * r)).clamp(-1.0, 1.0).asin();
+    let minor = 2.0 * det::asin((length_2d(chord) / (2.0 * r)).clamp(-1.0, 1.0));
     // The arc through `t` is the long one when `t` is on the centre's side of the chord.
     let long = dot_2d(n, sub_2d(t, mid)) * dot_2d(n, sub_2d(centre, mid)) > 0.0;
     Some((
@@ -1350,7 +1385,7 @@ pub fn arc_third_point_2d(
             return None;
         }
         let half = sweep * 0.5;
-        let r = len / (2.0 * half.sin());
+        let r = len / (2.0 * det::sin(half));
         let side = if dot_2d(n, sub_2d(h, mid)) < 0.0 {
             -1.0
         } else {
@@ -1359,7 +1394,7 @@ pub fn arc_third_point_2d(
         return Some(along_2d(
             mid,
             n,
-            side * r * 2.0 * (half * 0.5).sin().powi(2),
+            side * r * 2.0 * det::powi(det::sin(half * 0.5), 2),
         ));
     }
     let r = radius?;
@@ -1449,6 +1484,19 @@ pub fn left_side_inside_circle_2d(
 mod tests {
     use super::*;
 
+    #[test]
+    fn transform_face_turn_composition_respects_world_order_and_winding() {
+        let (axis, angle) = compose_turn(Vec3::X, HALF_PI, Vec3::Y, HALF_PI).unwrap();
+        let combined = Transform::rotation(Point3::ZERO, axis, angle).unwrap();
+        // X takes Y to Z, then Y takes Z to X. Reversing the two turns gives Z.
+        assert!((combined.transform_vector(Vec3::Y) - Vec3::X).length() < 1e-10);
+        assert_eq!(
+            compose_turn(Vec3::Z, TWO_PI, -Vec3::Z, HALF_PI),
+            Some((Vec3::Z, TWO_PI - HALF_PI))
+        );
+        assert_eq!(compose_turn(Vec3::X, 0.0, Vec3::ZERO, HALF_PI), None);
+    }
+
     /// Rounding below `noise` along a world axis is dropped and the axes come back unit; a plane
     /// tilted for real, and one with nothing to drop, keep their axes; parallel, empty or
     /// non-finite axes and a bad `noise` give `None`.
@@ -1460,7 +1508,7 @@ mod tests {
             1e-12,
         );
         assert_eq!(tilted, Some([Vec3::X, Vec3::Y]));
-        let (s, c) = (0.3_f64.sin(), 0.3_f64.cos());
+        let (s, c) = (det::sin(0.3_f64), det::cos(0.3_f64));
         let real = [Vec3::new(c, s, 0.0), Vec3::new(-s, c, 0.0)];
         assert_eq!(
             Transform::axis_squared_frame(real[0], real[1], 1e-12),
@@ -1573,7 +1621,7 @@ mod tests {
         let empty = (Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 1.0));
         assert_eq!(map.transformed_box(empty.0, empty.1), empty);
         // 1 + 2^-53 rounds to 1: the box still holds it.
-        let tiny = 2f64.powi(-53);
+        let tiny = det::powi(2f64, -53);
         let shift = Transform::translation(Vec3::new(1.0, 0.0, 0.0));
         let p = Point3::new(tiny, 0.0, 0.0);
         let (lo, hi) = shift.transformed_box(p, p);

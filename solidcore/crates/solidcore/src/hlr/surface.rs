@@ -31,6 +31,7 @@ use super::HlrError;
 use crate::eval::form;
 use crate::eval::SurfaceEval;
 use crate::eval::{Curve, Frame, Surface};
+use crate::math::det;
 use crate::math::Vec3;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -109,12 +110,12 @@ impl Analytic {
             Analytic::Cylinder { p, a, r } => (rh(p, a).0 - r).abs(),
             Analytic::Cone { apex, a, half } => {
                 let (rho, h) = rh(apex, a);
-                (rho * half.cos() - h * half.sin()).abs()
+                (rho * det::cos(half) - h * det::sin(half)).abs()
             }
             Analytic::Sphere { c, r } => (q.dist(c) - r).abs(),
             Analytic::Torus { c, a, major, minor } => {
                 let (rho, h) = rh(c, a);
-                ((rho - major).hypot(h) - minor).abs()
+                (det::hypot(rho - major, h) - minor).abs()
             }
             Analytic::Plane | Analytic::Other => f64::INFINITY,
         }
@@ -226,7 +227,7 @@ impl S3 {
                 half_angle,
             } => {
                 let (o, x, _, z) = axes(frame);
-                let r = |h: f64| radius_at_origin + h * half_angle.tan();
+                let r = |h: f64| radius_at_origin + h * det::tan(*half_angle);
                 let line = C3::Line {
                     a: o + x * r(along[0]) + z * along[0],
                     b: o + x * r(along[1]) + z * along[1],
@@ -286,7 +287,7 @@ impl S3 {
             }
             Analytic::Cone { apex, a, half } => {
                 let e1 = perp(a);
-                let at = |x: f64| apex + a * x + e1 * (x * half.tan());
+                let at = |x: f64| apex + a * x + e1 * (x * det::tan(half));
                 Rev::new(
                     apex,
                     a,
@@ -548,7 +549,7 @@ impl S3 {
             }
             Analytic::Cone { apex, a, half } => {
                 let w = p0 - apex;
-                let c2 = half.cos().powi(2);
+                let c2 = det::powi(det::cos(half), 2);
                 let (da, wa) = (d.dot(a), w.dot(a));
                 let roots = quadratic(
                     da * da - c2,
@@ -631,7 +632,7 @@ pub(crate) fn torus_roots(
         let p = w + d * l;
         let z = p.dot(a);
         let rho = (p - a * z).len();
-        (rho - big).hypot(z) - small
+        det::hypot(rho - big, z) - small
     };
     // Sample only where the ray is inside the shell |z| <= r, R - r <= rho <= R + r, in steps
     // of a quarter of the tube radius: the shell is short along any ray, so the steps are few.
@@ -662,7 +663,7 @@ pub(crate) fn torus_roots(
             ]
         })
     };
-    let Some(outer) = within((big + small + m).powi(2)) else {
+    let Some(outer) = within(det::powi(big + small + m, 2)) else {
         return Vec::new();
     };
     span = [span[0].max(outer[0]), span[1].min(outer[1])];
@@ -672,7 +673,7 @@ pub(crate) fn torus_roots(
     // Remove the inside of the inner radius, leaving up to two pieces.
     let mut pieces = vec![span];
     if big > small + m {
-        if let Some(inner) = within((big - small - m).powi(2)) {
+        if let Some(inner) = within(det::powi(big - small - m, 2)) {
             pieces = vec![
                 [span[0], span[1].min(inner[0])],
                 [span[0].max(inner[1]), span[1]],
@@ -781,16 +782,16 @@ fn form_box(face: &Face, label: &Surface) -> Result<[[f64; 2]; 2], HlrError> {
     };
     let (o, x, y, z) = axes(frame);
     let along = |w: Vec3, rho: f64| match label {
-        Surface::Sphere { .. } => w.dot(z).atan2(rho),
-        Surface::Torus { major_radius, .. } => w.dot(z).atan2(rho - major_radius),
+        Surface::Sphere { .. } => det::atan2(w.dot(z), rho),
+        Surface::Torus { major_radius, .. } => det::atan2(w.dot(z), rho - major_radius),
         _ => w.dot(z),
     };
     let turns = matches!(label, Surface::Torus { .. });
     let (angle, mut second) = sampled_box(face, turns, &|p| {
         let w = p - o;
         let (a, b) = (w.dot(x), w.dot(y));
-        let rho = a.hypot(b);
-        [rho, b.atan2(a), along(w, rho)]
+        let rho = det::hypot(a, b);
+        [rho, det::atan2(b, a), along(w, rho)]
     })?;
     if !(second[0] < second[1]) {
         return Err(HlrError::Invalid("surface form domain"));
@@ -969,7 +970,7 @@ fn placed_revolution(face: &Face) -> Result<S3, HlrError> {
         let w = p - o;
         let h = w.dot(a);
         let radial = w - a * h;
-        [radial.len(), radial.dot(e2).atan2(radial.dot(e1)), h]
+        [radial.len(), det::atan2(radial.dot(e2), radial.dot(e1)), h]
     })?;
     Ok(S3::Rev(Box::new(Rev::new(o, a, Some(e1), curve, angle)?)))
 }
@@ -1046,7 +1047,7 @@ impl Rev {
         // zeros that sit there (a half torus's equators). A difference for the rest.
         let dw = match &self.profile {
             C3::Line { a, b } => Some(*b - *a),
-            C3::Arc { x, y, r, .. } => Some(*x * (-r[0] * s.sin()) + *y * (r[1] * s.cos())),
+            C3::Arc { x, y, r, .. } => Some(*x * (-r[0] * det::sin(s)) + *y * (r[1] * det::cos(s))),
             _ => None,
         };
         if let Some(dw) = dw {
@@ -1068,7 +1069,7 @@ impl Rev {
 
     fn point(&self, uv: [f64; 2]) -> Vec3 {
         let [r, h] = self.rh(uv[1]);
-        self.o + self.a * h + (self.e1 * uv[0].cos() + self.e2 * uv[0].sin()) * r
+        self.o + self.a * h + (self.e1 * det::cos(uv[0]) + self.e2 * det::sin(uv[0])) * r
     }
 
     /// Profile parameters where component `k` of the profile's (r, h) tangent vanishes: sign
@@ -1147,7 +1148,7 @@ impl Rev {
     fn silhouette(&self, d: Vec3) -> Vec<(C3, f64)> {
         let (d1, d2, da) = (d.dot(self.e1), d.dot(self.e2), d.dot(self.a));
         let rho = (d1 * d1 + d2 * d2).sqrt();
-        let phi = d2.atan2(d1);
+        let phi = det::atan2(d2, d1);
         let n = 720usize;
         let mut ss: Vec<f64> = (0..=n)
             .map(|i| self.dom[0] + (self.dom[1] - self.dom[0]) * i as f64 / n as f64)
@@ -1207,7 +1208,7 @@ impl Rev {
                 t[0] * da / (t[1] * rho)
             }
         };
-        let at = |sign: f64, s: f64| self.point([phi + sign * c(s).clamp(-1., 1.).acos(), s]);
+        let at = |sign: f64, s: f64| self.point([phi + sign * det::acos(c(s).clamp(-1., 1.)), s]);
         // The parameter between a (|c| <= 1) and b (|c| > 1) where |c| = 1.
         let edge = |a: f64, b: f64| {
             let (mut lo, mut hi) = (a, b);
@@ -1306,12 +1307,12 @@ impl Rev {
             };
             let s = self.dom[0] + (self.dom[1] - self.dom[0]) * t;
             let p = self.rh(s);
-            return (s, (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2));
+            return (s, det::powi(p[0] - q[0], 2) + det::powi(p[1] - q[1], 2));
         }
         // Coarse scan, then the finer samples around the best coarse one.
         let mut best = (0usize, f64::MAX);
         for (i, smp) in self.samples.iter().enumerate().step_by(8) {
-            let d2 = (smp[1] - q[0]).powi(2) + (smp[2] - q[1]).powi(2);
+            let d2 = det::powi(smp[1] - q[0], 2) + det::powi(smp[2] - q[1], 2);
             if d2 < best.1 {
                 best = (i, d2);
             }
@@ -1323,7 +1324,7 @@ impl Rev {
         );
         for i in best.2.saturating_sub(8)..(best.2 + 9).min(self.samples.len()) {
             if let Some(smp) = self.samples.get(i) {
-                let d2 = (smp[1] - q[0]).powi(2) + (smp[2] - q[1]).powi(2);
+                let d2 = det::powi(smp[1] - q[0], 2) + det::powi(smp[2] - q[1], 2);
                 if d2 < best.1 {
                     best = (smp[0], d2, i);
                 }
@@ -1347,7 +1348,7 @@ impl Rev {
             s = next;
         }
         let p = self.rh(s);
-        (s, (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2))
+        (s, det::powi(p[0] - q[0], 2) + det::powi(p[1] - q[1], 2))
     }
 
     fn inverse(&self, p: Vec3, hint: Option<[f64; 2]>) -> Option<[f64; 2]> {
@@ -1356,7 +1357,7 @@ impl Rev {
         let radial = w - self.a * h;
         let r = radial.len();
         let theta = if r > 1e-12 * (1. + self.rmax) {
-            radial.dot(self.e2).atan2(radial.dot(self.e1))
+            det::atan2(radial.dot(self.e2), radial.dot(self.e1))
         } else {
             hint.map_or(0., |u| u[0])
         };
@@ -1519,7 +1520,7 @@ impl Rev {
             let t = -first[0] / e[0];
             let h_apex = first[1] + t * e[1];
             let dir = if e[1] * e[0] > 0. { self.a } else { -self.a };
-            let half = (e[0].abs() / el).asin();
+            let half = det::asin(e[0].abs() / el);
             return Analytic::Cone {
                 apex: self.o + self.a * h_apex,
                 a: dir,
@@ -1781,7 +1782,7 @@ impl Nurbs {
             let n = d * deg + 3;
             let (mid, half) = (0.5 * (s[0] + s[1]), 0.5 * (s[1] - s[0]));
             let inner = (0..n).map(move |k| {
-                mid + half * (std::f64::consts::PI * (2 * k + 1) as f64 / (2 * n) as f64).cos()
+                mid + half * det::cos(std::f64::consts::PI * (2 * k + 1) as f64 / (2 * n) as f64)
             });
             [s[0], s[1]].into_iter().chain(inner).collect()
         };
@@ -1810,7 +1811,7 @@ impl Nurbs {
                 }
             }
         }
-        if 16. * (w_max / w_min).powi(d as i32) * far <= tol * size {
+        if 16. * det::powi(w_max / w_min, d as i32) * far <= tol * size {
             an
         } else {
             Analytic::Other
@@ -1919,7 +1920,7 @@ impl Nurbs {
                 };
             }
             let dr = (c2.2 - c0.2) / c0.0.dist(c2.0);
-            let half = dr.abs().atan();
+            let half = det::atan(dr.abs());
             let dir = if dr > 0. { axis } else { -axis };
             let apex = c0.0 - dir * (c0.2 / dr.abs());
             return Analytic::Cone { apex, a: dir, half };
@@ -1974,7 +1975,7 @@ impl Nurbs {
             let on = self.grid.iter().all(|q| {
                 let w = *q - c;
                 let h = w.dot(a);
-                (((w - a * h).len() - major).hypot(h) - minor).abs() <= tol * (major + minor)
+                (det::hypot((w - a * h).len() - major, h) - minor).abs() <= tol * (major + minor)
             });
             if on {
                 return Analytic::Torus { c, a, major, minor };

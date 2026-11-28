@@ -17,8 +17,8 @@ use super::types::{
 
 /// Extrude a sketch's curves or profiles into a surface body: walls only, no caps.
 ///
-/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent` and `from`) are left
-/// out: a surface extrude refuses them as "not supported yet".
+/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper2` and
+/// `from`) are left out: a surface extrude refuses them as "not supported yet".
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SurfaceExtrudeParams {

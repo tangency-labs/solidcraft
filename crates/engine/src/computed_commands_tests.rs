@@ -281,6 +281,30 @@ fn editor_display_changes_allow_apply_and_cancel() {
     }
 }
 
+/// #9223: a parameter added while the feature editor is open is part of the edit the user is
+/// making, not an outside change: the editor's OK applies the edit and the design keeps the
+/// parameter the edit uses.
+#[test]
+fn a_parameter_added_while_the_editor_is_open_keeps_the_edit() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    // The edited feature's distance is driven by the parameter the user is about to add.
+    let mut commands = commands;
+    commands[0].1["params"]["distance"] = json!("len");
+    session.execute("parameters.add", &json!({"name": "len", "expression": "20 mm"})).unwrap();
+    let prepared = session
+        .scratch()
+        .compute_editor_commands(&commands, &source, original)
+        .unwrap_or_else(|error| panic!("the editor refused the edit: {error}"));
+    session.accept_commands(prepared).unwrap();
+    assert!(session.doc.params.iter().any(|param| param.name == "len"), "the design keeps the parameter");
+    let feature = session.doc.features.last().unwrap();
+    let solidcraft_doc::FeatureKind::Extrude { extent, .. } = &feature.kind else {
+        panic!("the edited feature is the extrude");
+    };
+    assert_eq!(extent.distance.as_str(), "len", "the feature's distance is the parameter");
+    assert_editor_volume(&mut session, 12024.0);
+}
+
 #[test]
 fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
     let (mut session, source, original, commands) = extrusion_editor();

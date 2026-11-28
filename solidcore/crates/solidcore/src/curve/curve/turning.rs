@@ -28,6 +28,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
@@ -669,7 +670,7 @@ fn hermite_pieces(coef: [f64; 4], lo: f64, hi: f64) -> Option<Vec<Piece>> {
     let mag = |hh: f64| hh * (b.abs() + u * (2.0 * c.abs() + 3.0 * d.abs() * u));
     let big = mag(h.abs())
         + h.abs() * h.abs() * (2.0 * c.abs() + 6.0 * d.abs() * u)
-        + h.abs().powi(3) * 3.0 * d.abs();
+        + det::powi(h.abs(), 3) * 3.0 * d.abs();
     let scale = a.abs() + u * (b.abs() + u * (c.abs() + u * d.abs()));
     let err = gamma(12) * big;
     let mut x = Bern {
@@ -1087,14 +1088,14 @@ mod tests {
         let c = out_of_bounds_quadratic(
             &[
                 [1.0, 0.0, 0.0],
-                [1.0, h.tan(), 0.0],
+                [1.0, det::tan(h), 0.0],
                 [
                     std::f64::consts::FRAC_1_SQRT_2,
                     std::f64::consts::FRAC_1_SQRT_2,
                     0.0,
                 ],
             ],
-            Some(&[1.0, h.cos(), 1.0]),
+            Some(&[1.0, det::cos(h), 1.0]),
             vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         );
         let bx = c
@@ -1391,7 +1392,7 @@ mod tests {
     #[test]
     fn a_span_a_few_ulps_wide_keeps_its_interior_peak() {
         let pts = [[0.0, 0.0, 0.0], [0.5, 0.0, 1.0], [1.0, 0.0, 0.0]];
-        let t0 = 2f64.powi(52);
+        let t0 = det::powi(2f64, 52);
         assert_eq!(turning_top_z(pts, 1.0, 0.0, 2.0), 0.5);
         assert_eq!(turning_top_z(pts, 1.0, t0, t0 + 2.0), 0.5);
     }

@@ -1,0 +1,90 @@
+{
+  "en": {
+    "cmd.solid_transform_face": "Transform Face",
+    "help.solid.transform_face": "Moves or rotates the selected face. The surrounding faces extend or trim to meet it. Sliding a flat face along its own plane leaves the solid unchanged.",
+    "ui.transform_face.invalid_axis": "Enter a non-zero direction with three finite numbers.",
+    "ui.transform_face.length_range": "Enter a length with a magnitude below 1,000,000,000 mm.",
+    "ui.transform_face.pick_interior": "Pick a point inside the face, away from its edges.",
+    "ui.transform_face.pick_on_face": "Pick on face",
+    "ui.transform_face.pivot_x": "Pivot X",
+    "ui.transform_face.pivot_y": "Pivot Y",
+    "ui.transform_face.pivot_z": "Pivot Z"
+  },
+  "ar": {
+    "cmd.solid_transform_face": "تحويل الوجه",
+    "help.solid.transform_face": "ينقل الوجه المحدد أو يديره. تتمدد الأوجه المحيطة أو تُقص لتلتقي به. لا يتغير الجسم الصلب عند إزاحة وجه مستوٍ ضمن مستواه.",
+    "ui.transform_face.invalid_axis": "أدخل اتجاهًا غير صفري باستخدام ثلاثة أعداد منتهية.",
+    "ui.transform_face.length_range": "أدخل طولًا تقل قيمته المطلقة عن ١٬٠٠٠٬٠٠٠٬٠٠٠ مم.",
+    "ui.transform_face.pick_interior": "اختر نقطة داخل الوجه بعيدًا عن حوافه.",
+    "ui.transform_face.pick_on_face": "اختيار على الوجه",
+    "ui.transform_face.pivot_x": "إحداثي X للمحور الدوار",
+    "ui.transform_face.pivot_y": "إحداثي Y للمحور الدوار",
+    "ui.transform_face.pivot_z": "إحداثي Z للمحور الدوار"
+  },
+  "de": {
+    "cmd.solid_transform_face": "Fläche transformieren",
+    "help.solid.transform_face": "Verschiebt oder dreht die ausgewählte Fläche. Die angrenzenden Flächen werden bis zu ihr verlängert oder gekürzt. Wird eine ebene Fläche in ihrer eigenen Ebene verschoben, bleibt der Körper unverändert.",
+    "ui.transform_face.invalid_axis": "Geben Sie eine Richtung ungleich null mit drei endlichen Zahlen ein.",
+    "ui.transform_face.length_range": "Geben Sie eine Länge mit einem Betrag unter 1.000.000.000 mm ein.",
+    "ui.transform_face.pick_interior": "Wählen Sie einen Punkt im Inneren der Fläche, nicht auf ihren Kanten.",
+    "ui.transform_face.pick_on_face": "Auf Fläche wählen",
+    "ui.transform_face.pivot_x": "Drehpunkt X",
+    "ui.transform_face.pivot_y": "Drehpunkt Y",
+    "ui.transform_face.pivot_z": "Drehpunkt Z"
+  },
+  "he": {
+    "cmd.solid_transform_face": "הזזה או סיבוב של פאה",
+    "help.solid.transform_face": "מזיז או מסובב את הפאה שנבחרה. הפאות הסמוכות מתארכות או נחתכות כדי לפגוש אותה. הזזת פאה מישורית בתוך המישור שלה אינה משנה את הגוף.",
+    "ui.transform_face.invalid_axis": "יש להזין כיוון שאינו אפס באמצעות שלושה מספרים סופיים.",
+    "ui.transform_face.length_range": "יש להזין אורך שערכו המוחלט קטן מ־1,000,000,000 מ״מ.",
+    "ui.transform_face.pick_interior": "יש לבחור נקודה בתוך הפאה, הרחק מהקצוות שלה.",
+    "ui.transform_face.pick_on_face": "בחירה על הפאה",
+    "ui.transform_face.pivot_x": "ציר X של נקודת הסיבוב",
+    "ui.transform_face.pivot_y": "ציר Y של נקודת הסיבוב",
+    "ui.transform_face.pivot_z": "ציר Z של נקודת הסיבוב"
+  },
+  "ja": {
+    "cmd.solid_transform_face": "面を変換",
+    "help.solid.transform_face": "選択した面を移動または回転します。隣接する面は、その面と接するように延長またはトリムされます。平面をその面に沿って移動しても、ソリッドの形状は変わりません。",
+    "ui.transform_face.invalid_axis": "3 つの有限な数でゼロでない方向を入力してください。",
+    "ui.transform_face.length_range": "絶対値が 1,000,000,000 mm 未満の長さを入力してください。",
+    "ui.transform_face.pick_interior": "面の縁から離れた、面の内側の点を選択してください。",
+    "ui.transform_face.pick_on_face": "面上で選択",
+    "ui.transform_face.pivot_x": "回転中心 X",
+    "ui.transform_face.pivot_y": "回転中心 Y",
+    "ui.transform_face.pivot_z": "回転中心 Z"
+  },
+  "ko": {
+    "cmd.solid_transform_face": "면 변환",
+    "help.solid.transform_face": "선택한 면을 이동하거나 회전합니다. 인접한 면은 해당 면과 만나도록 연장되거나 잘립니다. 평면인 면을 같은 평면 안에서 이동하면 솔리드는 변하지 않습니다.",
+    "ui.transform_face.invalid_axis": "세 개의 유한한 수로 영벡터가 아닌 방향을 입력하세요.",
+    "ui.transform_face.length_range": "절댓값이 1,000,000,000 mm 미만인 길이를 입력하세요.",
+    "ui.transform_face.pick_interior": "모서리에서 떨어진 면 내부의 점을 선택하세요.",
+    "ui.transform_face.pick_on_face": "면에서 선택",
+    "ui.transform_face.pivot_x": "회전 중심 X",
+    "ui.transform_face.pivot_y": "회전 중심 Y",
+    "ui.transform_face.pivot_z": "회전 중심 Z"
+  },
+  "vi": {
+    "cmd.solid_transform_face": "Biến đổi mặt",
+    "help.solid.transform_face": "Di chuyển hoặc xoay mặt đã chọn. Các mặt liền kề được kéo dài hoặc cắt bớt để gặp mặt đó. Trượt một mặt phẳng dọc theo chính nó không làm thay đổi khối rắn.",
+    "ui.transform_face.invalid_axis": "Nhập một hướng khác không bằng ba số hữu hạn.",
+    "ui.transform_face.length_range": "Nhập chiều dài có giá trị tuyệt đối nhỏ hơn 1.000.000.000 mm.",
+    "ui.transform_face.pick_interior": "Chọn một điểm bên trong mặt, cách xa các cạnh.",
+    "ui.transform_face.pick_on_face": "Chọn trên mặt",
+    "ui.transform_face.pivot_x": "Tâm xoay X",
+    "ui.transform_face.pivot_y": "Tâm xoay Y",
+    "ui.transform_face.pivot_z": "Tâm xoay Z"
+  },
+  "zh": {
+    "cmd.solid_transform_face": "变换面",
+    "help.solid.transform_face": "移动或旋转选定的面。相邻的面会延伸或修剪，直到与该面相交。在平面自身所在的平面内滑动它不会改变实体。",
+    "ui.transform_face.invalid_axis": "请输入由三个有限数组成的非零方向向量。",
+    "ui.transform_face.length_range": "请输入绝对值小于 1,000,000,000 毫米的长度。",
+    "ui.transform_face.pick_interior": "请在面内选取一点，避开边缘。",
+    "ui.transform_face.pick_on_face": "在面上选取",
+    "ui.transform_face.pivot_x": "枢轴点 X",
+    "ui.transform_face.pivot_y": "枢轴点 Y",
+    "ui.transform_face.pivot_z": "枢轴点 Z"
+  }
+}

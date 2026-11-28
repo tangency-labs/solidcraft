@@ -82,6 +82,11 @@ pub struct AcpBackend {
     exited: bool,
     config_pending: Option<(u64, String)>,
     modern_config: bool,
+    /// The agent is Claude Code's adapter, as its command says ([`acp::is_claude_adapter`]),
+    /// decided once when it starts: only then are its read tools on.
+    claude: bool,
+    /// Its own tool calls in the running turn ([`acp::ClaudeCalls`]).
+    calls: acp::ClaudeCalls,
 }
 
 impl AcpBackend {
@@ -119,6 +124,8 @@ impl AcpBackend {
             exited: false,
             config_pending: None,
             modern_config: false,
+            claude: acp::is_claude_adapter(argv),
+            calls: acp::ClaudeCalls::default(),
         };
         b.request(Pending::Initialize, "initialize", acp::initialize_params(env!("CARGO_PKG_VERSION")));
         Ok(b)
@@ -142,7 +149,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note, self.claude);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -243,7 +250,13 @@ impl AcpBackend {
                 }
             }
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
-            Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
+            Incoming::Tool { id, title, kind, status, input, output, claude_tool } => {
+                let unasked = self.calls.update(&id, claude_tool.as_deref(), status);
+                out.push(Event::Tool { id, title, kind, status, input, output });
+                if let Some(tool) = unasked {
+                    out.push(Event::Unasked { tool });
+                }
+            }
             // Accept updates only during the matching session's prompt. A prompt reply earlier in
             // this poll can start a queued turn when the chat reads the events.
             Incoming::Plan { session, entries }
@@ -252,10 +265,11 @@ impl AcpBackend {
                 out.push(Event::Plan(entries));
             }
             Incoming::Plan { .. } => {}
-            Incoming::Permission { rpc, title, kind, options } => {
+            Incoming::Permission { rpc, title, kind, options, reads, writes, plan, call, claude_tool } => {
+                let claude_tool = self.calls.question(call.as_deref(), claude_tool.as_deref());
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, kind, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options, reads, writes, plan, claude_tool });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
@@ -338,6 +352,7 @@ impl ChatBackend for AcpBackend {
     }
 
     fn prompt(&mut self, parts: &[PromptPart]) {
+        self.calls.clear();
         if let Some(s) = self.session.clone() {
             self.request(Pending::Prompt, "session/prompt", acp::prompt_params(&s, parts));
         }
@@ -443,6 +458,10 @@ impl ChatBackend for AcpBackend {
         self.proc.as_ref().and_then(AgentProcess::pid)
     }
 
+    fn claude_code(&self) -> bool {
+        self.claude
+    }
+
     fn shutdown(&mut self, wait: bool) {
         if let Some(restart) = self.restart.take() {
             restart.stop(wait);
@@ -492,7 +511,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE, acp::is_claude_adapter(argv))));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             solidcraft_ui_text::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])

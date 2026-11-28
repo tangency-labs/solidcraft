@@ -506,3 +506,61 @@ fn a_sweep_along_each_edge_of_a_coil_is_its_closed_form_or_refused() {
         assert_eq!(s.doc.features.len(), before, "{pick:?}");
     }
 }
+
+/// The path: a 40 x 20 rounded rectangle about the origin on XY, corner radius 2, as lines
+/// `l1`..`l4` and corner arcs `a1`..`a4` from (-18, -10); and a profile `Prof` across its bottom
+/// line at x = 0, `2 w` wide (`w` each side of the path) and 1 high.
+fn rounded_rectangle_and_profile(s: &mut Session, w: f64) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(s, "sketch.line", json!({"points": [[-18.0, -10.0], [18.0, -10.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [18.0, -8.0], "start": [18.0, -10.0], "end": [20.0, -8.0]}));
+    run(s, "sketch.line", json!({"points": [[20.0, -8.0], [20.0, 8.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [18.0, 8.0], "start": [20.0, 8.0], "end": [18.0, 10.0]}));
+    run(s, "sketch.line", json!({"points": [[18.0, 10.0], [-18.0, 10.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [-18.0, 8.0], "start": [-18.0, 10.0], "end": [-20.0, 8.0]}));
+    run(s, "sketch.line", json!({"points": [[-20.0, 8.0], [-20.0, -8.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [-18.0, -8.0], "start": [-20.0, -8.0], "end": [-18.0, -10.0]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sketch.create", json!({"plane": {"origin": [0, -10.0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(s, "sketch.line", json!({"points": [[-w, 0], [w, 0], [w, 1], [-w, 1]], "closed": true, "infer": false}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn sweep_along(s: &mut Session, path: &[&str], name: &str) -> Result<Value, String> {
+    s.execute("solid.sweep", &json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "name": name}))
+        .map_err(|e| e.to_string())
+}
+
+/// The volume of the one body the session holds.
+fn only_volume(s: &Session) -> f64 {
+    let w = s.world_state().unwrap();
+    assert_eq!(w.bodies.len(), 1, "one body");
+    solidcraft_kernel::measure(&w.bodies[0].body).unwrap().volume
+}
+
+/// The 4 x 1 profile swept round the closed rounded rectangle with
+/// its inner edge on the corner arcs' centres, so each corner's inside wall closes to that edge.
+/// A solid of the profile's area times the path's length (its centroid on the path, Pappus):
+/// `4 (2 (40 - 4) + 2 (20 - 4) + 4 pi)` = 466.26548 mm³.
+#[test]
+fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_builds() {
+    let mut s = Session::default();
+    rounded_rectangle_and_profile(&mut s, 2.0);
+    sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"], "S").unwrap();
+    let want = 4.0 * (2.0 * (40.0 - 4.0) + 2.0 * (20.0 - 4.0) + 4.0 * PI);
+    assert!((want - 466.265_48).abs() < 1e-5);
+    let got = only_volume(&s);
+    assert!((got - want).abs() <= 1e-6 * want, "volume {got} vs {want}");
+}
+
+/// The same profile along the open run `l1`..`l3` (two corners, the inner edge on their centres
+/// too) is still the exact piecewise sweep: `4 (36 + 16 + 36 + 2 pi)`.
+#[test]
+fn an_open_sweep_whose_inner_edge_lies_on_the_corner_centres_builds() {
+    let mut s = Session::default();
+    rounded_rectangle_and_profile(&mut s, 2.0);
+    sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3"], "S").unwrap();
+    let want = 4.0 * (36.0 + 16.0 + 36.0 + 2.0 * PI);
+    let got = only_volume(&s);
+    assert!((got - want).abs() <= 1e-6 * want, "volume {got} vs {want}");
+}

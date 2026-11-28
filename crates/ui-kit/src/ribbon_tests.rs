@@ -172,10 +172,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
 }
 
 fn group(key: &'static str, buttons: Vec<Button<'static>>) -> Group<'static> {
-    let more = buttons
-        .iter()
-        .map(|b| MoreRow { id: b.id, label: b.label, icon: b.icon, shortcut: "", enabled: b.enabled, checked: None, hint: None })
-        .collect();
+    let more = buttons.iter().map(|b| crate::Item::action(b.id, b.label, b.icon).on_if(b.enabled)).collect();
     let commands = buttons.iter().map(|b| b.id).collect();
     Group {
         key,
@@ -202,6 +199,7 @@ struct RowRig {
     texts: std::cell::RefCell<Vec<(String, egui::Pos2)>>,
     /// The commands dragged off the row.
     removed: std::cell::RefCell<Vec<String>>,
+    menu_definitions: std::cell::Cell<usize>,
 }
 
 impl RowRig {
@@ -212,6 +210,7 @@ impl RowRig {
             time: std::cell::Cell::new(0.0),
             texts: Default::default(),
             removed: Default::default(),
+            menu_definitions: Default::default(),
         };
         rig.frame(Vec::new());
         rig
@@ -243,7 +242,11 @@ impl RowRig {
         let mut actions = Vec::new();
         let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(pos2(0.0, 30.0), vec2(self.width, GROUP_HEIGHT + 1.0));
-            actions = show(ui, &row, rect, &mut |_, _| false).actions;
+            actions = show(ui, &row, rect, &mut |_| {
+                self.menu_definitions.set(self.menu_definitions.get() + 1);
+                None
+            })
+            .actions;
             let dropped = actions.iter().any(|a| matches!(a, Action::Drop { .. }));
             self.removed.borrow_mut().extend(drag_end(ui, rect, None, dropped, &|_| Some("box".to_string()), &HANDLES));
         });
@@ -271,6 +274,25 @@ impl RowRig {
             .or_else(|| solidcraft_ui_registry::rect_of(name).map(|r| r.center()))
             .unwrap_or_else(|| panic!("{name} is drawn"))
     }
+}
+
+/// Building a folded group's full command tree is deferred until its menu is needed.
+#[test]
+fn closed_ribbon_overflow_does_not_build_command_menus() {
+    let rig = RowRig::new(60.0);
+    for _ in 0..3 {
+        rig.frame(Vec::new());
+    }
+    assert!(solidcraft_ui_registry::count_of("t:in_more").is_some_and(|count| count > 0.0));
+    assert_eq!(rig.menu_definitions.get(), 0, "closed overflow must not query command definitions");
+    rig.click(rig.at("t:more"));
+    rig.frame(Vec::new());
+    assert!(rig.menu_definitions.get() > 0, "opening overflow builds its shared menu tree");
+    rig.click(pos2(900.0, 300.0));
+    rig.frame(Vec::new());
+    let closed = rig.menu_definitions.get();
+    rig.frame(Vec::new());
+    assert_eq!(rig.menu_definitions.get(), closed, "closed menu stops rebuilding definitions");
 }
 
 /// A click on a button returns its command, with the button's rect; a disabled one returns
@@ -305,9 +327,11 @@ fn a_group_that_does_not_fit_is_in_the_more_menu() {
         }
     };
     open_b();
+    let picked_rect = solidcraft_ui_registry::rect_of("t:more_row:b.on").unwrap();
     let actions = rig.click(rig.at("t:more_row:b.on"));
-    let [Action::Run { id, place, .. }] = actions.as_slice() else { panic!("{actions:?}") };
+    let [Action::Run { id, rect, place }] = actions.as_slice() else { panic!("{actions:?}") };
     assert_eq!((id.as_str(), *place), ("b.on", Place::More));
+    assert_eq!(*rect, picked_rect, "overflow actions anchor to the selected row");
     open_b();
     assert_eq!(rig.click(rig.at("t:more_row:b.off")), Vec::new(), "a disabled row runs nothing");
 }
@@ -424,189 +448,8 @@ fn the_mouse_wheel_scrolls_tabs_that_do_not_fit_the_row() {
     assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_some(), "the wheel brought the last tab into view");
 }
 
-use egui::{Event, RawInput};
-
-/// One pass of a fake two-row drop-down at `menu`; returns the tips shown this pass.
-fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(usize, Rect)> {
-    let raw = RawInput { events: vec![Event::PointerMoved(at)], time: Some(time), ..Default::default() };
-    let mut shown: Vec<(usize, Rect)> = Vec::new();
-    crate::test_support::raw_frame(ctx, raw, |ui| {
-        let ctx = ui.ctx();
-        crate::Container::new(ctx, crate::Surface::Popup).area(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
-            for row in 0..2 {
-                let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
-                let resp = ui.interact(rect, egui::Id::unique(("test_row", row)), Sense::hover());
-                let tip = if row == 0 {
-                    menu_tip(ui, menu, &resp, |ui| {
-                        ui.label("first row");
-                    })
-                } else {
-                    menu_tip(ui, menu, &resp, |ui| {
-                        ui.label("second row");
-                    })
-                };
-                if let Some(rect) = tip {
-                    shown.push((row, rect));
-                }
-            }
-        });
-    });
-    shown
-}
-
-/// egui registers hover a pass or two after the pointer arrives (measured), while leaving
-/// a row drops hover the same pass. Timings below keep a margin around that lag.
-#[test]
-fn each_newly_hovered_row_waits_the_full_tip_delay() {
-    let ctx = crate::test_support::context();
-    let menu = Rect::from_min_size(pos2(20.0, 20.0), vec2(220.0, 64.0));
-    let a = menu.min + vec2(10.0, 16.0);
-    let b = menu.min + vec2(10.0, 48.0);
-    let mut tips = Vec::new();
-    for (time, at, expect) in [
-        (0.0, a, None),
-        (0.1, a, None),
-        (0.3, a, None), // hover registers around here; the first row's delay starts
-        (0.5, a, None), // still inside the delay
-        (0.9, a, Some(0)),
-        (1.0, b, None),    // the first row lost hover the moment the pointer left it
-        (1.2, b, None),    // the second row must not inherit the open tip's grace (#10481)
-        (1.4, b, None),    // its own delay cannot have elapsed yet, whenever hover registered
-        (2.2, b, Some(1)), // after its own full delay, with margin for late registration
-    ] {
-        let got = tip_pass(&ctx, menu, time, at);
-        match expect {
-            Some(row) => {
-                assert_eq!(got.len(), 1, "exactly row {row}'s tip at t={time}, got {got:?}");
-                assert_eq!(got[0].0, row, "wrong row's tip at t={time}");
-                let tip = got[0].1;
-                assert!(tip.min.x >= menu.max.x, "the tip sits beside the menu, never over its rows: {tip:?} vs {menu:?}");
-                tips.push((row, tip));
-            }
-            None => assert!(got.is_empty(), "no tip expected at t={time}, got {got:?}"),
-        }
-    }
-    assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
-}
-
-fn menu_style() -> MenuStyle<'static> {
-    MenuStyle {
-        pin_tip: "Pin",
-        unpin_tip: "Unpin",
-        accent: solidcraft_theme::TabAccent::for_ramp(&Tokens::get(), solidcraft_theme::AccentRamp::Main),
-        focus: egui::Id::unique("test_menu"),
-        entry: &["t:entry:"],
-        pin: "t:pin:",
-        more: "t:more:",
-        more_tip: "More",
-        hot: "t:hot:",
-        reveal: "t:reveal",
-    }
-}
-
-fn entry(id: &'static str, enabled: bool) -> MenuEntry<'static> {
-    MenuEntry { id, label: id, icon: "box", shortcut: "", enabled, checked: None, pinned: false, tip: None, app_paints: false }
-}
-
-/// A menu of two rows (the second disabled) or, `grid`, the same as a grid; each frame's choice.
-struct MenuRig {
-    ctx: egui::Context,
-    grid: bool,
-    time: std::cell::Cell<f64>,
-}
-
-impl MenuRig {
-    fn new(grid: bool) -> MenuRig {
-        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0) };
-        rig.frame(Vec::new(), 0.0);
-        rig
-    }
-
-    fn frame(&self, events: Vec<egui::Event>, wait: f64) -> Vec<(String, MenuAction)> {
-        solidcraft_ui_registry::clear_handles();
-        self.time.set(self.time.get() + 1.0 / 60.0 + wait);
-        let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
-            time: Some(self.time.get()),
-            events,
-            focused: true,
-            ..Default::default()
-        };
-        let entries = [entry("m.on", true), entry("m.off", false)];
-        let style = menu_style();
-        let mut chosen = Vec::new();
-        crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            if self.grid {
-                let grouped: Vec<(Option<&str>, MenuEntry)> = entries.iter().map(|e| (None, *e)).collect();
-                let out = grid(ui, &grouped, &[], &style);
-                chosen.extend(out.action.and_then(|(i, a)| entries.get(i).map(|e| (e.id.to_string(), a))));
-            } else {
-                for e in &entries {
-                    let (action, _) = menu_row(ui, e, 220.0, None, &style);
-                    chosen.extend(action.map(|a| (e.id.to_string(), a)));
-                }
-            }
-        });
-        chosen
-    }
-
-    fn press(&self, at: egui::Pos2, button: egui::PointerButton, wait: f64) -> Vec<(String, MenuAction)> {
-        let event = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
-        let mut chosen = self.frame(vec![egui::Event::PointerMoved(at)], 1.0);
-        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at)], wait));
-        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)], 0.0));
-        chosen.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)], 0.0));
-        chosen
-    }
-
-    fn at(&self, name: &str) -> egui::Pos2 {
-        solidcraft_ui_registry::handle_at(name).unwrap_or_else(|| panic!("{name} is drawn"))
-    }
-}
-
-/// A row or grid icon is hot under the pointer, runs its command when clicked, opens its menu on
-/// a right-click, runs nothing when disabled; a grid icon pins or unpins from its pin, a row
-/// opens its menu from its ⋯.
-#[test]
-fn a_menu_entry_returns_what_was_chosen() {
-    for grid in [false, true] {
-        let rig = MenuRig::new(grid);
-        let on = rig.at("t:entry:m.on");
-        let chosen = rig.press(on, egui::PointerButton::Primary, 0.0);
-        assert!(matches!(chosen.as_slice(), [(id, MenuAction::Run(rect))] if id == "m.on" && rect.contains(on)), "grid {grid}: {chosen:?}");
-        assert_eq!(solidcraft_ui_registry::handle_at("t:hot:m.on"), Some(on), "grid {grid}: the entry under the pointer is hot");
-        let chosen = rig.press(on, egui::PointerButton::Secondary, 0.0);
-        assert!(matches!(chosen.as_slice(), [(id, MenuAction::Menu(_))] if id == "m.on"), "grid {grid}: {chosen:?}");
-        assert_eq!(rig.press(rig.at("t:entry:m.off"), egui::PointerButton::Primary, 0.0), Vec::new(), "grid {grid}: a disabled entry runs nothing");
-        if !grid {
-            rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
-            let chosen = rig.press(rig.at("t:more:m.on"), egui::PointerButton::Primary, 0.0);
-            assert!(matches!(chosen.as_slice(), [(id, MenuAction::More(_))] if id == "m.on"), "{chosen:?}");
-            continue;
-        }
-        // A grid icon's pin takes clicks once the pointer has rested on the icon.
-        rig.press(on, egui::PointerButton::Primary, PIN_DELAY + 0.1);
-        rig.frame(vec![egui::Event::PointerMoved(on)], PIN_DELAY + 0.1);
-        let pin = rig.at("t:pin:m.on");
-        let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
-        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
-    }
-}
-
-/// A list row has no pin of its own (#11853): its ⋯ sits at the row's end, where the pin was.
-#[test]
-fn a_list_row_shows_its_more_button_at_its_end_and_no_pin() {
-    let rig = MenuRig::new(false);
-    let on = rig.at("t:entry:m.on");
-    for wait in [0.0, 2.0] {
-        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
-        rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
-        assert!(solidcraft_ui_registry::handle_at("t:pin:m.on").is_none(), "a row publishes no pin, even after a rest");
-        // MenuRig rows are 220 wide; the entry handle is the row's centre.
-        assert_eq!(rig.at("t:more:m.on"), pos2(on.x + 110.0 - MORE_INSET, on.y), "the ⋯ is at the row's end");
-    }
-}
-
+// Menus use the shared Item renderer; its keyboard, disabled, secondary-action and drag
+// contracts are exercised by menu_popup tests. Ribbon geometry and drops stay covered here.
 impl RowRig {
     /// Press at `from`, move past the drag threshold, then to `to`, and release there.
     fn drag(&self, from: egui::Pos2, to: egui::Pos2) -> Vec<Action> {
@@ -672,7 +515,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 400.0))), ..Default::default() };
     let mut deferred = Vec::new();
     crate::test_support::raw_frame(&ctx, input, |ui| {
-        let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(800.0, GROUP_HEIGHT + 1.0)), &mut |_, _| false);
+        let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(800.0, GROUP_HEIGHT + 1.0)), &mut |_| None);
         deferred = out.buttons.into_iter().filter_map(|d| d.deferred).collect();
         assert_eq!(deferred.len(), 1, "only the button the app paints is deferred");
         let look = DeferredLook {
@@ -712,7 +555,7 @@ fn split_button_parts_are_separated_without_overlap() {
         solidcraft_ui_registry::clear_handles();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 200.0))), ..Default::default() };
         crate::test_support::raw_frame(&ctx, input, |ui| {
-            let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(300.0, GROUP_HEIGHT + 1.0)), &mut |_, _| false);
+            let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(300.0, GROUP_HEIGHT + 1.0)), &mut |_| None);
             assert_eq!(out.buttons.len(), 1);
             let drawn = &out.buttons[0];
             let split = drawn.split.as_ref().expect("split response");

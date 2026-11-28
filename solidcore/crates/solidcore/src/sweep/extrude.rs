@@ -129,6 +129,7 @@ mod tests {
     use super::*;
     use crate::curve::line::Line;
     use crate::geom::vector3d::Point3;
+    use crate::math::det;
     use crate::topology::brep::p2::is_manifold_solid;
 
     const TOL: ExtrudeTolerances = ExtrudeTolerances {
@@ -410,7 +411,7 @@ mod tests {
             angle_deg: 0.5,
             corner: OffsetCornerType::CurveExtension,
         });
-        let t = 0.5_f64.to_radians().tan();
+        let t = det::tan(0.5_f64.to_radians());
         let (w, h2) = (2.0 * a, 2.0 * b);
         let c4 = 4.0 - std::f64::consts::PI;
         let volume = |h: f64| {

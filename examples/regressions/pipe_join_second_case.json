@@ -1,0 +1,383 @@
+{
+ "description": "#22146, second case: Pipe1 (a 5 mm pipe along lines and arcs of a sketch on the YZ plane) and Pipe2, joined into it, must give one valid body of 11173.137229284 mm^3 (Pipe1 10170.259935237927 + Pipe2 1002.8772940460799, touching, no overlap). The join failed SMLib's check on the torus face of Pipe1 read back through the flat arrays.",
+ "commands": [
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 1,
+     "name": "Sketch1",
+     "suppressed": false,
+     "type": "sketch",
+     "plane": {
+      "type": "custom",
+      "plane": {
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_dir": [
+        0,
+        1,
+        0
+       ],
+       "y_dir": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "sketch": {
+      "points": [
+       {
+        "id": "origin",
+        "pos": [
+         0.0,
+         0.0
+        ],
+        "fixed": true
+       },
+       {
+        "id": "p1",
+        "pos": [
+         15.87500000000112,
+         -152.3999999999999
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p2",
+        "pos": [
+         15.875,
+         1.1668691288920876e-13
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p3",
+        "pos": [
+         26.356702775769584,
+         -0.3608803402213867
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p4",
+        "pos": [
+         155.575,
+         16.827500000000036
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p5",
+        "pos": [
+         153.7843757758062,
+         -9.145849608545472
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p6",
+        "pos": [
+         155.5749999999999,
+         42.86250000000005
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p7",
+        "pos": [
+         -111.1249999999999,
+         -7.937500000000874
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p8",
+        "pos": [
+         -112.01158224701373,
+         42.854762913943816
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p9",
+        "pos": [
+         -111.12500000000009,
+         42.862499999999116
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p10",
+        "pos": [
+         0,
+         0
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p11",
+        "pos": [
+         -20.078504920390053,
+         0
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p12",
+        "pos": [
+         155.575,
+         30.18939258332125
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p13",
+        "pos": [
+         -124.71158224701374,
+         42.63308358935547
+        ],
+        "fixed": false
+       }
+      ],
+      "curves": [
+       {
+        "id": "a1",
+        "type": "arc",
+        "c": 1,
+        "a": 3,
+        "b": 2,
+        "construction": false
+       },
+       {
+        "id": "a2",
+        "type": "arc",
+        "c": 4,
+        "a": 5,
+        "b": 6,
+        "construction": false
+       },
+       {
+        "id": "a3",
+        "type": "arc",
+        "c": 7,
+        "a": 9,
+        "b": 8,
+        "construction": false
+       },
+       {
+        "id": "l1",
+        "type": "line",
+        "a": 10,
+        "b": 2,
+        "construction": false
+       },
+       {
+        "id": "l2",
+        "type": "line",
+        "a": 3,
+        "b": 5,
+        "construction": false
+       },
+       {
+        "id": "l3",
+        "type": "line",
+        "a": 6,
+        "b": 9,
+        "construction": false
+       },
+       {
+        "id": "l4",
+        "type": "line",
+        "a": 10,
+        "b": 11,
+        "construction": true
+       },
+       {
+        "id": "l5",
+        "type": "line",
+        "a": 4,
+        "b": 12,
+        "construction": true
+       },
+       {
+        "id": "l6",
+        "type": "line",
+        "a": 13,
+        "b": 8,
+        "construction": false
+       }
+      ],
+      "constraints": [],
+      "counters": {
+       "l": 6,
+       "a": 3,
+       "c": 0,
+       "p": 14
+      }
+     }
+    }
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 2,
+     "name": "Pipe1",
+     "suppressed": false,
+     "type": "pipe",
+     "path_sketch": 1,
+     "path": [
+      "l1",
+      "a1",
+      "l2",
+      "a2",
+      "l3",
+      "a3",
+      "l6"
+     ],
+     "diameter": "5",
+     "operation": "new_body"
+    }
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 3,
+     "name": "Sketch2",
+     "suppressed": false,
+     "type": "sketch",
+     "plane": {
+      "type": "custom",
+      "plane": {
+       "origin": [
+        0,
+        -0.7819220432273616,
+        44.79628385474434
+       ],
+       "x_dir": [
+        0,
+        -0.9998476951563914,
+        -0.01745240643728204
+       ],
+       "y_dir": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "sketch": {
+      "points": [
+       {
+        "id": "origin",
+        "pos": [
+         0.0,
+         0.0
+        ],
+        "fixed": true
+       },
+       {
+        "id": "p1",
+        "pos": [
+         127.87675242949744,
+         -124.08194968884071
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p2",
+        "pos": [
+         127.87675242949744,
+         0
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p3",
+        "pos": [
+         142.99853816650725,
+         -0.9248880370298455
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p4",
+        "pos": [
+         123.94853816650738,
+         0
+        ],
+        "fixed": false
+       },
+       {
+        "id": "p5",
+        "pos": [
+         174.74853816650736,
+         -4.823297845697007
+        ],
+        "fixed": false
+       }
+      ],
+      "curves": [
+       {
+        "id": "a1",
+        "type": "arc",
+        "c": 1,
+        "a": 3,
+        "b": 2,
+        "construction": false
+       },
+       {
+        "id": "l1",
+        "type": "line",
+        "a": 4,
+        "b": 2,
+        "construction": false
+       },
+       {
+        "id": "l2",
+        "type": "line",
+        "a": 3,
+        "b": 5,
+        "construction": false
+       }
+      ],
+      "constraints": [],
+      "counters": {
+       "l": 2,
+       "a": 1,
+       "c": 0,
+       "p": 6
+      }
+     }
+    }
+   }
+  },
+  {
+   "command": "timeline.add",
+   "params": {
+    "feature": {
+     "id": 4,
+     "name": "Pipe2",
+     "suppressed": false,
+     "type": "pipe",
+     "path_sketch": 3,
+     "path": [
+      "l1",
+      "a1",
+      "l2"
+     ],
+     "diameter": "5",
+     "operation": "join"
+    }
+   }
+  }
+ ]
+}

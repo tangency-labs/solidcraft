@@ -82,8 +82,14 @@ pub enum PanelAction {
         at: Option<usize>,
     },
     AttachDropped(Vec<std::path::PathBuf>),
-    /// Choose a file to attach.
+    /// Choose files to attach, one or several: for an endpoint, those the chat can send or import;
+    /// for a coding agent, any type.
     ChooseAttachment,
+    /// Choose folders to attach, one or several, for a coding agent: it is told where each is.
+    ChooseFolder,
+    /// Choose files and folders in one dialog, for a coding agent, where the host's dialog can
+    /// (macOS).
+    ChooseAny,
     /// Attach the clipboard's picture (desktop only, as the clipboard reader is).
     #[cfg(not(target_arch = "wasm32"))]
     PastePicture,
@@ -151,13 +157,13 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
-        PanelAction::ChooseAttachment => app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
-            if let Some(path) = path
-                && let Err(e) = attach_path(app, &path)
-            {
-                app.agent_chat.notice(e, true);
-            }
-        }),
+        PanelAction::ChooseAttachment => {
+            // A coding agent reads any file itself; an endpoint gets what the chat can send or import.
+            let exts = if takes_paths(app) { Vec::new() } else { attach::extensions() };
+            app.pick_files(tr("ui.agent_chat_attachable"), &exts, |app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from)))
+        }
+        PanelAction::ChooseFolder => app.pick_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseAny => app.pick_files_or_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::PastePicture => {
             if let Err(e) = paste_picture(app) {
@@ -253,6 +259,9 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
+    /// The host's file dialog chooses files and folders together (macOS): the + menu offers a
+    /// coding agent one Choose files or folders… instead of Choose files… and Choose folders….
+    pub mixed_picker: bool,
 }
 
 impl PanelView {
@@ -285,6 +294,7 @@ impl PanelView {
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
+            mixed_picker: app.services.pick_files_or_folders.is_some(),
         }
     }
 }
@@ -1331,7 +1341,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height + Tokens::get().space_2);
-                        add_menu(chat, ui);
+                        add_menu(chat, view, ui);
                         let mode = view.permission;
                         let permissions = ui
                             .allocate_ui(vec2(Tokens::get().space_24 * 4.0, Tokens::get().control_height), |ui| {
@@ -2239,26 +2249,12 @@ fn took_line(ui: &mut egui::Ui, stamp: &times::Stamp) {
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
     solidcraft_ui_registry::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
-    let opened = ui
-        .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
-    let mut copy = false;
-    Container::new(ui.ctx(), Surface::Popup)
-        .menu(response)
-        .at_pointer_fixed()
-        .frame(ui_kit::Menu::frame())
-        .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
-        .show(|ui| {
-            ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
-                let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
-                let row = item.show(ui);
-                solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
-                if row.clicked() {
-                    copy = true;
-                    ui.close();
-                }
-            });
-        });
-    if copy {
+    if !ui_kit::Menu::context_active(response) {
+        return;
+    }
+    let mut item = ui_kit::Item::action("copy_message", tr("ui.agent_chat_copy_message"), "copy");
+    item.aliases.push(format!("agent_chat:copy_menu:{n}"));
+    if ui_kit::Menu::context_items(response, &[item]).is_some() {
         ui.ctx().copy_text(text.to_owned());
     }
 }
@@ -2449,38 +2445,49 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     });
                 }
             }
-            Item::Permission { title, options, answer: given, .. } => {
+            Item::Permission { title, options, answer: given, plan, .. } => {
                 let card = ui_kit::assistant_approval(
                     ui,
                     &trf("ui.agent_chat_permission", &[("title", &crate::agent_label::card_title(solidcraft_ui_text::locale(), title))]),
-                    |ui| match given {
-                        Some(a) => {
-                            ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                    |ui| {
+                        // The plan the question asks to approve, in full (#19571).
+                        if let Some(plan) = plan {
+                            let shown = ui_kit::assistant_tool_detail(ui, |ui| {
+                                ui.set_min_width(ui.available_width().max(0.0));
+                                ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, plan, all_selected));
+                            });
+                            solidcraft_ui_registry::publish_rect("agent_chat:plan", shown.response.rect);
                         }
-                        None => {
-                            ui_kit::assistant_actions(ui, |ui| {
-                                for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
-                                {
-                                    let r = if o.kind == "allow_once" {
-                                        ui_kit::primary_button(ui, &o.name)
-                                    } else {
-                                        ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
-                                    };
-                                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
-                                    if r.clicked() {
-                                        answer = Some((n, Some(o.id.clone())));
-                                    }
-                                }
-                                ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-                                    for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
-                                        let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                        match given {
+                            Some(a) => {
+                                ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                            }
+                            None => {
+                                ui_kit::assistant_actions(ui, |ui| {
+                                    for o in
+                                        options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
+                                    {
+                                        let r = if o.kind == "allow_once" {
+                                            ui_kit::primary_button(ui, &o.name)
+                                        } else {
+                                            ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
+                                        };
                                         solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                         if r.clicked() {
                                             answer = Some((n, Some(o.id.clone())));
                                         }
                                     }
+                                    ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+                                        for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
+                                            let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                                            solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                            if r.clicked() {
+                                                answer = Some((n, Some(o.id.clone())));
+                                            }
+                                        }
+                                    });
                                 });
-                            });
+                            }
                         }
                     },
                 );
@@ -2793,6 +2800,10 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
+/// The tallest the file chips get past eight files, about three and a half rows: more scroll, and
+/// the half row shows that there are more. A message to a coding agent holds up to 200 files,
+/// which would otherwise push the conversation out of the panel; eight or fewer show whole.
+pub(super) const CHIPS_MAX_HEIGHT: f32 = 112.0;
 
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
 /// when the message has no pills), with their "gone" flags and each one's place among all of the
@@ -2960,6 +2971,7 @@ fn pill_input(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, focused
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
 /// wraps plain widgets, not framed groups, and one row wider than the chat widens all below it.
+/// Past eight files and [`CHIPS_MAX_HEIGHT`], the rows scroll.
 #[cfg(not(target_arch = "wasm32"))]
 fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // Thumbnails of files no longer on the message are let go.
@@ -2968,29 +2980,32 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     if chat.files() == 0 {
         return;
     }
-    let gap = ui.spacing().item_spacing.x;
-    let avail = ui.available_width().max(1.0);
-    let w = CHIP_W.min(avail);
-    let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
     let (mut remove, mut stop) = (None, None);
     // The files read, then those still being read (each takes its place once it is done).
     let read = chat.attachments.len();
     let indices: Vec<usize> = (0..chat.files()).collect();
-    for row in indices.chunks(per_row) {
-        ui.horizontal(|ui| {
-            for &i in row {
-                if let Some(f) = chat.attachments.get(i) {
-                    if chip(ui, &mut chat.thumbs, f, i, w) {
-                        remove = Some(i);
+    let most = if chat.files() > attach::MAX_FILES { CHIPS_MAX_HEIGHT } else { f32::INFINITY };
+    egui::ScrollArea::vertical().id_salt("sc_agent_chat_chips").max_height(most).auto_shrink([false, true]).show(ui, |ui| {
+        let gap = ui.spacing().item_spacing.x;
+        let avail = ui.available_width().max(1.0);
+        let w = CHIP_W.min(avail);
+        let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
+        for row in indices.chunks(per_row) {
+            ui.horizontal(|ui| {
+                for &i in row {
+                    if let Some(f) = chat.attachments.get(i) {
+                        if chip(ui, &mut chat.thumbs, f, i, w) {
+                            remove = Some(i);
+                        }
+                    } else if let Some(l) = chat.loading.get(i - read)
+                        && loading_chip(ui, &l.name, l.importing(), i - read, w)
+                    {
+                        stop = Some(i - read);
                     }
-                } else if let Some(l) = chat.loading.get(i - read)
-                    && loading_chip(ui, &l.name, l.importing(), i - read, w)
-                {
-                    stop = Some(i - read);
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     if let Some(i) = remove
         && i < chat.attachments.len()
     {
@@ -3001,6 +3016,17 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
         && i < chat.loading.len()
     {
         chat.loading.remove(i);
+    }
+}
+
+/// What a chip says when the pointer rests on it: the file's name; for one that goes by its path,
+/// that place (and for a folder, what the agent does with it).
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn chip_tip(f: &attach::Attachment) -> String {
+    match &f.content {
+        attach::Content::Reference { path, .. } => path.display().to_string(),
+        attach::Content::Folder { path, .. } => format!("{}\n{}", path.display(), tr("ui.agent_chat_folder_tip")),
+        _ => f.name.clone(),
     }
 }
 
@@ -3077,6 +3103,16 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                         let size = tex.size_vec2();
                         ui.image((tex.id(), size * (22.0 / size.x.max(size.y).max(1.0)))).rect.width()
                     }
+                    None if matches!(f.content, attach::Content::Folder { .. }) => {
+                        // A folder: a body with a tab on its top left.
+                        let (r, _) = ui.allocate_exact_size(vec2(28.0, 20.0), Sense::hover());
+                        let s = Stroke::new(1.2, t.text_dim);
+                        let body = Rect::from_min_max(pos2(r.left() + 3.0, r.top() + 5.0), pos2(r.right() - 3.0, r.bottom() - 2.0));
+                        let tab = Rect::from_min_max(pos2(body.left(), r.top() + 2.0), pos2(body.left() + 9.0, body.top()));
+                        ui.painter().rect_stroke(body, 1.5, s, egui::StrokeKind::Inside);
+                        ui.painter().rect_filled(tab, 1.0, t.text_dim);
+                        r.width()
+                    }
                     None => {
                         // A page marked with the file's type.
                         let (r, _) = ui.allocate_exact_size(vec2(28.0, 20.0), Sense::hover());
@@ -3098,7 +3134,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                     ui.add(egui::Label::new(RichText::new(&f.name).size(t.font_small)).truncate())
                 })
                 .inner
-                .backing_on_hover_text(&f.name);
+                .backing_on_hover_text(chip_tip(f));
                 let (r, x) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
                 let c = r.center();
                 let s = Stroke::new(1.3, if x.hovered() { t.text } else { t.text_dim });
@@ -3113,32 +3149,41 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
     clicked
 }
 
-/// The + button: choose a file with the app's picker (pictures, text and CAD files), or paste
-/// the clipboard's picture.
+/// The + button: choose files, several at once, or paste the clipboard's picture. For a coding
+/// agent, folders too, and files of any type (in one dialog where the host's dialog mixes them;
+/// else one item for each).
 #[cfg(not(target_arch = "wasm32"))]
-fn add_menu(chat: &mut AgentChat, ui: &mut egui::Ui) {
-    let (mut choose, mut paste) = (false, false);
-    let r = ui_kit::action_menu(ui, "+", |ui| {
-        let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:add_file", a.rect.center());
-        let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:paste_picture", b.rect.center());
-        if a.clicked() {
-            choose = true;
-            ui.close();
+fn add_menu(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+    let takes_paths = view.current.as_ref().is_some_and(|e| !e.kind.is_api());
+    let entry = |id: &str, label: &'static str, handle: &str, tip: Option<&'static str>| {
+        let mut item = ui_kit::Item::action(id, tr(label), if id == "paste_picture" { "paste" } else { "open" });
+        item.aliases.push(handle.into());
+        item.tip = tip.map(|key| tr(key).to_string());
+        item
+    };
+    let mut items = if !takes_paths {
+        vec![entry("add_file", "ui.agent_chat_add_file", "agent_chat:add_file", None)]
+    } else if view.mixed_picker {
+        vec![entry("add_any", "ui.agent_chat_add_any", "agent_chat:add_any", Some("ui.agent_chat_add_folder_tip"))]
+    } else {
+        vec![
+            entry("add_file", "ui.agent_chat_add_file", "agent_chat:add_file", None),
+            entry("add_folder", "ui.agent_chat_add_folder", "agent_chat:add_folder", Some("ui.agent_chat_add_folder_tip")),
+        ]
+    };
+    items.push(entry("paste_picture", "ui.agent_chat_paste_picture", "agent_chat:paste_picture", None));
+    let response = ui_kit::button(ui, "+", ui_kit::Button::Small);
+    solidcraft_ui_registry::publish_handle("agent_chat:add", response.rect.center());
+    let picked = ui_kit::Menu::button_items(&response, &items);
+    response.backing_on_hover_text(tr("ui.agent_chat_add"));
+    if let Some(item) = picked {
+        match item.id.as_str() {
+            "add_file" => chat.actions.push(PanelAction::ChooseAttachment),
+            "add_any" => chat.actions.push(PanelAction::ChooseAny),
+            "add_folder" => chat.actions.push(PanelAction::ChooseFolder),
+            "paste_picture" => chat.actions.push(PanelAction::PastePicture),
+            _ => {}
         }
-        if b.clicked() {
-            paste = true;
-            ui.close();
-        }
-    });
-    solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
-    r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
-    if choose {
-        chat.actions.push(PanelAction::ChooseAttachment);
-    }
-    if paste {
-        chat.actions.push(PanelAction::PastePicture);
     }
 }
 
@@ -3518,6 +3563,7 @@ mod tests {
             rtl: false,
             shared,
             composer_height: None,
+            mixed_picker: false,
         }
     }
 
@@ -3658,6 +3704,7 @@ mod tests {
                 key: 4,
                 title: "Run solid.fillet".into(),
                 answer: None,
+                plan: None,
                 options: vec![
                     PermissionOption { id: "reject".into(), name: "Deny".into(), kind: "reject_once".into() },
                     PermissionOption { id: "remember".into(), name: "Always allow".into(), kind: "allow_always".into() },
@@ -3681,6 +3728,41 @@ mod tests {
             let always = solidcraft_ui_registry::handle_at("agent_chat:permission:remember").expect("always");
             assert!(once.x > always.x, "primary once choice remains on the right");
             assert_eq!(app.agent_chat.waiting(), 1, "drawing never answers an approval");
+        }
+    }
+
+    /// The plan a question asks the user to approve is drawn in it, inside the panel and above its
+    /// answers, at every width (#19571).
+    #[test]
+    fn the_plan_a_question_asks_to_approve_is_shown_above_its_answers() {
+        for width in [280.0, 440.0, 760.0] {
+            let ctx = crate::fonts::test_context();
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.agent_chat.items.push(Item::Permission {
+                key: 9,
+                title: "Ready to code?".into(),
+                answer: None,
+                plan: Some("# Plan: a block with a hole\n\n1. `solid.box` 40 x 20 x 10 mm, named Block.\n2. A 5 mm hole through its centre.".into()),
+                options: vec![
+                    PermissionOption { id: "exit-plan-default".into(), name: "Yes, manually approve edits".into(), kind: "allow_once".into() },
+                    PermissionOption { id: "reject".into(), name: "No, keep planning".into(), kind: "reject_once".into() },
+                ],
+            });
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
+            solidcraft_ui_registry::clear_handles();
+            let view = PanelView::of(&mut app, &ctx);
+            let mut output = ctx.run_ui(input, |ui| {
+                ui.set_width(width);
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, 720.0));
+            });
+            output.textures_delta.clear();
+            let plan = solidcraft_ui_registry::rect_of("agent_chat:plan").expect("the plan is drawn");
+            assert!(plan.left() >= 0.0 && plan.right() <= width + 16.0, "plan outside {width}: {plan:?}");
+            assert!(plan.height() > 40.0, "a heading and two steps: {plan:?}");
+            for id in ["exit-plan-default", "reject"] {
+                let at = solidcraft_ui_registry::handle_at(&format!("agent_chat:permission:{id}")).expect("answer drawn");
+                assert!(at.y > plan.bottom(), "{id} below the plan at {width}: {at:?} {plan:?}");
+            }
         }
     }
 

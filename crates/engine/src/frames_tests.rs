@@ -256,6 +256,38 @@ fn move_expression_distances_follow_world_axes_in_a_turned_component() {
 }
 
 #[test]
+fn transform_face_uses_the_picked_components_frame_on_create_and_redefine() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence":"C:1","axis":[1,0,0],"angle":"90 deg","translate":[50,10,20],"capture":true}));
+    run(&mut s, "solid.box", json!({"corner":[95,0,20],"length":10,"width":10,"height":10,"operation":"new","body_name":"Neighbour"}));
+    run(&mut s, "parameters.add", json!({"name":"travel","expression":"2 mm"}));
+    let (lo, hi) = world_bbox(&s, "Body1");
+    let other = world_bbox(&s, "Neighbour");
+    let st = s.model.state();
+    let b = st.body("Body1").unwrap();
+    let local_top = b.body.face_at_point(Vec3::new(20., 30., 10.)).unwrap().unwrap();
+    let name = &solidcraft_doc::naming::face_names(b)[local_top];
+    let cmd = "solid.transform_face";
+    run(&mut s, cmd, json!({"face":name,"translate":[0,0,"travel"],"name":"Raise"}));
+    let check = |s: &Session, rise| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let after = world_bbox(s, "Body1");
+        assert!(near(after.0, lo) && near(after.1, hi + Vec3::Z * rise), "{after:?} vs {lo:?} {hi:?}+{rise}");
+        assert_eq!(world_bbox(s, "Neighbour"), other);
+    };
+    check(&s, 2.);
+    let world_pick = [(lo.x + hi.x) / 2., (lo.y + hi.y) / 2., hi.z];
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Raise","command":cmd,"params":{"face":world_pick,"body":"Body1","translate":[0,0,"2 * travel"]}}),
+    );
+    check(&s, 4.);
+    run(&mut s, "parameters.change", json!({"name":"travel","expression":"3 mm"}));
+    check(&s, 6.);
+}
+
+#[test]
 fn move_expression_distances_keep_parameters_through_rebuild_and_reopen() {
     for copy in [false, true] {
         let mut s = block_in_component();
@@ -1537,4 +1569,283 @@ fn already_refreshed_is_guarded_against_pending_and_unsettled_import_checks() {
     assert!(!s.already_refreshed());
     s.refresh();
     assert!(s.already_refreshed());
+}
+
+/// How a block's component is placed for the placed-copy tests (placed copies).
+#[derive(Clone, Copy, Debug)]
+enum CopyPlace {
+    Translated,
+    Rotated,
+    Nested,
+}
+
+const COPY_PLACES: [CopyPlace; 3] = [CopyPlace::Translated, CopyPlace::Rotated, CopyPlace::Nested];
+
+/// A 20 x 20 x 10 block "Block" (local corner [3, 2, 0]) in a component placed as `place`, root
+/// active, with `feature` its box feature's name.
+fn copy_block(place: Option<CopyPlace>) -> Session {
+    let mut s = Session::default();
+    let make = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [3, 2, 0], "body_name": "Block"}));
+    };
+    match place {
+        None => make(&mut s),
+        Some(CopyPlace::Translated | CopyPlace::Rotated) => {
+            let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+            make(&mut s);
+            let mut p = json!({"occurrence": part["occurrence"], "translate": [50, 7, 100]});
+            if matches!(place, Some(CopyPlace::Rotated)) {
+                p["axis"] = json!([1, 0, 0]);
+                p["angle"] = json!("90 deg");
+            }
+            run(&mut s, "occurrence.move", p);
+        }
+        Some(CopyPlace::Nested) => {
+            let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}));
+            let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+            make(&mut s);
+            run(&mut s, "occurrence.move", json!({"occurrence": inner["occurrence"], "translate": [5, 0, 30], "axis": [0, 1, 0], "angle": "90 deg"}));
+            run(&mut s, "occurrence.move", json!({"occurrence": outer["occurrence"], "translate": [20, 10, 70]}));
+        }
+    }
+    if place.is_some() {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    s
+}
+
+/// The block's placement frame.
+fn block_frame(s: &Session) -> solidcraft_doc::Mat {
+    s.body_frames().iter().find(|(w, _, _)| w == "Block").map(|(.., m)| *m).unwrap_or(solidcraft_doc::IDENTITY)
+}
+
+fn to_world_point(s: &Session, p: [f64; 3]) -> Value {
+    let q = solidcraft_doc::apply_point(&block_frame(s), Vec3::new(p[0], p[1], p[2]));
+    json!([q.x, q.y, q.z])
+}
+
+fn to_world_dir(s: &Session, d: [f64; 3]) -> Value {
+    let q = solidcraft_doc::apply_vector(&block_frame(s), Vec3::new(d[0], d[1], d[2]));
+    json!([q.x, q.y, q.z])
+}
+
+/// The world boxes and volumes of every body but the original block, sorted.
+fn copies_world(s: &Session) -> Vec<([f64; 6], f64)> {
+    let world = s.world_state().unwrap();
+    let mut out: Vec<([f64; 6], f64)> = world
+        .bodies
+        .iter()
+        .filter(|b| b.name != "Block")
+        .map(|b| {
+            let bb = b.mesh().bounds();
+            let r = |x: f64| (x * 1e4).round() / 1e4;
+            ([r(bb.min.x), r(bb.min.y), r(bb.min.z), r(bb.max.x), r(bb.max.y), r(bb.max.z)], b.measure().map(|m| m.volume).unwrap_or(0.0))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+/// The box of a local box carried by the placement `m` (exact for quarter turns).
+fn placed_box(m: &solidcraft_doc::Mat, b: [f64; 6]) -> [f64; 6] {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for i in 0..8 {
+        let c = Vec3::new(b[3 * (i & 1)], b[1 + 3 * ((i >> 1) & 1)], b[2 + 3 * ((i >> 2) & 1)]);
+        let q = solidcraft_doc::apply_point(m, c);
+        for (k, v) in [q.x, q.y, q.z].into_iter().enumerate() {
+            lo[k] = lo[k].min(v);
+            hi[k] = hi[k].max(v);
+        }
+    }
+    let r = |x: f64| (x * 1e4).round() / 1e4;
+    [r(lo[0]), r(lo[1]), r(lo[2]), r(hi[0]), r(hi[1]), r(hi[2])]
+}
+
+/// Run `command` on the block placed as `place`, with `params(world_point, world_dir)` giving the
+/// world form of local parameters, and on the unplaced block with the local ones: each copy in the
+/// placed design is the unplaced copy carried by the placement, with its volume.
+fn check_placed_copies(what: &str, command: &str, local: impl Fn(&dyn Fn([f64; 3]) -> Value, &dyn Fn([f64; 3]) -> Value) -> Value) {
+    let mut flat = copy_block(None);
+    let ident = |p: [f64; 3]| json!(p);
+    let local_params = local(&ident, &ident);
+    run(&mut flat, command, local_params);
+    // The unplaced copies are the bodies that are not the original (in the block's own frame).
+    let want: Vec<([f64; 6], f64)> = copies_world(&flat);
+    assert!(!want.is_empty(), "{what}: the unplaced {command} made no copy");
+    for place in COPY_PLACES {
+        let mut s = copy_block(Some(place));
+        let frame = block_frame(&s);
+        let point = |p: [f64; 3]| to_world_point(&s, p);
+        let dir = |d: [f64; 3]| to_world_dir(&s, d);
+        let params = local(&point, &dir);
+        match s.execute(command, &params) {
+            Ok(_) => {}
+            Err(e) => panic!("{what} {place:?}: {command} {params}: {e}"),
+        }
+        let mut expected: Vec<([f64; 6], f64)> = want.iter().map(|(b, v)| (placed_box(&frame, *b), *v)).collect();
+        expected.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let got = copies_world(&s);
+        assert_eq!(got.len(), expected.len(), "{what} {place:?}: copies {got:?}, want {expected:?}");
+        for (g, e) in got.iter().zip(&expected) {
+            let same = g.0.iter().zip(&e.0).all(|(a, b)| (a - b).abs() < 1e-3) && (g.1 - e.1).abs() < 1e-3;
+            assert!(same, "{what} {place:?}: copy {g:?}, want {e:?}");
+        }
+    }
+}
+
+fn with_source(mut p: Value, bodies: bool) -> Value {
+    if bodies {
+        p["bodies"] = json!(["Block"]);
+    } else {
+        p["features"] = json!(["Box1"]);
+    }
+    p
+}
+
+/// a mirror of a placed body, picked as its feature or as the body, with its plane origin
+/// and normal in the world.
+#[test]
+fn placed_mirror_copies_land_where_the_unplaced_copy_does() {
+    for bodies in [true, false] {
+        for (form, local_plane) in [("origin and normal", 0), ("x_dir and y_dir", 1)] {
+            check_placed_copies(&format!("mirror {form} bodies={bodies}"), "solid.mirror", |pt, dr| {
+                let plane = if local_plane == 0 {
+                    json!({"origin": pt([13.0, 12.0, -30.0]), "normal": dr([0.0, 0.0, 1.0])})
+                } else {
+                    json!({"origin": pt([13.0, 12.0, -30.0]), "x_dir": dr([1.0, 0.0, 0.0]), "y_dir": dr([0.0, 1.0, 0.0])})
+                };
+                with_source(json!({"plane": plane, "name": "M"}), bodies)
+            });
+        }
+    }
+}
+
+/// a circular pattern of a placed body, about an axis given in the world.
+#[test]
+fn placed_circular_pattern_copies_land_where_the_unplaced_copy_does() {
+    for bodies in [true, false] {
+        check_placed_copies(&format!("circular bodies={bodies}"), "solid.pattern.circular", |pt, dr| {
+            with_source(
+                json!({"axis": {"origin": pt([13.0, 40.0, -30.0]), "dir": dr([0.0, 0.0, 1.0])}, "count": 3, "angle": "360 deg", "name": "P"}),
+                bodies,
+            )
+        });
+    }
+}
+
+/// Linear and rectangular patterns of a placed body: directions given in the world.
+#[test]
+fn placed_rectangular_pattern_copies_land_where_the_unplaced_copy_does() {
+    for bodies in [true, false] {
+        check_placed_copies(&format!("rectangular bodies={bodies}"), "solid.pattern.rectangular", |_, dr| {
+            with_source(
+                json!({"dir1": dr([1.0, 0.0, 0.0]), "count1": 3, "spacing1": 30, "dir2": dr([0.0, 1.0, 0.0]), "count2": 2, "spacing2": 40, "name": "P"}),
+                bodies,
+            )
+        });
+    }
+}
+
+/// a mirror plane given by name on a placed part: a construction plane of the root, or one
+/// made inside the part, lands the copy where the unplaced mirror does.
+#[test]
+fn placed_mirror_by_plane_name_lands_where_the_unplaced_copy_does() {
+    for in_part in [false, true] {
+        let mut flat = copy_block(None);
+        run(&mut flat, "construct.plane.offset", json!({"base": {"origin": [13, 12, -30], "normal": [0, 0, 1]}, "offset": 0, "name": "Lim"}));
+        run(&mut flat, "solid.mirror", json!({"features": ["Box1"], "plane": "Lim", "name": "M"}));
+        let want = copies_world(&flat);
+        for place in COPY_PLACES {
+            let mut s = copy_block(Some(place));
+            let frame = block_frame(&s);
+            let base = json!({"origin": to_world_point(&s, [13.0, 12.0, -30.0]), "normal": to_world_dir(&s, [0.0, 0.0, 1.0])});
+            if in_part {
+                let comp = if matches!(place, CopyPlace::Nested) { "Inner" } else { "Part" };
+                run(&mut s, "component.activate", json!({"component": comp}));
+                // Commands speak the world: the plane is made where the placed part shows it.
+                run(&mut s, "construct.plane.offset", json!({"base": base, "offset": 0, "name": "Lim"}));
+                run(&mut s, "component.activate", json!({"component": "root"}));
+            } else {
+                run(&mut s, "construct.plane.offset", json!({"base": base, "offset": 0, "name": "Lim"}));
+            }
+            run(&mut s, "solid.mirror", json!({"features": ["Box1"], "plane": "Lim", "name": "M"}));
+            let mut expected: Vec<([f64; 6], f64)> = want.iter().map(|(b, v)| (placed_box(&frame, *b), *v)).collect();
+            expected.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let got = copies_world(&s);
+            assert_eq!(got.len(), expected.len(), "in_part={in_part} {place:?}: {got:?} want {expected:?}");
+            for (g, e) in got.iter().zip(&expected) {
+                let same = g.0.iter().zip(&e.0).all(|(a, b)| (a - b).abs() < 1e-3) && (g.1 - e.1).abs() < 1e-3;
+                assert!(same, "in_part={in_part} {place:?}: copy {g:?}, want {e:?}");
+            }
+        }
+    }
+}
+
+/// a draft's neutral plane with its origin in the air, on a block placed three ways, drafts
+/// as the unplaced block does with the same local values.
+#[test]
+fn placed_draft_neutral_plane_in_the_air_maps_into_the_blocks_frame() {
+    fn block(place: usize) -> Session {
+        let mut s = Session::default();
+        let make = |s: &mut Session| {
+            run(s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        };
+        match place {
+            0 | 1 => {
+                let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+                make(&mut s);
+                let mut p = json!({"occurrence": part["occurrence"], "translate": [50, 0, 100]});
+                if place == 1 {
+                    p["axis"] = json!([1, 0, 0]);
+                    p["angle"] = json!("90 deg");
+                }
+                run(&mut s, "occurrence.move", p);
+            }
+            _ => {
+                let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}));
+                let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+                make(&mut s);
+                run(
+                    &mut s,
+                    "occurrence.move",
+                    json!({"occurrence": inner["occurrence"], "translate": [5, 0, 30], "axis": [0, 1, 0], "angle": "90 deg"}),
+                );
+                run(&mut s, "occurrence.move", json!({"occurrence": outer["occurrence"], "translate": [20, 10, 70]}));
+            }
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        s
+    }
+    let world = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let p = solidcraft_doc::apply_point(m, Vec3::new(local[0], local[1], local[2]));
+        json!([p.x, p.y, p.z])
+    };
+    let world_dir = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let d = solidcraft_doc::apply_vector(m, Vec3::new(local[0], local[1], local[2]));
+        json!([d.x, d.y, d.z])
+    };
+    for neutral_z in [-30.0, 5.0] {
+        let mut flat = Session::default();
+        run(&mut flat, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(
+            &mut flat,
+            "solid.draft",
+            json!({"faces": [[10, 20, 5]], "neutral": {"origin": [10, 10, neutral_z], "normal": [0, 0, 1]}, "pull": [0, 0, 1], "angle": "5 deg", "body": "Block"}),
+        );
+        let want = volume(&mut flat);
+        for place in 0..3 {
+            let mut s = block(place);
+            let faces = json!([world(&s, [10.0, 20.0, 5.0])]);
+            let neutral = json!({"origin": world(&s, [10.0, 10.0, neutral_z]), "normal": world_dir(&s, [0.0, 0.0, 1.0])});
+            let pull = world_dir(&s, [0.0, 0.0, 1.0]);
+            run(&mut s, "solid.draft", json!({"faces": faces, "neutral": neutral, "pull": pull, "angle": "5 deg", "body": "Block"}));
+            let got = volume(&mut s);
+            assert!((got - want).abs() < 1e-6, "place {place}, neutral z {neutral_z}: volume {got}, unplaced {want}");
+        }
+    }
 }

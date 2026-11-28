@@ -75,6 +75,7 @@
 // goes through `get`/`set`, which reject negative or too-large indices.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::basis_adv::{compatible_knot_array_mult, increase_knot_mult};
 use crate::nurbs::basis_basic::PTOL;
@@ -906,8 +907,8 @@ impl Curve {
         // Reparametrize curve.
         let (mut w0, mut wn) = (get(self.cpts(), 0, OP)?.w, get(self.cpts(), n, OP)?.w);
         let exp = 1.0 / p as f64;
-        w0 = w0.powf(exp);
-        wn = wn.powf(exp);
+        w0 = det::powf(w0, exp);
+        wn = det::powf(wn, exp);
         let (u0, um) = (get(self.knots(), 0, OP)?, get(self.knots(), m, OP)?);
         let alf = wn * d - w0 * c;
         let bet = w0 * c * um - wn * d * u0;
@@ -1031,8 +1032,8 @@ impl Curve {
         // Reparametrize curve.
         let (mut w0, mut wn) = (get(self.cpts(), 0, OP)?.w, get(self.cpts(), n, OP)?.w);
         let exp = 1.0 / pu as f64;
-        w0 = (w0 / wt0).powf(exp);
-        wn = (wn / wtn).powf(exp);
+        w0 = det::powf(w0 / wt0, exp);
+        wn = det::powf(wn / wtn, exp);
         let alf = wn;
         let bet = 0.0;
         let gam = wn - w0;

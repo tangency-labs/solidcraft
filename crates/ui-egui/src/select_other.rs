@@ -21,9 +21,7 @@
 //!
 //! The control channel's `ui.selectOther` opens, describes and picks from the list.
 
-use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{Container, Surface};
-use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
+use egui::{Pos2, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
@@ -33,13 +31,11 @@ use std::hash::{Hash, Hasher};
 use crate::SolveApp;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
-use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
 /// How far (screen points) a repeat click may be from the last one and still cycle.
 const CYCLE_SLOP: f32 = 4.0;
-const ROW_HEIGHT: f32 = 24.0;
 /// The most rows kept per kind of thing (vertices, edges, faces, …). The list exists to tell a
 /// handful of overlapping things apart; nearest first, farther ones of the same kind are dropped
 /// so it stays readable and bounded.
@@ -69,6 +65,7 @@ pub struct Popup {
     include_hidden: bool,
     /// The keys held at the press or click that opened it.
     held: Held,
+    shown: bool,
 }
 
 /// The last plain click, for cycling.
@@ -421,6 +418,7 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
         dialog: app.dialog.is_some(),
         include_hidden: app.preferences.select_other_hidden,
         held,
+        shown: false,
     });
     true
 }
@@ -636,88 +634,34 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         close(app);
         return;
     };
-    let t = Tokens::get();
-    let mut hovered = None;
-    let mut picked = None;
-    let screen = ctx.content_rect();
-    let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let width = crate::ui_kit::LIST_W.min(screen.width());
-    let w = (width - margins.x).max(0.0);
-    let header = 20.0;
-    let gap = vec2(12.0, 12.0);
-    let at = pos2(p.at.x.clamp(screen.left(), screen.right()), p.at.y.clamp(screen.top(), screen.bottom()));
-    let rows_height = p.rows.len() as f32 * ROW_HEIGHT;
-    let overhead = header + margins.y;
-    let scroll_height = (screen.height() - overhead).max(0.0);
-    let size = vec2(width, overhead + rows_height.min(scroll_height));
-    let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::unique("sc_select_other"))
-        .fixed_pos(crate::context_menu::place(at, gap, size, screen))
-        .constrain(true)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            // Area remembers the preceding list's size, which must not limit a longer list.
-            ui.set_max_height(size.y);
-            crate::ui_kit::Menu::show(ui, width, |ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
-                let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
-                let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
-                ui.painter().text(
-                    pos2(r.left() + 8.0, r.center().y),
-                    Align2::LEFT_CENTER,
-                    title,
-                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
-                    t.text_dim,
-                );
-                egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (i, row) in p.rows.iter().enumerate() {
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::click());
-                        crate::scenario::publish_handle(&format!("select_other:{i}"), r.center());
-                        if resp.hovered() {
-                            hovered = Some(i);
-                            ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), t.radius_sm, t.hover);
-                        }
-                        crate::icons::paint_icon(
-                            ui.painter(),
-                            Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(16.0, 16.0)),
-                            row.icon,
-                            f32::from(t.icon.a()) / 255.0,
-                        );
-                        // Names can be wider than the list. Keep one line inside the row and
-                        // expose the full name on hover, as the browser tree does.
-                        let text_rect = Rect::from_min_max(pos2(r.left() + 32.0, r.top()), pos2(r.right() - 8.0, r.bottom()));
-                        let mut job =
-                            egui::text::LayoutJob::simple(row.label.clone(), FontId::proportional(t.font_button), t.text, text_rect.width());
-                        job.wrap.max_rows = 1;
-                        job.wrap.break_anywhere = true;
-                        job.wrap.overflow_character = Some('\u{2026}');
-                        let galley = ui.painter().layout_job(job);
-                        let elided = galley.elided;
-                        let at = pos2(text_rect.left(), r.center().y - galley.size().y / 2.0);
-                        ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.text);
-                        let resp = if elided { resp.backing_on_hover_text(&row.label) } else { resp };
-                        if resp.clicked() {
-                            picked = Some(i);
-                        }
-                    }
-                });
-            });
-        });
-    crate::scenario::publish_rect("select_other", resp.response.rect);
-    if let Some(pop) = app.viewport.select_other.popup.as_mut()
-        && pop.hovered != hovered
-    {
-        pop.hovered = hovered;
-        ctx.request_repaint();
+    let title = solidcraft_ui_text::tr_label("Select Other");
+    let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title.to_string() };
+    let mut items = vec![crate::ui_kit::Item::heading(&title)];
+    for (index, row) in p.rows.iter().enumerate() {
+        let id = format!("select_other:{index}");
+        let mut item = crate::ui_kit::Item::action(&id, &row.label, row.icon);
+        item.aliases.push(id);
+        item.tip = Some(row.label.clone());
+        items.push(item);
     }
-    let (pressed, pointer, mods) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.modifiers));
-    if let Some(i) = picked {
-        let held = Held::from_modifiers(mods);
+    let output = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_select_other"), crate::ui_kit::MenuAnchor::Point(p.at), &items, !p.shown);
+    if let Some(rect) = output.rect {
+        crate::scenario::publish_rect("select_other", rect);
+    }
+    let index = |item: &crate::ui_kit::Item| item.id.strip_prefix("select_other:").and_then(|index| index.parse::<usize>().ok());
+    let hovered = output.hovered.as_ref().and_then(index);
+    if let Some(pop) = app.viewport.select_other.popup.as_mut() {
+        pop.shown = true;
+        if pop.hovered != hovered {
+            pop.hovered = hovered;
+            ctx.request_repaint();
+        }
+    }
+    if let Some(index) = output.picked.as_ref().and_then(index) {
+        let held = Held::from_modifiers(ctx.input(|input| input.modifiers));
         let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
-        let _ = choose(app, i, add, toggle);
-    } else if pressed && !pointer.is_some_and(|q| resp.response.rect.contains(q)) {
-        // A press elsewhere only closes the list.
+        let _ = choose(app, index, add, toggle);
+    } else if output.close {
         close(app);
         app.viewport.select_other.held = true;
     }

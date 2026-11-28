@@ -41,6 +41,7 @@ mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
+pub mod exact;
 mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
@@ -526,6 +527,7 @@ pub use route::sweep_with;
 pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
+pub use route::transform_face;
 pub use route::trim_member;
 pub use route::tube_cope;
 pub use route::which;
@@ -666,6 +668,7 @@ pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
+pub use surfaces::morph_surface;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;
@@ -721,6 +724,9 @@ pub use validity::validity;
 pub enum KernelError {
     #[error("invalid input: {0}")]
     Invalid(String),
+    /// A stored B-rep number failed the coordinate ceiling check.
+    #[error("invalid input: {cause}", cause = solidcore_record::brep::Invalid(BREP_COORDINATE_CEILING))]
+    CoordinateCeiling,
     #[error("the operation failed: {0}")]
     Failed(String),
     /// A blend or other size too large for the geometry around it (a smaller size may work);
@@ -747,6 +753,8 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+const BREP_COORDINATE_CEILING: &str = "non-finite or excessive coordinate";
 
 /// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
 /// the kernel does not depend on solidcore, so the number is repeated here.

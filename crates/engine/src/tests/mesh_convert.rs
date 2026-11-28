@@ -1377,6 +1377,18 @@ fn automatic_cut_over_a_solid_and_a_mesh_cuts_the_solid_and_keeps_the_mesh() {
     assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
 }
 
+#[test]
+fn automatic_cut_with_a_hidden_solid_skips_the_visible_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    run(&mut s, "solid.box", json!({"corner": [12, 5, 0], "length": 5, "width": 5, "height": 10, "body_name": "Hidden"}));
+    run(&mut s, "browser.visibility", json!({"items": ["Hidden"], "visible": false}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert_eq!(s.doc.features.last().unwrap().participants, ["Block"]);
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Hidden"), 250.0) < 1e-6);
+}
+
 /// A mesh body elsewhere in the design does not stop a cut that never meets it (#615).
 #[test]
 fn automatic_cut_clear_of_a_mesh_cuts_the_solid() {
@@ -1396,6 +1408,14 @@ fn automatic_cut_of_only_a_mesh_is_refused_naming_convert_mesh() {
     assert!(error.contains("Convert Mesh"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+#[test]
+fn automatic_cut_names_convert_mesh_when_the_only_solid_is_hidden() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+    let error = s.execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"})).unwrap_err().to_string();
+    assert!(error.contains("Mesh is a mesh body") && error.contains("Convert Mesh"), "{error}");
 }
 
 /// A cut that names a mesh body is refused with the way out: Convert Mesh (#615).

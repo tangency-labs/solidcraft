@@ -1794,6 +1794,110 @@ fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
     assert_eq!(cut(false), twin);
 }
 
+/// tangency-labs/solidcore#3446: a helical groove cut into a shaft from its end face. A circle
+/// of radius 1 on the top face of a cylinder of radius 10 and height 30, centred on the rim at
+/// (10, 0), is carried 6 turns at pitch 3 down the axis by a screw motion (`s = -1`: the axis
+/// -z, right-handed about it, as SolidCraft's reversed coil). The check refused the cut: the
+/// inner arc of the circle on the top face, where the coil's start cap meets its wall, kept a
+/// UV trim on the wall 0.0137 off the wall's boundary line, which the coil's own trim lies on.
+/// Its mirror image in the plane y = 0 (`s = 1`: the axis +z and pitch -3, the same descent
+/// turned the other way) built. The stock and the circle are their own mirror images, so both
+/// cuts are one valid solid with the same face, edge and vertex counts.
+///
+/// Every slice of the coil square to the axis, from z = 12 to 30, is the circle turned about
+/// the axis, and so is its part inside the cylinder: the lens of the circle (radius r = 1, its
+/// centre d = 10 from the axis) and the cylinder's disc (R = 10), of area
+/// r² acos((d² + r² - R²) / 2dr) + R² acos((d² + R² - r²) / 2dR) -
+/// √((-d + r + R)(d + r - R)(d - r + R)(d + r + R)) / 2. The cut's volume is the
+/// cylinder's, 3000 π, less 18 lenses (Cavalieri). The coil's wall lies within the sweep's
+/// tolerance of its screw surface, so the cut's volume is within the coil's area times that
+/// tolerance of it.
+///
+/// The counts: the groove's two helices on the cylinder (radius 10, where the circle crosses
+/// it at angles ±acos(-1/20) about its centre) cross the cylinder's seam half-plane (y 0,
+/// x > 0) once a turn; the groove covers the seam just below the top face and over the end
+/// cap, so the seam is left in seven pieces: six between the groove's turns and the one
+/// below the end cap. Vertices: those 14 ends, and the ends of the circle's inner arc on the
+/// top face and on the end cap: 18. Faces: the top and bottom discs, the coil's wall and its
+/// end cap inside the shaft, and the cylinder's side in seven pieces between them: 11.
+/// Edges by Euler's formula for one shell without a handle: 18 + 11 - 2 = 27.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_coil_cut_from_a_circle_on_a_shafts_end_face_builds_like_its_mirror_image() {
+    use solidcore_ops::sweep::screw_sweep;
+    all_fixes();
+    let (r, d, big, height) = (1.0_f64, 10.0_f64, 10.0_f64, 30.0_f64);
+    let (pitch, turns) = (3.0, 6.0);
+    // SolidCraft's coil tolerance: a ten-thousandth of the pitch
+    let tolerance = pitch * 1e-4;
+    let lens = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos()
+        + big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos()
+        - ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt() / 2.0;
+    let exact = PI * big * big * height - pitch * turns * lens;
+    let cut = |s: f64| {
+        let stock = extrude(
+            &[Curve::Arc {
+                center: [0.0; 3],
+                axis: [0.0, 0.0, 1.0],
+                reference: [1.0, 0.0, 0.0],
+                radius: big,
+                start: 0.0,
+                end: TAU,
+            }],
+            [0.0, 0.0, 1.0],
+            height,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        let circle = Curve::Arc {
+            center: [d, 0.0, height],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        };
+        let swept = screw_sweep(
+            &[circle],
+            [0.0, 0.0, height],
+            [0.0, 0.0, s],
+            -s * pitch,
+            turns,
+            None,
+            tolerance,
+        );
+        // as SolidCraft hands it to the cut: through its record, its wall its net alone
+        let coil = Body::from_record(&swept.unwrap().to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        let bound = coil.area(1e-8).unwrap() * tolerance;
+        let c = boolean(stock, coil, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("s {s}: {e:?}"))
+            .unwrap();
+        let report = c.check(CheckLevel::All).unwrap();
+        let v = volume(&c);
+        let counts = c.counts().unwrap();
+        eprintln!(
+            "s {s}: volume {v} exact {exact} bound {bound} counts {counts:?} {}",
+            report.text
+        );
+        assert!(report.is_valid(), "s {s}: {}", report.text);
+        assert_eq!(c.solid_count().unwrap(), 1, "s {s}");
+        assert!((v - exact).abs() <= bound, "s {s}: {v} vs {exact}");
+        // one closed shell without a handle (the groove is open at the top face): Euler's
+        // V - E + F = 2
+        let [f, e, n] = counts;
+        assert_eq!(n + f, e + 2, "s {s}: {counts:?}");
+        counts
+    };
+    // the mirror image first: it built before this change too
+    let twin = cut(1.0);
+    assert_eq!(twin, [11, 27, 18]);
+    assert_eq!(cut(-1.0), twin);
+}
+
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
 /// cut by a circle of radius 4.717 sketched on the plane at 45 degrees through that edge and
 /// extruded into the bar. The sketch puts the circle's centre 7.9e-6 off the edge, so the cut
@@ -3176,6 +3280,107 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
             "the front of the cavity and the tool: {:?}",
             other.map(|r| r.is_some())
         ),
+    }
+}
+
+/// A cylinder of radius `r` and height `h` about +Z from base centre `base`, its seam turned
+/// `seam_deg` about its axis (SolidCraft's cylinders put the seam where the sketch put it).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
+    let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
+    let (s, co) = seam_deg.to_radians().sin_cos();
+    c.transform(&[
+        [co, s, 0.0, 0.0],
+        [-s, co, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [base[0], base[1], base[2], 1.0],
+    ])
+    .unwrap();
+    c
+}
+
+/// #22582: a point in the plane of a cylinder's cap, on a line along x or y that touches the
+/// rim circle, is at distance sqrt(a^2 + r^2) > r from the axis (`a` its offset along the
+/// line from the touching point): outside. The classifier's first ray runs along that line,
+/// grazing the rim, and its sector answer was a rounding error: inside at some seam angles.
+#[test]
+fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
+    all_fixes();
+    let mut wrong = Vec::new();
+    // the issue's scales: 0.05 and 1 failed, 40 did not
+    for scale in [0.05, 1.0, 40.0] {
+        let ([cx, cy, z0], r, h) = (
+            [10.0 * scale, 22.5 * scale, 30.0 * scale],
+            2.5 * scale,
+            5.0 * scale,
+        );
+        let mut points = Vec::new();
+        for z in [z0, z0 + h] {
+            for a in [0.5 * scale, 1.5 * scale, 3.0 * scale] {
+                // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
+                points.extend([
+                    [cx - a, cy + r, z],
+                    [cx + a, cy + r, z],
+                    [cx - a, cy - r, z],
+                    [cx + a, cy - r, z],
+                    [cx + r, cy - a, z],
+                    [cx - r, cy + a, z],
+                ]);
+            }
+        }
+        // every 5 degrees at scale 1; at the other scales, the seams that failed at scale 1
+        let seams: Vec<u16> = if scale == 1.0 {
+            (0..3600).step_by(50).chain([175, 200, 351, 425]).collect()
+        } else {
+            vec![0, 175, 200, 351, 425, 900]
+        };
+        for tenth in seams {
+            let seam = f64::from(tenth) / 10.0;
+            let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
+            for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
+                if l != Ok(solidcore_ops::PointLocation::Outside) {
+                    wrong.push((scale, seam, *p, l));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} not outside: {wrong:?}", wrong.len());
+}
+
+/// #22582's intersect: box A spans x 7.5..12.5, y 25..30, z 10..30; cylinder B (r 2.5, z
+/// 30..35, axis through (10, 22.5)) stands on A's top plane, where its rim touches A only at
+/// (10, 25, 30) (its other points on that plane are at y < 25). They share one point, so the
+/// intersection is empty, in either order. It was refused as "an intersection was missed":
+/// A's corner (7.5, 25, 30), 3.54 from B's axis, was classified inside B.
+#[test]
+fn a_box_and_a_cylinder_touching_at_a_rim_point_intersect_to_nothing() {
+    all_fixes();
+    for scale in [0.05, 1.0, 40.0] {
+        for seam in [0.0, 35.13, 90.0, 215.13] {
+            let a = || {
+                make_box(
+                    [7.5 * scale, 25.0 * scale, 10.0 * scale],
+                    [5.0 * scale, 5.0 * scale, 20.0 * scale],
+                )
+                .unwrap()
+            };
+            let b = || {
+                cylinder_with_seam(
+                    [10.0 * scale, 22.5 * scale, 30.0 * scale],
+                    2.5 * scale,
+                    5.0 * scale,
+                    seam,
+                )
+            };
+            for (x, y) in [(a(), b()), (b(), a())] {
+                let r = boolean(x, y, BooleanOp::Intersect);
+                assert!(
+                    matches!(r, Ok(None)),
+                    "scale {scale}, seam {seam}: {:?}",
+                    r.map(|r| r.is_some())
+                );
+            }
+        }
     }
 }
 
@@ -5054,6 +5259,27 @@ fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
         (v - want).abs() < 1e-3,
         "volume {v}, on the hole's axis {want}"
     );
+}
+
+/// #23204: the part and the tool a 360° revolve cut is handed, after the profile's corner
+/// arc ends were rounded to 9 decimals (2.5e-10 mm off the arcs). The cut itself builds one
+/// body; SMLib's check used to refuse it at Face->Vertex, because the vertex's UV drop named
+/// the seam's far side, outside a face that stops short of it. The check must read that drop
+/// on the face's own chart, and the cut must stay one valid solid of the unrounded profile's
+/// volume, 15724.04351 mm3, with 18 faces, 43 edges and 27 vertices.
+#[test]
+fn a_revolve_cut_with_its_profiles_arc_ends_rounded_is_valid() {
+    all_fixes();
+    let body = traced_operands("issue_23204_rounded_revolve_cut");
+    let cut = boolean(body("part"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = cut.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    assert_eq!(cut.counts().unwrap(), [18, 43, 27]);
+    let v = cut.volume(1e-9).unwrap();
+    assert!((v - 15724.04351).abs() < 1e-3, "volume {v}");
 }
 
 /// #20422: two curved spline pockets meeting diagonally at the crossing (4, 5) leave a vertical

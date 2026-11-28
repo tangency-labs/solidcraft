@@ -1,4 +1,4 @@
-//! A failed feature is marked in the bottom timeline and the Feature History by a shape, not only
+//! A failed feature is marked in the bottom timeline, the Feature History and the History grid by a shape, not only
 //! its colour (#972): the error mark where a warning's mark goes (now an icon image, so these
 //! tests look for the 10-point image at the mark's place).
 
@@ -45,12 +45,17 @@ fn error_discs(app: &mut SolveApp, draw: fn(&mut SolveApp, &mut egui::Ui)) -> Ve
 
 /// The features that have a disc where their mark goes (`at`: the mark's centre from the item's).
 fn marked(app: &mut SolveApp, draw: fn(&mut SolveApp, &mut egui::Ui), at: impl Fn(Pos2, Pos2) -> bool) -> Vec<(String, bool)> {
+    marked_by(app, draw, "timeline:", at)
+}
+
+/// [`marked`], with the items found by their handles' `prefix`.
+fn marked_by(app: &mut SolveApp, draw: fn(&mut SolveApp, &mut egui::Ui), prefix: &str, at: impl Fn(Pos2, Pos2) -> bool) -> Vec<(String, bool)> {
     let discs = error_discs(app, draw);
-    let handles = crate::scenario::handles("timeline:");
+    let handles = crate::scenario::handles(prefix);
     features(app)
         .into_iter()
         .map(|(name, _)| {
-            let item = handles.iter().find(|(h, _)| *h == format!("timeline:{name}")).map(|(_, p)| *p);
+            let item = handles.iter().find(|(h, _)| *h == format!("{prefix}{name}")).map(|(_, p)| *p);
             let item = item.unwrap_or_else(|| panic!("{name} is not drawn"));
             let has = discs.iter().any(|d| at(item, *d));
             (name, has)
@@ -75,6 +80,18 @@ fn a_failed_feature_is_marked_in_the_feature_history() {
     let want = features(&app);
     // The mark sits at the row's right end, on its centre line.
     let got = marked(&mut app, crate::timeline_left::panel_contents, |item, d| (d.y - item.y).abs() < 1.5 && d.x > item.x);
+    assert_eq!(got, want, "an error mark on each failed feature and on no other");
+}
+
+#[test]
+fn a_failed_feature_is_marked_in_the_history_grid() {
+    // #23390: the grid showed the error only in a chip's tooltip.
+    let mut app = failing_sample();
+    let want = features(&app);
+    // The mark sits in the chip's top-right corner: 10 points square, inside the 38 × 32 chip.
+    let got = marked_by(&mut app, crate::timeline_2d::panel_contents, "timeline_2d:", |chip, d| {
+        (d.x - (chip.x + 14.0)).abs() < 1.5 && (d.y - (chip.y - 11.0)).abs() < 1.5
+    });
     assert_eq!(got, want, "an error mark on each failed feature and on no other");
 }
 

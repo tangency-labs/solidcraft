@@ -125,6 +125,10 @@ scale
 offset_face
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+transform_face
+  moves: face[0], face[1], face[2], origin[0], origin[1], origin[2], rotate_axis[0], rotate_axis[2], translate[0], translate[1], translate[2]
+  face points: [0, 0, 0]
+  placement: 8, 8.5, 8.25
 delete_face
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
@@ -234,6 +238,9 @@ surface_match
   face points: [0, 0, 0]
 surface_fair
   moves: faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
+surface_morph
+  moves: base_face[0], base_face[1], base_face[2], control_face[0], control_face[1], control_face[2], faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
 unstitch
   moves: faces[0][0], faces[0][1], faces[0][2]

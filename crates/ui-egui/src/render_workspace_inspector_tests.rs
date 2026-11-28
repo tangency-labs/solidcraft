@@ -4066,7 +4066,7 @@ mod saved_clear_coat_contract {
             scalar(&mut h, "render:coat:weight", "0.63", true);
             scalar(&mut h, "render:coat:roughness", "0.61", true);
             scalar(&mut h, "render:coat:ior-field", "1.7", false);
-            let expected = CoatMaterial { weight: 0.63, roughness: 0.61, ior: 1.7 };
+            let expected = CoatMaterial { weight: 0.63, roughness: 0.61, ior: 1.7, flakes: None };
             let request = super::super::super::image_request(&h.app).unwrap();
             assert!(setups::has_runtime_inputs(&h.app), "portable coat drafts remain unsaved for review/navigation");
             assert!(!setups::requires_runtime_request(&h.app), "stable coat preview does not require ordinal override capture");
@@ -4103,6 +4103,30 @@ mod saved_clear_coat_contract {
             h.frames(5);
             assert!(Arc::ptr_eq(&reopened, &h.app.session.doc), "hydrating saved coat numbers never writes on paint");
             assert!(h.app.render_workspace.view.materials.bindings.is_empty());
+            assert_eq!(super::super::super::image_request(&h.app).unwrap()["settings"]["coats"][0]["coat"], json!(expected));
+        }
+    }
+    #[test]
+    fn actual_flake_controls_save_their_numbers_with_the_coat_and_reopen_hydrated() {
+        for gpu in [false, true] {
+            let mut h = body_editor(gpu, false);
+            reveal_coat(&mut h);
+            click(&mut h, "render:coat:enable");
+            assert!(crate::scenario::rect_of("render:flakes:enable").is_some());
+            click(&mut h, "render:flakes:enable");
+            scalar(&mut h, "render:flakes:coverage", "0.55", true);
+            scalar(&mut h, "render:flakes:spread", "0.7", true);
+            scalar(&mut h, "render:flakes:size", "0.2", false);
+            let flakes = solidcraft_engine::doc::render_coat::FlakeMaterial { coverage: 0.55, spread: 0.7, size_mm: 0.2, ..Default::default() };
+            let expected = CoatMaterial { flakes: Some(flakes), ..Default::default() };
+            assert_eq!(super::super::super::image_request(&h.app).unwrap()["settings"]["coats"][0]["coat"], json!(expected));
+            click(&mut h, "render:coat:save");
+            assert_eq!(authored(&h), expected);
+            let saved = h.app.session.doc.clone();
+            let loaded = solidcraft_engine::io::read_design(&solidcraft_engine::io::write_design_container(&saved).unwrap()).unwrap();
+            h.app.session = solidcraft_engine::Session::new(loaded);
+            setups::load(&mut h.app);
+            h.frames(5);
             assert_eq!(super::super::super::image_request(&h.app).unwrap()["settings"]["coats"][0]["coat"], json!(expected));
         }
     }

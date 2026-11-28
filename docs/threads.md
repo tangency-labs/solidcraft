@@ -147,6 +147,16 @@ without one, at the end the `face` point lies within a third of the face of. A p
 of a face whose ends are alike is refused, naming `from`. A length as long as the face runs the
 whole face.
 
+**Offset** (`offset`, a length, default 0) starts the thread that far in from the end it starts at,
+leaving that end plain: an unthreaded lead-in on a bolt, a plain stretch below a hole's mouth, a
+thread band in the middle of a rod. `length` and `up_to` are measured from the offset start; Full
+runs from there to the far end, and a length past the far end stops there. The start is a square
+stop inside the face; the runout (`ease_out`) stays at the inner end. Drawings draw a limit line at
+both ends, and `model.threads` reports the offset span as `start`/`end`. Refused: an offset below
+0, one as long as the face or longer, one with `tip: start` (the start is no longer a free end;
+`tip: both` chamfers only a free far end), and one on a taper pipe thread, whose standard sets its
+gauge diameter at the pipe's end or the hole's mouth.
+
 ## Runout and tip
 
 **Runout** (`ease_out`: a length, `standard` = 2.5 P or `short` = 1.25 P, ISO 3508's normal and

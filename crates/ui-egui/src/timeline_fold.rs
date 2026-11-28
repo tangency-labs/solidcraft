@@ -19,6 +19,8 @@
 //! in it, as it does to the whole history.
 use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use serde_json::json;
 use solidcraft_engine::doc::Component;
@@ -79,7 +81,7 @@ pub(crate) enum Entry {
 }
 
 /// What a feature's chip would show that its run's chip shows while folded.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Marks {
     pub selected: bool,
     pub hovered: bool,
@@ -89,12 +91,16 @@ pub(crate) struct Marks {
 
 /// The History bar's entries for one frame, with what each feature's chip would show. Entries,
 /// runs and folders count the features the bar shows (`view`), not the design's.
+#[derive(Clone)]
 pub(crate) struct History {
-    pub entries: Vec<Entry>,
-    /// By the bar's feature; empty when nothing folds.
-    marks: Vec<Marks>,
-    pub folders: crate::timeline_folders::Folders,
-    pub view: View,
+    pub entries: Arc<[Entry]>,
+    /// By the bar's feature (without viewport hover, which [`Self::from_view_slots`] carries so
+    /// hover changes reuse both the grouping and marks); empty when nothing folds.
+    marks: Arc<[Marks]>,
+    /// Shown-feature slots matching `strip.from_view` (0..=2 in normal designs).
+    from_view_slots: Vec<usize>,
+    pub folders: Arc<crate::timeline_folders::Folders>,
+    pub view: Arc<View>,
     /// The component whose features the bar shows (`timeline_scope`); none for the whole design.
     pub within: Option<u64>,
 }
@@ -328,9 +334,200 @@ fn set_open(app: &mut SolveApp, key: &str, open: bool) {
     crate::history_folds::set_open(app, key, open);
 }
 
-/// What the History bar shows of the design's features this frame: the whole history, or the
-/// features of one component and those inside it (`timeline_scope`).
-pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
+/// What tells the bar that its grouped entry structure (`entries`, `folders`, `view`, `within`)
+/// may have changed since it was last built. Steady-state frames (camera movement, idling,
+/// viewport hover changes) keep the exact same key and skip regrouping completely.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct HistoryPlanKey {
+    session: u64,
+    revision: u64,
+    document: usize,
+    features: usize,
+    components: usize,
+    timeline_groups: usize,
+    joints: usize,
+    history_bar_groups: bool,
+    history_show_hidden: bool,
+    scope: crate::timeline_scope::Scope,
+    active_component: u64,
+    picked_component: Option<u64>,
+    marker: usize,
+    folds_revision: u64,
+    legacy_collapsed: u64,
+}
+
+impl HistoryPlanKey {
+    fn of(app: &SolveApp, marker: usize) -> Self {
+        let doc = &app.session.doc;
+        let picked_component = match app.tree.picked_components.as_slice() {
+            [one] if *one != 0 => Some(*one),
+            _ => None,
+        };
+        Self {
+            session: app.session.uid,
+            revision: app.session.revision,
+            document: Arc::as_ptr(doc) as usize,
+            features: doc.features.len(),
+            components: doc.components.len(),
+            timeline_groups: doc.timeline_groups.len(),
+            joints: doc.assembly.joints.len(),
+            history_bar_groups: app.preferences.history_bar_groups,
+            history_show_hidden: app.tree.history_show_hidden,
+            scope: app.tree.timeline_scope,
+            active_component: app.session.active_component,
+            picked_component,
+            marker,
+            folds_revision: app.tree.history_folds.revision(),
+            legacy_collapsed: legacy_collapsed_key(app),
+        }
+    }
+}
+
+/// Fingerprint of legacy folder fold choices still held in `app.tree.collapsed` (`timeline_group:*`).
+/// O(1) when the design has no folders or no collapsed keys, otherwise O(log N + K).
+fn legacy_collapsed_key(app: &SolveApp) -> u64 {
+    if app.session.doc.timeline_groups.is_empty() || app.tree.collapsed.is_empty() {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut count = 0usize;
+    for key in app.tree.collapsed.range::<str, _>((std::ops::Bound::Included("timeline_group:"), std::ops::Bound::Excluded("timeline_group;"))) {
+        key.hash(&mut h);
+        count += 1;
+    }
+    if count == 0 {
+        return 0;
+    }
+    count.hash(&mut h);
+    h.finish()
+}
+
+/// Cached structural grouping of the History bar, independent of viewport hover and selection marks.
+struct HistoryPlan {
+    entries: Arc<[Entry]>,
+    folders: Arc<crate::timeline_folders::Folders>,
+    view: Arc<View>,
+    within: Option<u64>,
+    has_folds: bool,
+    /// Shown-feature slot for each unique feature id (populated when `has_folds`).
+    id_to_slot: HashMap<u64, usize>,
+    unique_ids: bool,
+}
+
+/// What tells the bar that its per-feature marks (`selected`, `error`, `warning`) may have changed.
+/// Viewport hover (`strip.from_view`) is intentionally excluded and resolved in O(1) from
+/// [`HistoryPlan::id_to_slot`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct HistoryMarksKey {
+    plan: HistoryPlanKey,
+    results_ptr: usize,
+    results_len: usize,
+    floating: bool,
+    selection: u64,
+    dialog: u64,
+}
+
+impl HistoryMarksKey {
+    fn of(app: &SolveApp, plan: HistoryPlanKey, floating: bool) -> Self {
+        Self {
+            plan,
+            results_ptr: app.session.model.results.as_ptr() as usize,
+            results_len: app.session.model.results.len(),
+            floating,
+            selection: feature_selection_hash(&app.session.selection),
+            dialog: dialog_feature_selection_hash(app),
+        }
+    }
+}
+
+/// Hash only the selection variants that [`crate::timeline::feature_of_sel`] can map to a feature
+/// id, avoiding O(N) scans over large body/face selections and avoiding any JSON serialization.
+fn hash_feature_sel(sel: &solidcraft_engine::Sel, h: &mut impl Hasher) -> bool {
+    use solidcraft_engine::Sel;
+    match sel {
+        Sel::Feature { id } => {
+            1u8.hash(h);
+            id.hash(h);
+            true
+        }
+        Sel::Plane { name } => {
+            2u8.hash(h);
+            name.hash(h);
+            true
+        }
+        Sel::Axis { name } => {
+            3u8.hash(h);
+            name.hash(h);
+            true
+        }
+        Sel::ConstructionPoint { name } => {
+            4u8.hash(h);
+            name.hash(h);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn feature_selection_hash(items: &[solidcraft_engine::Sel]) -> u64 {
+    if items.is_empty() {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut count = 0usize;
+    for sel in items {
+        if hash_feature_sel(sel, &mut h) {
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return 0;
+    }
+    count.hash(&mut h);
+    h.finish()
+}
+
+fn dialog_feature_selection_hash(app: &SolveApp) -> u64 {
+    let Some(dialog) = app.dialog.as_ref() else {
+        return 0;
+    };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut count = 0usize;
+    for input in &dialog.inputs {
+        for sel in &input.items {
+            if hash_feature_sel(sel, &mut h) {
+                count += 1;
+            }
+        }
+    }
+    if count == 0 {
+        return 0;
+    }
+    count.hash(&mut h);
+    h.finish()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times the History bar's grouped plan was built.
+    static HISTORY_PLAN_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times the History bar's fold marks were built.
+    static HISTORY_MARKS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn plan_built_count() -> usize {
+    HISTORY_PLAN_BUILT.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn marks_built_count() -> usize {
+    HISTORY_MARKS_BUILT.with(std::cell::Cell::get)
+}
+
+fn build_plan(app: &SolveApp, marker: usize) -> HistoryPlan {
+    #[cfg(test)]
+    HISTORY_PLAN_BUILT.with(|built| built.set(built.get() + 1));
     let doc = &app.session.doc;
     let within = crate::timeline_scope::shown(app);
     let view = View::of(doc, within.map(|c| crate::timeline_scope::components_within(app, c)).as_ref(), app.tree.history_show_hidden);
@@ -339,7 +536,15 @@ pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
     // Layout, "Fold the History bar into groups").
     let folds = n > FOLD_FROM && app.preferences.history_bar_groups;
     if !folds && doc.timeline_groups.is_empty() {
-        return History { entries: (0..n).map(Entry::Feature).collect(), marks: Vec::new(), folders: Default::default(), view, within };
+        return HistoryPlan {
+            entries: Arc::from((0..n).map(Entry::Feature).collect::<Vec<_>>()),
+            folders: Arc::default(),
+            view: Arc::new(view),
+            within,
+            has_folds: false,
+            id_to_slot: HashMap::new(),
+            unique_ids: true,
+        };
     }
     let folders = crate::timeline_folders::Folders::of(doc);
     let spans = view.spans(&folders.spans);
@@ -362,9 +567,78 @@ pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
             folders_holding(&spans, last, &mut on_the_way);
         }
     }
-    let mut open = Shown { app, view: &view, marker: view.slot(strip.marker), focus: focus.map_or(&[][..], of), folders: on_the_way };
-    let entries = entries(n, &per_feature, &spans, &mut open);
-    History { entries, marks: marks(app, strip, &view), folders, view, within }
+    let mut open = Shown { app, view: &view, marker: view.slot(marker), focus: focus.map_or(&[][..], of), folders: on_the_way };
+    let entries = Arc::from(entries(n, &per_feature, &spans, &mut open));
+    let mut id_to_slot = HashMap::with_capacity(n);
+    let mut unique_ids = true;
+    for slot in 0..n {
+        if let Some(f) = doc.features.get(view.index(slot))
+            && id_to_slot.insert(f.id, slot).is_some()
+        {
+            unique_ids = false;
+        }
+    }
+    HistoryPlan { entries, folders: Arc::new(folders), view: Arc::new(view), within, has_folds: true, id_to_slot, unique_ids }
+}
+
+fn from_view_slots(plan: &HistoryPlan, doc: &solidcraft_engine::doc::Document, from_view: [Option<u64>; 2]) -> Vec<usize> {
+    if !plan.has_folds || from_view == [None, None] {
+        return Vec::new();
+    }
+    if plan.unique_ids {
+        let mut slots = Vec::with_capacity(2);
+        for id in from_view.into_iter().flatten() {
+            if let Some(&slot) = plan.id_to_slot.get(&id)
+                && !slots.contains(&slot)
+            {
+                slots.push(slot);
+            }
+        }
+        return slots;
+    }
+    (0..plan.view.len()).filter(|&slot| doc.features.get(plan.view.index(slot)).is_some_and(|f| from_view.contains(&Some(f.id)))).collect()
+}
+
+/// What the History bar shows of the design's features this frame: the whole history, or the
+/// features of one component and those inside it (`timeline_scope`). Reuses the cached grouping
+/// and marks stored in `ui`'s egui context whenever their inputs did not change.
+pub(crate) fn cached(app: &SolveApp, ui: &egui::Ui, strip: &Strip) -> History {
+    let plan_id = egui::Id::unique("sc_history_bar_fold_plan");
+    let plan_key = HistoryPlanKey::of(app, strip.marker);
+    let plan = match ui.data(|data| data.get_temp::<(HistoryPlanKey, Arc<HistoryPlan>)>(plan_id)) {
+        Some((was, plan)) if was == plan_key => plan,
+        _ => {
+            let plan = Arc::new(build_plan(app, strip.marker));
+            ui.data_mut(|data| data.insert_temp(plan_id, (plan_key, plan.clone())));
+            plan
+        }
+    };
+    let marks: Arc<[Marks]> = if !plan.has_folds {
+        Arc::from([])
+    } else {
+        let marks_id = egui::Id::unique("sc_history_bar_fold_marks");
+        let marks_key = HistoryMarksKey::of(app, plan_key, strip.floating);
+        match ui.data(|data| data.get_temp::<(HistoryMarksKey, Arc<[Marks]>)>(marks_id)) {
+            Some((was, marks)) if was == marks_key => marks,
+            _ => {
+                let marks: Arc<[Marks]> = Arc::from(marks(app, strip, &plan.view));
+                ui.data_mut(|data| data.insert_temp(marks_id, (marks_key, marks.clone())));
+                marks
+            }
+        }
+    };
+    let from_view_slots = from_view_slots(&plan, &app.session.doc, strip.from_view);
+    History { entries: plan.entries.clone(), marks, from_view_slots, folders: plan.folders.clone(), view: plan.view.clone(), within: plan.within }
+}
+
+/// What the History bar shows of the design's features this frame, built afresh without reading
+/// any frame cache.
+#[cfg(test)]
+pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
+    let plan = build_plan(app, strip.marker);
+    let marks: Arc<[Marks]> = if plan.has_folds { Arc::from(marks(app, strip, &plan.view)) } else { Arc::from([]) };
+    let from_view_slots = from_view_slots(&plan, &app.session.doc, strip.from_view);
+    History { entries: plan.entries, marks, from_view_slots, folders: plan.folders, view: plan.view, within: plan.within }
 }
 
 /// The folders whose features hold feature `at`, at any depth.
@@ -406,20 +680,43 @@ impl Opens for Shown<'_> {
     }
 }
 
-/// Each feature's marks, reading the results and the selection once.
+/// Each feature's marks, reading the results and the selection once. Viewport hover is tracked
+/// separately on [`History::from_view_slots`].
 fn marks(app: &SolveApp, strip: &Strip, view: &View) -> Vec<Marks> {
-    let flags: HashMap<u64, (bool, bool)> = app.session.model.results.iter().map(|r| (r.id, (r.error.is_some(), r.warning.is_some()))).collect();
-    let in_dialog = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
-    let picked: HashSet<u64> =
-        app.session.selection.iter().chain(in_dialog.iter()).filter_map(|s| crate::timeline::feature_of_sel(&app.session.doc, s)).collect();
-    let last_done = strip.marker.checked_sub(1).filter(|_| strip.floating);
+    #[cfg(test)]
+    HISTORY_MARKS_BUILT.with(|built| built.set(built.get() + 1));
     let features = &app.session.doc.features;
-    view.indices(0, view.len())
-        .into_iter()
-        .filter_map(|i| features.get(i).map(|f| (i, f)))
+    let results = &app.session.model.results;
+    let aligned = results.len() == features.len() && features.iter().zip(results).all(|(f, r)| f.id == r.id);
+    let flags: Option<HashMap<u64, (bool, bool)>> =
+        (!aligned).then(|| results.iter().map(|r| (r.id, (r.error.is_some(), r.warning.is_some()))).collect());
+    let mut picked: HashSet<u64> = HashSet::new();
+    for s in &app.session.selection {
+        if let Some(id) = crate::timeline::feature_of_sel(&app.session.doc, s) {
+            picked.insert(id);
+        }
+    }
+    if let Some(dialog) = app.dialog.as_ref() {
+        for input in &dialog.inputs {
+            for s in &input.items {
+                if let Some(id) = crate::timeline::feature_of_sel(&app.session.doc, s) {
+                    picked.insert(id);
+                }
+            }
+        }
+    }
+    let last_done = strip.marker.checked_sub(1).filter(|_| strip.floating);
+    (0..view.len())
+        .filter_map(|slot| {
+            let i = view.index(slot);
+            features.get(i).map(|f| (i, f))
+        })
         .map(|(i, f)| {
-            let (error, warning) = flags.get(&f.id).copied().unwrap_or_default();
-            Marks { selected: picked.contains(&f.id) || last_done == Some(i), hovered: strip.from_view.contains(&Some(f.id)), error, warning }
+            let (error, warning) = match &flags {
+                None => results.get(i).map_or((false, false), |r| (r.error.is_some(), r.warning.is_some())),
+                Some(map) => map.get(&f.id).copied().unwrap_or_default(),
+            };
+            Marks { selected: picked.contains(&f.id) || last_done == Some(i), hovered: false, error, warning }
         })
         .collect()
 }
@@ -431,7 +728,7 @@ impl History {
         let marks = self.marks.get(start..end).unwrap_or_default();
         Marks {
             selected: !open && marks.iter().any(|m| m.selected),
-            hovered: marks.iter().any(|m| m.hovered),
+            hovered: self.from_view_slots.iter().any(|&slot| start <= slot && slot < end),
             error: marks.iter().any(|m| m.error),
             warning: marks.iter().any(|m| m.warning),
         }
@@ -484,7 +781,7 @@ pub(crate) fn group_chip(
     if response.clicked() {
         fold(app, group, &history.view);
     }
-    crate::ui_kit::Menu::context(&response, |ui| group_menu(app, ui, group, &history.view));
+    group_menu(app, &response, group, &history.view);
     rect.width()
 }
 
@@ -498,30 +795,38 @@ fn fold(app: &mut SolveApp, group: &Group, view: &View) {
     }
 }
 
-fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View) {
-    let fold_label = if group.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::ui_kit::menu::button(ui, fold_label, "list").clicked() {
-        fold(app, group, view);
-        ui.close();
+fn group_menu(app: &mut SolveApp, response: &egui::Response, group: &Group, view: &View) {
+    if !crate::ui_kit::Menu::context_active(response) {
+        return;
     }
-    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
-        let features = &app.session.doc.features;
-        let items: Vec<_> = view
-            .indices(group.start, group.end)
-            .into_iter()
-            .filter_map(|i| features.get(i))
-            .map(|f| json!({"type": "feature", "id": f.id}))
-            .collect();
-        app.tree.picked_joints.clear();
-        app.tree.picked_timeline_groups.clear();
-        let _ = app.run("select.set", json!({ "items": items }));
-        ui.close();
-    }
-    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
-        let end = view.index(group.end);
-        let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
-        let _ = app.run_heavy("timeline.roll_to", position);
-        ui.close();
+    use crate::ui_kit::Item;
+    let items = [
+        Item::action("fold", if group.open { "Fold Features" } else { "Show Each Feature" }, "list"),
+        Item::action("select", "Select Features", "select"),
+        Item::action("roll", "Roll History Marker Here", "rollback"),
+    ];
+    if let Some(picked) = crate::ui_kit::Menu::context_items(response, &items) {
+        match picked.id.as_str() {
+            "fold" => fold(app, group, view),
+            "select" => {
+                let features = &app.session.doc.features;
+                let items: Vec<_> = view
+                    .indices(group.start, group.end)
+                    .into_iter()
+                    .filter_map(|i| features.get(i))
+                    .map(|f| json!({"type":"feature","id":f.id}))
+                    .collect();
+                app.tree.picked_joints.clear();
+                app.tree.picked_timeline_groups.clear();
+                let _ = app.run("select.set", json!({"items":items}));
+            }
+            "roll" => {
+                let end = view.index(group.end);
+                let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({"position":end}) };
+                let _ = app.run_heavy("timeline.roll_to", position);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -676,5 +981,59 @@ mod tests {
         let shown = entries(20, &chains, &folders, &mut Open(&[1, 2, 3, 4]));
         let features: Vec<usize> = shown.iter().filter_map(|e| if let Entry::Feature(i) = e { Some(*i) } else { None }).collect();
         assert_eq!(features, (0..20).collect::<Vec<_>>());
+    }
+
+    /// Steady-state frames with "Fold the History bar into groups" enabled reuse the cached
+    /// grouping plan and fold marks without rebuilding them; viewport hover changes (`from_view`)
+    /// reuse both while still reporting accurate hover marks; fold toggles, scope changes and
+    /// preference flips invalidate and match a fresh build identically.
+    #[test]
+    fn cached_history_grouping_reuses_plan_and_marks_across_steady_frames_and_hover() {
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.call("ui.prefs", serde_json::json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("component.create", serde_json::json!({"name": "Rig"})).unwrap();
+        for i in 0..FOLD_FROM + 4 {
+            h.app.run("sketch.create", serde_json::json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        }
+        h.app.run("component.activate", serde_json::json!({"component": "root"})).unwrap();
+        h.frames(3);
+
+        let plans = super::plan_built_count();
+        let marks = super::marks_built_count();
+        h.frames(5);
+        assert_eq!(super::plan_built_count(), plans, "steady frames must reuse the cached History grouping plan");
+        assert_eq!(super::marks_built_count(), marks, "steady frames must reuse cached fold marks");
+
+        // Changing viewport hover must not rebuild either the grouping plan or the marks array,
+        // while `History::inside` still reflects the hovered feature accurately.
+        let hovered_id = h.app.session.doc.features[2].id;
+        h.app.viewport.hover_feature = Some(hovered_id);
+        h.frames(2);
+        assert_eq!(super::plan_built_count(), plans, "viewport hover change must not rebuild History grouping");
+        assert_eq!(super::marks_built_count(), marks, "viewport hover change must not rebuild History marks");
+        let marker = h.app.session.doc.features.len();
+        let strip = super::Strip {
+            marker,
+            from_view: [Some(hovered_id), None],
+            floating: true,
+            accent: crate::workspace::tab_accent(&solidcraft_theme::Tokens::get(), &h.app.ui.tab),
+        };
+        let fresh = super::history(&h.app, &strip);
+        assert!(fresh.inside(0, fresh.view.len(), false).hovered, "hovered feature inside folded run lights its chip");
+
+        // Toggling a component run fold invalidates the plan and rebuilds once.
+        let comp = h.app.session.doc.components.first().expect("component").id;
+        let run_key = super::key(&h.app, comp, 0);
+        super::set_open(&mut h.app, &run_key, true);
+        let plans_before_toggle = super::plan_built_count();
+        h.frames(3);
+        assert_eq!(super::plan_built_count(), plans_before_toggle + 1, "toggling a fold rebuilds once then caches again");
+
+        // Toggling `history_bar_groups` off invalidates and rebuilds once (`h.call` runs a frame).
+        let plans_before_pref = super::plan_built_count();
+        assert_eq!(h.call("ui.prefs", serde_json::json!({"history_bar_groups": false}))["ok"], true);
+        h.frames(3);
+        assert_eq!(super::plan_built_count(), plans_before_pref + 1, "changing grouping preference rebuilds once then caches again");
     }
 }

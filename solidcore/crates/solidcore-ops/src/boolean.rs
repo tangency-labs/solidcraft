@@ -274,6 +274,84 @@ fn union_pair(
     finished(k, r, expect, contract)
 }
 
+/// Intersect copies of two bodies under [`Contract::Closed`]. For a failed radial search at a
+/// shared edge between solid operands, retry in reverse order and, if needed, with rebuilt native
+/// operands in both orders. The inputs and the attributes that carry their provenance are kept.
+pub fn intersect_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let inputs = [("a", a), ("b", b)];
+    if inputs.iter().any(|(_, body)| body.is_poisoned()) {
+        return Err(Error::Internal(
+            "SmApiBoolean: the body was left unfinished by an earlier panic".into(),
+        ));
+    }
+    let d = run_on("SmApiBoolean", &inputs, |k| {
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let mut operands = [(ca, Proof::default()), (cb, Proof::default())];
+        let expect = expect_of(k, &mut operands, Contract::Closed)?;
+        let [(ca, _), (cb, _)] = operands;
+        let first = intersect_pair(k, ca, cb, expect, Contract::Closed);
+        let Err(original) = first else { return first };
+        if !expect.solid() || !radial_sector_failure(&original) {
+            return Err(original);
+        }
+
+        // The merge copies faces into its first operand. Its radial search can succeed in
+        // the other direction at the same shared edge, or after rebuilding native radial links.
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let reverse = intersect_pair(k, cb, ca, expect, Contract::Proved);
+        if is_settled_intersect(&reverse) {
+            return reverse;
+        }
+        let rebuilt_ab = (|| {
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            intersect_pair(k, ca, cb, expect, Contract::Proved)
+        })();
+        if is_settled_intersect(&rebuilt_ab) {
+            return rebuilt_ab;
+        }
+        let rebuilt_ba = (|| {
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            intersect_pair(k, cb, ca, expect, Contract::Proved)
+        })();
+        if is_settled_intersect(&rebuilt_ba) {
+            return rebuilt_ba;
+        }
+        Err(original)
+    })?;
+    result(d, Ok(None))
+}
+
+fn is_settled_intersect(outcome: &KernelResult<Done>) -> bool {
+    matches!(
+        outcome,
+        Ok(Done::Body(..) | Done::Empty)
+            | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+    ) || outcome
+        .as_ref()
+        .is_err_and(|e| e.root_cause().is_not_certified())
+}
+
+fn intersect_pair(
+    k: &mut Kernel,
+    mut a: Brep,
+    mut b: Brep,
+    expect: Expect,
+    contract: Contract,
+) -> KernelResult<Done> {
+    matched_tolerances(k, &mut a, &mut b)?;
+    let witnesses = Witnesses::of(k, &a, &b, BooleanOp::Intersect, expect)?;
+    let mut r = sm::boolean_intersection(k, a, b)?;
+    after_boolean(k, &mut r)?;
+    Ok(match finished(k, r, expect, contract)? {
+        Done::Empty => witnesses.refute(k),
+        d => d,
+    })
+}
+
 /// Each operand's vertices with a copy of the other operand, which the boolean consumes, and
 /// the side of it (material or void) on which a vertex proves the result is not empty.
 struct Witnesses(Vec<(Vec<[f64; 3]>, Brep, bool)>);
@@ -1019,5 +1097,23 @@ mod tests {
         assert_eq!(seen[0].0, "a");
         let back = Body::from_smb(seen[0].1.clone().unwrap(), false).unwrap();
         assert_eq!(back.counts().unwrap(), [6, 12, 8]);
+    }
+
+    #[test]
+    fn intersect_copies_measures_overlap_clears_flush_contact_and_keeps_inputs() {
+        all_fixes();
+        let a = cube([0.0, 0.0, 0.0]);
+        let overlap = cube([0.5, 0.0, 0.0]);
+        let flush = cube([1.0, 0.0, 0.0]);
+        let apart = cube([5.0, 0.0, 0.0]);
+
+        let hit = intersect_copies(&a, &overlap).unwrap().unwrap();
+        assert!((hit.volume(1e-10).unwrap() - 0.5).abs() < 1e-9);
+        assert!(intersect_copies(&a, &flush).unwrap().is_none());
+        assert!(intersect_copies(&a, &apart).unwrap().is_none());
+        // Both input bodies remain intact after every call.
+        assert!((a.volume(1e-10).unwrap() - 1.0).abs() < 1e-9);
+        assert!((overlap.volume(1e-10).unwrap() - 1.0).abs() < 1e-9);
+        assert!((flush.volume(1e-10).unwrap() - 1.0).abs() < 1e-9);
     }
 }

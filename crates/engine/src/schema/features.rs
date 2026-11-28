@@ -147,9 +147,14 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub extent: Option<ExtentKeyword>,
     /// Draft angle of the side walls (positive: outward, so the far end is larger along the
-    /// extrusion direction; negative: inward, so the far end is smaller).
+    /// extrusion direction; negative: inward, so the far end is smaller). With `direction:
+    /// symmetric` it drafts both halves from the start plane; with `distance2`, the first side.
     #[serde(default)]
     pub taper: Option<AngleExpr>,
+    /// With `distance2`: the second side's draft angle, from the start plane the same way
+    /// (positive: that side's far end is larger). Default: `taper`.
+    #[serde(default)]
+    pub taper2: Option<AngleExpr>,
     /// Which way to extrude. Default: positive.
     #[serde(default)]
     pub direction: Option<DirectionParam>,
@@ -2095,9 +2100,15 @@ pub struct ThreadParams {
     #[serde(default, deserialize_with = "thread_extent")]
     #[schemars(schema_with = "thread_extent_schema")]
     pub extent: Option<String>,
-    /// How far the thread runs, from the end it starts at. Not with `up_to`.
+    /// How far the thread runs, from where it starts (the end it starts at, or `offset` in from it).
+    /// Not with `up_to`.
     #[serde(default)]
     pub length: Option<LengthExpr>,
+    /// How far in from the end it starts at (`from`) the thread starts, leaving that much of the face
+    /// plain; `length` and `up_to` are measured from there. 0 or more, shorter than the face; not
+    /// with `tip: start` or a taper pipe thread. Default: 0, the thread starts at that end.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     #[serde(default)]
     pub up_to: Option<ThreadUpTo>,
     /// A point near the end of the face the thread starts at, in mm. Default: the face's only free

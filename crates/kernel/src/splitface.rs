@@ -153,7 +153,7 @@ fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     // definition, a ball patch) has no (u, v) of its own: its face's NURBS form is the surface,
     // over its knot box, as a round's face was before it kept its definition.
     let surface = match &f.surface {
-        Surface::Blend { .. } | Surface::BallPatch { .. } => f.parameters(),
+        Surface::Blend { .. } | Surface::Sweep { .. } | Surface::BallPatch { .. } => f.parameters(),
         s => s,
     };
     let dom = SurfaceEval::new(surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
