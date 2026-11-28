@@ -211,3 +211,66 @@ fn a_fillet_over_a_square_ended_stem_is_refused() {
         assert_eq!(groove_fillet_weld(picks, &flat(), legs(4.0, 4.0)).unwrap_err(), GrooveRefusal::NoGrooveUnderFillet);
     }
 }
+
+// ---- the through part's face under the weld (CodeRabbit on #22504) ----
+
+/// A through plate 8 thick from y = -8 to 0, its top's outline `outline` (x, z, counter-clockwise
+/// seen from below) less `holes` (each clockwise), swept up to the top: the plate of [`t_joint`]
+/// when the outline is its rectangle.
+fn through_plate(outline: &[(f64, f64)], holes: &[&[(f64, f64)]]) -> Body {
+    // x along x, y along -z: its normal is +y, so the plate runs from y = -8 up to 0; the plane's
+    // y is -z, so each loop is reversed to keep its turn
+    let plane = Plane { origin: Vec3::new(0.0, -8.0, 0.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, -1.0) };
+    let poly = |c: &[(f64, f64)]| Loop2::polygon(&c.iter().rev().map(|&(x, z)| Vec2::new(x, -z)).collect::<Vec<_>>());
+    let region = Region2 { outer: poly(outline), holes: holes.iter().map(|&h| poly(h)).collect() };
+    extrude_planar_regions(&plane, &[region], 0.0, 8.0).unwrap()
+}
+
+/// The rectangle of [`t_joint`]'s through plate, x from -40 to 40, z from -40 to 160.
+const THROUGH: [(f64, f64); 4] = [(-40.0, -40.0), (40.0, -40.0), (40.0, 160.0), (-40.0, 160.0)];
+
+/// A square hole 2 by 4 through the plate, x from `x` to `x + 2`, z from `z` to `z + 4`.
+fn hole(x: f64, z: f64) -> [(f64, f64); 4] {
+    [(x, z), (x, z + 4.0), (x + 2.0, z + 4.0), (x + 2.0, z)]
+}
+
+/// The beveled T of [`t_joint`] on a through plate with holes: one under the weld but past the
+/// stem's end (z = -20), one beside the stem away from the weld (x = -30): both filled as without
+/// them; one under the weld beside the stem (x from 2 to 4, z = 50): refused as interrupted,
+/// naming the through part whichever part is first.
+#[test]
+fn a_hole_in_the_through_plate_matters_only_under_the_weld() {
+    let (_, stem, bevel) = t_joint(0.0);
+    for (holes, builds) in [(hole(2.0, -20.0), true), (hole(-30.0, 50.0), true), (hole(2.0, 50.0), false)] {
+        let through = through_plate(&THROUGH, &[&holes]);
+        let top = facing(&through, UP);
+        assert_eq!(top.len(), 1, "{holes:?}");
+        let (t, s) = (picked(&through, &top, UP), picked(&stem, &bevel, [-1.0, 0.0, 0.0]));
+        for (picks, part) in [([&s, &t], JointPart::Right), ([&t, &s], JointPart::Left)] {
+            let got = groove_weld(picks, &flat());
+            if builds {
+                let volume = got.unwrap().body.volume_at(1e-9).unwrap();
+                assert!((volume - 18.0 * 120.0).abs() <= 1e-6 * volume, "{holes:?}: {volume}");
+            } else {
+                assert_eq!(got.unwrap_err(), GrooveRefusal::GrooveFaceInterrupted { part, face: top[0] }, "{holes:?}");
+            }
+        }
+    }
+}
+
+/// The T of [`t_joint`] on a through plate whose top narrows: its edge on the fillet's side runs
+/// from x = -40 at z = -40 to x = 2 at z = 160, so it is at -19 at the stem's middle and -6.4 at
+/// its end. A through leg of 8 is on the face in the middle but runs off it near the end: refused;
+/// a leg of 4 stays on it all along and builds (the groove's 18 under 4 · 4 / 2).
+#[test]
+fn a_fillet_leg_that_runs_off_a_narrowing_through_face_is_refused() {
+    let (_, stem, bevel) = t_joint(0.0);
+    let through = through_plate(&[(-40.0, -40.0), (40.0, -40.0), (40.0, 160.0), (2.0, 160.0)], &[]);
+    let top = facing(&through, UP);
+    let [t, s] = t_picks(&through, &stem, &top, &bevel);
+    for (picks, part) in [([&s, &t], JointPart::Right), ([&t, &s], JointPart::Left)] {
+        assert_eq!(groove_fillet_weld(picks, &flat(), legs(4.0, 8.0)).unwrap_err(), GrooveRefusal::LegPastFace { part });
+        let volume = groove_fillet_weld(picks, &flat(), legs(4.0, 4.0)).unwrap().body.volume_at(1e-9).unwrap();
+        assert!((volume - 120.0 * 26.0).abs() <= 1e-6 * volume, "{volume}");
+    }
+}

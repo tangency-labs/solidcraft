@@ -52,8 +52,8 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
 use solidcraft_kernel::api::UnitNormal;
 use solidcraft_kernel::{
-    Body, ChannelFill, FillFailure, FillNote, FillOptions, FillSide, KernelError, PlanarPiece, Straight, extrude_planar_regions, fill_channel,
-    fill_margin, profiles, straight_direction,
+    Body, BoolOp, ChannelFill, FillFailure, FillNote, FillOptions, FillSide, KernelError, PlanarPiece, Straight, boolean, extrude_planar_regions,
+    fill_channel, fill_margin, profiles, straight_direction,
 };
 
 /// Which of the two parts of a joint something is about.
@@ -659,9 +659,9 @@ fn cut(picks: [&GroovePick<'_>; 2], parts: [JointPart; 2], through: bool, zone: 
 
     // each groove face's span along the joint and its section, read from its own edges
     let mut reads: [Vec<FaceRead>; 2] = [Vec::new(), Vec::new()];
-    for (((pick, part), f), read) in picks.into_iter().zip(parts).zip(&faces).zip(&mut reads) {
+    for ((((pick, part), f), read), whole) in picks.into_iter().zip(parts).zip(&faces).zip(&mut reads).zip([false, through]) {
         for &face in f {
-            match face_read(pick, part, face, &frame, d, zone)? {
+            match face_read(pick, part, face, &frame, d, zone, whole)? {
                 Some(r) if r.span[1] - r.span[0] > zone => read.push(r),
                 Some(_) => return Err(GrooveRefusal::GrooveFaceNeverWhole { part, face }),
                 None => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
@@ -772,7 +772,7 @@ fn piece_walls(
         if !reads[1].iter().any(|r| r.span[0] <= lo + zone && r.span[1] >= hi - zone) {
             return Ok(None);
         }
-        match through_wall(picks[1], parts[0], &left, piece)? {
+        match through_wall(picks[1], parts, &left, piece)? {
             Some(wall) => (wall, picks[1].outer),
             None => return Ok(None),
         }
@@ -838,13 +838,17 @@ fn part_wall(
 /// hit's distance along `x`), to the stem's root, which must lie on that face. `None` where the
 /// outer face is not straight along the joint.
 ///
+/// The face must be whole under the wall, from the toe to the root, all along the piece
+/// ([`whole_under`]): a hole or a notch elsewhere in it does not matter (CodeRabbit on #22504).
+///
 /// # Errors
-/// [`GrooveRefusal::StemOffThroughPart`] naming the stem `part` where the ray meets no face, or
-/// only other faces at its nearest hit, or the stem's root is not on the outer face; the errors of
-/// the kernel calls.
-fn through_wall(pick: &GroovePick<'_>, part: JointPart, stem: &[Seg2], piece: &Piece<'_>) -> Result<Option<Vec<Seg2>>> {
+/// [`GrooveRefusal::StemOffThroughPart`] naming the stem (the first of `parts`) where the ray
+/// meets no face, or only other faces at its nearest hit, or the stem's root is not on the outer
+/// face; [`GrooveRefusal::GrooveFaceInterrupted`] naming the through part (the second) where the
+/// face is not whole under the wall; the errors of the kernel calls.
+fn through_wall(pick: &GroovePick<'_>, parts: [JointPart; 2], stem: &[Seg2], piece: &Piece<'_>) -> Result<Option<Vec<Seg2>>> {
     let tol = piece.zone * ALLOWANCE;
-    let off = GrooveRefusal::StemOffThroughPart { part };
+    let off = GrooveRefusal::StemOffThroughPart { part: parts[0] };
     if !straight(pick, pick.outer, piece.d, piece.zone)? {
         return Ok(None);
     }
@@ -863,6 +867,9 @@ fn through_wall(pick: &GroovePick<'_>, part: JointPart, stem: &[Seg2], piece: &P
     let (toe, root) = (Vec2::new(start.x + hit.distance, start.y), ends(last).1);
     if near(toe, root, tol) || !on_face(pick, pick.outer, piece.in_space(root), tol)? {
         return Err(off);
+    }
+    if !whole_under(pick, pick.outer, toe, root, piece)? {
+        return Err(GrooveRefusal::GrooveFaceInterrupted { part: parts[1], face: pick.outer });
     }
     Ok(Some(vec![Seg2::Line { a: toe, b: root }]))
 }
@@ -917,12 +924,16 @@ fn fillet_fill(
     let left = Vec2::new(c.x - fillet.stem, c.y);
     let [on_through, _] = affine::frame_axes(piece.d, outer_normal(picks[1], parts[1])?.value)?;
     let u = piece.in_frame_direction(on_through);
-    let out = if (root.x - c.x) * u.x + (root.y - c.y) * u.y > 0.0 { -fillet.through } else { fillet.through };
-    let right = Vec2::new(c.x + out * u.x, c.y + out * u.y);
+    let (c3, u3) = ([c.x, c.y, 0.0], [u.x, u.y, 0.0]);
+    let out = if affine::distance_along(c3, u3, [root.x, root.y, 0.0]) > 0.0 { -fillet.through } else { fillet.through };
+    let [rx, ry, _] = affine::parallelogram_point(c3, u3, [0.0; 3], out, 0.0);
+    let right = Vec2::new(rx, ry);
     if fillet.stem > down && !on_face(picks[0], picks[0].outer, piece.in_space(left), tol)? {
         return Err(GrooveRefusal::LegPastFace { part: parts[0] });
     }
-    if !on_face(picks[1], picks[1].outer, piece.in_space(right), tol)? {
+    // the leg on the through part's face all along the stretch, not only in its middle: a face
+    // that narrows or a hole beside the stem leaves it (CodeRabbit on #22504)
+    if !on_face(picks[1], picks[1].outer, piece.in_space(right), tol)? || !whole_under(picks[1], picks[1].outer, c, right, piece)? {
         return Err(GrooveRefusal::LegPastFace { part: parts[1] });
     }
     let mut fill = match fill_channel(&[Seg2::Line { a: left, b: c }], &[Seg2::Line { a: right, b: c }], None, options)? {
@@ -959,10 +970,69 @@ fn fillet_fill(
     Ok(fill)
 }
 
-/// How far apart `p` and `q` are. shortcut: plain arithmetic in the frame's plane, as [`ends`]
-/// reads arcs.
-fn span(p: Vec2, q: Vec2) -> f64 {
-    ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y)).sqrt()
+/// How far apart `p` and `q` are, by the kernel ([`affine::segment_distance`] from a line of no
+/// length); `None` for a point that is no number.
+fn span(p: Vec2, q: Vec2) -> Option<f64> {
+    affine::segment_distance(&Seg2::Line { a: p, b: p }, q)
+}
+
+/// How deep below a face, and how far in from a piece's ends, a slab ([`slab`]) starts: a quarter
+/// of [`MARK_HEIGHT`], so that its faces are not the part's own.
+const SLAB_GAP: f64 = MARK_HEIGHT / 4.0;
+
+/// The quadrilateral `corners` (in the frame's plane) swept along `piece`, [`SLAB_GAP`] short of
+/// each of its ends.
+fn slab(corners: [Vec2; 4], piece: &Piece<'_>) -> Result<Body> {
+    let region = Region2 { outer: Loop2::polygon(&corners), holes: Vec::new() };
+    let [lo, hi] = piece.along;
+    Ok(extrude_planar_regions(piece.frame, &[region], lo + SLAB_GAP, hi - SLAB_GAP)?)
+}
+
+/// The volume a slab `width` wide over `piece` may leave from a boolean and still count as
+/// nothing: a skin [`ALLOWANCE`] zone tolerances thick over it.
+fn skin(width: f64, piece: &Piece<'_>) -> f64 {
+    piece.zone * ALLOWANCE * width * (piece.along[1] - piece.along[0])
+}
+
+/// The volume of a boolean's result `got`, none for an empty one; `None` where the kernel
+/// measures none.
+fn volume_of(got: Option<Body>) -> Option<f64> {
+    got.map_or(Some(0.0), |b| b.volume_at(1e-9))
+}
+
+/// Whether face `face` of `pick`'s part, a plane, is whole under the strip from `a` to `b`
+/// (points of the face in the frame's plane) all along `piece`: a slab under the strip, from
+/// [`SLAB_GAP`] to [`MARK_HEIGHT`] inside the part, lies in its material (cut by the part, at most
+/// a [`skin`] is left; [`boolean`]). A hole, a notch, or an edge of the face that crosses the strip,
+/// straight or curved, leaves more (CodeRabbit on #22504). `true` for a face that is not a plane.
+/// shortcut: a gap shallower than [`SLAB_GAP`], or within it of the piece's ends, is not seen.
+fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Piece<'_>) -> Result<bool> {
+    let Some(n) = pick.part.face_plane_normal(face)? else {
+        return Ok(true);
+    };
+    let out = piece.in_frame_direction(n.value);
+    let below = |p: Vec2, depth: f64| {
+        let [x, y, _] = affine::parallelogram_point([p.x, p.y, 0.0], [out.x, out.y, 0.0], [0.0; 3], -depth, 0.0);
+        Vec2::new(x, y)
+    };
+    let Some(width) = span(a, b) else {
+        return Ok(false);
+    };
+    let under = slab([below(a, SLAB_GAP), below(b, SLAB_GAP), below(b, MARK_HEIGHT), below(a, MARK_HEIGHT)], piece)?;
+    Ok(volume_of(boolean(&under, pick.part, BoolOp::Cut)?).is_some_and(|v| v <= skin(width, piece)))
+}
+
+/// Whether the space of the default mark on `seam` (the other side's seam of a joint with no
+/// groove) is clear of `pick`'s part all along `piece`: a slab from [`SLAB_GAP`] to
+/// [`MARK_HEIGHT`] off the surface, as wide as the mark, meets at most a [`skin`] of the part
+/// ([`boolean`]): a rib or anything else below the root within the mark is seen, across its
+/// whole width and length (CodeRabbit on #22504). shortcut: a part reaching less than
+/// [`SLAB_GAP`] into the mark is not seen.
+fn clear_under(pick: &GroovePick<'_>, seam: &Seam, piece: &Piece<'_>) -> Result<bool> {
+    let (half, x, y) = (seam.mark_width() / 2.0, seam.at.x, seam.at.y);
+    let (near, far) = if seam.normal.y > 0.0 { (y + SLAB_GAP, y + MARK_HEIGHT) } else { (y - SLAB_GAP, y - MARK_HEIGHT) };
+    let probe = slab([Vec2::new(x - half, near), Vec2::new(x + half, near), Vec2::new(x + half, far), Vec2::new(x - half, far)], piece)?;
+    Ok(volume_of(boolean(&probe, pick.part, BoolOp::Intersect)?).is_some_and(|v| v <= skin(2.0 * half, piece)))
 }
 
 /// Whether point `p` lies on record face `face` of `pick`'s part, within `tol`.
@@ -982,7 +1052,7 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
     let along = [joint.start + over.from, joint.start + over.to];
     // shortcut: no groove only between butt plates; coincident walls elsewhere get the fill's
     // own refusal until a corner or T without a groove is asked for
-    if let Some(gap) = apart(left_wall, right_wall) {
+    if let Some(gap) = apart(left_wall, right_wall, zone * ALLOWANCE) {
         if gap <= zone {
             if let (true, Some(first), Some(last)) = (butt, left_wall.first(), left_wall.last()) {
                 let (toe, root) = (ends(first).0, ends(last).1);
@@ -990,11 +1060,13 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
                 let arrow = Seam { at: toe, normal: Vec2::new(0.0, 1.0), thickness };
                 let under = Seam { at: root, normal: Vec2::new(0.0, -1.0), thickness };
                 // the other side's seam only where both parts' undersides are flat at the root's
-                // level beside it, under the default mark (brett19's point 1 on #22504)
+                // level beside it, out to the default mark's edges (brett19's point 1 on #22504),
+                // and its mark's space is clear of both parts all over (CodeRabbit on #22504)
                 let piece = Piece { frame: &frame, d: joint.d, along, zone };
                 let half = under.mark_width() / 2.0;
                 let flat = flat_under(picks[0], root, -half, &piece)? && flat_under(picks[1], root, half, &piece)?;
-                let other = flat.then_some(under);
+                let clear = flat && clear_under(picks[0], &under, &piece)? && clear_under(picks[1], &under, &piece)?;
+                let other = clear.then_some(under);
                 return Err(GrooveRefusal::NoGroove(Box::new(NoGroove { frame, along, arrow, other })));
             }
         } else if gap <= zone + fill_margin(left_wall, right_wall)? {
@@ -1013,8 +1085,9 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
 
 /// Whether `pick`'s part has a flat underside at `root` beside it, `side` along the frame's `x`
 /// (negative for the left part, positive for the right): the first face a ray up along `y` from
-/// [`MARK_HEIGHT`] below meets is a plane facing `-y` at the root's level, so the default mark's
-/// space there is clear of the part. shortcut: one point on each side, in the piece's middle.
+/// [`MARK_HEIGHT`] below meets is a plane facing `-y` at the root's level, so the default mark
+/// lies on it there. shortcut: one point on each side, in the piece's middle; the mark's space
+/// all over is [`clear_under`]'s.
 fn flat_under(pick: &GroovePick<'_>, root: Vec2, side: f64, piece: &Piece<'_>) -> Result<bool> {
     let tol = piece.zone * ALLOWANCE;
     let y = point(piece.frame.y);
@@ -1044,8 +1117,10 @@ pub struct NoGroove {
     pub arrow: Seam,
     /// The seam on the other side, under the groove's root: only where both parts' undersides
     /// there are flat at the root's level, square to the frame's `y`, beside it as far as the
-    /// default mark reaches (brett19's point 1 on #22504). `None` where they are not (a thicker
-    /// plate or an upright plate's side runs on below the root), so no mark goes into a part.
+    /// default mark reaches (brett19's point 1 on #22504), and the default mark's space is clear
+    /// of both parts over its whole width and length (CodeRabbit on #22504). `None` where it is
+    /// not (a thicker plate, an upright plate's side or a rib below the root), so no mark goes
+    /// into a part.
     pub other: Option<Seam>,
 }
 
@@ -1097,26 +1172,52 @@ impl NoGroove {
 }
 
 /// How far apart two walls are where they are the same number of lines and arcs of the same
-/// kinds, in order: the largest distance between their ends (and between arcs' centres, and
-/// their radii's difference; brett19's point 6 on #22504); `None` for walls of other shapes. shortcut: ends, not the walls'
-/// full distance, and only walls read with the same pieces; enough to tell walls that coincide
-/// or nearly do.
-fn apart(left: &[Seg2], right: &[Seg2]) -> Option<f64> {
+/// kinds, in order, once lines that carry straight on are one ([`merged`]: a wall face split into
+/// coplanar faces, CodeRabbit on #22504): the largest distance between their ends (and between
+/// arcs' centres, and their radii's difference; brett19's point 6 on #22504). Two arcs must also
+/// turn the same way: with their ends, centres and radii together, arcs that turn opposite ways
+/// are the two halves of one circle around a hole, not one wall (CodeRabbit on #22504). `None`
+/// for walls of other shapes. shortcut: ends, not the walls' full distance, and only walls read
+/// with the same pieces; enough to tell walls that coincide or nearly do.
+fn apart(left: &[Seg2], right: &[Seg2], tol: f64) -> Option<f64> {
+    let (left, right) = (merged(left, tol)?, merged(right, tol)?);
     if left.len() != right.len() {
         return None;
     }
-    let off = span;
     let mut gap: f64 = 0.0;
-    for (a, b) in left.iter().zip(right) {
+    for (a, b) in left.iter().zip(&right) {
         let ((a0, a1), (b0, b1)) = (ends(a), ends(b));
-        gap = gap.max(off(a0, b0)).max(off(a1, b1));
+        gap = gap.max(span(a0, b0)?).max(span(a1, b1)?);
         match (a, b) {
             (Seg2::Line { .. }, Seg2::Line { .. }) => {}
-            (Seg2::Arc { center: c, radius: r, .. }, Seg2::Arc { center: k, radius: q, .. }) => gap = gap.max(off(*c, *k)).max((r - q).abs()),
+            (Seg2::Arc { center: c, radius: r, sweep: s, .. }, Seg2::Arc { center: k, radius: q, sweep: t, .. }) => {
+                if (*s > 0.0) != (*t > 0.0) {
+                    return None;
+                }
+                gap = gap.max(span(*c, *k)?).max((r - q).abs());
+            }
             _ => return None,
         }
     }
     Some(gap)
+}
+
+/// `wall` with each line that carries straight on from the one before joined to it: where their
+/// shared end lies within `tol` of the line from the first's start to the second's end
+/// ([`affine::segment_distance`]). A wall that turns there keeps both. `None` for a point that is
+/// no number.
+fn merged(wall: &[Seg2], tol: f64) -> Option<Vec<Seg2>> {
+    let mut out: Vec<Seg2> = Vec::new();
+    for &s in wall {
+        if let (Some(Seg2::Line { a, b }), Seg2::Line { b: q, .. }) = (out.last_mut(), s)
+            && affine::segment_distance(&Seg2::Line { a: *a, b: q }, *b)? <= tol
+        {
+            *b = q;
+            continue;
+        }
+        out.push(s);
+    }
+    Some(out)
 }
 
 /// The first edge a groove face of `pick` (in the order of `faces`) shares with its outer face.
@@ -1300,16 +1401,21 @@ struct FaceRead {
 /// tolerance; else (no end square, or an end read in pieces), for a plane, the line between its
 /// two runs. `None` for a face with no long edge.
 ///
+/// With `through`, the face is a T joint's through part's outer face: its span is from the first
+/// of its runs' starts to the last of their ends, and a hole or a notch in it is not refused here
+/// (it may lie far from the stem): only the face under the weld must be whole, which
+/// [`through_wall`] checks ([`whole_under`]; CodeRabbit on #22504). Its section is not used.
+///
 /// # Errors
 /// [`GrooveRefusal::GrooveFaceInterrupted`] for a face with a hole or cut-out inside it (more than
 /// one loop) or a run with a gap along the joint (a notch in its edge): the span from its runs
 /// would sweep its section across the gap (CodeRabbit on #22033). The errors of the kernel calls.
-fn face_read(pick: &GroovePick<'_>, part: JointPart, face: usize, frame: &Plane, d: [f64; 3], zone: f64) -> Result<Option<FaceRead>> {
+fn face_read(pick: &GroovePick<'_>, part: JointPart, face: usize, frame: &Plane, d: [f64; 3], zone: f64, through: bool) -> Result<Option<FaceRead>> {
     let tol = zone * ALLOWANCE;
     let o = point(frame.origin);
     let edges = pick.part.rim_edges(&[face])?;
     let record = pick.part.record();
-    if record.faces.get(face).is_some_and(|f| f.loops.len() > 1) {
+    if !through && record.faces.get(face).is_some_and(|f| f.loops.len() > 1) {
         return Err(GrooveRefusal::GrooveFaceInterrupted { part, face });
     }
     // each run along the joint: its point in the frame and how far each of its edges reaches along d
@@ -1342,14 +1448,18 @@ fn face_read(pick: &GroovePick<'_>, part: JointPart, face: usize, frame: &Plane,
         let Some((&first, rest)) = reaches.split_first() else { continue };
         let mut run = first;
         for r in rest {
-            if r[0] > run[1] + tol {
+            if !through && r[0] > run[1] + tol {
                 return Err(GrooveRefusal::GrooveFaceInterrupted { part, face });
             }
             run[1] = run[1].max(r[1]);
         }
         whole.push((*x, run));
     }
-    let span = whole.iter().fold([f64::NEG_INFINITY, f64::INFINITY], |[lo, hi], &(_, [a, b])| [lo.max(a), hi.min(b)]);
+    let span = if through {
+        whole.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], &(_, [a, b])| [lo.min(a), hi.max(b)])
+    } else {
+        whole.iter().fold([f64::NEG_INFINITY, f64::INFINITY], |[lo, hi], &(_, [a, b])| [lo.max(a), hi.min(b)])
+    };
     let agree = pick.part.planar_edges_tolerance().max(zone);
     let segs: Vec<Seg2> = pick.part.planar_edges(frame, &ends).into_iter().flatten().filter_map(|p| one_seg(&p)).collect();
     let from_ends = segs.split_first().and_then(|(a, rest)| rest.iter().all(|b| same(a, b, agree)).then_some(*a));

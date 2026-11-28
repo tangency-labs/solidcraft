@@ -888,3 +888,56 @@ fn no_groove_beside_a_thicker_plate_or_an_upright_has_no_seam_under_it() {
         assert_eq!(no.other, None, "{name}");
     }
 }
+
+/// CodeRabbit on #22504: the left plate of [`square_butt`] with a rib 1 deep under it, 1 to 2
+/// from the joint, inside the default mark (6 wide, 3 each side). The undersides beside the root
+/// are flat out to the mark's edges, but the mark would go into the rib: no seam under the root.
+#[test]
+fn a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (-2.0, -6.0), (-1.5, -7.0), (-1.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}
+
+/// CodeRabbit on #22504: the left plate's square end split into two coplanar faces at 2 deep,
+/// both picked, against the right plate's one: the walls coincide, so no groove, with both seams.
+#[test]
+fn a_square_end_split_into_coplanar_faces_still_has_no_groove() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, -2.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (2, 1), "{lf:?} {rf:?}");
+    let got = weld(&[left, right], &[lf, rf], &flat()).unwrap_err();
+    let GrooveRefusal::NoGroove(no) = got else {
+        panic!("not NoGroove: {got:?}");
+    };
+    assert!(no.arrow.at.x.abs() < 1e-9 && no.arrow.at.y.abs() < 1e-9 && no.other.is_some(), "{no:?}");
+}
+
+/// CodeRabbit on #22504: `apart` joins lines that carry straight on, and tells two arcs with the
+/// same ends, centre and radius apart by the way they turn: the halves of one circle around a
+/// hole (each bowing into its own plate) are not one wall; the same arc is.
+#[test]
+fn walls_apart_join_straight_lines_and_tell_the_halves_of_a_circle_apart() {
+    let tol = zone() * ALLOWANCE;
+    let whole = [line((0.0, 0.0), (0.0, -6.0))];
+    let split = [line((0.0, 0.0), (0.0, -2.0)), line((0.0, -2.0), (0.0, -6.0))];
+    assert_eq!(apart(&whole, &split, tol), Some(0.0));
+    // a wall that turns is not joined
+    let turned = [line((0.0, 0.0), (0.0, -2.0)), line((0.0, -2.0), (1.0, -6.0))];
+    assert!(apart(&whole, &turned, tol).is_none_or(|gap| gap > 0.5), "{:?}", apart(&whole, &turned, tol));
+    // from the toe (0, 0) down to the root (0, -6) about (0, -3): through (-3, -3), and through (3, -3)
+    let into_left = arc((0.0, -3.0), 3.0, FRAC_PI_2, std::f64::consts::PI);
+    let into_right = arc((0.0, -3.0), 3.0, FRAC_PI_2, -std::f64::consts::PI);
+    assert_eq!(apart(&[into_left], &[into_right], tol), None);
+    assert_eq!(apart(&[into_left], &[into_left], tol), Some(0.0));
+}
