@@ -4547,6 +4547,7 @@ pub fn calc_sector_angle(k: &Kernel, b: &mut Brep, eu: EdgeuseId, parameter: f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::topology::Edgeuse;
 
     fn lone() -> (Brep, EdgeuseId) {
@@ -4705,7 +4706,7 @@ mod tests {
             .unwrap()
             .clone_for_evaluation()
             .unwrap();
-        let (s, c) = (0.3_f64.sin(), 0.3_f64.cos());
+        let (s, c) = (det::sin(0.3_f64), det::cos(0.3_f64));
         let placement = Axis2Placement::new(FAR, Vec3::new(c, s, 0.0), Vec3::new(-s, c, 0.0));
         crate::topology::brep::p5::transform(&mut k, &mut b, &placement, None, false).unwrap();
         let m = placement.matrix();

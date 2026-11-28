@@ -91,6 +91,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::gamma;
@@ -351,7 +352,7 @@ pub(crate) struct TangentCone {
 
 /// The angle between `a` and `b`, by `atan2` of the cross and the dot products.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 impl Curve {
@@ -488,7 +489,7 @@ impl Curve {
         }
         let axis = chord / length;
         // the chord's own direction to its rounding
-        let mut half_angle = (2.0 * rounding / length).min(1.0).asin();
+        let mut half_angle = det::asin((2.0 * rounding / length).min(1.0));
         let own = half_angle;
         for (points, _) in &pieces {
             for (i, &p) in points.iter().enumerate() {
@@ -498,7 +499,7 @@ impl Curve {
                     if len.is_nan() || len <= 2.0 * rounding {
                         return Ok(None);
                     }
-                    let wide = angle(axis, d) + (2.0 * rounding / len).min(1.0).asin() + own;
+                    let wide = angle(axis, d) + det::asin((2.0 * rounding / len).min(1.0)) + own;
                     half_angle = half_angle.max(wide * (1.0 + gamma(8)));
                 }
             }
@@ -606,7 +607,7 @@ impl Curve {
                     return Ok(None);
                 };
                 // how far from `p` the window is sure to hold the curve
-                let cos = cone.half_angle.cos();
+                let cos = det::cos(cone.half_angle);
                 let mut covered = f64::INFINITY;
                 for (end, limit, bound) in [
                     (cone.ends[0], lo, domain.min()),
@@ -627,7 +628,7 @@ impl Curve {
             let acute = between.min(std::f64::consts::PI - between);
             let theta = acute * (1.0 - gamma(8)) - cone_c.half_angle - cone_e.half_angle;
             if theta > 0.0 {
-                let reach = tolerance / theta.sin() * (1.0 + gamma(8));
+                let reach = tolerance / det::sin(theta) * (1.0 + gamma(8));
                 if reach <= covered_c.min(*covered_e) {
                     return Ok(Some(reach));
                 }
@@ -705,7 +706,9 @@ impl Curve {
                     (cone.ends[1], cone.ends[0], lo, domain.min())
                 };
                 let covered = if (far_t - bound).abs() > 0.0 {
-                    ((far - p).length() - cone.rounding) * cone.half_angle.cos() * (1.0 - gamma(8))
+                    ((far - p).length() - cone.rounding)
+                        * det::cos(cone.half_angle)
+                        * (1.0 - gamma(8))
                 } else {
                     f64::INFINITY
                 };
@@ -728,7 +731,7 @@ impl Curve {
                 return Ok(None);
             }
             let off = ((near - p).length() + cone.rounding) * (1.0 + gamma(4));
-            let side = (off + (reach + off) * phi.sin()) * (1.0 + gamma(4)) + gamma(4) * reach;
+            let side = (off + (reach + off) * det::sin(phi)) * (1.0 + gamma(4)) + gamma(4) * reach;
             stray = stray.max(side);
         }
         Ok((!stray.is_nan()).then_some(stray))
@@ -1240,16 +1243,16 @@ mod tests {
     fn a_chord_and_its_arc_are_together_within_the_sagitta() {
         let k = Kernel::default();
         let circle = ellipse(&k, Point3::new(1.0, -2.0, 3.0), 4.0, 4.0);
-        let half = (0.1_f64 / 4.0).asin();
+        let half = det::asin(0.1_f64 / 4.0);
         // about the circle's top, away from its seam
-        let p = Point3::new(1.0 - 0.1, -2.0 + 4.0 * half.cos(), 3.0);
-        let q = Point3::new(1.0 + 0.1, -2.0 + 4.0 * half.cos(), 3.0);
+        let p = Point3::new(1.0 - 0.1, -2.0 + 4.0 * det::cos(half), 3.0);
+        let q = Point3::new(1.0 + 0.1, -2.0 + 4.0 * det::cos(half), 3.0);
         let line = Curve::from(Line::from_points(p, q, 3));
         let (s, t) = (at(&k, &circle, p), at(&k, &circle, q));
         let arc = Extent1d::from_min_max(s.min(t), s.max(t));
         let (s, t) = (at(&k, &line, p), at(&k, &line, q));
         let seg = Extent1d::from_min_max(s.min(t), s.max(t));
-        let sagitta = 4.0 * (1.0 - half.cos());
+        let sagitta = 4.0 * (1.0 - det::cos(half));
         assert!((sagitta - 1.25e-3).abs() < 1e-6);
         for (a, ia, b, ib) in [(&line, &seg, &circle, &arc), (&circle, &arc, &line, &seg)] {
             assert!(a.proved_near(&k, ia, b, ib, sagitta * 1.001, &[]).unwrap());
@@ -1376,13 +1379,13 @@ mod tests {
     fn a_chord_and_its_arc_run_together_only_within_the_sagitta() {
         let k = Kernel::default();
         let circle = ellipse(&k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0);
-        let half = (0.1_f64 / 4.0).asin();
-        let p = Point3::new(-0.1, 4.0 * half.cos(), 0.0);
-        let q = Point3::new(0.1, 4.0 * half.cos(), 0.0);
+        let half = det::asin(0.1_f64 / 4.0);
+        let p = Point3::new(-0.1, 4.0 * det::cos(half), 0.0);
+        let q = Point3::new(0.1, 4.0 * det::cos(half), 0.0);
         let chord = Curve::from(Line::from_points(p, q, 3));
         let (s, t) = (at(&k, &circle, p), at(&k, &circle, q));
         let arc = Extent1d::from_min_max(s.min(t), s.max(t));
-        let sagitta = 4.0 * (1.0 - half.cos());
+        let sagitta = 4.0 * (1.0 - det::cos(half));
         let seg = chord.natural_interval();
         assert!(matches!(
             chord
@@ -1411,7 +1414,7 @@ mod tests {
         let p = Point3::new(0.0, 2.0, 0.0);
         let s = at(&k, &circle, p);
         let reach = |degrees: f64| {
-            let (sin, cos) = degrees.to_radians().sin_cos();
+            let (sin, cos) = det::sin_cos(degrees.to_radians());
             let d = Vec3::new(cos, sin, 0.0);
             let line = Curve::from(Line::from_points(p - d, p + d, 3));
             let t = at(&k, &line, p);
@@ -1445,10 +1448,10 @@ mod tests {
             .unwrap()
             .unwrap();
         for a in [5e-4_f64, -5e-4, 0.999e-3, -0.999e-3] {
-            let off = 1.0 - a.cos();
+            let off = 1.0 - det::cos(a);
             assert!(stray >= off, "stray {stray:e} below {off:e} at {a}");
         }
-        assert!(stray < 4.0 * (1.0 - 1e-3_f64.cos()), "{stray:e}");
+        assert!(stray < 4.0 * (1.0 - det::cos(1e-3_f64)), "{stray:e}");
         let line = Curve::from(Line::from_points(top - Vec3::X, top + Vec3::X, 3));
         let t = at(&k, &line, top);
         let flat = line

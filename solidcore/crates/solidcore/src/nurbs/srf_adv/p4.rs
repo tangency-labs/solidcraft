@@ -64,6 +64,7 @@
 //!   allocated are `NL_MEM_ERR`.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::{srf_extend_4d, ExtendAt};
@@ -181,7 +182,7 @@ pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec
     let (first, last) = (at(&b, 0, OP)?, at(&b, k, OP)?);
     let t_last = at(&tg, k, OP)?;
     // the signed angle about the last tangent from the last vector to the first
-    let angle = last.cross(first).dot(t_last).atan2(last.dot(first));
+    let angle = det::atan2(last.cross(first).dot(t_last), last.dot(first));
     let (t0, tk) = (at(t, 0, OP)?, at(t, k, OP)?);
     let span = tk - t0;
     #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
@@ -195,7 +196,12 @@ pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec
         let turn = angle * (at(t, i, OP)? - t0) / span;
         let (bi, ti) = (at(&b, i, OP)?, at(&tg, i, OP)?);
         // B[i] is square to T[i]: turned about it, it stays so
-        let (turned, _) = normalize(combine2_pts(turn.cos(), bi, turn.sin(), ti.cross(bi)))?;
+        let (turned, _) = normalize(combine2_pts(
+            det::cos(turn),
+            bi,
+            det::sin(turn),
+            ti.cross(bi),
+        ))?;
         put(&mut b, i, turned, OP)?;
     }
     put(&mut b, k, first, OP)?;
@@ -926,7 +932,7 @@ pub fn approx_cross_boundary_derivs(
 
         // Insert knots to bring derivatives in compliance.
         let rad = (eps * PI) / 180.0;
-        let sne = rad.sin();
+        let sne = det::sin(rad);
         let mut mx_: isize = -1;
 
         if als_ > eps {
@@ -1558,7 +1564,11 @@ mod tests {
         let points: Vec<Vec3> = (0..16)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-                Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 3.0 * (2.0 * t).cos())
+                Vec3::new(
+                    10.0 * det::cos(t),
+                    10.0 * det::sin(t),
+                    3.0 * det::cos(2.0 * t),
+                )
             })
             .collect();
         let traj = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(

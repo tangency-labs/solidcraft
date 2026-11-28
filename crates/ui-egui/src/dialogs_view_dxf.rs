@@ -124,7 +124,9 @@ mod tests {
         h.app.cam.set_view(StandardView::Top);
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
-        h.step(&json!({"widget":"Export Current View as DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:CAD & 2D"}})).unwrap();
+        h.step(&json!({"widget":"Current View as DXF…"})).unwrap();
         assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewDxf { dashed: false, .. })));
         h.step(&json!({"click":{"handle":"dialog:dxf:tolerance"},"double":true})).unwrap();
         h.step(&json!({"key":"A","cmd":true})).unwrap();

@@ -13,7 +13,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 |---|---|---|
 | `.sc` (versioned container or JSON design; `.solidcraft` files from earlier releases still open) | yes | yes |
 | `.json` (self-contained plain JSON design) | yes | yes |
-| STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
+| STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours, layers (as body folders) | AP242 with names, colours, the component tree and body folders (as layers) |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
 | FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids and sketches, through cadmpeg | |
 | Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
@@ -121,6 +121,12 @@ sub-assemblies become nested components, and a part used several times is one co
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
 and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
+
+Body folders travel through STEP as presentation layers. A STEP export puts each body in a folder
+on a layer named after the folder's path: a body in the folder Rails inside the folder Frame is
+on the layer `Frame/Rails`. A body in no folder is on no layer. When you insert or open a STEP
+file, each body on a layer goes into a folder of that name in its component's Bodies folder, and
+a `/` in the name nests the folders, so an exported design comes back with the same folders.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
 same way: its nodes become nested components, a mesh placed several times is one component with
@@ -272,6 +278,17 @@ exactly one of `percentage` or `triangle_count`; an optional `name` names the hi
 The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save As Mesh**.
 To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
 Mesh panel customizations are kept but hidden while the legacy toolbar is enabled.
+
+To model against a mesh body, such as a 3D scan or the STL of an existing part, use
+**Surface → Mesh → Section Stack** (`mesh.section_stack`). Pick the mesh body and a plane, and
+give the spacing (and, if you like, the first and last distance from the plane; by default the
+whole body). Each plane that meets the mesh gets an ordinary sketch holding the lines, arcs and
+circles fitted to the section there, as **Fit Curves to Mesh Section** fits one. Tick **Extrude
+slabs** to extrude each section's outline to the next plane, each slab a body of its own, for a
+stepped stand-in for the mesh. A slab never runs past a plane that missed the mesh, and the last
+one stops where the body ends. A section whose slab cannot be built is listed in the command's
+reply with the reason, and the other slabs stand. The sketches and slabs go into one timeline
+folder, and one Undo removes them all.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
@@ -454,6 +471,16 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+**Preferences → Design → Send to Slicer file name** names the file that **Send to Slicer** writes,
+which is the name the slicer and the printer show. It takes the same placeholders and makes the
+name safe in the same way; `{body}` is the first body sent. With `{design}-{body}`, sending the
+body Base of the design Bracket writes `Bracket-Base.3mf`. Sending again replaces that file.
+Designs that get the same name share one file, so a later send replaces the earlier one. Left
+empty, the file is named after the design, followed by a code that keeps designs and body
+selections apart, such as `Bracket-71b989e9a18bb966.3mf`. The control channel sets it with
+`ui.prefs {"slicer_file_name": "{design}-{body}"}`. A script names the file itself, with the
+`name` of `file.send_to_slicer`; the preference does not apply to it.
 
 ## Default folders
 

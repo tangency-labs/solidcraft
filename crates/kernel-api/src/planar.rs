@@ -73,10 +73,11 @@ pub trait Planar: Backend {
     /// Whether `outline` is an open section's, like an angle, a channel or a beam: some corner
     /// turns inward. A tube's or a bar's never does.
     fn is_open(&self, outline: &Loop2) -> bool;
-    /// How far along `toward` from `end` its line leaves the box round a section, `rect` its
-    /// rectangle's corners in order (mm). `None` for a zero `toward`, a degenerate `rect` or a line
-    /// along the box.
-    fn exit_through_box(&self, end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64>;
+    /// How far past `end` along `toward` any point of a member's end leaves the box round a
+    /// section, `rect` its rectangle's corners in order: the farthest over `end` and the rectangles
+    /// `sections` placed square to the line at `end` (mm). `None` for a zero `toward`, a degenerate
+    /// `rect` or every line along the box.
+    fn reach_through_box(&self, end: Vec3, toward: Vec3, sections: &[[Vec3; 4]], rect: [Vec3; 4]) -> Option<f64>;
     /// How far past `end` along `toward` a member's end is built to leave the round bars `rounds`
     /// (each its axis's ends and radius, mm) that `end` lies in: the farthest any point of its
     /// section runs on before leaving such a bar's far side, the section bounded by `sections` (each a

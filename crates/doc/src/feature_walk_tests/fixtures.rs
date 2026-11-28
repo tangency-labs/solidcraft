@@ -22,7 +22,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     let sk = serde_json::to_value(solidcraft_sketch::Sketch::new()).unwrap();
     let extent = |n: &str| {
         json!({"distance": format!("{n}.distance"), "distance2": format!("{n}.distance2"), "start_offset": format!("{n}.start_offset"),
-            "taper": format!("{n}.taper"), "to_offset": format!("{n}.to_offset")})
+            "taper": format!("{n}.taper"), "taper2": format!("{n}.taper2"), "to_offset": format!("{n}.to_offset")})
     };
     let fillet = |style: Value| json!({"type": "fillet", "edges": [o], "radius": "fillet.radius", "style": style});
     let pattern = |p: Value| json!({"type": "pattern", "features": [7], "pattern": p});
@@ -301,6 +301,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("surface_match", json!({"type": "surface_match", "body": "B", "faces": [o], "target": "C", "edges": [o]})),
         ("surface_fair", json!({"type": "surface_fair", "body": "B", "faces": [o], "tolerance": "sfair.tolerance"})),
+        (
+            "surface_morph",
+            json!({"type": "surface_morph", "body": "B", "faces": [o], "base": "B", "base_face": o,
+                "control": "B", "control_face": o, "scale": "smorph.scale", "tolerance": "smorph.tolerance"}),
+        ),
         ("unstitch", json!({"type": "unstitch", "body": "B"})),
         ("reverse_normal", json!({"type": "reverse_normal", "body": "B"})),
         ("surface_untrim", json!({"type": "surface_untrim", "face": {"body": "B", "point": o}, "holes": [o], "outer": true})),
@@ -312,6 +317,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         (
             "surface_extend_to_face",
             json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "up_to": {"face": {"body": "B", "point": o}}, "neighbours": false}),
+        ),
+        (
+            "surface_extend_law",
+            json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "mode": "law", "angle": "extend.law_angle"}),
         ),
         (
             "surface_ruled",

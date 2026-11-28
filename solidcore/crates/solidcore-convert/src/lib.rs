@@ -368,6 +368,11 @@ fn surface_inner(s: &Surface) -> Result<k::Surface, Invalid> {
                 "a blend's label: its geometry is the face's NURBS form",
             ))
         }
+        Surface::Sweep { .. } => {
+            return Err(Invalid(
+                "a sweep's label: its geometry is the face's NURBS form",
+            ))
+        }
     })
 }
 
