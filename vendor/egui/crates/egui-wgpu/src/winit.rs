@@ -705,7 +705,7 @@ impl Painter {
         // `None` when there is no frame to present to. A capture is rendered to its own
         // texture and copied back to the cpu, so it is served even then — that is how a hidden
         // window, which the compositor gives no surface texture, is screenshotted at all.
-        let frame = match output_frame {
+        let output_frame = match output_frame {
             wgpu::CurrentSurfaceTexture::Success(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
@@ -734,15 +734,6 @@ impl Painter {
                 None
             }
         };
-        // SolidCraft: however this frame ends (presented, dropped by an early return below, or
-        // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
-        // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
-        // wgpu marks the loss (the lost callback) inside the present or discard that meets it.
-        let output_frame = frame.map(|frame| {
-            let texture = frame.texture.clone();
-            crate::AcquiredFrame::new(frame, texture, render_state.device_lost.flag())
-        });
-
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as
         // the viewport's tessellated vertices). If acquisition skips this frame, dropping
@@ -794,7 +785,7 @@ impl Painter {
                 // as long as no resize is in flight.
                 let (size, format) = match &output_frame {
                     Some(output_frame) => {
-                        (output_frame.frame.texture.size(), output_frame.frame.texture.format())
+                        (output_frame.texture.size(), output_frame.texture.format())
                     }
                     None => (
                         wgpu::Extent3d {
@@ -817,7 +808,7 @@ impl Painter {
 
                 &capture_state.texture
             } else if let Some(output_frame) = &output_frame {
-                &output_frame.frame.texture
+                &output_frame.texture
             } else {
                 // Unreachable: without a frame to present to, and with nothing to capture,
                 // we returned above.
@@ -909,7 +900,7 @@ impl Painter {
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    output_frame.as_ref().map(|output_frame| &output_frame.frame),
+                    output_frame.as_ref(),
                     &mut encoder,
                 ));
             }
@@ -961,7 +952,7 @@ impl Painter {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
-            output_frame.present(|frame| render_state.queue.present(frame));
+            render_state.queue.present(output_frame);
             vsync_sec += start.elapsed().as_secs_f32();
         }
 
