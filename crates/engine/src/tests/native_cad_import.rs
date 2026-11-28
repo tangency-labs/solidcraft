@@ -639,3 +639,31 @@ fn the_writer_option_is_refused_where_it_does_not_apply() {
     assert!(e.contains("`writer`"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #2664: a translated cylinder with its axis along Y survives an IGES round trip.
+/// The dimensions, bounds and mass properties below follow from the original cylinder,
+/// not from a second measurement of the exported geometry.
+#[test]
+fn iges_round_trip_preserves_a_translated_y_axis_cylinder() {
+    let mut source = Session::default();
+    run(&mut source, "solid.cylinder", json!({"radius": 4, "height": 20, "base": [10, -20, 30], "axis": [0, 1, 0], "body_name": "Pin"}));
+    let (dir, path) = file("iges-y-axis", "pin.iges", &[]);
+    run(&mut source, "file.export", json!({"path": path}));
+    let pi = std::f64::consts::PI;
+    for reader in ["solidcraft", "cadmpeg"] {
+        let mut s = Session::default();
+        run(&mut s, "doc.open", json!({"path": path, "reader": reader}));
+        let reply = run(&mut s, "inspect.measure", json!({}));
+        assert_eq!(reply["body_count"], 1, "{reader}: {reply}");
+        let b = &reply["bodies"][0];
+        assert_eq!(b["closed"], true, "{reader}: {reply}");
+        assert!((b["volume_mm3"].as_f64().unwrap() - pi * 16.0 * 20.0).abs() < 1e-6, "{reader}: {reply}");
+        assert!((b["area_mm2"].as_f64().unwrap() - 2.0 * pi * 4.0 * 24.0).abs() < 1e-6, "{reader}: {reply}");
+        for (i, (lo, hi, center)) in [(6.0, 14.0, 10.0), (-20.0, 0.0, -10.0), (26.0, 34.0, 30.0)].into_iter().enumerate() {
+            assert!((b["bbox"]["min"][i].as_f64().unwrap() - lo).abs() < 1e-6, "{reader}: {reply}");
+            assert!((b["bbox"]["max"][i].as_f64().unwrap() - hi).abs() < 1e-6, "{reader}: {reply}");
+            assert!((b["center_of_mass"][i].as_f64().unwrap() - center).abs() < 1e-6, "{reader}: {reply}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
