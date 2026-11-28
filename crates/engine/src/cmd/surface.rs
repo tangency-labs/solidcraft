@@ -4185,4 +4185,29 @@ mod tests {
             assert!(s.execute("surface.loft", &p).is_err(), "hostile loft params: {p}");
         }
     }
+
+    /// #23066: a loft between the top edges of parallel sheets, 1 apart across their normal, runs
+    /// straight across from one edge to the next: an end at G0 and an interior section are held
+    /// by position alone, so the sheets' normal pointing at the next section is no reason to
+    /// refuse it. The strip between the 10 mm edges is 10 x 1, or 10 x 2 through a third sheet.
+    /// An end at G1 leaves through its sheet, which it cannot do across the sheet's normal: still
+    /// refused.
+    #[test]
+    fn surface_loft_between_edges_of_parallel_sheets_runs_across_their_normal() {
+        let mut s = Session::default();
+        for (name, y) in [("A", 0.0), ("B", 1.0), ("C", 2.0)] {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+            let l = run(&mut s, "sketch.line", json!({"points": [[0.0, y], [10.0, y]]}));
+            let l = l["created"]["curves"][0].as_str().unwrap_or_default().to_string();
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "surface.extrude", json!({"sketch": name, "curves": [l], "distance": 20, "body_name": name}));
+        }
+        let edge = |body: &str, y: f64| json!({"body": body, "edges": [[5.0, y, 20.0]]});
+        run(&mut s, "surface.loft", json!({"sections": [edge("A", 0.0), edge("B", 1.0)], "body_name": "Across"}));
+        assert!((area(&s, "Across") - 10.0).abs() < 1e-6, "{}", area(&s, "Across"));
+        run(&mut s, "surface.loft", json!({"sections": [edge("A", 0.0), edge("B", 1.0), edge("C", 2.0)], "body_name": "Through"}));
+        assert!((area(&s, "Through") - 20.0).abs() < 1e-6, "{}", area(&s, "Through"));
+        let e = s.execute("surface.loft", &json!({"sections": [edge("A", 0.0), edge("B", 1.0)], "continuity": ["g1", "g0"]})).unwrap_err();
+        assert!(e.to_string().contains("lies in no face at the picked edges"), "{e}");
+    }
 }

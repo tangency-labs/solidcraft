@@ -128,6 +128,20 @@ pub fn section_frames(body: &Body, edges: &[Vec3], leave: Vec3, stations: usize)
     crate::bridge::frames(body, face, &chain, leave, stations)
 }
 
+/// The frames of one cross-section picked as an edge chain of a body, for a section the blend
+/// holds by position alone (an interior one, or an end at G0): the chain at the stations
+/// [`section_frames`] puts on it, each leaving along `leave` and bending nowhere. No face of the
+/// body is read, so the run may leave the chain in any direction.
+pub fn section_positions(body: &Body, edges: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<Frame>> {
+    let chain = crate::bridge::chain(body, edges)?;
+    let leave =
+        leave.normalized().filter(|l| l.is_finite()).ok_or_else(|| KernelError::Invalid("the leave direction must be a finite vector".into()))?;
+    Ok(crate::bridge::chain_stations(body, &chain, stations)?
+        .into_iter()
+        .map(|p| Frame { p, leave, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+        .collect())
+}
+
 /// What the face has to do at one section: where it is, and the run direction's first, second and
 /// third derivatives at each of the section's stations. The third is carried only when the
 /// section holds a change-of-curvature condition.
