@@ -3401,6 +3401,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
+    // A redefine never lowers Tab and Slot's key floor: a removed plate's key is not handed out
+    // again, whether or not the new parameters name `next_plate_key`.
+    if let FeatureKind::TabSlot { next_plate_key: floor, .. } = &old.kind
+        && cid == "solid.tab_slot"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        let given = parameters.get("next_plate_key").and_then(Value::as_u64).unwrap_or(0);
+        parameters.insert("next_plate_key".into(), json!(given.max(u64::from(*floor))));
+    }
     // Press-in hardware's hole is redefined by the command that made it: the Hole command would
     // drop the hardware it names and leave a plain hole of its size (#17752).
     if let FeatureKind::Hole { hardware: Some(h), .. } = &old.kind

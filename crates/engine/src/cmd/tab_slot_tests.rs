@@ -241,6 +241,28 @@ fn a_tab_slot_redefined_with_its_keys_keeps_them() {
     assert!(s.execute("solid.tab_slot", &twice).is_err());
 }
 
+/// A redefine that leaves `next_plate_key` out keeps the stored floor: after plate 3 is taken
+/// out, a plate added by the redefine gets 4, not the retired 3.
+#[test]
+fn a_tab_slot_redefined_without_its_floor_keeps_it() {
+    let mut s = fixture_f();
+    run(&mut s, "solid.box", json!({"corner": [20, 70, 6], "length": 120, "width": 6, "height": 60, "body_name": "Wall2", "operation": "new"}));
+    tab_slot(&mut s, json!({"tab_plates": ["Wall", "Wall2"]})).unwrap();
+    let keys = |s: &Session| {
+        let f = s.doc.features.last().unwrap();
+        let solidcraft_doc::FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, .. } = &f.kind else { panic!("{:?}", f.kind) };
+        (tab_plates.iter().chain(slot_plates).map(|p| p.key).collect::<Vec<_>>(), *next_plate_key)
+    };
+    assert_eq!(keys(&s), (vec![Some(1), Some(2), Some(3)], 4));
+    let id = s.doc.features.last().unwrap().id;
+    let dropped = json!({"tab_plates": [{"key": 1, "body": "Wall"}], "slot_plates": [{"key": 3, "body": "Bottom"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.tab_slot", "params": dropped}));
+    assert_eq!(keys(&s), (vec![Some(1), Some(3)], 4));
+    let back = json!({"tab_plates": [{"key": 1, "body": "Wall"}, "Wall2"], "slot_plates": [{"key": 3, "body": "Bottom"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.tab_slot", "params": back}));
+    assert_eq!(keys(&s), (vec![Some(1), Some(4), Some(3)], 5));
+}
+
 /// A tab plate that does not touch the slot plate is skipped `no_contact` with the distance in
 /// its text (design 11, 11.6): a plate far away never fails the whole feature, and a plate 4 mm
 /// above is named in the reply's `skipped` list, while Wall's joint is made.

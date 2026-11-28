@@ -80,9 +80,10 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
 }
 
 /// A new seed for the width variation: a whole number from the clock, mixed with the old one so
-/// two clicks in one tick still differ, and never the old value.
+/// two clicks in one tick still differ, and never the old value. The clock is `web_time`:
+/// `std::time::SystemTime::now` panics on wasm.
 fn fresh_seed(old: &str) -> u64 {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
     let mut x = nanos ^ old.trim().bytes().fold(0x9E37_79B9_7F4A_7C15u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
     x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
