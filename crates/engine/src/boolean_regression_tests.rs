@@ -1689,7 +1689,7 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
             &json!({"sketch": "Sketch1", "profiles": [{"point": [50, 10]}], "distance": 10, "operation": "join", "name": "Extrude2"}),
         )
         .unwrap();
-    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart)), "{join}");
+    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart) && w.contains("(New Body makes it a body of its own)")), "{join}");
     assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), join["warning"].as_str());
     assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Body1"]);
     assert!((volume(&s, "Body1") - 8000.0).abs() < 1e-6, "{}", volume(&s, "Body1"));

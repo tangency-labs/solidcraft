@@ -16658,3 +16658,46 @@ fn a_float_a_resize_leaves_over_the_navigators_place_moves_below_it_but_one_let_
         }
     }
 }
+
+/// #23395: an item list with nothing selected leaves a button's event without a row; an empty
+/// row id would have the whole press refused.
+#[test]
+fn plugin_panel_button_beside_an_unselected_item_list_sends_no_row() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout = Layout {
+        root: 0,
+        nodes: vec![
+            Node { widget: Widget::Group(vec![1, 2]) },
+            Node { widget: Widget::Toolbar(vec![ButtonSpec { label: "Refresh".into(), icon: None, entry: "show".into() }]) },
+            Node { widget: Widget::ItemList(ListSpec { bind: "/tools".into(), on_select: None }) },
+        ],
+    };
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        // The list has drawn, and so stored its selection, before the button is pressed.
+        frame(Vec::new());
+        frame(Vec::new());
+        let at = crate::scenario::rect_of("plugin-panel:machining:tools:button:show").unwrap().center();
+        frame(crate::test_support::pointer(at, true));
+        frame(crate::test_support::pointer(at, false));
+    }
+    assert_eq!(
+        actions,
+        vec![("show".into(), UiEvent { panel: "tools".into(), event: EventKind::Press, path: "show".into(), row: None, value: None })]
+    );
+}

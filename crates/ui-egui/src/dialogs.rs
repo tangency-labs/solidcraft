@@ -199,9 +199,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, through_axis, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
             direction_only: bool = false => *direction_only,
+            // A new plane starts with it on (#6180), see `start`.
+            through_axis: bool = false => *through_axis,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
@@ -903,6 +905,37 @@ impl Drop for Applying {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The display quality another window in the process sets between this thread's window
+    /// setting up its frame and adopting a result ([`other_window_draws_at`]).
+    static OTHER_WINDOW_QUALITY: std::cell::Cell<Option<solidcraft_engine::doc::display_quality::DisplayQuality>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Until the returned guard is dropped, another window in the process sets the process-wide
+/// display quality to `quality` in each of this thread's frames, after the frame's own setup and
+/// before OK's result is adopted and the viewport keys and draws its scenes: what the other tests'
+/// windows do on a busy test run.
+#[cfg(test)]
+pub(crate) fn other_window_draws_at(quality: solidcraft_engine::doc::display_quality::DisplayQuality) -> impl Drop {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OTHER_WINDOW_QUALITY.with(|q| q.set(None));
+        }
+    }
+    OTHER_WINDOW_QUALITY.with(|q| q.set(Some(quality)));
+    Restore
+}
+
+#[cfg(test)]
+pub(crate) fn another_window_sets_quality() {
+    if let Some(quality) = OTHER_WINDOW_QUALITY.with(std::cell::Cell::get) {
+        solidcraft_engine::doc::display_quality::set_current(quality);
+    }
+}
+
 /// How long OK waits before displaying its computing state.
 pub const APPLY_AT_ONCE: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -1427,7 +1460,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
+                vec![SelInput::new("Profile", PROFILES | PLANES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine {
@@ -1745,8 +1778,11 @@ impl Dialog {
             return;
         }
         self.started_from_sketch = Some(sketch);
+        // With no profile picked, what the field holds is the default taken with no sketch left
+        // open, which can be a later sketch's: the one just edited comes first (#23342).
+        let picked = s.selection.iter().any(|x| matches!(x, Sel::Profile { .. }));
         if let Some(inp) = self.inputs.first_mut()
-            && inp.items.is_empty()
+            && (inp.items.is_empty() || (!picked && inp.items.iter().all(|x| matches!(x, Sel::Profile { .. }))))
         {
             inp.items = single_profile(s, sketch);
             self.advance();
@@ -2309,6 +2345,10 @@ impl Dialog {
         if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
+        // A new placement plane replaces the saved direction; the Direction field can override it afterward.
+        if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
+            self.extra.remove("axis");
+        }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
@@ -2488,6 +2528,13 @@ impl Dialog {
         if accepted {
             self.awaiting_pick = false;
             self.pick_refused = None;
+        }
+        if accepted
+            && self.active == 0
+            && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. })
+            && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
+        {
+            self.extra.remove("axis");
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -5768,8 +5815,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Adopt the complete transaction. Never rerun a Boolean on the window thread.
     let finished = if cancel { None } else { app.applying.as_mut().and_then(Applying::finished) };
     // Preferences received after this frame's renderer setup take effect next frame.
-    // Keep the result ready until the viewport will consume the prepared quality.
-    let finished = if finished.is_some() && solidcraft_engine::doc::display_quality::current() != display_quality(app) {
+    // Keep the result ready until the viewport will consume the prepared quality: the quality
+    // this window set up this frame, never the process-wide level, which another window in the
+    // process can set at any time (each test's window does, every frame).
+    #[cfg(test)]
+    another_window_sets_quality();
+    let finished = if finished.is_some() && crate::prefs::drawn_quality(app) != display_quality(app) {
         if let Some(job) = app.applying.as_mut() {
             job.ready = finished;
         }
@@ -7981,7 +8032,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { direction_only, .. } => {
+        Kind::AnglePlane { direction_only, through_axis, .. } => {
             // With no plane picked, a body edge as the axis is enough: the command measures the
             // angle from a flat face along the edge (#20233).
             let edge_only = sels(d, 0).is_empty() && matches!(sels(d, 1).first(), Some(Sel::Edge { .. }));
@@ -7998,6 +8049,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"axis": axis, "direction_only": direction_only});
             if !edge_only {
                 p["base"] = plane_arg(app, sels(d, 0).first())?;
+            }
+            // Sent only when it applies: direction only wins, as in the dense form (#6180).
+            if *through_axis && !*direction_only && !edge_only {
+                p["through_axis"] = json!(true);
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
@@ -8596,6 +8651,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 {
                     p.insert("references".into(), json!(references));
                 }
+            }
+            if *cmd == "solid.coil" {
+                crate::primitive_placement::plane_params(s, sels(d, 0).first(), d.extra.get("axis"), &mut p)?;
             }
             // A refilled reference already carries its saved axis and base. A new pick
             // clears the saved axis and supplies its own origin.
@@ -9199,10 +9257,14 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::SidedCurves { .. } => {
             solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
-        ProfileSel::Curves { loops } => loops
+        ProfileSel::Curves { loops, sides } => loops
             .iter()
-            .filter_map(|l| {
-                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()] }).ok()?.first().copied()
+            .enumerate()
+            .filter_map(|(k, l)| {
+                // Each loop with its own saved sides, which pick its region when a change made a
+                // twin bounded by the same curves (#23291).
+                let sides = if sides.len() == loops.len() { sides.get(k).cloned().into_iter().collect() } else { Vec::new() };
+                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()], sides }).ok()?.first().copied()
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
