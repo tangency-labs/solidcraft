@@ -6896,7 +6896,11 @@ fn hovered_body(app: &SolveApp) -> Option<String> {
 }
 
 fn highlighted_cow(app: &SolveApp) -> std::borrow::Cow<'_, [Sel]> {
-    if app.dialog.is_none() && app.viewport.text_drag.is_none() && crate::agent_chat::hovered_chip(app).is_empty() {
+    if app.dialog.is_none()
+        && app.viewport.text_drag.is_none()
+        && crate::joint_handles::began_on(app).is_none()
+        && crate::agent_chat::hovered_chip(app).is_empty()
+    {
         std::borrow::Cow::Borrowed(&app.session.selection)
     } else {
         std::borrow::Cow::Owned(app.highlighted())
@@ -9685,6 +9689,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::joint_handles::active(app) && !crate::ui_kit::input_blocked() {
         if let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| p.is_finite()) {
             crate::joint_handles::to(app, &proj, p);
+            joint_motions::follow(app);
         }
         if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
             crate::joint_handles::end_drag(app);
@@ -12914,6 +12919,7 @@ mod tests {
         let id = s.execute("sketch.line3d", &json!({"points":[[10,20,30],[30,20,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
+        // The plane as it turns by default, about the line where it is.
         let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);

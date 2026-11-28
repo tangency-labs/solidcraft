@@ -201,7 +201,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "body": string("Body name (default: all bodies)"),
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
-                    "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
+                    "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}; or 3 to 64 round edges or hole faces with parallel axes, for the spacing along a row or round a bolt circle (gaps, span, pitch, pitch-circle diameter)"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
                     "within": {"type": "object", "properties": {
                         "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
