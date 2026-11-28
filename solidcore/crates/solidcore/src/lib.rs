@@ -46,6 +46,7 @@ pub mod math;
 pub mod mesh_reconstruction;
 pub mod topology;
 
+pub mod arrange;
 pub mod blend;
 pub mod boolean;
 pub mod cell_grid;

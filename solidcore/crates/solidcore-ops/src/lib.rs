@@ -36,6 +36,7 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod affine;
+pub mod arrange;
 pub mod axial_section;
 pub mod bead;
 pub mod blend;

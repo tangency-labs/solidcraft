@@ -172,7 +172,7 @@ pub struct Silhouette {
 }
 
 /// The body `b` in the kernel's kinds. A blend face is its NURBS form.
-fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
+pub(crate) fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
     let curve = |c| solidcore_convert::curve(c).map_err(|_| HlrError::Unsupported("edge curve"));
     let surface = |s: &Surface| match s {
         Surface::Blend { .. } => Err(HlrError::Unsupported(

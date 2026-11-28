@@ -460,7 +460,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             },
             CommandGroup {
                 label: "Bodies",
-                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove", "solid.arrange"],
             },
             CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
         ],
@@ -2087,6 +2087,7 @@ mod tests {
                 "solid.split_body",
                 "solid.scale",
                 "solid.remove",
+                "solid.arrange",
                 "sheet.convert",
                 "solid.dogbone",
                 "timeline.delete",

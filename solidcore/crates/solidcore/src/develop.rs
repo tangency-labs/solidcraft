@@ -74,7 +74,7 @@ mod layout;
 pub(crate) mod plane;
 mod refusal;
 mod rigid;
-mod seg;
+pub(crate) mod seg;
 mod sheet;
 mod slit;
 

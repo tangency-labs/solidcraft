@@ -1124,6 +1124,7 @@ pub fn hidden_lines_on(
             Vec3::new(f64::from_bits(x), f64::from_bits(y), f64::from_bits(z)),
             opts,
             &ctx,
+            false,
         )?;
         let n = sets
             .iter()
@@ -1371,7 +1372,7 @@ pub fn silhouettes(
     let Some(placed) = local.first() else {
         return Ok(Vec::new());
     };
-    let sets = body_silhouettes(def, placed.local_dir(view.d), opts, &ctx)?;
+    let sets = body_silhouettes(def, placed.local_dir(view.d), opts, &ctx, false)?;
     let mut out = Vec::new();
     for (face, _, sils) in &sets {
         for s in sils {
@@ -1422,6 +1423,109 @@ pub fn silhouettes(
     Ok(out)
 }
 
+/// Every curve of `def` placed by `p` and seen in `view` with no hidden-line work: its edges
+/// (seams left out) and the silhouettes of its curved faces, whole, whether they would be seen
+/// or not, as lines and conic arcs where the projection is exact and chords otherwise, with the
+/// largest distance (mm) of any chord from its exact curve. This is what an outline seen along
+/// the view (a shadow) is walked from ([`crate::arrange::footprint`]): it leaves out the
+/// crossings, rays and coverage of [`hidden_lines`], which a shadow does not need.
+///
+/// A freeform face swept along the view (an extruded spline side seen along its extrusion) has
+/// no silhouette traced: its projection is a curve its own boundary edges already draw, and a
+/// surface whose normal is square to the view all over has no single silhouette.
+///
+/// # Errors
+/// An invalid placement or view, a face whose trim is not supported (its silhouette cannot be
+/// traced), a budget of `opts` exceeded, or [`HlrError::Cancelled`].
+pub fn projected_curves(
+    def: &Prepared,
+    p: &Placement,
+    view: &View,
+    opts: &Options,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<(Vec<Seg2>, f64), HlrError> {
+    if def.faces.iter().any(|f| f.trim.unsupported.is_some()) {
+        return Err(HlrError::Invalid("a face whose trim is not supported"));
+    }
+    let defs = std::slice::from_ref(def);
+    let given = [Placement { body: 0, ..*p }];
+    // Worked in a frame centred on the body, as hidden_lines works.
+    let origin = scene_centre(defs, &given)?;
+    let local = [Placement {
+        body: 0,
+        rotation: p.rotation,
+        translation: p.apply(def.offset) - origin,
+    }];
+    let shift = view.screen(origin);
+    let ctx = context(defs, &local, view, opts, cancel, &Serial)?;
+    let Some(placed) = local.first() else {
+        return Ok((Vec::new(), 0.));
+    };
+    let mut tracks = Vec::new();
+    for (ei, e) in def.edges.iter().enumerate() {
+        if e.kind != EdgeKind::Seam {
+            tracks.push((
+                &e.curve,
+                e.curve.domain(),
+                Source::Edge {
+                    edge: ei,
+                    tangent: e.kind == EdgeKind::Tangent,
+                },
+                e.acc,
+            ));
+        }
+    }
+    let sets = body_silhouettes(def, placed.local_dir(view.d), opts, &ctx, true)?;
+    for (face, _, sils) in &sets {
+        for s in sils {
+            for r in &s.ranges {
+                tracks.push((&s.curve, *r, Source::Silhouette { face: *face }, s.acc));
+            }
+        }
+    }
+    if tracks.len() > opts.max_tracks {
+        return Err(HlrError::Budget("curve"));
+    }
+    let mut out = Vec::new();
+    let mut sag: f64 = 0.;
+    for (curve, range, source, acc) in tracks {
+        let mut track = Track {
+            placement: 0,
+            curve,
+            range,
+            source,
+            acc,
+            own: Vec::new(),
+            own_eps: 0.,
+            samples: Vec::new(),
+            sags: Vec::new(),
+            splits: Vec::new(),
+        };
+        let (samples, sags) = screen_samples(&track, &ctx)?;
+        track.samples = samples;
+        track.sags = sags;
+        let piece = Piece {
+            t: range,
+            visibility: Visibility::Visible,
+            covered: false,
+            geometry: Vec::new(),
+            accuracy: acc,
+            points: track.samples.iter().map(|(_, q)| *q).collect(),
+            sag: track.sags.iter().copied().fold(0., f64::max),
+        };
+        let (geometry, accuracy) = piece_geometry(&track, &piece, placed, view);
+        sag = sag.max(match accuracy {
+            CurveAccuracy::Analytic => 0.,
+            CurveAccuracy::Bounded { max_deviation_mm } => max_deviation_mm,
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm,
+            } => max_sample_deviation_mm,
+        });
+        out.extend(geometry.into_iter().map(|g| shift_seg(g, shift)));
+    }
+    Ok((out, sag))
+}
+
 /// A body's silhouettes seen along `dl` (the direction of sight in its own frame), per set of
 /// supported curved faces on one surface: the set's first face, its largest face and the
 /// traced curves. Cancellation is polled every 256 faces while the sets are formed and before
@@ -1432,11 +1536,16 @@ fn body_silhouettes(
     dl: Vec3,
     opts: &Options,
     ctx: &Ctx,
+    skip_edge_on: bool,
 ) -> Result<Vec<(usize, f64, Vec<silhouette::Sil>)>, HlrError> {
     let supported: Vec<bool> = def
         .faces
         .iter()
-        .map(|f| !(f.freeform && !opts.freeform) && f.trim.unsupported.is_none())
+        .map(|f| {
+            !(f.freeform && !opts.freeform)
+                && f.trim.unsupported.is_none()
+                && !(skip_edge_on && f.freeform && f.surface.swept_along(dl))
+        })
         .collect();
     // Faces on one surface (a sphere in two halves, say) share their silhouettes, keyed by
     // the set's first face: one curve along their seams, not one per face.

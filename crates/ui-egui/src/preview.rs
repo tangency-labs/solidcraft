@@ -151,6 +151,8 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (what Arrange placed and left out, for its dialog).
+    pub reply: Option<serde_json::Value>,
     /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
     /// the bodies and plane it was worked out for ([`mirror_key`]).
     pub mirror_meets: Option<(u64, bool)>,
@@ -290,6 +292,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (see [`Built::reply`]).
+    pub reply: Option<serde_json::Value>,
     /// The reply of a previewed assembly constraint (see [`Built::placed`]).
     pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
@@ -454,6 +458,7 @@ impl PreviewState {
         self.warning = None;
         self.applied = None;
         self.stopped = None;
+        self.reply = None;
         self.placed = None;
         self.tapered.clear();
         self.mirror_meets = None;
@@ -547,6 +552,7 @@ impl PreviewState {
                 self.warning = b.warning;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.reply = b.reply;
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
@@ -592,6 +598,7 @@ impl PreviewState {
                 self.warning = None;
                 self.applied = None;
                 self.stopped = None;
+                self.reply = None;
                 self.placed = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
@@ -808,6 +815,11 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
         colors.new_body[3] = crate::viewport::frame_ghost_alpha();
         colors.glass_new = true;
     }
+    // Arrange: where a laid-out part stands now is the light red of a picked part.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Arrange { .. })) {
+        colors.removed = crate::arrange_sheet::picked(&Tokens::get()).to_srgba_unmultiplied();
+    }
+
     // Scale shows only its result, in the body's own colour: every face of a scaled body is new.
     if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
         colors.replaced_ghost = false;
@@ -1109,6 +1121,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let warnings: Vec<&str> = p.replies.iter().filter_map(|r| r.get("warning").and_then(Value::as_str)).filter(|w| !w.is_empty()).collect();
             b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.reply = p.replies.last().cloned();
             b.centrelines = crate::dialogs_frame::centrelines(&p);
             if let Some((command, params)) = cmds.first() {
                 let editing = if command == "timeline.redefine" { params.get("feature").and_then(Value::as_u64) } else { None };
@@ -1307,6 +1320,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
@@ -1366,6 +1380,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
@@ -1690,6 +1705,7 @@ fn build_scene(
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points,
         placed: None,
@@ -2171,6 +2187,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            reply: None,
             mirror_meets: None,
             points: Vec::new(),
             placed: None,

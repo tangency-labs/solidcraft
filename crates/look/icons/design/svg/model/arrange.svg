@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Arrange</title>
+  <path d="M6 10L58 10L58 54L6 54Z" fill="#e2e8ef"/>
+  <path d="M6 10L58 10L58 54L6 54Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 16L34 16L34 25L21 25L21 48L12 48Z" fill="#b9ddf8"/>
+  <path d="M12 16L34 16L34 25L21 25L21 48L12 48Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39 16L52 16L52 48L39 48Z" fill="#b9ddf8"/>
+  <path d="M39 16L52 16L52 48L39 48Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.6 36.5A5.4 5.4 0 1 0 35.4 36.5A5.4 5.4 0 1 0 24.6 36.5Z" fill="#b9ddf8"/>
+  <path d="M24.6 36.5A5.4 5.4 0 1 0 35.4 36.5A5.4 5.4 0 1 0 24.6 36.5Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

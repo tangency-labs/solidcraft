@@ -650,6 +650,9 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
             assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_none(), "{command}: hidden selection field {}", input.label);
             continue;
         }
+        if !input_shown(&d, input.label) {
+            continue;
+        }
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
             nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(solidcraft_ui_text::tr_label(input.label))),
@@ -699,9 +702,10 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{command}");
     assert_eq!(apply_commands(&h.app, &d).unwrap(), expected, "{command}: drawing is lossless");
     let mut label_width: Option<f32> = None;
-    // Cell Grid's cell profile has a row only with the Sketch shape.
+    // Cell Grid's cell profile has a row only with the Sketch shape; Arrange hides the picks its
+    // choices make no use of.
     let shown = |i: usize| !matches!(&d.kind, Kind::CellGrid(c) if !crate::dialogs_cell_grid::shown_picks(c).contains(&i));
-    let rows = d.inputs.iter().enumerate().filter(|(i, _)| shown(*i)).map(|(_, i)| i.label);
+    let rows = d.inputs.iter().enumerate().filter(|(i, input)| shown(*i) && input_shown(&d, input.label)).map(|(_, i)| i.label);
     for label in rows.chain(labels.iter().copied()) {
         let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap_or_else(|| panic!("{command}: missing dense row {label}"));
         let label_rect = scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
@@ -732,6 +736,17 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "{command}");
 }
 
+/// Whether the dialog draws the selection input `label` as it is set: Arrange hides the picks its
+/// choices make no use of.
+fn input_shown(d: &Dialog, label: &str) -> bool {
+    match (&d.kind, label) {
+        (Kind::Arrange { on_face, .. }, "Areas") => *on_face,
+        (Kind::Arrange { on_face, .. }, "Plane") => !*on_face,
+        (Kind::Arrange { lay_flat, .. }, "Bottom Faces") => !*lay_flat,
+        _ => true,
+    }
+}
+
 fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
@@ -751,9 +766,12 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Style" if command == "solid.dogbone" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
-        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
-        "Flip alternate cells" if command == "solid.cell_grid" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
+        "arrange.rotation" => Role::ComboBox,
+        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" | "arrange.avoid" | "arrange.keep" | "arrange.lay_flat" => {
+            Role::CheckBox
+        }
+        "Flip alternate cells" if command == "solid.cell_grid" => Role::CheckBox,
         "Through all" if command == "solid.cell_grid" => Role::CheckBox,
         "Mode" | "Clip" | "Keep-out clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
         "Animate" => Role::Button,
@@ -1605,6 +1623,46 @@ fn the_pipe_window_keeps_the_typed_wall_when_the_type_becomes_solid() {
     assert_eq!(commands[0].1["wall"], "2 mm", "{:?}", commands[0].1);
 }
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(
+    arrange,
+    "solid.arrange",
+    [
+        "ui.width",
+        "ui.length",
+        "arrange.edge_margin",
+        "Gap",
+        "arrange.rotation",
+        "arrange.lay_flat",
+        "arrange.copies_of_each",
+        "arrange.sheets",
+        "arrange.keep",
+        "arrange.avoid"
+    ]
+);
+/// Arrange keeps the picks of the sheet it is not using without showing them: they are not
+/// highlighted in the view, and come back when that sheet is chosen again.
+#[test]
+fn arrange_set_aside_picks_are_not_highlighted() {
+    use crate::dialogs::{ARRANGE_FACE, ARRANGE_PARTS, ARRANGE_PLANE};
+    let h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.arrange").unwrap();
+    d.inputs[ARRANGE_PARTS].items = vec![Sel::Body { name: "Part".into() }];
+    d.inputs[ARRANGE_FACE].items = vec![Sel::Body { name: "Plate".into() }];
+    d.inputs[ARRANGE_PLANE].items = vec![Sel::Body { name: "Ground".into() }];
+    let names = |d: &Dialog| d.items().into_iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(" ");
+    let set = |d: &mut Dialog, face: bool| {
+        if let Kind::Arrange { on_face, .. } = &mut d.kind {
+            *on_face = face;
+        }
+    };
+    set(&mut d, false);
+    let shown = names(&d);
+    assert!(shown.contains("Part") && shown.contains("Ground") && !shown.contains("Plate"), "{shown}");
+    set(&mut d, true);
+    let shown = names(&d);
+    assert!(shown.contains("Part") && shown.contains("Plate") && !shown.contains("Ground"), "{shown}");
+    assert_eq!(d.inputs[ARRANGE_PLANE].items.len(), 1, "the plane pick is kept");
+}
 form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);

@@ -20,6 +20,7 @@ macro_rules! planned {
     };
 }
 
+mod arrange;
 mod board_import;
 mod board_layers;
 mod bom;
@@ -674,6 +675,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(arrange::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());

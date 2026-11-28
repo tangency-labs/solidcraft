@@ -6229,12 +6229,17 @@ fn long_items_poll_cancellation_inside_them() {
     )
     .unwrap();
     let ctx = context(&[], &[], &view, &o, &never).unwrap();
-    assert_eq!(body_silhouettes(&two, view.d, &o, &ctx).unwrap().len(), 2);
+    assert_eq!(
+        body_silhouettes(&two, view.d, &o, &ctx, false)
+            .unwrap()
+            .len(),
+        2
+    );
     let polls = AtomicUsize::new(0);
     let second = || polls.fetch_add(1, Ordering::Relaxed) >= 1;
     let ctx = context(&[], &[], &view, &o, &second).unwrap();
     assert!(matches!(
-        body_silhouettes(&two, view.d, &o, &ctx),
+        body_silhouettes(&two, view.d, &o, &ctx, false),
         Err(HlrError::Cancelled)
     ));
     // One surface in two faces: it asks again before each face its curves are trimmed to, and
@@ -6247,7 +6252,9 @@ fn long_items_poll_cancellation_inside_them() {
     };
     let ctx = context(&[], &[], &view, &o, &counting).unwrap();
     assert_eq!(
-        body_silhouettes(&halves, view.d, &o, &ctx).unwrap().len(),
+        body_silhouettes(&halves, view.d, &o, &ctx, false)
+            .unwrap()
+            .len(),
         1
     );
     assert!(polls.load(Ordering::Relaxed) >= 3, "{polls:?} polls");
@@ -6255,7 +6262,7 @@ fn long_items_poll_cancellation_inside_them() {
     let once = || polls.fetch_add(1, Ordering::Relaxed) == 1;
     let ctx = context(&[], &[], &view, &o, &once).unwrap();
     assert!(matches!(
-        body_silhouettes(&halves, view.d, &o, &ctx),
+        body_silhouettes(&halves, view.d, &o, &ctx, false),
         Err(HlrError::Cancelled)
     ));
     // Many faces: forming the sets asks too, before any surface is traced.
@@ -6269,7 +6276,7 @@ fn long_items_poll_cancellation_inside_them() {
     let boxes = prepare(&Brep { shells }, &o).unwrap();
     let ctx = context(&[], &[], &view, &o, &|| true).unwrap();
     assert!(matches!(
-        body_silhouettes(&boxes, view.d, &o, &ctx),
+        body_silhouettes(&boxes, view.d, &o, &ctx, false),
         Err(HlrError::Cancelled)
     ));
     // One chord across the boxes of many left-out faces: it asks every 1024 boxes.

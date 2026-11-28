@@ -3336,6 +3336,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
+    // The last command's reply: what the view draws beside the preview (Arrange's sheets).
+    let reply = preview.replies.last().cloned();
     // Keep the placement report for Constrain's freedom line. Its round-part Center mode
     // creates a line-on-plane joint rather than a planar constraint.
     let placed =
@@ -3384,6 +3386,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             });
         }
         built.stopped = stopped;
+        built.reply = reply;
         built.placed = placed;
         built.plugin_view = plugin_view;
         if plugin {

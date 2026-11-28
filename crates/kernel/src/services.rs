@@ -1,6 +1,8 @@
 //! The solidcore services that stay outside the kernel interface's families (`crate::route`), and
 //! the midsurface helpers that are still on their way into one:
 //!
+//! - `arrange`, laying parts out on sheets: it reads the bodies' outlines and returns where each
+//!   goes; the Move feature moves them.
 //! - `constraint`, an exception by decision: the sketch solver's forward-mode dual numbers and the
 //!   residuals it evaluates on every iteration, generic over the number type. A copy in the
 //!   interface would be a second implementation of one job; they move when the solver's residuals
@@ -16,6 +18,7 @@
 //! them, under the same module names, so a call keeps its path below `services`.
 
 pub use solidcore_ops::Error;
+pub use solidcore_ops::arrange;
 pub use solidcore_ops::constraint;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::finger_joint;

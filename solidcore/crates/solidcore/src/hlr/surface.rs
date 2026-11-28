@@ -1549,6 +1549,70 @@ impl Rev {
     }
 }
 
+impl S3 {
+    /// Whether the surface is swept along `d`, so its normal is square to `d` everywhere and its
+    /// outline seen along `d` is its edges'. Judged exactly from how it is made, never from
+    /// samples, which can miss a bump between them: a plane parallel to `d`; a spline whose
+    /// control points lie, row by row in one direction, on lines along `d` with one weight per
+    /// row; a surface of revolution round an axis along `d` with a straight profile along it.
+    pub(crate) fn swept_along(&self, d: Vec3) -> bool {
+        let Some(d) = d.normalized() else {
+            return false;
+        };
+        match self {
+            S3::Plane { n, .. } => n.dot(d).abs() <= 1e-12,
+            S3::Rev(r) => match &r.profile {
+                C3::Line { a, b } => {
+                    r.a.cross(d).len() <= 1e-12
+                        && (*b - *a).cross(d).len() <= 1e-12 * (*b - *a).len()
+                }
+                _ => false,
+            },
+            S3::Nurbs(n) => {
+                let ctrl = n.s.homogeneous();
+                let [ku, _] = n.s.knots();
+                let [pu, _] = n.s.degree();
+                let nu = ku.len().saturating_sub(pu + 1);
+                let pts: Vec<(Vec3, f64)> = ctrl
+                    .iter()
+                    .filter_map(|h| project(h).map(|p| (p, h[3])))
+                    .collect();
+                let Some(&(first, _)) = pts.first() else {
+                    return false;
+                };
+                if nu == 0 || pts.len() != ctrl.len() || pts.len() % nu.max(1) != 0 {
+                    return false;
+                }
+                let nv = pts.len() / nu.max(1);
+                let (lo, hi) = pts
+                    .iter()
+                    .fold((first, first), |(lo, hi), (p, _)| (lo.min(*p), hi.max(*p)));
+                let tol = 1e-9 * (hi - lo).len().max(1e-9);
+                // u fastest.
+                let at = |i: usize, j: usize| pts.get(j * nu + i).copied();
+                // Rows along v (one per i), or along u (one per j), each a line along `d`.
+                let rows =
+                    |outer: usize,
+                     inner: usize,
+                     at: &dyn Fn(usize, usize) -> Option<(Vec3, f64)>| {
+                        (0..outer).all(|o| {
+                            let Some((p0, w0)) = at(o, 0) else {
+                                return false;
+                            };
+                            (1..inner).all(|k| {
+                                at(o, k).is_some_and(|(p, w)| {
+                                    (p - p0).cross(d).len() <= tol
+                                        && (w - w0).abs() <= 1e-12 * w0.abs().max(1.0)
+                                })
+                            })
+                        })
+                    };
+                rows(nu, nv, &at) || rows(nv, nu, &|j, i| at(i, j))
+            }
+        }
+    }
+}
+
 impl Nurbs {
     fn new(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Nurbs, HlrError> {
         let nu = rows.len();
