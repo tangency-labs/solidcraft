@@ -46,6 +46,10 @@ pub struct RunParams {
     /// Populated forms require explicit acknowledgement of this document revision.
     #[serde(default)]
     pub form_guard: Option<FormGuard>,
+    /// Run the entry as a live preview: `plugin.preview` answers true inside it. A dialog's
+    /// preview sets it on its scratch design; a script sets it to try that path.
+    #[serde(default)]
+    pub preview: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -170,6 +174,18 @@ pub struct ListResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Ask whether the plugin run under way is a live preview (`plugin.preview`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewParams {}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PreviewResult {
+    /// True while a plugin dialog's live preview runs the entry on a scratch design that is
+    /// thrown away; false in a run whose result is kept.
+    pub preview: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 /// List the installed, enabled plugins' entries as tools for agents (`plugin.tools`).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -328,6 +344,10 @@ pub struct InstallResult {
     /// Host-drawn panels declared by the plugin, shown during permission review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panels: Vec<crate::plugin::ui::PanelSpec>,
+    /// Workspaces declared by the plugin, shown during permission review. They are inert data;
+    /// any enter or exit hook is a read-only entry listed in `entry_points`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<crate::plugin::ui::WorkspaceSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.

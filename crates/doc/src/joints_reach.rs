@@ -11,8 +11,8 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, bounded_step, build, close_within,
-    jacobian, joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, JointKind, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, bounded_step, build,
+    close_within, jacobian, joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -166,13 +166,13 @@ fn reach_with(doc: &Document, st: &ModelState, r: &Reach, frame: Option<&mut Fra
         .into());
     }
     // The loops those values are in, and the values of theirs that follow.
-    if built.closing.len() > MAX_LOOPS {
-        return Err(format!("the design has more than {MAX_LOOPS} closed loops"));
+    if built.closing.len() > MAX_CLOSING {
+        return Err(format!("the design has more than {MAX_CLOSING} closed loops"));
     }
     let groups = loop_groups(tree, &built.closing, asm, &linked);
     let (mut vars, mut closers, mut around) = (drive.clone(), Vec::new(), path.clone());
     let mut taken = BTreeSet::new();
-    while vars.len() <= MAX_LOOP_VALUES {
+    while vars.len() <= MAX_LOOP_VALUES && closers.len() <= MAX_LOOPS {
         let more: Vec<usize> =
             groups.iter().enumerate().filter(|(g, (_, _, t))| !taken.contains(g) && t.iter().any(|v| vars.contains(v))).map(|(g, _)| g).collect();
         if more.is_empty() {
@@ -188,6 +188,9 @@ fn reach_with(doc: &Document, st: &ModelState, r: &Reach, frame: Option<&mut Fra
             }
         }
         taken.extend(more);
+    }
+    if closers.len() > MAX_LOOPS {
+        return Err(format!("its chain and loops have more than {MAX_LOOPS} closed loops"));
     }
     if vars.len() > MAX_LOOP_VALUES {
         return Err(format!("its chain and loops have more than {MAX_LOOP_VALUES} values"));

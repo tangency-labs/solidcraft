@@ -54,17 +54,32 @@ pub struct Place {
     pub scale: f64,
     /// Degrees, counter-clockwise.
     pub angle: f64,
-    /// The drawing's own width and height in the file, when it could be read.
+    /// The drawing's own width and height in the file, when it could be read (at `dpi`).
     pub natural: Option<(f64, f64)>,
+    /// The dots per inch an SVG's pixels are read at; 96 is CSS's, and what the command does
+    /// without one. Not used for a DXF (#20240).
+    pub dpi: f64,
+    /// The resolution `natural` and `middle` were read at; it trails `dpi` while the file is
+    /// being measured again.
+    pub measured_dpi: f64,
     /// How far, in mm, a removed edge may lie from the outline kept: lines that meet end to end
     /// are followed with fewer edges (see `sketch.insert_svg`'s `simplify`). 0 keeps every edge as
-    /// drawn. A drawing with more edges than the largest sketch takes starts at a small distance
-    /// it can be lowered to 0 from.
+    /// drawn.
     pub simplify: f64,
+    /// Simplify is Auto: the engine works out the smallest distance at which the drawing fits the
+    /// sketch (`sketch.drawing_bounds`'s `fit`), and [`Place::auto_value`] holds it. Turning Auto
+    /// off keeps the number it set and lets it be changed.
+    pub auto: bool,
+    /// The engine's fit distance for this drawing: 0 when it fits as drawn, `None` when no
+    /// distance up to the cap does (Auto is then unavailable).
+    pub auto_value: Option<f64>,
     /// The middle of the drawing's box in the file's own coordinates, when it could be read.
     pub middle: Option<(f64, f64)>,
     pub align: Align,
 }
+
+/// The dots per inch an SVG's pixels are read at unless the dialog says otherwise.
+pub(crate) const DEFAULT_DPI: f64 = 96.0;
 
 /// A drawing being read for the placement window, on a worker thread: the file's size, the box
 /// around it and its edge count, which is quick for a drawing of a few hundred segments and not
@@ -81,6 +96,9 @@ pub struct InsertRead {
     /// Cancelled from the operations panel: the answer is dropped and no window opens.
     pub cancelled: bool,
     progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+    /// The sketch being edited and the design the picker ran in: the window opens only for them.
+    sketch: Option<u64>,
+    session: u64,
 }
 
 impl InsertRead {
@@ -104,7 +122,7 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut copy = app.session.scratch();
-        let given = json!({"path": path.clone(), "format": if command.ends_with("dxf") { "dxf" } else { "svg" }});
+        let given = json!({"path": path.clone(), "format": if command.ends_with("dxf") { "dxf" } else { "svg" }, "fit": true});
         let (tx, done) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
@@ -114,8 +132,29 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
         });
         if worker.is_ok() {
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
-            app.insert_read =
-                Some(InsertRead { name, serial: crate::operations::serial(), command: command.to_string(), path, done, cancelled: false, progress });
+            let (sketch, session) = (crate::workspace::focused_sketch(app), app.session.uid);
+            // A second pick replaces the read still under way: it never opens a window, so it is
+            // taken and recorded as cancelled before its row goes, like a cancelled one.
+            if let Some(mut old) = app.insert_read.take() {
+                old.cancel();
+                crate::operations::record_ended(
+                    app,
+                    &format!("insert_read:{}", old.serial),
+                    reading_label(&old.name),
+                    crate::operations::Outcome::Cancelled,
+                );
+            }
+            app.insert_read = Some(InsertRead {
+                name,
+                serial: crate::operations::serial(),
+                command: command.to_string(),
+                path,
+                done,
+                cancelled: false,
+                progress,
+                sketch,
+                session,
+            });
             return;
         }
     }
@@ -137,8 +176,22 @@ pub fn tick(app: &mut SolveApp) {
         Err(TryRecvError::Disconnected) => Err(String::new()),
     };
     let Some(read) = app.insert_read.take() else { return };
-    if read.cancelled {
+    let key = format!("insert_read:{}", read.serial);
+    let label = reading_label(&read.name);
+    // The window is for the sketch and design the picker ran in, and only when nothing opened
+    // meanwhile: an answer that arrives after the sketch is finished, another sketch is picked or
+    // a dialog opens is dropped rather than put over what the person is doing.
+    let asked = app.session.uid == read.session && crate::workspace::focused_sketch(app) == read.sketch;
+    if read.cancelled || !asked || app.dialog.is_some() {
+        crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Cancelled);
         return;
+    }
+    match &job {
+        Ok(_) => crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Done),
+        Err(e) => {
+            let why = if e.is_empty() { "the read stopped".to_string() } else { e.clone() };
+            crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Failed(why));
+        }
     }
     let bounds = job.ok();
     open_with_bounds(app, &read.command, read.path, bounds.as_ref());
@@ -147,49 +200,118 @@ pub fn tick(app: &mut SolveApp) {
 /// Open the placement for `path`, read here on the window's thread: the tests' path, and the
 /// browser's. The picker calls [`start`] instead.
 pub fn open(app: &mut SolveApp, command: &str, path: String) {
-    let bounds =
-        app.session.execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }})).ok();
+    let bounds = app
+        .session
+        .execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }, "fit": true}))
+        .ok();
     open_with_bounds(app, command, path, bounds.as_ref());
 }
 
 /// The placement window for `path`, with what `sketch.drawing_bounds` answered (`None`: the file
 /// could not be read, and the window opens without a size).
 fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Option<&Value>) {
+    let (natural, middle, _edges, auto_value) = measured(bounds);
+    // Auto is on when the drawing needs simplifying to fit: the engine's smallest distance that
+    // does (measured on the drawing, so it means the same at any scale).
+    let auto = auto_value.is_some_and(|d| d > 0.0);
+    let simplify = if auto { auto_value.unwrap_or(0.0) } else { 0.0 };
+    let place = Place {
+        command: command.to_string(),
+        path,
+        x: 0.0,
+        y: 0.0,
+        scale: 1.0,
+        angle: 0.0,
+        natural,
+        dpi: DEFAULT_DPI,
+        measured_dpi: DEFAULT_DPI,
+        simplify,
+        auto,
+        auto_value,
+        middle,
+        align: Align::Middle,
+    };
+    app.dialog = Some(Dialog::new(Kind::InsertDrawing(place), Vec::new()));
+}
+
+/// The drawing's own width and height, the middle of its box and how many edges it has, from what
+/// `sketch.drawing_bounds` answered.
+fn measured(bounds: Option<&Value>) -> (Option<(f64, f64)>, Option<(f64, f64)>, u64, Option<f64>) {
     let natural = bounds
         .and_then(|b| Some((b.get("width")?.as_f64()?, b.get("height")?.as_f64()?)))
         .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9);
     let edges = bounds.and_then(|b| b.get("edges")?.as_u64()).unwrap_or(0);
-    let simplify = suggested_simplify(edges, solidcraft_engine::sketch::limits::max_points(), natural);
     let corner = |b: &Value, key: &str| -> Option<(f64, f64)> { Some((b.get(key)?.get(0)?.as_f64()?, b.get(key)?.get(1)?.as_f64()?)) };
     let middle = bounds
         .and_then(|b| Some((corner(b, "min")?, corner(b, "max")?)))
         .map(|(lo, hi)| ((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0))
         .filter(|(x, y)| x.is_finite() && y.is_finite());
-    let place = Place { command: command.to_string(), path, x: 0.0, y: 0.0, scale: 1.0, angle: 0.0, natural, middle, align: Align::Middle, simplify };
-    app.dialog = Some(Dialog::new(Kind::InsertDrawing(place), Vec::new()));
+    let auto_value = bounds.and_then(|b| b.get("auto_simplify")).and_then(Value::as_f64).filter(|d| d.is_finite() && *d >= 0.0);
+    (natural, middle, edges, auto_value)
 }
 
-/// A starting Simplify distance (mm) for a drawing with `edges` entities: none while the largest
-/// sketch takes it as drawn, else a two-hundredth of its size (a smoothed outline of a dense
-/// drawing usually loses most of its edges there), rounded up to 0.01 mm. The window shows it and
-/// it can be lowered to 0; a drawing that still does not fit says so in its preview.
-pub fn suggested_simplify(edges: u64, limit: usize, natural: Option<(f64, f64)>) -> f64 {
-    if edges <= limit as u64 {
-        return 0.0;
+/// The file being measured again beside the window, for a new Resolution.
+pub struct Remeasure {
+    path: String,
+    dpi: f64,
+    done: Receiver<Result<Value, String>>,
+}
+
+/// Keeps `natural` and `middle` at the Resolution row's value: the file is measured on a worker
+/// thread, one read at a time, so dragging the value reads only the latest one once the read under
+/// way is done. An answer for another file or resolution is dropped. With no thread to read on
+/// (the browser), the file is read here.
+fn remeasure(app: &mut SolveApp, p: &mut Place) {
+    if let Some(job) = app.insert_remeasure.take() {
+        let answer = match job.done.try_recv() {
+            Err(TryRecvError::Empty) => {
+                app.insert_remeasure = Some(job);
+                return;
+            }
+            answer => answer.ok().and_then(Result::ok),
+        };
+        if job.path == p.path && job.dpi == p.dpi {
+            take_measure(p, job.dpi, answer.as_ref());
+        }
     }
-    let Some((w, h)) = natural else { return 0.0 };
-    let span = w.max(h);
-    if !(span.is_finite() && span > 1e-9) {
-        return 0.0;
+    if p.dpi == p.measured_dpi || !(1.0..=10000.0).contains(&p.dpi) {
+        return;
     }
-    ((span / 200.0) * 100.0).ceil().max(1.0) / 100.0
+    let given = json!({"path": p.path, "format": "svg", "dpi": p.dpi, "fit": true});
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut copy = app.session.scratch();
+        let asked = given.clone();
+        let (tx, done) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new().name("drawing bounds".into()).spawn(move || {
+            let _ = tx.send(copy.execute("sketch.drawing_bounds", &asked).map_err(|e| e.to_string()));
+        });
+        if worker.is_ok() {
+            app.insert_remeasure = Some(Remeasure { path: p.path.clone(), dpi: p.dpi, done });
+            return;
+        }
+    }
+    let answer = app.session.execute("sketch.drawing_bounds", &given).ok();
+    take_measure(p, p.dpi, answer.as_ref());
+}
+
+fn take_measure(p: &mut Place, dpi: f64, bounds: Option<&Value>) {
+    (p.natural, p.middle, _, p.auto_value) = measured(bounds);
+    // At another Resolution the drawing's own size, and so its fit, can change: Auto follows it.
+    if p.auto {
+        match p.auto_value {
+            Some(d) => p.simplify = d,
+            None => p.auto = false,
+        }
+    }
+    p.measured_dpi = dpi;
 }
 
 pub fn title(p: &Place) -> &'static str {
     if p.command.ends_with("dxf") { "INSERT DXF" } else { "INSERT SVG" }
 }
 
-pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     let name = std::path::Path::new(&p.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.path.clone());
     form_row(ui, "File", |ui| {
         ui.label(name).backing_on_hover_text(&p.path);
@@ -210,10 +332,26 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
             crate::scenario::publish_handle(handle, r.rect.center());
         });
     }
+    // An SVG's pixels are read at this resolution: a file drawn at 72 dpi comes in at the size it
+    // was drawn at with 72 (#20240). The file's own size follows it.
+    if !p.command.ends_with("dxf") {
+        form_row(ui, solidcraft_ui_text::tr("ui.insert_drawing.resolution"), |ui| {
+            let r = crate::ui_kit::number_field(ui, &mut p.dpi, 1.0..=10000.0, 1.0, " dpi");
+            crate::scenario::publish_handle("dialog:insert:dpi", r.rect.center());
+        });
+        remeasure(app, p);
+        if app.insert_remeasure.is_some() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
     // The size in millimetres follows the scale and the other way round; the aspect is kept.
     if let Some((nw, nh)) = p.natural {
         for (label, natural, handle) in [("Width", nw, "dialog:insert:width"), ("Height", nh, "dialog:insert:height")] {
             form_row(ui, label, |ui| {
+                // The size shown is for the old resolution until the file has been measured.
+                if p.dpi != p.measured_dpi {
+                    ui.disable();
+                }
                 let mut mm = natural * p.scale;
                 let r = crate::ui_kit::number_field(ui, &mut mm, 0.001..=natural * MAX_SCALE, 0.5, " mm");
                 if r.changed() && mm.is_finite() && mm > 0.0 {
@@ -233,7 +371,26 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
     });
     crate::ui_kit::with_row_label_tooltip(ui, solidcraft_ui_text::tr("ui.insert_simplify_tip"), |ui| {
         form_row(ui, solidcraft_ui_text::tr("ui.insert_simplify"), |ui| {
+            // Auto: the engine's smallest distance at which the drawing fits the sketch (worked
+            // out with the file's size). It owns the number; turning it off keeps that number and
+            // lets it be changed. A drawing no distance fits has no Auto to offer.
+            let mut auto = p.auto;
+            let boxed =
+                ui.add_enabled(p.auto_value.is_some(), |ui: &mut egui::Ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("Auto"), &mut auto));
+            if boxed.changed() {
+                p.auto = auto;
+                if auto {
+                    p.simplify = p.auto_value.unwrap_or(0.0);
+                }
+            }
+            let boxed = boxed.on_hover_text(solidcraft_ui_text::tr("ui.insert_simplify_auto_tip"));
+            crate::scenario::publish_handle("dialog:insert:auto", boxed.rect.center());
+            // The field stays editable, as it always was: a distance typed into it is the
+            // person's, so Auto lets go of it (turn Auto back on for the fitted distance again).
             let r = crate::ui_kit::number_field(ui, &mut p.simplify, 0.0..=MAX_SIMPLIFY_MM, 0.01, " mm");
+            if r.changed() {
+                p.auto = false;
+            }
             crate::scenario::publish_handle("dialog:insert:simplify", r.rect.center());
         });
     });
@@ -289,10 +446,14 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
     if !p.angle.is_finite() {
         return Err("the angle must be a number".into());
     }
-    Ok(vec![(
-        p.command.clone(),
-        json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": p.align.word(), "simplify": p.simplify}),
-    )])
+    let mut params = json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": p.align.word(), "simplify": p.simplify});
+    if !p.command.ends_with("dxf") && p.dpi != DEFAULT_DPI {
+        if !(p.dpi.is_finite() && (1.0..=10000.0).contains(&p.dpi)) {
+            return Err("the resolution must be from 1 to 10000 dpi".into());
+        }
+        params["dpi"] = json!(p.dpi);
+    }
+    Ok(vec![(p.command.clone(), params)])
 }
 
 #[cfg(test)]
@@ -351,7 +512,14 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.settle();
         h.app.start("sketch.insert_svg");
-        h.frames(3);
+        // The drawing is read beside the window: wait for it, bounded, so a lost answer still fails.
+        for _ in 0..500 {
+            h.frame();
+            if h.app.dialog.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
         assert_eq!((p.path.as_str(), p.x, p.y, p.scale, p.angle, p.natural), (path.as_str(), 0.0, 0.0, 1.0, 0.0, Some((20.0, 10.0))));
         assert!(handle_at("dialog:insert:scale").is_some(), "the scale is drawn");
@@ -430,7 +598,11 @@ mod tests {
             natural: Some((20.0, 10.0)),
             middle: Some((10.0, 5.0)),
             align: Align::Middle,
+            dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
         };
         let mut p = p;
         p.simplify = 0.2;
@@ -471,7 +643,11 @@ mod tests {
             natural: None,
             middle: None,
             align: Align::Middle,
+            dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
         };
         let q = placed(solidcore_record::Vec2::new(10.0, 5.0), &p);
         assert!((q.x + 5.0).abs() < 1e-9 && (q.y - 17.0).abs() < 1e-9, "twice, a quarter turn, then moved: {q:?}");
@@ -539,6 +715,124 @@ mod tests {
         assert!(h.app.dialog.is_none(), "a cancelled read opens no window");
     }
 
+    /// A second pick replaces the read still under way: the first is recorded as cancelled and
+    /// only the second opens a window.
+    #[test]
+    fn a_second_pick_records_the_first_read_as_cancelled() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("first-pick.svg"));
+        let first = format!("insert_read:{}", h.app.insert_read.as_ref().expect("under way").serial);
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("second-pick.svg"));
+        let reply = h.call("ui.operations", json!({}));
+        let finished = reply["result"]["finished"].as_array().cloned().unwrap_or_default();
+        let ended: Vec<(String, String)> = finished
+            .iter()
+            .map(|f| (f["key"].as_str().unwrap_or_default().to_string(), f["outcome"].as_str().unwrap_or_default().to_string()))
+            .collect();
+        assert!(ended.iter().any(|(key, outcome)| *key == first && outcome == "cancelled"), "the replaced read says it ended: {finished:?}");
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the second pick opens a window") };
+        assert_eq!(p.path, svg_file("second-pick.svg"), "the window is the second pick's");
+    }
+
+    /// Typing a distance is the person's: Auto lets go of it, and its value is the one typed.
+    #[test]
+    fn typing_a_distance_turns_auto_off() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("typed-distance.svg", 25_000));
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement") };
+        assert!(p.auto && p.simplify > 0.0, "Auto opens on: {}", p.simplify);
+        h.step(&json!({"click": {"handle": "dialog:insert:simplify"}})).unwrap();
+        h.frame();
+        h.step(&json!({"text": "0.5"})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(!p.auto, "the typed distance is not Auto's");
+        assert!((p.simplify - 0.5).abs() < 1e-9, "the distance typed: {}", p.simplify);
+    }
+
+    /// OK waits while another Resolution is being measured: the distance shown is fitted at the
+    /// old one until the file is read again at the new one.
+    #[test]
+    fn ok_waits_for_a_new_resolutions_fit() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("resolution-fit.svg", 25_000));
+        h.frames(2);
+        let measured = |h: &Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::InsertDrawing(p)) => Some((p.dpi, p.measured_dpi)),
+            _ => None,
+        };
+        assert_eq!(measured(&h), Some((DEFAULT_DPI, DEFAULT_DPI)), "measured at 96 dpi to start");
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.dpi = 72.0;
+        }
+        h.frame();
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0), "OK waits for the fit at 72 dpi");
+        for _ in 0..600 {
+            h.frame();
+            if measured(&h) == Some((72.0, 72.0)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frame();
+        assert_eq!(measured(&h), Some((72.0, 72.0)), "the file was measured at 72 dpi");
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "OK is back with the new fit");
+    }
+
+    /// A read whose sketch was finished meanwhile opens nothing: the answer arrives after the
+    /// interaction it was for is over.
+    #[test]
+    fn a_read_that_finishes_after_the_sketch_opens_no_window() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-then-finish.svg"));
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.settle();
+        for _ in 0..500 {
+            h.frame();
+            if h.app.insert_read.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(2);
+        assert!(h.app.insert_read.is_none(), "the read finished and left");
+        assert!(h.app.dialog.is_none(), "the finished sketch's read opens no window");
+    }
+
+    /// A read that finishes while another dialog is open keeps that dialog: it is dropped, not
+    /// put over it.
+    #[test]
+    fn a_read_that_finishes_beside_another_dialog_keeps_that_dialog() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-beside-dialog.svg"));
+        open(&mut h.app, "sketch.insert_svg", svg_file("other.svg"));
+        let before = h.app.dialog.as_ref().map(|d| d.kind.clone());
+        for _ in 0..500 {
+            h.frame();
+            if h.app.insert_read.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(2);
+        assert!(h.app.insert_read.is_none(), "the read finished and left");
+        let after = h.app.dialog.as_ref().map(|d| d.kind.clone());
+        let Some(Kind::InsertDrawing(p)) = after else { panic!("the other window was lost") };
+        assert_eq!(p.path, svg_file("other.svg"), "the window open is the one that was there");
+        assert!(matches!(before, Some(Kind::InsertDrawing(_))));
+    }
+
     /// A drawing with more edges than the largest sketch takes opens with a Simplify distance
     /// the window shows, so it can come in without a person guessing one.
     #[test]
@@ -550,6 +844,8 @@ mod tests {
         h.frames(2);
         let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
         assert!(p.simplify > 0.0 && p.simplify <= MAX_SIMPLIFY_MM, "a Simplify distance is offered: {}", p.simplify);
+        assert!(p.auto && p.auto_value == Some(p.simplify), "it is the engine's Auto distance: {}", p.simplify);
+        assert!(handle_at("dialog:insert:auto").is_some(), "the Auto box is drawn");
         h.step(&json!({"key": "Enter"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -557,14 +853,37 @@ mod tests {
         assert!(n > 0 && n <= solidcraft_engine::sketch::limits::DEFAULT_POINTS, "the drawing comes in: {n}");
     }
 
+    /// Auto owns the distance: turning it off keeps the number the engine set and lets it be
+    /// lowered by hand; turning it back on restores the engine's fit.
+    #[test]
+    fn turning_auto_off_keeps_the_distance_it_set() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("auto-off.svg", 25_000));
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
+        let auto = p.simplify;
+        assert!(p.auto && auto > 0.0, "Auto opens on: {}", p.simplify);
+        h.step(&json!({"click": {"handle": "dialog:insert:auto"}})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(!p.auto, "Auto is off");
+        assert_eq!(p.simplify, auto, "the distance it set is kept");
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.simplify = 0.5;
+        }
+        h.frame();
+        h.step(&json!({"click": {"handle": "dialog:insert:auto"}})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(p.auto && p.simplify == auto, "Auto back on restores the fit: {} vs {auto}", p.simplify);
+    }
+
     /// The Simplify distance starts at 0 for a drawing the sketch takes as drawn, is drawn as a
     /// field, and reaches the import: OK then follows the outline with fewer edges.
     #[test]
     fn the_simplify_distance_reaches_the_import() {
-        assert_eq!(suggested_simplify(100, 20_000, Some((50.0, 50.0))), 0.0, "a drawing the sketch takes is not simplified");
-        assert_eq!(suggested_simplify(30_000, 20_000, Some((50.0, 50.0))), 0.25, "a two-hundredth of its size");
-        assert_eq!(suggested_simplify(30_000, 20_000, Some((3.0, 1.0))), 0.02, "at least 0.01 mm, rounded up");
-        assert_eq!(suggested_simplify(30_000, 20_000, None), 0.0, "no size, nothing to go by");
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.settle();
@@ -670,6 +989,72 @@ mod tests {
         assert!((place(&h).angle - 90.0).abs() < 2.0, "turned: {}", place(&h).angle);
     }
 
+    /// An SVG is read at 96 dpi unless the Resolution row says otherwise, and only an SVG has the
+    /// row (#20240): the command carries `dpi` only when it is not the default.
+    #[test]
+    fn an_svg_is_placed_at_the_resolution_it_was_drawn_at() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", svg_file("dpi.svg"));
+        h.frames(2);
+        assert!(handle_at("dialog:insert:dpi").is_some(), "the resolution is drawn for an SVG");
+        let svg = Place {
+            command: "sketch.insert_svg".into(),
+            path: "a.svg".into(),
+            x: 0.0,
+            y: 0.0,
+            scale: 1.0,
+            angle: 0.0,
+            natural: None,
+            dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
+            simplify: 0.0,
+            auto: false,
+            auto_value: None,
+            middle: None,
+            align: Align::Middle,
+        };
+        assert!(commands(&svg).unwrap()[0].1.get("dpi").is_none(), "96 dpi is what the command does without one");
+        assert_eq!(commands(&Place { dpi: 72.0, ..svg.clone() }).unwrap()[0].1["dpi"], json!(72.0));
+        for bad in [0.0, 0.5, 20000.0, f64::NAN] {
+            assert!(commands(&Place { dpi: bad, ..svg.clone() }).is_err(), "{bad}");
+        }
+        let dxf = Place { command: "sketch.insert_dxf".into(), dpi: 72.0, ..svg };
+        assert!(commands(&dxf).unwrap()[0].1.get("dpi").is_none(), "a DXF has no pixels");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_dxf", svg_file("dpi.dxf"));
+        h.frames(2);
+        assert!(handle_at("dialog:insert:dpi").is_none(), "no resolution for a DXF");
+    }
+
+    /// A new Resolution measures the file again, beside the window.
+    #[test]
+    fn a_new_resolution_measures_the_file_again() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let px = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect width="144" height="72"/></svg>"#;
+        open(&mut h.app, "sketch.insert_svg", svg_text_file("pixels.svg", px));
+        let place = |h: &mut Harness| match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            Some(Kind::InsertDrawing(p)) => p.clone(),
+            other => panic!("{other:?}"),
+        };
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.dpi = 72.0;
+        }
+        let started = std::time::Instant::now();
+        while place(&mut h).measured_dpi != 72.0 {
+            assert!(started.elapsed().as_secs() < 30, "the file was never measured again");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (w, height) = place(&mut h).natural.expect("a size");
+        assert!((w - 50.8).abs() < 1e-6 && (height - 25.4).abs() < 1e-6, "{w} x {height}");
+        assert!(h.app.insert_remeasure.is_none());
+    }
+
     /// Cancel adds nothing; a bad scale is refused.
     #[test]
     fn cancelling_the_placement_adds_nothing() {
@@ -686,6 +1071,10 @@ mod tests {
             scale: 0.0,
             angle: 0.0,
             natural: None,
+            dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
+            auto: false,
+            auto_value: None,
             middle: None,
             align: Align::Middle,
             simplify: 0.0,

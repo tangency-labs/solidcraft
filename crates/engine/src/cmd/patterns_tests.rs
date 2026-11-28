@@ -786,12 +786,15 @@ fn rectangular_pattern_distance_types_place_the_copies() {
 
 /// The command works a row out with the values the pattern is built with, so an expression's
 /// bare number is read in the design's unit there too (#8523): in an inch design `2 + 0` is a
-/// 2 in extent, not 2 mm that a 1 in spacing would not fit in.
+/// 2 in extent, not 2 mm that a 1 in spacing would not fit in. The spacings are checked the same
+/// way before that: with `inset` at 1 mm, `1 - inset` is 24.4 mm there, not the 0 mm a division would
+/// refuse.
 #[test]
 fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     let pattern = |p: Value| {
         let mut s = Session::default();
         run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "parameters.add", json!({"name": "inset", "expression": "1 mm"}));
         run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "body_name": "Cube"}));
         let mut p = p;
         p["bodies"] = json!(["Cube"]);
@@ -813,6 +816,113 @@ fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     assert_eq!(xs.len(), 2, "{xs:?}");
     assert!((xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
     let solidcraft_doc::PatternKind::Rectangular { spacing1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(spacing1.as_str(), "25.4 mm");
+    let gap = 10.0 / 24.4;
+    for p in [
+        json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": "10 mm * 1 mm / (1 - inset)"}),
+        json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 2, "spacing_list1": ["10 mm * 1 mm / (1 - inset)"]}),
+    ] {
+        let (xs, _) = pattern(p.clone());
+        assert!(xs.len() == 1 && (xs[0] - gap).abs() < 1e-9, "{p}: {xs:?}");
+    }
+}
+
+/// A direction set by count and spacing list takes the list's gaps in turn and from the start
+/// again: 10, 20 and 30 mm with a count of 5 put the copies at 10, 30, 60 and 70 mm. Centred, the
+/// list runs out from the original on both sides; Flip runs it the other way.
+#[test]
+fn rectangular_pattern_spacing_list_places_the_copies() {
+    let x = |v: &[f64]| v.iter().map(|x| [*x, 0.0]).collect::<Vec<_>>();
+    let list = |extra: Value| {
+        let mut p = json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 5, "spacing_list1": [10, "20 mm", 30]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        rectangular_offsets(p)
+    };
+    let (got, s) = list(json!({}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0]));
+    // The list is saved as given; the spacing keeps its first gap for switching back.
+    let Some(solidcraft_doc::FeatureKind::Pattern {
+        pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, spacing_list1, distance1, .. },
+        ..
+    }) = s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(*distance1, solidcraft_doc::PatternDistance::CountList);
+    assert_eq!(spacing_list1.iter().map(|e| e.as_str()).collect::<Vec<_>>(), ["10", "20 mm", "30"]);
+    assert_eq!(spacing1.as_str(), "10 mm");
+    let (got, _) = list(json!({"count1": 7}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0, 90.0, 120.0]));
+    let (got, _) = list(json!({"reversed": true}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    let (got, _) = list(json!({"alignment": "center"}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0, 30.0]));
+    // An even count centred: the extra copy goes ahead, or behind with Flip.
+    let (got, _) = list(json!({"alignment": "center", "count1": 4}));
+    assert_offsets(&got, &x(&[-10.0, 10.0, 30.0]));
+    let (got, _) = list(json!({"alignment": "center", "count1": 4, "reversed": true}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0]));
+    let (got, _) = list(json!({"alignment": "left"}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    // Each direction chooses on its own.
+    let (got, _) = rectangular_offsets(json!({
+        "dir1": [1, 0, 0], "count1": 2, "spacing1": 30,
+        "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3, "spacing_list2": [5, 15]
+    }));
+    assert_offsets(&got, &[[0.0, 5.0], [0.0, 20.0], [30.0, 0.0], [30.0, 5.0], [30.0, 20.0]]);
+    // A list on a direction set another way isn't kept.
+    let (_, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "spacing_list1": [4, 5]}));
+    assert!(!s.doc.to_json().contains("spacing_list1"));
+}
+
+/// The spacing list is saved, undone and reopened with the design, and its gaps follow
+/// parameters.
+#[test]
+fn rectangular_pattern_spacing_list_saves_reopens_and_follows_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let before = s.doc.to_json();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 4, "spacing_list1": ["gap", "2 * gap"]}),
+    );
+    let reach = |s: &Session| {
+        let st = s.model.state();
+        st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox.max.x).fold(f64::NEG_INFINITY, f64::max)
+    };
+    // Copies at 10, 30 and 40 mm.
+    assert_eq!(s.model.state().bodies.len(), 4);
+    assert!((reach(&s) - 42.0).abs() < 1e-6, "{}", reach(&s));
+    let saved = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.model.state().bodies.len(), 4);
+    run(&mut reopened, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    // Now at 20, 60 and 80 mm.
+    assert!((reach(&reopened) - 82.0).abs() < 1e-6, "{}", reach(&reopened));
+    // In an inch design a bare number inside an expression is inches, for the copies and for the
+    // spacing kept for switching back alike.
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "solid.box", json!({"length": "2 mm", "width": "2 mm", "height": "2 mm", "body_name": "Cube"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 3, "spacing_list1": ["1 + 0"]}),
+    );
+    assert!((reach(&s) - 52.8).abs() < 1e-6, "{}", reach(&s));
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, .. }, .. }) =
+        s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
     assert_eq!(spacing1.as_str(), "25.4 mm");
 }
 
@@ -859,7 +969,7 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let cases = [
-        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent or spacing_extent"),
+        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent, spacing_extent or count_list"),
         (json!({"distance1": 2, "count1": 3, "spacing1": 10}), "`distance1` must be"),
         (json!({"distance1": "spacing_extent", "spacing1": 10, "extent1": 80, "copy_at_end1": "yes"}), "`copy_at_end1` must be true or false"),
         (json!({"distance1": "count_extent", "count1": 3}), "`extent1`"),
@@ -875,6 +985,20 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
         (json!({"distance1": "spacing_extent", "spacing1": 1e-300, "extent1": 1e8}), "pattern count must be"),
         (json!({"distance1": "count_extent", "count1": 3, "extent1": "5 deg"}), "extent1"),
         (json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 30, "extent2": 20}), "direction 2"),
+        (json!({"distance1": "count_list", "count1": 3}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": []}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": 10}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, true]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, " "]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, "5 deg"]}), "spacing_list1 spacing 2"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, 0]}), "spacing 2 must be greater than zero"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [-10]}), "spacing 1 must be greater than zero"),
+        (json!({"distance1": "count_list", "spacing_list1": [10]}), "`count1`"),
+        (json!({"distance1": "count_list", "count1": 0, "spacing_list1": [10]}), "count"),
+        (
+            json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3}),
+            "`spacing_list2` must list at least one spacing",
+        ),
     ];
     for (mut p, message) in cases {
         p["bodies"] = json!(["Cube"]);
@@ -3338,6 +3462,78 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
     }
 }
 
+/// #18048: a pattern or mirror of a Draft drafts the copied face instead of failing with
+/// "Draft1 cannot be patterned or mirrored yet". A 20 x 20 x 20 pad joined on a 100 x 40 x 10
+/// plate has its side at x = 10 drafted 5 deg about its bottom edge (neutral plane z = 10): the
+/// side sweeps a wedge of 0.5 * 20 * (20 tan 5 deg) * 20 = 4000 tan 5 deg. Each copy of the pad
+/// is drafted by the same wedge, whether the pad is copied with the draft or was copied before.
+#[test]
+fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let pattern = json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": 50});
+    let with = |features: Value, mut p: Value| {
+        p["features"] = features;
+        p
+    };
+    let cases = [
+        ("mirror", None, ("solid.mirror", json!({"features": ["Pad1", "Draft1"], "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}))),
+        ("pattern", None, ("solid.pattern.rectangular", with(json!(["Pad1", "Draft1"]), pattern.clone()))),
+        (
+            "pattern of the draft alone",
+            Some(with(json!(["Pad1"]), pattern.clone())),
+            ("solid.pattern.rectangular", with(json!(["Draft1"]), pattern.clone())),
+        ),
+    ];
+    for (what, before, (copy, params)) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        let pad_copied_before = before.is_some();
+        if let Some(p) = before {
+            let r = run(&mut s, "solid.pattern.rectangular", p);
+            assert!(r["error"].is_null(), "{what}: {r}");
+        }
+        let pads = volume(&mut s);
+        run(
+            &mut s,
+            "solid.draft",
+            json!({"faces": [[10, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+        );
+        let drafted = volume(&mut s) - pads;
+        assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{what}: {r}");
+        // Both pads undrafted: the second pad is either there already or copied now.
+        let pads = if pad_copied_before { pads } else { 48000.0 + 8000.0 };
+        let want = pads + 2.0 * drafted;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+    }
+}
+
+/// #18048: a pattern of a Draft drafts the copied face where the draft finds it now. The pad's
+/// side at x = 30 is drafted 5 deg about its bottom edge and the pad and draft are patterned
+/// 50 apart; making the pad 30 long moves that side to x = 40, so the copy's side is at x = 90,
+/// not at x = 80 where it was picked. Each pad is 30 x 20 x 20 less the wedge 4000 tan 5 deg.
+#[test]
+fn pattern_of_a_draft_follows_its_face_after_an_edit() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+    run(
+        &mut s,
+        "solid.draft",
+        json!({"faces": [[30, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+    );
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pad1", "Draft1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(rel(volume(&mut s), 40000.0 + 2.0 * (8000.0 - wedge)) < 1e-6, "20 long: {}", volume(&mut s));
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Pad1", "set": {"length": "30 mm"}}));
+    assert!(r["error"].is_null(), "{r}");
+    let want = 40000.0 + 2.0 * (12000.0 - wedge);
+    assert!(rel(volume(&mut s), want) < 1e-6, "30 long: {} vs {want}", volume(&mut s));
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
@@ -3511,6 +3707,39 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
     let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
     assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
+}
+
+/// #20931: a ring revolved about X from a section with a 0.2 mm corner arc, a rib revolved 7°
+/// across that corner and joined, a 0.75 mm round on the two edges where the rib's end meets the
+/// ring, and a circular pattern of the rib and the round. Every copy is the original turned a
+/// quarter, apart from the others, so from the second rib on each one splits the ring's faces as
+/// the second did: four ribs have the faces of two plus twice what the second added. At count 4
+/// SMLib's check refused the round of the last copy (Bad SpeedPt, Bad CurveCusp on a 2D curve):
+/// the pattern joins its three rib copies in one union, and the round at the last of them fails
+/// there, while the same copies joined one at a time round.
+#[test]
+fn circular_pattern_of_a_rib_and_its_round_on_a_ring_builds_at_four_copies() {
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/regressions/ring_rib_round_circular_pattern.json")).unwrap();
+    let build = |count: u32| {
+        let mut script = script.clone();
+        for c in script["commands"].as_array_mut().unwrap() {
+            if c["params"]["feature"]["type"] == "pattern" {
+                c["params"]["feature"]["pattern"]["count"] = json!(count.to_string());
+            }
+        }
+        let mut s = Session::default();
+        s.run_script(&script).unwrap();
+        let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "count {count}: {errors:?}");
+        let st = s.model.state();
+        let ring = st.body("Ring").unwrap();
+        (ring.body.face_count(), ring.body.lumps().expect("the ring body reports its lumps").len())
+    };
+    let (one, _) = build(1);
+    let (two, _) = build(2);
+    let (four, pieces) = build(4);
+    assert_eq!(pieces, 1, "the four ribs are joined to the ring");
+    assert_eq!(four, two + 2 * (two - one), "faces: {one} with one rib, {two} with two, {four} with four");
 }
 
 /// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
@@ -4400,4 +4629,473 @@ fn multi_seed_joined_pattern_separate_copies_inherit_unanimous_seed_material() {
     run(&mut s, "material.assign", json!({"bodies": [copies[0].as_str()], "material": "Default"}));
     assert_eq!(s.doc.body_material(&copies[0]), solidcraft_doc::DEFAULT_MATERIAL);
     assert_eq!(s.doc.body_material(&copies[1]), "Steel");
+}
+
+/// Renaming or deleting an input body of a multi-body pattern (with no placement) must fail the
+/// pattern with an unknown-body error instead of silently skipping the missing entries.
+#[test]
+fn pattern_reports_error_when_input_body_is_renamed_or_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [10, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket"}));
+    let p1 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 20, "name": "GridPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p2 = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["Bracket", "Bracket (2)", "Bracket (3)"], "axis": "Z", "count": 2, "name": "CircPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p3 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket", "Bracket (2)"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 25, "name": "StackPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+
+    assert!(s.model.result(p2).unwrap().error.is_none());
+    assert!(s.model.result(p3).unwrap().error.is_none());
+
+    // Rename P1's copies so Bracket (2) and Bracket (3) no longer exist.
+    run(&mut s, "timeline.edit", json!({"feature": p1, "set": {"body_names": ["Renamed_1", "Renamed_2"]}}));
+    let computed = run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!(computed["errors"].as_u64(), Some(2), "{computed}");
+
+    let err_p2 = s.model.result(p2).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(
+        err_p2.contains("unknown body `Bracket (2)`") && err_p2.contains("2 missing") && err_p2.contains("`Bracket (3)`"),
+        "expected missing-bodies error on CircPat, got: {err_p2:?}"
+    );
+    let err_p3 = s.model.result(p3).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_p3.contains("unknown body `Bracket (2)`"), "expected unknown-body error on StackPat, got: {err_p3:?}");
+
+    let inspected = run(&mut s, "document.inspect", json!({"bodies": false, "sketches": false}));
+    let timeline = inspected["timeline"].as_array().unwrap();
+    for name in ["CircPat", "StackPat"] {
+        let row = timeline.iter().find(|r| r["name"] == name).unwrap();
+        assert!(row["error"].as_str().is_some_and(|e| e.contains("unknown body")), "{name}: {row}");
+    }
+
+    // Deleting one seed body of a two-body pattern also fails the pattern cleanly.
+    let mut del = Session::default();
+    run(&mut del, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut del, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spacer", "name": "SpacerBox"}));
+    let pat = run(
+        &mut del,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Pin", "Spacer"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "PairPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut del, "timeline.delete", json!({"feature": "SpacerBox"}));
+    let err_del = del.model.result(pat).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_del.contains("unknown body `Spacer`"), "expected unknown-body error after delete, got: {err_del:?}");
+}
+
+/// An explicit placement on a body pattern must resolve strictly within that placement instead of
+/// falling back to a same-named body in the root component (whether a plain root body or an
+/// unrelated root pattern copy).
+#[test]
+fn pattern_explicit_placement_is_not_shadowed_by_same_named_root_body() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "SubAsm", "grounded": false}));
+    let occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 100, 0]}));
+
+    run(&mut s, "solid.box", json!({"corner": [0, -80, 0], "length": 10, "width": 10, "height": 10, "body_name": "Housing"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Housing"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 25, "name": "RootPat"}));
+
+    let circ = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Pin", "Housing"], "axis": "Z", "count": 2, "name": "CircPat"}))["feature"]
+        .as_u64()
+        .unwrap();
+    assert!(s.model.result(circ).unwrap().error.is_none());
+
+    // 1) Plain root body ("Housing") paired with occurrence placement `[occ]` must fail instead
+    //    of silently falling back to the root body.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_root = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_root.contains("no longer shows it"), "plain root body must not shadow explicit placement: {err_root:?}");
+
+    // 2) Unrelated root pattern copy ("Housing (2)") paired with `[occ]` must also fail instead
+    //    of matching `migrated_copy_placement`'s root prefix `&[]`.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing (2)".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_copy = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_copy.contains("no longer shows it"), "root pattern copy must not shadow explicit placement: {err_copy:?}");
+}
+
+#[test]
+fn pattern_edit_without_body_names_preserves_copy_names_and_overrides_with_left_out_entries() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 0, 0], "operation": "new", "body_name": "FastenerA"}));
+    let feat_b =
+        run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 20, 0], "operation": "new", "body_name": "FastenerB"}))
+            ["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 40, 0], "operation": "new", "body_name": "FastenerC"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 60, 0], "operation": "new", "body_name": "FastenerD"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 80, 0], "operation": "new", "body_name": "FastenerE"}));
+
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerA", "FastenerB"], "material": "Steel"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerC"], "material": "Aluminum"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerD"], "material": "Copper"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerE"], "material": "Titanium"}));
+
+    let pat = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD"], "axis": "Z", "count": 2, "angle": "180 deg"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"body_names": ["Copy1", "Copy2", "Copy3", "Copy4"]}}));
+    run(&mut s, "material.assign", json!({"bodies": ["Copy4"], "material": "Brass"}));
+
+    // Suppress FastenerB so the pattern leaves index 1 out while keeping 4 source-aligned slots.
+    run(&mut s, "timeline.suppress", json!({"feature": feat_b, "suppressed": true}));
+    let left_out_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(left_out_copies, vec!["Copy1", "Copy3", "Copy4"]);
+
+    // Adding FastenerE without body_names while FastenerB is left out must keep Copy1/Copy3/Copy4
+    // aligned to their sources (preserving Copy4's explicit Brass) and give FastenerE's copy Titanium.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD", "FastenerE"]}}));
+    let after_add: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_add.len(), 4, "{after_add:?}");
+    assert_eq!(after_add[..3], ["Copy1", "Copy3", "Copy4"]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy3"), "Aluminum");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&after_add[3]), "Titanium");
+
+    // Purging FastenerB and FastenerC without body_names must keep Copy4 on FastenerD (not Copy3)
+    // and retain both inherited materials and Copy4's explicit Brass override.
+    let copy_e = after_add[3].clone();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerD", "FastenerE"]}}));
+    let after_purge: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_purge, ["Copy1", "Copy4", copy_e.as_str()]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&copy_e), "Titanium");
+}
+
+#[test]
+fn mirror_combine_unmerged_copies_inherit_seed_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 30, 0], "operation": "new", "body_name": "Spacer"}));
+
+    // Single-seed combined mirror of a body away from the mirror plane yields an unmerged copy lump.
+    let single = run(&mut s, "solid.mirror", json!({"bodies": ["Bracket"], "plane": "YZ", "combine": true}));
+    let single_id = single["feature"].as_u64().unwrap();
+    let single_copy =
+        s.model.state().bodies.iter().find(|b| b.feature == single_id).map(|b| b.name.clone()).expect("disconnected mirror combine copy");
+
+    run(&mut s, "material.assign", json!({"bodies": ["Bracket"], "material": "Steel"}));
+    assert_eq!(s.doc.body_material(&single_copy), "Steel");
+    run(&mut s, "material.assign", json!({"bodies": [single_copy.as_str()], "material": "Default"}));
+    assert_eq!(s.doc.body_material(&single_copy), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material("Bracket"), "Steel");
+
+    // Multi-seed combined mirror inherits unanimously when seeds share the same material.
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Steel"}));
+    let multi =
+        run(&mut s, "solid.mirror", json!({"bodies": ["Bracket", "Spacer"], "plane": {"origin": [0, -20, 0], "normal": [0, 1, 0]}, "combine": true}));
+    let multi_id = multi["feature"].as_u64().unwrap();
+    let multi_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == multi_id).map(|b| b.name.clone()).collect();
+    assert_eq!(multi_copies.len(), 2, "{multi_copies:?}");
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), "Steel", "{copy}");
+    }
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Aluminum"}));
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), solidcraft_doc::DEFAULT_MATERIAL, "{copy}");
+    }
+}
+
+/// A pattern of picked placements adds them again once and keeps no timeline feature, so a body
+/// pattern redefined into one says so instead of "did not make a feature" (#22942).
+#[test]
+fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,0],"body_name":"PartBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Block"],"dir1":[0,0,1],"count1":3,"spacing1":20,"name":"Pattern"}));
+    let (doc, occurrences) = (s.doc.clone(), s.doc.occurrences.len());
+    let err = s
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+                "occurrences":[[occurrence]],"dir1":[0,0,1],"count1":3,"spacing1":20}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not kept in the timeline"), "{err}");
+    assert!(!err.contains("did not make a feature"), "{err}");
+    assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
+    assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
+}
+
+// ---- no-cache model helpers
+fn fresh_no_cache_model(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
+    let mut m = solidcraft_doc::Model::new();
+    m.no_cache = true;
+    m.evaluate(doc);
+    assert!(
+        m.results.iter().all(|r| r.error.is_none()),
+        "fresh eval errors: {:?}",
+        m.results.iter().filter_map(|r| r.error.as_deref()).collect::<Vec<_>>()
+    );
+    m
+}
+
+/// Hub/Profile/Sweep(cut, twist 180 deg)/Circular Pattern in C1 referencing a 2D
+/// planar XZ Path sketch in C2. Moving C2 must invalidate the Sweep and Circular Pattern caches
+/// so the cached Hub area matches a fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_sweep_path_recomputes_twisted_cut_pattern() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 40, "base": [0, 0, 0], "body_name": "Hub"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [13, 0], "radius": 3, "id": "prof"}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[13, 0], [13, -40]], "ids": ["path_line"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Profile",
+            "path_sketch": "Path",
+            "path": ["path_line"],
+            "twist": "180 deg",
+            "operation": "cut",
+            "targets": ["Hub"],
+            "name": "Groove"
+        }),
+    );
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Groove"], "axis": "Z", "count": 4, "name": "Pattern"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [2, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let hub_area = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Hub").unwrap().body).unwrap().area;
+    let cached = hub_area(&s.model);
+    let expected = hub_area(&fresh);
+    assert!((cached - expected).abs() < 1e-3, "cached Hub area {cached} vs fresh {expected}");
+}
+
+/// Moving component C2 owning a 2D planar `Pipe` `path_sketch` invalidates the Pipe in C1 and
+/// matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_pipe_path_recomputes_pipe() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "PipePath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -20]], "ids": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "PipePath", "path": ["p1"], "diameter": 4, "operation": "new", "body_name": "Tube"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [5, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let bounds = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Tube").unwrap().body).unwrap().bbox;
+    let cached = bounds(&s.model);
+    let expected = bounds(&fresh);
+    assert!(cached.min.dist(expected.min) < 1e-3 && cached.max.dist(expected.max) < 1e-3, "cached {cached:?} vs fresh {expected:?}");
+}
+
+/// Moving component C2 owning a 2D planar `solid.pattern.path` `path_sketch` invalidates the
+/// path pattern in C1 and matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_pattern_path_recomputes_path_pattern() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 0, 0], "body_name": "Pin"}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PatternPath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pattern.path", json!({"bodies": ["Pin"], "path_sketch": "PatternPath", "path": ["l1"], "count": 3, "spacing": 10}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "axis": [0, 0, 1], "angle": "90 deg", "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let body_boxes = |m: &solidcraft_doc::Model| {
+        m.state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+                (b.name.clone(), bb.min, bb.max)
+            })
+            .collect::<Vec<_>>()
+    };
+    let cached = body_boxes(&s.model);
+    let expected = body_boxes(&fresh);
+    assert_eq!(cached.len(), expected.len());
+    for ((cn, cmin, cmax), (en, emin, emax)) in cached.iter().zip(&expected) {
+        assert_eq!(cn, en);
+        assert!(cmin.dist(*emin) < 1e-3 && cmax.dist(*emax) < 1e-3, "{cn}: cached ({cmin:?}, {cmax:?}) vs fresh ({emin:?}, {emax:?})");
+    }
+}
+
+/// Moving component C2 owning a 2D planar guide rail (`rails`) on `solid.sweep` invalidates the
+/// Sweep in C1 and matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_sweep_rail_recomputes_railed_sweep() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -40]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "RailSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [5, -40]], "ids": ["in"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Profile",
+            "path_sketch": "Path",
+            "path": ["up"],
+            "rails": [{"sketch": "RailSketch", "curves": ["in"]}],
+            "operation": "new",
+            "body_name": "Frustum"
+        }),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [4, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+    let measure = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Frustum").unwrap().body).unwrap();
+    let cached = measure(&s.model);
+    let expected = measure(&fresh);
+    assert!((cached.volume - expected.volume).abs() < 1e-3, "cached vol {} vs fresh {}", cached.volume, expected.volume);
+    assert!((cached.area - expected.area).abs() < 1e-3, "cached area {} vs fresh {}", cached.area, expected.area);
+}
+
+// ---- moved-component path/rail tests
+
+/// Scene: `Tube` pipe in C1 along a planar XZ path owned by C2 (nested under `Asm` when
+/// `nested`). Returns the session and the occurrence id to move (C2, or `Asm` when nested).
+fn planar_pipe_scene(nested: bool) -> (Session, u64) {
+    let mut s = Session::default();
+    let mut mover = 0;
+    let mut owner_parent = 0;
+    if nested {
+        let asm = run(&mut s, "component.create", json!({"name": "Asm", "grounded": false}));
+        mover = asm["occurrence"].as_u64().unwrap();
+        owner_parent = asm["component"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": owner_parent}));
+    let c2 = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}));
+    if !nested {
+        mover = c2["occurrence"].as_u64().unwrap();
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "PipePath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -20]], "ids": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "PipePath", "path": ["p1"], "diameter": 4, "operation": "new", "body_name": "Tube"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    (s, mover)
+}
+
+fn tube_box(m: &solidcraft_doc::Model) -> (solidcore_record::Vec3, solidcore_record::Vec3) {
+    let b = solidcraft_kernel::measure(&m.state().body("Tube").unwrap().body).unwrap().bbox;
+    (b.min, b.max)
+}
+
+fn assert_tube_fresh(s: &Session, what: &str) {
+    let fresh = fresh_no_cache_model(&s.doc);
+    let (cmin, cmax) = tube_box(&s.model);
+    let (fmin, fmax) = tube_box(&fresh);
+    assert!(cmin.dist(fmin) < 1e-3 && cmax.dist(fmax) < 1e-3, "{what}: cached ({cmin:?},{cmax:?}) vs fresh ({fmin:?},{fmax:?})");
+}
+
+/// the owner of the planar path is nested under a moved assembly; the pipe's component is not.
+#[test]
+fn moving_assembly_around_planar_path_owner_recomputes_pipe() {
+    let (mut s, asm_occ) = planar_pipe_scene(true);
+    run(&mut s, "occurrence.move", json!({"occurrence": asm_occ, "translate": [7, 0, 0], "capture": true}));
+    assert_tube_fresh(&s, "after nested move");
+}
+
+/// undo and redo of the move keep the cached pipe equal to a fresh evaluation.
+#[test]
+fn undo_redo_of_moving_planar_path_owner_keeps_pipe_fresh() {
+    let (mut s, occ) = planar_pipe_scene(false);
+    let (before_min, _) = tube_box(&s.model);
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [5, 0, 0], "capture": true}));
+    assert_tube_fresh(&s, "after move");
+    let (moved_min, _) = tube_box(&s.model);
+    assert!(moved_min.dist(before_min) > 1.0, "the move must change the pipe");
+    run(&mut s, "edit.undo", json!({}));
+    assert_tube_fresh(&s, "after undo");
+    assert!(tube_box(&s.model).0.dist(before_min) < 1e-3, "undo restores the pipe");
+    run(&mut s, "edit.redo", json!({}));
+    assert_tube_fresh(&s, "after redo");
+    assert!(tube_box(&s.model).0.dist(moved_min) < 1e-3, "redo restores the moved pipe");
+}
+
+/// a moved design saved and reopened evaluates to the same pipe the live session shows.
+#[test]
+fn save_reload_after_moving_planar_path_owner_matches_live_pipe() {
+    let (mut s, occ) = planar_pipe_scene(false);
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [5, 0, 0], "capture": true}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let (lmin, lmax) = tube_box(&s.model);
+    let (rmin, rmax) = tube_box(&reopened.model);
+    assert!(lmin.dist(rmin) < 1e-3 && lmax.dist(rmax) < 1e-3, "live ({lmin:?},{lmax:?}) vs reopened ({rmin:?},{rmax:?})");
 }

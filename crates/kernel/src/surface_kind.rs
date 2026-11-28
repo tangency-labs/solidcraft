@@ -5,7 +5,7 @@ pub use solidcore_ops::axial_section::AxialPiece;
 use solidcore_ops::axial_section::Revolved;
 use solidcore_ops::face_surface::{Exact, FaceSurface as ExactSurface};
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Curve, Surface};
+use solidcore_record::brep::{Brep, Curve, Face, Surface};
 use solidcraft_geom::UnitVec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
@@ -67,6 +67,78 @@ pub fn same_surface(a: &FaceSurface, b: &FaceSurface, tol: f64, region: &solidcr
         FaceSurface::Torus { center, axis, major, minor } => Analytic::Torus { centre: arr(center), axis: arr(axis.vec()), major, minor },
     };
     same_surface(ops(a), ops(b), tol, arr(region.min), arr(region.max)).unwrap_or(false)
+}
+
+/// Whether two non-analytic face records lie on one surface within `tol`: identical definitions,
+/// or tensor-product B-spline / NURBS nets with matching knots (and weights, for rational nets)
+/// whose control points agree within `tol` everywhere. By the non-negative partition-of-unity
+/// property of B-spline basis functions, control-point agreement within `tol` bounds the surface
+/// distance over the entire parameter domain by `tol`, absorbing the last-bit rounding when a
+/// boolean shifts operands far from the origin to the origin and back without conflating distinct
+/// surfaces. For `Surface::Blend` faces, falls back to comparing their certified `nurbs` nets.
+pub fn same_face_record_surface(a: &Face, b: &Face, tol: f64) -> bool {
+    same_record_surface(&a.surface, &b.surface, tol)
+        || (matches!((&a.surface, &b.surface), (Surface::Blend { .. }, Surface::Blend { .. }))
+            && matches!((&a.nurbs, &b.nurbs), (Some(na), Some(nb)) if same_record_surface(na, nb, tol)))
+}
+
+/// Whether two record surfaces `a` and `b` are bit-for-bit identical or represent the same
+/// B-spline / NURBS surface within `tol`.
+pub fn same_record_surface(a: &Surface, b: &Surface, tol: f64) -> bool {
+    if !(tol.is_finite() && tol >= 0.0) {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    match (a, b) {
+        (Surface::Spline { u_knots: ua, v_knots: va, points: pa }, Surface::Spline { u_knots: ub, v_knots: vb, points: pb }) => {
+            knots_close(ua, ub)
+                && knots_close(va, vb)
+                && pa.len() == pb.len()
+                && pa.iter().zip(pb).all(|(ra, rb)| ra.len() == rb.len() && ra.iter().zip(rb).all(|(p, q)| point_within(*p, *q, tol)))
+        }
+        (
+            Surface::RationalSpline { u_knots: ua, v_knots: va, homogeneous: ha },
+            Surface::RationalSpline { u_knots: ub, v_knots: vb, homogeneous: hb },
+        ) => {
+            knots_close(ua, ub)
+                && knots_close(va, vb)
+                && ha.len() == hb.len()
+                && ha.iter().zip(hb).all(|(ra, rb)| ra.len() == rb.len() && ra.iter().zip(rb).all(|(p, q)| rational_point_within(*p, *q, tol)))
+        }
+        _ => false,
+    }
+}
+
+fn knots_close(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(&x, &y)| x.is_finite() && y.is_finite() && (x - y).abs() <= 1e-12 * (1.0 + x.abs().max(y.abs())))
+}
+
+fn point_within(a: [f64; 3], b: [f64; 3], tol: f64) -> bool {
+    if !(a[0].is_finite() && a[1].is_finite() && a[2].is_finite() && b[0].is_finite() && b[1].is_finite() && b[2].is_finite()) {
+        return false;
+    }
+    let (dx, dy, dz) = ((a[0] - b[0]).abs(), (a[1] - b[1]).abs(), (a[2] - b[2]).abs());
+    if !(dx <= tol && dy <= tol && dz <= tol) {
+        return false;
+    }
+    if tol == 0.0 {
+        return true;
+    }
+    let (sx, sy, sz) = (dx / tol, dy / tol, dz / tol);
+    sx * sx + sy * sy + sz * sz <= 1.0
+}
+
+fn rational_point_within(a: [f64; 4], b: [f64; 4], tol: f64) -> bool {
+    let (wa, wb) = (a[3], b[3]);
+    if !(wa.is_finite() && wb.is_finite() && wa > 0.0 && wb > 0.0) {
+        return false;
+    }
+    if !((wa - wb).abs() <= 1e-12 * wa.max(wb)) {
+        return false;
+    }
+    point_within([a[0] / wa, a[1] / wa, a[2] / wa], [b[0] / wb, b[1] / wb, b[2] / wb], tol)
 }
 
 /// What torus face `face` lies on, if its surface is a torus held as a spline (such as a
@@ -337,6 +409,26 @@ impl FaceSurface {
     }
 }
 
+/// The levels along `plane`'s normal where the line through each of `points` (in the plane) along
+/// it meets `surface` carried on without end (a torus: the span of its bounding sphere, which
+/// holds every meeting): where an extrusion over those points must run to reach it
+/// ([`solidcore_ops::extended_levels::extended_levels`]). Empty for a plane that spans none.
+#[must_use]
+pub fn extended_levels(surface: &FaceSurface, plane: &solidcore_record::Plane, points: &[Vec3]) -> Vec<f64> {
+    use solidcore_ops::extended_levels::{Carried, extended_levels};
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let unit = |u: UnitVec3| arr(u.vec());
+    let carried = match *surface {
+        FaceSurface::Plane { normal, point } => Carried::Plane { point: arr(point), normal: unit(normal) },
+        FaceSurface::Cylinder { origin, axis, radius } => Carried::Cylinder { origin: arr(origin), axis: unit(axis), radius },
+        FaceSurface::Cone { apex, axis, half_angle } => Carried::Cone { apex: arr(apex), axis: unit(axis), half_angle },
+        FaceSurface::Sphere { center, radius } => Carried::Sphere { center: arr(center), radius },
+        FaceSurface::Torus { center, major, minor, .. } => Carried::Torus { center: arr(center), major, minor },
+    };
+    let points: Vec<[f64; 3]> = points.iter().map(|p| arr(*p)).collect();
+    extended_levels(&carried, arr(plane.origin), arr(plane.x), arr(plane.y), &points).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +472,61 @@ mod tests {
         assert_eq!(tori.len(), 1, "found: {tori:?}");
         assert!((tori[0].0 - 3.0).abs() < 1e-3, "major radius: {:?}", tori[0].0);
         assert!((tori[0].1 - 2.0).abs() < 1e-3, "minor radius: {:?}", tori[0].1);
+    }
+
+    #[test]
+    fn same_record_surface_accepts_spline_rounding_and_rejects_shifted_spline() {
+        let base = Surface::Spline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![vec![[-1200.0, 0.0, 0.0], [-1200.0, -2.0, 0.0]], vec![[-1204.0, -4.0, 3.0], [-1202.0, -4.0, 3.0]]],
+        };
+        let rounded = Surface::Spline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![
+                vec![[-1200.0, 1.776e-15, 0.0], [-1200.0, -2.0 + 1.776e-15, 0.0]],
+                vec![[-1204.0, -4.0, 3.0 - 1.776e-15], [-1202.0, -4.0, 3.0]],
+            ],
+        };
+        let shifted = Surface::Spline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![vec![[-1200.0, 1e-3, 0.0], [-1200.0, -2.0, 0.0]], vec![[-1204.0, -4.0, 3.0], [-1202.0, -4.0, 3.0]]],
+        };
+        let diff_knots = Surface::Spline {
+            u_knots: vec![0.0, 0.0, 2.0, 2.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![vec![[-1200.0, 0.0, 0.0], [-1200.0, -2.0, 0.0]], vec![[-1204.0, -4.0, 3.0], [-1202.0, -4.0, 3.0]]],
+        };
+        assert!(same_record_surface(&base, &rounded, 1e-6));
+        assert!(same_record_surface(&rounded, &base, 1e-6));
+        assert!(!same_record_surface(&base, &rounded, 0.0));
+        assert!(!same_record_surface(&base, &shifted, 1e-6));
+        assert!(!same_record_surface(&base, &diff_knots, 1e-6));
+        assert!(!same_record_surface(&base, &base, -1.0));
+        assert!(!same_record_surface(&base, &base, f64::NAN));
+
+        let face = |surface: Surface| Face { surface, nurbs: None, domain: [[0.0, 1.0], [0.0, 1.0]], loops: Vec::new() };
+        assert!(same_face_record_surface(&face(base.clone()), &face(rounded), 1e-6));
+        assert!(!same_face_record_surface(&face(base), &face(shifted), 1e-6));
+
+        let rat_a = Surface::RationalSpline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            homogeneous: vec![vec![[0.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 2.0]], vec![[0.0, 1.0, 0.0, 1.0], [2.0, 2.0, 0.0, 2.0]]],
+        };
+        let rat_rounded = Surface::RationalSpline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            homogeneous: vec![vec![[0.0, 1e-15, 0.0, 1.0], [2.0 + 2e-15, 0.0, 0.0, 2.0]], vec![[0.0, 1.0, 0.0, 1.0], [2.0, 2.0, 0.0, 2.0]]],
+        };
+        let rat_diff_weight = Surface::RationalSpline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            homogeneous: vec![vec![[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]], vec![[0.0, 1.0, 0.0, 1.0], [2.0, 2.0, 0.0, 2.0]]],
+        };
+        assert!(same_record_surface(&rat_a, &rat_rounded, 1e-6));
+        assert!(!same_record_surface(&rat_a, &rat_diff_weight, 1e-6));
     }
 }

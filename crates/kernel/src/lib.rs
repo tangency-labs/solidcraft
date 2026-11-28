@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+pub mod dogbone;
 mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
@@ -48,6 +49,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;
@@ -96,6 +98,7 @@ mod loft_rails_tests;
 mod loft_region_tests;
 mod matchsurf;
 mod measure;
+mod memory;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
@@ -110,6 +113,7 @@ mod outline_tests;
 mod par;
 #[cfg(test)]
 mod split_cone_tests;
+pub use memory::{available_memory_bytes, with_available_memory_for_test};
 pub use par::KERNEL_STACK;
 pub use par::for_each_on_threads;
 pub use par::kernel_thread;
@@ -147,6 +151,8 @@ mod smlib_sweeps;
 mod smlib_sweeps_tests;
 mod smooth_edges;
 #[cfg(test)]
+mod sphere_area_tests;
+#[cfg(test)]
 mod sphere_lens_tests;
 mod splitface;
 mod step;
@@ -161,6 +167,7 @@ mod surface_second_derivative_tests;
 mod surface_trim;
 mod surface_untrim;
 mod surfaces;
+mod sweep_api;
 mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
@@ -181,18 +188,16 @@ mod validity;
 pub mod watch;
 
 pub use backend::Solidcore;
+pub use blend::BlendFit;
 pub use blend::ChamferSide;
 pub use blend::FilletTurn;
 pub use blend::FitSearch;
 pub use blend::SETBACK_AT_LEAST;
 pub use blend::blend_edge_middles;
 pub use blend::blend_edges;
-pub use blend::chamfer_carrying_face;
 pub use blend::chamfer_max;
 pub use blend::chamfer_max_why;
-pub use blend::chamfer_sides_carrying_face;
 pub use blend::chamfer_sides_max_why;
-pub use blend::fillet_each;
 pub use blend::fillet_g2;
 pub use blend::fillet_g2_corners;
 pub use blend::fillet_g2_with_g2_corners;
@@ -200,15 +205,15 @@ pub use blend::fillet_least_setback;
 pub use blend::fillet_max;
 pub use blend::fillet_max_each;
 pub use blend::fillet_max_why;
-pub use blend::fillet_removing;
-pub use blend::fillet_setback;
 pub use blend::largest_fit_note;
+pub use blend::named_blend_fit;
 pub use blend::named_fit;
 pub use blend::names_largest_fit;
 pub use blend::scale_fit_note;
 pub use blend::smooth_picks;
 pub use blend::tangent_chain;
 pub use blend::tangent_chain_beyond_points;
+pub use blend::tangent_chain_closes;
 pub use blend::tangent_chain_edges;
 pub use blend::with_fit_note;
 pub use blend::without_fit_note;
@@ -220,6 +225,7 @@ pub use blend_variable::fillet_tapered;
 pub use blend_variable::fillet_variable;
 pub use blend_variable::fillet_variable_points;
 pub use blend_variable::fillet_variable_spline;
+pub use blend_variable::fillet_variable_spline_chain;
 pub use blend_variable::taper;
 pub use body::Body;
 pub use body::COLOUR_NAME_MAX;
@@ -231,7 +237,6 @@ pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
-pub use body::KernelForms;
 pub use body::MESH_MIN_ANGLE;
 pub use body::MeshSpec;
 pub use body::MeshTolerance;
@@ -241,11 +246,15 @@ pub use body::PlanStats;
 pub use body::PointClass;
 pub use body::RayPick;
 pub use body::Refusal;
+pub use body::ShapeLimit;
 pub use body::SketchPlane;
 pub use body::SurfaceKind;
+pub use body::Unshaped;
 pub use body::colour_name;
 pub use body::display_tolerance;
 pub use body::placed_mesh;
+pub use body::straight_direction;
+pub use body::{KernelFormMask, KernelForms};
 pub use boundary::Boundary;
 pub use boundary::boundary_patch;
 pub use boundary_network::BoundaryCurve;
@@ -263,25 +272,17 @@ pub use bridge::curve_chain_of_edges;
 pub use bridge::frames;
 pub use bridge::frames_across;
 pub use bridge::sample_grid;
+pub use bridge::tangent_face_chain_of_faces;
 pub use build::PathSeg;
 pub use build::canonical_revolve_axis;
-pub use build::extrude_tapered;
-pub use build::extrude_tapered_between;
-pub use build::extrude_whole_sides;
 pub use build::level_on_plane;
-pub use build::loft;
-pub use build::loft_regions;
-pub use build::loft_with_rails;
 pub use build::offset_loop;
 pub use build::path_polyline;
 pub use build::planar_face_record;
 pub use build::plane_gap;
 pub use build::plane_raised;
 pub use build::plane_rise;
-pub use build::revolve_whole_sides;
 pub use build::slab_sides;
-pub use build::sweep;
-pub use build::sweep_with;
 pub use build::symmetric_offset_intervals;
 pub use build::symmetric_offset_probe_points;
 pub use continuity::ContinuityReport;
@@ -318,6 +319,7 @@ pub use distance::faces_closest;
 pub use distance::interiors_disjoint;
 pub use distance::overlap_witness;
 pub use distance::point_closest;
+pub use distance::segment_closest;
 pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
@@ -353,15 +355,15 @@ pub use fill::PatchSpec;
 pub use fill::patch_edges_crowned;
 pub use fill::patch_edges_report;
 pub use fill::patch_edges_with;
-pub use helix::loft_to_point;
-pub use helix::loft_to_point_with_rails;
-pub use helix::sweep_helix;
+pub use helix::MAX_HELIX_TURNS;
+pub use helix::require_unfolded_screw_section;
 pub use helix::sweep_helix_mesh;
-pub use helix::sweep_helix_radial;
 pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;
 pub use iges_in::iges_native_system;
 pub use iges_in::iges_to_step;
+pub use iges_in::max_bytes as iges_max_bytes;
+pub use iges_in::set_max_bytes as set_iges_max_bytes;
 pub use iges_out::iges_export_bodies;
 pub use intersection::MeetingEdge;
 pub use intersection::meeting_edges;
@@ -378,10 +380,12 @@ pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
 pub use measure::levels_along;
+pub use measure::line_meets_box;
 pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
 pub use measure::measure_mass_many;
+pub use measure::reach_past;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
@@ -397,6 +401,7 @@ pub use ops::BoolOp;
 pub use ops::apart;
 pub use ops::half_space;
 pub use ops::join_apart;
+pub use ops::overlapping_piece_pairs;
 pub use ops::place_matrix;
 pub use ops::split_by_plane;
 pub use ops::transform;
@@ -410,18 +415,19 @@ pub use point_path::along_path;
 pub use point_path::curve_path;
 pub use point_path::edge_path;
 pub use point_path::face_section_along;
+pub use point_path::polyline_fraction_at;
+pub use point_path::polyline_point_at;
 pub use point_path::project_onto_face;
 pub use point_path::sketch_record_curve;
-pub use point_path::sweep_point_path_with;
 pub use polybool::faceted_boolean;
 pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
-pub use polyhedron::draft;
 pub use polyhedron::offset_solid;
 pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
-pub use prism::extrude_planar_regions;
+pub use prism::fill_channel;
 pub use prism::planar_regions_boolean;
+pub use prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
 pub use prism_curve::PlanarPiece;
 pub use prism_curve::PlanarSpline;
 pub use prism_measure::PrismSection;
@@ -450,32 +456,58 @@ pub use route::boolean;
 pub use route::box_solid;
 pub use route::cell_regions;
 pub use route::chamfer;
+pub use route::chamfer_carrying_face;
 pub use route::chamfer_sides;
+pub use route::chamfer_sides_carrying_face;
 pub use route::check_bend_clearance;
 pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::develop;
+pub use route::draft;
+pub use route::dxf;
 pub use route::extrude;
+pub use route::extrude_planar_regions;
+pub use route::extrude_tapered;
+pub use route::extrude_tapered_between;
+pub use route::extrude_whole_sides;
 pub use route::fillet;
+pub use route::fillet_each;
+pub use route::fillet_removing;
+pub use route::fillet_setback;
 pub use route::gusset_prepare;
 pub use route::gusset_support;
 pub use route::gusset_support_pick;
 pub use route::gusset_support_plane;
+pub use route::hatch;
 pub use route::hole_stacks;
+pub use route::loft;
+pub use route::loft_regions;
+pub use route::loft_to_point;
+pub use route::loft_to_point_with_rails;
+pub use route::loft_with_rails;
 pub use route::member_along;
 pub use route::member_axes;
 pub use route::member_axis;
 pub use route::member_extent;
+pub use route::mesh;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::plan_sketch_cell_grid;
+pub use route::planar;
 pub use route::points;
+pub use route::profiles;
 pub use route::projection;
 pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
+pub use route::revolve_joining_arcs;
 pub use route::revolve_whole;
+pub use route::revolve_whole_sides;
+pub use route::runtime;
+pub use route::sections;
+pub use route::shaft_spline;
 pub use route::shell;
 pub use route::sphere;
 pub use route::step_string;
@@ -486,9 +518,16 @@ pub use route::stock_retained_line;
 pub use route::stock_section_plane;
 pub use route::stock_spatial_arc;
 pub use route::stock_terminal_planes;
+pub use route::sweep;
+pub use route::sweep_helix;
+pub use route::sweep_helix_radial;
+pub use route::sweep_point_path_with;
+pub use route::sweep_with;
+pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
 pub use route::trim_member;
+pub use route::tube_cope;
 pub use route::which;
 pub use route::write_cadir;
 pub use sew::EdgeSpec;
@@ -502,7 +541,11 @@ pub use solidcore_ops::MaterialSides;
 pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::directions_aligned;
+pub use solidcore_ops::measure::frame_z_deviation;
+pub use solidcore_ops::measure::rigid_pose_delta;
 pub use solidcore_ops::measure::turn_to_parallel;
+pub use solidcore_ops::measure::{Straight, StraightBy};
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
@@ -511,19 +554,29 @@ pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathR
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
-/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
-/// stops with it (a sketch solve).
-pub use solidcraft_smlib::stop::token as stop_token;
+
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
+/// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
+/// scopes and counted work of the calls this process made.
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::write_kernel_profiles;
+
+pub use route::split_body;
+pub use route::split_body_by_faces;
+pub use route::split_body_by_sheet_where_it_cuts;
+pub use route::split_faces;
+pub use route::split_faces_with_map;
+pub use route::trim_keep;
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
-pub use splitface::split_body;
-pub use splitface::split_body_by_faces;
-pub use splitface::split_body_by_sheet_where_it_cuts;
-pub use splitface::split_faces;
-pub use splitface::split_faces_with_map;
 pub use splitface::{FieldKind, PieceSides, split_piece_sides};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
@@ -556,11 +609,13 @@ pub use step_in::records::RecordMesh;
 pub use step_in::records::import_trims;
 pub use step_in::records::records_import;
 pub use step_in::records::records_import_shared;
+pub use step_in::records::records_import_shared_with_workers;
 pub use step_in::records::records_noted;
 pub use step_in::records::records_text;
 pub use step_in::step_cache_alive;
 pub use step_in::step_import;
 pub use step_in::step_import_shared;
+pub use step_in::step_import_shared_with_workers;
 pub use step_in::step_orientation_errors;
 pub use step_in::step_validate;
 pub use step_out::ExportBody;
@@ -573,14 +628,18 @@ pub use step_out::step_export_products;
 pub use surface_extend::ExtendLimit;
 pub use surface_extend::ExtendMode;
 pub use surface_extend::ExtendOptions;
+pub use surface_extend::LAW_ANGLE_LIMIT;
 pub use surface_extend::extend_surface;
 pub use surface_kind::AxialPiece;
 pub use surface_kind::EdgeCircle;
 pub use surface_kind::FaceSurface;
 pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
+pub use surface_kind::same_face_record_surface;
+pub use surface_kind::same_record_surface;
 pub use surface_kind::same_surface;
 pub use surface_offset::offset_surface;
 pub use surface_ruled::Ruled;
@@ -591,10 +650,10 @@ pub use surface_ruled::ruled_surface;
 pub use surface_ruled::ruled_surface_with;
 pub use surface_trim::TrimKeep;
 pub use surface_trim::mutual_trim;
+pub use surface_trim::split_sheet_where_it_cuts;
 pub use surface_trim::stop_at_bodies;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
-pub use surface_trim::trim_keep;
 pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
@@ -602,7 +661,9 @@ pub use surfaces::copy_faces;
 pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::extrude_sheet_tapered;
+pub use surfaces::loft_section_closed;
 pub use surfaces::loft_sheet;
+pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;
@@ -744,6 +805,22 @@ impl KernelError {
             None => KernelError::Failed(format!("{context}: {e}")),
         }
     }
+
+    /// The largest fitting size in mm named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn largest_fit(&self) -> Option<f64> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_fit(why),
+            _ => None,
+        }
+    }
+
+    /// The typed largest fitting size named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn blend_fit(&self) -> Option<BlendFit> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_blend_fit(why),
+            _ => None,
+        }
+    }
 }
 
 /// The native kernel call running right now (SMLib), for crash reports.
@@ -864,3 +941,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

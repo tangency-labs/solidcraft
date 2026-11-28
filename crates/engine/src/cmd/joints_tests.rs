@@ -3822,6 +3822,16 @@ fn joint_drive_and_refresh_do_not_repeat_dof_analysis() {
     }
 }
 
+#[test]
+fn quiet_joint_drive_without_contact_solves_once_and_settles_refresh() {
+    let (mut s, _, _) = four_bar();
+    for angle in [17, 58, 105] {
+        super::solve_counts::take();
+        run(&mut s, "joint.drive", json!({"joint": "Crank", "value": angle, "quiet": true}));
+        assert_eq!(super::solve_counts::take(), (1, 0), "quiet drive without contact or conflicts solves once (and refresh keeps it)");
+    }
+}
+
 /// A parameter change solves the joints once: the refresh that follows the command finds the
 /// design and the model as the command's own solve left them (the sketch the parameter drives
 /// has its new solution stored after that solve). A move the joints undo is still solved.
@@ -3975,6 +3985,23 @@ fn board_twice(s: &mut Session) -> (u64, u64, u64) {
     run(s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "ProbeBox"}));
     run(s, "component.activate", json!({"component": "root"}));
     (occ(s, "Board"), second, occ(s, "Header"))
+}
+
+#[test]
+fn center_rule_names_both_faces_on_the_second_placement() {
+    let mut s = Session::default();
+    let (_, second, header) = board_twice(&mut s);
+    s.param_check = crate::schema::ParamCheck::Strict;
+    // Header's local x = 0 and 10 faces run along world Y, on the +100 X copy.
+    let r = run(&mut s, "joint.origin", json!({"name": "Mid", "path": [second, header], "faces": [[95, 20, 5], [95, 30, 5]]}));
+    assert_eq!(r["origin"], "Mid", "{r}");
+    let mid = &s.doc.assembly.origins.iter().find(|o| o.name == "Mid").unwrap().origin;
+    assert_eq!((mid.occurrence, mid.inside.as_slice()), (second, &[header][..]));
+    let frame = s.doc.origin_world(&s.model.state(), mid).unwrap();
+    assert!(near(solidcraft_doc::apply_point(&frame, Vec3::ZERO), Vec3::new(95.0, 25.0, 5.0)));
+    let r = run(&mut s, "assembly.constraint.create", json!({"type": "center", "a": "Mid", "b": {"occurrence": "Probe", "plane": "XZ"}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Probe", Vec3::ZERO), Vec3::new(0.0, 25.0, 0.0)));
 }
 
 /// The Probe's centre in the world.

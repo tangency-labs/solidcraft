@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.extend_to_face": "Extend To Face",
+    "ui.extrude_extend_to_face_tip": "Carry the To face's surface on past its edges, so a profile wider than the face, or over a hole in it, ends on that surface instead of being refused."
+  },
+  "ar": {
+    "ui.extend_to_face": "تمديد وجه الوصول",
+    "ui.extrude_extend_to_face_tip": "يمدّ سطح وجه الوصول إلى ما بعد حوافه، فينتهي المقطع الأعرض من الوجه أو الذي يعلو ثقبًا فيه على ذلك السطح بدل أن يُرفض."
+  },
+  "de": {
+    "ui.extend_to_face": "Bis-Fläche erweitern",
+    "ui.extrude_extend_to_face_tip": "Setzt die Oberfläche der Bis-Fläche über ihre Kanten hinaus fort, damit ein Profil, das breiter als die Fläche ist oder über einem Loch darin liegt, auf dieser Oberfläche endet, statt abgelehnt zu werden."
+  },
+  "he": {
+    "ui.extend_to_face": "הרחבת פאת היעד",
+    "ui.extrude_extend_to_face_tip": "ממשיך את משטח פאת היעד אל מעבר לשפתיה, כך שפרופיל רחב מהפאה, או כזה שמעל חור בה, מסתיים על המשטח הזה במקום להידחות."
+  },
+  "ja": {
+    "ui.extend_to_face": "終了面を延長",
+    "ui.extrude_extend_to_face_tip": "終了面の曲面をその縁の先まで延長し、面より幅の広いプロファイルや面の穴にかかるプロファイルを、拒否せずにその曲面で止めます。"
+  },
+  "ko": {
+    "ui.extend_to_face": "끝 면 연장",
+    "ui.extrude_extend_to_face_tip": "끝 면의 곡면을 가장자리 너머까지 이어서, 면보다 넓거나 면의 구멍 위에 놓인 프로파일을 거부하지 않고 그 곡면에서 끝냅니다."
+  },
+  "vi": {
+    "ui.extend_to_face": "Kéo dài mặt đích",
+    "ui.extrude_extend_to_face_tip": "Kéo dài bề mặt của mặt đích ra ngoài các cạnh của nó, để biên dạng rộng hơn mặt hoặc nằm trên một lỗ của mặt kết thúc trên bề mặt đó thay vì bị từ chối."
+  },
+  "zh": {
+    "ui.extend_to_face": "延伸终止面",
+    "ui.extrude_extend_to_face_tip": "将终止面的曲面延伸到其边缘之外，使比该面更宽或位于面上孔洞之上的轮廓止于该曲面，而不是被拒绝。"
+  }
+}

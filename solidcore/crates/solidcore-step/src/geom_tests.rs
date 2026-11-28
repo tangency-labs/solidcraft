@@ -527,6 +527,59 @@ fn surface_replica_is_its_parent_moved() {
     at_surface(&s, 0.0, 0.0, [25.0, 0.0, 0.0]);
 }
 
+/// An operator that leaves `axis1` out takes +X for it (+Y when `axis3` is along X), as
+/// ISO 10303-42 `first_proj_axis` does, so `axis3` = -Z and `axis2` = -Y with no `axis1` turn
+/// the parent half a turn about X (x' = +X, y' = -Y, z' = -Z) instead of failing, and `axis3` = +Z
+/// with no `axis2` still keeps it. `axis3` = -Z with no `axis2` takes +Y for it
+/// (`second_proj_axis`), a mirror, which a replica refuses.
+#[test]
+fn surface_replica_without_axis1_takes_the_standard_x_whichever_way_z_points() {
+    let moved = |y: &str, z: &str| {
+        format!(
+            "#7=DIRECTION('',(0.,0.,-1.));#8=DIRECTION('',(0.,-1.,0.));#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,{y},#20,1.,{z});"
+        )
+    };
+    for (y, z, sign) in [("$", "#2", 1.0), ("#8", "#7", -1.0)] {
+        let p = surface(&format!("{}#10=PLANE('',#4);#11=SURFACE_REPLICA('',#10,#21);", moved(y, z)), 11, MM);
+        at_surface(&p, 1.0, 2.0, [6.0, 2.0 * sign, 0.0]);
+        let c = surface(&format!("{}#10=CYLINDRICAL_SURFACE('',#4,10.);#11=SURFACE_REPLICA('',#10,#21);", moved(y, z)), 11, MM);
+        at_surface(&c, 0.0, 3.0, [15.0, 0.0, 3.0 * sign]);
+        at_surface(&c, FRAC_PI_2, 3.0, [5.0, 10.0 * sign, 3.0 * sign]);
+    }
+    let ex = file(&format!("{BASE}{}#10=PLANE('',#4);#11=SURFACE_REPLICA('',#10,#21);", moved("$", "#7")));
+    let e = Reader::new(&ex, MM).surface(11).map(|_| ()).unwrap_err();
+    assert_eq!(e, "not supported yet: a SURFACE_REPLICA that mirrors");
+}
+
+/// ISO 10303-42 `second_proj_axis`: an operator's Y is `axis2`, or +Y when `axis2` is left out,
+/// made orthogonal to Z and then to X. It need not be Z x X: `axis1` = -X with no `axis2` keeps
+/// +Y (a mirror). An explicit `axis2` keeps the Y it has always had, skew or not. Where nothing
+/// is left of it (+Y along `axis1`, or `axis2` in the plane of `axis1` and `axis3`) the standard
+/// derives no Y, and Y stays `Z` x `X` as before (`axis1` = +Y alone is a quarter turn).
+#[test]
+fn operator_y_is_axis2_or_the_global_y_made_orthogonal_to_z_and_x() {
+    use crate::read::operator_axes;
+    let (x, y, z) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let neg = |v: P3| v.map(|c: f64| -c);
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let frames = [
+        ((Some(neg(x)), None, Some(z)), [neg(x), y, z]),
+        ((None, None, Some(neg(z))), [x, y, neg(z)]),
+        ((Some(x), None, Some(z)), [x, y, z]),
+        ((Some(y), Some(neg(x)), Some(z)), [y, neg(x), z]),
+        ((Some(x), Some(neg(y)), Some(z)), [x, neg(y), z]),
+        ((Some([1.0, 0.0, 1.0]), Some([1.0, 1.0, 0.0]), Some(z)), [x, y, z]),
+        ((Some([1.0, 1.0, 0.0]), Some([0.0, 1.0, 5.0]), Some(z)), [[s, s, 0.0], [-s, s, 0.0], z]),
+        ((Some(y), None, Some(z)), [y, neg(x), z]),
+        ((Some(x), Some(x), Some(z)), [x, y, z]),
+        ((Some(x), Some([1.0, 0.0, 1.0]), Some(z)), [x, y, z]),
+    ];
+    for ((a1, a2, a3), want) in frames {
+        let got = operator_axes(a1, a2, a3, "op").unwrap_or_else(|e| panic!("{a1:?} {a2:?} {a3:?}: {e}"));
+        assert!(got.iter().zip(want).all(|(g, w)| close(*g, w)), "{a1:?} {a2:?} {a3:?}: got {got:?}, want {want:?}");
+    }
+}
+
 /// A scale stretches a plane's or a cylinder's length parameters, so the pcurves on it would no
 /// longer fit, and a mirror turns a surface over: both are refused, never read as a wrong surface.
 #[test]

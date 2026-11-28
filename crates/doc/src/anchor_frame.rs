@@ -14,3 +14,20 @@ pub fn state_in_face_anchor_frame<'a>(doc: &Document, state: &'a ModelState, anc
     *slot = body;
     Ok(Cow::Owned(output))
 }
+
+/// Narrower version of [`state_in_face_anchor_frame`] when the feature reads only the anchored
+/// body (no other foreign bodies or sketches): avoids moving every unrelated body of an assembly
+/// into `author`'s frame.
+pub(crate) fn state_for_face_anchor_only<'a>(doc: &Document, state: &'a ModelState, anchor: &FaceAnchor, author: u64) -> Result<Cow<'a, ModelState>> {
+    let _frame = anchor.author_frame(doc, author)?;
+    let raw = state.body(&anchor.target.body).ok_or_else(|| DocError::Unknown(format!("anchored body `{}`", anchor.target.body)))?;
+    let relative = anchor.source_to_author(doc, author, raw)?;
+    if crate::is_identity(&relative) {
+        return Ok(Cow::Borrowed(state));
+    }
+    let body = state.body_in_frame(raw, &relative)?;
+    let mut output = state.clone();
+    let slot = output.bodies.iter_mut().find(|body| body.name == raw.name).ok_or_else(|| DocError::Unknown("anchored body frame".into()))?;
+    *slot = body;
+    Ok(Cow::Owned(output))
+}

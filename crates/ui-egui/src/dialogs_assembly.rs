@@ -163,6 +163,7 @@ const MOVES: &[&str] = &[
     "assembly.constraint.create",
     "assembly.constraint.edit",
     "occurrence.align",
+    "scan.align",
     "parts.insert",
     "parts.fastener",
 ];
@@ -181,7 +182,10 @@ pub enum Asm {
         name: String,
         hover: Hover,
     },
-    RigidGroup,
+    /// `whole_components`: each component picked whole, as As-Built keeps them (#23189).
+    RigidGroup {
+        whole_components: Vec<WholeComponent>,
+    },
     /// `focus`: the first value takes the keyboard (its text selected) on the next frame.
     Drive {
         joint: usize,
@@ -253,6 +257,15 @@ impl Searched {
     }
 }
 
+/// As-built, Rigid Group: a component picked whole, by its Browser row or selected when the dialog opened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WholeComponent {
+    /// The placement that was picked: the occurrence ids from the root.
+    pub path: Vec<u64>,
+    /// Its bodies, those of its sub-components included.
+    pub bodies: Vec<String>,
+}
+
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
@@ -309,10 +322,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
-    /// As-built: the bodies of each component picked whole (its Browser row, or the component
-    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
-    /// once any of its bodies leaves Components.
-    pub whole_components: Vec<Vec<String>>,
+    /// As-built: each component picked whole (its Browser row, or the component selected when
+    /// the dialog opened). Its bodies are one side, not parts to separate; a record goes once any
+    /// of its bodies leaves Components.
+    pub whole_components: Vec<WholeComponent>,
 }
 
 impl JointForm {
@@ -390,7 +403,7 @@ impl Asm {
             Asm::Joint(j) if j.as_built => "AS-BUILT JOINT",
             Asm::Joint(_) => "JOINT",
             Asm::JointOrigin { .. } => "JOINT ORIGIN",
-            Asm::RigidGroup => "RIGID GROUP",
+            Asm::RigidGroup { .. } => "RIGID GROUP",
             Asm::Drive { .. } => "DRIVE JOINTS",
             Asm::MotionLink { .. } => "MOTION LINK",
             Asm::Coupling(f) => match f.command {
@@ -406,7 +419,7 @@ impl Asm {
     }
 
     pub fn previews(&self) -> bool {
-        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup | Asm::Coupling(_) | Asm::Cam(_) | Asm::Constrain(_))
+        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup { .. } | Asm::Coupling(_) | Asm::Cam(_) | Asm::Constrain(_))
     }
 }
 
@@ -437,7 +450,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
         "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
-        "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
+        "joint.rigid_group" => (Asm::RigidGroup { whole_components: Vec::new() }, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
             (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
@@ -601,7 +614,20 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             return Some(Sel::SketchPoint { id: format!("{sketch}:{point}") });
         }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
+        // A between-faces reference is two faces, which no one pick stands for; the dialog
+        // keeps the constraint's own saved reference (its origins, as an edit loads them).
+        Snap::BetweenFaces { .. } => return None,
     };
+    placed_geometry_pick(s, o, pick, face, edge)
+}
+
+/// Each face of a saved between-faces origin, as a separate pick in Constrain.
+pub(crate) fn between_face_picks(app: &SolveApp, o: &JointOrigin) -> Option<[Option<Sel>; 2]> {
+    let Snap::BetweenFaces { a, b } = &o.snap else { return None };
+    Some([a, b].map(|f| placed_geometry_pick(&app.session, o, f.pick, Some(&f.face), None)))
+}
+
+fn placed_geometry_pick(s: &Session, o: &JointOrigin, pick: Vec3, face: Option<&str>, edge: Option<&str>) -> Option<Sel> {
     // The pick is in its part's coordinates; the placed bodies are in the world.
     let path = origin_placement(s, o)?;
     let (_, at) = s.doc.path_placement(&path)?;
@@ -1514,10 +1540,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
         }
         Asm::Joint(f) => {
             let picked = sel_items(inputs, 0);
-            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            f.whole_components.retain(|w| w.bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
             // As-built: two components picked, the position comes next. Counted as OK counts
-            // them: a component with two bodies is one.
-            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
+            // them: a component with two bodies, or with a sub-component, is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked, &f.whole_components).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -1669,7 +1695,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
             crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
-        Asm::RigidGroup => {}
+        Asm::RigidGroup { whole_components } => {
+            let picked = sel_items(inputs, 0);
+            whole_components.retain(|w| w.bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+        }
         Asm::Drive { joint, values, focus } => {
             let s = &app.session;
             let list = movable(s);
@@ -2150,65 +2179,81 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
+    use crate::ui_kit;
     let t = Tokens::get();
     if let Some(e) = r.get("error").and_then(Value::as_str) {
-        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
+        ui_kit::status_line(ui, e, ui_kit::StatusTone::Error);
         return;
     }
-    let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
     form_row(ui, "Checked", |ui| {
         ui.label(solidcraft_ui_text::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
     });
-    let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
-    let near = r["near"].as_array().cloned().unwrap_or_default();
-    let pair = |h: &Value| format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or(""));
+    let list = |key: &str| r[key].as_array().map_or(&[][..], Vec::as_slice);
+    let (hits, unchecked, near) = (list("overlaps"), list("unchecked"), list("near"));
     if hits.is_empty() && unchecked.is_empty() {
-        crate::ui_kit::status_line(ui, "no interference", crate::ui_kit::StatusTone::Dim);
+        ui_kit::status_line(ui, "no interference", ui_kit::StatusTone::Dim);
     }
-    // Pairs closer than the clearance, nearest first.
-    if !near.is_empty() {
-        form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in &near {
-        form_row(ui, &pair(h), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["distance_mm"].as_f64().unwrap_or(0.0), 1)).color(t.warning));
-        });
-    }
-    // Each body's nearest neighbour.
-    let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
-    if !nearest.is_empty() {
-        form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for (body, list) in &nearest {
-        let Some(n) = list.get(0) else { continue };
-        form_row(ui, &format!("{body} → {}", n["body"].as_str().unwrap_or("")), |ui| {
-            ui.label(crate::prefs::show_mm(app, n["distance_mm"].as_f64().unwrap_or(0.0), 1));
-        });
-    }
-    if hits.is_empty() && unchecked.is_empty() {
+    if hits.is_empty() && unchecked.is_empty() && near.is_empty() && r["nearest"].as_object().is_none_or(|map| map.is_empty()) {
         return;
     }
-    if !hits.is_empty() {
-        form_row(ui, "Interferes", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in hits {
-        form_row(ui, &format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["volume_mm3"].as_f64().unwrap_or(0.0), 3)).color(t.error));
-        });
-    }
-    // Pairs the check could not work out: not clear, not known to interfere.
-    for u in unchecked {
-        form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("dialog.could_not_be_checked")).color(t.warning))
-                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
-        });
-    }
+    let columns = [
+        ui_kit::Column::new(solidcraft_ui_text::tr("ui.bodies"), 1.5).flex(),
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Value"), 1.0).flex(),
+    ];
+    ui_kit::report_list(ui, "interference_results", ui_kit::table_row_height() * 10.0, &columns, "", |ui, table| {
+        for (key, heading, metric, field, power, ink) in [
+            ("near", "Too close", "Distance", "distance_mm", 1, t.warning),
+            ("nearest", "Nearest", "Distance", "distance_mm", 1, t.text),
+            ("overlaps", "Interferes", "Volume", "volume_mm3", 3, t.error),
+            ("unchecked", "dialog.could_not_be_checked", "", "", 0, t.warning),
+        ] {
+            let pairs: Vec<_> = if key == "nearest" {
+                r[key]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|(body, list)| {
+                        let n = list.get(0)?;
+                        Some((format!("{body} → {}", n["body"].as_str().unwrap_or("")), n))
+                    })
+                    .collect()
+            } else {
+                list(key).iter().map(|h| (format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), h)).collect()
+            };
+            if pairs.is_empty() {
+                continue;
+            }
+            let heading = if metric.is_empty() {
+                solidcraft_ui_text::tr(heading).to_owned()
+            } else {
+                format!("{} · {}", solidcraft_ui_text::tr_label(heading), solidcraft_ui_text::tr_label(metric))
+            };
+            let id = ui.make_persistent_id(("interference_results", key));
+            let mut open = ui.data(|data| data.get_temp(id)).unwrap_or(true);
+            table.group(ui, key, &heading, pairs.len(), &mut open);
+            ui.data_mut(|data| data.insert_temp(id, open));
+            if !open {
+                continue;
+            }
+            for (index, (pair, hit)) in pairs.iter().enumerate() {
+                let value = if power == 0 {
+                    solidcraft_ui_text::tr("dialog.could_not_be_checked").to_owned()
+                } else {
+                    crate::prefs::show_mm(app, hit[field].as_f64().unwrap_or(0.0), power)
+                };
+                let response = table.row(ui, &format!("{key}:{index}"), false, |row| {
+                    let label = row.cell(|ui| ui_kit::text(ui, pair, ui_kit::Text::Cell));
+                    let value = row.cell(|ui| {
+                        ui.add(egui::Label::new(RichText::new(&value).color(ink)).truncate())
+                            .backing_on_hover_text(hit["reason"].as_str().unwrap_or(&value))
+                    });
+                    crate::scenario::publish_rect(&format!("dialog:label:{pair}"), label.rect);
+                    crate::scenario::publish_rect(&format!("dialog:control:{pair}"), value.rect);
+                });
+                crate::scenario::publish_target(&format!("dialog:row:{pair}"), response.rect);
+            }
+        }
+    });
 }
 
 // ---- commands ----
@@ -2635,7 +2680,8 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
     // As-built: one component picked whole is one side, and the second is still to come (#21842).
-    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    let whole =
+        f.as_built && f.whole_components.iter().any(|w| w.bodies.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.bodies.contains(b)));
     if whole {
         return None;
     }
@@ -2667,14 +2713,17 @@ pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput])
     if f.editing.is_some() {
         return None;
     }
-    let picks: Vec<&Sel> =
-        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
     let doc = &app.session.doc;
     let mut occs: Vec<u64> = Vec::new();
-    for pick in picks {
-        let occ = side_occurrence(&app.session, pick)?;
-        if !occs.contains(&occ) {
-            occs.push(occ);
+    if f.as_built {
+        // The components as OK counts them: a component picked whole is one.
+        occs = occurrences(&app.session, sel_items(inputs, 0), &f.whole_components);
+    } else {
+        for pick in (0..2).filter_map(|i| sel_items(inputs, i).first()) {
+            let occ = side_occurrence(&app.session, pick)?;
+            if !occs.contains(&occ) {
+                occs.push(occ);
+            }
         }
     }
     let [a, b] = occs.as_slice() else { return None };
@@ -2704,29 +2753,58 @@ fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
     }
 }
 
-/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
-pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
-    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
-    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
-    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
-        f.whole_components.push(bodies.to_vec());
+/// The components picked whole in As-built and Rigid Group, the windows that count them so.
+fn whole_picks(k: &Asm) -> Option<&Vec<WholeComponent>> {
+    match k {
+        Asm::Joint(f) if f.as_built => Some(&f.whole_components),
+        Asm::RigidGroup { whole_components } => Some(whole_components),
+        _ => None,
     }
+}
+
+/// As-built, Rigid Group: the component placed at `path` was picked whole, as these bodies. Kept
+/// while Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[String]) {
+    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
+    let whole_components = match &mut d.kind {
+        Kind::Assembly(Asm::Joint(f)) if f.as_built => &mut f.whole_components,
+        Kind::Assembly(Asm::RigidGroup { whole_components }) => whole_components,
+        _ => return,
+    };
+    let whole = WholeComponent { path: path.to_vec(), bodies: bodies.to_vec() };
+    if held && !bodies.is_empty() && !whole_components.contains(&whole) {
+        whole_components.push(whole);
+    }
+}
+
+/// As-built, Rigid Group: the row of a component inside one picked whole, or around one, adds that
+/// component as one of its own, where a second click on a row otherwise takes its bodies out again.
+pub(crate) fn row_adds_nested_whole(d: &Dialog, path: &[u64]) -> bool {
+    let Kind::Assembly(k) = &d.kind else { return false };
+    whole_picks(k)
+        .is_some_and(|whole| whole.iter().any(|w| path.starts_with(&w.path) || w.path.starts_with(path)) && !whole.iter().any(|w| w.path == path))
 }
 
 /// As-built with fewer than two components in Components: they are still being picked.
 pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built && occurrences(s, sel_items(&d.inputs, 0), &f.whole_components).len() < 2)
 }
 
-/// The occurrences of picked bodies (deduplicated, in pick order).
-fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
+/// The occurrences of picked bodies (deduplicated, in pick order). A body of a component picked
+/// whole counts as that component, also when a sub-component places it; where several whole picks
+/// hold it (a component and its sub-component), as each of them, in the order they were picked.
+fn occurrences(s: &Session, items: &[Sel], whole: &[WholeComponent]) -> Vec<u64> {
     let mut out = Vec::new();
     for x in items {
-        if let Sel::Body { name } = x
-            && let Some(o) = occurrence_of_body(s, name)
-            && !out.contains(&o)
-        {
-            out.push(o);
+        let Sel::Body { name } = x else { continue };
+        let mut held: Vec<u64> = whole.iter().filter(|w| w.bodies.contains(name)).filter_map(|w| w.path.last().copied()).collect();
+        if held.is_empty() {
+            held.extend(occurrence_of_body(s, name));
+        }
+        for o in held {
+            if !out.contains(&o) {
+                out.push(o);
+            }
         }
     }
     out
@@ -2835,7 +2913,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(out);
             }
             if f.as_built {
-                let occs = occurrences(s, sel_items(inputs, 0));
+                let occs = occurrences(s, sel_items(inputs, 0), &f.whole_components);
                 if occs.len() != 2 {
                     return Err("select two components".into());
                 }
@@ -2885,11 +2963,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.origin", p)
         }
-        Asm::RigidGroup => {
+        Asm::RigidGroup { whole_components } => {
             let items = sel_items(inputs, 0);
-            let occs = occurrences(s, items);
+            let occs = occurrences(s, items, whole_components);
             if occs.len() < 2 {
-                if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
+                // A component picked whole is one component, not bodies to separate.
+                if occs.len() == 1 && whole_components.is_empty() && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
                     return Err(solidcraft_ui_text::format(
                         "joint.rigid_group_one_component",
                         &[("count", &items.len().to_string()), ("command", solidcraft_ui_text::tr("cmd.component_from_bodies"))],
@@ -3003,8 +3082,10 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
-    // A constraint's reply: how free its part is with the constraint the preview shows.
-    let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
+    // Keep the placement report for Constrain's freedom line. Its round-part Center mode
+    // creates a line-on-plane joint rather than a planar constraint.
+    let placed =
+        cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.") || c == "joint.create").map(|(_, r)| r.clone());
     let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
     let before = preview.before.clone();
     let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
@@ -3119,7 +3200,8 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
+    let center = matches!(&d.kind, Kind::Assembly(Asm::Constrain(f)) if f.center);
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let center_frame = under
         .as_ref()
@@ -3163,8 +3245,9 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint and a constraint name their two picks; a joint origin and a trace have one.
-    let two = matches!(k, Asm::Joint(_) | Asm::Constrain(_));
+    // A joint and an ordinary constraint name their two picks. In Center, the first two
+    // picks share a part; mark both walls alike, leaving the part's picks in the other colour.
+    let two = !center && matches!(k, Asm::Joint(_) | Asm::Constrain(_));
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
@@ -3178,9 +3261,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .inputs
         .iter()
         .enumerate()
-        .filter(|(_, i)| i.accept == SNAPS)
+        .filter(|(_, i)| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES)
         .filter_map(|(n, i)| {
-            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), if n == 0 { t.accent } else { t.warning })))
+            let color = if n < if center { 2 } else { 1 } { t.accent } else { t.warning };
+            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), color)))
         })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
@@ -3332,33 +3416,35 @@ pub fn open_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
 }
 
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-pub(crate) fn joint_menu(
+pub(crate) fn joint_menu_items(app: &SolveApp, (id, kind, suppressed): (u64, JointKind, bool)) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
+    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
+    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
+    let mut items = vec![Item::action("joint_menu.edit", edit, "edit")];
+    if kind != JointKind::Rigid {
+        items.push(Item::action("joint_menu.drive", solidcraft_ui_text::tr_label("Drive Joint"), "joint"));
+    }
+    items.extend([
+        Item::action("joint_menu.suppress", solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), "suppress"),
+        Item::sep(),
+        Item::action("joint_menu.delete", solidcraft_ui_text::tr_label("Delete"), "delete"),
+    ]);
+    items
+}
+
+pub(crate) fn run_joint_menu_item(
     app: &SolveApp,
-    ui: &mut egui::Ui,
-    (id, kind, suppressed): (u64, JointKind, bool),
+    picked: &crate::ui_kit::Item,
+    (id, suppressed): (u64, bool),
     open: &mut Option<Dialog>,
     run: &mut Option<(&'static str, Value)>,
 ) {
-    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
-    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
-    if crate::ui_kit::button(ui, edit, crate::ui_kit::Button::Normal).clicked() {
-        *open = open_joint(app, id);
-        ui.close();
-    }
-    if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = drive_joint(app, id);
-        ui.close();
-    }
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal)
-        .clicked()
-    {
-        *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed})));
-        ui.close();
-    }
-    ui.separator();
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
-        *run = Some(("selection.delete", json!({ "joints": [id] })));
-        ui.close();
+    match picked.id.as_str() {
+        "joint_menu.edit" => *open = open_joint(app, id),
+        "joint_menu.drive" => *open = drive_joint(app, id),
+        "joint_menu.suppress" => *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed}))),
+        "joint_menu.delete" => *run = Some(("selection.delete", json!({"joints": [id]}))),
+        _ => {}
     }
 }
 
@@ -3546,7 +3632,12 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         if resp.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&resp, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&resp) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&resp, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
         x += 32.0;
     }
     if let Some((c, prm)) = run {
@@ -3637,7 +3728,12 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
         if response.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&response, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&response) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&response, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
     }
     if let Some((command, params)) = run {
         if command == "selection.delete" {

@@ -10,6 +10,17 @@ use solidcraft_kernel::{self as kernel, Body};
 
 use super::ModelBody;
 
+impl ModelBody {
+    /// [`ModelBody::mesh`] without keeping a placement's moved copy with the body: for a one-off
+    /// reader (a thumbnail), which must not leave every placed part's triangles in memory.
+    pub fn mesh_uncached(&self) -> Arc<Mesh> {
+        match (self.mesh.get(), self.mesh_placement.as_deref()) {
+            (None, Some(placed)) => placed.mesh(),
+            _ => self.mesh(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct PlacedMesh {
     body: Body,
@@ -536,10 +547,10 @@ mod tests {
     #[test]
     fn plan_mesh_soon_makes_it_on_a_worker() {
         let body = ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap(), 1);
-        assert!(body.plan_mesh_soon().is_none(), "not made in the asking frame");
+        assert!(body.plan_mesh_soon(crate::display_quality::current()).is_none(), "not made in the asking frame");
         let began = std::time::Instant::now();
         let soon = loop {
-            if let Some(mesh) = body.plan_mesh_soon() {
+            if let Some(mesh) = body.plan_mesh_soon(crate::display_quality::current()) {
                 break mesh;
             }
             assert!(began.elapsed() < std::time::Duration::from_secs(30), "the worker made it");

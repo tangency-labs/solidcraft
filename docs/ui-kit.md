@@ -165,6 +165,17 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
+For preference tables that must stay within their card, use `table_fitted` with flexible
+columns. It uses the same headers, cells and row rules, disables both scrolling axes, and
+lets column minimums yield when necessary. `table_custom` retains horizontal overflow for
+wide editable data such as configurations.
+
+Table headers are opt-in: call `Table::headers` once to add a header band, or omit it
+for a headerless table. The card, column layout, row padding and hairline rules
+remain the same. Headerless columns can use stable internal identifiers rather than
+translated headings. The Navigation mouse-mapping legend uses this mode beside its
+mouse picture, with input chips and action text in separate cells.
+
 ## Grid
 
 `Grid` is the one editable table: a cell cursor, ranges, editing, TSV copy and paste, fill down
@@ -384,6 +395,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
 | `linear_color_field` | Linear RGB swatch with precise channel fields; clips only the preview to display gamut and preserves HDR values until edited | `control_height`, `space_4`, shared colour popover |
 | `section`, `section_count`, `section_method`, `search_fold`, `divider` | Persisted small-caps disclosure with chevron, optional count or method tag and trailing hairline; `search_fold` is that row for shortcut matches during Preferences search, closed until opened; full-width rule | `control_height`, `dialog_rule`, `font_caption`, tracking, spacing |
+| `card_section` | Bordered disclosure for repeated form groups. Remembers open state and shows an optional palette-colored icon while closed. Publishes `dialog:card:{title}` and `dialog:card_header:{title}`. | `control_height`, `dialog_rule`, `control_radius`, `space_6/8`, `form_ink/dim` |
 | `icon_action` | Icon-only action with an accessible name, tooltip, enabled state and danger variant | Shared icon-label action geometry and ink tokens |
 | `list_row` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
 | `text`, `Text` | Hint, note, report, inline or cell text; see variants below | `font_small/label`, `text/dim/error`, `control_height`, `space_4` |
@@ -415,7 +427,11 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `placement_field` | Stable focus ID; drawing tool owns Enter/Tab validation and completion | `control_fill`, `font_body`, `text`, `control_height`, spacing |
 | `color_field`, `color_field_with_opacity`, `mixed_color_field`, `color_popover` | Document RGB swatch and kit popover; global U8/F/Hex segments, active-format copy, gamma-byte or linear RGB fields or one Hex editor, painter-drawn HSV square/hue and current strip; outside click dismisses. The opacity-aware field edits the caller's separate `f64` opacity, never premultiplied RGB. Six Hex digits preserve exact opacity; eight set alpha to `aa / 255`. RGB-only callers reject non-FF alpha without applying RGB. Incomplete text remains editable without changing the last valid colour. The mixed-aware wrapper adds a non-editable label and reports accepting the first colour as an edit, so the caller can set all selected targets. | `control_*`, `form_*`, `border`, `on_accent`, `space_*` |
 | choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment, `glyphs` draws a symbol per segment in place of its label (the label stays the hover text and accessible name) | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
+| `PageSwitch` | Counted page navigation using `segmented`; sliding pill snaps with reduced motion or zero host animation duration. | Segment tokens, `pref_well/nav_hover`, `radius_lg`, `dialog_rule/border`, `font_small` |
+| `SelectionBar`, `SelectionAction`, `SelectionBarResponse` | Selection count, labelled actions and clear control inside the owning card. | `selected_bg`, `form_primary/ink`, `control_*`, `radius_lg`, `space_*` |
+| `Panel::feature_with_left` | Scrolling feature body and pinned bottom actions with a left footer slot, for forms that keep a live-apply control alongside Cancel/OK. | Shared feature and footer tokens |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
+| `icon_choices`, `IconChoice` | Left-aligned square icon buttons for a choice or toggles (plugin dialogs); the selected one has the accent fill and the artwork for its ink; `None` when the row does not fit | `control_height/radius`, `control_*`, `hover`, `TabAccent`, icon palette |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
@@ -430,20 +446,20 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | navigation: `NavigationMetrics`, `navigation_surface`, `navigation_button`, `navigation_separator` | Shared live/editor navigation painter, button states, upward menu chevron and separator; approved board dimensions below | `dialog_body/border`, `form_ink/dim/primary`, `control_border`, `selected_bg`, `nav_hover/press` |
 | `ReorderPayload<T>`, `insertion_marker`, `drop_index` | Typed drag origin, insertion chrome and horizontal gap selection shared by the ribbon and navigation editor | `accent` |
 | `navigation_button_editable`, `navigation_edit_outline` | The live navigation button with drag interaction, selection outline and dashed hidden-slot chrome | Navigation control tokens, `border/accent` |
-| navigation_menu: `navigation_menu`, `NavigationMenuRow`, `navigation_context`, `navigation_tooltip` | Upward menus, checked rows, headings, separators and the delayed shortcut tooltip; context menus retain kit popup hosts and Container's shared elevation | `dialog_body/border/rule`, `form_ink/dim/primary`, `selected_bg`, `nav_hover/tip/tip_ink/tip_key_border` |
+| navigation menus: `Item`, `Menu`, `navigation_tooltip` | The same shared menu rows, state and popup hosts as other menus; the delayed shortcut tooltip remains a separate tooltip | `dialog_body/border/rule`, `form_ink/dim/primary`, `selected_bg`, `nav_hover/tip/tip_ink/tip_key_border` |
 | navigation_settings: `navigation_stage`, `navigation_tile`, `navigation_drag_ghost` | Custom preview stage, draggable slot tiles and drag feedback. Ordinary preferences reuse `settings_section`, `settings_form`, `row`, default `segmented`, `checkbox`, `button`, `divider` and text hints | `dialog_border`, `control_border`, `form_ink/dim`, `nav_field/hover/viewport` |
 | `settings_card` | Full-width settings detail group; uses Container chrome and preserves its width with empty or changing content | `dialog_footer`, `border`, `radius_md`, `space_12/10` |
 | `settings_plugin_card`, `checkbox_at` | Installed plugin card with 36 pt content, 12 pt padding, 36 pt tile, 13 pt semibold title, 11 pt version, 12 pt description and 2 pt text gap. The unframed 24 pt folder action and 16 pt checkbox are centred; actions wrap on narrow cards. | `control_fill`, `dialog_border`, `radius_lg`, `space_12/16/24` |
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
 | `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
-| `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
+| `footer`, `footer_with_left`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `footer_with_left` reserves a clipped left slot where `icon_label_button` truncates to fit beside the normal actions; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::group`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`; `group` adds a collapsing section band beneath that shared header (configuration previews group appearances, rule traces and effective parameters). `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
 | `removable_header`, `add_column_button`, `bin_button`, `active_pill` | Hover-only column removal, labelled "+ Add column" button above the table that opens the Add Column menu, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
-| `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
+| `compact_button` | Borderless stars and chevrons with enabled/selected states. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
 | `label_actions` | Clipped row name beside compact actions | `control_height`, form font/spacing tokens |
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
@@ -511,13 +527,13 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 1 | Border 1, padding 3, gap 2, bottom offset 7; separator width 1 + two 4 margins, height 18 | `NAV_BORDER/PADDING/GAP/BOTTOM/SEPARATOR/SEPARATOR_HEIGHT` |
 | Bar 2 | Menu padding left 7 / right 6, gap 5, chevron 12; medium text 12.5 | `NAV_MENU_LEFT/RIGHT/GAP`, `NAV_CHEVRON/TEXT` |
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
-| Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
+| Bar 5 | Menu width follows its content and available viewport; row density, headings, padding, radius and shadow follow the shared menu's theme tokens and frame | `Item`, `Menu::popup`, `Menu::frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
+| Bar 7 | More button follows the selected size; its shared menu measures content width; value text drops before labels and overflow | `NavigationMetrics`, `nav_bar_layout::measure`, `Menu::popup` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render's product view hides Selection mode, which its pick filter sets; Render's result and flat canvases hide Orbit, Spin, Look at, Projection, Visual style and Selection mode, retaining Home and Display; an open sketch hides Selection mode | `Slot::available`, `canvas_caps`, `navigation_bar_view::shows` |
-| Bar 11 | Context width 232; bar has Customise / Hide / Reset, slot has Remove | `NAV_CONTEXT_WIDTH`, `navigation_bar_view::context_menu` |
+| Bar 11 | Context menu width follows its content and available viewport; bar has Customise / Hide / Reset, slot has Remove | `Item`, `Menu::context_items`, `nav_bar::context_items` |
 | Settings 1, 8 | Stage height 96, radius 8, padding 12 inside its 1 border; a miniature of the 3D view (the view's gradient and grid colours); the bar follows the chosen anchor (side and top or bottom edge) live, and the slot count sits beside it on the side facing the view's middle | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `navigation_stage`, `editor_layout` |
 | Settings 5 | Position is one picker of six anchors on a miniature of the view (`prefs:navbar:anchor:0..5`, top row then bottom row); the separator source is a dashed chip at the end of the Available heading, apart from the button tiles | `navigation_anchor_picker`, `navigation_separator_source` |
 | Settings 1–3 | Standard settings section and full-width detail card; actions stay on one line, with name truncation before icon-only actions | `settings_section`, `settings_card`, `inspector_header_layout` |
@@ -644,17 +660,39 @@ activation, rule and preview handles remain. The "+ Add column" button above the
 Add forms and column-removal band have been removed.
 
 
-Crash Reports uses `report_list` (bordered bounded scroll), `report_header` (kind,
-count pill and mono UTC time), `path_chip` (clipped mono path and adjacent action),
-`empty_box` (dashed empty state), and `icon_label_button` (secondary icon/text,
-optional danger ink). These use `dialog_rule/footer`, `control_*`, `form_*`,
-`font_label/small` and spacing tokens. The report header retains the combined-title
-cell alias; bins retain the previous Delete handle. Report actions remain immediate.
-`list_frame` supplies the same border to virtualised library rows.
-The list frame owns its border and horizontal padding; the report viewport adds
-no inherited scroll margin. Report list measurements publish
-`dialog:list:KEY:viewport` and `dialog:list:KEY:content_width`. Reports use vertical
-scrolling; the horizontal rule beneath each report remains a divider.
+Read-only reports use `report_list(ui, key, height, columns, empty, |ui, table| …)`,
+a thin bounded viewport over `table_custom` with one shared header band. Add comparable
+results with `Table::row` and `TableRow::cell`; `Table::group` supplies optional folding
+sections. Interference pairs, contact collision depths and unconstrained sketch entities
+use this path, with flexible columns and the table's horizontal overflow in narrow windows.
+`report_header(ui, table, key, title, actions)` is a summary/action row on that same grid.
+Measurement item descriptions wrap above the table so complete coordinate triples stay visible.
+Single-unit results use named value rows, preserving distance selection and copy;
+dual-unit measurements retain a wrapping report so both units remain visible in narrow panels; import losses,
+plugin details and folding importer groups use shared tables with header bands too.
+Crash reports use compact expandable `report_card` cards with `space_4` inner margins, spaced by `space_8`.
+The host supplies the copy-path action's tooltip as data; the kit does not reference host message IDs.
+Their headers use hover and expanded tints only; clicking or focusing a header adds no outline.
+`ReportCardSummary` supplies the title, short subtitle, severity icon and semantic ink;
+`ReportCardDetails` supplies `(key, label, value)` fields and the original diagnostic text.
+The caller owns a per-report expansion boolean and receives `ReportCardAction` responses.
+The chevron, tinted severity tile and text form one keyboard-focusable disclosure; Report
+and Delete are separate framed buttons. Expanded cards have an accent outline, a divider,
+a three-column details grid (one column when narrow), and a mono code strip with Copy
+details and Copy path actions. Values are selectable, elided with full-text tooltips and
+registered as `dialog:card:KEY:FIELD`; summary, toggle, code and actions also publish targets.
+CrashUi keeps expansion in memory only and retains the `crash:ID:report/copy/delete` and
+legacy dialog button aliases. The gallery has four severity examples, one initially expanded.
+The gallery has no runtime pending-catalogue loader: its small build script merges pending
+English messages with the base and shared catalogues into `OUT_DIR`, rejecting duplicate IDs.
+Source catalogues and pending files remain untouched, so new kit labels work before the locale fold.
+All surfaces, ink and sizing come from existing theme tokens. The existing plain shield and
+stop icons stand in for shield-check and power, which are absent from the icon set.
+`path_chip` supplies a clipped mono path and adjacent action, `empty_box` the dashed empty
+state, and `list_frame` the border for virtualised library rows. Report viewports publish
+`dialog:list:KEY`, `dialog:list:KEY:viewport` and `dialog:list:KEY:content_width` alongside
+the table's `dialog:table:…` targets. These components use the table, typography, colour
+and spacing tokens; report actions remain immediate.
 Appearance uses a 340 pt card derived from card/label/spacing tokens, with the
 104 pt label basis where space permits, 10 pt body gaps, and a count on In This Design.
 
@@ -768,16 +806,51 @@ of the approved fills. It only styles tab pills; global primary actions still us
 ink on the card and panel, ink on soft, and pill text on fill in both themes.
 Only Mesh separates ink from fill in the light theme.
 
-Context menu adapters retain item IDs, enabled logic and command parameters. `Menu`
-owns popup elevation (10 pt corners, 1 pt border), headings, separators, adjacent
-submenus and bounded arrow navigation. Enter opens a submenu or chooses its row;
-Right opens, Left returns, and Esc dismisses the menu. Appearance includes document
-swatches and Remove override through `appearance.assign`; its original action still
-opens the full editor. Workspace retains its descriptive cards and scenario handles
-on the shared surface. Ribbon rows reuse `MenuItem::paint` while owning drag, focus
-and pin interactions. History context menus and ribbon overflow use kit popup chrome.
-Rename uses the shared caption, field policy and Cancel/OK actions with its stable
-editor ID. No additional translation keys or colour roles are needed.
+All application menus use one recursive `Item` definition and the `Menu` component
+in `crates/ui-kit/src/menu_popup.rs`. Callers provide data and an opening anchor;
+they dispatch the returned `picked` item. They do not paint menu rows, position
+flyouts, or maintain their own menu cursor or dismissal logic.
+
+```rust
+let items = vec![
+    Item::action("save", "Save", "save").key("Ctrl+S"),
+    Item::sep(),
+    Item::submenu("export", "Export", "export", vec![
+        Item::action("export.step", "STEP…", "export"),
+        Item::action("export.stl", "STL…", "mesh_export"),
+    ]),
+];
+if let Some(picked) = Menu::context_items(&response, &items) {
+    dispatch(picked);
+}
+```
+
+Use `context_items` for right-click, `button_items` for button-anchored menus,
+and `popup` for an already-open menu at a `MenuAnchor::Point` or `Rect`.
+Their output variants return hover/open state and row responses for domain
+features such as selection previews, drag payloads and panel control recording.
+`items` embeds the same renderer in a searchable chooser. Pass `just_opened`
+on the opening frame so Enter cannot also activate its first action. A real search field,
+rename editor or other form remains an editor, not a separate menu renderer.
+`preview` paints the same definition without taking keyboard or pointer actions.
+The native operating-system menu bar adapts the same `Item` model.
+
+Every level uses the viewport menu's density: the shared row height is
+`control_height + space_2`, with no extra vertical gap. Font, icons, checks,
+radio state, separators, danger tone and icon accents all come from the common
+row component and theme tokens. The component owns measured widths, screen-edge
+flipping, scrolling, hover delay, focus, keyboard navigation and dismissal.
+Enter chooses a row or opens its children; Right enters, Left returns, and
+Escape dismisses. Popup state is scoped to its viewport. Lazy submenu definitions
+can query `branch_open` to enumerate expensive content only when required.
+
+File, app-bar and ribbon overflow, navigation, History, drawing sheets, panel
+menus, workspace choices and text-field context menus all use this path. Domain
+builders may choose commands and enabled states, but there is no File-only,
+navigation-only or ribbon-only menu renderer. Text editing retains its clipboard,
+selection and focus rules; ribbon dragging and pinning retain their command
+semantics. Rename uses the shared caption, field policy and Cancel/OK actions
+with its stable editor ID.
 
 The menu gallery includes normal, hovered, open, disabled, checked/unchecked,
 swatch and danger rows, a submenu and rename. Radial geometry tests measure the
@@ -841,7 +914,7 @@ committed usable region or the render projection.
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
-icon ids and cached thumbnail textures; callers retain commands, document state,
+icon ids and `PreviewArt` pictures; callers retain commands, document state,
 persistence, thumbnail jobs and recovery decisions.
 
 - `page`, `content` and `rail` own the page background, responsive insets and
@@ -868,6 +941,27 @@ persistence, thumbnail jobs and recovery decisions.
   at narrow widths. Discard is optional for summaries; the return value is
   `(recover_response, optional_discard_response)`. `recovery_review` uses the same
   geometry with per-design Discard. Callers provide truthful metadata.
+
+### File previews
+
+`file_preview(ui, id, rect, art, hovered, opacity)` is the only way the app pictures a
+file or a part. Recent rows, sample cards, parts library cards, the parts dialog and the
+loading card all use it, and any new browser, picker or panel that shows files must too.
+It draws:
+
+- a backdrop and an isometric ground grid in the theme's 3D view colours
+  (`viewport_top`, `viewport_bottom`, `grid`, `grid_major`);
+- the cut-out picture, and the shadow of its footprint, when `art` is there (without it,
+  the grid alone: the caller adds its placeholder icon);
+- the lift while `hovered`: the model springs off the grid, its shadow softens and the
+  grid lights up around it in the accent. It asks for frames only while it moves, and
+  stays still when egui's animation time is zero.
+
+`hovered` is the whole card's pointer or keyboard focus, not only the picture's. The host
+decodes pixels into a `PreviewImage` and keeps the `PreviewTextures` it loads; `art()`
+gives the handle to draw. Pictures come from `solidcraft_engine::thumbnail`, which draws
+every one from the same isometric orthographic view, so the grid fits them all. A host
+does not draw its own backdrop, scale the picture or animate it.
 
 The exported `file_*` colour tokens provide readable light/dark foreground and
 background pairs, including File-specific secondary text. Thumbnails retain the
@@ -1025,7 +1119,7 @@ PBR passes no opacity and remains opaque. All Hex parsing and draft state stay i
 `mixed_slider` pairs the standard slider with the mixed-aware scalar editor.
 `editor_section` uses a 24 pt heading and 6 pt field gaps.
 `workspace_chip`, `text_button`, `section_heading`, `pending_section`,
-`searchable_icon_dropdown` and `Menu::text` retain
+`searchable_icon_dropdown` and data-driven menu triggers retain
 shared token paint and hit targets. All are exercised in the kit gallery.
 
 | Shared editor component | Behaviour |
