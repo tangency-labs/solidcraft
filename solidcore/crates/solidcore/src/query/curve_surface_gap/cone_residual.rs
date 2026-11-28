@@ -1622,7 +1622,7 @@ mod tests {
             assert!(g >= across, "{e:e}: {g:e} under {across:e}");
             // (the trim's box's residual: the seam's tear counted only near the seam)
             let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap();
-            let local = super::super::cone_net_offset(&k, &s, &net, &uv)
+            let local = super::super::cone_net_offset(&k, &s, &net, Some(&uv))
                 .unwrap()
                 .unwrap();
             assert!(g >= local, "{e:e}: {g:e} under the residual {local:e}");
