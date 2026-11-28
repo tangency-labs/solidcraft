@@ -1429,7 +1429,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
+                vec![SelInput::new("Profile", PROFILES | PLANES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine {
@@ -2311,6 +2311,10 @@ impl Dialog {
         if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
+        // A new placement plane replaces the saved direction; the Direction field can override it afterward.
+        if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
+            self.extra.remove("axis");
+        }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
@@ -2490,6 +2494,13 @@ impl Dialog {
         if accepted {
             self.awaiting_pick = false;
             self.pick_refused = None;
+        }
+        if accepted
+            && self.active == 0
+            && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. })
+            && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
+        {
+            self.extra.remove("axis");
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -8602,6 +8613,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 {
                     p.insert("references".into(), json!(references));
                 }
+            }
+            if *cmd == "solid.coil" {
+                crate::primitive_placement::plane_params(s, sels(d, 0).first(), d.extra.get("axis"), &mut p)?;
             }
             // A refilled reference already carries its saved axis and base. A new pick
             // clears the saved axis and supplies its own origin.
