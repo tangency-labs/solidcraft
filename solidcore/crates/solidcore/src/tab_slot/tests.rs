@@ -316,6 +316,16 @@ fn a_tangent_slot_and_a_slot_holding_a_hole_are_over_hole() {
 }
 
 #[test]
+fn a_slot_wholly_inside_a_hole_is_over_hole() {
+    let face = bottom(vec![circle(80.0, 33.0, 10.0)]);
+    let inside = slot_outline(78.0, 4.0, (32.0, 34.0), 0.1).unwrap();
+    assert_eq!(
+        check_slot(&inside, &face, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::OverHole { web: 0.0 })
+    );
+}
+
+#[test]
 fn a_slot_running_out_through_the_face_edge_is_at_edge() {
     let face = bottom(Vec::new());
     let out = slot_outline(-5.0, 10.0, (30.0, 36.0), 0.1).unwrap();
@@ -496,4 +506,13 @@ fn a_thickness_clearance_sizes_the_slot_across_and_the_clearance_along() {
     assert!((hi - lo - 6.6).abs() < 1e-9, "{lo} {hi}");
     assert!(slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, -0.1).is_err());
     assert!(slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, f64::NAN).is_err());
+}
+
+#[test]
+fn a_width_filling_the_whole_room_does_not_panic() {
+    for seed in 0..64 {
+        let v = vary((0.1, 1.0), &[0.3], 0.5, 0.0, 0.0, seed, 10.0).unwrap();
+        let (s, w) = v[0];
+        assert!(s >= 0.1 - 1e-12 && s + w <= 1.0 + 1e-12, "seed {seed}: {v:?}");
+    }
 }

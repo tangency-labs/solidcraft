@@ -294,7 +294,9 @@ pub fn vary(
         let (lo, hi) = (lo.min(start), hi.max(start + width));
         let w = wanted.min(hi - lo);
         let centre = start + width / 2.0;
-        let s = (centre - w / 2.0).clamp(lo, hi - w);
+        // `min` then `max`, not `clamp`: a width that fills the whole room can leave `hi - w` a
+        // rounding below `lo`, and the tab then starts at `lo`.
+        let s = (centre - w / 2.0).min(hi - w).max(lo);
         out.push((s, w));
     }
     Ok(out)
@@ -542,7 +544,7 @@ impl SlotSkip {
 /// Design 7.4 for one slot (its outline with the clearance, and in PR B its dogbones) against
 /// `face`, the region of S's face in P's frame: `at_edge` unless the slot is `Inside` the outer
 /// loop at `tol`; `over_hole` when a hole is nearer than `min_land − tol` (the web the kernel's
-/// Apart allows, design 5), or the slot holds a point of the hole. The first failing check
+/// Apart allows, design 5), or the slot holds a point of the hole or lies inside it. The first failing check
 /// names the skip; `Ok(None)` cuts it.
 ///
 /// # Errors
@@ -573,9 +575,12 @@ pub fn check_slot(
         let web = outline.nearest(hole, tol).ok_or_else(undecided)?;
         let probe = hole.segs.first().ok_or_else(undecided)?.start();
         let holds = web > tol && outline.holds(probe).ok_or_else(undecided)?;
-        if web < min_land - tol || holds {
+        // A slot wholly inside the hole would cut where the plate has no material.
+        let start = outline.segs.first().ok_or_else(undecided)?.start();
+        let held = web > tol && hole.holds(start).ok_or_else(undecided)?;
+        if web < min_land - tol || holds || held {
             return Ok(Some(SlotSkip::OverHole {
-                web: if holds { 0.0 } else { web },
+                web: if holds || held { 0.0 } else { web },
             }));
         }
     }
