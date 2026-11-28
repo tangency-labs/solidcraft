@@ -754,13 +754,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Ok(());
         }
 
+        let keep_wires: Option<std::collections::BTreeSet<O>> =
+            opt_keep_as_wires.map(|keep| keep.iter().copied().collect());
+
         // iter every edge of every deleted face looking for wire edges to delete
         for &e in &faces_edges {
             if !brep.edge_is_wire(e)? {
                 continue;
             }
             // save wires when asked
-            if opt_keep_as_wires.is_some_and(|keep| contains(keep, &e)) {
+            if keep_wires.as_ref().is_some_and(|keep| keep.contains(&e)) {
                 continue;
             }
 
@@ -2071,6 +2074,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// ([`TopologyIntersector::mate_stands_beside`]), so a refusal `Relate` passes on is a
     /// conflict between edges at different places only.
     ///
+    /// A pair is also left unrelated when its ends are not vertex
+    /// mates, no pairing of those ends lies within the intersection tolerance, and
+    /// neither edge already has a mate. Ends within that tolerance are one edge and are
+    /// related; an edge that already has a mate is still passed to `Relate`.
+    ///
     /// Not upstream (#17118): two definitions of one proto vertex that give one vertex
     /// of a B-rep two different vertices of the other make those two one vertex
     /// ([`TopologyIntersector::combine_images_of_one_vertex`]) instead of relating the
@@ -2140,9 +2148,80 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             if self.mate_stands_beside(k, &*brep, e1, e2)? {
                 continue;
             }
+            // Leave the pair unrelated only when the ends are not
+            // vertex mates, lie farther apart than the intersection tolerance, and neither
+            // edge already has a mate. A profile joint off by about 1e-9 mm meets the end
+            // face as two points about 4e-5 mm apart; relating those edges makes
+            // `make_faceuse` look up a vertex mate that is neither end. Ends within the
+            // tolerance are one edge. An edge that already has a mate is still related,
+            // so a refusal is passed on.
+            if self.ends_apart_and_unmated(k, brep, e1, e2)? {
+                continue;
+            }
             self.relate(k, brep, t1, t2)?;
         }
         Ok(())
+    }
+
+    /// Whether `e1` and `e2` must stay unrelated.
+    ///
+    /// True only when all three hold: the ends are not exact vertex mates (in either
+    /// order), no pairing of the ends lies within [`xsect_tol_3d_from_zones`] of the two
+    /// vertices (the same test as the coincident-edge endpoints), and neither edge
+    /// already has a mate. Vertex mates are recorded before edge mates in
+    /// [`TopologyIntersector::set_relationships`].
+    ///
+    /// # Errors
+    ///
+    /// Those of the edge-end walks and of the vertex points and tolerances.
+    fn ends_apart_and_unmated(
+        &self,
+        k: &Kernel,
+        brep: &impl IntersectorBrep<O>,
+        e1: O,
+        e2: O,
+    ) -> Result<bool> {
+        if self.other_mate(Some(e1)).is_some() || self.brep_mate(Some(e2)).is_some() {
+            return Ok(false);
+        }
+        let Some(a) = brep.edge_start_vertex(e1)? else {
+            return Ok(false);
+        };
+        let Some(b) = brep.edge_other_vertex(e1, Some(a))? else {
+            return Ok(false);
+        };
+        let Some(c) = brep.edge_start_vertex(e2)? else {
+            return Ok(false);
+        };
+        let Some(d) = brep.edge_other_vertex(e2, Some(c))? else {
+            return Ok(false);
+        };
+        let ma = self.other_mate(Some(a));
+        let mb = self.other_mate(Some(b));
+        if (ma == Some(c) && mb == Some(d)) || (ma == Some(d) && mb == Some(c)) {
+            return Ok(false);
+        }
+        let measured = |v, w| -> Result<(f64, f64)> {
+            let tolerance = xsect_tol_3d_from_zones(k, tol_of(brep, v)?, tol_of(brep, w)?);
+            let distance = brep.vertex_point(v)?.distance(brep.vertex_point(w)?);
+            Ok((distance, tolerance))
+        };
+        let (ac, bd, ad, bc) = (
+            measured(a, c)?,
+            measured(b, d)?,
+            measured(a, d)?,
+            measured(b, c)?,
+        );
+        // A non-finite distance or tolerance is not a reason to drop the relation.
+        let finite = |p: (f64, f64)| p.0.is_finite() && p.1.is_finite();
+        if !finite(ac) || !finite(bd) || !finite(ad) || !finite(bc) {
+            return Ok(false);
+        }
+        let within = |p: (f64, f64)| p.0 <= p.1;
+        if (within(ac) && within(bd)) || (within(ad) && within(bc)) {
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     /// Not upstream (#16937): whether the edge `e1` of the B-rep and the edge `e2` of the

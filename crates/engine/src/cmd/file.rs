@@ -2350,11 +2350,15 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
         if snap.doc.name == from {
             let old = std::sync::Arc::as_ptr(&snap.doc);
-            std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
-            renamed.push((old, snap.doc.clone()));
+            if let Some((_, new)) = renamed.iter().find(|(known, _)| *known == old) {
+                snap.doc = new.clone();
+            } else {
+                std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
+                renamed.push((old, snap.doc.clone()));
+            }
         }
     }
-    if let Some(entry) = s.sketch_entry.as_mut() {
+    for entry in s.undo.iter_mut().chain(s.redo.iter_mut()).filter_map(|snap| snap.sketch_entry.as_mut()).chain(s.sketch_entry.as_mut()) {
         let follow = |doc: &mut std::sync::Arc<solidcraft_doc::Document>| match renamed.iter().find(|(old, _)| *old == std::sync::Arc::as_ptr(doc)) {
             Some((_, new)) => *doc = new.clone(),
             None if doc.name == from => std::sync::Arc::make_mut(doc).name = to.to_string(),

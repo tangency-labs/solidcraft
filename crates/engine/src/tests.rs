@@ -8641,6 +8641,69 @@ fn fillet_fit_taper_closes_to_a_point() {
 }
 
 #[test]
+fn spline_fillet_follows_a_rounded_corner_chain() {
+    // #6473: the top outline has a line, an R10 quarter arc, and another line.
+    // Equal spline control radii describe the same R2 round as a constant fillet,
+    // including the arc between the two straight edges.
+    let rounded_box = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 15]], "radius": "10 mm"}));
+        s
+    };
+    let mut constant = rounded_box();
+    run(&mut constant, "solid.fillet", json!({"edges": [[50, 0, 30]], "radius": "2 mm", "tangent_chain": true}));
+    let mut spline = rounded_box();
+    run(
+        &mut spline,
+        "solid.fillet",
+        json!({
+            "edges": [[50, 0, 30]], "radius": "2 mm", "type": "spline",
+            "start": [0, 0, 30], "tangent_chain": true,
+            "radii": ["2 mm", "2 mm", "2 mm", "2 mm"],
+            "knots": [0, 0, 0, 0, 0.5, 1, 1, 1, 1]
+        }),
+    );
+    assert!(rel(volume(&mut spline), volume(&mut constant)) < 1e-9);
+}
+
+#[test]
+fn variable_fillet_runs_its_radius_along_a_rounded_corner_chain() {
+    // #6473: the same line, R10 quarter arc and line, rounded from R2 at the far end of the first
+    // line to R1 at the far end of the second. With tangent_chain the law runs along the whole
+    // chain, so the arc and the second line are rounded too. Where SMLib cannot build that law
+    // along the chain, the round takes the picked line alone, as with tangent_chain: false, and
+    // the warning says why: following the chain never fails where the picked edge alone builds.
+    let round = |tangent_chain: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 15]], "radius": "10 mm"}));
+        let before = volume(&mut s);
+        let p = json!({
+            "edges": [[50, 0, 30]], "radius": "2 mm", "type": "variable", "radius2": "1 mm",
+            "start": [0, 0, 30], "tangent_chain": tangent_chain
+        });
+        let out = s.execute("solid.fillet", &p).ok()?;
+        let w = out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        Some((before - volume(&mut s), w))
+    };
+    let (alone, _) = round(false).expect("the fixed picked-edge control must build");
+    let (chain, warning) = round(true).expect("the chain round fails where the picked edge alone builds");
+    // the cut of an R round along a length L is (1 - pi/4) r^2 L
+    let cut = |r: f64, l: f64| (1.0 - std::f64::consts::FRAC_PI_4) * r * r * l;
+    assert!(alone > cut(1.0, 90.0) && alone < cut(2.0, 90.0), "{alone}");
+    if warning.contains("could not run along the tangent chain") {
+        assert!(rel(chain, alone) < 1e-9, "{chain} vs {alone}: {warning}");
+        assert!(!warning.contains("chain closes on itself"), "{warning}");
+    } else {
+        // the chain is 90 + 5 pi + 50 long
+        let along = 90.0 + 5.0 * std::f64::consts::PI + 50.0;
+        assert!(chain > cut(1.0, along) && chain < cut(2.0, along), "{chain}");
+        assert!(chain > alone * 1.2, "{chain} vs {alone}");
+    }
+}
+
+#[test]
 fn spline_fillet_takes_over_a_taper() {
     // A tapered fillet keeps each edge's radius spline; given back as a `spline` fillet it makes
     // the same part, and its control radii are then the user's to change.

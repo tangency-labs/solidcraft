@@ -1405,12 +1405,15 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
+        FeatureKind::SurfaceExtend { edges, mode, angle, up_to, neighbours, .. } => {
             // The dialog edits the edges and the distance or the plane, face or body they go up to; the
-            // rest is kept as it was.
+            // rest (a law extension's angle too) is kept as it was.
             let mut extra = Map::new();
             if !mode.is_natural() {
                 extra.insert("mode".into(), json!(mode));
+            }
+            if let Some(a) = angle {
+                extra.insert("angle".into(), json!(a));
             }
             if !*neighbours {
                 extra.insert("neighbours".into(), json!(false));
