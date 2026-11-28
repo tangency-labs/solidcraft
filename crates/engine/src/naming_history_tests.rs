@@ -1826,8 +1826,9 @@ fn a_renamed_piece_of_a_mirrored_cut_keeps_its_name_when_an_upstream_notch_takes
 
 /// #4341: suppressing or deleting the feature that created a blend's target body must never jump
 /// a Fillet or Chamfer onto another body in the design. Suppressing the upstream maker leaves the
-/// blend waiting with a clear warning (no error, nothing re-pointed) and recovers cleanly on
-/// unsuppress; deleting the upstream maker fails with an actionable missing-reference error.
+/// blend failing with a clear suppressed-maker diagnostic (nothing re-pointed, distinct from
+/// `Reselect`/`unknown body`) and recovers cleanly on unsuppress; deleting the upstream maker
+/// invalidates cached state and fails with an actionable missing-reference error.
 #[test]
 fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
     let fillet_removed = (4.0 - std::f64::consts::PI) * 30.0;
@@ -1857,11 +1858,15 @@ fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
             assert!(has_volume(&s, "Body1", 12000.0 - removed), "{command}: {}", volume_of(&s, "Body1"));
             assert!(has_volume(&s, "Body2", 12000.0), "{command}: {}", volume_of(&s, "Body2"));
 
-            // Suppressing Extrude1 leaves Blend waiting cleanly and must never touch Body2.
+            // Suppressing Extrude1 leaves Blend failing with a suppressed-maker error (not Reselect)
+            // and must never touch Body2.
             run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
-            assert_eq!(error(&s, "Blend"), None, "{command} clear_body={clear_body}");
-            let warn = warning(&s, "Blend").unwrap_or_default();
-            assert!(warn.contains("Extrude1") && warn.contains("suppressed"), "{command} clear_body={clear_body}: {warn}");
+            let suppressed_err = error(&s, "Blend").unwrap_or_default();
+            assert!(
+                suppressed_err.contains("Extrude1") && suppressed_err.contains("suppressed"),
+                "{command} clear_body={clear_body}: {suppressed_err}"
+            );
+            assert!(reselect(&s, "Blend").is_none(), "{command} clear_body={clear_body}: suppressed maker must not ask to reselect");
             assert!(has_volume(&s, "Body2", 12000.0), "{command} jumped onto Body2: {}", volume_of(&s, "Body2"));
             assert!(solid_at(&s, [139.9, 15.0, 9.9]), "{command} blended Body2's edge");
 
@@ -1869,8 +1874,7 @@ fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
             let mut cold = Session::new(solidcraft_doc::Document::clone(&s.doc));
             cold.model.no_cache = true;
             cold.refresh();
-            assert_eq!(error(&cold, "Blend"), None, "cold {command}");
-            assert_eq!(warning(&cold, "Blend"), warning(&s, "Blend"), "cold {command}");
+            assert_eq!(error(&cold, "Blend"), error(&s, "Blend"), "cold {command}");
             assert!(has_volume(&cold, "Body2", 12000.0), "cold {command}");
 
             // Unsuppressing Extrude1 restores the exact original blend with no error or warning.
@@ -1882,7 +1886,7 @@ fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
 
             // Transitioning from suppressed -> deleted invalidates any cached state and errors clearly.
             run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
-            assert_eq!(error(&s, "Blend"), None);
+            assert!(error(&s, "Blend").as_deref().is_some_and(|e| e.contains("suppressed")));
             run(&mut s, "timeline.delete", json!({"features": ["Extrude1"]}));
             let err = error(&s, "Blend").expect("deleted upstream maker must error");
             if clear_body {
@@ -1938,8 +1942,9 @@ fn unnamed_blend_never_jumps_to_another_body_or_unrelated_edge() {
 }
 
 /// #4341: suppressing an upstream joined feature on the same body leaves a Fillet/Chamfer on its
-/// edges waiting with a suppressed-feature warning (leaving the base body untouched), recovers
-/// cleanly on unsuppress, and fails with `Reselect` when the maker feature is deleted instead.
+/// edges failing with a suppressed-feature diagnostic (leaving the base body untouched and
+/// distinct from `Reselect`), recovers cleanly on unsuppress, and transitions to `Reselect` when
+/// the maker feature is deleted instead.
 #[test]
 fn suppressed_vs_deleted_joined_maker_on_same_body_is_distinct_and_recovers() {
     let fillet_removed = (1.0 - std::f64::consts::FRAC_PI_4) * 10.0;
@@ -1955,11 +1960,11 @@ fn suppressed_vs_deleted_joined_maker_on_same_body_is_distinct_and_recovers() {
         assert_eq!(error(&s, "Blend"), None, "{command}");
         assert!(has_volume(&s, "Body1", 12500.0 - removed), "{command}: {}", volume_of(&s, "Body1"));
 
-        // Suppress Boss: Body1 stays at 12000 mm³, Blend warns without error.
+        // Suppress Boss: Body1 stays at 12000 mm³, Blend fails naming suppressed Boss (not Reselect).
         run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
-        assert_eq!(error(&s, "Blend"), None, "suppressed {command}");
-        let warn = warning(&s, "Blend").unwrap_or_default();
-        assert!(warn.contains("Boss") && warn.contains("suppressed"), "{command}: {warn}");
+        let suppressed_err = error(&s, "Blend").unwrap_or_default();
+        assert!(suppressed_err.contains("Boss") && suppressed_err.contains("suppressed"), "{command}: {suppressed_err}");
+        assert!(reselect(&s, "Blend").is_none(), "suppressed {command} must not ask to reselect");
         assert!(has_volume(&s, "Body1", 12000.0), "suppressed {command} touched Body1: {}", volume_of(&s, "Body1"));
 
         // Unsuppress Boss: Blend resolves the original edge again.
@@ -1968,9 +1973,9 @@ fn suppressed_vs_deleted_joined_maker_on_same_body_is_distinct_and_recovers() {
         assert_eq!(warning(&s, "Blend"), None, "unsuppressed {command}");
         assert!(has_volume(&s, "Body1", 12500.0 - removed), "unsuppressed {command}: {}", volume_of(&s, "Body1"));
 
-        // Suppress then delete Boss: must switch cleanly from suppressed warning to Reselect error.
+        // Suppress then delete Boss: must switch cleanly from suppressed error to Reselect error.
         run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
-        assert_eq!(error(&s, "Blend"), None);
+        assert!(error(&s, "Blend").as_deref().is_some_and(|e| e.contains("suppressed")));
         run(&mut s, "timeline.delete", json!({"features": ["Boss"]}));
         assert!(reselect(&s, "Blend").is_some(), "deleted {command}: {:?}", error(&s, "Blend"));
         assert!(has_volume(&s, "Body1", 12000.0), "deleted {command} touched Body1: {}", volume_of(&s, "Body1"));

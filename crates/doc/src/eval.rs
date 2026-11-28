@@ -10434,18 +10434,37 @@ fn boxes_overlap(a_min: Vec3, a_max: Vec3, b_min: Vec3, b_max: Vec3, slack: f64)
         && a_max.z + slack >= b_min.z
 }
 
+/// How far from an edge of a body this big a pick still means it: matches the kernel's
+/// `blend_smlib::pick_tolerance` and the engine command's `features::edge_reach`.
+fn blend_edge_reach(size: f64) -> f64 {
+    size * 0.05 + 1e-3
+}
+
+/// How far `p` is from the nearest edge of `b`, when within [`blend_edge_reach`].
+fn edge_within_reach(b: &ModelBody, p: Vec3) -> Option<f64> {
+    if b.body.is_mesh() {
+        return None;
+    }
+    let size = b.body.size();
+    let (_, d) = b.body.nearest_edge(p, (size * 1e-3).max(1e-3)).ok()??;
+    (d <= blend_edge_reach(size)).then_some(d)
+}
+
 /// Edge reference points re-found on the body, preserving each kept pick's index in `pts`: points
 /// on an edge stay; a point that moved off (an upstream edit on the same body) is carried with the
 /// body (its place in the body's bounding box then and now) to an edge running the same way when
-/// the body still overlaps its saved box; points with no matching edge are skipped with a warning,
-/// never moved onto an unrelated nearby edge.
-fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[Option<&EdgeRef>], warning: &mut Option<String>) -> Result<Vec<(usize, Vec3)>> {
+/// the body still overlaps its saved box; a point within [`blend_edge_reach`] takes that edge;
+/// when `allow_nearest` is set (an unnamed blend pinned to an explicit target body), a pick with a
+/// unique nearest edge within a quarter of the body diagonal follows it with a warning. Otherwise
+/// points with no matching edge are skipped with a warning, never moved onto an unrelated edge.
+fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[Option<&EdgeRef>], allow_nearest: bool, warning: &mut Option<String>) -> Result<Vec<(usize, Vec3)>> {
     let size = b.size();
     let edges = b.edges((size * 1e-3).max(1e-3))?;
     let tight = (size * 2e-3).max(1e-3);
+    let reach = blend_edge_reach(size);
     let dist = |p: Vec3, e: &kernel::EdgeInfo| e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
     let now = b.mesh(&solidcraft_kernel::MeshTolerance::chord((size * 1e-2).max(1e-2))).map(|m| m.bounds()).ok();
-    let (mut out, mut lost) = (Vec::new(), 0usize);
+    let (mut out, mut moved, mut lost) = (Vec::new(), 0usize, 0usize);
     for (k, &p) in pts.iter().enumerate() {
         let on = edges.iter().any(|e| dist(p, e) <= tight);
         if on {
@@ -10474,13 +10493,40 @@ fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[Option<&EdgeRef>], warning: &mu
                 continue;
             }
         }
-        lost += 1;
+        let mut best: Option<(f64, Vec3)> = None;
+        let mut second = f64::INFINITY;
+        for e in &edges {
+            let d = dist(p, e);
+            if best.is_none_or(|(bd, _)| d < bd) {
+                if let Some((bd, _)) = best {
+                    second = second.min(bd);
+                }
+                best = Some((d, e.mid));
+            } else if d < second {
+                second = d;
+            }
+        }
+        match best {
+            Some((d, mid)) if d <= reach => out.push((k, mid)),
+            Some((d, mid)) if allow_nearest && d <= size * 0.25 && d + tight < second => {
+                out.push((k, mid));
+                moved += 1;
+            }
+            _ => lost += 1,
+        }
     }
     if out.is_empty() {
         return Err(DocError::Invalid("none of the selected edges exist any more".into()));
     }
-    if lost > 0 {
-        *warning = Some(format!("{lost} edge reference(s) no longer found and skipped"));
+    if moved + lost > 0 {
+        let mut w = Vec::new();
+        if moved > 0 {
+            w.push(format!("{moved} edge reference(s) re-found on the nearest edge"));
+        }
+        if lost > 0 {
+            w.push(format!("{lost} edge reference(s) no longer found and skipped"));
+        }
+        *warning = Some(w.join("; "));
     }
     Ok(out)
 }
@@ -10493,9 +10539,9 @@ fn no_solid_body_error(state: &ModelState) -> DocError {
     }
 }
 
-/// The body a fillet/chamfer applies to: by name, or the solid body with an edge through the first
-/// edge point (within pick reach). Never jumps to an unrelated distant body when no body has an
-/// edge at the pick.
+/// The body a fillet/chamfer applies to: by name, or the solid body with an edge within
+/// [`blend_edge_reach`] of the first edge point. Never jumps to an unrelated distant body when no
+/// body has an edge within pick reach.
 pub fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
         return state.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
@@ -10508,7 +10554,7 @@ pub fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &
             continue;
         }
         any_solid = true;
-        if let Some(d) = edge_through(b, *p)
+        if let Some(d) = edge_within_reach(b, *p)
             && best.is_none_or(|(_, bd)| d < bd)
         {
             best = Some((i, d));
@@ -10670,11 +10716,11 @@ fn body_on_edge(st: &ModelState, p: Vec3) -> Option<usize> {
     st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
 }
 
-/// The body (index) an edge picked at `p` without a name lies on, as [`body_on_edge`], and the note
-/// when `p` lies on edges of other bodies too: every body with an edge through `p` about as near
+/// The body (index) an edge picked at `p` without a name lies on (within [`blend_edge_reach`]),
+/// and the note when `p` lies on edges of other bodies too: every body with an edge about as near
 /// as the nearest one, the window the `solid.fillet` command refuses such a pick with (#20517).
 fn body_on_edge_noted(st: &ModelState, p: Vec3) -> (Option<usize>, Option<String>) {
-    let near: Vec<(usize, f64)> = st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).collect();
+    let near: Vec<(usize, f64)> = st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_within_reach(b, p)?))).collect();
     let Some(&(chosen, d_min)) = near.iter().min_by(|a, b| a.1.total_cmp(&b.1)) else { return (None, None) };
     let mut names: Vec<&str> =
         near.iter().filter(|(_, d)| *d <= 2.0 * d_min + 1e-3).filter_map(|(i, _)| Some(st.bodies.get(*i)?.name.as_str())).collect();
@@ -10709,7 +10755,8 @@ fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
 enum BlendPickTarget {
     /// Resolve this pick on `st.bodies[ti]`.
     Body(usize),
-    /// This pick's direct upstream maker feature(s) are suppressed: wait without error.
+    /// This pick's direct upstream maker feature(s) are suppressed: skipped if other picks survive,
+    /// or reported as a suppressed-maker error if no picks remain (distinct from deleted/reselect).
     Suppressed(Vec<String>),
     /// An unnamed pick has no body with an edge at its point.
     Lost,
@@ -10852,8 +10899,13 @@ pub(crate) fn blend_edges_on(
     if !f.edge_names.iter().any(|n| !n.is_empty()) {
         let pts: Vec<Vec3> = idx.iter().map(|i| pick(*i)).collect();
         let refs: Vec<Option<&EdgeRef>> = idx.iter().map(|i| f.edge_refs.get(*i)).collect();
+        let explicit_body = matches!(
+            &f.kind,
+            FeatureKind::Fillet { body: Some(_), .. } | FeatureKind::Chamfer { body: Some(_), .. } | FeatureKind::Dogbone { body: Some(_), .. }
+        );
         let mut warning = None;
-        let points: Vec<(usize, Vec3)> = resolve_edges(&mb.body, &pts, &refs, &mut warning)?.into_iter().map(|(k, p)| (idx[k], p)).collect();
+        let points: Vec<(usize, Vec3)> =
+            resolve_edges(&mb.body, &pts, &refs, explicit_body, &mut warning)?.into_iter().map(|(k, p)| (idx[k], p)).collect();
         let unnamed_lost = idx.len().saturating_sub(points.len());
         return Ok(ResolvedBlendEdges { points, warning, suppressed_makers: Vec::new(), suppressed_count: 0, unnamed_lost });
     }
@@ -10872,7 +10924,7 @@ pub(crate) fn blend_edges_on(
             if pick_lies_on_a_round_axis(&mb.body, p) {
                 unnamed_lost += 1;
                 notes.push(skipped.into());
-            } else if let Ok(q) = resolve_edges(&mb.body, &[p], &refs, &mut w) {
+            } else if let Ok(q) = resolve_edges(&mb.body, &[p], &refs, false, &mut w) {
                 out.extend(q.into_iter().map(|(_, pt)| (i, pt)));
                 notes.push("an edge reference without a name was found by its point".into());
             } else {
@@ -20237,10 +20289,7 @@ fn eval_feature_kind(
                 if suppressed_count > 0 && unnamed_lost == 0 {
                     let list = suppressed_makers.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
                     let verb = if suppressed_makers.len() == 1 { "is" } else { "are" };
-                    notes.push(format!("nothing to blend: {list} {verb} suppressed"));
-                    *warning = Some(notes.join("; "));
-                    st.blend_edges.insert(f.id, Vec::new());
-                    return Ok(());
+                    return Err(DocError::Invalid(format!("nothing to blend: {list} {verb} suppressed")));
                 }
                 if !edges.is_empty() {
                     let why = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) };
@@ -23262,7 +23311,8 @@ mod blend_reference_hardening_tests {
     use super::*;
 
     /// #4341: `blend_target` with no explicit body must never jump to a distant unrelated body
-    /// when the original target body is missing or moved away.
+    /// when the original target body is missing or moved away, while still accepting picks within
+    /// standard blend pick reach (`size * 0.05 + 1e-3`).
     #[test]
     fn blend_target_never_jumps_to_unrelated_distant_body() {
         let mut st = ModelState::default();
@@ -23272,6 +23322,8 @@ mod blend_reference_hardening_tests {
         let err = blend_target(&st, &None, &[Vec3::new(20.0, 10.0, 10.0)]).unwrap_err();
         assert!(err.to_string().contains("none of the selected edges exist any more"), "{err}");
         assert_eq!(blend_target(&st, &None, &[Vec3::new(520.0, 10.0, 10.0)]).unwrap(), 0);
+        // 1.0 mm off the edge on a 20×20×10 box (diagonal 30, reach 1.501 mm) still hits Body2.
+        assert_eq!(blend_target(&st, &None, &[Vec3::new(521.0, 10.0, 10.0)]).unwrap(), 0);
     }
 
     /// #4341: when two copies share identical face/edge names (`NameCell::same`) and the pick
@@ -23296,23 +23348,34 @@ mod blend_reference_hardening_tests {
     }
 
     /// #4341: `resolve_edges` must refuse a disappeared edge instead of jumping to an unrelated
-    /// nearby edge (within 25% of the body diagonal) or linearly remapping an `EdgeRef` from a
-    /// disjoint body.
+    /// nearby edge (when `allow_nearest` is false or equidistant) or linearly remapping an
+    /// `EdgeRef` from a disjoint body, while allowing explicit-body unnamed blends to follow a
+    /// unique nearest edge after a resize.
     #[test]
     fn resolve_edges_refuses_unrelated_nearby_edge_and_disjoint_ref() {
         let solid = kernel::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
         let mut warn = None;
-        // Midpoint of the right face is 5 mm from the top/bottom edges (within old 0.25 * size).
-        assert!(resolve_edges(&solid, &[Vec3::new(40.0, 15.0, 5.0)], &[], &mut warn).is_err());
+        // Midpoint of the right face is 5 mm from the top/bottom edges (within old 0.25 * size
+        // and equidistant between two edges): refused both without and with `allow_nearest`.
+        assert!(resolve_edges(&solid, &[Vec3::new(40.0, 15.0, 5.0)], &[], false, &mut warn).is_err());
+        assert!(resolve_edges(&solid, &[Vec3::new(40.0, 15.0, 5.0)], &[], true, &mut warn).is_err());
 
         // An EdgeRef recorded on a disjoint body at x = 500..540 must not remap onto x = 0..40.
         let disjoint = EdgeRef { dir: Vec3::Y, min: Vec3::new(500.0, 0.0, 0.0), max: Vec3::new(540.0, 30.0, 10.0) };
-        assert!(resolve_edges(&solid, &[Vec3::new(540.0, 15.0, 10.0)], &[Some(&disjoint)], &mut warn).is_err());
+        assert!(resolve_edges(&solid, &[Vec3::new(540.0, 15.0, 10.0)], &[Some(&disjoint)], false, &mut warn).is_err());
+        assert!(resolve_edges(&solid, &[Vec3::new(540.0, 15.0, 10.0)], &[Some(&disjoint)], true, &mut warn).is_err());
 
         // An edge pick actually on the body still resolves cleanly.
-        let hit = resolve_edges(&solid, &[Vec3::new(40.0, 15.0, 10.0)], &[], &mut warn).unwrap();
+        let hit = resolve_edges(&solid, &[Vec3::new(40.0, 15.0, 10.0)], &[], false, &mut warn).unwrap();
         assert_eq!(hit, vec![(0, Vec3::new(40.0, 15.0, 10.0))]);
         assert_eq!(warn, None);
+
+        // A pick 4 mm past x = 40 (outside reach 2.55 mm) is refused without `allow_nearest`,
+        // but follows the unique nearest edge when `allow_nearest` is set (explicit target body).
+        assert!(resolve_edges(&solid, &[Vec3::new(44.0, 15.0, 10.0)], &[], false, &mut warn).is_err());
+        let moved = resolve_edges(&solid, &[Vec3::new(44.0, 15.0, 10.0)], &[], true, &mut warn).unwrap();
+        assert_eq!(moved, vec![(0, Vec3::new(40.0, 15.0, 10.0))]);
+        assert!(warn.as_deref().is_some_and(|w| w.contains("re-found on the nearest edge")), "{warn:?}");
     }
 
     /// #4341: `edge_maker_ids` extracts direct face makers (base, nested blend/inner, and copies)
