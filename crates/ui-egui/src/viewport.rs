@@ -298,6 +298,9 @@ pub struct ViewportState {
     /// None before the host's early confirmation paint; Some(NOTHING) means
     /// no visible pair this pass. Late controls retain the already drawn rect.
     pub(crate) host_confirm: Option<Rect>,
+    /// Where the axis navigator is drawn while it glides to `layout.axis_view`.
+    /// What lays out around it keeps using the settled place.
+    pub(crate) axis_glide: Option<Rect>,
     /// Snapshot of this host pass's shared persistent Window paint. None is a
     /// bounded-ledger failure; the usable seam then refuses placement/framing.
     pub(crate) host_windows: Option<Vec<Rect>>,
@@ -11789,6 +11792,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
 }
 
 pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
+    app.viewport.axis_glide = None;
     if let Some(rect) = app.viewport.rect {
         if app.universal_panel_frame().is_some() {
             let Ok(usable) = control_region(app, rect) else {
@@ -11825,6 +11829,9 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
                     false,
                 )
             });
+            if !crate::view_tiles::shown(app) {
+                ease_axis_view(app, ctx);
+            }
             return;
         }
         let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
@@ -11837,6 +11844,93 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             crate::view_confirm::size(app),
             navigation,
         ));
+    }
+}
+
+/// Every place the axis navigator takes with no panel in the way, with its
+/// clearance: where it sits alone and where it sits below the OK and Cancel pair
+/// a dialog or sketch shows, both clear of the navigation bar. Side columns start
+/// below all of it, so neither docking a panel nor opening a dialog pushes the
+/// navigator aside or moves the column. `None` when the view shows no navigator.
+pub(crate) fn axis_home(
+    app: &SolveApp,
+    ctx: &egui::Context,
+    domain: Rect,
+    chrome: &[solidcraft_engine::panels::LogicalRect],
+) -> Option<(solidcraft_engine::panels::LogicalRect, solidcraft_engine::panels::LogicalRect)> {
+    // The render workspace keeps its approved fixed layout: the stage's inspector
+    // stays level with its browser.
+    if !compass_enabled(app)
+        || !crate::navigation_bar_view::canvas_caps(app).orbit
+        || crate::view_tiles::shown(app)
+        || crate::render_workspace::active(app)
+    {
+        return None;
+    }
+    let usable = crate::panel_runtime::resolve_usable_region(crate::panel_runtime::logical_rect(domain), chrome).ok()?;
+    let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, domain).rect } else { Rect::NOTHING };
+    let style = crate::view_gizmo::style(app);
+    let corners = [Some(egui::Vec2::ZERO), app.preferences.view_confirm_corner.then(crate::view_confirm::shown_size)];
+    let places: Vec<_> = corners
+        .into_iter()
+        .flatten()
+        .map(|corner| crate::viewport_layout::Layout::host_with_axis(domain, &usable, style, corner, navigation, true).axis_view)
+        .filter(|place| place.is_positive() && place.is_finite())
+        .collect();
+    let alone = *places.first()?;
+    let union = places.iter().fold(alone, |all, place| all.union(*place));
+    Some((crate::panel_runtime::logical_rect(union.expand(solidcraft_theme::Tokens::get().space_4)), crate::panel_runtime::logical_rect(alone)))
+}
+
+/// The axis navigator glides to a new place when a panel moves it, instead of
+/// jumping on the release. A resized view or reduced motion places it at once.
+fn ease_axis_view(app: &mut SolveApp, ctx: &egui::Context) {
+    #[derive(Clone, Copy)]
+    struct Glide {
+        viewport: Rect,
+        from: Rect,
+        to: Rect,
+        started: f64,
+        revision: Option<u64>,
+        revised: f64,
+    }
+    let id = egui::Id::unique("viewport.axis_view.glide");
+    let revision = app.panel_runtime().map(|runtime| solidcraft_engine::panels::ActionSink::inspect(runtime.layout()).revision);
+    app.viewport.axis_glide = None;
+    let reduced = app.panel_runtime().is_some_and(|runtime| runtime.environment().motion == crate::panel_runtime::Motion::Reduced);
+    let Some(layout) = app.viewport.layout.as_ref() else { return };
+    let (viewport, target) = (layout.viewport, layout.axis_view);
+    if !viewport.is_finite() || !target.is_finite() || !target.is_positive() {
+        ctx.data_mut(|data| data.remove::<Glide>(id));
+        return;
+    }
+    let now = ctx.input(|input| input.time);
+    let duration = solidcraft_theme::panel_motion_duration(ctx, reduced);
+    let at = |glide: &Glide| {
+        let time = if duration > 0.0 { ((now - glide.started) as f32 / duration).clamp(0.0, 1.0) } else { 1.0 };
+        let progress = solidcraft_theme::panel_motion_ease(time);
+        (Rect::from_min_max(glide.from.min.lerp(glide.to.min, progress), glide.from.max.lerp(glide.to.max, progress)), time < 1.0)
+    };
+    let glide = match ctx.data(|data| data.get_temp::<Glide>(id)) {
+        // Only a panel move glides it (the place follows the layout a frame or two
+        // later); a dialog or a resize places it at once.
+        Some(glide) if glide.viewport == viewport && duration > 0.0 && !crate::render_workspace::active(app) => {
+            let revised = if glide.revision != revision { now } else { glide.revised };
+            if glide.to == target {
+                Glide { revision, revised, ..glide }
+            } else if now - revised <= 0.3 {
+                Glide { viewport, from: at(&glide).0, to: target, started: now, revision, revised }
+            } else {
+                Glide { viewport, from: target, to: target, started: now, revision, revised }
+            }
+        }
+        _ => Glide { viewport, from: target, to: target, started: now, revision, revised: f64::NEG_INFINITY },
+    };
+    ctx.data_mut(|data| data.insert_temp(id, glide));
+    let (shown, moving) = at(&glide);
+    if moving {
+        app.viewport.axis_glide = Some(shown);
+        ctx.request_repaint();
     }
 }
 
@@ -11895,7 +11989,7 @@ pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
         .layout
         .as_ref()
         .filter(|layout| layout.viewport == rect || layout.viewport == crate::render_workspace::camera_rect(app, rect))
-        .map(|layout| layout.axis_view)
+        .map(|layout| app.viewport.axis_glide.unwrap_or(layout.axis_view))
         .unwrap_or_else(|| {
             let size = axis_view_size(crate::view_gizmo::style(app));
             Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))

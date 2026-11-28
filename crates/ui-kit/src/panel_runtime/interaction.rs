@@ -1678,7 +1678,9 @@ pub fn empty_workspace_float(
     let grab = own.filter(|_| floating).map(|card| Point { x: start.x - card.outer.origin.x, y: start.y - card.outer.origin.y });
     let above = at.y < cap.origin.y;
     let clamped = Point { x: at.x.clamp(cap.origin.x, right(cap)), y: at.y.clamp(cap.origin.y, bottom(cap)) };
-    float_preview(service, layout, instance, clamped, grab, above)
+    // Only a release on the navigator's own place covers it; near it the card lands below.
+    let displace = layout.geometry_policy.navigator.is_some_and(|navigator| navigator.contains(at));
+    float_preview(service, layout, instance, clamped, grab, above, displace)
 }
 
 fn float_preview(
@@ -1688,6 +1690,7 @@ fn float_preview(
     at: Point,
     grab: Option<Point>,
     top_at_pointer: bool,
+    displace: bool,
 ) -> PanelResult<HostPreview> {
     let panel = service.layout().instance(instance)?;
     if !service.registry().get(&panel.kind)?.allowed_zones.contains(&Zone::Floating) {
@@ -1698,7 +1701,14 @@ fn float_preview(
     let grab = grab.unwrap_or(Point { x: size.width / 2.0, y: layout.metrics.header_height / 2.0 });
     let cap = layout.capacity;
     let x = (at.x - grab.x).clamp(cap.origin.x, (right(cap) - size.width).max(cap.origin.x));
-    let y = (if top_at_pointer { at.y } else { at.y - grab.y }).clamp(cap.origin.y, (bottom(cap) - layout.metrics.header_height).max(cap.origin.y));
+    let mut y =
+        (if top_at_pointer { at.y } else { at.y - grab.y }).clamp(cap.origin.y, (bottom(cap) - layout.metrics.header_height).max(cap.origin.y));
+    if !displace
+        && let Some(keep) = layout.geometry_policy.keep_clear
+        && intersect_rect(rect(x, y, size.width, size.height), keep).is_some()
+    {
+        y = y.max((bottom(keep) + layout.metrics.gap).min((bottom(cap) - layout.metrics.header_height).max(cap.origin.y)));
+    }
     let destination = Destination::NewSection { section, index, location: SectionLocation::Floating { origin: Point { x, y } }, size };
     let candidate = move_action(service, layout, instance, &destination, false)?;
     let proposed = project_reserved(service, layout, candidate.clone())?;

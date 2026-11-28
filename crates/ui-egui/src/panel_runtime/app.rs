@@ -1757,6 +1757,7 @@ impl crate::SolveApp {
         let force_opaque = self.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
         let direction = crate::i18n::panel_direction(&self.preferences.language);
         let shortcuts = crate::keymap::panel_shortcuts(self);
+        let axis_home = crate::viewport::axis_home(self, ui.ctx(), render_domain, &chrome);
         if visible {
             self.shell.cards = cards;
             self.shell.status_bar = status_bar;
@@ -1774,6 +1775,7 @@ impl crate::SolveApp {
                     if let Some(host) = &mut integration.host {
                         host.note_egui_context(ui.ctx(), force_opaque);
                         host.set_gap(gap)?;
+                        host.set_keep_clear(axis_home.map(|home| home.0), axis_home.map(|home| home.1));
                     }
                     integration.prepare_host_in_domain(&self.session, logical_rect(render_domain), logical_rect(placement), &chrome)
                 })();

@@ -787,24 +787,83 @@ mod tests {
         for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
-            let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
+            let states: Vec<bool> = TOGGLES.iter().map(|&(k, _)| option_on(&h, k)).collect();
+            // Test change: below the navigator the column is shorter and the last option sits
+            // under the pinned footer; scroll each option into view first, as a person would, and
+            // check that this option (and no other) flipped, so a click on a neighbour can't pass.
+            let at = scroll_into_options(&mut h, &format!("sketch_palette:toggle:{key}"));
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_ne!(h.app.session.doc.to_json(), before, "{key}");
+            for (&(other, _), was) in TOGGLES.iter().zip(&states) {
+                assert_eq!(option_on(&h, other), *was != (other == key), "clicking {key}: {other}");
+            }
             assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
             assert_eq!(h.app.session.active_sketch, Some(active));
             h.app.run("edit.undo", json!({})).unwrap();
             h.settle();
             assert_eq!(h.app.session.doc.to_json(), before, "{key}");
         }
-        let construction = crate::scenario::handle_at("sketch_palette:toggle:construction_mode").unwrap();
+        let construction = scroll_into_options(&mut h, "sketch_palette:toggle:construction_mode");
         h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
         assert_eq!(mode(&h.app), 1);
         h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
         assert_eq!(mode(&h.app), 0);
-        let infinite = crate::scenario::handle_at("dialog:Line Type:infinite").expect("the Infinite segment is drawn");
+        assert!(crate::scenario::handle_at("dialog:Line Type:infinite").is_some(), "the Infinite segment is drawn");
+        let infinite = scroll_into_options(&mut h, "dialog:Line Type:infinite");
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    /// Scrolls the palette's options area until the named handle is inside it, as a person
+    /// would, and returns where to click. Fails if the handle never comes into view.
+    fn scroll_into_options(h: &mut crate::scenario::Harness, handle: &str) -> egui::Pos2 {
+        for _ in 0..8 {
+            let at = crate::scenario::handle_at(handle).unwrap();
+            let options = crate::scenario::rect_of("sketch_palette:options").unwrap().shrink(8.0);
+            if options.contains(at) {
+                break;
+            }
+            let delta = if at.y > options.bottom() { -120 } else { 120 };
+            h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":delta}));
+            settle_scroll(h);
+        }
+        assert!(!h.ctx.input(|input| input.is_scrolling()), "{handle}: the options area is still scrolling");
+        let at = crate::scenario::handle_at(handle).unwrap();
+        let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
+        assert!(options.contains(at), "{handle} scrolls into view: {at:?} outside {options:?}");
+        at
+    }
+
+    /// Follows the wheel's actual smoothing, rather than clicking the palette's moving content.
+    fn settle_scroll(h: &mut crate::scenario::Harness) {
+        h.settle();
+        for _ in 0..120 {
+            if h.ctx.input(|input| !input.is_scrolling()) {
+                break;
+            }
+            h.frame();
+        }
+    }
+
+    /// Whether the active sketch's palette option `key` is on, read from the sketch itself.
+    fn option_on(h: &crate::scenario::Harness, key: &str) -> bool {
+        let world = h.app.session.world_state().unwrap();
+        let view = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view;
+        match key {
+            "grid" => !view.hide_grid,
+            "snap" => !view.no_snap,
+            "slice" => view.slice,
+            "show_profile" => !view.hide_profile,
+            "show_points" => !view.hide_points,
+            "show_dimensions" => !view.hide_dimensions,
+            "show_constraints" => !view.hide_constraints,
+            "show_projected" => !view.hide_projected,
+            "show_construction" => !view.hide_construction,
+            "show_control_polygons" => !view.hide_control_polygons,
+            "sketch_3d" => view.three_d,
+            _ => panic!("unknown palette option {key}"),
+        }
     }
 
     #[test]
@@ -1030,7 +1089,23 @@ mod tests {
             h.call("ui.resize", json!({"width":1400,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":scale}));
             h.settle();
+            // Below the navigator the column is shorter: scroll the fold out from under the pinned
+            // footer first, as a person would.
+            for _ in 0..8 {
+                let fold = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+                let footer_top = crate::scenario::rect_of("sketch_palette:finish").unwrap().top();
+                if fold.y < footer_top - 4.0 {
+                    break;
+                }
+                h.call("ui.scroll", json!({"x":fold.x,"y":fold.y.min(footer_top - 20.0),"delta":-120}));
+                settle_scroll(&mut h);
+            }
+            assert!(!h.ctx.input(|input| input.is_scrolling()), "scale{scale} height{height}: the options area is still scrolling");
             let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+            assert!(
+                at.y < crate::scenario::rect_of("sketch_palette:finish").unwrap().top(),
+                "scale{scale} height{height}: the fold scrolls into view"
+            );
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             let baseline = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
@@ -1040,7 +1115,8 @@ mod tests {
             let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
             assert!(vp.contains_rect(options));
             h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":-1000}));
-            h.settle();
+            settle_scroll(&mut h);
+            assert!(!h.ctx.input(|input| input.is_scrolling()), "scale{scale} height{height}: the options area is still scrolling");
             assert_eq!(h.app.session.doc.to_json(), baseline);
             assert_eq!(h.app.session.undo.len(), undo);
             let [x, y] = h.widget("3D Sketch").unwrap();
