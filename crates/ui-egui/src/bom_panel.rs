@@ -292,14 +292,26 @@ fn actions(ui: &mut egui::Ui, selected: bool) -> Option<Action> {
 
 fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     let was = (d.top, d.by_definition, d.group_children);
-    let available = ui.available_width();
+    let available = ui.available_width().min((ui.clip_rect().right() - ui.cursor().left()).max(0.0));
     ui.horizontal_wrapped(|ui| {
+        let mut used = 0.0;
         for (key, option, labels) in
             [("bom:levels", &mut d.top, ["Parts only", "Top level"]), ("bom:group-by", &mut d.by_definition, ["By part number", "By definition"])]
         {
-            let width = ui_kit::ContentWidth::dropdown(ui, &labels).min(available);
+            let width = labels.iter().map(|label| ui_kit::ContentWidth::button(ui, label)).fold(0.0, f32::max) * 2.0;
+            let width = width.min(available);
+            if used > 0.0 && used + width + ui.spacing().item_spacing.x * 3.0 > available {
+                ui.end_row();
+                used = 0.0;
+            }
+            used += width + ui.spacing().item_spacing.x * 3.0;
             let mut selected = usize::from(*option);
-            let response = ui.allocate_ui(egui::vec2(width, ui_kit::row_height()), |ui| ui_kit::dropdown(ui, key, &mut selected, &labels)).inner;
+            let response = ui
+                .push_id(key, |ui| {
+                    ui.allocate_ui(egui::vec2(width, ui_kit::row_height()), |ui| ui_kit::segmented(ui, &mut selected, &labels, Default::default()))
+                })
+                .inner
+                .response;
             solidcraft_ui_registry::publish_target(key, response.rect);
             *option = selected == 1;
             ui.separator();
@@ -339,7 +351,7 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value]) {
         part_width = part_width.max(ui_kit::ContentWidth::label(ui, &text(row, "part_number")));
         qty_width = qty_width.max(ui_kit::ContentWidth::monospace(ui, &text(row, "count")));
     }
-    let mut columns = vec![
+    let columns = vec![
         ui_kit::Column::new(solidcraft_ui_text::tr("bom.column.item"), 0.0).min_content_width(item_width.min(t.control_height * 2.0)),
         ui_kit::Column::new("Part number", 0.0).min_content_width(part_width.min(available * 0.3)),
         ui_kit::Column::new("Description", 1.0).flex().min_content_width(ui_kit::ContentWidth::label(ui, "Description") + t.space_4),
@@ -349,26 +361,8 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value]) {
         ui_kit::Column::new("Material", 0.0),
         ui_kit::Column::new("Finish", 0.0),
     ];
-    let mut keys = COLUMN_KEYS.to_vec();
-    // Keep the main BOM columns visible; optional details must not displace quantity.
-    while columns.len() > 4 && ui_kit::table_min_width(ui, &columns) > available {
-        let _ = columns.pop();
-        let _ = keys.pop();
-    }
-    if ui_kit::table_min_width(ui, &columns) > available
-        && let Some(part) = columns.get_mut(1)
-    {
-        *part = ui_kit::Column::new("Part number", 0.0).manual_width(Some(part_width.min(available * 0.3).max(t.control_height)));
-    }
-    if ui_kit::table_min_width(ui, &columns) > available
-        && let Some(description) = columns.get_mut(2)
-    {
-        *description = ui_kit::Column::new("Description", 1.0).flex();
-    }
-    if columns.len() == 4 && ui_kit::table_min_width(ui, &columns) > available {
-        columns.remove(1);
-        keys.remove(0);
-    }
+    let keys = COLUMN_KEYS.to_vec();
+    // Every column stays reachable: a narrow panel scrolls the table sideways.
     // Inline labels retain native text selection and copying; only parent items pick a part.
     let rest = |cells: &mut ui_kit::TableRow<'_>, row: &Value| {
         for key in &keys {
@@ -383,50 +377,53 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value]) {
             });
         }
     };
-    ui_kit::table_custom(ui, "bom", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
-        table.headers(ui, |_, _| false);
-        for (i, row) in rows.iter().enumerate() {
-            let picked = d.picked == Some(i);
-            table.row(ui, &i.to_string(), picked, |cells| {
-                cells.cell(|ui| {
-                    let item = text(row, "item");
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    let response = ui
-                        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui_kit::button(
-                                ui,
-                                RichText::new(&item).font(egui::FontId::monospace(t.font_body)),
-                                if picked { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
-                            )
-                        })
-                        .inner
-                        .backing_on_hover_text(&item);
-                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, &item));
-                    solidcraft_ui_registry::publish_target(&format!("dialog:list:{i}"), response.rect);
-                    if picked || response.has_focus() {
-                        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-                    }
-                    if response.clicked() {
-                        if picked {
-                            d.clear_pick();
-                        } else {
-                            d.pick_row(i, row);
-                        }
-                    }
-                });
-                rest(cells, row);
-            });
-            for (child, c) in row["children"].as_array().into_iter().flatten().enumerate() {
-                table.row(ui, &format!("{i}:child:{child}"), false, |cells| {
+    ui.scope(|ui| {
+        ui.set_max_width(available.min((ui.clip_rect().right() - ui.cursor().left() - Tokens::get().space_12 * 2.0).max(0.0)));
+        ui_kit::table_custom(ui, "bom", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+            table.headers(ui, |_, _| false);
+            for (i, row) in rows.iter().enumerate() {
+                let picked = d.picked == Some(i);
+                table.row(ui, &i.to_string(), picked, |cells| {
                     cells.cell(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui_kit::text(ui, &text(c, "item"), ui_kit::Text::MonoInline)
-                        });
+                        let item = text(row, "item");
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                        let response = ui
+                            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui_kit::button(
+                                    ui,
+                                    RichText::new(&item).font(egui::FontId::monospace(t.font_body)),
+                                    if picked { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
+                                )
+                            })
+                            .inner
+                            .backing_on_hover_text(&item);
+                        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, &item));
+                        solidcraft_ui_registry::publish_target(&format!("dialog:list:{i}"), response.rect);
+                        if picked || response.has_focus() {
+                            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+                        }
+                        if response.clicked() {
+                            if picked {
+                                d.clear_pick();
+                            } else {
+                                d.pick_row(i, row);
+                            }
+                        }
                     });
-                    rest(cells, c);
+                    rest(cells, row);
                 });
+                for (child, c) in row["children"].as_array().into_iter().flatten().enumerate() {
+                    table.row(ui, &format!("{i}:child:{child}"), false, |cells| {
+                        cells.cell(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui_kit::text(ui, &text(c, "item"), ui_kit::Text::MonoInline)
+                            });
+                        });
+                        rest(cells, c);
+                    });
+                }
             }
-        }
+        });
     });
 }
 
@@ -663,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn the_table_keeps_quantity_visible_and_hides_optional_columns_in_narrow_panels() {
+    fn the_table_keeps_every_column_and_scrolls_sideways_in_narrow_panels() {
         let h = Harness::new();
         let ctx = h.ctx.clone();
         let rows = [
@@ -683,17 +680,15 @@ mod tests {
             let viewport = solidcraft_ui_registry::rect_of("dialog:table:bom:viewport").unwrap();
             let content = solidcraft_ui_registry::count_of("dialog:table:bom:content_width").unwrap() as f32;
             assert!(viewport.width() <= width, "the card stays inside the panel: {viewport:?}");
-            assert!((content - viewport.width()).abs() <= 1.0, "all visible columns fit: {width}, {content}, {viewport:?}");
-            if width <= 280.0 {
-                assert!(solidcraft_ui_registry::rect_of("dialog:column:bom:Rev").is_none());
-                assert!(solidcraft_ui_registry::rect_of("dialog:column:bom:Definition").is_none());
+            assert!(content + 1.0 >= viewport.width(), "the table is never narrower than its card: {width}, {content}, {viewport:?}");
+            for column in ["Rev", "Definition"] {
+                assert!(solidcraft_ui_registry::rect_of(&format!("dialog:column:bom:{column}")).is_some(), "{column} stays reachable at {width}");
             }
             let item = solidcraft_ui_registry::rect_of("dialog:table:bom:0:cell:Item").unwrap();
             let picker = solidcraft_ui_registry::rect_of("dialog:list:0").unwrap();
             assert!(item.contains_rect(picker), "the item picker fits its cell");
             assert!((item.right() - picker.right()).abs() < 1.0, "item numbers align to the right");
             let qty = solidcraft_ui_registry::rect_of("dialog:table:bom:0:cell:Qty").unwrap();
-            assert!(viewport.expand(1.0).contains_rect(qty), "quantity remains on screen at {width}: {qty:?}, {viewport:?}");
             let value = solidcraft_ui_registry::rect_of("dialog:inline:12").unwrap();
             assert!((qty.right() - value.right()).abs() < 1.0, "quantity is right aligned: {qty:?}, {value:?}");
             let other = solidcraft_ui_registry::rect_of("dialog:inline:34").unwrap();
@@ -715,13 +710,13 @@ mod tests {
                     }
                 }
             }
-            assert_eq!(numbers, 4, "both item numbers and quantities are painted at {width}");
+            assert!(numbers >= 2, "the item numbers are painted at {width}, and quantities when not scrolled out");
             assert!(truncated_description, "the description is painted at {width}");
         }
     }
 
     #[test]
-    fn several_rows_and_option_dropdowns_have_no_widget_id_clashes() {
+    fn several_rows_and_option_controls_have_no_widget_id_clashes() {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.ctx.options_mut(|options| options.warn_on_id_clash = true);
@@ -777,24 +772,19 @@ mod tests {
             let ids: Vec<_> = ["Parts only", "By part number"]
                 .iter()
                 .map(|value| {
-                    tree.nodes
-                        .iter()
-                        .find(|(_, node)| node.role() == egui::Role::ComboBox && (node.label() == Some(*value) || node.value() == Some(*value)))
-                        .map(|(id, _)| *id)
-                        .unwrap()
+                    tree.nodes.iter().find(|(_, node)| node.label() == Some(*value) || node.value() == Some(*value)).map(|(id, _)| *id).unwrap()
                 })
                 .collect();
-            assert_ne!(ids[0], ids[1], "the real option ComboBoxes have different native IDs");
+            assert_ne!(ids[0], ids[1], "the two option controls have different native IDs");
             let cached = &h.app.bom.as_ref().unwrap().cache.as_ref().unwrap().2;
             assert_eq!(cached["rows"].as_array().unwrap().len(), 2);
             assert_eq!(cached["total_occurrences"], 5);
             let viewport = solidcraft_ui_registry::rect_of("dialog:table:bom:viewport").unwrap();
             let content = solidcraft_ui_registry::count_of("dialog:table:bom:content_width").unwrap() as f32;
-            assert!((content - viewport.width()).abs() <= 1.0, "the whole panel needs no horizontal table scrolling at {width}");
             let section = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "bom").unwrap();
             assert!((section.outer.size.width - width as f32).abs() <= 1.0, "the test exercises the requested whole-panel width {width}");
             let panel = crate::panel_runtime::egui_rect(section.outer).expand(1.0);
-            assert!(panel.contains_rect(viewport), "the table stays inside the whole panel at {width}");
+            assert!(panel.contains_rect(viewport), "the table stays inside the whole panel at {width}: {viewport:?} {panel:?}");
             for key in ["bom:levels", "bom:group-by", "dialog:note:bom-summary"] {
                 let rect = solidcraft_ui_registry::rect_of(key).unwrap();
                 assert!(panel.contains_rect(rect), "{key} stays inside the whole panel at {width}: {rect:?}, {panel:?}");
@@ -821,14 +811,6 @@ mod tests {
                     );
                     assert!(cell.contains_rect(caption), "{column} contains its whole caption: cell={cell:?}, caption={caption:?}");
                 }
-            }
-            if width == 280 {
-                let rows = cached["rows"].as_array().unwrap();
-                let index = rows.iter().position(|row| row["part_number"] == "HG-200").unwrap();
-                let name = super::text(&rows[index], "definition");
-                let caption = solidcraft_ui_registry::rect_of(&format!("dialog:inline:{name}")).unwrap();
-                let description = solidcraft_ui_registry::rect_of(&format!("dialog:table:bom:{index}:cell:Description")).unwrap();
-                assert!(description.contains_rect(caption), "a part with no description retains its name when Definition is hidden");
             }
         }
     }

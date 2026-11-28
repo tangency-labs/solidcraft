@@ -281,7 +281,7 @@ pub fn table_min_width(ui: &Ui, columns: &[Column<'_>]) -> f32 {
     let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
     let t = Tokens::get();
     let frame = egui::Frame::NONE.outer_margin(egui::Margin::same(t.space_12 as i8)).stroke(t.container_border(t.border));
-    content_width(&column_widths(ui, columns, 0.0)) + frame.total_margin().sum().x
+    content_width(&column_widths(ui, columns, 0.0, false)) + frame.total_margin().sum().x
 }
 
 fn content_width(widths: &[f32]) -> f32 {
