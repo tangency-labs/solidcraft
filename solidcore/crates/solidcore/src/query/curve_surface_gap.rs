@@ -664,11 +664,12 @@ impl NetSurface {
         b0: f64,
         b1: f64,
         lk: usize,
+        centre: bool,
     ) -> Result<Partials<Ivl>> {
         let n = &self.net;
         // (an offset of exactly zero is its base, and evaluates as it, with no step-off)
         let Some(d) = self.offset.filter(|d| !(d.lo == 0.0 && d.hi == 0.0)) else {
-            let shift = if self.far_from_origin && !(a0 == a1 && b0 == b1) {
+            let shift = if centre && !(a0 == a1 && b0 == b1) {
                 Shift::Middle
             } else {
                 Shift::None
@@ -713,6 +714,16 @@ impl NetSurface {
         w: &[V3<Ivl>],
         lk: usize,
         continuity: usize,
+    ) -> Result<(Partials<Ivl>, f64)> {
+        self.partials_with(w, lk, continuity, self.far_from_origin)
+    }
+
+    fn partials_with(
+        &self,
+        w: &[V3<Ivl>],
+        lk: usize,
+        continuity: usize,
+        centre: bool,
     ) -> Result<(Partials<Ivl>, f64)> {
         let refused = |reason| SolidError::Unsupported {
             operation: OP,
@@ -823,7 +834,7 @@ impl NetSurface {
         let mut out: Option<Partials<Ivl>> = None;
         for &(a0, a1, ku) in &us {
             for &(b0, b1, kv) in &vs {
-                let p = self.piece_partials(ku, kv, a0, a1, b0, b1, lk)?;
+                let p = self.piece_partials(ku, kv, a0, a1, b0, b1, lk, centre)?;
                 out = Some(match out {
                     None => p,
                     Some(h) => partials_hull(h, &p, lk),
@@ -868,10 +879,14 @@ impl NetSurface {
                 let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
                 let mid = |lo: f64, hi: f64| (lo + 0.5 * (hi - lo)).max(lo).min(hi);
                 let (mu, mv) = (mid(a[0], a[1]), mid(a[2], a[3]));
-                let own_m = self.piece_partials(tu, tv, mu, mu, mv, mv, 0)?.at(0, 0);
-                let cont_m = self.piece_partials(ku, kv, mu, mu, mv, mv, 0)?.at(0, 0);
-                let own = self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 1)?;
-                let cont = self.piece_partials(ku, kv, a[0], a[1], a[2], a[3], 1)?;
+                let own_m = self
+                    .piece_partials(tu, tv, mu, mu, mv, mv, 0, false)?
+                    .at(0, 0);
+                let cont_m = self
+                    .piece_partials(ku, kv, mu, mu, mv, mv, 0, false)?
+                    .at(0, 0);
+                let own = self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 1, centre)?;
+                let cont = self.piece_partials(ku, kv, a[0], a[1], a[2], a[3], 1, centre)?;
                 let du = Ivl::new(a[0], a[1]) - Ivl::from(mu);
                 let dv = Ivl::new(a[2], a[3]) - Ivl::from(mv);
                 let (ou, ov, cu, cv) = (own.at(1, 0), own.at(0, 1), cont.at(1, 0), cont.at(0, 1));
@@ -1041,7 +1056,7 @@ impl NetSurface {
         let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
         // (an offset's own side is its formula's only away from a pole: refused there as
         // the two sides enclosed apart are)
-        self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 0)?;
+        self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 0, false)?;
         let own = nurbs_partials_over_piece(n, tu, tv, a[0], a[1], a[2], a[3], 2)?;
         let cont = nurbs_partials_over_piece(n, ku, kv, a[0], a[1], a[2], a[3], 2)?;
         // (a partial of order `i` along the line and `j` across it)
@@ -1248,7 +1263,7 @@ fn piece(
         return Ok(None);
     };
     let h = Ivl::from(b) - Ivl::from(a);
-    let term = second_term(s, &wd, *c1, *c2, h)?;
+    let term = second_term(s, &wd, *c1, *c2, h, s.far_from_origin)?;
     Ok(term.and_then(|(term, slack)| PieceBound::with(ends, term, slack)))
 }
 
@@ -1395,6 +1410,7 @@ fn piece_reparametrised(
     s: &NetSurface,
     a: f64,
     b: f64,
+    centre: bool,
     mut endpoint: impl FnMut(f64) -> Result<Option<f64>>,
 ) -> Result<Option<PieceBound>> {
     let Sides {
@@ -1418,17 +1434,22 @@ fn piece_reparametrised(
     let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
         return Ok(None);
     };
-    let cd = curve_derivs_for_gap(cn, r0, 2)?;
+    let cd = if centre {
+        curve_derivs_for_gap(cn, r0, 2)?
+    } else {
+        curve_derivs_over(cn, r0, 2, None)?
+    };
     let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2), Some(w1)) = (cd.get(1), cd.get(2), wd.get(1)) else {
         return Ok(None);
     };
     let cp = scaled(*c1, p1);
     let h = Ivl::from(b) - Ivl::from(a);
+    let surf_centre = centre && s.far_from_origin;
     let corner = sides.trim_kinks.iter().any(|&x| a < x && x < b)
         || sides.curve_kinks.iter().any(|&x| r0.lo < x && x < r0.hi);
     if corner {
-        let (p, slack) = s.partials(&wd, 1, 0)?;
+        let (p, slack) = s.partials_with(&wd, 1, 0, surf_centre)?;
         let sw = plus(scaled(p.at(1, 0), w1.x), scaled(p.at(0, 1), w1.y));
         let Some(m) = norm_upper(minus(cp, sw)) else {
             return Ok(None);
@@ -1436,7 +1457,7 @@ fn piece_reparametrised(
         return Ok(PieceBound::with(ends, h * Ivl::from(m), slack));
     }
     let cpp = plus(scaled(*c2, p1 * p1), scaled(*c1, p2));
-    let term = second_term(s, &wd, cp, cpp, h)?;
+    let term = second_term(s, &wd, cp, cpp, h, surf_centre)?;
     Ok(term.and_then(|(term, slack)| PieceBound::with(ends, term, slack)))
 }
 
@@ -1452,6 +1473,7 @@ fn second_term(
     c1: V3<Ivl>,
     c2: V3<Ivl>,
     h: Ivl,
+    centre: bool,
 ) -> Result<Option<(Ivl, f64)>> {
     let (Some(w1), Some(w2)) = (wd.get(1), wd.get(2)) else {
         return Ok(None);
@@ -1460,7 +1482,7 @@ fn second_term(
     let (u2, v2) = (w2.x, w2.y);
     // The second order, where the surface is C^1 across every knot line the box crosses:
     // (S o W)'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 + S_u u'' + S_v v''
-    let second = s.partials(wd, 2, 1).map(|(p, slack)| {
+    let second = s.partials_with(wd, 2, 1, centre).map(|(p, slack)| {
         let mut swpp = scaled(p.at(2, 0), u1 * u1);
         swpp = plus(swpp, scaled(p.at(1, 1), Ivl::from(2.0) * u1 * v1));
         swpp = plus(swpp, scaled(p.at(0, 2), v1 * v1));
@@ -1479,7 +1501,7 @@ fn second_term(
         // a knot line the surface is only C^0 across (a patch corner the curve ends on):
         // g is Lipschitz there, |g(t) - g(a)| <= h sup |g'| with the one-sided partials hulled
         Err(_) => {
-            let (p, slack) = s.partials(wd, 1, 0)?;
+            let (p, slack) = s.partials_with(wd, 1, 0, centre)?;
             let sw = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
             let Some(m) = norm_upper(minus(c1, sw)) else {
                 return Ok(None);
@@ -6251,7 +6273,7 @@ fn bound_trim_pair(
                     true,
                     |a, b| {
                         k.check_cancelled(OP)?;
-                        piece_reparametrised(&sides, net, a, b, end)
+                        piece_reparametrised(&sides, net, a, b, true, end)
                     },
                     Some(&mut look),
                 )?
@@ -6301,7 +6323,10 @@ fn bound_trim_pair(
                cn: &NurbsCurve,
                net: &NetSurface,
                enough: f64,
+               over_limit: f64,
                cuts: &[f64],
+               collapse: bool,
+               centre: bool,
                endpoints: &mut BTreeMap<u64, f64>|
      -> Result<Option<f64>> {
         let sides = Sides {
@@ -6333,12 +6358,12 @@ fn bound_trim_pair(
                 cuts,
                 CLOSE_RELATIVE,
                 floor,
-                [enough_gap, over],
+                [enough_gap, over_limit],
                 budget,
-                collapse_unproved,
+                collapse,
                 |a, b| {
                     k.check_cancelled(OP)?;
-                    piece_reparametrised(&sides, net, a, b, end)
+                    piece_reparametrised(&sides, net, a, b, centre, end)
                 },
                 Some(&mut look),
             )
@@ -6373,7 +6398,47 @@ fn bound_trim_pair(
     // and no piece is cut further past [`MAX_PIECES`]: the work stays bounded.)
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
         let mut endpoints = BTreeMap::new();
-        let mut first = run(psi, cn, net, enough, &[], &mut endpoints)?;
+        // (#22467: when the caller treats every proved bound at most `enough` identically and
+        // the pair is far from the origin, try a centred pass capped at `target` first so exact
+        // far-origin trims close without exhausting `MAX_PIECES` before `recentred_retry`. Any
+        // trim whose true gap exceeds `enough` aborts immediately on the endpoint check and
+        // falls through to the uncentred pass, keeping exact raised tolerances bit-exact.)
+        if any_within_enough
+            && enough.is_finite()
+            && target > c_slack
+            && (net.far_from_origin || curve_is_far_from_origin(cn))
+        {
+            let target_gap = (Ivl::from(target) - Ivl::from(c_slack)).lo;
+            if target_gap > 0.0 {
+                if let Some(g) = run(
+                    psi,
+                    cn,
+                    net,
+                    enough,
+                    target_gap,
+                    &[],
+                    false,
+                    true,
+                    &mut endpoints,
+                )? {
+                    if g.is_finite() && g <= enough && g <= over {
+                        return Ok(Some(g));
+                    }
+                }
+                budget_stopped.set(false);
+            }
+        }
+        let mut first = run(
+            psi,
+            cn,
+            net,
+            enough,
+            over,
+            &[],
+            collapse_unproved,
+            false,
+            &mut endpoints,
+        )?;
         // (#22820: when `collapse_unproved` is enabled and `first` stopped on the piece budget
         // with every evaluated endpoint within `enough`, do not spend thousands of knot cuts or
         // a recentred retry — whose `enough - slack` can also lift the piece cap — on a trim the
@@ -6391,7 +6456,17 @@ fn bound_trim_pair(
                 .collect();
             cuts.dedup();
             if !cuts.is_empty() {
-                if let Some(g) = run(psi, cn, net, enough, &cuts, &mut endpoints)? {
+                if let Some(g) = run(
+                    psi,
+                    cn,
+                    net,
+                    enough,
+                    over,
+                    &cuts,
+                    collapse_unproved,
+                    false,
+                    &mut endpoints,
+                )? {
                     first = Some(first.map_or(g, |b| b.min(g)));
                 }
             }
@@ -6399,7 +6474,17 @@ fn bound_trim_pair(
         drop(endpoints);
         recentred_retry(first, [enough, over], cn, net, |cn, net, enough| {
             // Translation rounds the points in the enclosure, so it gets its own cache.
-            run(psi, cn, net, enough, &cuts, &mut BTreeMap::new())
+            run(
+                psi,
+                cn,
+                net,
+                enough,
+                over,
+                &cuts,
+                collapse_unproved,
+                false,
+                &mut BTreeMap::new(),
+            )
         })
     };
     let mut bound = with_psi(&psi)?;
@@ -6614,7 +6699,9 @@ pub fn crv_on_surf_trim_gap_bound(
         match c2 {
             Some(c2) if !corner => {
                 let cpp = plus(scaled(c2, p1 * p1), scaled(c1, p2));
-                let Some((term, slack)) = second_term(&face_net, &wd, cp, cpp, h)? else {
+                let Some((term, slack)) =
+                    second_term(&face_net, &wd, cp, cpp, h, face_net.far_from_origin)?
+                else {
                     return Ok(None);
                 };
                 Ok(PieceBound::with(ends, term, add(slack, c_slack)))
@@ -7256,12 +7343,12 @@ mod tests {
         let mut endpoints = BTreeMap::new();
         let mut evaluations = 0;
         for [a, b] in [[0.0, 1.0], [0.0, 0.5], [0.5, 1.0], [0.0, 0.5]] {
-            let direct = piece_reparametrised(&sides, &net, a, b, |at| {
+            let direct = piece_reparametrised(&sides, &net, a, b, false, |at| {
                 reparametrised_endpoint(&sides, &net, at)
             })
             .unwrap()
             .unwrap();
-            let reused = piece_reparametrised(&sides, &net, a, b, |at| {
+            let reused = piece_reparametrised(&sides, &net, a, b, false, |at| {
                 cached_trim_endpoint(&mut endpoints, at, || {
                     evaluations += 1;
                     reparametrised_endpoint(&sides, &net, at)

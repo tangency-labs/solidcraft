@@ -18,15 +18,20 @@ use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
 
 const OP: &str = "blend::fillet_section::offset_box";
 
-/// Whether a homogeneous control-point array `pw` (`(x w, y w, z w, w)` per point) lies far
-/// enough from the origin that uncentred rational enclosures lose significant accuracy:
-/// `max_i max(|x_i|, |y_i|, |z_i|) > 8 * max(bbox_extent, 1)`. Near-origin geometry stays
-/// bit-exact with uncentred (`Shift::None`) enclosures.
+/// Whether a homogeneous control-point array `pw` (`(x w, y w, z w, w)` per point) is rational
+/// (non-constant positive weights) and lies far enough from the origin along at least one
+/// coordinate axis that uncentred rational enclosures lose significant accuracy:
+/// `|mid_c| >= 512` and `|mid_c| > 4 * max(span_c, 1)` for some axis `c`.
+///
+/// Checking per-axis prevents an unbounded ruling extent (such as a canonical cylinder's
+/// `±INFINITE_PARAMETER` axis) from masking a far-origin cross-section, while non-rational arrays
+/// (`w_min == w_max`, where `w' = 0`) and near-origin geometry stay bit-exact with uncentred
+/// (`Shift::None`) enclosures.
 pub(crate) fn pw_is_far_from_origin(pw: &[f64]) -> bool {
     let (mut min_x, mut min_y, mut min_z) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let (mut max_x, mut max_y, mut max_z) =
         (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-    let mut far = 0.0_f64;
+    let (mut min_w, mut max_w) = (f64::INFINITY, f64::NEG_INFINITY);
     let mut any = false;
     for p in pw.chunks_exact(4) {
         let &[x, y, z, w] = p else {
@@ -45,14 +50,19 @@ pub(crate) fn pw_is_far_from_origin(pw: &[f64]) -> bool {
         max_x = max_x.max(px);
         max_y = max_y.max(py);
         max_z = max_z.max(pz);
-        far = far.max(px.abs()).max(py.abs()).max(pz.abs());
+        min_w = min_w.min(w);
+        max_w = max_w.max(w);
         any = true;
     }
-    if !any {
+    if !any || min_w >= max_w {
         return false;
     }
-    let size = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
-    far.is_finite() && size.is_finite() && far > 8.0 * size.max(1.0)
+    let axis_far = |lo: f64, hi: f64| {
+        let span = hi - lo;
+        let mid = 0.5 * (lo + hi);
+        span.is_finite() && mid.is_finite() && mid.abs() >= 512.0 && mid.abs() > 4.0 * span.max(1.0)
+    };
+    axis_far(min_x, max_x) || axis_far(min_y, max_y) || axis_far(min_z, max_z)
 }
 
 #[inline]

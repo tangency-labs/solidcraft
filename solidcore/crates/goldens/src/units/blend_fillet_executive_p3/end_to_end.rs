@@ -4302,38 +4302,30 @@ mod wr459_sphere_rows {
         }
 
         shares_the_target_boundary(name, &target, &body);
-        // the target's own failures: the cone faces 4, 5 and 7 near their seams (edgeuse
-        // 142's trim failures went with the clamped-sliver drop rule, #21353, which leaves
-        // the trim's folded end span out on read)
+        // the target has no Level 2 failures now: edgeuse 142's trim failures went with the
+        // clamped-sliver drop rule (#21353), and the three false "Face Near missing Seam"
+        // reports on swapped-UV cone faces 4, 5 and 7 cleared when `ruling_frame` /
+        // `native_curve_in_strip` handled `swap_uv` and trimmed canonical seam lines
+        // (`cf933eb06a`)
         let target_failures = failures(&mut target.clone_standing_for_self().unwrap());
-        assert_eq!(
-            target_failures,
-            [(SEAM, Some((FACE, 4))), (SEAM, Some((FACE, 5))), (SEAM, Some((FACE, 7)))],
-            "{name}: the target's Level 2 failures"
+        assert!(
+            target_failures.is_empty(),
+            "{name}: the target's Level 2 failures: {target_failures:?}"
         );
 
-        // the kept boundary adds no failure: main's, less every seam near miss on a sphere
-        // face (the vertices above, now on the seam; on e4 main's sphere face 0 is one of
-        // the two patches), and no seam near miss on the added patch. On e4 the round's
-        // rail runs on the target's cone face 5 (face 9 here), whose B-spline seam lies
-        // 2^-20 off the sphere's: the target near-misses it, and with the rail's end vertex
-        // on the sphere's seam the result keeps that near miss of the target (on e1 it is
-        // the `cone` of `shared`, on main too); so the body near-misses no more faces than
-        // the target does
+        // the kept boundary adds no failure: main's, less every seam near miss (the sphere
+        // face vertices above, now on the seam per #21421, and the swapped-UV cone faces'
+        // false seam near misses cleared by `cf933eb06a`), leaving only main's "Bad Repeated
+        // CPts" entries on the round's rails
         let mut want: Vec<Failure> = row
             .main_failures
             .iter()
             .copied()
-            .filter(|&(label, key)| {
-                !(label == SEAM
-                    && key.is_some_and(|(space, i)| {
-                        space == FACE && is_sphere(&body, FaceId::from_index(i as u32))
-                    }))
-            })
+            .filter(|&(label, _)| label != SEAM)
             .collect();
         want.sort();
         let removed = row.main_failures.len() - want.len();
-        assert_eq!(removed, usize::from(name.contains("-e4-")), "{name}: main's sphere failures");
+        assert_eq!(removed, 3, "{name}: main's seam failures");
         if name.contains("-e4-") {
             let (cone, target_cone) = (FaceId::from_index(9), FaceId::from_index(5));
             assert_eq!(
@@ -4341,9 +4333,6 @@ mod wr459_sphere_rows {
                 geometry_text(&target, target_cone).replace("swap_uv: true", "swap_uv: false"),
                 "{name}: face 9 is not the target's face 5"
             );
-            assert!(target_failures.contains(&(SEAM, Some((FACE, 5)))), "{name}");
-            want.push((SEAM, Some((FACE, 9))));
-            want.sort();
         }
         let got = failures(&mut body);
         assert_eq!(got, want, "{name}: Level 2 failures");
