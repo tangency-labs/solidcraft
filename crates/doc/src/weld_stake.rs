@@ -284,6 +284,10 @@ pub fn stake_site(skin: &Body, face: usize, web: &Body, start: [f64; 3], path: &
         }
     }
 
+    // the snapped start on the picked face itself, not on another face of the sheet: with the
+    // room to the face's edges checked below along the whole path, the path stays on it
+    through(skin, face, add(new_start, scale(normal, -t)), normal, tol)?;
+
     // the web touching the top sheet at the start, to the tolerance
     match web.classify_point(Vec3::from(new_start))? {
         PointClass::OnBoundary => {}
@@ -363,6 +367,10 @@ fn snapped_joints(
     for piece in laid {
         joints.push(moved(piece.ends().1, piece.tangents().1));
     }
+    // every arc keeps a radius, corners or not
+    for piece in laid {
+        moved_radius(piece, normal, by, tol)?;
+    }
     if by == 0.0 || turns.is_empty() {
         return Ok(joints);
     }
@@ -394,14 +402,7 @@ fn snapped_joints(
                 let k = reach / length;
                 Seg2::Line { a: Vec2::new(p.x - (q.x - p.x) * k, p.y - (q.y - p.y) * k), b: Vec2::new(q.x + (q.x - p.x) * k, q.y + (q.y - p.y) * k) }
             }
-            Laid::Arc { c, axis, radius, .. } => {
-                // left of a left turn is towards the centre
-                let r = if affine::distance_along([0.0; 3], normal, axis) > 0.0 { radius - by } else { radius + by };
-                if r <= tol {
-                    return bad("a stake weld arc that moved onto the web's middle has no radius left");
-                }
-                Seg2::Arc { center: flat(c), radius: r, start: 0.0, sweep: TAU }
-            }
+            Laid::Arc { c, .. } => Seg2::Arc { center: flat(c), radius: moved_radius(p, normal, by, tol)?, start: 0.0, sweep: TAU },
         })
     };
     for turn in turns {
@@ -421,6 +422,19 @@ fn snapped_joints(
         }
     }
     Ok(joints)
+}
+
+/// The radius of arc `piece` moved `by` sideways (left about `normal`): left of a left turn is
+/// towards the centre. Refused when no radius is left. A line's is none (0).
+fn moved_radius(piece: &Laid, normal: [f64; 3], by: f64, tol: f64) -> Result<f64> {
+    let Laid::Arc { axis, radius, .. } = *piece else {
+        return Ok(0.0);
+    };
+    let r = if affine::distance_along([0.0; 3], normal, axis) > 0.0 { radius - by } else { radius + by };
+    if r <= tol {
+        return bad("a stake weld arc that moved onto the web's middle has no radius left");
+    }
+    Ok(r)
 }
 
 /// The skin's thickness at `p` on its picked face `face`, along `normal`, and the point under it

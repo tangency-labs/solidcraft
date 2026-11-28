@@ -185,6 +185,25 @@ fn a_hole_in_the_sheet_or_a_snap_off_the_sheet_is_refused() {
     assert_eq!(site_on(&edge, &wide, -1.3), Err(StakeRefusal::OffFace));
 }
 
+/// A sheet stepped up to 3 mm past x = 0, the line drawn on its 1 mm part 1.3 mm from the step over
+/// a web whose middle is 1.5 mm past it: the snap leaves the picked face for the taller part,
+/// refused, though the sheet is there. A right-turning half circle of radius 0.5 over a web whose
+/// middle is 0.9 mm towards its centre would turn inside out: refused.
+#[test]
+fn a_snap_off_the_picked_face_or_through_an_arc_s_centre_is_refused() {
+    let low = block([-20.0, -20.0, 0.0], [0.1, 20.0, T]);
+    let high = block([0.0, -20.0, 0.0], [20.0, 20.0, 3.0]);
+    let stepped = solidcraft_kernel::boolean(&low, &high, BoolOp::Union).unwrap().unwrap();
+    let wide = block([-0.5, -15.0, -10.0], [3.5, 15.0, 0.0]);
+    assert_eq!(site_on(&stepped, &wide, -1.3), Err(StakeRefusal::OffFace));
+    let s = skin();
+    let start = [0.5, 0.0, T];
+    let path = [SeamPiece::Arc { center: [0.0, 0.0, T], to: [-0.5, 0.0, T], turn: Turn::Right }];
+    let off = block([-2.4, -15.0, -10.0], [1.6, 15.0, 0.0]);
+    let got = stake_site(&s, face_at(&s, start), &off, start, &path, W, WELD_TOLERANCE);
+    assert!(matches!(got, Err(StakeRefusal::Invalid(_))), "{got:?}");
+}
+
 /// A pocket 0.4 mm deep in the sheet's underside between the line's ends: refused as uneven, by
 /// 0.4. A hole through the web between the ends, which the path lowered 0.5 mm into the web runs
 /// through: refused, the web 0.5 nearer than at the start.
