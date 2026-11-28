@@ -479,12 +479,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::overlay(app, painter, proj, &d);
+        app.dialog = Some(d);
+        return;
+    }
     if crate::dialogs_sheet::overlay(app, painter, proj.rect, &d) {
         app.dialog = Some(d);
         return;
     }
     if let Kind::Measure { result, show, labels, dual_units, .. } = &mut d.kind {
-        labels.drawn = Default::default();
+        labels.start_frame();
         if !ui.input(|i| i.pointer.primary_down()) {
             labels.grab = None;
         }
@@ -2225,15 +2230,26 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
     true
 }
 
+/// The labels a pair's measurement has: the distance's, then X, Y and Z's.
+const PAIR_LABELS: usize = 4;
+/// The most gap labels a spacing measurement has: one a gap, and a bolt circle of the most
+/// items `inspect.measure` takes has as many gaps as items.
+const GAP_LABELS: usize = 64;
+
 /// The Measure labels in the view the user dragged away from the part (#8510): the distance's,
-/// then X, Y and Z's. They last while the measurement does; another one starts them over.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// then X, Y and Z's, then each gap's of a spacing measurement (#10170). They last while the
+/// measurement does; another one starts them over.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeasureLabels {
-    /// How far each label was dragged from its own place, in points.
-    offset: [egui::Vec2; 4],
+    /// How far each of a pair's labels was dragged from its own place, in points.
+    offset: [egui::Vec2; PAIR_LABELS],
     /// Where each was drawn in the last frame, so a press on one drags it instead of picking
     /// under it or navigating.
-    drawn: [Option<egui::Rect>; 4],
+    drawn: [Option<egui::Rect>; PAIR_LABELS],
+    /// The same for the gaps of a spacing measurement, as far as there are gaps: labels
+    /// `PAIR_LABELS` and up.
+    gap_offset: Vec<egui::Vec2>,
+    gap_drawn: Vec<Option<egui::Rect>>,
     /// The dragged label's offset when the button went down (while it is held).
     grab: Option<egui::Vec2>,
 }
@@ -2241,40 +2257,78 @@ pub struct MeasureLabels {
 impl MeasureLabels {
     /// Whether `p` is on one of the labels drawn in the last frame.
     pub(crate) fn contains(&self, p: Pos2) -> bool {
-        self.drawn.iter().flatten().any(|r| r.contains(p))
+        self.drawn.iter().chain(&self.gap_drawn).flatten().any(|r| r.contains(p))
     }
 
     /// How far label `i` was dragged (zero: in its own place).
     pub(crate) fn offset(&self, i: usize) -> egui::Vec2 {
-        self.offset.get(i).copied().unwrap_or(egui::Vec2::ZERO)
+        let offset = if i < PAIR_LABELS { self.offset.get(i) } else { self.gap_offset.get(i - PAIR_LABELS) };
+        offset.copied().unwrap_or(egui::Vec2::ZERO)
+    }
+
+    /// Label `i`'s offset, to drag it; none past the last label a measurement can have.
+    fn offset_mut(&mut self, i: usize) -> Option<&mut egui::Vec2> {
+        if i < PAIR_LABELS {
+            return self.offset.get_mut(i);
+        }
+        let gap = i - PAIR_LABELS;
+        if gap < GAP_LABELS && self.gap_offset.len() <= gap {
+            self.gap_offset.resize(gap + 1, egui::Vec2::ZERO);
+        }
+        self.gap_offset.get_mut(gap)
+    }
+
+    /// Label `i` was drawn at `rect` in this frame.
+    fn set_drawn(&mut self, i: usize, rect: egui::Rect) {
+        if i < PAIR_LABELS {
+            if let Some(drawn) = self.drawn.get_mut(i) {
+                *drawn = Some(rect);
+            }
+        } else if i - PAIR_LABELS < GAP_LABELS {
+            let gap = i - PAIR_LABELS;
+            if self.gap_drawn.len() <= gap {
+                self.gap_drawn.resize(gap + 1, None);
+            }
+            if let Some(drawn) = self.gap_drawn.get_mut(gap) {
+                *drawn = Some(rect);
+            }
+        }
+    }
+
+    /// Nothing is drawn yet in this frame.
+    fn start_frame(&mut self) {
+        self.drawn = Default::default();
+        self.gap_drawn.clear();
     }
 }
 
 /// Label `i`, drawn at `rect`, follows a drag of the pointer; a double-click puts it back.
 fn drag_label(ui: &mut egui::Ui, labels: &mut MeasureLabels, i: usize, rect: egui::Rect) {
-    if let Some(drawn) = labels.drawn.get_mut(i) {
-        *drawn = Some(rect);
-    }
+    labels.set_drawn(i, rect);
     let r = ui.interact(rect, egui::Id::unique(("sc_measure_label", i)), egui::Sense::click_and_drag());
     if r.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     } else if r.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    let Some(offset) = labels.offset.get_mut(i) else { return };
+    let Some(now) = labels.offset_mut(i).map(|offset| *offset) else { return };
+    let mut to_offset = None;
     if r.double_clicked() {
-        *offset = egui::Vec2::ZERO;
+        to_offset = Some(egui::Vec2::ZERO);
     } else if r.dragged()
         && let (Some(from), Some(to)) = (ui.input(|i| i.pointer.press_origin()), r.interact_pointer_pos())
     {
         // Where it was at the press, plus how far the pointer went since: the label stays under
         // the pointer where it was grabbed.
-        let start = *labels.grab.get_or_insert(*offset);
+        let start = *labels.grab.get_or_insert(now);
         let moved = start + (to - from);
         // Far enough to leave any view, finite whatever the pointer reports.
         if moved.is_finite() {
-            *offset = moved.clamp(egui::Vec2::splat(-10_000.0), egui::Vec2::splat(10_000.0));
+            to_offset = Some(moved.clamp(egui::Vec2::splat(-10_000.0), egui::Vec2::splat(10_000.0)));
         }
+    }
+    if let (Some(value), Some(offset)) = (to_offset, labels.offset_mut(i)) {
+        *offset = value;
     }
 }
 
@@ -2306,6 +2360,10 @@ fn measure_line(
     dual: bool,
 ) {
     let t = Tokens::get();
+    if let Some(sp) = r.get("spacing").filter(|sp| sp.is_object()) {
+        measure_spacing(app, ui, painter, proj, sp, labels, dual);
+        return;
+    }
     let Some((_, d, a, b)) = crate::dialogs::shown_distance(r, show) else { return };
     if !a.is_finite() || !b.is_finite() || !d.is_finite() {
         return;
@@ -2316,7 +2374,7 @@ fn measure_line(
     }
     painter.line_segment([sa, sb], Stroke::new(2.0, t.manipulator));
     for s in [sa, sb] {
-        painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
+        measure_end(painter, s);
     }
     let mid = sa + (sb - sa) * 0.5;
     let galley = painter.layout_no_wrap(
@@ -2337,6 +2395,74 @@ fn measure_line(
     painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
     drag_label(ui, labels, 0, rect);
+}
+
+/// The dot at an end of a measured line.
+fn measure_end(painter: &egui::Painter, at: Pos2) {
+    painter.circle(at, 3.5, Tokens::get().manipulator, Stroke::new(1.0, Color32::WHITE));
+}
+
+/// The spacing of three or more round items (#10170): a line between each neighbouring pair of
+/// centres with the gap's length (a gap that differs from the pitch in the warning colour), and
+/// each centre numbered as the panel lists the items. A gap's label can be dragged away, as a
+/// distance's can.
+fn measure_spacing(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    sp: &serde_json::Value,
+    labels: &mut MeasureLabels,
+    dual: bool,
+) {
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_label);
+    let order: Vec<u64> = sp["order"].as_array().into_iter().flatten().filter_map(serde_json::Value::as_u64).collect();
+    let odd = |g: usize| sp["odd_gaps"].as_array().is_some_and(|o| o.iter().any(|v| v.as_u64() == Some(g as u64)));
+    let gaps = sp["gaps"].as_array().into_iter().flatten().zip(sp["gap_points"].as_array().into_iter().flatten());
+    for (g, (gap, ends)) in gaps.enumerate().take(GAP_LABELS) {
+        let (Some(d), Some(a), Some(b)) = (gap.as_f64(), crate::dialogs::vec3_of(&ends[0]), crate::dialogs::vec3_of(&ends[1])) else { continue };
+        let (Some(sa), Some(sb)) = (proj.to_screen(a), proj.to_screen(b)) else { continue };
+        if !d.is_finite() || !sa.is_finite() || !sb.is_finite() {
+            continue;
+        }
+        let colour = if odd(g) { t.warning } else { t.manipulator };
+        painter.line_segment([sa, sb], Stroke::new(2.0, colour));
+        for s in [sa, sb] {
+            measure_end(painter, s);
+        }
+        // The first centre of each gap takes its item's number; a row's last centre, which
+        // starts no gap, takes its own below.
+        let number = |k: usize, at: Pos2| {
+            let Some(n) = order.get(k).map(|i| (i + 1).to_string()) else { return };
+            let galley = painter.layout_no_wrap(n.clone(), font.clone(), t.text);
+            let rect = egui::Rect::from_center_size(at + vec2(0.0, 16.0), galley.size() + vec2(8.0, 4.0));
+            painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+            painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
+            crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
+        };
+        number(g, sa);
+        if g + 1 == order.len().saturating_sub(1) && sp["pattern"].as_str() != Some("circle") {
+            number(g + 1, sb);
+        }
+        let mid = sa + (sb - sa) * 0.5;
+        let galley = painter.layout_no_wrap(crate::prefs::show_measure(app, d, 1, dual), font.clone(), t.text);
+        let own = egui::Rect::from_center_size(mid + vec2(0.0, -16.0), galley.size() + vec2(10.0, 6.0));
+        let rect = moved_label(proj, own, labels.offset(PAIR_LABELS + g));
+        crate::scenario::publish_target(&format!("measure:gap:{}", g + 1), rect);
+        if rect != own {
+            painter.line_segment([mid, rect.clamp(mid)], Stroke::new(1.0, colour));
+        }
+        painter.rect(
+            rect,
+            t.radius_sm.saturating_sub(1),
+            t.overlay,
+            t.control_border_stroke(if odd(g) { t.warning } else { t.border }),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
+        drag_label(ui, labels, PAIR_LABELS + g, rect);
+    }
 }
 
 /// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
