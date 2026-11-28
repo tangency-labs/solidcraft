@@ -1647,8 +1647,23 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // F = b^3 / |A|, A = C' x C'', b = |C'|
                 let b = c[1].length();
                 if is_zero(b) {
+                    // At an ordinary cusp the limiting radius is zero:
+                    // R(t + h) ~ 2 |h| |C''|^3 / |C'' x C'''|.
+                    // Require exactly zero speed and resolved noncollinearity.
+                    // A slowly parametrised regular curve is not a cusp, and
+                    // collinear or higher-order stationary derivatives do not
+                    // determine the limit with the derivatives available here.
+                    let cross = c[2].cross(c[3]).length();
+                    let scale = c[2].length() * c[3].length();
+                    if c[1] == Vec3::ZERO
+                        && cross.is_finite()
+                        && scale.is_finite()
+                        && cross > EFF_ZERO * scale
+                    {
+                        out.found_answer = true;
+                        return Ok(());
+                    }
                     return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
-                    // Zero 1stDeriv point in search for MinRadOfCurvature
                 }
                 let numer = b * b * b;
 
@@ -2314,6 +2329,56 @@ mod tests {
     fn seg(a: [f64; 3], b: [f64; 3]) -> Curve {
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         hermite(a, d, b, d)
+    }
+
+    #[test]
+    fn minimum_radius_at_a_resolved_cusp_is_zero_in_both_directions() {
+        let k = Kernel::default();
+        // C(t) = (t^2, t^3, 0), and the same curve traversed backwards.
+        let forward = hermite([0.0; 3], [0.0; 3], [1.0, 1.0, 0.0], [2.0, 3.0, 0.0]);
+        let reversed = hermite([1.0, 1.0, 0.0], [-2.0, -3.0, 0.0], [0.0; 3], [0.0; 3]);
+        for (curve, end, near) in [(forward, 0.0, 1e-4), (reversed, 1.0, 1.0 - 1e-4)] {
+            let mut efo = CurvePropertyEfo::new(
+                &k,
+                &curve,
+                CurvePropertyType::MinimizeRadiusOfCurvature,
+                None,
+                None,
+                0.0,
+            );
+            let mut value = FunctionValue::default();
+            efo.evaluate(end, &mut value, false).unwrap();
+            assert_eq!(value.f, 0.0);
+            assert!(value.found_answer);
+            efo.evaluate(near, &mut value, false).unwrap();
+            // The radius of (t^2,t^3) is t (4 + 9 t^2)^(3/2) / 6.
+            let h = 1e-4_f64;
+            let expected = h * (4.0 + 9.0 * h * h).powf(1.5) / 6.0;
+            assert!((value.f - expected).abs() < 1e-10);
+            assert!(!value.found_answer);
+        }
+    }
+
+    #[test]
+    fn minimum_radius_at_an_undetermined_stationary_point_remains_a_refusal() {
+        let k = Kernel::default();
+        // C(t) = (t^2,0,0): zero speed alone does not imply zero radius.
+        let straight = hermite([0.0; 3], [0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
+        // C(t) = (t^3,0,0): the second derivative vanishes as well.
+        let stationary = hermite([0.0; 3], [0.0; 3], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0]);
+        for curve in [straight, stationary] {
+            let mut efo = CurvePropertyEfo::new(
+                &k,
+                &curve,
+                CurvePropertyType::MinimizeRadiusOfCurvature,
+                None,
+                None,
+                0.0,
+            );
+            let mut value = FunctionValue::default();
+            assert!(efo.evaluate(0.0, &mut value, false).is_err());
+            assert!(!value.found_answer);
+        }
     }
 
     #[test]
