@@ -2105,6 +2105,16 @@ pub struct FeatureResult {
 }
 
 impl FeatureResult {
+    /// A name pin or an adopted sketch solution keeps the geometry that the import slots describe.
+    fn refingerprint(&mut self, fingerprint: u64, layouts: &mut BTreeMap<u64, ImportLayout>) {
+        if let Some(layout) = layouts.get_mut(&self.id)
+            && layout.result == self.fingerprint
+        {
+            layout.result = fingerprint;
+        }
+        self.fingerprint = fingerprint;
+    }
+
     /// The largest fitting size reported by a blend refusal on this feature, if any.
     pub fn largest_fit(&self) -> Option<kernel::BlendFit> {
         self.error.as_deref().and_then(kernel::named_blend_fit)
@@ -2125,6 +2135,8 @@ pub struct Model {
     /// The reads of the imports whose SMLib check of their parts has not been settled yet
     /// ([`HeldReads`]).
     held_reads: HeldReads,
+    /// Source slots of the STEP assemblies in `results`. Geometry stays in its feature result.
+    import_layouts: BTreeMap<u64, ImportLayout>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -2359,6 +2371,75 @@ impl Drop for ImportReads {
         if let Some(outer) = self.outer.take() {
             IMPORT_READS.with(|r| *r.borrow_mut() = Some(outer));
         }
+    }
+}
+
+/// Enough to recognize the same imported geometry after a component's deletion added skipped
+/// slots. The result fingerprint pairs the slots with the exact evaluation that produced them.
+#[derive(Clone, Debug)]
+struct ImportLayout {
+    input: u64,
+    result: u64,
+    skip: Vec<u64>,
+}
+
+impl ImportLayout {
+    fn of(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, shared: u64, digests: &ImportDigests) -> Option<Self> {
+        let FeatureKind::Import { components, step, records: None, skip, .. } = &f.kind else { return None };
+        if components.is_empty() || step.is_empty() || digests.has_digest_only_heal(f.id) {
+            return None;
+        }
+        let mut source = f.clone();
+        source.body_names.clear();
+        if let FeatureKind::Import { skip, .. } = &mut source.kind {
+            skip.clear();
+        }
+        let input = fingerprint(doc, shared, &source, vals, false, digests);
+        Some(Self { input, result: 0, skip: skip.clone() })
+    }
+
+    /// Reuse only pinned, previously visible slots. Replacing the source, restoring an unseen
+    /// slot, a missing face lineage, or a name collision goes through the ordinary importer.
+    fn append_subset(&self, old: &FeatureResult, f: &Feature, skip: &[u64], st: &mut ModelState) -> bool {
+        use std::collections::HashSet;
+        if old.fingerprint != self.result || old.stale || old.unkept || old.skipped || old.error.is_some() || skip.len() <= self.skip.len() {
+            return false;
+        }
+        let skipped: HashSet<_> = skip.iter().copied().collect();
+        if !self.skip.iter().all(|k| skipped.contains(k)) {
+            return false;
+        }
+        let old_skip: HashSet<_> = self.skip.iter().copied().collect();
+        let mut slots = (0usize..).filter(|k| !old_skip.contains(&(*k as u64)));
+        let mut kept = Vec::new();
+        let mut end = 0;
+        for (b, slot) in old.state.bodies.iter().filter(|b| b.feature == f.id).zip(&mut slots) {
+            end = slot + 1;
+            if skipped.contains(&(slot as u64)) {
+                continue;
+            }
+            if f.body_names.get(slot).map(|s| s.trim()) != Some(b.name.as_str()) || !matches!(b.made, crate::lineage::Made::Traced(_)) {
+                return false;
+            }
+            kept.push(b);
+        }
+        let names: HashSet<_> = kept.iter().map(|b| b.name.as_str()).collect();
+        // The ordinary importer reserves pins past the file's bodies before assigning names.
+        // The last previously visible slot gives a conservative bound when its tail was skipped.
+        if names.len() != kept.len()
+            || st.bodies.iter().any(|b| names.contains(b.name.as_str()))
+            || f.body_names.iter().skip(end).any(|name| names.contains(name.trim()))
+        {
+            return false;
+        }
+        let _span = solidcraft_profile::span("doc", "import.filter_slots");
+        st.threads.extend(old.state.threads.iter().filter(|t| t.feature == f.id && names.contains(t.body.as_str())).cloned());
+        for source in kept {
+            let mut body = ModelBody::new(source.name.clone(), source.body.clone(), f.id);
+            body.made = source.made.clone();
+            st.bodies.push(body);
+        }
+        true
     }
 }
 
@@ -6378,7 +6459,7 @@ impl Model {
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
-                r.fingerprint = prev_fp;
+                r.refingerprint(prev_fp, &mut self.import_layouts);
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
                     if let Some(s) = stepper.as_mut() {
                         s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
@@ -6571,6 +6652,8 @@ impl Model {
         self.context = ctx;
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
+        let mut import_layouts: BTreeMap<_, _> =
+            doc.features.iter().filter_map(|f| Some((f.id, ImportLayout::of(doc, &vals, f, shared_ctx, &self.import_digests)?))).collect();
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
         // Per-component ancestor-chain digests and feature->component map, built once per pass.
         let component_digests = ComponentDigests::of(doc);
@@ -6581,10 +6664,20 @@ impl Model {
         let constructions = construction_indices(doc);
         let watched = crate::progress::begin(doc.features.len());
         let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
+        // A worker starting from an empty state cannot filter the previous result. Leave these
+        // imports to the timeline, where the incoming body names are known.
+        let subset_imports = import_layouts
+            .iter()
+            .filter_map(|(&id, new)| {
+                let old = self.import_layouts.get(&id)?;
+                (old.input == new.input && new.skip.len() > old.skip.len()).then_some(id)
+            })
+            .collect();
         let prepared_imports = parallel::prefetch_imports(
             doc,
             &vals,
             &self.results,
+            &subset_imports,
             &prev_import_digests,
             &self.import_digests,
             &self.cache,
@@ -6602,6 +6695,7 @@ impl Model {
             &vals,
             &self.param_errors,
             &self.results,
+            &subset_imports,
             &self.empty,
             &self.frame_bodies,
             &self.cache,
@@ -7037,6 +7131,10 @@ impl Model {
                                 heal,
                                 meshes,
                                 prepared_imports.get(f.id),
+                                self.import_layouts
+                                    .get(&f.id)
+                                    .filter(|_| !self.no_cache && subset_imports.contains(&f.id))
+                                    .zip(self.results.get(i).filter(|r| r.id == f.id)),
                                 Some(&before_states),
                             );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
@@ -7267,6 +7365,12 @@ impl Model {
         self.poses = poses;
         self.component_keys = component_keys;
         self.results = out;
+        for r in &self.results {
+            if let Some(layout) = import_layouts.get_mut(&r.id) {
+                layout.result = r.fingerprint;
+            }
+        }
+        self.import_layouts = import_layouts;
         self.note_states();
         for (feature, read) in reads.finish() {
             self.held_reads.hold(feature, read);
@@ -8004,7 +8108,7 @@ impl Model {
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
-            r.fingerprint = prev;
+            r.refingerprint(prev, &mut self.import_layouts);
             let prev_state = before;
             before = r.state.clone();
             if i < marker
@@ -13394,6 +13498,9 @@ fn feature_tools_with_constructor(
                         .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
                 Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
+            // A coil without a diameter of its own takes its picked edge's or face's (a circular
+            // edge, a cylinder, a flat end face's round outline), as the model is now.
+            let mut picked_diameter = None;
             let (base, direction) = match axis_ref {
                 Some(AxisRef::Construction { name }) => {
                     let recorded = sketch.and_then(|sk| {
@@ -13422,9 +13529,17 @@ fn feature_tools_with_constructor(
                         // Pick and orient the axis in the same frame as the command and viewport.
                         let world = construction_state(doc, st, 0)?;
                         let (origin, direction) = crate::construct::coil_model_axis(&world, geo)?;
+                        if diameter.is_none() && sketch.is_none() {
+                            picked_diameter = crate::construct::coil_model_diameter(&world, geo)?;
+                        }
                         line_from_world(origin, direction)?
                     }
-                    _ => crate::construct::model_axis_in(Some(doc), st, geo, f.component)?,
+                    _ => {
+                        if diameter.is_none() && sketch.is_none() {
+                            picked_diameter = crate::construct::coil_placed_edge_diameter(doc, st, geo)?;
+                        }
+                        crate::construct::model_axis_in(Some(doc), st, geo, f.component)?
+                    }
                 },
                 Some(AxisRef::Line { origin, dir }) => (point(vals, origin)?, dir.0),
                 Some(AxisRef::SketchLine { curve, sketch: owner }) => {
@@ -13495,14 +13610,25 @@ fn feature_tools_with_constructor(
                 kernel::require_unfolded_screw_section(&ss.plane, region, *base, axis, pitch)?;
                 return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
             }
-            let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
+            let d = match diameter {
+                Some(diameter) => val(vals, diameter, Kind::Length)?,
+                None => picked_diameter.ok_or_else(|| {
+                    DocError::Invalid("a coil needs a `sketch`, a `diameter`, or a circular edge or round end face to take it from".into())
+                })?,
+            };
             let section_size = section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
-            let (d, s) = (val(vals, diameter, Kind::Length)?, val(vals, section_size, Kind::Length)?);
+            let s = val(vals, section_size, Kind::Length)?;
             if !(d > 0.0 && s > 0.0 && n > 0.0) {
                 return Err(DocError::Invalid("the coil diameter, section size and revolutions must be positive".into()));
             }
-            let r = d / 2.0 + f64::from(*position) * s / 2.0;
-            if r <= s / 2.0 {
+            // How far the section reaches across the diameter: a triangle of side `s` is its
+            // height deep, its point toward the axis.
+            let depth = match section {
+                crate::CoilSection::Triangle => s * 3f64.sqrt() / 2.0,
+                crate::CoilSection::Circular | crate::CoilSection::Square => s,
+            };
+            let r = d / 2.0 + f64::from(*position) * depth / 2.0;
+            if r <= depth / 2.0 {
                 return Err(DocError::Invalid("the section reaches the coil's axis".into()));
             }
             let a0 = match start_angle {
@@ -13532,6 +13658,12 @@ fn feature_tools_with_constructor(
                 crate::CoilSection::Square => {
                     let h = s / 2.0;
                     solidcore_record::Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)])
+                }
+                crate::CoilSection::Triangle => {
+                    // Centred on the diameter across its depth: the point toward the axis, the
+                    // side of length `s` along it, outward.
+                    let (h, half) = (depth / 2.0, s / 2.0);
+                    solidcore_record::Loop2::polygon(&[c + Vec2::new(-h, 0.0), c + Vec2::new(h, -half), c + Vec2::new(h, half)])
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
@@ -14514,6 +14646,24 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 /// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
 const MAX_INSTANCES: usize = 10_000;
 
+const PATTERN_SPACING_COORDINATE_RANGE: &str = "A pattern copy would lie beyond the supported coordinate range. Reduce the spacing or count.";
+const PATTERN_CIRCULAR_COORDINATE_RANGE: &str = "A pattern copy would lie beyond the supported coordinate range. Adjust the axis, angle, or count.";
+
+/// Move a copy using the same record checks as any other transform, with advice for the pattern
+/// whose copy fails the coordinate ceiling.
+fn transform_pattern_copy(kind: &FeatureKind, body: &Body, matrix: Mat) -> Result<Body> {
+    kernel::transform_matrix(body, matrix).map_err(|e| match (e, kind) {
+        (kernel::KernelError::CoordinateCeiling, FeatureKind::Pattern { pattern, .. }) => {
+            let message = match pattern {
+                crate::PatternKind::Rectangular { .. } | crate::PatternKind::Path { .. } => PATTERN_SPACING_COORDINATE_RANGE,
+                crate::PatternKind::Circular { .. } => PATTERN_CIRCULAR_COORDINATE_RANGE,
+            };
+            DocError::Invalid(message.into())
+        }
+        (e, _) => e.into(),
+    })
+}
+
 /// Prepared source body and per-instance transforms for one source body of a body pattern.
 struct PreparedPatternBody {
     mb: ModelBody,
@@ -14669,7 +14819,7 @@ fn pattern_bodies(
     let run_one = |&(s, k): &(usize, usize)| -> Result<Body> {
         let Some(Ok(p)) = prepared.get(s) else { return Err(DocError::Invalid("pattern body".into())) };
         let Some(&local) = p.locals.get(k) else { return Err(DocError::Invalid("pattern transform".into())) };
-        Ok(kernel::transform_matrix(&p.mb.body, local)?)
+        transform_pattern_copy(&f.kind, &p.mb.body, local)
     };
     let mut transformed = if jobs.len() > 1 {
         kernel::map_on_threads(&jobs, 16, run_one)
@@ -16667,7 +16817,7 @@ fn replay(
                 let start = copies.len();
                 for t in &tools {
                     let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
-                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
+                    copies.push(t.copied(transform_pattern_copy(&f.kind, &t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
                 }
                 instances.push(start..copies.len());
             }
@@ -16974,31 +17124,41 @@ fn replay(
         }
         // A Draft repeats at the copied faces of the body they lie on, about the copied neutral
         // plane and pull direction (#18048).
-        if let FeatureKind::Draft { faces, angle, neutral, pull, body } = &src.kind {
+        if matches!(src.kind, FeatureKind::Draft { .. }) {
             if let Some(batch) = pending.take() {
                 flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
             }
-            let a = val(vals, angle, Kind::Angle)?;
-            let pl = doc.resolve_plane_in(vals, neutral, 0, src.component, Some(st))?;
-            let picked: Vec<Vec3> = crate::plain(faces);
-            let picks = PickFrames::new(doc, st, own, src);
-            let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
-            for m in mats {
-                let (m, on) = match picked.first() {
-                    Some(p) => picks.copy(st, m, *p, named)?,
-                    None => (*m, None),
-                };
-                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
-                let i = match on {
-                    Some(i) => i,
-                    None => body_at(st, body, &moved)?,
-                };
-                let neutral = placed_plane(&m, &pl)?;
-                let pull = crate::apply_vector(&m, pull.0);
-                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
-                let nb = Traced::step(kernel::draft(&mb.body, &moved, &neutral, pull, a)?, &[&mb.traced()]);
-                if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = mb.remade(nb);
+            // Its picks where the draft found its named faces when it ran, as other features'
+            // copies take them: a face an edit moved is copied from where it is now.
+            let mut found = (*src).clone();
+            if let Some(points) = st.named_faces.get(&src.id) {
+                for (p, q) in found.kind.face_points_mut().into_iter().zip(points) {
+                    *p = *q;
+                }
+            }
+            if let FeatureKind::Draft { faces, angle, neutral, pull, body } = &found.kind {
+                let a = val(vals, angle, Kind::Angle)?;
+                let pl = doc.resolve_plane_in(vals, neutral, 0, src.component, Some(st))?;
+                let picked: Vec<Vec3> = crate::plain(faces);
+                let picks = PickFrames::new(doc, st, own, src);
+                let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
+                for m in mats {
+                    let (m, on) = match picked.first() {
+                        Some(p) => picks.copy(st, m, *p, named)?,
+                        None => (*m, None),
+                    };
+                    let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
+                    let i = match on {
+                        Some(i) => i,
+                        None => body_at(st, body, &moved)?,
+                    };
+                    let neutral = placed_plane(&m, &pl)?;
+                    let pull = crate::apply_vector(&m, pull.0);
+                    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                    let nb = Traced::step(kernel::draft(&mb.body, &moved, &neutral, pull, a)?, &[&mb.traced()]);
+                    if let Some(slot) = st.bodies.get_mut(i) {
+                        *slot = mb.remade(nb);
+                    }
                 }
             }
             continue;
@@ -17021,7 +17181,7 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 for (mb, at) in made.iter().zip(&made_in) {
                     let m = at.map_or(*m, |at| crate::mat_mul(m, &at));
-                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, m)?, first + k + 1);
+                    let moved = moved_copy(mb, transform_pattern_copy(&f.kind, &mb.body, m)?, first + k + 1);
                     let name = copy_body_name(st, f, output, &mb.name);
                     st.bodies.push(ModelBody::traced_new(name, moved, f.id));
                     output += 1;
@@ -18729,10 +18889,11 @@ fn eval_feature(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    previous_import: Option<(&ImportLayout, &FeatureResult)>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, sources);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, previous_import, sources);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -18802,6 +18963,7 @@ fn eval_feature_kind(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    previous_import: Option<(&ImportLayout, &FeatureResult)>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
@@ -18852,6 +19014,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceNetwork { .. }
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
+        | FeatureKind::SurfaceMorph { .. }
         | FeatureKind::SurfaceOffset { .. }
         | FeatureKind::SurfaceMidsurface { .. }
         | FeatureKind::SurfaceRuled { .. }
@@ -20422,6 +20585,13 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { file, step, skip, records, .. } => {
+            if let Some((layout, old)) = previous_import
+                && layout.append_subset(old, f, skip, st)
+            {
+                warning.clone_from(&old.warning);
+                import_report.clone_from(&old.import_report);
+                return Ok(());
+            }
             #[cfg(test)]
             cost_tests::count(|c| c.imports_read += 1);
             // A linked design's bodies left out of the file, and not read back when it opened.

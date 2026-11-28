@@ -4066,6 +4066,106 @@ fn coil_cuts_from_end_face_sectors_make_helical_flutes() {
     assert_eq!(reopened.model.state().bodies.len(), 4, "four flutes after reopening");
 }
 
+/// A shaft of radius `radius` (a parameter `r`) and height 40 standing on the origin, and the
+/// volume a Coil cut takes out of it: 3 turns of pitch 8 with a section of `section_size` 2 on
+/// the shaft's wall, from `start` (axis and base, with or without a diameter).
+fn shaft_groove(radius: &str, start: Value, section: &str) -> (Session, f64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": radius}));
+    run(&mut s, "solid.cylinder", json!({"radius": "r", "height": 40, "body_name": "Shaft"}));
+    let before = volume(&mut s);
+    let mut p =
+        json!({"revolutions": 3, "pitch": 8, "section_size": 2, "section": section, "operation": "cut", "targets": ["Shaft"], "name": "Groove"});
+    p.as_object_mut().unwrap().extend(start.as_object().unwrap().clone());
+    run(&mut s, "solid.coil", p);
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let removed = before - volume(&mut s);
+    (s, removed)
+}
+
+/// Coil from an end face: the shaft's flat top gives the base (its centre), the axis (its
+/// outward normal, reversed to grow down into the shaft) and the diameter (its round edge). It
+/// cuts exactly what the same coil typed out in full cuts, and follows the shaft's radius.
+#[test]
+fn a_coil_cut_from_a_shafts_top_face_grooves_its_wall() {
+    let typed = |d: f64| json!({"base": [0, 0, 40], "axis": [0, 0, -1], "diameter": d});
+    let from_face = json!({"axis": {"face": [5, 5, 40]}, "reversed": true});
+    let (mut s, removed) = shaft_groove("20 mm", from_face, "circular");
+    let (_, expected) = shaft_groove("20 mm", typed(40.0), "circular");
+    assert!(removed > 0.0 && rel(removed, expected) < 1e-6, "{removed} vs {expected}");
+    assert_eq!(measure(&mut s)["body_count"], 1);
+    let saved = serde_json::to_value(&s.doc.find_feature("Groove").unwrap().kind).unwrap();
+    assert_eq!(saved["axis_ref"]["type"], "model", "{saved}");
+    assert!(saved.get("diameter").is_none(), "the diameter follows the face: {saved}");
+    // A wider shaft: the coil follows its top face's circle out to the new wall.
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "25 mm"}));
+    let (_, wider) = shaft_groove("25 mm", typed(50.0), "circular");
+    let full = std::f64::consts::PI * 25.0 * 25.0 * 40.0;
+    assert!(rel(full - volume(&mut s), wider) < 1e-6, "{} vs {wider}", full - volume(&mut s));
+    // The saved design rebuilds the same.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(full - volume(&mut reopened), wider) < 1e-6);
+}
+
+/// A triangle section from the same end face cuts a thread-like V groove: the same as the typed
+/// coil, and less than the square groove it fits in.
+#[test]
+fn a_triangle_coil_from_an_end_face_cuts_a_thread_like_groove() {
+    let from_face = json!({"axis": {"face": [5, 5, 40]}, "reversed": true});
+    let (_, v) = shaft_groove("20 mm", from_face.clone(), "triangle");
+    let (_, expected) = shaft_groove("20 mm", json!({"base": [0, 0, 40], "axis": [0, 0, -1], "diameter": 40}), "triangle");
+    let (_, square) = shaft_groove("20 mm", from_face, "square");
+    assert!(v > 0.0 && rel(v, expected) < 1e-6, "{v} vs {expected}");
+    assert!(v < square, "{v} {square}");
+}
+
+/// The triangle's volume as a new body, worked out by Pappus: a screw motion sweeps the section
+/// as a revolve does, `n` turns about the axis at the radius of its centroid. An equilateral
+/// triangle of side `a` pointing at the axis, centred across its depth `h = a √3 / 2` on the
+/// circle of radius `R`, has its centroid at `R + h / 6` and area `√3 / 4 a²`.
+#[test]
+fn a_triangle_coil_sweeps_its_area_about_the_axis() {
+    use std::f64::consts::PI;
+    let (a, big_r, n) = (2.0f64, 20.0, 3.0);
+    let h = a * 3f64.sqrt() / 2.0;
+    for (position, centre) in [("center", big_r), ("inside", big_r - h / 2.0), ("outside", big_r + h / 2.0)] {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"diameter": 2.0 * big_r, "revolutions": n, "pitch": 8, "section": "triangle", "section_size": a, "section_position": position}),
+        );
+        let expected = n * 2.0 * PI * (centre + h / 6.0) * 3f64.sqrt() / 4.0 * a * a;
+        assert!(rel(volume(&mut s), expected) < 1e-3, "{position}: {} vs {expected}", volume(&mut s));
+    }
+}
+
+/// A spring joined on a block's flat top: the face's centre is its base and its outward normal
+/// its axis, so it stands up off the face; a face without a round edge needs the diameter typed.
+#[test]
+fn a_coil_joined_on_a_flat_face_stands_on_its_centre() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Block"}));
+    let refused =
+        s.execute("solid.coil", &json!({"axis": {"face": [5, 5, 10]}, "revolutions": 2, "pitch": 6, "section_size": 2, "operation": "join"}));
+    assert!(refused.unwrap_err().to_string().contains("diameter"), "a square face has no diameter to give");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis": {"face": [5, 5, 10]}, "diameter": 16, "revolutions": 2, "pitch": 6, "section_size": 2, "operation": "join", "targets": ["Block"]}),
+    );
+    let m = measure(&mut s);
+    assert_eq!(m["body_count"], 1, "{m}");
+    let at = |k: &str, i: usize| m["bodies"][0]["bbox"][k][i].as_f64().unwrap_or(f64::NAN);
+    // Up off the top by the two turns and the section's half above the centre line.
+    assert!((at("max", 2) - (10.0 + 12.0 + 1.0)).abs() < 1e-3, "{m}");
+    assert!((at("min", 2)).abs() < 1e-6 && (at("max", 0) - 40.0).abs() < 1e-6, "the block is unchanged below: {m}");
+    // Its turns stand around the face's centre (20, 15): a point just past the wire's start, which
+    // lies in the plane y = 15 through the axis (start angle 0, from the axis toward +x).
+    assert!(in_body(&s, "Block", [20.0 + 8.0, 15.3, 10.5]), "the spring starts on the face's centre line");
+}
+
 #[test]
 fn a_loaded_coil_cannot_be_both_primitive_and_from_a_sketch() {
     let mut s = Session::default();

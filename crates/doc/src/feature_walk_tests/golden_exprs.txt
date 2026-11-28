@@ -537,6 +537,11 @@ surface_fair
   inputs:
     Tolerance = sfair.tolerance (Length)
   expressions: sfair.tolerance
+surface_morph
+  inputs:
+    Scale factor = smorph.scale (Unitless)
+    Tolerance = smorph.tolerance (Length)
+  expressions: smorph.scale, smorph.tolerance
 unstitch
 reverse_normal
 surface_untrim

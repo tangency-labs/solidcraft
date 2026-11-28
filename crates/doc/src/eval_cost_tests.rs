@@ -463,6 +463,68 @@ fn placed_imports(parts: usize) -> Document {
     doc
 }
 
+#[test]
+fn deleting_an_imported_component_reuses_only_matching_pinned_slots() {
+    let mut doc = placed_imports(1);
+    let f = &mut doc.features[0];
+    let FeatureKind::Import { step, components, .. } = &mut f.kind else { panic!("expected the two-box STEP import") };
+    *components = kernel::step_import_shared(step).unwrap().tree.clone();
+    f.body_names = vec![String::new(), "small".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let before = model.state();
+    let large_name = before.bodies[0].name.clone();
+    doc.features[0].pin_body_names(&[large_name.clone(), "small".into()], &[]);
+    let old_fingerprint = model.results[0].fingerprint;
+    model.refingerprint(&doc);
+    assert_ne!(model.results[0].fingerprint, old_fingerprint, "pinning the first slot must change the import fingerprint");
+    let original = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut doc.features[0].kind else { panic!("expected the two-box STEP import") };
+    skip.push(0);
+    let (_, work) = measure(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "dropping a slot must not ask the STEP reader for the assembly");
+    let state = model.state();
+    let remaining = state.body("small").unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(remaining.body.same(&before.body("small").unwrap().body));
+    let mut fresh = Model::new();
+    let (_, baseline) = measure(|| fresh.evaluate(&doc));
+    assert_eq!(baseline.imports_read, 1);
+    let reference = fresh.state();
+    let fresh_body = reference.body("small").unwrap();
+    assert_eq!(remaining.body.exact_bounds().unwrap(), fresh_body.body.exact_bounds().unwrap());
+    assert!((remaining.body.volume_at(1e-3).unwrap() - fresh_body.body.volume_at(1e-3).unwrap()).abs() < 1e-9);
+    assert_eq!(remaining.key, fresh_body.key);
+    assert_eq!(crate::naming::face_names(remaining), crate::naming::face_names(fresh_body));
+    assert_eq!(remaining.component, fresh_body.component);
+
+    // A longer skip list can also bring a body back. That body is absent from the previous result.
+    let mut swapped = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut swapped.features[0].kind else { panic!("expected the two-box STEP import") };
+    *skip = vec![1, 12];
+    let (_, work) = measure(|| model.evaluate(&swapped));
+    assert_eq!(work.imports_read, 1);
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, large_name);
+
+    // A renamed pin, or a new STEP payload with the same slots, needs ordinary evaluation.
+    for change_source in [false, true] {
+        let mut model = Model::new();
+        model.evaluate(&original);
+        let mut changed = doc.clone();
+        if change_source {
+            let FeatureKind::Import { step, .. } = &mut changed.features[0].kind else { panic!("expected the two-box STEP import") };
+            *step = format!("{}\n", step).into();
+        } else {
+            changed.features[0].body_names[1] = "new".into();
+        }
+        let (_, work) = measure(|| model.evaluate(&changed));
+        assert_eq!(work.imports_read, 1);
+        let expected = if change_source { "small" } else { "new" };
+        assert_eq!(model.state().bodies[0].name, expected);
+    }
+}
+
 fn line_sketch(plane: PlaneRef, to: Vec2) -> FeatureKind {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();

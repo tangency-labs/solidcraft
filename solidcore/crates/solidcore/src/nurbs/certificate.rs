@@ -1627,6 +1627,7 @@ mod turn_tests {
 mod circle_tests {
     #![allow(clippy::unwrap_used)] // test helpers
     use super::*;
+    use crate::math::det;
 
     /// The quarter circle r 2 about (5, 0, 1) in the plane z = 1, one rational quadratic
     /// arc, its middle control point moved out by `bulge` of its distance from the centre.
@@ -1863,7 +1864,7 @@ mod circle_tests {
                 (w.0 - 2.0 * m.0 + u.0) / (h * h),
                 (w.1 - 2.0 * m.1 + u.1) / (h * h),
             );
-            let rho = (r1 * r1 + z1 * z1).powf(1.5) / (r1 * z2 - z1 * r2).abs();
+            let rho = det::powf(r1 * r1 + z1 * z1, 1.5) / (r1 * z2 - z1 * r2).abs();
             lo = lo.min(rho);
             hi = hi.max(rho);
         }

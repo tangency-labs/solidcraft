@@ -2236,6 +2236,26 @@ fn fins_meeting_at_the_axis_join_into_their_hub() {
     assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
 
+/// #22146, second case: Pipe1, a 5 mm pipe along lines and arcs, and Pipe2 joined to it. Each pipe
+/// builds alone with its volume (Pappus), and the join must give one valid body of both volumes:
+/// the pipes touch without overlapping. The join failed SMLib's check on a torus face of Pipe1 read
+/// back through the flat arrays ("SmSurfOfRevolution::Test #3 Midpoint").
+#[test]
+fn a_pipe_joined_to_a_pipe_of_lines_and_arcs_builds_one_body_of_both_volumes() {
+    let s = replay(include_str!("../../../examples/regressions/pipe_join_second_case.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1"], "Pipe2 joins Pipe1's body");
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Pipe1 10170.259935237927 and Pipe2 1002.8772940460799 mm^3, touching
+    let want = 11173.137229284;
+    let v = volume(&s, "Body1");
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, the two pipes' {want}");
+}
+
 /// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
 /// surfaces of revolution) could not be read back into the kernel, so every later operation on it
 /// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The

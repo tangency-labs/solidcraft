@@ -29,6 +29,7 @@
 //! continue, and a piece the bisection cannot close all give `None`: the gap is then not
 //! enclosed.
 
+use crate::math::det;
 use core::cell::{Cell, RefCell};
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -2046,7 +2047,8 @@ fn nurbs_uv_box(n: &NurbsCurve) -> Option<[[f64; 2]; 2]> {
         }
     }
     let big = b.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
-    let pad = (Ivl::from(big) * Ivl::from(2f64.powi(-40)) + Ivl::from(2f64.powi(-1000))).hi;
+    let pad =
+        (Ivl::from(big) * Ivl::from(det::powi(2f64, -40)) + Ivl::from(det::powi(2f64, -1000))).hi;
     for [lo, hi] in &mut b {
         *lo = (Ivl::from(*lo) - Ivl::from(pad)).lo;
         *hi = (Ivl::from(*hi) + Ivl::from(pad)).hi;
@@ -6745,7 +6747,7 @@ fn recentre(cn: &NurbsCurve) -> Option<[f64; 3]> {
     let [l0, l1, l2] = lo;
     let [h0, h1, h2] = hi;
     let t = [0.5 * (l0 + h0), 0.5 * (l1 + h1), 0.5 * (l2 + h2)];
-    let size = ((h0 - l0).powi(2) + (h1 - l1).powi(2) + (h2 - l2).powi(2)).sqrt();
+    let size = (det::powi(h0 - l0, 2) + det::powi(h1 - l1, 2) + det::powi(h2 - l2, 2)).sqrt();
     let far = t.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
     (far.is_finite() && size.is_finite() && far > size).then_some(t)
 }
@@ -7603,7 +7605,7 @@ mod tests {
             |t| Some(if (0.7..=0.71).contains(&t) { 1.0 } else { 0.5 }),
             |t| (!(0.3..0.4).contains(&t)).then_some(0.5),
             |t| (!(0.3..0.4).contains(&t)).then_some(if t > 0.9 { 2.0 } else { 0.5 }),
-            |t| Some(0.75 - 1.0e-4 * (40.0 * t).sin()),
+            |t| Some(0.75 - 1.0e-4 * det::sin(40.0 * t)),
             |_| Some(0.75),
         ];
         let cuts: Vec<f64> = (1..1000).map(|i| f64::from(i) / 1000.0 + 1.0e-7).collect();
@@ -8219,8 +8221,8 @@ mod tests {
         let (t0, t1) = (base.u[base.p], base.u[base.n]);
         let th = deg.to_radians();
         let (a, b) = (
-            Point3::new(r * th.cos(), -r * th.sin(), 0.0),
-            Point3::new(r * th.cos(), r * th.sin(), 0.0),
+            Point3::new(r * det::cos(th), -r * det::sin(th), 0.0),
+            Point3::new(r * det::cos(th), r * det::sin(th), 0.0),
         );
         let chord = Curve::from(
             Line::create_line_segment(
@@ -8231,7 +8233,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let sagitta = r * (1.0 - th.cos());
+        let sagitta = r * (1.0 - det::cos(th));
         let g = curve_piece_gap_bound(
             &k,
             &arc,
@@ -9423,7 +9425,7 @@ mod tests {
                 let c = curve.evaluate_point(k, t).unwrap();
                 let w = trim.evaluate_point(k, t).unwrap();
                 let p = s.evaluate_point(k, Point2::new(w.x, w.y)).unwrap();
-                ((c.x - p.x).powi(2) + (c.y - p.y).powi(2) + (c.z - p.z).powi(2)).sqrt()
+                (det::powi(c.x - p.x, 2) + det::powi(c.y - p.y, 2) + det::powi(c.z - p.z, 2)).sqrt()
             })
             .fold(0.0, f64::max)
     }
@@ -10027,7 +10029,7 @@ mod tests {
         use crate::nurbs::srf_basic::Surface as NurbSurface;
         use crate::surface::offset_surface::OffsetSurface;
         let k = Kernel::default();
-        let (tilt, d) = (10.0_f64.to_radians().tan(), 5.0);
+        let (tilt, d) = (det::tan(10.0_f64.to_radians()), 5.0);
         let rows = [
             [[0.0, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]],
             [[1.0, 0.0, 0.0], [1.0, 0.5, 0.0], [1.0, 1.0, 0.0]],

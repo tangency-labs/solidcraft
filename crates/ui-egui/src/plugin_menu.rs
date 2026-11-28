@@ -1102,8 +1102,7 @@ fn ribbon_group<'a>(app: &'a SolveApp, id: &str) -> Option<(usize, &'a solidcraf
 }
 
 /// The group's rows reuse the Plugins menu actions and dialog path, in declared order.
-fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::app_bar::FileRow> {
-    use crate::app_bar::{FileItem, FileRow};
+fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::ui_kit::Item> {
     let Some((p, group)) = ribbon_group(app, id) else { return Vec::new() };
     let Some(plugin) = app.plugin_menu.listed.get(p) else { return Vec::new() };
     group
@@ -1111,13 +1110,7 @@ fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::app_bar::FileRow> {
         .iter()
         .filter_map(|name| {
             let (e, entry) = plugin.entries.iter().enumerate().find(|(_, entry)| entry.name == *name)?;
-            Some(FileRow::Item(FileItem {
-                id: format!("entry:{p}:{e}"),
-                label: command_title(plugin, entry),
-                key: String::new(),
-                icon: command_icon(plugin, entry).to_owned(),
-                enabled: true,
-            }))
+            Some(crate::ui_kit::Item::action(&format!("entry:{p}:{e}"), &command_title(plugin, entry), command_icon(plugin, entry)))
         })
         .collect()
 }
@@ -1183,43 +1176,31 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
 }
 
 /// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
-pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
-    use crate::app_bar::{FileItem, FileRow};
-    let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
+pub(crate) fn rows(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
     let mut rows = vec![
-        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
-        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
-        FileRow::Separator,
+        Item::action(INSTALL, app.tr("ui.plugin_menu_install"), ""),
+        Item::action(LAST_REPORT, app.tr("ui.plugin_menu_last_report"), "").on_if(app.import_report.is_some()),
+        Item::sep(),
     ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
+        rows.push(Item::action("empty", app.tr("ui.plugin_menu_empty"), "").on_if(false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
+        rows.push(Item::action("empty", app.tr("ui.plugin_menu_all_off"), "").on_if(false));
     }
-    // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
-        let entries: Vec<FileRow> = plugin
+        let entries: Vec<Item> = plugin
             .entries
             .iter()
             .enumerate()
             .map(|(e, entry)| {
-                FileRow::Item(FileItem {
-                    id: format!("entry:{p}:{e}"),
-                    label: format!("{}…", command_title(plugin, entry)),
-                    key: String::new(),
-                    // Keep the menu's unillustrated rows for entries without an annotation.
-                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
-                        command_icon(plugin, entry).to_owned()
-                    } else {
-                        String::new()
-                    },
-                    enabled: true,
-                })
+                let icon = if entry.input_schema.get(crate::plugin_images::KEY).is_some() { command_icon(plugin, entry) } else { "" };
+                Item::action(&format!("entry:{p}:{e}"), &format!("{}…", command_title(plugin, entry)), icon)
             })
             .collect();
-        match <[FileRow; 1]>::try_from(entries) {
+        match <[Item; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),
-            Err(entries) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: entries }),
+            Err(entries) => rows.push(Item::submenu(&format!("plugin:{p}"), &plugin.name, "", entries)),
         }
     }
     rows
@@ -1302,12 +1283,12 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
     let over_group_button =
         app.plugin_menu.ribbon_group_anchor.is_some_and(|rect| ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))));
     let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr() || over_group_button;
-    let out = crate::app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_plugins_area"), just_opened);
+    let out = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_plugins_area"), crate::ui_kit::MenuAnchor::Point(at), &rows, just_opened);
     if out.close {
         app.plugin_menu.open = false;
     }
-    if let Some(id) = out.chosen {
-        choose(app, &id);
+    if let Some(picked) = out.picked {
+        choose(app, &picked.id);
     }
 }
 
