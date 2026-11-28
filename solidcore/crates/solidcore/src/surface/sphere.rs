@@ -1089,8 +1089,16 @@ impl Sphere {
                 need_nurb_intersection = more;
                 *out = found;
             }
-            // (an SmCylinder is not SmCone_TYPE: the default branch)
-            SurfaceKind::Cone(c) if c.type_code() == crate::surface::surface::p2::CONE_TYPE => {
+            // (not upstream: an SmCylinder is not SmCone_TYPE there and goes to the
+            // general intersection, though the cylinder's own dispatch takes this case,
+            // so the order of the two surfaces chose the result)
+            SurfaceKind::Cone(c)
+                if matches!(
+                    c.type_code(),
+                    crate::surface::surface::p2::CONE_TYPE
+                        | crate::surface::surface::p2::CYLINDER_TYPE
+                ) =>
+            {
                 need_nurb_intersection = self.intersect_with_cone_into(
                     k,
                     uv_domain,
