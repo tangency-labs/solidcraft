@@ -1383,6 +1383,8 @@ pub(crate) struct EntryDialog {
     /// The command's icon ([`command_icon`]), in the window's header.
     pub(crate) icon: String,
     pub(crate) read: bool,
+    /// The plugin's own name for the Run button ("Save"), when it gives one (#23389).
+    pub(crate) submit_label: Option<String>,
     /// A long job: never previewed, since a preview would run it whole on every change.
     pub(crate) job: bool,
     /// The fields, or `None` when the schema needs the agent or the CLI.
@@ -1768,6 +1770,7 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
         icon: command_icon(&plugin, entry).to_owned(),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
+        submit_label: (!entry.submit_label.is_empty()).then(|| entry.submit_label.clone()),
         job: entry.job,
         fields,
         plugin,
@@ -3016,7 +3019,12 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     } else {
         "ui.plugin_dialog_run"
     };
-    let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    // A command's own name for its button stands in for Run; file and edit forms keep theirs.
+    let run_label = match &dialog.submit_label {
+        Some(label) if run_key == "ui.plugin_dialog_run" => label.clone(),
+        _ => app.tr(run_key).to_owned(),
+    };
+    let close_label = app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned();
     let mut browse = None;
     let mut choose_file = false;
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.

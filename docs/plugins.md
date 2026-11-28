@@ -428,6 +428,15 @@ refuse a manifest that sets it, like any unknown entry field; set `min_host_vers
 An importer may opt into the bounded dialog hook below; choosing a file then runs that hook,
 never the importer. The field changes no saved designs, and scripts and MCP calls ignore it.
 
+A command dialog confirms with **Run** unless its entry names its own button with
+`"submit_label"`, such as `{"name": "job-setup", "submit_label": "Save"}`: 1 to 24 printable
+characters on one line, shown as written (surrounding spaces are dropped, and a blank label keeps
+**Run**). Name what the user is doing, such as Save, Create or Add, when **Run** would mislead.
+Only a command entry may set it: an importer's dialog confirms with Open file, an exporter's with
+Export, and a form that edits a stored operation with Apply. Releases before this field existed
+refuse a manifest that sets it, like any unknown entry field; set `min_host_version` to match.
+The label changes no saved designs, and scripts and MCP calls ignore it.
+
 ### File-aware importer forms
 
 File conditions use the same bounded condition grammar as sibling conditions, replacing `field`
