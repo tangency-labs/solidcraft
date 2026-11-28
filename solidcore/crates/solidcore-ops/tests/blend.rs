@@ -2154,6 +2154,73 @@ fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
     assert_eq!(b.counts().unwrap()[0], 18);
 }
 
+/// tangency-labs/solidcraft#22795 (stress corpus S1409, S3776, S5016, S6582, S6937, S7015,
+/// S7940): a 100 x 200 x 1 plate with a 1 x 1 notch 0.5 deep centred on its top's +Y edge (at
+/// Y = 100), the top's outer loop rounded r 0.2 with [`Turn::Auto`]. The notch's two inner
+/// upright edges are concave under convex rounds, so Auto sweeps the turns there: two horn
+/// tori, each about its upright edge 100 from the origin. Their axis was the balls' centres'
+/// common foot on the edge's line, taken from the line's own point far along it, and came out
+/// 4.7e-11 above the centres: the torus tilted by 2.3e-10, which its polar converter read back
+/// on its sweep circle of radius 0.047 as an end angle 2.3e-9 degrees past the surface's 90,
+/// and the check refused the result (`SmSurfOfRevolution` Test 7).
+///
+/// The closed form, as in [`auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room`]:
+/// every wall upright, the top over a point at distance t inside the offset outline drops by
+/// g(t) = r - sqrt(r^2 - (r - t)^2), so the rounds take off the integral of g(t) P(t) dt over
+/// 0..r, P(t) the offset outline's perimeter. Its six convex right corners are mitred, each
+/// shortening it by 2 t; at the two reflex corners the swept turns make the offset a quarter
+/// circle of radius t about the upright edge (the horn torus's depth at distance t from its
+/// axis is g(t)), each adding pi t / 2 (a mitre would add 2 t). With L0 = 2 (100 + 200) + 1
+/// = 601, P(t) = L0 - (12 - pi) t, and the integrals of g and t g over 0..r are r^2 (1 - pi/4)
+/// and r^3 (5/6 - pi/4): V = 100 200 1 - 1 1 0.5 0.5 - L0 r^2 (1 - pi/4) + (12 - pi) r^3 (5/6
+/// - pi/4). The notch's sides (0.5) and floor (1) stay longer than the offsets need (r and 2 r).
+#[test]
+fn auto_turns_swept_at_a_notch_far_from_the_origin_pass_the_check() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+    all_fixes();
+    let plate = make_box([-50.0, -100.0, 0.0], [100.0, 200.0, 1.0]).unwrap();
+    let notch = make_box([-0.5, 99.5, 0.5], [1.0, 1.0, 0.5]).unwrap();
+    let b = boolean(plate, notch, BooleanOp::Subtract).unwrap().unwrap();
+    let edges: Vec<usize> = [
+        [0.0, -100.0, 1.0],
+        [50.0, 0.0, 1.0],
+        [-50.0, 0.0, 1.0],
+        [-25.0, 100.0, 1.0],
+        [25.0, 100.0, 1.0],
+        [0.0, 99.5, 1.0],
+        [-0.5, 99.75, 1.0],
+        [0.5, 99.75, 1.0],
+    ]
+    .iter()
+    .map(|&p| edge_at(&b, p))
+    .collect();
+    blend_with(
+        &b,
+        Blend::Round,
+        &edges,
+        &[0.2],
+        &[],
+        Corners::Filled,
+        BlendOptions {
+            turn: Turn::Auto,
+            ..BlendOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // as the next feature reads it back
+    let (back, _) = Body::from_record(&b.to_record().unwrap().0, true).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let r: f64 = 0.2;
+    let want = 19999.75 - 601.0 * r * r * (1.0 - PI / 4.0)
+        + (12.0 - PI) * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+    let v = b.volume(1e-10).unwrap();
+    assert!(rel(v, want) < 1e-9, "{v} against {want}");
+    // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
+    // floor, eight rounds and the two swept turns
+    assert_eq!(b.counts().unwrap()[0], 20);
+}
+
 /// tangency-labs/solidcraft#22796 (stress corpus S3514, S2598): the notched block of
 /// [`auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room`] with a 2 radius blind hole
 /// 10 deep at x = -26, y = 0 (2 of wall to the -X side), the top's outer loop rounded r 2.8. The

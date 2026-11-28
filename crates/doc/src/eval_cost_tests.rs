@@ -5012,16 +5012,18 @@ fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) ->
 /// one the kernel still cannot size.
 #[test]
 fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
-    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 2 mm
+    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 5 mm
     // round of its four top edges (solidcore-ops'
-    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused`).
+    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred`).
     // The top face is the rectangle less its corners outside the circle of radius
     // rho = sqrt(35.75^2 - 12.5^2) = 33.49, so the four edges end on the ball and share no
     // corner. Past their ends the rails of two neighbouring rounds run on as the lines
     // x = 30 - r and y = 20 - r and cross on the top face while (30 - r)^2 + (20 - r)^2 < rho^2,
-    // so no round larger than r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850 fits. The kernel
-    // finds the bands overlapping past the edges' ends and refuses the round as having no room
-    // there, without naming a radius that fits.
+    // above r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850. Since #22798 the mitre handles that
+    // crossing: such rounds are built in turns and meet in the conic where their cylinders
+    // cross, so 2 mm builds (59677.698 mm^3). At 5 mm the mitred body exists too (the same
+    // section integral gives 58861.194 mm^3), but the kernel cannot build it: its turns are
+    // refused, and the round is refused as having no room, without naming a radius that fits.
     let mut doc = Document::new("ball-trimmed block");
     block(&mut doc, "Part", Vec3::new(-30.0, -20.0, 0.0), [60.0, 40.0, 25.0]);
     let ball = FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, 12.5)), radius: "35.75".into(), operation: Operation::Intersect };
@@ -5032,7 +5034,7 @@ fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
     let top = [Vec3::new(30.0, -10.0, 25.0), Vec3::new(-30.0, 10.0, 25.0), Vec3::new(-15.0, -20.0, 25.0), Vec3::new(15.0, 20.0, 25.0)];
     let kind = FeatureKind::Fillet {
         edges: top.into_iter().map(Position).collect(),
-        radius: "2".into(),
+        radius: "5".into(),
         body: None,
         style: Default::default(),
         fit: Default::default(),

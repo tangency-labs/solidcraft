@@ -754,7 +754,9 @@ fn add_read_step(
     } else {
         (sf.body_names, import::Tree::Step(&sf.import))
     };
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, body_names, &sf.invisible, &cname, tree)?;
+    // The file's layers, by body, become folders.
+    let layers: Vec<Option<String>> = sf.import.bodies.iter().map(|b| b.layer.clone()).collect();
+    let (id, placed) = import::add_in_component(s, sf.kind, &fname, body_names, &sf.invisible, &layers, &cname, tree)?;
     let content_sha256 = unchanged
         .then(|| {
             s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
@@ -1028,7 +1030,7 @@ fn add_mesh(
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
         _ => import::Tree::Flat(prepared),
     };
-    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
+    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
     // The materials' looks, body by body (the bodies are built in the file's order).
     if looks.iter().any(Option::is_some) && bodies.len() == looks.len() {
@@ -1521,7 +1523,7 @@ fn add_kicad_with(
     let component_name = import::component_name(path, name);
     let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
     // A board hides none of its own bodies; its layers are all wanted.
-    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
+    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
     // coordinates KiCad stores, which put a board anywhere on the project sheet.
     if let Some(corner) = imported.corner {
@@ -1600,7 +1602,7 @@ pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<
         let feature = imported.feature;
         let feature_name = old_name.filter(|n| !n.trim().is_empty()).unwrap_or(feature.name);
         let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
-        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], tree)?;
+        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], &[], tree)?;
         if let Some(step) = imported.board_step {
             import::add_step_in_component(s, comp, "board.step", step, &feature_name)?;
         }
@@ -6028,6 +6030,7 @@ mod tests {
                 opacity: 1.0,
                 faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
                 name: None,
+                layer: None,
             },
         ));
         let model = solidcraft_doc::SavedModel {
