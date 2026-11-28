@@ -61,6 +61,7 @@ fn schemas_and_the_key_check_agree() {
             "flip",
             "height",
             "height_from",
+            "offset",
             "orientation",
             "position",
             "profiles",

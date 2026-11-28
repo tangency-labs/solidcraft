@@ -527,6 +527,7 @@ pub use route::sweep_with;
 pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
+pub use route::transform_face;
 pub use route::trim_member;
 pub use route::tube_cope;
 pub use route::which;

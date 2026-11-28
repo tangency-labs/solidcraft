@@ -6,7 +6,8 @@
 //! feature's footprint is outlined where the marker is: the solid preview is recomputed off the
 //! window thread and trails the pointer by its boolean, the outline does not. A feature that can
 //! turn in its face also gets a ring lying on the face about the same centre, a fixed size on
-//! screen like the move triad's arrows; dragging its grip turns the feature about the face normal.
+//! screen like the move triad's arrows; dragging its grip turns the feature about the face normal,
+//! and the footprint is outlined while it does.
 //! Nothing runs until OK: the handles edit the open dialog, which the live preview follows, so a
 //! new feature and an Edit Feature behave alike.
 //!
@@ -26,6 +27,7 @@
 //! marker reads it from there and moves it by replacing the item, as a click on the input does.
 
 mod boss;
+mod emboss;
 pub(crate) mod frame_anchor;
 mod hole;
 mod look;
@@ -54,9 +56,9 @@ use solidcraft_theme::Tokens;
 
 /// One tool's use of the handles.
 ///
-/// While `places`, `footprint` and the turn's `reach` and `angle` run, the dialog is in the app;
-/// inside `move_to`, `click` and [`Turn::set`] it is taken out (`app.dialog` is `None`): read the
-/// session and `d` there, never `app.dialog`.
+/// While `places`, `footprint` and the turn's `reach`, `angle` and `readout` run, the dialog is in
+/// the app; inside `move_to`, `click` and [`Turn::set`] it is taken out (`app.dialog` is `None`):
+/// read the session and `d` there, never `app.dialog`.
 pub(crate) struct Spec {
     /// Handle names (`<name>:position`, `<name>:rotate`; `<name>:<n>` with `many`) and widget ids.
     pub name: &'static str,
@@ -76,7 +78,8 @@ pub(crate) struct Spec {
     /// What a click (a press without a drag) on the marker at `key` does: a Single hole is taken
     /// out. `None`: a click on the marker does nothing.
     pub click: Option<fn(&SolveApp, &mut Dialog, usize)>,
-    /// The footprint outlined while dragging, in world points (empty: no outline).
+    /// The footprint outlined while the marker drags or the ring turns, in world points (empty: no
+    /// outline).
     pub footprint: fn(&SolveApp, &Dialog, Vec3, Vec3) -> Vec<Vec3>,
     /// How freely the place at `key` moves on its face: anywhere, or along a line (a hole held at
     /// a distance from one reference edge). The marker shows it as its arms, and does not take a
@@ -218,6 +221,10 @@ pub(crate) struct Turn {
     pub angle: fn(&SolveApp, &Dialog, Vec3) -> f64,
     /// Turn to the pointer's angle (`free` when Alt or Ctrl is held); returns the angle taken.
     pub set: fn(&SolveApp, &mut Dialog, Vec3, f64, bool) -> f64,
+    /// The angle the readout shows while turning, as the tool's field holds it, when that is not
+    /// the grip's own about the face normal: an Emboss shows its Angle, which counts from its
+    /// sketch's x. `None`: the grip's, within a half turn.
+    pub readout: Option<fn(&SolveApp, &Dialog) -> f64>,
 }
 
 /// Every tool with handles, one file each under `place_gizmo/`, one per line in name order so
@@ -225,6 +232,7 @@ pub(crate) struct Turn {
 #[rustfmt::skip]
 static TOOLS: &[&Spec] = &[
     &boss::SPEC,
+    &emboss::SPEC,
     &hole::SPEC,
     &primitive::SPEC,
     &rest::SPEC,
@@ -520,7 +528,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
             alpha: motion::step_back(&ctx, at(marker, "marker_dim"), turning || held, DIM, DIM_S),
         };
         crate::scenario::publish_count(&format!("{name}:hot"), f64::from(style.hot));
-        if dragging && let Some(d) = app.dialog.as_ref() {
+        if (dragging || turning)
+            && let Some(d) = app.dialog.as_ref()
+        {
             let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, pl.base, pl.n).into_iter().map(|p| proj.to_screen(p)).collect();
             if let Some(pts) = pts.filter(|p| p.len() >= 3) {
                 footprint(painter, &pts, &t);
@@ -619,6 +629,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if shown <= -std::f64::consts::PI + 1e-9 {
             shown = std::f64::consts::PI;
         }
+        // A tool's own value for the turn is shown as its field holds it.
+        let shown = turn.readout.zip(app.dialog.as_ref()).map_or(shown, |(read, d)| read(app, d));
         angle_label(painter, gs, bs, shown, on_point.as_deref().map(|name| (name, axis_colour(name, &t))), &t);
     }
 }

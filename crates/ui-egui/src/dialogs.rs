@@ -34,6 +34,8 @@ mod dense;
 pub(crate) use dense::angle_step;
 #[cfg(test)]
 pub(crate) use dense::primitive_label;
+#[path = "dialogs_transform_face.rs"]
+pub(crate) mod transform_face;
 
 const SELECT_ONLY: &[Scope] = &[Scope::Selection, Scope::FeaturePreview];
 const SELECT_MANIP: &[Scope] = &[Scope::Selection, Scope::Manipulator, Scope::FeaturePreview];
@@ -68,6 +70,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.split_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.scale", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.offset_face", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.transform_face", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.thread", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "material.assign", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "inspect.section", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -486,6 +489,15 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Where the labels in the view were dragged to (#8510).
                 labels: crate::canvas::MeasureLabels,
             },
+            /// Distances, rotation direction and pivot in the displayed owner's world frame.
+            TransformFace {
+                translate: [String; 3],
+                axis: usize,
+                custom_axis: [String; 3],
+                angle: String,
+                explicit_pivot: bool,
+                origin: [String; 3],
+            },
             /// Move bodies by a distance along X, Y and Z.
             /// Move/Copy (see `dialogs_move`): the move type, X/Y/Z distances (Point to Position: the
             /// target), X/Y/Z angles (Free Move) and the angle (Rotate).
@@ -738,6 +750,8 @@ pub struct Dialog {
     /// Hidden face-profile sources shown only for this editor's lifetime. Visibility itself is
     /// unchanged, so OK, Cancel, failed apply and replacing the dialog cannot leak an override.
     pub(crate) edit_source_bodies: Vec<String>,
+    /// Values at the start of a face manipulator gesture, discarded when the drag ends.
+    face_drag: Option<std::sync::Arc<transform_face::DragStart>>,
     /// A user pick or clear makes the profile selector explicit, even if all are reselected.
     pub profile_selection_changed: bool,
     /// Give the on-canvas value box the keyboard (and select its text) on the next frame.
@@ -1118,6 +1132,7 @@ impl Dialog {
             error: None,
             editing: None,
             edit_source_bodies: Vec::new(),
+            face_drag: None,
             profile_selection_changed: false,
             focus: true,
             value_focus: None,
@@ -1415,6 +1430,7 @@ impl Dialog {
                 ]
             }),
             "solid.move" => Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0)),
+            "solid.transform_face" => transform_face::start(s),
             "solid.hole" => Dialog::new(hole_defaults(s), single_hole_inputs()),
             "solid.box" => Dialog::new(
                 Kind::Primitive {
@@ -1873,6 +1889,7 @@ impl Dialog {
                 | Kind::Stock { .. }
                 | Kind::Scale { .. }
                 | Kind::OffsetFaces { .. }
+                | Kind::TransformFace { .. }
                 | Kind::PatternRect { .. }
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
@@ -2355,6 +2372,9 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        if transform_face::take_pivot(s, self, &sel) {
+            return;
+        }
         self.awaiting_pick = false;
         self.pick_refused = None;
         // A Single hole takes a face place; a sketch point picked as itself had no face under the
@@ -2478,6 +2498,10 @@ impl Dialog {
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        if self.active == 1 && transform_face::pivot_input(self).is_some() {
+            // A marquee is not a click on one offered point.
+            return;
+        }
         // A marquee over a frame takes only its corners into Corner Overrides.
         let sels = match &self.kind {
             Kind::Frame(m) if self.active == 2 => {
@@ -2575,6 +2599,9 @@ impl Dialog {
         if accepted {
             self.awaiting_pick = false;
             self.pick_refused = None;
+            if self.active == 0 && transform_face::pivot_input(self).is_some() {
+                self.advance();
+            }
         }
         if accepted
             && self.active == 0
@@ -3678,6 +3705,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Loft { .. } => "LOFT",
         Kind::Sweep { .. } => "SWEEP",
         Kind::Move { .. } => "MOVE",
+        Kind::TransformFace { .. } => "cmd.solid_transform_face",
         Kind::Hole { .. } => "HOLE",
         Kind::Primitive { cmd, .. } => match *cmd {
             "solid.box" => "BOX",
@@ -6032,6 +6060,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::AnglePlane { .. }
             | Kind::Scale { .. }
             | Kind::OffsetFaces { .. }
+            | Kind::TransformFace { .. }
             | Kind::Stock { .. }
             | Kind::Pipe { .. }
             | Kind::Emboss { .. }
@@ -7423,7 +7452,15 @@ pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value
 /// A wrapped Emboss edit keeps its profile guide in the saved author occurrence.
 /// An invalid saved context must not draw the guide at a different occurrence.
 pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option<solidcore_record::Plane>, String> {
-    let Some(dialog) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Emboss { .. })) else { return Ok(None) };
+    let Some(dialog) = app.dialog.as_ref() else { return Ok(None) };
+    emboss_plane_of(app, dialog, sketch)
+}
+
+/// [`emboss_profile_plane`] for `dialog`, which a placement handle's drag has taken out of the app.
+pub(crate) fn emboss_plane_of(app: &SolveApp, dialog: &Dialog, sketch: u64) -> Result<Option<solidcore_record::Plane>, String> {
+    if !matches!(dialog.kind, Kind::Emboss { .. }) {
+        return Ok(None);
+    }
     let Some((feature, _)) = dialog.editing else { return Ok(None) };
     let Some(feature) = app.session.doc.feature(feature) else { return Err("the edited feature is missing".into()) };
     let FeatureKind::Emboss { sketch: source, face: Some(face), .. } = &feature.kind else { return Ok(None) };
@@ -8395,6 +8432,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 .collect();
             let faces = faces.ok_or("select faces first")?;
             ("solid.offset_face", with_single_body(json!({"faces": faces}), sels(d, 0)))
+        }
+        Kind::TransformFace { translate, axis, custom_axis, angle, explicit_pivot, origin } => {
+            let [pick @ Sel::Face { body, .. }] = sels(d, 0) else { return Err("select a face first".into()) };
+            if let Some(input) = transform_face::pivot_input(d) {
+                return Err(pick_first(input));
+            }
+            let at = transform_face::pick_point(s, pick).ok_or_else(|| tr("ui.transform_face.pick_interior").to_owned())?;
+            let pivot = explicit_pivot.then_some(origin);
+            let mut p = transform_face::motion(s, translate, *axis, custom_axis, angle, pivot)?;
+            p["face"] = pt(at);
+            p["body"] = json!(body);
+            ("solid.transform_face", p)
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
@@ -11220,6 +11269,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
+        FeatureKind::TransformFace { .. } => transform_face::reopen(s, &f)?,
         FeatureKind::Thread { .. } => {
             let mut d = start("solid.thread")?;
             crate::dialogs_thread::reopen(&mut d, s, &f);

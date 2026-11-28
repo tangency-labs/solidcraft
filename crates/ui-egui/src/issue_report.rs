@@ -1080,6 +1080,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::sketch3d::drag_end();
         crate::drag_snap::clear();
         crate::gizmo::cancel(ctx, egui::Id::unique("sc_move_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_transform_face_triad"));
         crate::gizmo::cancel(ctx, egui::Id::unique("sc_occ_triad"));
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));

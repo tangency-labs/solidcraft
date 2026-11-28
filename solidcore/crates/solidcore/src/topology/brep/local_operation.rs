@@ -8,6 +8,7 @@
 //! |---------------------|---------------------------|
 //! | [`local_operation`] | `SmBrep::LocalOperation`  |
 //! | [`local_operation_simple`] | (not upstream) `SmBrep::LocalOperation` with its own notification identities |
+//! | [`transformed_face_surface`] | (not upstream) one face's support under a rigid motion |
 //!
 //! Deviations: the offset executive's local-operation geometry creator
 //! (`SmLocalOperationGeometryCreation`) is the face and surface lists the executive
@@ -1703,6 +1704,144 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
     Ok(true)
 }
 
+/// A checked rigid motion of a face. Keep the original axis and displacement for
+/// exact tangency decisions, which rounding a transformed frame could change.
+#[derive(Debug)]
+pub struct FaceMotion {
+    axis: Vec3,
+    translate: Vec3,
+    angle: f64,
+    placement: Axis2Placement,
+}
+
+impl FaceMotion {
+    /// Rotate about `axis` through `origin` by `angle` radians, then translate.
+    ///
+    /// # Errors
+    /// A non-finite argument, a zero rotation axis, or an overflowing placement.
+    pub fn new(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Self> {
+        let invalid = |reason| SolidError::invalid_input("FaceMotion::new", reason);
+        let finite = |p: Vec3| p.to_array().into_iter().all(f64::is_finite);
+        if !(finite(origin) && finite(translate) && angle.is_finite()) {
+            return Err(invalid("non-finite pivot, translation or angle"));
+        }
+        let (_, unit) = axis
+            .length_and_unit()
+            .ok_or_else(|| invalid("non-finite or zero rotation axis"))?;
+        let mut placement = Axis2Placement::IDENTITY;
+        if angle != 0.0 {
+            placement.rotate_about_axis_at_point(angle, origin, unit);
+        }
+        placement.translate(translate);
+        if !finite(placement.origin()) {
+            return Err(invalid("the pivoted motion overflows its placement"));
+        }
+        Ok(Self {
+            axis,
+            translate,
+            angle,
+            placement,
+        })
+    }
+}
+
+/// The selected face's support under `motion`. Returns `None` for an invariant
+/// support; otherwise the replacement is an independent copy, including its definition.
+///
+/// # Errors
+///
+/// A missing face or surface, a motion the surface transform cannot represent,
+/// or the copy or transform's own error.
+pub fn transformed_face_surface(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    motion: &FaceMotion,
+) -> Result<Option<Surface>> {
+    const TRANSFORM: &str = "topology::brep::local_operation::transformed_face_surface";
+    let invalid = |reason| SolidError::invalid_input(TRANSFORM, reason);
+    let (translate, axis, angle) = (motion.translate, motion.axis, motion.angle);
+    let own = face_ops::surface(b, face)?
+        .ok_or_else(|| SolidError::topology(TRANSFORM, TopologyFailure::FaceWithoutSurface))?;
+    if angle == 0.0 && translate == Vec3::ZERO {
+        return Ok(None);
+    }
+
+    // Test a translation on the original support: adding it to a distant origin
+    // can round a tangent vector out of its plane, or erase a real normal move.
+    let invariant = match own.kind() {
+        SurfaceKind::Plane(p) => {
+            let p = p.position();
+            let (x, y) = (p.x_axis(), p.y_axis());
+            if spans(p) == Some(true)
+                && (angle == 0.0
+                    || [x, y]
+                        .into_iter()
+                        .all(|v| exact::dot(v, axis).is_some_and(|d| exact::is_zero(&d))))
+            {
+                exact::det3(x, y, translate).map(|d| exact::is_zero(&d))
+            } else {
+                None
+            }
+        }
+        SurfaceKind::Cone(c) if angle == 0.0 && c.cylinder => {
+            let p = &c.rev.position;
+            exact::dot(p.x_axis(), translate)
+                .zip(exact::dot(p.y_axis(), translate))
+                .map(|(x, y)| exact::is_zero(&x) && exact::is_zero(&y))
+        }
+        SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) if angle == 0.0 => {
+            Some(false)
+        }
+        SurfaceKind::BSpline(net) if angle == 0.0 && own.procedural_definition().is_none() => {
+            net_slides_in_plane(net, translate)
+        }
+        _ => None,
+    };
+    if invariant == Some(true) {
+        return Ok(None);
+    }
+    // The surface transform itself skips placements within EFF_ZERO of identity.
+    // That is not a proof of an invariant support. Do not retrim on an unmoved
+    // copy (or silently accept a genuinely normal displacement) in that case.
+    if motion.placement.is_identity(EFF_ZERO) {
+        return Err(invalid(
+            "the face's rigid motion is below the surface transform's resolution",
+        ));
+    }
+    let mut moved = own.copy(k)?;
+    moved.transform(k, &motion.placement, None)?;
+    if is_own_surface(own, &moved) {
+        if invariant == Some(false) {
+            return Err(invalid(
+                "the displacement is not resolved on the face's support",
+            ));
+        }
+        return Ok(None);
+    }
+    Ok(Some(moved))
+}
+
+/// A bare net whose control points all lie in a plane parallel to `delta` slides
+/// in that plane. A chord not parallel to `delta` nominates the second direction;
+/// rounding that chord cannot produce a false positive: [`net_plane_coordinate`]
+/// tests every homogeneous point against the two *stored* directions exactly.
+fn net_slides_in_plane(net: &BSplineSurface, delta: Vec3) -> Option<bool> {
+    let mut pts = net.gw_nurb()?.rows().flatten().map(|c| {
+        let h = Vec3::new(c.x, c.y, c.z);
+        if c.w == NOW {
+            h
+        } else {
+            h / c.w
+        }
+    });
+    let origin = pts.next()?;
+    let chord = pts.map(|p| p - origin).find(|&v| {
+        exact::cross(delta, v).is_some_and(|cross| cross.iter().any(|c| !exact::is_zero(c)))
+    })?;
+    net_plane_coordinate(net, delta, chord).map(|_| true)
+}
+
 /// Whether `given` is the surface `own` lies on, exactly: both of one analytic kind
 /// ([`AnalyticSupport`]) with equal radii and semi-angle, and the same placement where it
 /// matters, each comparison made without rounding (error-free products and sums,
@@ -1895,25 +2034,10 @@ fn own_plane_moved_origin(p: &Axis2Placement, q: &Axis2Placement) -> Option<Vec3
         .then_some(origin)
 }
 
-/// The translation along `q`'s rounded normal that moves `net`'s plane onto `q`'s plane.
-/// Exact determinants of `q`'s stored axes prove the homogeneous control points have
-/// the same plane coordinate per positive finite weight. The displacement uses the
-/// matching determinant ratio; its doubles are estimates ([`exact::to_f64`]). The sense
-/// is `own`'s evaluated normal against `q`'s rounded normal, finite and positive.
-fn net_moved_translation(
-    net: &BSplineSurface,
-    k: &Kernel,
-    own: &Surface,
-    q: &Axis2Placement,
-) -> Option<Vec3> {
-    let (x, y, m, g) = (q.x_axis(), q.y_axis(), q.z_axis(), q.origin());
-    // a degenerate given frame has no normal to be parallel to (`z_axis` is (0, 0, 1) for
-    // parallel or zero axes)
-    if !spans(q)? {
-        return None;
-    }
-    // det(x, y, H_i)*w0 = det(x, y, H_0)*wi, not H_i dot m: unitizing the
-    // cross product rounds m, so its exact perpendicular plane can differ from q's.
+/// The common coordinate `det(x, y, H_i)/w_i` of all the net's control points,
+/// as its first point's weight and determinant. Exact even for a rational net:
+/// compare the cross products of the two fractions, not rounded Euclidean points.
+fn net_plane_coordinate(net: &BSplineSurface, x: Vec3, y: Vec3) -> Option<(f64, Vec<f64>)> {
     let nurb = net.gw_nurb()?;
     let weight = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
     let first = nurb.rows().flatten().next()?;
@@ -1935,6 +2059,29 @@ fn net_moved_translation(
             return None;
         }
     }
+    Some((w0, a0))
+}
+
+/// The translation along `q`'s rounded normal that moves `net`'s plane onto `q`'s plane.
+/// Exact determinants of `q`'s stored axes prove the homogeneous control points have
+/// the same plane coordinate per positive finite weight. The displacement uses the
+/// matching determinant ratio; its doubles are estimates ([`exact::to_f64`]). The sense
+/// is `own`'s evaluated normal against `q`'s rounded normal, finite and positive.
+fn net_moved_translation(
+    net: &BSplineSurface,
+    k: &Kernel,
+    own: &Surface,
+    q: &Axis2Placement,
+) -> Option<Vec3> {
+    let (x, y, m, g) = (q.x_axis(), q.y_axis(), q.z_axis(), q.origin());
+    // a degenerate given frame has no normal to be parallel to (`z_axis` is (0, 0, 1) for
+    // parallel or zero axes)
+    if !spans(q)? {
+        return None;
+    }
+    // det(x, y, H_i)*w0 = det(x, y, H_0)*wi, not H_i dot m: unitizing the
+    // cross product rounds m, so its exact perpendicular plane can differ from q's.
+    let (w0, a0) = net_plane_coordinate(net, x, y)?;
     // a net whose normal cannot be evaluated is not shown this construction
     let domain = own.natural_uv_domain_with_nurb(k).ok()?;
     let own_normal = own

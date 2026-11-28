@@ -1705,6 +1705,21 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Rotate one face's supporting surface about its pivot, then translate it and retrim its neighbours.
+    TransformFace {
+        face: FacePick,
+        body: BodyName,
+        #[walk(length = ["X distance", "Y distance", "Z distance"])]
+        translate: [Expr; 3],
+        rotate_axis: Dir,
+        /// Without an explicit pivot, turn about the resolved face pick.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        origin: Option<PointExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+    },
     /// Remove faces (at the given points) and heal the gap from the neighbouring planes, as when
     /// a fillet, chamfer, hole or boss is taken off. A picked face brings the rest of its surface
     /// (both halves of a hole's wall).
@@ -2395,6 +2410,12 @@ pub enum FeatureKind {
         /// Corner choices for these flanges, identified by their named source rims.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         corners: Vec<crate::CornerJoinParams>,
+        /// How far each bend is moved out past where `position` puts it, away from the panel it
+        /// stands on (toward it where negative); the panel grows by the same strip. None is no
+        /// offset. Walked last, so the inputs before it keep their names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
     },
     /// A corner shared by two bends, saved by their source-edge identities.
     SheetCornerJoin {
@@ -4418,6 +4439,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
+            FeatureKind::TransformFace { .. } => "TransformFaceFeature",
             FeatureKind::DeleteFace { .. } => "DeleteFaceFeature",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::SurfaceMidsurface { .. } => "MidsurfaceFeature",
@@ -4521,6 +4543,7 @@ impl FeatureKind {
             FeatureKind::SplitFace { .. } => "split_face",
             FeatureKind::Scale { .. } => "scale",
             FeatureKind::OffsetFace { .. } => "offset_face",
+            FeatureKind::TransformFace { .. } => "transform_face",
             FeatureKind::DeleteFace { .. } => "delete_face",
             FeatureKind::BoundingSolid { .. } => "bounding_solid",
             FeatureKind::Pipe { .. } => "pipe",
@@ -4624,6 +4647,7 @@ impl FeatureKind {
             "MoveFeature" => "move",
             "ScaleFeature" => "scale",
             "OffsetFacesFeature" => "offset_face",
+            "TransformFaceFeature" => "transform_face",
             "DeleteFaceFeature" => "delete_face",
             "OffsetSurfaceFeature" => "surface_offset",
             "MidsurfaceFeature" => "surface_midsurface",
@@ -4727,6 +4751,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
+            FeatureKind::TransformFace { .. } => "TransformFace",
             FeatureKind::DeleteFace { .. } => "DeleteFace",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::SurfaceMidsurface { .. } => "Midsurface",
