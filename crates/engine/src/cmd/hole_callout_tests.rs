@@ -159,7 +159,7 @@ fn counterbore_and_countersink_callouts_keep_their_hole() {
     let cs = callout(&mut s, "CS");
     assert!(near(&cs["callout"]["diameter"], 6.6), "{cs}");
     assert!(near(&cs["callout"]["extent"]["depth"], 15.0), "{cs}");
-    assert_eq!(lines(&cs), ["Ø6.60 ↧ 15.00", "⌵ Ø12.00 × 90.00°"]);
+    assert_eq!(lines(&cs), ["Ø6.60 ↧ 15.00", "⌵ Ø12.00 × 90°"]);
     // Words in the drawing's content language, numbers in its unit.
     assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"language": "de-DE"}))), ["Ø6.60 DURCH", "⌴ Ø11.00 ↧ 6.80"]);
     assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"units": "in", "decimals": 2}))), ["Ø0.2598 THRU", "⌴ Ø0.4331 ↧ 0.2677"]);
@@ -458,6 +458,80 @@ fn a_tapped_hole_takes_every_thread_the_hole_feature_takes() {
     assert_eq!(lines(&unc), ["1/4-20 UNC ↧ 12.00"]);
 }
 
+/// BTUSALLC/solidcraft issue 19: the Hole feature's saved hand and tolerance class are part of the
+/// thread's designation (ISO 965-1: `M22x1-6H`, then `-LH` for a left-hand thread; ASME B1.1:
+/// `1/4-20 UNC-2B`, `-LH` likewise), read from the feature, never typed into the callout.
+#[test]
+fn a_tapped_holes_class_and_left_hand_are_in_its_callout() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [15, 15, 20], "thread": "M22x1", "thread_class": "6H", "hand": "left", "depth": 15, "name": "T"}));
+    let c = callout(&mut s, "T");
+    assert_eq!(c["status"], "resolved", "{c}");
+    assert_eq!(
+        (&c["callout"]["thread"], &c["callout"]["thread_class"], &c["callout"]["hand"]),
+        (&json!("M22x1"), &json!("6H"), &json!("left")),
+        "{c}"
+    );
+    assert_eq!(lines(&c), ["M22x1-6H-LH ↧ 15.00"]);
+    // 15 mm = 0.590551 in: inches keep a meaningful fourth digit, as every length does.
+    assert_eq!(lines(&callout_with(&mut s, "T", None, json!({"decimals": 0, "units": "in"}))), ["M22x1-6H-LH ↧ 0.5906"]);
+    // Left-hand without a class, modelled: the hand alone.
+    run(&mut s, "solid.hole", json!({"position": [45, 15, 20], "thread": "M10", "hand": "left", "modeled": true, "depth": 12, "name": "L"}));
+    let l = callout(&mut s, "L");
+    assert_eq!((&l["callout"]["hand"], l["callout"].get("thread_class")), (&json!("left"), None), "{l}");
+    assert_eq!(lines(&l), ["M10-LH ↧ 12.00"]);
+    // A right-hand thread without a class reads as before.
+    run(&mut s, "solid.hole", json!({"position": [30, 5, 20], "thread": "M4", "depth": 10, "name": "R"}));
+    assert_eq!(lines(&callout(&mut s, "R")), ["M4 ↧ 10.00"]);
+    // Editing the feature's class changes the callout: it is read from the model.
+    run(&mut s, "timeline.edit", json!({"feature": "T", "set": {"thread_class": "5H6H"}}));
+    assert_eq!(lines(&callout(&mut s, "T")), ["M22x1-5H6H-LH ↧ 15.00"]);
+    // Unified: the class after the series, then the hand.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [15, 15, 20], "thread": "1/4-20 UNC", "thread_class": "2B", "depth": 15, "name": "U"}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [45, 15, 20], "thread": "1/4-20 UNC", "thread_class": "2B", "hand": "left", "depth": 15, "name": "UL"}),
+    );
+    let u = callout(&mut s, "U");
+    assert_eq!((&u["callout"]["thread_class"], &u["callout"]["hand"]), (&json!("2B"), &json!("right")), "{u}");
+    assert_eq!(lines(&u), ["1/4-20 UNC-2B ↧ 15.00"]);
+    assert_eq!(lines(&callout(&mut s, "UL")), ["1/4-20 UNC-2B-LH ↧ 15.00"]);
+}
+
+/// BTUSALLC/solidcraft issue 20: a thread by its standard designation however it was typed (ISO
+/// 965-1 writes `M8x1`, and a coarse thread without its pitch, `M8`); a countersink's angle in
+/// degrees with decimals of its own, not the lengths'; a small hole never reads 0.
+#[test]
+fn a_callouts_thread_angle_and_small_sizes_read_as_a_drawing_writes_them() {
+    let mut s = Session::default();
+    bearing_block(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [90, 30, 40], "thread": "M8X1", "depth": 15, "name": "Upper"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "thread": "M8x1.25", "depth": 15, "name": "Coarse"}));
+    assert_eq!(lines(&callout(&mut s, "Upper")), ["M8x1 ↧ 15.00"]);
+    let coarse = callout(&mut s, "Coarse");
+    assert_eq!((&coarse["callout"]["thread"], lines(&coarse)), (&json!("M8"), vec!["M8 ↧ 15.00".to_string()]), "{coarse}");
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [10, 52, 40], "diameter": 6.6, "depth": 15, "type": "countersink", "cs_diameter": 12, "cs_angle": "90 deg", "name": "CS"}),
+    );
+    assert_eq!(lines(&callout_with(&mut s, "CS", None, json!({"decimals": 6}))), ["Ø6.600000 ↧ 15.000000", "⌵ Ø12.000000 × 90°"]);
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [90, 52, 40], "diameter": 6.6, "depth": 15, "type": "countersink", "cs_diameter": 12, "cs_angle": "82.5 deg", "name": "CS82"}),
+    );
+    assert_eq!(lines(&callout_with(&mut s, "CS82", None, json!({"decimals": 0, "units": "in"}))), ["Ø0.2598 ↧ 0.5906", "⌵ Ø0.4724 × 82.5°"]);
+    // Ø0.05, 0.2 deep, at 0 decimals: each shows its first significant digit, never `Ø0 ↧ 0`.
+    run(&mut s, "solid.hole", json!({"position": [50, 5, 40], "diameter": 0.05, "depth": 0.2, "name": "Tiny"}));
+    assert_eq!(lines(&callout_with(&mut s, "Tiny", None, json!({"decimals": 0}))), ["Ø0.05 ↧ 0.2"]);
+    assert_eq!(lines(&callout_with(&mut s, "Tiny", None, json!({"decimals": 3}))), ["Ø0.050 ↧ 0.200"]);
+}
+
 #[test]
 fn a_hole_in_a_moved_body_follows_the_move() {
     let mut s = Session::default();
@@ -694,7 +768,7 @@ fn a_tapped_hole_under_a_recess_gives_its_thread_depth_from_the_start_face() {
     );
     let c = callout(&mut s, "Cs");
     assert!((c["callout"]["thread_depth"].as_f64().unwrap_or(f64::NAN) - 12.975).abs() < 1e-9, "{c}");
-    assert_eq!(lines(&c), ["M8 ↧ 12.98", "Ø6.80 ↧ 20.00", "⌵ Ø12.75 × 90.00°"]);
+    assert_eq!(lines(&c), ["M8 ↧ 12.98", "Ø6.80 ↧ 20.00", "⌵ Ø12.75 × 90°"]);
 }
 
 // A later feature that moves or covers the face a hole starts on, or closes a through hole, leaves

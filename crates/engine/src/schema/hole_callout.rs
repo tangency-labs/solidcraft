@@ -10,6 +10,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use solidcraft_doc::drawing::hole_callout::{self as doc, MAX_DECIMALS};
+use solidcraft_doc::thread_forms::ThreadHand;
 
 /// A Hole feature, by its id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,9 +134,16 @@ pub struct CalloutValues {
     pub count: usize,
     /// The drilled diameter (for a tapped hole, the tap drill).
     pub diameter: f64,
-    /// A tapped hole's thread (`M8`, `1/4-20 UNC`, `G 1/4`), shown in place of the diameter.
+    /// A tapped hole's thread by its standard designation (`M8`, `M8x1`, `1/4-20 UNC`, `G 1/4`),
+    /// shown in place of the diameter with its class and hand (`M22x1-6H-LH`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// The tapped thread's tolerance class as the Hole feature keeps it (`6H`, `2B`), when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_class: Option<String>,
+    /// The tapped thread's hand, `right` or `left`: present with `thread`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hand: Option<HandResult>,
     /// The thread's depth when the feature gives it one, from the face the hole starts on as the
     /// blind depth is: the feature's own thread depth (which starts below any counterbore or
     /// countersink) plus that recess. Without one, the thread runs the hole's length.
@@ -153,6 +161,14 @@ pub struct CalloutValues {
     pub start_face: String,
     /// The drilling direction, into the material, in the frame of `start`.
     pub direction: [f64; 3],
+}
+
+/// Which way a tapped hole's thread turns.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HandResult {
+    Right,
+    Left,
 }
 
 /// What `drawing.hole_callout` returns.
@@ -186,11 +202,18 @@ pub struct CalloutResult {
 impl From<&doc::HoleCallout> for CalloutValues {
     fn from(c: &doc::HoleCallout) -> Self {
         // Every field by name, so one added to the callout can't be left out of the reply.
-        let doc::HoleCallout { count, diameter, thread, thread_depth, extent, form, start, start_face, direction } = c;
+        let doc::HoleCallout { count, diameter, thread, thread_class, hand, thread_depth, extent, form, start, start_face, direction } = c;
         CalloutValues {
             count: *count,
             diameter: *diameter,
             thread: thread.clone(),
+            thread_class: thread_class.clone(),
+            // A hole's thread is never both hands: the callout reads failed on one.
+            hand: hand.and_then(|h| match h {
+                ThreadHand::Right => Some(HandResult::Right),
+                ThreadHand::Left => Some(HandResult::Left),
+                ThreadHand::Both => None,
+            }),
             thread_depth: *thread_depth,
             extent: match *extent {
                 doc::Extent::Through => ExtentResult::Through,

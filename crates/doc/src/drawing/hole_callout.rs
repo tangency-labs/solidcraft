@@ -29,7 +29,9 @@
 //!   looked for where the move put it, and `start` and `direction` are in the frame of the model
 //!   as it is now (of the hole's own component, the same for every placement of it). A body
 //!   moved any other way reads as failed.
-//! - A tapped hole takes any thread the Hole feature takes (ISO metric, UNC/UNF, G, Rp). With
+//! - A tapped hole takes any thread the Hole feature takes (ISO metric, UNC/UNF, G, Rp), by its
+//!   standard designation however it was typed (`m8X1` is `M8x1`, the coarse `M8x1.25` is `M8`),
+//!   with the tolerance class and hand the feature keeps (`M22x1-6H-LH`, `1/4-20 UNC-2B-LH`). With
 //!   its own thread depth, the drill gets a line of its own and the thread line that depth, both
 //!   from the face the hole starts on: the feature counts its thread from below any counterbore
 //!   or countersink, so the callout adds that recess. A thread that reaches the floor of a blind
@@ -38,8 +40,11 @@
 //!   record with the hole in it, so no face is named after the hole.
 //! - `count` is the feature's; the extent is this hole's. One feature can drill through on one
 //!   hole and blind on another (a stepped part), so `6×` does not say the six share it.
-//! - The text: numbers through the shared length formatter ([`crate::display_units`]), the
-//!   words in the drawing's content language. Nothing is read from a view, and nothing is saved.
+//! - The text: lengths through the shared length formatter ([`crate::display_units`]) and the
+//!   diameter sign dimensions use, as a dimension's are; a length that would round to 0 takes the
+//!   decimals that show its first significant digit. An angle in degrees with decimals of its own.
+//!   The words in the drawing's content language. Nothing is read from a view, and nothing is
+//!   saved.
 //!
 //! Holes made by other features, and the copies a pattern or a mirror makes of a hole, are not
 //! supported yet: a hole that is copied reads as failed, not supported yet.
@@ -52,7 +57,10 @@ use solidcraft_geom::prelude::*;
 use solidcraft_kernel::PointClass;
 use solidcraft_kernel::affine;
 
+use super::dimension::DIAMETER_SIGN;
+use crate::display_units::NumberFormat;
 use crate::expr::{Kind, Value};
+use crate::thread_forms::ThreadHand;
 use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Mat, Model, ModelState, Result, display_units};
 
 /// The decimals a callout's numbers get unless asked for others: the one default dimensions take
@@ -105,9 +113,16 @@ pub struct HoleCallout {
     pub count: usize,
     /// The drilled diameter (for a tapped hole, the tap drill).
     pub diameter: f64,
-    /// The thread of a tapped hole (`M8`, `1/4-20 UNC`, `G 1/4`), shown in place of the diameter.
+    /// The thread of a tapped hole by its standard designation (`M8`, `M8x1`, `1/4-20 UNC`,
+    /// `G 1/4`), shown in place of the diameter with its class and hand.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// The tapped thread's tolerance class as the feature keeps it (`6H`, `2B`), when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_class: Option<String>,
+    /// The tapped thread's hand, right or left: present with `thread`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hand: Option<ThreadHand>,
     /// The thread's depth when the feature gives it one, from the face the hole starts on as the
     /// drill depth is: the feature's own thread depth (from where the thread starts) plus any
     /// counterbore depth or countersink depth above it. Without one, the thread runs the hole's
@@ -331,7 +346,7 @@ fn measure(
     motion: &dyn Fn(&str) -> Result<Mat>,
     copied: &dyn Fn(&str) -> bool,
 ) -> Result<Resolution> {
-    let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, to, .. } = &f.kind else {
+    let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, thread_class, hand, to, .. } = &f.kind else {
         return Err(DocError::Invalid("not a hole".into()));
     };
     // Measured as the evaluator drills it: a hole at sketch points in its sketch's frame, meeting
@@ -375,15 +390,30 @@ fn measure(
             Form::Countersink { diameter: length(cs_diameter, "countersink diameter")?, angle: angle(cs_angle, "countersink angle")? }
         }
     };
-    // Any thread the feature takes; a metric one as written, a catalogued one by its designation.
-    let thread = match thread {
+    // Any thread the feature takes, by its standard designation however it was typed (ISO 965-1
+    // and ISO 261: `M8x1`, a coarse thread without its pitch, `M8`), with the class and hand the
+    // feature keeps. Eval refuses a class the thread doesn't take; a hand-edited file is checked
+    // again here, and a hole's thread is never both hands.
+    let tapped = match thread {
         Some(t) => match crate::parse_tapped_thread(t).filter(|_| t.trim().len() <= 32) {
-            Some(tapped) if tapped.family == crate::TappedThreadFamily::Metric => Some(metric_as_written(t)),
-            Some(tapped) => Some(tapped.designation),
+            Some(tapped) => Some(tapped),
             None => return Err(DocError::Invalid("the hole's thread is not one a tapped hole takes (ISO metric, UNC, UNF, G or Rp)".into())),
         },
         None => None,
     };
+    let thread_class = match (thread_class, &tapped) {
+        (Some(class), Some(tapped)) => {
+            tapped.check_class(class).map_err(DocError::Invalid)?;
+            Some(class.clone())
+        }
+        _ => None,
+    };
+    let hand = match (&tapped, hand) {
+        (Some(_), ThreadHand::Both) => return Ok(Resolution::Failed { reason: "a tapped hole's thread is right- or left-hand, never both".into() }),
+        (Some(_), h) => Some(*h),
+        (None, _) => None,
+    };
+    let thread = tapped.map(|t| t.designation);
     let thread_depth = match thread_depth {
         Some(d) if thread.is_some() => Some(length(d, "thread depth")?),
         _ => None,
@@ -481,6 +511,8 @@ fn measure(
         count: spots.len(),
         diameter,
         thread,
+        thread_class,
+        hand,
         thread_depth,
         extent,
         form,
@@ -489,15 +521,6 @@ fn measure(
         direction: direction.into(),
     };
     Ok(Resolution::Resolved { callout })
-}
-
-/// A metric thread as written, with the `M` in capitals (`m8x1` → `M8x1`).
-fn metric_as_written(t: &str) -> String {
-    let t = t.trim();
-    match t.strip_prefix('m') {
-        Some(rest) => format!("M{rest}"),
-        None => t.to_string(),
-    }
 }
 
 /// The bore of a hole as a model has it.
@@ -653,7 +676,8 @@ fn first_face(st: &ModelState, prefix: &str, from: Vec3, along: Vec3) -> Option<
 /// tapped hole whose thread runs its length is one line, the thread in place of the drill.
 pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
     style.validate()?;
-    let len = |mm: f64| display_units::length_number(mm, &style.units, style.decimals);
+    let len = |mm: f64| length(mm, style);
+    let diameter = len(c.diameter)?;
     let count = if c.count > 1 { format!("{}× ", c.count) } else { String::new() };
     // A thread at least as deep as a blind hole runs its length: one line, as with no depth of
     // its own (the feature keeps a thread within the hole's wall, so it is never deeper).
@@ -663,21 +687,78 @@ pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
     };
     let extent = match c.extent {
         Extent::Through => format!(" {}", words(&style.language).through),
-        Extent::Blind { depth } => format!(" ↧ {}", len(depth)),
+        Extent::Blind { depth } => format!(" ↧ {}", len(depth)?),
     };
-    let mut lines = match (&c.thread, thread_depth) {
-        (Some(t), Some(depth)) => vec![format!("{count}{t} ↧ {}", len(depth)), format!("Ø{}{extent}", len(c.diameter))],
+    let thread = c.thread.as_ref().map(|t| designation(t, c.thread_class.as_deref(), c.hand));
+    let mut lines = match (thread, thread_depth) {
+        (Some(t), Some(depth)) => vec![format!("{count}{t} ↧ {}", len(depth)?), format!("{DIAMETER_SIGN}{diameter}{extent}")],
         (Some(t), None) => vec![format!("{count}{t}{extent}")],
-        (None, _) => vec![format!("{count}Ø{}{extent}", len(c.diameter))],
+        (None, _) => vec![format!("{count}{DIAMETER_SIGN}{diameter}{extent}")],
     };
     match c.form {
         Form::Simple | Form::Drilled { .. } => {}
-        Form::Counterbore { diameter, depth } => lines.push(format!("⌴ Ø{} ↧ {}", len(diameter), len(depth))),
-        Form::Countersink { diameter, angle } => {
-            lines.push(format!("⌵ Ø{} × {:.*}°", len(diameter), usize::from(style.decimals.min(MAX_DECIMALS)), angle.to_degrees()))
-        }
+        Form::Counterbore { diameter, depth } => lines.push(format!("⌴ {DIAMETER_SIGN}{} ↧ {}", len(diameter)?, len(depth)?)),
+        Form::Countersink { diameter, angle } => lines.push(format!("⌵ {DIAMETER_SIGN}{} × {}°", len(diameter)?, degrees(angle)?)),
     }
     Ok(lines)
+}
+
+/// A thread's designation with its tolerance class and hand: the class after the size, then `LH`
+/// for a left-hand thread, each after a hyphen (ISO 965-1's designation of a metric thread,
+/// `M22x1-6H-LH`; ASME B1.1's of a Unified one, `1/4-20 UNC-2B-LH`). A right-hand thread has no
+/// mark of its hand.
+fn designation(thread: &str, class: Option<&str>, hand: Option<ThreadHand>) -> String {
+    let mut out = thread.to_string();
+    if let Some(class) = class {
+        out.push('-');
+        out.push_str(class);
+    }
+    if hand == Some(ThreadHand::Left) {
+        out.push_str("-LH");
+    }
+    out
+}
+
+/// A length in millimetres as the callout shows it: by the shared length formatter, as a
+/// dimension's number is, so a callout and a dimension on one sheet read alike (including the
+/// decimal mark, which is the formatter's and not the content language's). A positive length
+/// that would read 0 at the style's decimals takes the decimals that show its first significant
+/// digit instead (`Ø0.05`, never `Ø0`), as inch lengths already keep a meaningful fourth digit; one
+/// too small to show even with [`MAX_DECIMALS`] is refused.
+fn length(mm: f64, style: &TextStyle) -> Result<String> {
+    let nonzero = |s: &str| s.bytes().any(|b| (b'1'..=b'9').contains(&b));
+    let shown = display_units::length_number(mm, &style.units, style.decimals);
+    if mm.is_nan() || mm <= 0.0 || nonzero(&shown) {
+        return Ok(shown);
+    }
+    // The decimals of its first significant digit, or one more where the binary value rounds
+    // down there (0.0995 → 0.10).
+    let value = mm * display_units::unit_scale(&style.units).0;
+    let first = (-value.log10()).ceil();
+    if first.is_finite() && first <= f64::from(MAX_DECIMALS) {
+        let first = (first.max(0.0) as u8).max(style.decimals);
+        for decimals in [first, first.saturating_add(1).min(MAX_DECIMALS)] {
+            let shown = display_units::length_number(mm, &style.units, decimals);
+            if nonzero(&shown) {
+                return Ok(shown);
+            }
+        }
+    }
+    let unit: String = style.units.chars().take(32).collect();
+    Err(DocError::Invalid(format!("a length of the hole is too small to show in {} with up to {MAX_DECIMALS} decimals", unit.escape_debug())))
+}
+
+/// The decimals an angle in a callout is shown with: the default drafting profile's angle
+/// decimals, trailing zeros dropped, so a countersink reads `90°` or `82.5°` whatever decimals
+/// its lengths take (ISO 129-1 writes angles in degrees).
+const ANGLE_DECIMALS: u8 = 2;
+
+/// An angle in radians, in degrees as the callout shows it.
+fn degrees(radians: f64) -> Result<String> {
+    let f = NumberFormat { trailing_zeros: false, ..NumberFormat::default() };
+    let text = display_units::format_number(radians.to_degrees(), ANGLE_DECIMALS, &f)?.text;
+    // Trailing zeros dropped leave a whole number's point behind (`90.`).
+    Ok(text.trim_end_matches('.').to_string())
 }
 
 /// The words of a callout in one content language.
@@ -707,6 +788,8 @@ mod tests {
             count,
             diameter: 6.6,
             thread: None,
+            thread_class: None,
+            hand: None,
             thread_depth: None,
             extent,
             form,
@@ -722,7 +805,7 @@ mod tests {
         let cb = callout(2, Extent::Through, Form::Counterbore { diameter: 11.0, depth: 6.8 });
         assert_eq!(text(&cb, &en).unwrap(), ["2× Ø6.6 THRU", "⌴ Ø11.0 ↧ 6.8"]);
         let cs = callout(1, Extent::Blind { depth: 12.0 }, Form::Countersink { diameter: 12.0, angle: 90f64.to_radians() });
-        assert_eq!(text(&cs, &en).unwrap(), ["Ø6.6 ↧ 12.0", "⌵ Ø12.0 × 90.0°"]);
+        assert_eq!(text(&cs, &en).unwrap(), ["Ø6.6 ↧ 12.0", "⌵ Ø12.0 × 90°"]);
         let mut tapped = callout(1, Extent::Blind { depth: 12.0 }, Form::Simple);
         tapped.thread = Some("M8".into());
         assert_eq!(text(&tapped, &style("mm", 0, "en")).unwrap(), ["M8 ↧ 12"]);
@@ -753,10 +836,57 @@ mod tests {
         assert_eq!(text(&c, &style("mm", 2, "de")).unwrap(), ["2× M8 ↧ 14.00", "Ø6.75 DURCH", "⌴ Ø14.00 ↧ 4.00"]);
     }
 
+    /// BTUSALLC/solidcraft issue 19: the class after the size, then `-LH` (ISO 965-1, ASME B1.1).
     #[test]
-    fn a_metric_thread_is_shown_with_a_capital_m() {
-        assert_eq!(metric_as_written(" m8x1 "), "M8x1");
-        assert_eq!(metric_as_written("M8"), "M8");
+    fn a_threads_class_and_hand_follow_its_size() {
+        let mut c = callout(1, Extent::Blind { depth: 15.0 }, Form::Simple);
+        c.thread = Some("M22x1".into());
+        c.thread_class = Some("6H".into());
+        c.hand = Some(ThreadHand::Left);
+        assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["M22x1-6H-LH ↧ 15.00"]);
+        c.thread_depth = Some(10.0);
+        assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["M22x1-6H-LH ↧ 10.00", "Ø6.60 ↧ 15.00"]);
+        assert_eq!(designation("1/4-20 UNC", Some("2B"), Some(ThreadHand::Right)), "1/4-20 UNC-2B");
+        assert_eq!(designation("1/4-20 UNC", Some("2B"), Some(ThreadHand::Left)), "1/4-20 UNC-2B-LH");
+        assert_eq!(designation("M10", None, Some(ThreadHand::Left)), "M10-LH");
+        assert_eq!(designation("M8", None, Some(ThreadHand::Right)), "M8");
+    }
+
+    /// BTUSALLC/solidcraft issue 20: the thread's designation is the catalogue's, however typed.
+    #[test]
+    fn a_metric_thread_is_shown_by_its_standard_designation() {
+        let shown = |t: &str| crate::parse_tapped_thread(t).map(|t| t.designation);
+        assert_eq!(shown(" m8x1 ").as_deref(), Some("M8x1"));
+        assert_eq!(shown("M8X1").as_deref(), Some("M8x1"));
+        assert_eq!(shown("M8").as_deref(), Some("M8"));
+        assert_eq!(shown("M8x1.25").as_deref(), Some("M8"), "coarse: no pitch (ISO 261)");
+    }
+
+    /// BTUSALLC/solidcraft issue 20: an angle with decimals of its own; a small length never 0;
+    /// the numbers and the diameter sign as a dimension's on the same sheet, in any language.
+    #[test]
+    fn angles_and_small_lengths_read_as_a_drawing_writes_them() {
+        let cs = |angle: f64| callout(1, Extent::Through, Form::Countersink { diameter: 12.0, angle: angle.to_radians() });
+        assert_eq!(text(&cs(90.0), &style("mm", 6, "en")).unwrap(), ["Ø6.600000 THRU", "⌵ Ø12.000000 × 90°"]);
+        assert_eq!(text(&cs(82.0), &style("in", 0, "en")).unwrap(), ["Ø0.2598 THRU", "⌵ Ø0.4724 × 82°"]);
+        assert_eq!(text(&cs(82.5), &style("mm", 0, "en")).unwrap(), ["Ø7 THRU", "⌵ Ø12 × 82.5°"]);
+        assert_eq!(ANGLE_DECIMALS, crate::drafting_profile::DraftingProfile::default().angle_decimals);
+        // 90° made from radians and back is not exactly 90.
+        assert_eq!(degrees(std::f64::consts::FRAC_PI_2).unwrap(), "90");
+        let mut tiny = callout(1, Extent::Blind { depth: 0.2 }, Form::Simple);
+        tiny.diameter = 0.05;
+        assert_eq!(text(&tiny, &style("mm", 0, "en")).unwrap(), ["Ø0.05 ↧ 0.2"]);
+        assert_eq!(text(&tiny, &style("mm", 3, "en")).unwrap(), ["Ø0.050 ↧ 0.200"]);
+        assert_eq!(text(&tiny, &style("um", 0, "en")).unwrap(), ["Ø50 ↧ 200"]);
+        // Too small to show even with every decimal: refused, never `Ø0`.
+        tiny.diameter = 1e-7;
+        assert!(text(&tiny, &style("mm", 0, "en")).unwrap_err().to_string().contains("too small to show"));
+        // A dimension and a callout on one German sheet read alike: the decimal mark is the
+        // shared formatter's, not the language's, and the diameter sign is the dimensions'.
+        let c = callout(1, Extent::Through, Form::Simple);
+        let dimension = super::super::dimension::reading_label(super::super::dimension::LabelKind::Diameter, 6.6, "mm", 2);
+        assert_eq!(text(&c, &style("mm", 2, "de-DE")).unwrap(), [format!("{dimension} DURCH")]);
+        assert_eq!(dimension, "Ø6.60");
     }
 
     #[test]

@@ -209,7 +209,7 @@ pub const MAX_MODEL_NAME_BYTES: usize = 256;
 pub const MAX_SET_TARGETS: usize = 64;
 /// What a diameter's number follows: Ø (U+00D8), as tolerance texts write it. The diameter sign
 /// U+2300 isn't in the bundled fonts, so it would print as a missing glyph.
-const DIAMETER_SIGN: &str = "Ø";
+pub(crate) const DIAMETER_SIGN: &str = "Ø";
 
 /// One dimension of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
