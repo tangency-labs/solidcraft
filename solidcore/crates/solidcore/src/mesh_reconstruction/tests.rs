@@ -1236,6 +1236,17 @@ fn a_block_bored_on_two_axes_gets_exact_cylinders_and_planes() {
             assert_eq!(body.vertex_list().len(), 8 + 2 * 2, "{what}");
             block - bores
         };
-        assert_volume(&mut k, &mut body, expected, 1e-6);
+        // f32 moves each vertex by at most sqrt(3) * 60 * 2^-24 (a coordinate's half unit in the
+        // last place below 64), and a circle fitted through three such vertices a third of the
+        // way round each other by at most three times that. Over the solid's area, less than
+        // its six sides' and the two bores' walls, that bounds the volume.
+        let bound = if f32_input {
+            let moved = 3f64.sqrt() * 60. * f64::from(f32::EPSILON) / 2.;
+            let area = 2. * (60. * 40. + 60. * 30. + 40. * 30.) + PI * (10. * 60. + 8. * 40.);
+            3. * moved * area
+        } else {
+            1e-6
+        };
+        assert_volume(&mut k, &mut body, expected, bound);
     }
 }

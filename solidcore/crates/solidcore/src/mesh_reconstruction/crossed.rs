@@ -15,7 +15,9 @@
 
 use crate::kernel::Kernel;
 use crate::math::Vec3;
-use crate::prism::profile::Region2;
+use std::f64::consts::{FRAC_PI_2, TAU};
+
+use crate::prism::profile::{Region2, Seg2};
 use crate::{Brep, Result};
 
 use super::curves::certified;
@@ -96,8 +98,21 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
             return Ok(None);
         };
         for hole in prism.regions.iter().flat_map(|region| &region.holes) {
+            // A fitted circle starts on its frame's x direction, which is horizontal for every
+            // horizontal axis: the seams of two bores at one height then lie in one plane and
+            // meet where the bores cross, and the Boolean fails when rounding moves them apart
+            // (NoRadialEdgeUse at a 1e-7 miss). A tool's seam starts a quarter turn on, on the
+            // frame's y direction, which is up for a horizontal axis.
+            let mut outer = hole.reversed();
+            for seg in &mut outer.segs {
+                if let Seg2::Arc { start, sweep, .. } = seg {
+                    if sweep.abs() >= TAU {
+                        *start += FRAC_PI_2;
+                    }
+                }
+            }
             let tool = Region2 {
-                outer: hole.reversed(),
+                outer,
                 holes: Vec::new(),
             };
             let length = prism.hi - prism.lo + 2. * size;
