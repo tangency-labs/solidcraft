@@ -1,0 +1,30 @@
+{
+  "en": {
+    "nav.touchpad_auto.help": "A two-finger scroll, pinch or twist on the touchpad switches to the Touchpad preset; a mouse wheel notch or a middle-button press switches back to the preset chosen above. The chosen preset stays the saved one.",
+    "nav.touchpad_auto.label": "Use the Touchpad preset while the touchpad is in use"
+  },
+  "ar": {
+    "nav.touchpad_auto.help": "التمرير بإصبعين أو القرص أو اللف على لوحة اللمس ينتقل إلى إعداد لوحة اللمس؛ ونقرة عجلة الفأرة أو الضغط على الزر الأوسط يعيدان الإعداد المختار أعلاه. يبقى الإعداد المختار هو المحفوظ.",
+    "nav.touchpad_auto.label": "استخدام إعداد لوحة اللمس أثناء استخدام لوحة اللمس"
+  },
+  "de": {
+    "nav.touchpad_auto.help": "Scrollen mit zwei Fingern, Zusammenziehen oder Drehen auf dem Touchpad wechselt zur Touchpad-Vorgabe; eine Rastung des Mausrads oder ein Druck auf die mittlere Taste wechselt zurück zur oben gewählten Vorgabe. Gespeichert bleibt die gewählte Vorgabe.",
+    "nav.touchpad_auto.label": "Touchpad-Vorgabe verwenden, solange das Touchpad benutzt wird"
+  },
+  "he": {
+    "nav.touchpad_auto.help": "גלילה בשתי אצבעות, צביטה או סיבוב על משטח המגע עוברים להגדרת משטח המגע; נקישה בגלגל העכבר או לחיצה על הכפתור האמצעי מחזירות להגדרה שנבחרה למעלה. ההגדרה שנבחרה היא זו שנשמרת.",
+    "nav.touchpad_auto.label": "שימוש בהגדרת משטח המגע בזמן השימוש במשטח המגע"
+  },
+  "ja": {
+    "nav.touchpad_auto.help": "タッチパッドで 2 本指スクロール、ピンチ、回転を行うとタッチパッドのプリセットに切り替わり、マウスホイールを 1 段回すか中ボタンを押すと上で選んだプリセットに戻ります。保存されるのは選んだプリセットです。",
+    "nav.touchpad_auto.label": "タッチパッド使用中はタッチパッドのプリセットを使う"
+  },
+  "vi": {
+    "nav.touchpad_auto.help": "Cuộn hai ngón, chụm hoặc xoay trên bàn di chuột sẽ chuyển sang cấu hình Bàn di chuột; một nấc con lăn chuột hoặc nhấn nút giữa sẽ quay lại cấu hình đã chọn ở trên. Cấu hình đã chọn vẫn là cấu hình được lưu.",
+    "nav.touchpad_auto.label": "Dùng cấu hình Bàn di chuột khi đang dùng bàn di chuột"
+  },
+  "zh": {
+    "nav.touchpad_auto.help": "在触控板上双指滚动、捏合或旋转会切换到触控板预设；滚动鼠标滚轮一格或按下中键会切回上面选择的预设。保存的仍是所选预设。",
+    "nav.touchpad_auto.label": "使用触控板时使用触控板预设"
+  }
+}
