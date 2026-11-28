@@ -1098,7 +1098,6 @@ mod view_compass {
                     axes: front,
                     hover: Some(at),
                     orbiting: false,
-                    snap_hint,
                     home_label: "Home".into(),
                     turn_around_label: None,
                 };
