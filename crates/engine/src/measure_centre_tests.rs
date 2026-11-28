@@ -884,3 +884,27 @@ fn a_watertight_mesh_keeps_its_volume_and_an_open_mesh_has_none() {
     assert_eq!(r["total"]["open_bodies_skipped"], 1);
     assert!(close(&r["total"]["volume_mm3"], 1000.0 / 6.0, 1e-6), "{r}");
 }
+
+/// #2668: a translated plate with an off-centre bore has a mass centre that moves away
+/// from the removed cylinder. Its volume, surface area and first moments are analytic.
+#[test]
+fn mass_properties_of_a_translated_plate_with_an_off_centre_bore() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "corner": [100, -70, 20], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 12, "base": [115, -40, 19], "operation": "cut"}));
+    let r = run(&mut s, "inspect.measure", json!({}));
+    let b = &r["bodies"][0];
+    let hole = PI * 25.0 * 10.0;
+    let volume = 24000.0 - hole;
+    let area = 2.0 * (60.0 * 40.0 + 60.0 * 10.0 + 40.0 * 10.0) - 2.0 * PI * 25.0 + TAU * 5.0 * 10.0;
+    let center = [(24000.0 * 130.0 - hole * 115.0) / volume, (24000.0 * -50.0 + hole * 40.0) / volume, 25.0];
+    assert_eq!(r["body_count"], 1, "{r}");
+    assert_eq!(b["closed"], true, "{r}");
+    assert!(close(&b["volume_mm3"], volume, 1e-6), "{r}");
+    assert!(close(&b["area_mm2"], area, 1e-6), "{r}");
+    for (i, (lo, hi)) in [(100.0, 160.0), (-70.0, -30.0), (20.0, 30.0)].into_iter().enumerate() {
+        assert!(close(&b["center_of_mass"][i], center[i], 1e-6), "{r}");
+        assert!(close(&b["bbox"]["min"][i], lo, 1e-6), "{r}");
+        assert!(close(&b["bbox"]["max"][i], hi, 1e-6), "{r}");
+    }
+}
