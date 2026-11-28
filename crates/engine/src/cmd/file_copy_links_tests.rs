@@ -219,3 +219,28 @@ fn the_open_design_is_copied_from_its_file_once_saved() {
     let e = refused(&mut s, "file.copy_with_links.list", json!({}));
     assert!(e.contains("Save the design's changes first"), "{e}");
 }
+
+#[test]
+fn a_drawing_beside_a_part_in_another_folder_is_listed_and_copied_with_it() {
+    // The bolt lives in a library folder of its own, with its drawing beside it; a design there that
+    // draws nothing listed is not.
+    let k = skid("other-folder");
+    let lib = k.bolt.parent().unwrap().to_path_buf();
+    let bolt_drawing = lib.join("bolt drawing.sc");
+    drawing_of(&bolt_drawing, &k.bolt);
+    part(&lib.join("washer.sc"), 2);
+    let mut s = Session::default();
+    let listed = run(&mut s, "file.copy_with_links.list", json!({"path": k.skid}));
+    let items = listed["items"].as_array().unwrap();
+    let drawing = items.iter().find(|i| i["path"] == text(&bolt_drawing)).unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(drawing["kind"], "drawing");
+    assert_eq!(drawing["used_by"], json!([text(&k.bolt)]));
+    assert!(!items.iter().any(|i| i["path"] == text(&lib.join("washer.sc"))), "{listed}");
+
+    let out = k.folder.dir("out");
+    let copy = |p: &Path, name: &str| json!({"path": p, "name": name});
+    run(&mut s, "file.copy_with_links", json!({"path": k.skid, "folder": out, "copy": [
+        copy(&k.skid, "skid.sc"), copy(&k.bolt, "bolt.sc"), copy(&bolt_drawing, "bolt drawing.sc"),
+    ]}));
+    assert_eq!(drawn(&out.join("bolt drawing.sc")), vec![text(&out.join("bolt.sc"))]);
+}
