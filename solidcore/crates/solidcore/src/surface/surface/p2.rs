@@ -4286,7 +4286,15 @@ impl Surface {
                 intersect(k, s, uv_domain, p, other_uv_domain, tolerance)
             }
             (SurfaceKind::Plane(p), SurfaceKind::BSpline(s)) => {
-                intersect(k, s, other_uv_domain, p, uv_domain, tolerance)
+                intersect(k, s, other_uv_domain, p, uv_domain, tolerance).map(|opt| {
+                    opt.map(|mut section| {
+                        std::mem::swap(
+                            &mut section.surface1_uv_curves,
+                            &mut section.surface2_uv_curves,
+                        );
+                        section
+                    })
+                })
             }
             _ => Ok(None),
         };

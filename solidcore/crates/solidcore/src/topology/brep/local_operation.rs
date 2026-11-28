@@ -41,6 +41,11 @@
 //! supplied draft definition and source attributes are preserved, the face's on the drafted
 //! wall and each capped end's rim's on the wall's new rim there (`rims_by_end`), as the local
 //! operation carries an edge's attributes to the edge that replaces it.
+//! (not upstream, #22804) Before the extended offset runs, a kept torus face beside a moved
+//! face whose tube direction is closed (`360°`) yet whose boundary leaves a gap around the
+//! tube gets its torus re-parameterised with its tube seam in the middle of that gap
+//! (`clear_torus_tube_seams`), so extending the torus past its trimmed rims never crosses
+//! the tube's periodic seam.
 
 use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
@@ -745,6 +750,7 @@ fn local_operation_on(
             }
         }
     }
+    clear_torus_tube_seams(k, b, &all_faces, &moving)?;
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
@@ -1222,6 +1228,204 @@ fn closing_band(
         }
     }
     Ok(first.map(|(_, face, beside, largest)| (face, beside, largest)))
+}
+
+/// (not upstream, #22804) Moves the tube seam (`v` seam) of every kept closed-tube torus
+/// face that borders a moved face into the middle of the widest gap its boundary leaves
+/// around the tube.
+///
+/// A torus primitive is doubly periodic (`[0°, 360°] × [0°, 360°]`), with its tube seam
+/// along the outer equator `v = 0° / 360°`. Cutting a half-torus at `z = 0` leaves that
+/// closed torus on the face with its outer rim lying right on `v = 0°` and its boundary
+/// covering only `v ∈ [0°, 180°]`. Moving the flat cut face outward (`z = 0 → z = -d`)
+/// extends the torus into `v < 0°`, across the `v = 0° / 360°` periodic seam: the meridian
+/// seam edge's extended minor circle has its seam at `v = 0°`, so no single parameter
+/// interval of that circle gives the extended arc (`trim_extended_edge_ends`), leaving the
+/// meridian seam unextended and failing `step_gaps` with `LoopGapUncertified`.
+///
+/// Re-parameterising the same analytic torus over `[u_min, u_max] × [v_seam, v_seam + 360°]`
+/// with `v_seam` in the middle of the unused complement arc (for a half-torus `z ≥ 0`,
+/// `v_seam = 270°` at the bottom of the tube) moves no point of the surface, preserves its
+/// orientation and topology, keeps the tube seam strictly off the face, and gives equal
+/// clearance on both rims for any outward move up to the tube's full room.
+fn clear_torus_tube_seams(
+    k: &Kernel,
+    b: &mut Brep,
+    all_faces: &[FaceId],
+    moving: &[FaceId],
+) -> Result<()> {
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Point2;
+    use crate::math::EFF_ZERO_DEG;
+    use crate::surface::torus::{Torus, TorusOptions};
+    use crate::topology::edge;
+    use crate::topology::face::p1 as face1;
+
+    for &face in all_faces {
+        if moving.contains(&face) {
+            continue;
+        }
+        let mut touches_moving = false;
+        for e in face4::edges(b, face, None, false, None)? {
+            if edge::faces(b, e, None)?
+                .iter()
+                .any(|&n| n != face && moving.contains(&n))
+            {
+                touches_moving = true;
+                break;
+            }
+        }
+        if !touches_moving {
+            continue;
+        }
+        let Some(surface) = face_ops::surface(b, face)? else {
+            continue;
+        };
+        if surface.procedural_definition().is_some() {
+            continue;
+        }
+        let SurfaceKind::Torus(torus) = surface.kind() else {
+            continue;
+        };
+        if !torus.base().have_polar_conversion() {
+            continue;
+        }
+        let anal = torus.base().step_uv_domain();
+        let v_ivl = anal.v_interval();
+        if (v_ivl.length() - 360.0).abs() > EFF_ZERO_DEG {
+            continue;
+        }
+        let position = *torus.base().position();
+        let major = torus.major_radius();
+        let minor = torus.minor_radius();
+        let swap_uv = torus.base().swap_uv();
+        let inside_out = torus.inside_out();
+        let u_ivl = anal.u_interval();
+        let cur_seam = v_ivl.min().rem_euclid(360.0);
+
+        let uv_box =
+            face1::calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
+        let Some(surface) = face_ops::surface(b, face)? else {
+            continue;
+        };
+        let nurb_dom = surface.natural_uv_domain_with_nurb(k)?;
+        let SurfaceKind::Torus(torus) = surface.kind() else {
+            continue;
+        };
+        let (gen_face, gen_surf, mid_other) = if swap_uv {
+            (
+                uv_box.u_interval(),
+                nurb_dom.u_interval(),
+                nurb_dom.v_interval().mid(),
+            )
+        } else {
+            (
+                uv_box.v_interval(),
+                nurb_dom.v_interval(),
+                nurb_dom.u_interval().mid(),
+            )
+        };
+        let surf_len = gen_surf.length();
+        let face_len = gen_face.length();
+        if !(surf_len.is_finite()
+            && face_len.is_finite()
+            && face_len > EFF_ZERO * (1.0 + surf_len)
+            && face_len < surf_len * (1.0 - 1.0 / 360.0))
+        {
+            continue;
+        }
+        let pt = |g: f64| {
+            if swap_uv {
+                Point2::new(g, mid_other)
+            } else {
+                Point2::new(mid_other, g)
+            }
+        };
+        let a_lo = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.min()))?
+            .y;
+        let a_mid = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.mid()))?
+            .y;
+        let a_hi = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.max()))?
+            .y;
+        if !(a_lo.is_finite() && a_mid.is_finite() && a_hi.is_finite()) {
+            continue;
+        }
+        let (d_lo, d_hi) = if inside_out {
+            (
+                (a_lo - a_mid).rem_euclid(360.0),
+                (a_mid - a_hi).rem_euclid(360.0),
+            )
+        } else {
+            (
+                (a_mid - a_lo).rem_euclid(360.0),
+                (a_hi - a_mid).rem_euclid(360.0),
+            )
+        };
+        let span = d_lo + d_hi;
+        let gap = 360.0 - span;
+        if !(d_lo > 0.0 && d_hi > 0.0 && gap > 1.0) {
+            continue;
+        }
+        let v_hi = if inside_out {
+            a_mid + d_lo
+        } else {
+            a_mid + d_hi
+        };
+        let v_seam = (v_hi + 0.5 * gap).rem_euclid(360.0);
+        let diff = (v_seam - cur_seam).rem_euclid(360.0);
+        if diff.min(360.0 - diff) <= 0.36 {
+            continue;
+        }
+
+        let new_step_domain =
+            Extent2d::from_bounds(u_ivl.min(), v_seam, u_ivl.max(), v_seam + 360.0);
+        let new_torus = Surface::from(Torus::create_canonical(
+            k,
+            &position,
+            major,
+            minor,
+            TorusOptions {
+                swap_uv,
+                inside_out,
+                circle_nurb: None,
+            },
+            Some(&new_step_domain),
+        )?);
+
+        let editing = b.editing_enabled();
+        b.set_editing_enabled(true);
+        let replaced = (|| -> Result<()> {
+            let mut state = p2::ArenaNotifyState::new(b);
+            let mut env = state.env(None);
+            let face_ref = b
+                .face(face)?
+                .surface
+                .as_ref()
+                .and_then(Surface::owner)
+                .unwrap_or_else(|| (env.key_of)(EntityRef::Face(face)));
+            p2::replace_surface(
+                k,
+                b,
+                &mut env,
+                face,
+                new_torus,
+                face_ref,
+                p2::OldSurface::Delete,
+                true,
+            )?;
+            let uv_domain =
+                face1::calculate_uv_domain_from_uv_trim_curves(k, b, face, false, false, false)?
+                    .domain;
+            face_ops::set_uv_domain(b, face, &uv_domain)?;
+            Ok(())
+        })();
+        b.set_editing_enabled(editing);
+        replaced?;
+    }
+    Ok(())
 }
 
 /// (not upstream) The planes faces that keep their surfaces continue as: a face whose
@@ -4451,5 +4655,65 @@ mod tests {
             matches!(why, Some(OffsetFailure::Unsound { .. })),
             "{why:?}"
         );
+    }
+
+    /// #22804: moving the flat face of a half-torus outward (across the torus's `v = 0°`
+    /// tube seam) and inward builds a clean 2-face manifold solid at the exact Pappus
+    /// volume, for both upper (`z ≥ 0`) and lower (`z ≤ 0`) half-tori.
+    #[test]
+    fn a_half_toruss_flat_face_moves_outward_across_the_tube_seam() {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::offset::offset_faces::OffsetFacesExecutive;
+        use crate::primitive::api_primitives::create_torus;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+
+        let (major, minor) = (15.0_f64, 4.0_f64);
+        let pi = crate::math::PI;
+        let expected_volume = |d: f64| -> f64 {
+            let half = pi * pi * major * minor * minor;
+            let slice = 2.0
+                * pi
+                * major
+                * (d * (minor * minor - d * d).sqrt() + minor * minor * det::asin(d / minor));
+            half + slice
+        };
+
+        for (cut_z, distance) in [(-5.0, 2.0), (-5.0, -2.0), (0.0, 2.0)] {
+            let mut k = Kernel::default();
+            let torus = create_torus(&mut k, Point3::ZERO, major, minor).unwrap();
+            let box_cut =
+                create_box(&mut k, Point3::new(-20.0, -20.0, cut_z), 40.0, 40.0, 5.0).unwrap();
+            let mut b = boolean_difference(&mut k, torus, box_cut).unwrap();
+            let flat = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    matches!(
+                        b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                        SurfaceKind::Plane(_)
+                    )
+                })
+                .unwrap();
+
+            OffsetFacesExecutive::new()
+                .offset_faces(&mut k, &mut b, &[flat], distance)
+                .unwrap_or_else(|e| panic!("cut_z={cut_z}, distance={distance}: {e:?}"));
+
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 2);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            let want = expected_volume(distance);
+            assert!(
+                manifold && (v - want).abs() < 1e-3,
+                "cut_z={cut_z}, distance={distance}: manifold={manifold}, {v} vs {want}"
+            );
+            b.use_arena_naming().unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(
+                lines.is_empty(),
+                "cut_z={cut_z}, distance={distance}: {lines:?}"
+            );
+        }
     }
 }
