@@ -1309,10 +1309,11 @@ fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
 }
 
 /// A circular pattern of cylinder `T` (radius 0.5, beside cylinder `M`) of six makes copies `T (2)`
-/// … `T (6)`. Combine joins copies that are there. A number the pattern never made is refused as
-/// an unknown body, also when the seed `T` is listed beside it: that name is not dropped.
+/// … `T (6)`. Combine joins copies that are there. A copy the pattern no longer makes (its count was
+/// lowered) is skipped with a warning that says so, when the seed `T` is listed beside it, so the
+/// design still rebuilds; listed without its seed it is an unknown body.
 #[test]
-fn combine_refuses_a_missing_numbered_copy() {
+fn combine_skips_a_missing_numbered_copy_with_a_truthful_warning() {
     let setup = || {
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"radius": 0.5, "height": 1, "base": [0, 0, 0], "body_name": "M"})).unwrap();
@@ -1321,18 +1322,31 @@ fn combine_refuses_a_missing_numbered_copy() {
         s
     };
     let join = |s: &mut Session, tools: Value| s.execute("solid.combine", &json!({"target": "M", "tools": tools, "operation": "join"}));
-    let unknown = |err: &crate::Result<Value>, name: &str| err.as_ref().is_err_and(|e| e.to_string().contains(&format!("unknown body `{name}`")));
+    let last_warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
 
-    join(&mut setup(), json!(["T (2)", "T (6)"])).unwrap();
+    let mut s = setup();
+    join(&mut s, json!(["T (2)", "T (6)"])).unwrap();
+    assert!(!last_warning(&s).contains("not there any more"), "{}", last_warning(&s));
 
-    let past_the_end = join(&mut setup(), json!(["T (2)", "T (7)"]));
-    assert!(unknown(&past_the_end, "T (7)"), "{past_the_end:?}");
+    // Seed listed, copies gone: builds, and the warning does not claim they are part of `T`.
+    let mut s = setup();
+    join(&mut s, json!(["T", "T (7)", "T (9)"])).unwrap();
+    let w = last_warning(&s);
+    assert!(w.contains("`T (7)` is not there any more; skipped"), "{w}");
+    assert!(w.contains("`T (9)` is not there any more; skipped"), "{w}");
+    assert!(!w.contains("is part of"), "{w}");
 
-    let alone = join(&mut setup(), json!(["T (9)"]));
-    assert!(unknown(&alone, "T (9)"), "{alone:?}");
+    // Copies that exist are joined while the missing ones are skipped.
+    let mut s = setup();
+    join(&mut s, json!(["T", "T (2)", "T (9)"])).unwrap();
+    let w = last_warning(&s);
+    assert!(w.contains("`T (9)` is not there any more; skipped"), "{w}");
 
-    let with_seed = join(&mut setup(), json!(["T", "T (9)"]));
-    assert!(unknown(&with_seed, "T (9)"), "{with_seed:?}");
+    // No seed in the list: an unknown body, as before.
+    for tools in [json!(["T (9)"]), json!(["T (2)", "T (7)"])] {
+        let r = join(&mut setup(), tools);
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("unknown body")), "{r:?}");
+    }
 }
 
 /// A triangular prism and a thin slab sharing their bottom plane, the prism's edge in that plane
