@@ -78,6 +78,8 @@ pub struct Grants {
 pub struct UserState {
     /// One UI request's consent, never serialised or persisted. Consumed before entering a guest.
     pub dialog_folders: Option<folders::DialogFolders>,
+    /// Trusted interactive open only; never populated from command parameters.
+    pub import_prompt: Option<import_consent::Prompt>,
     /// Settings location supplied by the app or tests; otherwise the user's native settings folder.
     pub user_settings_dir: Option<PathBuf>,
     /// The authenticated command plugin for this run, only when it requests user-storage.
@@ -857,6 +859,7 @@ mod form;
 pub mod grant_store;
 pub use form::form_errors;
 mod import;
+pub mod import_consent;
 pub mod install;
 pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1199,6 +1202,12 @@ impl PluginHost for SolidCraftHost {
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
+    }
+    fn request_import_folder(&mut self) -> craft_plugin::Result<bool> {
+        match self.session.plugin_state.user.import_prompt.as_ref() {
+            Some(prompt) => prompt.ask(),
+            None => Ok(false),
+        }
     }
     fn granted_input_folders(&self) -> Vec<FileGrant> {
         self.input_folders.clone()

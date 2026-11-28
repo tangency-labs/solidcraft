@@ -6683,3 +6683,31 @@ fn a_body_a_plugin_run_hides_stays_hidden_beside_one_hidden_meanwhile() {
     live.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(shown(&live), [false, false, true]);
 }
+
+#[test]
+fn importer_folder_answers_persist_only_always() {
+    use super::import_consent::{Answer, Prompt};
+    for answer in [Answer::Once, Answer::Always, Answer::Cancel] {
+        let root = std::env::temp_dir().join(format!("sc-import-consent-{}-{answer:?}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let grants = Grants { input_folder: true, package_hash: Some("a".repeat(64)), ..Default::default() };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let prompt = Prompt::new(tx).for_import("Importer".into(), root.display().to_string(), root.clone(), "sample".into(), grants.clone());
+        let worker = std::thread::spawn(move || {
+            let first = prompt.ask().unwrap();
+            assert_eq!(prompt.ask().unwrap(), first, "one question per open, including Cancel");
+            first
+        });
+        rx.recv().unwrap().reply.send(answer).unwrap();
+        assert_eq!(worker.join().unwrap(), answer != Answer::Cancel);
+        assert!(rx.try_recv().is_err());
+        let stored = super::grant_store::read_all(&root);
+        if answer == Answer::Always {
+            assert_eq!(stored.get("sample"), Some(&grants));
+        } else {
+            assert!(stored.is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

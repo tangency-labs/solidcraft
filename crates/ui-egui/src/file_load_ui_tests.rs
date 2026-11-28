@@ -2059,3 +2059,13 @@ fn removing_an_importer_forgets_every_entry_and_preferences_cancel_cannot_restor
     assert!(!restored.preferences.plugin_importer_options.contains_key("sample"));
     assert_eq!(restored.preferences.plugin_importer_options["other"]["convert"].values["size"], 4);
 }
+
+#[test]
+fn importer_folder_prompt_is_reserved_for_interactive_opens() {
+    use crate::file_load::{Kind, Request};
+    let interactive = Request::new("assembly.smp", Kind::Open);
+    assert!(crate::file_load::interactive_import_prompt(&interactive));
+    let mut programmatic = Request::new("assembly.smp", Kind::Open);
+    programmatic.reply = Some(std::sync::mpsc::channel().0);
+    assert!(!crate::file_load::interactive_import_prompt(&programmatic));
+}

@@ -396,6 +396,8 @@ impl Running {
 
 #[derive(Default)]
 pub struct FileLoad {
+    import_questions: Option<Receiver<solidcraft_engine::plugin::import_consent::Question>>,
+    import_question: Option<solidcraft_engine::plugin::import_consent::Question>,
     /// Home was showing when Open started; read by the next request that begins.
     pub(crate) home_at_start: bool,
     /// Interactive importer refusals, each kept until the person acknowledges it.
@@ -1031,6 +1033,13 @@ fn start(app: &mut SolveApp) {
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
     scratch.plugin_state.user.dialog_folders = request.plugin_folders.as_deref().cloned();
+    scratch.plugin_state.user.import_prompt = None;
+    if interactive_import_prompt(&request) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        scratch.plugin_state.user.import_prompt = Some(solidcraft_engine::plugin::import_consent::Prompt::new(tx));
+        app.file_load.import_questions = Some(rx);
+    }
+
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
     scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
@@ -1692,6 +1701,8 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The app's shared message card, with plugin-controlled content rendered as plain text.
 pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
+    show_import_question(app, ctx);
+
     let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
     let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
     let (closed, action) =
@@ -1705,6 +1716,43 @@ pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
         app.file_load.refusals.pop_front();
+    }
+}
+
+pub(crate) fn interactive_import_prompt(request: &Request) -> bool {
+    request.kind == Kind::Open && request.reply.is_none() && request.scope.is_none() && request.chat_turn.is_none()
+}
+
+fn show_import_question(app: &mut SolveApp, ctx: &egui::Context) {
+    use solidcraft_engine::plugin::import_consent::Answer;
+    if app.file_load.running.is_none() {
+        app.file_load.import_question = None;
+        app.file_load.import_questions = None;
+        return;
+    }
+    if app.file_load.import_question.is_none() {
+        app.file_load.import_question = app.file_load.import_questions.as_ref().and_then(|rx| rx.try_recv().ok());
+    }
+    let Some(question) = &app.file_load.import_question else { return };
+    let message = solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+        .format("plugin_import.folder_question", &[("plugin", question.plugin.as_str()), ("folder", question.folder.as_str())]);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_import_folder"), "status_warning", app.tr("plugin_import.folder_title"))
+        .actions(app.tr("plugin_import.folder_once"), app.tr("plugin_import.folder_cancel"), Some(app.tr("plugin_import.folder_always")))
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &message, ui_kit::Text::Report("message", false));
+        });
+    app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+    let answer = match action {
+        ui_kit::Action::Ok => Some(Answer::Once),
+        ui_kit::Action::Apply => Some(Answer::Always),
+        ui_kit::Action::Cancel => Some(Answer::Cancel),
+        _ if closed => Some(Answer::Cancel),
+        _ => None,
+    };
+    if let Some(answer) = answer
+        && let Some(question) = app.file_load.import_question.take()
+    {
+        let _ = question.reply.send(answer);
     }
 }
 
@@ -3585,5 +3633,36 @@ M30
         assert_eq!(asked(&app, "a.stp", None), Some(Value::Bool(true)), "a folder while they are on");
         assert_eq!(asked(&app, "a.step", Some(false)), Some(Value::Bool(false)), "the caller's choice stays");
         assert_eq!(asked(&app, "a.stl", None), None, "a mesh has no folders");
+    }
+    #[test]
+    fn interactive_import_folder_question_draws_a_dialog() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.file_load.running = Some(Running {
+            request: Request::new("assembly.smp", Kind::Open),
+            base: app.session.doc.clone(),
+            base_revision: app.session.revision,
+            before: Vec::new(),
+            rx,
+            phase: Arc::new(AtomicU8::new(0)),
+            progress: Arc::new(Progress::default()),
+            preview_rx: None,
+            preview: None,
+            partial_rx: None,
+            built: None,
+            staged: None,
+            ready: None,
+            sketch: None,
+        });
+        let (reply, _answer) = std::sync::mpsc::channel();
+        app.file_load.import_question =
+            Some(solidcraft_engine::plugin::import_consent::Question { plugin: "Sample Importer".into(), folder: "/parts".into(), reply });
+        let ctx = crate::fonts::test_context();
+        let _ = ctx.run(Default::default(), |ctx| show_import_question(&mut app, ctx));
+        assert!(app.viewport.dialog_rect.is_some());
+        assert!(app.file_load.import_question.is_some(), "drawing must not approve access");
+        app.file_load.running = None;
+        show_import_question(&mut app, &ctx);
+        assert!(app.file_load.import_question.is_none(), "canceling the open drops its question");
     }
 }

@@ -266,6 +266,26 @@ fn run_importer<R>(
         let user_storage = package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@"));
         let mut scratch = Session::default();
         scratch.plugin_state.user.user_settings_dir = session.plugin_state.user_settings_dir();
+        let prompt = session.plugin_state.user.import_prompt.take();
+        if runtime.permissions.input_folder
+            && !input_folder
+            && Path::new(path).parent().is_some_and(|folder| solidcraft_io::vfs::check(&folder.to_string_lossy()).is_ok())
+            && let Some(prompt) = prompt
+            && let Some(root) = session.plugin_state.plugins_dir()
+        {
+            let mut grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+            grants.input_folder = true;
+            grants.package_hash = Some(package.approval.clone());
+            package::validate_grants(&package.manifest, &grants)?;
+            scratch.plugin_state.user.import_prompt = Some(prompt.for_import(
+                package.manifest.name.clone(),
+                Path::new(path).parent().unwrap_or_else(|| Path::new(".")).display().to_string(),
+                root,
+                package.manifest.id.clone(),
+                grants,
+            ));
+        }
+
         scratch.plugin_state.user.user_storage_caller = user_storage.then(|| package.manifest.id.clone());
         scratch.plugin_state.user.defer_user_settings = session.plugin_state.user.defer_user_settings;
         scratch.plugin_state.user.pending_user_settings = session.plugin_state.user.pending_user_settings.clone();

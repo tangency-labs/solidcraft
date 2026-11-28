@@ -446,6 +446,10 @@ pub trait PluginHost {
     fn granted_folders(&self) -> Vec<FileGrant>;
     /// Read-only roots for annotated entry fields, already authorised by the app for this call.
     /// Names are property keys, not install-time permission names. No grants by default.
+    /// Ask the trusted interactive host for this import's neighboring files. Headless hosts refuse.
+    fn request_import_folder(&mut self) -> Result<bool> {
+        Ok(false)
+    }
     fn granted_input_folders(&self) -> Vec<FileGrant> {
         Vec::new()
     }

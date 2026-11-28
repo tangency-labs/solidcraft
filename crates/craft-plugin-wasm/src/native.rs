@@ -662,7 +662,16 @@ impl<H: PluginHost> State<H> {
         if path.is_empty() {
             return Ok(PathBuf::from(&import.name));
         }
-        if !import.input_folder {
+        let input_folder = import.input_folder;
+        let allowed = if input_folder {
+            true
+        } else {
+            match self.host.request_import_folder() {
+                Ok(allowed) => allowed,
+                Err(error) => return Err(self.fail(error)),
+            }
+        };
+        if !allowed {
             let permission = format!("input_folder: reading {path} beside the imported file needs the input_folder permission");
             return Err(self.fail(HostError::PermissionDenied { permission }));
         }
@@ -674,6 +683,9 @@ impl<H: PluginHost> State<H> {
         if !plain {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {path} is not a plain path inside the folder") }));
         }
+        let Some(import) = self.import.as_ref() else {
+            return Err(self.fail(HostError::Cancelled));
+        };
         if let Err(error) = refuse_links(&import.dir, &relative) {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {error}") }));
         }
