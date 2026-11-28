@@ -683,6 +683,7 @@ pub use surfaces::sweep_sheet_points;
 pub use surfaces::sweep_sheet_points_with;
 pub use surfaces::sweep_sheet_with;
 pub use surfaces::unstitch;
+pub use surfaces::{check_round_picks, rounded_parts};
 pub use sweep_path::RailFit;
 pub use sweep_path::SweepControl;
 pub use sweep_path::SweepOrientation;

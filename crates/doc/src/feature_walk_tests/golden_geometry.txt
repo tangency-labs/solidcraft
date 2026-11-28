@@ -228,6 +228,12 @@ surface_offset
 surface_midsurface
   moves: faces[0][0], faces[0][1], faces[0][2], faces[1][0], faces[1][1], faces[1][2]
   face points: [0, 0, 0], [0, 0, 0]
+surface_fillet
+  moves: a.point[0], a.point[1], a.point[2], b.point[0], b.point[1], b.point[2]
+  face points: [0, 0, 0], [0, 0, 0]
+surface_chamfer
+  moves: a.point[0], a.point[1], a.point[2], b.point[0], b.point[1], b.point[2]
+  face points: [0, 0, 0], [0, 0, 0]
 surface_blend
   moves: align[0][0], align[0][1], align[0][2], align[1][0], align[1][1], align[1][2], from.edges[0][0], from.edges[0][1], from.edges[0][2], seam[0][0], seam[0][1], seam[0][2], seam[1][0], seam[1][1], seam[1][2], to.edges[0][0], to.edges[0][1], to.edges[0][2]
 surface_boundary

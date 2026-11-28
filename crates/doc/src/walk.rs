@@ -85,6 +85,7 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::SplitSheet {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
+impl Walk for crate::document::FilletTrim {}
 impl Walk for crate::document::ExtrudeConvention {}
 impl Walk for crate::document::FoldSide {}
 impl Walk for crate::document::OffsetEdges {}

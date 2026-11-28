@@ -407,6 +407,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Thicken { .. } => "surface_thicken",
         FeatureKind::SurfaceExtend { .. } => "surface_extend",
         FeatureKind::SurfaceTrim { .. } => "surface_trim",
+        FeatureKind::SurfaceFillet { .. } | FeatureKind::SurfaceChamfer { .. } => "surface_fillet",
         other => crate::workspace::feature_icon(other).unwrap_or("feature"),
     }
 }

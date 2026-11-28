@@ -4185,6 +4185,24 @@ fn thread_target_body_identities_follow_face_slots_and_reference_remapping() {
     assert_eq!(reopened, kind);
 }
 
+/// Surface Fillet and Chamfer name and find each pick on its own body (#769): `a` on `a.body`,
+/// `b` on `b.body`, never on another body with a face at the same point.
+#[test]
+fn surface_fillet_and_chamfer_scope_each_face_slot_to_its_body() {
+    for kind in ["surface_fillet", "surface_chamfer"] {
+        let kind: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": kind, "a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]},
+            "radius": "2 mm", "distance": "2 mm"
+        }))
+        .unwrap();
+        assert_eq!(kind.face_points(), vec![Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 0.0, 5.0)]);
+        assert_eq!([kind.face_slot_body(0), kind.face_slot_body(1), kind.face_slot_body(2)], [Some("A"), Some("B"), None]);
+    }
+    // Other kinds keep their own rule: a thread's slot is its target body, the rest none.
+    let thread: FeatureKind = serde_json::from_value(serde_json::json!({"type": "thread", "face": [3, 0, 2], "target_bodies": ["T"]})).unwrap();
+    assert_eq!(thread.face_slot_body(0), Some("T"));
+}
+
 #[test]
 fn restoring_a_thread_pick_preserves_saved_bits_but_follows_an_upstream_move() {
     for saved in [Vec3::new(3.0, -0.0, 5.0), Vec3::new(1e8, -0.0, 5.0)] {

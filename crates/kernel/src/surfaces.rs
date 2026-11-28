@@ -602,6 +602,53 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
+/// The three faces of a surface body rounded between two surfaces, each as its own surface body:
+/// the face at `a`, the face at `b` and the round (the face the body's history says the fillet
+/// made from an edge), in that order. Their histories are over `[body]`. A point nearer the round
+/// than to its own face, or two points on one face, are refused.
+pub fn rounded_parts(body: &Body, a: Vec3, b: Vec3) -> Result<[Body; 3]> {
+    body.require_brep("rounded parts")?;
+    let r = body.record();
+    let history = body.history().ok_or_else(|| invalid("the body has no history to tell its round by"))?;
+    let rounds: Vec<usize> =
+        history.faces.iter().enumerate().filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. }))).map(|(k, _)| k).collect();
+    if rounds.len() > 1 {
+        return Err(invalid("a blend with more than one seam is not supported yet: pick surfaces that meet along one edge"));
+    }
+    if r.faces.len() != 3 {
+        return Err(invalid("the body is not two surfaces and a round between them"));
+    }
+    let Some(&round) = rounds.first() else {
+        return Err(invalid("the body has no round"));
+    };
+    let (fa, fb) = picks_off_the_rounds(body, a, b, &[round])?;
+    Ok([taken(body, r, &[(fa, false)])?, taken(body, r, &[(fb, false)])?, taken(body, r, &[(round, false)])?])
+}
+
+/// The faces at `a` and `b` of a surface body rounded between two surfaces, refused when either
+/// point is nearer a round (a face the body's history says a fillet or chamfer made from an edge)
+/// than to its own face, or both are on one face: the check [`rounded_parts`] makes, for a body
+/// that is kept whole.
+pub fn check_round_picks(body: &Body, a: Vec3, b: Vec3) -> Result<()> {
+    body.require_brep("rounded picks")?;
+    let history = body.history().ok_or_else(|| invalid("the body has no history to tell its round by"))?;
+    let rounds: Vec<usize> =
+        history.faces.iter().enumerate().filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. }))).map(|(k, _)| k).collect();
+    if rounds.is_empty() {
+        return Err(invalid("the body has no round"));
+    }
+    picks_off_the_rounds(body, a, b, &rounds).map(|_| ())
+}
+
+/// The faces nearest `a` and `b`, when neither is one of `rounds` and they differ.
+fn picks_off_the_rounds(body: &Body, a: Vec3, b: Vec3, rounds: &[usize]) -> Result<(usize, usize)> {
+    let (fa, fb) = (nearest_face(body, a)?, nearest_face(body, b)?);
+    if rounds.contains(&fa) || rounds.contains(&fb) || fa == fb {
+        return Err(invalid("pick a point on each surface that is farther from the seam than the radius"));
+    }
+    Ok((fa, fb))
+}
+
 /// A body's faces taken apart: each picked face (by points on it; every face when none are given)
 /// its own surface body, and the faces left, if any, one surface body. A solid comes apart into
 /// surfaces. Histories are over `[body]`: each face is the body's.

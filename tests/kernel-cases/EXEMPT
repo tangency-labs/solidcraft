@@ -548,6 +548,8 @@ storage.get                       plugins: a plugin's own data in the design, no
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.patch                     plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
+surface.chamfer                   tested in the engine: crates/engine/src/cmd/surface.rs (surface_chamfer_* tests); the trim, sewing and chamfer are existing kernel operations with their own cases
+surface.fillet                    tested in the engine: crates/engine/src/cmd/surface.rs (surface_fillet_* tests); the trim, sewing and fillet are existing kernel operations with their own cases
 surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
 surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
 surface.morph                     tested in the engine: crates/engine/src/cmd/surface_morph.rs (and solidcore deform:: unit tests in solidcore/crates/solidcore/src/deform/brep.rs)
