@@ -40,6 +40,15 @@ pub fn face_plane(face: &solidcore_record::Plane) -> Result<Plane> {
     Plane::spanned(vec3(face.origin), vec3(face.x), vec3(face.y)).map_err(status)
 }
 
+/// The distinct planes of the planar faces `faces` ([`face_plane`]), in face order
+/// ([`pc::distinct_planes`]); a face [`face_plane`] refuses is skipped.
+pub fn distinct_face_planes(
+    faces: impl IntoIterator<Item = solidcore_record::Plane>,
+    tol: f64,
+) -> Vec<Plane> {
+    pc::distinct_planes(faces.into_iter().filter_map(|f| face_plane(&f).ok()), tol)
+}
+
 /// What the Tab and Slot recipe is asked for (design 6, 7): the layout, the tab width `W`, the
 /// end distance `e`, the slot clearance `c` and the least land `MIN_LAND`, all the caller's.
 #[derive(Clone, Copy, Debug, PartialEq)]

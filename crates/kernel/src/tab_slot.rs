@@ -86,15 +86,7 @@ pub fn cut(tab: &Body, slot: &Body, p: Plane, spec: TabSlotSpec, tol: f64) -> Re
 /// In face order; empty for a mesh body or a body with no planar face.
 #[must_use]
 pub fn slot_planes(slot: &Body, tol: f64) -> Vec<Plane> {
-    let mut out: Vec<Plane> = Vec::new();
-    for i in 0..slot.face_count() {
-        let Some(f) = slot.planar_face(i) else { continue };
-        let Ok(p) = solidcore_ops::plate_contact::face_plane(&f) else { continue };
-        if !out.iter().any(|q| q.normal.dot(p.normal) > 1.0 - 1e-9 && (q.offset - p.offset).abs() <= tol) {
-            out.push(p);
-        }
-    }
-    out
+    solidcore_ops::plate_contact::distinct_face_planes((0..slot.face_count()).filter_map(|i| slot.planar_face(i)), tol)
 }
 
 /// The joint plane P of the tab plate `tab` on the slot plate `slot` (design 5.3): of `slot`'s

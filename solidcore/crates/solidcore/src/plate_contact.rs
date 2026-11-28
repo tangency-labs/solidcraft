@@ -86,6 +86,20 @@ pub enum Bearing {
     Oblique(f64),
 }
 
+/// `planes` in order, each one plane once: a plane with the same normal as one already taken
+/// (dot product above 1 - 1e-9) and an offset within `tol` of it is that plane and is left out.
+pub fn distinct_planes(planes: impl IntoIterator<Item = Plane>, tol: f64) -> Vec<Plane> {
+    let mut out: Vec<Plane> = Vec::new();
+    for p in planes {
+        let same =
+            |q: &Plane| q.normal.dot(p.normal) > 1.0 - 1e-9 && (q.offset - p.offset).abs() <= tol;
+        if !out.iter().any(same) {
+            out.push(p);
+        }
+    }
+    out
+}
+
 /// How `b` stands to `a`. Both must be unit vectors (as in a [`Plane`]).
 ///
 /// # Errors
