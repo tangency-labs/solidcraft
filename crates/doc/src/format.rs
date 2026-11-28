@@ -2052,6 +2052,7 @@ mod tests {
             plane: crate::PlaneRef::Offset { base: Box::new(crate::PlaneRef::Origin { name: "XY".into() }), distance: "qqlb * 2".into() },
             center: solidcore_record::Vec2::ZERO,
             width: 40.0,
+            height: None,
             angle: 0.0,
             opacity: 0.5,
             flip: false,

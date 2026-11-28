@@ -9143,6 +9143,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.viewport.spin
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
+    let canvas_handle_pointer = hover.is_some_and(|p| inside && crate::browser_canvas::owns_pointer(app, &proj, p));
+    // Calibration, straighten, and trace markers keep their own click path. Only Edit Canvas grips block a click here.
+    let canvas_grip_pointer = (canvas_handle_pointer || app.tree.canvas_panel.as_ref().is_some_and(|p| p.edit_drag.is_some()))
+        && !app.tree.canvas_panel.as_ref().is_some_and(|panel| panel.picks_points() || panel.trace);
     // Nor while a component's triad drags it as a layer, unless the preference asks for the
     // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
     // too: nothing under it lights up (#5137).
@@ -9162,6 +9166,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.viewport.boxsel.is_none()
             && !crate::joint_drag::active(app)
             && !joint_handle_pointer
+            && !canvas_handle_pointer
             && !navigating
             && !dragging_layer
             // A part dragged in from the parts library lands in the design, not on a face.
@@ -9208,9 +9213,12 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // held Space owns drags, not a still press, so only a navigation that has started cancels
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
-    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
+    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || canvas_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
+    let (canv_pressed, canv_down) =
+        if app.viewport.primary_nav.is_none() && mode.is_none() { (primary_pressed, primary_down) } else { (false, false) };
+    let canvas_dragging = crate::browser_canvas::drag(app, &proj, hover.filter(|_| inside), canv_pressed, canv_down);
     list_hover(app);
     let still = inside
         && !navigating
@@ -9575,9 +9583,19 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !held
             && !reference_pick
             && !joint_handle_pointer
+            && !canvas_grip_pointer
+            && !canvas_dragging
             && !app.viewport.draw_drag_handled
             && crate::dim_view::accept_outside_click(app);
-        if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        if resp.clicked()
+            && !held
+            && !reference_pick
+            && !dim_accept
+            && !joint_handle_pointer
+            && !canvas_grip_pointer
+            && !canvas_dragging
+            && !app.viewport.draw_drag_handled
+        {
             if crate::browser_canvas::click(app, &proj, p, add) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108); Trace Region: it picks a
                 // region, Ctrl+click one more (#20798).
@@ -9812,6 +9830,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && mode.is_none()
         && crate::sketch_view::active_sketch(app).is_some()
         && !held
+        && !canvas_dragging
     {
         let on_plane = |app: &SolveApp, p: Pos2| {
             let ss = crate::sketch_view::active_sketch(app).and_then(|sid| crate::open_meshing::shown_world(app).sketch(sid).cloned())?;
@@ -10024,6 +10043,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && mode.is_none()
         && crate::sketch_view::active_sketch(app).is_none()
         && !held
+        && !canvas_dragging
     {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
@@ -10110,6 +10130,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::joint_drag::active(app)
         && !crate::joint_handles::active(app)
         && !joint_handle_pointer
+        && !canvas_dragging
         && !crate::occurrence_drag::active(app)
         && !crate::drag_extrude::started(app)
         && !crate::dim_view::dragging()
