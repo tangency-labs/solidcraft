@@ -2194,6 +2194,39 @@ fn declared_ribbon_group_replaces_only_its_entries_and_lists_them_in_order() {
 }
 
 #[test]
+fn plugins_menu_nests_each_ribbon_group_in_the_plugins_submenu_and_keeps_ungrouped_entries_flat() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![grouped_gears()];
+    let menu = rows(&app);
+    assert_eq!(menu.len(), 4);
+    let plugin_rows = &menu[3].children;
+    assert_eq!(menu[3].label, "gears plugin");
+    assert_eq!(menu[3].id, "plugin:0");
+    assert_eq!(plugin_rows.len(), 2, "one nested group, one flat entry");
+    let group_rows = &plugin_rows[0].children;
+    assert_eq!(plugin_rows[0].label, "Gears");
+    assert_eq!(plugin_rows[0].id, "plugin:0:group:0");
+    let items: Vec<_> = group_rows.iter().map(|i| (i.id.as_str(), i.label.as_str())).collect();
+    assert_eq!(items, [("entry:0:1", "Bevel Gear…"), ("entry:0:0", "Spur Gear…")], "the group's own order");
+    assert_eq!(plugin_rows[1].id, "entry:0:2");
+    assert_eq!(plugin_rows[1].label, "inspect…");
+    assert!(plugin_rows[1].children.is_empty(), "ungrouped entry stays flat");
+    assert!(app.plugin_menu.dialogs.is_empty(), "listing the menu runs and opens nothing");
+}
+
+#[test]
+fn plugins_menu_without_ribbon_groups_is_unchanged() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut plugin = grouped_gears();
+    plugin.ribbon_groups.clear();
+    app.plugin_menu.listed = vec![plugin];
+    let menu = rows(&app);
+    let plugin_rows = &menu[3].children;
+    let labels: Vec<_> = plugin_rows.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, ["Spur Gear…", "Bevel Gear…", "inspect…"]);
+}
+
+#[test]
 fn grouped_entries_with_saved_individual_ribbon_pins_keep_their_own_button() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.plugin_menu.listed = vec![grouped_gears()];

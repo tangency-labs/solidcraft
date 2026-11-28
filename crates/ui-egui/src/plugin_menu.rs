@@ -1189,17 +1189,36 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
         rows.push(Item::action("empty", app.tr("ui.plugin_menu_all_off"), "").on_if(false));
     }
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
-        let entries: Vec<Item> = plugin
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(e, entry)| {
-                let icon = if entry.input_schema.get(crate::plugin_images::KEY).is_some() { command_icon(plugin, entry) } else { "" };
-                Item::action(&format!("entry:{p}:{e}"), &format!("{}…", command_title(plugin, entry)), icon)
-            })
-            .collect();
+        let row = |e: usize, entry: &solidcraft_engine::plugin::Entry| {
+            // Keep the menu's unillustrated rows for entries without an annotation.
+            let icon = if entry.input_schema.get(crate::plugin_images::KEY).is_some() { command_icon(plugin, entry) } else { "" };
+            Item::action(&format!("entry:{p}:{e}"), &format!("{}…", command_title(plugin, entry)), icon)
+        };
+        // Like the ribbon, the declared groups come first, each a nested submenu named after the
+        // group with its entries in the group's order; entries in no group follow, flat.
+        let mut entries: Vec<Item> = Vec::new();
+        for (g, group) in plugin.ribbon_groups.iter().enumerate() {
+            let children: Vec<Item> = group
+                .entries
+                .iter()
+                .filter_map(|name| plugin.entries.iter().enumerate().find(|(_, entry)| entry.name == *name))
+                .map(|(e, entry)| row(e, entry))
+                .collect();
+            if !children.is_empty() {
+                entries.push(Item::submenu(&format!("plugin:{p}:group:{g}"), group.label.trim(), "", children));
+            }
+        }
+        entries.extend(
+            plugin
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| !plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name)))
+                .map(|(e, entry)| row(e, entry)),
+        );
         match <[Item; 1]>::try_from(entries) {
-            Ok([one]) => rows.push(one),
+            Ok([one]) if one.children.is_empty() => rows.push(one),
+            Ok([one]) => rows.push(Item::submenu(&format!("plugin:{p}"), &plugin.name, "", vec![one])),
             Err(entries) => rows.push(Item::submenu(&format!("plugin:{p}"), &plugin.name, "", entries)),
         }
     }
