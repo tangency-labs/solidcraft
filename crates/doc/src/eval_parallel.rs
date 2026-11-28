@@ -536,8 +536,8 @@ fn eval_component_chain(
                         heal,
                         None,
                         prepared_imports.get(f.id),
-                        &history,
                         None,
+                        &history,
                         Some(&before_states),
                     );
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = None);

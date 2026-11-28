@@ -84,6 +84,7 @@
 //! - `SM_ASSERT_BREAK` checks and `sm_*`'s `ERR(SM_ERR)` logging are compiled out
 //!   upstream (release build) and omitted.
 
+use crate::math::det;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::error::geom::GeomFailure;
@@ -109,7 +110,7 @@ pub fn sqrt(x: f64) -> f64 {
 /// `sm_cbrt` (`smos_CubeRoot`): cube root.
 #[must_use]
 pub fn cbrt(x: f64) -> f64 {
-    x.cbrt()
+    det::cbrt(x)
 }
 
 /// `sm_acos` (`smos_ArcCosine`): arc cosine clamped to `0` / `PI` for arguments
@@ -122,7 +123,7 @@ pub fn acos(x: f64) -> f64 {
     if x <= -1.0 {
         return PI;
     }
-    x.acos()
+    det::acos(x)
 }
 
 /// `sm_asin` (`smos_ArcSine`): arc sine clamped to `±PI/2` for arguments outside
@@ -135,7 +136,7 @@ pub fn asin(x: f64) -> f64 {
     if x <= -1.0 {
         return -PI / 2.0;
     }
-    x.asin()
+    det::asin(x)
 }
 
 /// `SM_DEG2RAD(a)` = `a * (SM_PI / 180.0)`.
@@ -769,8 +770,8 @@ impl Vec3 {
     /// unit length) (`RotateVecAboutAxis`).
     #[must_use]
     pub fn rotate_vec_about_axis(self, axis: Self, ang_rad: f64) -> Self {
-        let cos = ang_rad.cos();
-        let sin = ang_rad.sin();
+        let cos = det::cos(ang_rad);
+        let sin = det::sin(ang_rad);
 
         // avoid errors - unitize the input (status ignored)
         let z = axis.unitize_or_z();
@@ -930,7 +931,7 @@ impl Vec3 {
         Ok(if cos < 0.0 && sin.abs() < 1e-12 {
             PI
         } else {
-            sin.atan2(cos)
+            det::atan2(sin, cos)
         })
     }
 
@@ -1147,7 +1148,7 @@ mod tests {
                 Vec3::Z
                     .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
                     .unwrap(),
-                tiny.atan2(-1.0)
+                det::atan2(tiny, -1.0)
             );
         }
     }

@@ -7158,11 +7158,11 @@ impl Model {
                                 heal,
                                 meshes,
                                 prepared_imports.get(f.id),
-                                &ReplayHistory { doc, results: &out, empty: &self.empty },
                                 self.import_layouts
                                     .get(&f.id)
                                     .filter(|_| !self.no_cache && subset_imports.contains(&f.id))
                                     .zip(self.results.get(i).filter(|r| r.id == f.id)),
+                                &ReplayHistory { doc, results: &out, empty: &self.empty },
                                 Some(&before_states),
                             );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
@@ -19033,8 +19033,8 @@ fn eval_feature(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
-    history: &ReplayHistory<'_>,
     previous_import: Option<(&ImportLayout, &FeatureResult)>,
+    history: &ReplayHistory<'_>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
@@ -19049,8 +19049,8 @@ fn eval_feature(
         heal,
         prepared_meshes,
         prepared_import,
-        history,
         previous_import,
+        history,
         sources,
     );
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
@@ -19122,8 +19122,8 @@ fn eval_feature_kind(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
-    history: &ReplayHistory<'_>,
     previous_import: Option<(&ImportLayout, &FeatureResult)>,
+    history: &ReplayHistory<'_>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
@@ -19174,6 +19174,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceNetwork { .. }
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
+        | FeatureKind::SurfaceMorph { .. }
         | FeatureKind::SurfaceOffset { .. }
         | FeatureKind::SurfaceMidsurface { .. }
         | FeatureKind::SurfaceRuled { .. }
