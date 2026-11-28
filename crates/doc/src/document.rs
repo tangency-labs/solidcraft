@@ -6370,16 +6370,46 @@ impl Document {
         self.features.iter().find(|f| same_feature_name(&f.name, r))
     }
 
-    /// Whether a new feature of `kind` called `name` would be ambiguous. Plane references share
-    /// the feature namespace, and sketches are also referenced by name (`extrude` by sketch name
-    /// takes the first match), so a duplicate would silently select the first feature. Other
-    /// shared names (a sketch and its extrude) remain supported. Two sketches clash the way
-    /// lookup matches them (ASCII case does not matter); a plane clashes on the exact name, as
-    /// it always has.
-    pub fn name_clash(&self, kind: &FeatureKind, name: &str) -> bool {
+    /// [`Self::find_feature`] for the component that asks: the feature of `component` wins when
+    /// several features carry the name, since a name belongs to the component that holds the
+    /// feature (#11258).
+    pub fn find_feature_in(&self, r: &str, component: u64) -> Option<&Feature> {
+        if let Ok(id) = r.parse::<u64>()
+            && let Some(f) = self.feature(id)
+        {
+            return Some(f);
+        }
+        self.features
+            .iter()
+            .find(|f| f.component == component && same_feature_name(&f.name, r))
+            .or_else(|| self.features.iter().find(|f| same_feature_name(&f.name, r)))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous in `component`. Plane
+    /// references share the feature namespace, and sketches are also referenced by name (`extrude`
+    /// by sketch name takes the first match), so a duplicate would silently select the first
+    /// feature. Other shared names (a sketch and its extrude) remain supported. Two sketches
+    /// clash the way lookup matches them (ASCII case does not matter); a plane clashes on the
+    /// exact name, as it always has.
+    ///
+    /// A name belongs to the component that holds the feature (#11258): only the features of
+    /// `component` are compared, so two components may hold features with the same name and each
+    /// of them finds its own.
+    pub fn name_clash(&self, kind: &FeatureKind, name: &str, component: u64) -> bool {
+        self.name_clash_where(kind, name, Some(component))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous anywhere in the
+    /// design. The copies of an imported file are numbered, so each copy keeps its own name
+    /// even when the copies live in different components (#11258).
+    pub fn name_clash_anywhere(&self, kind: &FeatureKind, name: &str) -> bool {
+        self.name_clash_where(kind, name, None)
+    }
+
+    fn name_clash_where(&self, kind: &FeatureKind, name: &str, component: Option<u64>) -> bool {
         let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
         let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
-        self.features.iter().any(|f| {
+        self.features.iter().filter(|f| component.is_none_or(|c| f.component == c)).any(|f| {
             let other_sketch = matches!(f.kind, FeatureKind::Sketch { .. });
             let other_plane = matches!(f.kind, FeatureKind::ConstructionPlane { .. });
             (is_sketch && other_sketch && same_feature_name(&f.name, name)) || ((is_plane || other_plane) && f.name == name)
@@ -6395,6 +6425,24 @@ impl Document {
     /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
     /// Older scripts also pass ids as strings or use a different case for a unique name.
     pub fn resolve_feature_name(&self, name: &str) -> Result<&Feature> {
+        self.resolve_feature_name_with(name, None)
+    }
+
+    /// [`Self::resolve_feature_name`] for the component that asks: the feature of `component`
+    /// wins when several features carry the name, since a name belongs to the component that
+    /// holds the feature (#11258).
+    pub fn resolve_feature_name_in(&self, name: &str, component: u64) -> Result<&Feature> {
+        self.resolve_feature_name_with(name, Some(component))
+    }
+
+    fn resolve_feature_name_with(&self, name: &str, component: Option<u64>) -> Result<&Feature> {
+        let of_component = |f: &Feature| component.is_some_and(|c| f.component == c);
+        // The exact name in the component that asks: a name belongs to the component that holds
+        // the feature (#11258), so two components may hold features with the same name and each
+        // of them finds its own.
+        if let Some(feature) = self.features.iter().filter(|f| of_component(f)).find(|f| f.name == name) {
+            return Ok(feature);
+        }
         if let Some(feature) = self.features.iter().find(|f| f.name == name) {
             return Ok(feature);
         }
@@ -6403,6 +6451,8 @@ impl Document {
         {
             return Ok(feature);
         }
+        // A name that only the case tells apart is ambiguous, as it always was: the components do
+        // not make it a name of one of them.
         let mut matches = self.features.iter().filter(|f| same_feature_name(&f.name, name));
         let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
         if matches.next().is_some() {
@@ -6421,6 +6471,18 @@ impl Document {
             .iter()
             .find(|x| x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
             .or_else(|| self.resolve_feature_name(name).ok())
+    }
+
+    /// [`Self::seed_feature`] for the component that asks: the feature of `component` wins when
+    /// several features carry the name, since a name belongs to the component that holds the
+    /// feature (#11258).
+    pub fn seed_feature_in(&self, name: &str, component: u64) -> Option<&Feature> {
+        let geometry = |x: &Feature| !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. });
+        self.features
+            .iter()
+            .find(|x| x.component == component && x.name == name && geometry(x))
+            .or_else(|| self.features.iter().find(|x| x.name == name && geometry(x)))
+            .or_else(|| self.resolve_feature_name_in(name, component).ok())
     }
 
     /// The name a new feature of `base`'s kind gets (`Extrude` → `Extrude3`): the first number not taken.
@@ -6468,6 +6530,13 @@ impl Document {
 
     /// Insert a feature at the marker (or the end) and return its id.
     pub fn add_feature(&mut self, kind: FeatureKind, name: Option<&str>) -> Result<u64> {
+        self.add_feature_in(kind, name, 0)
+    }
+
+    /// Insert a feature at the marker (or the end) and return its id, in `component` (0 is the
+    /// root). The name is checked against the features of that component: a name belongs to the
+    /// component that holds the feature (#11258).
+    pub fn add_feature_in(&mut self, kind: FeatureKind, name: Option<&str>, component: u64) -> Result<u64> {
         if self.features.len() >= MAX_FEATURES {
             return Err(DocError::Invalid("too many features".into()));
         }
@@ -6475,13 +6544,13 @@ impl Document {
             crate::validate_body_transfer(self, &crate::plain(bodies), *from, *to, transform)?;
             *to
         } else {
-            0
+            component
         };
         let name = match name {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        if self.name_clash(&kind, &name) {
+        if self.name_clash(&kind, &name, component) {
             return Err(DocError::Invalid(format!("another feature is called `{name}`")));
         }
         let id = self.next_id.max(1);

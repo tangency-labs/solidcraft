@@ -293,8 +293,12 @@ impl Builder {
 
     fn add(&mut self, kind: FeatureKind, name: &str) -> Result<u64, String> {
         // Two sketches (or planes) may not share a name; FreeCAD labels can repeat, so number it.
-        let free =
-            if self.doc.name_clash(&kind, name) { solidcraft_doc::copy_name(name, |n| self.doc.name_clash(&kind, n)) } else { name.to_string() };
+        // The copies of a file are numbered in the whole design, each in its own component.
+        let free = if self.doc.name_clash_anywhere(&kind, name) {
+            solidcraft_doc::copy_name(name, |n| self.doc.name_clash_anywhere(&kind, n))
+        } else {
+            name.to_string()
+        };
         self.doc.add_feature(kind, Some(&free)).map_err(|e| format!("{name}: {e}"))
     }
 
