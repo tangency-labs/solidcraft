@@ -698,6 +698,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !folders.is_empty() {
         s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
+        let gone_folders: Vec<u64> = folders.iter().copied().collect();
+        s.doc_mut().remove_configuration_folders(&gone_folders);
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
@@ -1055,6 +1057,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     next.timeline_groups.retain(|group| !ids.contains(&group.id));
+    next.remove_configuration_folders(&ids);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;

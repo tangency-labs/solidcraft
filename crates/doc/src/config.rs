@@ -35,6 +35,8 @@ pub enum Column {
     ComponentAppearance(u64),
     /// A certified semantic face lineage in a shared definition.
     FaceAppearance(ConfigFaceTarget),
+    /// Every feature and joint in a timeline folder and its nested folders (by folder id).
+    SuppressFolder(u64),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -154,6 +156,90 @@ pub fn appearance_cell(value: &str) -> Result<Option<crate::appearance::Look>> {
 }
 
 impl Document {
+    /// Lookup a timeline folder by its persistent id.
+    pub fn timeline_group(&self, id: u64) -> Option<&crate::TimelineGroup> {
+        self.timeline_groups.iter().find(|group| group.id == id)
+    }
+
+    /// All folder ids in the subtrees rooted at `roots`, walking nested folders iteratively.
+    pub fn timeline_group_subtree(&self, roots: &[u64]) -> BTreeSet<u64> {
+        let mut children = BTreeMap::<u64, Vec<u64>>::new();
+        for group in &self.timeline_groups {
+            if let Some(parent) = group.parent {
+                children.entry(parent).or_default().push(group.id);
+            }
+        }
+        let mut pending = roots.to_vec();
+        let mut visited = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) || self.timeline_group(id).is_none() {
+                continue;
+            }
+            if let Some(kids) = children.get(&id) {
+                pending.extend(kids.iter().copied());
+            }
+        }
+        visited
+    }
+
+    /// Features (in timeline order) and joints (in assembly order) held by folder `id` and its nested folders.
+    pub fn timeline_group_contents(&self, id: u64) -> (Vec<u64>, Vec<u64>) {
+        let subtree = self.timeline_group_subtree(&[id]);
+        if subtree.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let mut feature_ids = BTreeSet::new();
+        let mut joint_ids = BTreeSet::new();
+        for group in &self.timeline_groups {
+            if subtree.contains(&group.id) {
+                feature_ids.extend(group.features.iter().copied());
+                joint_ids.extend(group.joints.iter().copied());
+            }
+        }
+        let features = self.features.iter().filter(|f| feature_ids.contains(&f.id)).map(|f| f.id).collect();
+        let joints = self.assembly.joints.iter().filter(|j| joint_ids.contains(&j.id)).map(|j| j.id).collect();
+        (features, joints)
+    }
+
+    /// Remove configuration table columns targeting any deleted/ungrouped timeline folder in `ids`.
+    pub fn remove_configuration_folders(&mut self, ids: &[u64]) {
+        if ids.is_empty() {
+            return;
+        }
+        let gone: BTreeSet<u64> = ids.iter().copied().collect();
+        let keep: Vec<bool> = self.configs.columns.iter().map(|c| !matches!(c, Column::SuppressFolder(id) if gone.contains(id))).collect();
+        if keep.contains(&false) {
+            let mut k = keep.iter();
+            self.configs.columns.retain(|_| k.next().copied().unwrap_or(true));
+            for r in &mut self.configs.rows {
+                let mut k = keep.iter();
+                r.cells.retain(|_| k.next().copied().unwrap_or(true));
+            }
+        }
+    }
+
+    fn folder_suppressed(&self, id: u64) -> Option<bool> {
+        self.timeline_group(id)?;
+        let (features, joints) = self.timeline_group_contents(id);
+        let has_contents = !features.is_empty() || !joints.is_empty();
+        let all_suppressed = has_contents
+            && features.iter().all(|fid| self.feature(*fid).is_some_and(|f| f.suppressed))
+            && joints.iter().all(|jid| self.assembly.joints.iter().any(|j| j.id == *jid && j.suppressed));
+        Some(all_suppressed)
+    }
+
+    fn folder_matches(&self, expected: &Document, id: u64) -> bool {
+        if self.timeline_group(id).is_none() || expected.timeline_group(id).is_none() {
+            return false;
+        }
+        let (features, joints) = self.timeline_group_contents(id);
+        features.into_iter().all(|fid| self.feature(fid).map(|f| f.suppressed) == expected.feature(fid).map(|f| f.suppressed))
+            && joints.into_iter().all(|jid| {
+                self.assembly.joints.iter().find(|j| j.id == jid).map(|j| j.suppressed)
+                    == expected.assembly.joints.iter().find(|j| j.id == jid).map(|j| j.suppressed)
+            })
+    }
+
     /// Parse a physical material cell (a built-in material or one defined in this design),
     /// returning None for the default material.
     pub fn material_cell(&self, value: &str) -> Result<Option<String>> {
@@ -211,6 +297,7 @@ impl Document {
             Column::FaceAppearance(target) => {
                 Some(self.config_face_look(target).and_then(|look| serde_json::to_string(&look).ok()).unwrap_or_default())
             }
+            Column::SuppressFolder(id) => self.folder_suppressed(*id).map(|on| on.to_string()),
         }
     }
 
@@ -223,6 +310,13 @@ impl Document {
             Column::Appearance(body) => format!("appearance:{body}"),
             Column::ComponentAppearance(id) => format!("component_appearance:{id}"),
             Column::FaceAppearance(target) => format!("face_appearance:{}", target.key()),
+            Column::SuppressFolder(id) => {
+                let unique = self
+                    .timeline_group(*id)
+                    .filter(|group| self.timeline_groups.iter().filter(|other| other.name == group.name).count() == 1)
+                    .map(|group| group.name.as_str());
+                format!("suppress_folder:{}", unique.map(str::to_string).unwrap_or_else(|| id.to_string()))
+            }
         }
     }
 
@@ -317,6 +411,26 @@ impl Document {
                         });
                     }
                 }
+                Column::SuppressFolder(id) => {
+                    let on = suppression_cell(v)?;
+                    if next.timeline_group(*id).is_none() {
+                        return Err(DocError::Unknown(format!("configuration `{row}`: folder {id} is gone")));
+                    }
+                    let (features, joints) = next.timeline_group_contents(*id);
+                    for fid in features {
+                        if let Some(f) = next.feature_mut(fid) {
+                            f.suppressed = on;
+                        }
+                    }
+                    if !joints.is_empty() {
+                        let joint_set: BTreeSet<u64> = joints.into_iter().collect();
+                        for joint in &mut next.assembly.joints {
+                            if joint_set.contains(&joint.id) {
+                                joint.suppressed = on;
+                            }
+                        }
+                    }
+                }
             }
         }
         next.configs.active = Some(row.to_string());
@@ -331,15 +445,28 @@ impl Document {
         if r.cells.len() != self.configs.columns.len() {
             return false;
         }
+        let expected_with_folders =
+            (!self.configs.rules.is_empty() || self.configs.columns.iter().any(|column| matches!(column, Column::SuppressFolder(_)))).then(|| {
+                let mut expected = self.clone();
+                expected.apply_configuration(r.id).ok().map(|()| expected)
+            });
         if !self.configs.rules.is_empty() {
-            let mut expected = self.clone();
-            if expected.apply_configuration(r.id).is_err() {
+            let Some(Some(expected)) = expected_with_folders.as_ref() else {
                 return false;
-            }
-            return self.configs.columns.iter().all(|column| self.config_current(column) == expected.config_current(column));
+            };
+            return self.configs.columns.iter().all(|column| match column {
+                Column::SuppressFolder(id) => self.folder_matches(expected, *id),
+                _ => self.config_current(column) == expected.config_current(column),
+            });
         }
+        let expected = match expected_with_folders {
+            Some(Some(expected)) => Some(expected),
+            Some(None) => return false,
+            None => None,
+        };
         self.configs.columns.iter().zip(&r.cells).all(|(c, v)| match c {
             Column::Suppress(id) => suppression_cell(v).is_ok_and(|on| self.feature(*id).is_some_and(|f| f.suppressed == on)),
+            Column::SuppressFolder(id) => expected.as_ref().is_some_and(|expected| self.folder_matches(expected, *id)),
             Column::Param(name) if self.text_param(name).is_some() => self.text_param(name).is_some_and(|p| p.text == crate::text_params::unquote(v)),
             Column::Param(name) => {
                 let kind = self
@@ -487,5 +614,103 @@ mod tests {
         assert!(appearance_cell(r#"{"name":"Invalid","color":[1,2,3],"opacity":1e999}"#).is_err());
         assert!(appearance_cell(&"a".repeat(4097)).is_err());
         assert!(appearance_cell("default").unwrap().is_none());
+    }
+
+    fn test_box(d: &mut Document, name: &str) -> u64 {
+        d.add_feature(
+            crate::FeatureKind::Box {
+                corner: ["0".into(), "0".into(), "0".into()],
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: crate::Operation::NewBody,
+                centred: false,
+            },
+            Some(name),
+        )
+        .unwrap()
+    }
+
+    fn test_joint(id: u64, name: &str) -> crate::joints::Joint {
+        use crate::joints::*;
+        let origin = |occurrence| JointOrigin::new(occurrence, Snap::Frame { origin: [0.0, 0.0, 0.0].into(), z: [0.0, 0.0, 1.0].into(), x: None });
+        Joint {
+            id,
+            name: name.into(),
+            kind: JointKind::Rigid,
+            a: origin(1),
+            b: origin(2),
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: false,
+            offset: 0.0,
+            offset_xy: [0.0, 0.0],
+            angle: 0.0,
+            suppressed: false,
+            exprs: JointExprs::default(),
+            captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
+            constraint: None,
+            dynamics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn suppress_folder_column_applies_nested_features_joints_matches_keys_and_cleans_up() {
+        let mut d = Document::new("Folders");
+        let f_outer = test_box(&mut d, "OuterBox");
+        let f_inner = test_box(&mut d, "InnerBox");
+        let j_outer = d.allocate_id().unwrap();
+        let j_inner = d.allocate_id().unwrap();
+        d.assembly.joints.push(test_joint(j_outer, "OuterJoint"));
+        d.assembly.joints.push(test_joint(j_inner, "InnerJoint"));
+
+        let g_parent = d.allocate_id().unwrap();
+        let g_child = d.allocate_id().unwrap();
+        let g_empty = d.allocate_id().unwrap();
+        d.timeline_groups = vec![
+            crate::TimelineGroup { id: g_parent, name: "Group".into(), parent: None, features: vec![f_outer], joints: vec![j_outer] },
+            crate::TimelineGroup { id: g_child, name: "Nested".into(), parent: Some(g_parent), features: vec![f_inner], joints: vec![j_inner] },
+            crate::TimelineGroup { id: g_empty, name: "Empty".into(), parent: None, features: vec![], joints: vec![] },
+        ];
+
+        let col_parent = Column::SuppressFolder(g_parent);
+        let col_empty = Column::SuppressFolder(g_empty);
+        let col_override = Column::Suppress(f_inner);
+        assert_eq!(d.config_key(&col_parent), "suppress_folder:Group");
+        assert_eq!(d.config_current(&col_parent).as_deref(), Some("false"));
+        assert_eq!(d.config_current(&col_empty).as_deref(), Some("false"));
+
+        // Overlapping parent folder + child feature override + empty folder.
+        d.configs.columns = vec![col_parent.clone(), col_override.clone(), col_empty.clone()];
+        let row_off = d.add_configuration_row("On".into(), vec!["false".into(), "false".into(), "false".into()]).unwrap();
+        let row_sup = d.add_configuration_row("Suppressed".into(), vec!["true".into(), "false".into(), "true".into()]).unwrap();
+        let _ = row_off;
+
+        d.apply_configuration(row_sup).unwrap();
+        assert!(d.feature(f_outer).unwrap().suppressed);
+        assert!(!d.feature(f_inner).unwrap().suppressed, "later child column overrides nested feature");
+        assert!(d.assembly.joints.iter().find(|j| j.id == j_outer).unwrap().suppressed);
+        assert!(d.assembly.joints.iter().find(|j| j.id == j_inner).unwrap().suppressed);
+        assert!(d.configuration_matches(), "matches immediately after apply despite overlapping override and empty folder");
+
+        // Manual drift on a single nested joint or feature must make configuration_matches false even when config_current is still "false".
+        d.apply_configuration("On").unwrap();
+        assert!(d.configuration_matches());
+        d.feature_mut(f_inner).unwrap().suppressed = true;
+        assert_eq!(d.config_current(&col_parent).as_deref(), Some("false"));
+        assert!(!d.configuration_matches(), "mixed folder drift is detected as modified");
+
+        // Duplicate folder names fall back to numeric id keys.
+        let g_dup = d.allocate_id().unwrap();
+        d.timeline_groups.push(crate::TimelineGroup { id: g_dup, name: "Group".into(), parent: None, features: vec![], joints: vec![] });
+        assert_eq!(d.config_key(&Column::SuppressFolder(g_parent)), format!("suppress_folder:{g_parent}"));
+        assert_eq!(d.config_key(&Column::SuppressFolder(g_dup)), format!("suppress_folder:{g_dup}"));
+
+        // Cleaning up a folder removes its column and cells from every row.
+        d.remove_configuration_folders(&[g_parent]);
+        assert_eq!(d.configs.columns, vec![col_override, col_empty]);
+        assert!(d.configs.rows.iter().all(|r| r.cells.len() == 2));
     }
 }

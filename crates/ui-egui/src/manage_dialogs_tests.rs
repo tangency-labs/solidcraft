@@ -1300,3 +1300,49 @@ fn configurations_as_columns_swap_the_table_and_its_keys() {
     h.frames(3);
     assert!(scenario::rect_of("dialog:table:configuration_table:viewport").is_some(), "and switched back");
 }
+
+#[test]
+fn configuration_folder_suppression_columns_add_toggle_activate_and_remove() {
+    let mut h = fixture();
+    h.app.run("solid.box", json!({"corner":[20,0,0],"length":10,"width":10,"height":10,"name":"ExtraBox"})).unwrap();
+    let folder = h.app.run("timeline.group", json!({"name":"ExtraGroup","features":["ExtraBox"]})).unwrap()["group"].as_u64().unwrap();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+
+    // Add the folder column via the Add Column popup menu.
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    let pick = h.widget("Suppress folder ExtraGroup").unwrap();
+    h.step(&json!({"click": pick})).unwrap();
+    h.frames(4);
+    assert_eq!(
+        h.app.session.doc.configs.columns,
+        vec![solidcraft_engine::doc::config::Column::Param("width".into()), solidcraft_engine::doc::config::Column::SuppressFolder(folder),]
+    );
+    let col_key = h.app.session.doc.config_key(&solidcraft_engine::doc::config::Column::SuppressFolder(folder));
+    assert_eq!(col_key, "suppress_folder:ExtraGroup");
+
+    // Add a second row, toggle the folder checkbox in that row, and activate it.
+    h.app.run("config.row", json!({"name":"Suppressed"})).unwrap();
+    h.frames(4);
+    assert_eq!(config_cell(&h, "Suppressed", 1), "false");
+    h.step(&json!({"click":{"handle":format!("config:cell:Suppressed:{col_key}")}})).unwrap();
+    h.frames(2);
+    assert_eq!(config_cell(&h, "Suppressed", 1), "true");
+    h.step(&json!({"click":{"handle":"config:activate:Suppressed"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.session.doc.find_feature("ExtraBox").unwrap().suppressed);
+
+    // Switch back to Default so ExtraBox unsuppresses, then remove the folder column via header close.
+    h.step(&json!({"click":{"handle":"config:activate:Default"}})).unwrap();
+    h.frames(4);
+    assert!(!h.app.session.doc.find_feature("ExtraBox").unwrap().suppressed);
+    let header_rect = scenario::rect_of("dialog:column:configuration_table:Suppress Folder: ExtraGroup").unwrap();
+    h.step(&json!({"move":[header_rect.center().x, header_rect.center().y]})).unwrap();
+    h.frames(2);
+    let remove = scenario::rect_of("dialog:button:Suppress Folder: ExtraGroup:×").unwrap();
+    h.step(&json!({"click":[remove.center().x, remove.center().y]})).unwrap();
+    h.frames(4);
+    assert_eq!(h.app.session.doc.configs.columns, vec![solidcraft_engine::doc::config::Column::Param("width".into())]);
+}

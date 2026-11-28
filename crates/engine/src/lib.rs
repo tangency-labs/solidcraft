@@ -3166,6 +3166,10 @@ impl Session {
     /// as before. Otherwise store each sketch whose values changed as solved, so the next edit
     /// continues from it (see `Model::adopt_solved_sketches`).
     pub(crate) fn settle_value_edit(&mut self, solved_before: &SketchValues) -> Result<()> {
+        self.settle_value_edit_with_joints(solved_before).map(|_| ())
+    }
+
+    pub(crate) fn settle_value_edit_with_joints(&mut self, solved_before: &SketchValues) -> Result<Option<solidcraft_doc::joints::Solution>> {
         // The solved geometry each sketch had before the edit, for the shrink/fling checks
         // after the refresh below (the same checks `settle` runs on an edit's own solve).
         let solved_geometry: std::collections::BTreeMap<u64, solidcraft_sketch::Sketch> =
@@ -3198,7 +3202,7 @@ impl Session {
             // design-only: a parameter edit rewrites the design's pattern-quantity sketches.
             *self.doc_mut().sketch_mut(id)? = sketch;
         }
-        self.refresh();
+        let joint_solution = self.refresh_with_joint_report();
         for r in &self.model.results {
             // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
             // one that conflicts; an error from upstream is not the edit's to refuse.
@@ -3275,7 +3279,7 @@ impl Session {
             self.forget_dirty_answer();
             self.model.adopt_solved_sketches(Arc::make_mut(&mut self.doc));
         }
-        Ok(())
+        Ok(joint_solution)
     }
 
     /// Install the host's validated live view registry without orphaning the current edit.

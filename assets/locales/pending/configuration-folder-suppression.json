@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "config.add_suppress_folder": "تعطيل المجلد {name}",
+    "config.suppress_folder": "تعطيل المجلد: {name}"
+  },
+  "de": {
+    "config.add_suppress_folder": "Ordner {name} unterdrücken",
+    "config.suppress_folder": "Ordner unterdrücken: {name}"
+  },
+  "en": {
+    "config.add_suppress_folder": "Suppress folder {name}",
+    "config.suppress_folder": "Suppress Folder: {name}"
+  },
+  "he": {
+    "config.add_suppress_folder": "השבת תיקייה {name}",
+    "config.suppress_folder": "השבת תיקייה: {name}"
+  },
+  "ja": {
+    "config.add_suppress_folder": "フォルダー {name} を抑制",
+    "config.suppress_folder": "フォルダーを抑制: {name}"
+  },
+  "ko": {
+    "config.add_suppress_folder": "폴더 {name} 억제",
+    "config.suppress_folder": "폴더 억제: {name}"
+  },
+  "vi": {
+    "config.add_suppress_folder": "Vô hiệu hóa thư mục {name}",
+    "config.suppress_folder": "Vô hiệu hóa thư mục: {name}"
+  },
+  "zh": {
+    "config.add_suppress_folder": "抑制文件夹 {name}",
+    "config.suppress_folder": "抑制文件夹：{name}"
+  }
+}

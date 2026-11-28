@@ -112,12 +112,16 @@ pub struct ConfigConfigureParams {
     #[serde(default, deserialize_with = "face_picks", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "face_picks_schema")]
     pub face_appearances: Option<Vec<Value>>,
+    /// Timeline folders whose suppression to configure: each a folder's id or unique name. At most 500.
+    #[serde(default, deserialize_with = "folder_keys", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "folder_keys_schema")]
+    pub folders: Option<Vec<FolderKey>>,
 }
 
 /// Add a column to the configuration table, or delete one: give exactly one of `param`,
-/// `feature`, `material`, `appearance`, `component_appearance` and `face_appearance`. An added
-/// column is filled in every row with the design's current value; the rows are checked against
-/// the table's rules afterwards. One undo step.
+/// `feature`, `material`, `appearance`, `component_appearance`, `face_appearance` and `folder`. An
+/// added column is filled in every row with the design's current value; the rows are checked
+/// against the table's rules afterwards. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = exactly_one_target)]
 pub struct ConfigColumnParams {
@@ -144,6 +148,10 @@ pub struct ConfigColumnParams {
     #[serde(default, deserialize_with = "face_column", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "face_column_schema")]
     pub face_appearance: Option<Value>,
+    /// A timeline folder, by id or unique name: whether each row suppresses its features and joints.
+    #[serde(default, deserialize_with = "some_folder_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderKey")]
+    pub folder: Option<FolderKey>,
     /// Delete the column instead of adding it. Default: false.
     #[serde(default)]
     pub delete: Option<bool>,
@@ -307,6 +315,52 @@ fn component_keys_schema(generator: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "array", "items": key, "maxItems": MAX_COLUMNS})
 }
 
+/// A timeline folder, by its id or unique name, as `config.column` (`folder`) and
+/// `config.configure` (`folders`) read it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FolderKey {
+    Id(u64),
+    Name(String),
+}
+
+impl FolderKey {
+    fn read(v: &Value) -> Option<Self> {
+        v.as_u64().map(FolderKey::Id).or_else(|| v.as_str().filter(|name| !name.is_empty()).map(|name| FolderKey::Name(name.to_string())))
+    }
+}
+
+impl<'de> Deserialize<'de> for FolderKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        FolderKey::read(&Value::deserialize(d)?).ok_or_else(|| D::Error::custom(whole("folder name or ID required")))
+    }
+}
+
+impl JsonSchema for FolderKey {
+    fn schema_name() -> Cow<'static, str> {
+        "FolderKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A timeline folder's id or unique name.",
+            "anyOf": [{"type": "string", "minLength": 1}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+fn some_folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<FolderKey>, D::Error> {
+    FolderKey::deserialize(d).map(Some)
+}
+
+fn folder_keys<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<FolderKey>>, D::Error> {
+    let list = bounded_targets(Value::deserialize(d)?).map_err(D::Error::custom)?;
+    list.iter().map(|v| FolderKey::read(v).ok_or_else(|| D::Error::custom(whole("folder name or ID required")))).collect::<Result<_, _>>().map(Some)
+}
+
+fn folder_keys_schema(generator: &mut SchemaGenerator) -> Schema {
+    let key = generator.subschema_for::<FolderKey>();
+    json_schema!({"type": "array", "items": key, "maxItems": MAX_COLUMNS})
+}
+
 /// The list `config.configure` reads `component_appearances` and `face_appearances` as: at most
 /// 500 targets, with its message for anything else.
 fn bounded_targets(v: Value) -> Result<Vec<Value>, String> {
@@ -387,7 +441,7 @@ fn target_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
 /// `config.column` takes exactly one target, as the handler counts them. (A target given as
 /// `null` counts, and its reader refuses it.)
 fn exactly_one_target(schema: &mut Schema) {
-    let one: Vec<Value> = ["param", "feature", "material", "appearance", "component_appearance", "face_appearance"]
+    let one: Vec<Value> = ["param", "feature", "material", "appearance", "component_appearance", "face_appearance", "folder"]
         .iter()
         .map(|key| serde_json::json!({"required": [key]}))
         .collect();
