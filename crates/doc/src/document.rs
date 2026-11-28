@@ -384,6 +384,38 @@ fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
     solidcore_record::cell_grid::Clip::Snap
 }
 
+/// A plate of a Tab and Slot feature: its body, and the point that picked it, when one did.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct PlatePick {
+    /// Stable for the life of the pick: names every tool of the pick's plate joints. Minted by
+    /// SolidCraft (the writers, and the file load for a pick that has none), never by the user;
+    /// `None` only on its way in. A key has no walk label: no parameter reaches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<u32>,
+    pub body: BodyName,
+    /// Chooses between several contact planes of a pair. A plain position, as Dogbone's
+    /// `edges`: it moves with the feature and names no face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near: Option<Position>,
+}
+
+/// A sheet metal input of a Tab and Slot feature, for the feature's sheet metal route: tabs
+/// placed by a shared sheet metal joint (or, later, on open edges). That route is not built yet:
+/// nothing writes one, and a feature that holds one skips it (`sheet_route_not_built`). The
+/// record has room for it now, so the sheet metal route needs no new format.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SheetPick {
+    /// A shared sheet metal joint, by its persistent name.
+    Joint {
+        /// As a plate pick's key: names the pick's tools, minted by SolidCraft.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<u32>,
+        /// The joint's persistent name.
+        name: String,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -2117,6 +2149,69 @@ pub enum FeatureKind {
         /// Target body names (empty = the feature's participants, else all bodies of its component).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// Tab and Slot (#17422): tabs on the tab plates' edges where they meet the slot plates, and
+    /// matching slots cut through the slot plates, planned by solidcore
+    /// (`solidcore_ops::tab_slot`). Nothing measured from the model is stored: thicknesses,
+    /// contacts and stretches are read again at every rebuild.
+    TabSlot {
+        /// The plates that get tabs.
+        tab_plates: Vec<PlatePick>,
+        /// The plates that get slots.
+        slot_plates: Vec<PlatePick>,
+        /// The sheet metal route's inputs (not built yet; see [`SheetPick`]). The plate route
+        /// takes `tab_plates` and `slot_plates`; a pair with a sheet metal plate also goes to the
+        /// sheet metal route.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sheet_picks: Vec<SheetPick>,
+        /// The next key a new pick gets. Only grows: a key is never handed out twice in one
+        /// feature, so a pick added after another was removed never takes over its names.
+        #[serde(default)]
+        next_plate_key: u32,
+        /// Tabs per stretch (default: as many as fit, auto).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Tabs Per Stretch")]
+        count: Option<Expr>,
+        /// Center to center between tabs, instead of a count.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Spacing")]
+        spacing: Option<Expr>,
+        /// A tab's width (default: three times the tab plate's thickness).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tab Width")]
+        tab_width: Option<Expr>,
+        /// From a stretch's end to the nearest tab (default: the tab width).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End Distance")]
+        end_distance: Option<Expr>,
+        /// The room on every side of a tab in its slot (the command writes 0.1 mm).
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        /// The room each side of a tab's faces in its slot, across the tab plate's thickness
+        /// (default: the clearance, so a feature without one builds as before).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thickness Clearance")]
+        thickness_clearance: Option<Expr>,
+        /// How far a tab stands out past the slot plate's far face (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Protrusion")]
+        protrusion: Option<Expr>,
+        /// Seed of the tab width variation: the same seed gives the same widths (a whole number,
+        /// default 1000). Only matters with a width jitter.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Seed")]
+        seed: Option<Expr>,
+        /// Vary each tab's width by up to this much either way (default 0: all tabs as wide as
+        /// the tab width). Never under a tenth of the tab width, never past the end distances.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Width Jitter")]
+        width_jitter: Option<Expr>,
+        /// Chamfer on the two outer corners of each tab's free end, so the tabs enter the slots
+        /// easily (default 0: off). The slot is not chamfered. Under half the tab width and
+        /// under the tab's length.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip Chamfer")]
+        tip_chamfer: Option<Expr>,
     },
     /// A spline on a shaft, in a bore, or both (#17693): tooth spaces cut into the picked round faces, or, with
     /// no face picked, a new splined shaft and hub at the origin. The teeth come from the kernel's tooth outlines
@@ -4454,6 +4549,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
+            FeatureKind::TabSlot { .. } => "TabSlotFeature",
             FeatureKind::ShaftSpline { .. } => "ShaftSplineFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
@@ -4537,6 +4633,7 @@ impl FeatureKind {
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
             FeatureKind::CellGrid { .. } => "cell_grid",
+            FeatureKind::TabSlot { .. } => "tab_slot",
             FeatureKind::ShaftSpline { .. } => "shaft_spline",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
@@ -4658,6 +4755,7 @@ impl FeatureKind {
             "RecognizeSheetMetalFeature" => "sheet_recognize",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
+            "TabSlotFeature" => "tab_slot",
             "ShaftSplineFeature" => "shaft_spline",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
@@ -4762,6 +4860,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
+            FeatureKind::TabSlot { .. } => "TabSlot",
             FeatureKind::ShaftSpline { .. } => "Shaft Spline",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",

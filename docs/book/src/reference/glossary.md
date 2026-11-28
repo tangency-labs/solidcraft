@@ -945,6 +945,23 @@ parameters and a production-process symbol.
 - **Don't use:** appearance, render material.
 - **For translators:** describes manufactured geometry and acceptance requirements.
 
+### tab and slot
+
+A joint between two flat plates that meet at a right angle, made of tongues on one plate's edge
+(tabs) that pass through matching openings in the other plate's face (slots), with a clearance on
+each side of every tab.
+
+The tab plate gets the tabs, the slot plate gets the slots; a plate joint is one place where a tab
+plate's end meets a slot plate's face, and one feature can make several.
+
+- **In SolidCraft:** the `solid.tab_slot` command ("Tab and Slot") and its `tab_slot` feature
+  type; its `tab_plates`, `slot_plates`, `count`, `spacing`, `tab_width`, `end_distance`,
+  `clearance` (on each side) and `protrusion` parameters and design-file keys.
+- **Don't use:** slot and tab, tabbed joint, finger joint (a corner joint), mortise and tenon.
+- **Elsewhere:** tab and slot, slot and tab joint, tab-and-slot construction.
+- **For translators:** a tab is a tongue of a plate, not a tab of the window or the ribbon; see
+  *Words with more than one meaning*, "Tab" and "Clearance".
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -1074,12 +1091,14 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
 | | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
+| | the room between a tab and its slot, on each side | clearance (joint) | the Tab and Slot dialog's Clearance row, `ui.tab_slot.clearance` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Tab | flat material a sheet metal Tab adds to a panel | tab (sheet metal) | `sheet.tab`, `cmd.sheet_tab` |
 | | a page of the ribbon or of a document strip | tab (ribbon, document) | the ribbon tabs, the document tabs |
+| | a tongue on a plate's edge that goes through a slot | tab (joint) | `solid.tab_slot`, `ui.tab_slot.*` |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
 | | a fillet | *fillet* | `solid.fillet` |
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |

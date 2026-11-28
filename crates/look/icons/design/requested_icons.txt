@@ -406,6 +406,7 @@ surface_untrim	false
 svg	false
 swap	false
 sweep	false
+tab_slot	false
 text	false
 thread	false
 timeline_2d	false

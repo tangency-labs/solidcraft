@@ -1056,6 +1056,7 @@ crates/solidcore/src/sweep/stations.rs	fractions	Ord::clamp	1	proven	clamp(MIN_S
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::drop	Vec::drain	1	proven	drain(..)	full drain(..) has no invalid bounds
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::unlock_mark	Vec::remove	1	proven	remove(index)	index is rposition() in the same locks Vec
 crates/solidcore/src/sweep/topology_sweep/store.rs	body_pair_mut	split_at	1	proven	split_at_mut(si.max(di))	entry() validates both base-adjusted indices against the same slots Vec
+crates/solidcore/src/tab_slot.rs	vary	with_capacity	1	proven	Vec::with_capacity(starts.len())	starts.len() of a slice already in memory
 crates/solidcore/src/topology.rs	Brep::add_loop	with_capacity	1	open	Vec::with_capacity(edges.len())	
 crates/solidcore/src/topology.rs	Brep::end_surface_owner_cleared	Vec::remove	1	open	remove(i)	
 crates/solidcore/src/topology/brep/local_operation.rs	local_operation	with_capacity	1	open	Vec::with_capacity(all_faces.len())	

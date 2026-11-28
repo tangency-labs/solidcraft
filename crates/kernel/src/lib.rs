@@ -172,6 +172,7 @@ mod sweep_api;
 mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
+pub mod tab_slot;
 mod tangent_edge;
 #[cfg(test)]
 mod thin_face_tests;

@@ -64,12 +64,14 @@ pub mod mass;
 pub mod mesh_reduce;
 pub mod nurbs;
 pub mod offset;
+pub mod plate_contact;
 pub mod primitive;
 pub mod prism;
 pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod tab_slot;
 pub mod teeth;
 pub mod weld_symbol;
 

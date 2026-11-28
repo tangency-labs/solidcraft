@@ -401,6 +401,8 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::CellGrid { .. } => "perforate",
         FeatureKind::ShaftSpline { .. } => "shaft_spline",
         FeatureKind::SheetBead { .. } => "rib",
+        // Borrowed until tab_slot.svg is drawn (A7).
+        FeatureKind::TabSlot { .. } => "tab_slot",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",

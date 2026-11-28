@@ -84,6 +84,7 @@ pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
+pub mod dialogs_tab_slot;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;

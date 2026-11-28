@@ -599,6 +599,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Weld(Box<crate::dialogs_weld::WeldDialog>),
             /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
             Dogbone(crate::dialogs_dogbone::Dogbone),
+            /// Tab and Slot (`dialogs_tab_slot`).
+            TabSlot(crate::dialogs_tab_slot::TabSlot),
             /// Cell Grid (`dialogs_cell_grid`).
             CellGrid(crate::dialogs_cell_grid::CellGrid),
             /// Rotate Member (`dialogs_rotate_member`).
@@ -1511,6 +1513,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
                     .or_else(|| crate::dialogs_weld::start(app, id))
                     .or_else(|| crate::dialogs_dogbone::start(app, id))
+                    .or_else(|| crate::dialogs_tab_slot::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
                     .or_else(|| crate::dialogs_gusset::start(app, id))
@@ -1841,7 +1844,8 @@ impl Dialog {
             | Kind::RotateMember(_)
             | Kind::FramePlate(_)
             | Kind::FrameTrim(_)
-            | Kind::Gusset(_) => return true,
+            | Kind::Gusset(_)
+            | Kind::TabSlot(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             Kind::Pulley(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
@@ -3708,6 +3712,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::EndCap(_) => "ui.end_cap_title",
         Kind::Weld(_) => "cmd.weld.create",
         Kind::Dogbone(_) => "ui.dogbone_title",
+        Kind::TabSlot(_) => "ui.tab_slot_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
         Kind::FrameTrim(_) => "TRIM/EXTEND",
@@ -6056,6 +6061,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Frame(_)
             | Kind::EndCap(_)
             | Kind::Dogbone(_)
+            | Kind::TabSlot(_)
             | Kind::CellGrid(_)
     )
 }
@@ -8857,6 +8863,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
         Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
         Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
+        Kind::TabSlot(k) => return crate::dialogs_tab_slot::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
         Kind::FrameTrim(k) => return crate::dialogs_frame::trim_commands(app, k, &d.inputs, &d.extra),
@@ -11349,6 +11356,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
+                .or_else(|| crate::dialogs_tab_slot::for_feature(app, other))
                 .or_else(|| crate::dialogs_cell_grid::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
                 .or_else(|| crate::dialogs_frame::trim_for_feature(app, other))

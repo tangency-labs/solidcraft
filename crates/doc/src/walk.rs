@@ -64,6 +64,8 @@ impl Walk for crate::MorphMapMode {}
 impl Walk for crate::MorphProjection {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::PatternDistance {}
+// A sheet pick names a sheet metal joint, not a body, sketch or feature, and holds no expression.
+impl Walk for crate::document::SheetPick {}
 impl Walk for crate::document::CellGridMode {}
 impl Walk for solidcore_record::cell_grid::CellShape {}
 impl Walk for solidcore_record::cell_grid::DotGrid {}

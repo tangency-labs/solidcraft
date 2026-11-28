@@ -454,7 +454,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Bodies",
                 ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
             },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
+            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone", "solid.tab_slot"] },
         ],
         _ => &[],
     }
@@ -590,7 +590,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert", "solid.tab_slot"],
     },
     Section {
         tab: "MODEL",
@@ -2080,6 +2080,7 @@ mod tests {
                 "solid.remove",
                 "sheet.convert",
                 "solid.dogbone",
+                "solid.tab_slot",
                 "timeline.delete",
             ]
         );

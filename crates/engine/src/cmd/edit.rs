@@ -1871,6 +1871,24 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_doc::validate_body_transfer(&s.doc, &solidcraft_doc::plain(bodies), *from, *to, transform)?;
         nf.component = *to;
     }
+    // Tab and Slot refuses, before evaluation, what its command refuses (design 11.1), against
+    // the model the feature is added to.
+    if matches!(nf.kind, FeatureKind::TabSlot { .. }) {
+        super::tab_slot::check(s, &s.model.state_before(id), &nf.kind)?;
+    }
+    // A plate the edit adds gets its key here, as the command gives one: from `next_plate_key`,
+    // which never goes back, so no key is handed out twice in the life of the feature.
+    if let (FeatureKind::TabSlot { next_plate_key: old, .. }, FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, .. }) =
+        (&f.kind, &mut nf.kind)
+    {
+        let largest = tab_plates.iter().chain(slot_plates.iter()).filter_map(|p| p.key).max();
+        let mut next = largest.map_or(1, |k| k.saturating_add(1)).max(*old).max(*next_plate_key);
+        for pick in tab_plates.iter_mut().chain(slot_plates.iter_mut()).filter(|p| p.key.is_none()) {
+            pick.key = Some(next);
+            next = next.checked_add(1).ok_or_else(|| bad(cmd, "the plate key space of this tab and slot is exhausted"))?;
+        }
+        *next_plate_key = next;
+    }
     if let (FeatureKind::Sketch { sketch: a, .. }, FeatureKind::Sketch { sketch: b, .. }) = (&nf.kind, &f.kind)
         && a != b
     {
@@ -3283,6 +3301,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::features_more::COMMANDS)
         .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
+        .chain(super::tab_slot::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
@@ -3393,6 +3412,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // A redefine never lowers Tab and Slot's key floor: a removed plate's key is not handed out
+    // again, whether or not the new parameters name `next_plate_key`.
+    if let FeatureKind::TabSlot { next_plate_key: floor, .. } = &old.kind
+        && cid == "solid.tab_slot"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        let given = parameters.get("next_plate_key").and_then(Value::as_u64).unwrap_or(0);
+        parameters.insert("next_plate_key".into(), json!(given.max(u64::from(*floor))));
     }
     // Press-in hardware's hole is redefined by the command that made it: the Hole command would
     // drop the hardware it names and leave a plain hole of its size (#17752).

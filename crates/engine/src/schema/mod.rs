@@ -191,6 +191,7 @@ pub mod surface_morph;
 pub mod surface_profile;
 pub mod surface_ruled;
 pub mod tab_layouts;
+pub mod tab_slot;
 pub mod tab_views;
 pub mod tab_windows;
 pub mod timeline_clipboard;

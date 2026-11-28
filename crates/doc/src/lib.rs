@@ -257,6 +257,9 @@ pub use eval::state_in_frame;
 pub use eval::state_in_frame_at;
 pub use eval::suggested_thread;
 pub use eval::suggested_thread_in;
+pub use eval::tab_slot::TabSlotJoint;
+pub use eval::tab_slot::TabSlotLeftOut;
+pub use eval::tab_slot::TabSlotReport;
 pub use eval::tangent_face_chain;
 pub use eval::through_all_distance;
 pub use eval::through_all_side;
@@ -464,6 +467,8 @@ mod named_projection_tests;
 mod old_cap_anchor_tests;
 #[cfg(test)]
 mod saved_text_font_tests;
+#[cfg(test)]
+mod tab_slot_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -68,6 +68,7 @@ mod features;
 mod features_more;
 mod hole_stacks;
 mod join_pieces;
+mod tab_slot;
 pub(crate) use bom::SAME_AS_COMPONENT;
 pub(crate) use bom::occurrence_bom_type;
 pub(crate) use bom::record_item_numbers;
@@ -673,6 +674,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
+    v.extend(tab_slot::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
