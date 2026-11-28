@@ -29,6 +29,7 @@ mod browser_search_tests;
 pub mod canvas;
 mod card_resize;
 pub mod cli_link;
+mod close_model;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]

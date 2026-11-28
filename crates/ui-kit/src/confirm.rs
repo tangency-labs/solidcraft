@@ -41,6 +41,7 @@ pub struct Confirm<'a> {
     cancel: &'a str,
     left: Option<&'a str>,
     secondary_left: bool,
+    left_enabled: bool,
     selected: Option<Action>,
     detail: Option<&'a str>,
 }
@@ -56,6 +57,7 @@ impl<'a> Confirm<'a> {
             cancel: "Cancel",
             left: None,
             secondary_left: false,
+            left_enabled: true,
             selected: None,
             detail: None,
         }
@@ -63,6 +65,12 @@ impl<'a> Confirm<'a> {
 
     pub fn tone(mut self, tone: Tone) -> Self {
         self.tone = tone;
+        self
+    }
+
+    /// Opt into a wider confirmation while keeping the card bounded to the screen.
+    pub fn width(mut self, width: f32) -> Self {
+        self.window = self.window.width(width);
         self
     }
 
@@ -77,6 +85,12 @@ impl<'a> Confirm<'a> {
         self
     }
 
+    /// Keep the left answer visible while it waits for work already in progress.
+    pub fn left_enabled(mut self, enabled: bool) -> Self {
+        self.left_enabled = enabled;
+        self
+    }
+
     pub fn selected(mut self, selected: Action) -> Self {
         self.selected = Some(selected);
         self
@@ -88,14 +102,14 @@ impl<'a> Confirm<'a> {
     }
 
     /// The footer's visible buttons with their live states, for the first-letter accelerator:
-    /// OK needs valid inputs, Cancel always answers, and a confirmation's left action is live.
+    /// OK needs valid inputs, Cancel always answers, and the left action has its own state.
     fn accelerators(&self, valid: bool) -> Vec<(Action, &'a str, bool)> {
         let mut out = Vec::new();
         if !self.ok.is_empty() {
             out.push((Action::Ok, self.ok, valid));
         }
         if let Some(left) = self.left {
-            out.push((Action::Apply, left, true));
+            out.push((Action::Apply, left, self.left_enabled));
         }
         if !self.cancel.is_empty() {
             out.push((Action::Cancel, self.cancel, true));
@@ -182,13 +196,14 @@ impl<'a> Confirm<'a> {
                     danger: matches!(self.tone, Tone::Danger),
                     confirm: true,
                     secondary_left: self.secondary_left,
+                    nothing_to_apply: !self.left_enabled,
                     ..Default::default()
                 },
                 |_| {},
             );
             let action = if action == Action::Cancel {
                 action
-            } else if enter && valid {
+            } else if enter && valid && (self.selected != Some(Action::Apply) || self.left_enabled) {
                 self.selected.unwrap_or(Action::Ok)
             } else if action == Action::None && accel != Action::None {
                 accel

@@ -274,7 +274,6 @@ pub use test_support::raster as raster_ui;
 pub use test_support::textures_update as test_textures_update;
 #[cfg(any(test, feature = "test-support"))]
 pub use test_support::textures_update as update_test_textures;
-#[cfg(any(test, feature = "test-support"))]
 pub use text::ellipsize_middle;
 pub use text::paint_text;
 pub use text_menu::menu_open as text_menu_open;
