@@ -51,6 +51,15 @@ fn child() {
         }
         std::process::abort();
     }
+    // Up and drawing, then the graphics device is lost: the report is written, and the process
+    // ends at once, without its clean exit, as `device_lost::end` does.
+    if mode == "device_lost" {
+        set_environment("Renderer: Vulkan Test GPU (IntegratedGpu, driver Test Corp 1.2.3), MSAA 4x");
+        phase(RUNNING);
+        let id = device_lost("Lost: Device lost (vkQueueSubmit 17)");
+        println!("DEVICE_LOST {id:?}");
+        std::process::exit(0);
+    }
     // Up and running, then a second window's surface (the agent chat on its own), then dying.
     if mode == "late_surface" {
         startup_step("window surface");
@@ -343,6 +352,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert_eq!(v["app"]["version"], "9.9.9");
     assert_eq!(v["app"]["commit"], "abc1234");
     assert_eq!(v["system"]["environment"], "Renderer: test");
+    assert!(v["run"]["pid"].as_u64().is_some() && v["run"]["start"].as_str().is_some(), "the run, for its log: {v}");
     assert!(v["message"].as_str().unwrap().contains("an internal error in a command"), "{v}");
     assert!(v["location"].as_str().unwrap().contains("diagnostics.rs"), "{v}");
     let bt = v["backtrace"].as_array().unwrap();
@@ -733,6 +743,74 @@ fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
     assert_eq!(bt.len(), 3 + MAX_FRAMES, "{bt:?}");
     assert!(v.get("minidump_path").is_none(), "{v}");
     let _ = fs::remove_dir_all(&d);
+}
+
+/// A lost graphics device leaves a report the next start offers (#4172): with the run's renderer
+/// and which run it was, and not an unclean exit as well. The same loss again is counted.
+#[test]
+fn a_lost_graphics_device_leaves_a_report_the_next_start_offers() {
+    let d = fresh_dir("device_lost");
+    let (out, ok) = run_child(&d, "device_lost");
+    assert!(ok, "{out}");
+    assert!(out.contains("DEVICE_LOST Some("), "{out}");
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok);
+    let fresh = out.lines().find_map(|l| l.split_once("FRESH ").map(|x| x.1)).unwrap_or_else(|| panic!("{out}"));
+    assert!(fresh.contains("\"device_lost\""), "the next start is told about it: {fresh}");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "device_lost");
+    assert!(s.graphics_failure);
+    assert!(s.message.contains("Lost: Device lost (vkQueueSubmit 17)"), "{}", s.message);
+    assert_eq!(s.renderer.as_deref(), Some("Renderer: Vulkan Test GPU (IntegratedGpu, driver Test Corp 1.2.3), MSAA 4x"));
+    assert!(v["run"]["pid"].as_u64().is_some() && v["run"]["start"].as_str().is_some(), "{v}");
+    assert!(v.get("startup_phase").is_none(), "not a startup crash: {v}");
+    let _ = run_child(&d, "device_lost");
+    let _ = run_child(&d, "none");
+    let (s, _) = only_report(&d);
+    assert_eq!(s.count, 2, "the same loss again is counted");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A graphics failure is a lost device, a death in a graphics startup step, or a native crash in
+/// a graphics driver; a crash in a command or a native one in another module is not.
+#[test]
+fn graphics_failures_are_told_apart_from_other_crashes() {
+    assert!(graphics_failure(&json!({"kind": "device_lost"})));
+    assert!(graphics_failure(&json!({"kind": "unclean_exit", "startup_phase": {"step": "device creation"}})));
+    assert!(graphics_failure(&json!({"kind": "unclean_exit", "native": {"module": "C:\\Windows\\System32\\DriverStore\\igvk64.dll"}})));
+    assert!(graphics_failure(&json!({"kind": "unclean_exit", "native": {"module": "C:\\Windows\\System32\\nvoglv64.dll"}})));
+    assert!(!graphics_failure(&json!({"kind": "unclean_exit", "startup_phase": {"step": "design"}})));
+    assert!(!graphics_failure(&json!({"kind": "unclean_exit", "native": {"module": "C:\\Program Files\\SolidCraft\\solidcraft.exe"}})));
+    assert!(!graphics_failure(&json!({"kind": "unclean_exit"})));
+    assert!(!graphics_failure(&json!({"kind": "command_panic", "startup_phase": {"step": "device creation"}})));
+}
+
+/// The renderer line reads back as the API, adapter, device type and driver, in the form the
+/// adapter step and the running app write it and in earlier releases' form.
+#[test]
+fn a_renderer_line_reads_back_as_api_adapter_and_driver() {
+    let g = graphics("Renderer: Vulkan Intel(R) UHD Graphics 620 (IntegratedGpu, driver Intel Corporation 31.0.101.2111)").unwrap();
+    assert_eq!((g.api.as_str(), g.api_id()), ("Vulkan", Some("vulkan")));
+    assert_eq!(g.adapter, "Intel(R) UHD Graphics 620");
+    assert_eq!(g.device_type.as_deref(), Some("IntegratedGpu"));
+    assert_eq!(g.driver.as_deref(), Some("Intel Corporation 31.0.101.2111"));
+    let g = graphics("Renderer: Dx12 Microsoft Basic Render Driver (Cpu, driver  ), MSAA 1x").unwrap();
+    assert_eq!(
+        (g.api_id(), g.adapter.as_str(), g.device_type.as_deref(), g.driver),
+        (Some("dx12"), "Microsoft Basic Render Driver", Some("Cpu"), None)
+    );
+    // Earlier releases: the driver's name alone, then MSAA.
+    let g = graphics("Renderer: Gl NVIDIA GeForce GT 220 (nvidia), MSAA 4x").unwrap();
+    assert_eq!((g.api_id(), g.adapter.as_str(), g.device_type, g.driver.as_deref()), (Some("gl"), "NVIDIA GeForce GT 220", None, Some("nvidia")));
+    // A driver's own brackets stay in it.
+    let g = graphics("Renderer: Vulkan llvmpipe (LLVM 19.1.7, 256 bits) (Cpu, driver llvmpipe Mesa 25.0 (LLVM 19.1.7)), MSAA 4x").unwrap();
+    assert_eq!(g.adapter, "llvmpipe (LLVM 19.1.7, 256 bits)");
+    assert_eq!((g.device_type.as_deref(), g.driver.as_deref()), (Some("Cpu"), Some("llvmpipe Mesa 25.0 (LLVM 19.1.7)")));
+    let g = graphics("Renderer: Vulkan Test GPU (driver 1.2.3)").unwrap();
+    assert_eq!((g.adapter.as_str(), g.driver.as_deref()), ("Test GPU", Some("1.2.3")));
+    assert_eq!(graphics("Renderer: CPU"), None);
+    assert_eq!(graphics("Renderer: test"), None);
+    assert_eq!(graphics(""), None);
 }
 
 #[test]

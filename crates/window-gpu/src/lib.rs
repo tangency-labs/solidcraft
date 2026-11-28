@@ -1,16 +1,19 @@
-//! SolidCraft's own window painter on a stock egui-wgpu (no eframe).
+//! SolidCraft's own window painter and runner on a stock egui-wgpu and egui-winit (no eframe).
 //!
 //! eframe paints every window through egui-wgpu's `winit::Painter`, configured from one setting and
 //! with no way to take over a frame. Two things SolidCraft needs don't fit that: a window other
 //! than the main one (a pop-out) presenting without waiting for vsync, so it can't halve the main
 //! window's frame rate (#9118), and the blur behind panels, which composes the frame itself
 //! (#8876). [`painter::Painter`] is egui-wgpu 0.37's painter with those (and two small fixes, its
-//! docs list them). A runner of our own draws with it; eframe stays the default.
+//! docs list them), and [`runner`] runs the windows on it. The app chooses this runner only when
+//! asked to; eframe stays the default.
 
 pub use egui_wgpu;
 pub use egui_wgpu::wgpu;
 
 pub mod painter;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod runner;
 
 /// The [`FrameCompositor`] the painter hands whole frames to, kept in egui's renderer's callback
 /// resources by whatever composes them (`renderer.callback_resources.insert(Compositor(..))`, and
