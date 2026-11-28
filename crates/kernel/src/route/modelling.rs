@@ -276,6 +276,13 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
 /// [`chamfer`], and where a single concave chamfer runs off the flat face it rolls on, that face
 /// carried on.
 pub fn chamfer_carrying_face(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Chamfer, &[body], |k, f| match f {
+        [fb] => k.chamfer_carrying_face(fb, edges, distance).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a chamfer takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the chamfer is empty".into())));
+    }
     match which(OpKind::Chamfer) {
         Which::Solidcore => Solidcore.chamfer_carrying_face(body, edges, distance),
     }

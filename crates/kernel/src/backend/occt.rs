@@ -327,8 +327,10 @@ impl Modelling for Occt {
         body.chamfer_nearest(&points, distance).map_err(failed)
     }
 
-    fn chamfer_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
-        unsupported("a chamfer")
+    fn chamfer_carrying_face(&self, body: &Shape, edges: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
+        // The equal chamfer: where a concave chamfer runs off the flat face it rolls on, OCCT
+        // fails, and solidcore runs it and carries that face on.
+        self.chamfer(body, edges, distance)
     }
 
     fn chamfer_sides_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _d1: f64, _side: ChamferSide, _flip: bool) -> Result<Shape, BackendError> {
@@ -979,6 +981,14 @@ mod tests {
         crate::route::fillet_removing(&cube().unwrap(), &[v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0)], 1.0, FilletTurn::Auto).unwrap();
         set_kernel(Kernel::Solidcore);
         assert!(fell_back() > before, "edges that meet run on solidcore");
+    }
+
+    #[test]
+    fn the_chamfer_feature_s_chamfers_match_solidcore() {
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        // One edge, 1 back: a prism of section 1/2 along it; two edges apart, twice that.
+        same_solid("one edge", 995.0, || crate::route::chamfer_carrying_face(&cube()?, &[v(5.0, 0.0, 10.0)], 1.0));
+        same_solid("two edges apart", 990.0, || crate::route::chamfer_carrying_face(&cube()?, &[v(5.0, 0.0, 10.0), v(5.0, 10.0, 0.0)], 1.0));
     }
 
     #[test]
