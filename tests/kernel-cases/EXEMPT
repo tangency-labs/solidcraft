@@ -127,6 +127,7 @@ drawing.fill.delete               a drawing fill: crates/engine/src/cmd/drawing_
 drawing.fill.edit                 a drawing fill: crates/engine/src/cmd/drawing_tests.rs
 drawing.fill.inspect              a drawing fill: crates/engine/src/cmd/drawing_tests.rs
 drawing.fill.profiles             drawing profile choices: crates/engine/src/cmd/drawing_tests.rs
+drawing.hole_callout              a drawing: tested in crates/engine/src/cmd/hole_callout_tests.rs
 drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
