@@ -279,7 +279,7 @@ pub(crate) fn folder_chip(
     if response.clicked() {
         set_open(app, folder.id, !folder.open);
     }
-    crate::ui_kit::Menu::context(&response, |ui| folder_menu(app, ui, folder, &history.view, rect.left_bottom()));
+    folder_menu(app, &response, folder, &history.view, rect.left_bottom());
     rect.width()
 }
 
@@ -288,41 +288,53 @@ fn counted(n: usize, thing: &str) -> String {
     if n == 1 { format!("1 {thing}") } else { format!("{n} {thing}s") }
 }
 
-fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &crate::timeline_fold::View, at: egui::Pos2) {
-    let fold = if folder.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::ui_kit::menu::button(ui, fold, "list").clicked() {
-        set_open(app, folder.id, !folder.open);
-        ui.close();
+fn folder_menu(app: &mut SolveApp, response: &egui::Response, folder: &Folder, view: &crate::timeline_fold::View, at: egui::Pos2) {
+    if !crate::ui_kit::Menu::context_active(response) {
+        return;
     }
-    if crate::ui_kit::menu::button(ui, "Rename", "rename").clicked() {
-        crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
-        ui.close();
-    }
-    crate::timeline::edit_holes_item(app, ui, folder.id);
-    if crate::ui_kit::menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
-        app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
-        let _ = app.run("timeline.ungroup", json!({ "group": folder.id }));
-        ui.close();
-    }
-    ui.separator();
-    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
-        let features = &app.session.doc.features;
-        let items: Vec<_> = view
-            .indices(folder.start, folder.end)
-            .into_iter()
-            .filter_map(|i| features.get(i))
-            .map(|f| json!({"type": "feature", "id": f.id}))
-            .collect();
-        app.tree.picked_joints.clear();
-        app.tree.picked_timeline_groups.clear();
-        let _ = app.run("select.set", json!({ "items": items }));
-        ui.close();
-    }
-    if crate::ui_kit::menu::button(ui, "Roll History Marker Here", "rollback").clicked() {
-        let end = view.index(folder.end);
-        let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
-        let _ = app.run_heavy("timeline.roll_to", position);
-        ui.close();
+    use crate::ui_kit::Item;
+    let mut items = vec![
+        Item::action("fold", if folder.open { "Fold Features" } else { "Show Each Feature" }, "list"),
+        Item::action("rename", "Rename", "rename"),
+    ];
+    items.extend(crate::timeline::edit_holes_item(app, folder.id));
+    let mut ungroup = Item::action("ungroup", "Ungroup", "feature_group");
+    ungroup.tip = Some("Keep its features and folders in the history".into());
+    items.extend([
+        ungroup,
+        Item::sep(),
+        Item::action("select", "Select Features", "select"),
+        Item::action("roll", "Roll History Marker Here", "rollback"),
+    ]);
+    if let Some(picked) = crate::ui_kit::Menu::context_items(response, &items) {
+        match picked.id.as_str() {
+            "fold" => set_open(app, folder.id, !folder.open),
+            "rename" => crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at),
+            "ungroup" => {
+                app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
+                let _ = app.run("timeline.ungroup", json!({"group":folder.id}));
+            }
+            "select" => {
+                let features = &app.session.doc.features;
+                let items: Vec<_> = view
+                    .indices(folder.start, folder.end)
+                    .into_iter()
+                    .filter_map(|i| features.get(i))
+                    .map(|f| json!({"type":"feature","id":f.id}))
+                    .collect();
+                app.tree.picked_joints.clear();
+                app.tree.picked_timeline_groups.clear();
+                let _ = app.run("select.set", json!({"items":items}));
+            }
+            "roll" => {
+                let end = view.index(folder.end);
+                let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({"position":end}) };
+                let _ = app.run_heavy("timeline.roll_to", position);
+            }
+            _ => {
+                crate::timeline::run_holes_item(app, &picked);
+            }
+        }
     }
 }
 

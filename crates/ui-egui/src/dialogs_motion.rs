@@ -546,24 +546,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 }
             });
             if let Some(c) = check {
-                let hits = c.get("collisions").and_then(Value::as_array).cloned().unwrap_or_default();
+                let hits = c.get("collisions").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
                 crate::ui_kit::section(ui, "contact_collisions", "Collisions", true, |ui| {
                     if let Some(e) = c.get("error").and_then(Value::as_str) {
                         ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error));
                     } else if hits.is_empty() {
                         ui.label(RichText::new(solidcraft_ui_text::tr_label("none")).color(t.text_dim));
                     } else {
-                        ui.vertical(|ui| {
-                            for h in hits {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} · {}  {:.3} mm",
-                                        name_of(&h["a"]),
-                                        name_of(&h["b"]),
-                                        h["depth_mm"].as_f64().unwrap_or(0.0)
-                                    ))
-                                    .color(t.error),
-                                );
+                        let columns = [
+                            crate::ui_kit::Column::new(solidcraft_ui_text::tr("ui.bodies"), 2.0).flex(),
+                            crate::ui_kit::Column::new(solidcraft_ui_text::tr("ui.depth"), 1.0).flex(),
+                        ];
+                        crate::ui_kit::report_list(ui, "contact_collisions", crate::ui_kit::table_row_height() * 8.0, &columns, "", |ui, table| {
+                            for (index, h) in hits.iter().enumerate() {
+                                table.row(ui, &index.to_string(), false, |row| {
+                                    row.cell(|ui| {
+                                        crate::ui_kit::text(ui, &format!("{} · {}", name_of(&h["a"]), name_of(&h["b"])), crate::ui_kit::Text::Cell)
+                                    });
+                                    row.cell(|ui| ui.label(RichText::new(format!("{:.3} mm", h["depth_mm"].as_f64().unwrap_or(0.0))).color(t.error)));
+                                });
                             }
                         });
                     }

@@ -64,13 +64,25 @@ def test_no_arguments_prints_the_cli_help(tmp_path):
 
 
 def test_no_binary_is_a_clear_error_not_a_traceback(tmp_path):
-    env = env_with()
-    env["PATH"] = str(tmp_path)  # nothing on PATH, no SOLIDCRAFT_CLI
-    code = "import sys, solidcraft._mcp as m; m.os.path.isfile = lambda p: False; from solidcraft._cli import main; sys.exit(main())"
-    r = subprocess.run([sys.executable, "-c", code, "--version"], capture_output=True, text=True, env=env, timeout=30, check=False)
+    env = env_with(SOLIDCRAFT_NO_DOWNLOAD="1", HOME=str(tmp_path), XDG_CACHE_HOME=str(tmp_path / "cache"))
+    env["PATH"] = str(tmp_path)  # nothing on PATH, no SOLIDCRAFT_CLI, no download
+    r = run(["--version"], env)
     assert r.returncode == 1
     assert "Traceback" not in r.stderr
-    assert "SOLIDCRAFT_CLI" in r.stderr and "install SolidCraft" in r.stderr
+    assert "SOLIDCRAFT_CLI" in r.stderr and "install SolidCraft from solidcraft.io" in r.stderr
+
+
+def test_a_path_cli_that_cannot_start_names_the_file(tmp_path):
+    # A solidcraft-cli on PATH whose interpreter is gone (as a script left behind by a removed install).
+    cli = tmp_path / "solidcraft-cli"
+    cli.write_text("#!/nonexistent/interpreter\n")
+    cli.chmod(0o755)
+    env = env_with(SOLIDCRAFT_NO_DOWNLOAD="1", HOME=str(tmp_path), XDG_CACHE_HOME=str(tmp_path / "cache"))
+    env["PATH"] = str(tmp_path)
+    r = run(["--version"], env)
+    assert r.returncode == 1, r.stderr
+    assert "Traceback" not in r.stderr
+    assert f"{cli} (found on PATH) cannot start" in r.stderr
 
 
 def test_a_missing_solidcraft_cli_path_is_a_clear_error(tmp_path):

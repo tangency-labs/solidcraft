@@ -153,7 +153,7 @@ pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &st
         let size = vec2((galley.size().x + t.space_4).max(galley.size().y), galley.size().y);
         let badge = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, rect.top()), size);
         ui.painter().rect_filled(badge, size.y / 2.0, t.accent);
-        ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+        ui.painter().galley(crate::text::centred_in(ui.painter(), &galley, badge.center()), galley, t.on_accent);
         badge
     });
     let popup = crate::Container::new(ui.ctx(), crate::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -881,10 +881,10 @@ fn publish_button(ui: &Ui, response: &Response, label: &str) {
 }
 
 /// Nested action menu in a dense table. Tokens: scope control/font tokens.
-pub fn action_menu<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
-    let response = super::Menu::button(ui, solidcraft_ui_text::tr_label(label), |ui| super::scope(ui, add));
-    solidcraft_ui_registry::publish_target(&format!("dialog:menu:{label}"), response.response.rect);
-    response
+pub fn action_menu(ui: &mut Ui, label: &str, items: &[super::Item]) -> Option<super::Item> {
+    let button = super::text_button(ui, solidcraft_ui_text::tr_label(label), true);
+    solidcraft_ui_registry::publish_target(&format!("dialog:menu:{label}"), button.rect);
+    super::Menu::button_items(&button, items)
 }
 
 /// Borderless compact table actions. Existing star glyphs keep their identities; arrows
