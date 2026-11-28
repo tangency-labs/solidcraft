@@ -779,7 +779,7 @@ pub(crate) fn is_entity_constraint_tool(cmd: &str) -> bool {
 }
 
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
-/// two curves, a line's midpoint, or alignment (horizontal/vertical) with the previous point
+/// two curves, a line or arc midpoint, a circular quadrant, or alignment with the previous point
 /// of the tool. None: nothing near, use the grid.
 pub fn refine_snap(
     app: &SolveApp,
@@ -862,20 +862,27 @@ pub fn refine_snap(
         locked = Some((q, "X", arg, vec![SnapTarget::Curve(ca.id.clone()), SnapTarget::Curve(cb.id.clone())], None));
     }
     if locked.is_none() {
-        let mut best_mid: Option<(f64, String, Vec2)> = None;
+        let mut best_snap: Option<(f64, String, Vec2, &'static str, bool)> = None;
         for (i, c) in sk.curves.iter().enumerate() {
-            if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
-                && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
-            {
-                let m = (a + b) * 0.5;
-                let d = m.dist(lp);
-                if d < mid_tol && best_mid.as_ref().is_none_or(|x| d < x.0) {
-                    best_mid = Some((d, c.id.clone(), m));
+            let Some(shape) = sk.shape(i) else { continue };
+            let (q, label, line_mid) = match shape {
+                solidcraft_engine::sketch::Shape::Line { a, b } if matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }) => {
+                    ((a + b) * 0.5, "Mid", true)
                 }
+                solidcraft_engine::sketch::Shape::Round { .. } => {
+                    let Some((q, midpoint)) = shape.nearest_round_snap(lp, mid_tol, mid_only) else { continue };
+                    (q, if midpoint { "Mid" } else { "On" }, false)
+                }
+                _ => continue,
+            };
+            let d = solidcraft_kernel::planar::distance(q.into(), lp.into());
+            if d < mid_tol && best_snap.as_ref().is_none_or(|old| d < old.0) {
+                best_snap = Some((d, c.id.clone(), q, label, line_mid));
             }
         }
-        if let Some((_, id, m)) = best_mid {
-            locked = Some((m, "Mid", Some(format!("mid:{id}")), vec![SnapTarget::Curve(id)], None));
+        if let Some((_, id, q, label, line_mid)) = best_snap {
+            let arg = if line_mid { format!("mid:{id}") } else { format!("on:{id}:{},{}", q.x, q.y) };
+            locked = Some((q, label, Some(arg), vec![SnapTarget::Curve(id)], None));
         }
     }
     // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch

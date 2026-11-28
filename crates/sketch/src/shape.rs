@@ -52,6 +52,15 @@ impl Shape {
             }
         }
     }
+    /// Find the nearest circular snap in sketch coordinates. The boolean is true
+    /// for an arc midpoint and false for a quadrant. Only points on the drawn
+    /// part of the curve are candidates.
+    pub fn nearest_round_snap(&self, p: Vec2, tol: f64, midpoint_only: bool) -> Option<(Vec2, bool)> {
+        let Shape::Round { c, r, start, sweep } = *self else { return None };
+        solidcraft_kernel::planar::nearest_round_snap(c.into(), r, [start, sweep], p.into(), tol, midpoint_only)
+            .map(|(q, midpoint)| (q.into(), midpoint))
+    }
+
     pub fn point(&self, t: f64) -> Vec2 {
         match *self {
             Shape::Line { a, b } => a.lerp(b, t),
@@ -819,6 +828,31 @@ mod intersection_snap_tests {
         on.add_line(v(0.0, 0.0), v(20.0, 20.0), None, None, None).unwrap();
         let (p, _, _) = nearest_curve_intersection(&on, v(7.0, 7.0), 2.0).expect("on the quarter");
         assert!((p.len() - 10.0).abs() < 1e-6 && p.x > 0.0 && p.y > 0.0, "{p:?}");
+    }
+
+    #[test]
+    fn round_snaps_find_quadrants_and_bounded_arc_midpoints() {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let c = v(3.0, -2.0);
+        let circle = Shape::Round { c, r: 10.0, start: 0.0, sweep: TAU };
+        for dir in [Vec2::X, Vec2::Y, -Vec2::X, -Vec2::Y] {
+            let q = c + dir * 10.0;
+            assert_eq!(circle.nearest_round_snap(q + v(0.1, 0.2), 0.5, false), Some((q, false)));
+            assert!(circle.nearest_round_snap(q, 0.5, true).is_none());
+        }
+        let arc = Shape::Round { c, r: 10.0, start: -FRAC_PI_4, sweep: PI };
+        let midpoint = c + Vec2::from_angle(FRAC_PI_4) * 10.0;
+        let (q, mid) = arc.nearest_round_snap(midpoint + v(0.1, 0.2), 0.5, true).unwrap();
+        assert!(mid && q.dist(midpoint) < 1e-9);
+        for dir in [Vec2::X, Vec2::Y] {
+            let q = c + dir * 10.0;
+            assert_eq!(arc.nearest_round_snap(q, 0.5, false), Some((q, false)));
+        }
+        assert!(arc.nearest_round_snap(c - Vec2::X * 10.0, 0.5, false).is_none());
+        assert!(arc.nearest_round_snap(c - Vec2::Y * 10.0, 0.5, false).is_none());
+        let quarter = Shape::Round { c, r: 10.0, start: 0.0, sweep: FRAC_PI_2 };
+        assert!(quarter.nearest_round_snap(c + Vec2::X * 10.0, 0.5, true).is_none());
+        assert!(quarter.nearest_round_snap(c, f64::INFINITY, false).is_none());
     }
 
     #[test]
