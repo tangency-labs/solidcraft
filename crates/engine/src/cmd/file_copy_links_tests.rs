@@ -239,8 +239,12 @@ fn a_drawing_beside_a_part_in_another_folder_is_listed_and_copied_with_it() {
 
     let out = k.folder.dir("out");
     let copy = |p: &Path, name: &str| json!({"path": p, "name": name});
-    run(&mut s, "file.copy_with_links", json!({"path": k.skid, "folder": out, "copy": [
-        copy(&k.skid, "skid.sc"), copy(&k.bolt, "bolt.sc"), copy(&bolt_drawing, "bolt drawing.sc"),
-    ]}));
+    run(
+        &mut s,
+        "file.copy_with_links",
+        json!({"path": k.skid, "folder": out, "copy": [
+            copy(&k.skid, "skid.sc"), copy(&k.bolt, "bolt.sc"), copy(&bolt_drawing, "bolt drawing.sc"),
+        ]}),
+    );
     assert_eq!(drawn(&out.join("bolt drawing.sc")), vec![text(&out.join("bolt.sc"))]);
 }

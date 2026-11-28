@@ -316,9 +316,17 @@ mod tests {
         skid(&mut h, &root);
         let out = root.join("Skid-200");
         std::fs::create_dir_all(&out).unwrap();
+        // Started from anywhere (the command search, `ui.start`), the command opens the window.
         h.app.start("file.copy_with_links");
+        h.frames(2);
+        assert!(h.app.copy_links.take().is_some(), "starting the command opens the window");
+        // File > Copy Design with Links… opens it too.
+        h.call("ui.resize", json!({"width": 1600, "height": 1300}));
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "appbar:file"}})).unwrap();
+        h.step(&json!({"widget": "Copy Design with Links…"})).unwrap();
         h.frames(3);
-        let w = h.app.copy_links.as_mut().expect("starting the command opens the window");
+        let w = h.app.copy_links.as_mut().expect("the File menu's row opens the window");
         assert_eq!(w.rows.len(), 3, "{:?}", w.rows);
         let bolt = w.rows.iter_mut().find(|r| r.name == "Bolt.sc").unwrap();
         bolt.copy = false;
