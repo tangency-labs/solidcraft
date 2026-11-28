@@ -1301,7 +1301,27 @@ impl OffsetExecutive {
 
             // cpp:217–251: the helper's scope drops any separately retained
             // executive temporary before querying the result's manifold status.
-            let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
+            // (not upstream, solidcraft#22791) a face whose loop passes through one vertex twice
+            // (a pad's corner on its face's edge) is offset from a working copy where that loop
+            // is cut into two at the vertex and the vertex comes apart into one per fan of faces
+            // (`split_pinched_loops`): the offsets of the two fans meet in two points, which one
+            // vertex cannot stand for. The difference below takes the input as it is.
+            let mut unpinched = if crate::topology::brep::vertex_fans::has_pinched_loop(original)? {
+                let mut copy = original.clone_standing_for_self_keeping_definitions()?;
+                crate::topology::brep::vertex_fans::split_pinched_loops(
+                    kernel,
+                    &mut copy,
+                    options.offset.distance,
+                )?;
+                Some(copy)
+            } else {
+                None
+            };
+            let source = match unpinched.as_mut() {
+                Some(copy) => copy,
+                None => &mut *original,
+            };
+            let mut shell = run_shell_offset(kernel, source, options, faces, notifications)?;
             // Not upstream (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid
             // whose offset leaves nothing has no cavity to take away (the difference would
             // hand the input back unhollowed). Its non-empty non-manifold case is the shell

@@ -4752,3 +4752,137 @@ fn a_ringed_countersinks_cone_moves_within_the_ring() {
     );
     b.check_solid().unwrap();
 }
+
+/// A `side` cube on `z`, turned 45 degrees about the vertical through `(cx, cy)`: a square pad
+/// whose corners point along the axes.
+#[allow(clippy::disallowed_methods)] // the turn places the test body, not ops geometry
+fn turned_pad(cx: f64, cy: f64, z: f64, side: f64) -> Body {
+    let half = side / 2.0;
+    let pad = make_box([cx - half, cy - half, z], [side, side, side]).unwrap();
+    let (s, c) = (PI / 4.0).sin_cos();
+    pad.transform(&[
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [cx - c * cx + s * cy, cy - s * cx - c * cy, 0.0, 1.0],
+    ])
+    .unwrap();
+    pad
+}
+
+fn shells_to(b: &Body, open: &[usize], t: f64, want: f64, what: &str) {
+    shell(b, &order(b), open, -t).unwrap_or_else(|e| panic!("{what}, wall {t}: {e}"));
+    let v = volume(b);
+    assert!(rel(v, want) < 1e-9, "{what}, wall {t}: {v} {want}");
+    assert!(b.is_manifold_solid().unwrap(), "{what}, wall {t}");
+    assert_eq!(
+        b.check(crate::CheckLevel::All).unwrap().failures,
+        0,
+        "{what}, wall {t}"
+    );
+}
+
+/// solidcraft#22791 (stress corpus S4981, S6660, S2241, S1020, ...): a 4.8 pad on the top of a
+/// 60 x 40 x 25 block, turned 45 degrees with its +X corner on the top's +X edge, or 0.00001
+/// or 0.00002 inside it, or 0.00001 past it. The join merges the corner into the edge, which it
+/// splits there, and the top's one loop runs along the edge to that vertex, round the pad's
+/// footprint and on along the edge: it passes through the vertex twice. One offset vertex
+/// cannot stand for it: the edge's two pieces' offsets meet at (30 - t, 0), the footprint's at
+/// the corner of the pad's inset, (30 - sqrt 2 t, 0). The offset now builds from a working copy
+/// where the loop is cut in two there and the vertex split in one per fan of faces.
+///
+/// Closed form, wall t: the block and pad, 60000 + 4.8^3, less the block's void,
+/// (60 - 2t)(40 - 2t)(25 - 2t) (25 - t high, open at the bottom), less the pad's, a
+/// (4.8 - 2t) square column 4.8 high from the block's void to t under the pad's top (its corner
+/// nearest the edge, 30 - sqrt 2 t, inside the void's side, 30 - t). A wall of 3, more than half
+/// the pad, leaves it solid (`thin_features`). The corner past the edge adds a sliver of
+/// 4.8 x 1e-10, below the bound. For the issue's script (wall 1): 9380.960.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_pads_corner_on_its_faces_edge_shells_to_its_closed_form() {
+    all_fixes();
+    let h = 2.4 * 2f64.sqrt();
+    let cases: [(f64, &[(f64, bool)]); 4] = [
+        (
+            0.0,
+            &[(1.0, false), (1.92, false), (3.0, false), (1.0, true)],
+        ),
+        (1e-5, &[(1.0, false), (1.92, false), (1.0, true)]),
+        (2e-5, &[(1.0, false), (3.0, false), (1.0, true)]),
+        (-1e-5, &[(1.0, false), (1.92, false), (1.0, true)]),
+    ];
+    for (gap, walls) in cases {
+        for &(t, open_bottom) in walls {
+            let base = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+            let pad = turned_pad(30.0 - h - gap, 0.0, 25.0, 4.8);
+            let b = crate::boolean::boolean(base, pad, crate::BooleanOp::Union)
+                .unwrap()
+                .unwrap();
+            assert!(b.outline_touch().unwrap().is_some(), "gap {gap}: no pinch");
+            let o = order(&b);
+            let open = if open_bottom {
+                vec![face(&b, &o, |bx| {
+                    bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+                })]
+            } else {
+                Vec::new()
+            };
+            let high = if open_bottom {
+                25.0 - t
+            } else {
+                25.0 - 2.0 * t
+            };
+            let inner = (4.8_f64 - 2.0 * t).max(0.0);
+            let want = 60000.0 + 4.8_f64.powi(3)
+                - (60.0 - 2.0 * t) * (40.0 - 2.0 * t) * high
+                - inner * inner * 4.8;
+            shells_to(&b, &open, t, want, &format!("pad {gap} from the edge"));
+        }
+    }
+}
+
+/// A 3 x 4 peg (stress corpus S0085) with a 0.36 pad turned 45 degrees on its top, its +X corner
+/// on the rim, or 0.00001 inside it, where the rim's circle has its one vertex (#18568's
+/// case): the top's loop runs round the rim from that vertex and round the footprint from it
+/// again. Shelled closed by 0.05: the peg pi 1.5^2 4 and the pad 0.36^3, less the void
+/// pi 1.45^2 3.9 and the pad's 0.26 square column 0.36 high (its far corner at radius
+/// 1.5 - 0.18 sqrt 2 + 0.13 sqrt 2 < 1.45).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_pads_corner_on_a_cylinders_rim_shells_to_its_closed_form() {
+    all_fixes();
+    for gap in [0.0, 1e-5] {
+        let base = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let pad = turned_pad(1.5 - 0.18 * 2f64.sqrt() - gap, 0.0, 4.0, 0.36);
+        let b = crate::boolean::boolean(base, pad, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let t = 0.05;
+        let want = PI * 2.25 * 4.0 + 0.36_f64.powi(3)
+            - PI * 1.45_f64.powi(2) * 3.9
+            - 0.26_f64.powi(2) * 0.36;
+        shells_to(&b, &[], t, want, &format!("peg pad {gap} from the rim"));
+    }
+}
+
+/// A 4.8 hole 10 deep in the 60 x 40 x 25 block's top, 0.00001 from its +X side (stress corpus
+/// S1948, S9699): the join merges the hole's circle into the top's edge, so the top's loop
+/// passes through that vertex twice. Shelled closed by 1: the block less the hole,
+/// 60000 - pi 2.4^2 10, less the void, 58 x 38 x 23 less the hole grown by 1 (r 3.4, from
+/// z = 14 to the void's top, 24) where it lies inside the void, x < 29: its disc less the
+/// segment past a chord 1.4 + 0.00001 from its centre.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_hole_by_its_faces_edge_shells_to_its_closed_form() {
+    all_fixes();
+    let gap = 1e-5;
+    let base = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+    let hole = make_cylinder([27.6 - gap, 0.0, 15.0], 2.4, 10.0).unwrap();
+    let b = crate::boolean::boolean(base, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(b.outline_touch().unwrap().is_some());
+    let cavity = 58.0 * 38.0 * 23.0 - (PI * 3.4 * 3.4 - disc_segment(3.4, 1.4 + gap)) * 10.0;
+    let want = 60000.0 - PI * 2.4 * 2.4 * 10.0 - cavity;
+    shells_to(&b, &[], 1.0, want, "hole 0.00001 from the edge");
+}

@@ -1,0 +1,96 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1",
+        "b2"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [],
+          "points": [],
+          "tolerance": 0.05
+        },
+        "thickness": -1.0
+      }
+    }
+  ],
+  "case": "22791-shell-pad-corner-on-its-faces-edge",
+  "expected": {
+    "body_count": 1,
+    "method": "block and pad 60 x 40 x 25 + 4.8^3 = 60110.592, less the block's void 58 x 38 x 23 = 50692, less the pad's void, a 2.8 square column from the block's void (z = 24) to 1 under the pad's top (z = 28.8), 2.8^2 x 4.8 = 37.632, whose corner nearest the edge, x = 30 - sqrt 2 = 28.586, lies inside the void's side, x = 29: V = 9380.960",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22791"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 9380.96
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "22791-shell-pad-corner-on-its-faces-edge.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22791"
+  ],
+  "ungraded": [],
+  "what": "a 60 x 40 x 25 block and a 4.8 cube on its top turned 45 degrees, its +X corner 0.00001 inside the top's +X edge, joined (the join merges the corner into the edge, so the top's one loop passes through that vertex twice), then shelled closed with a 1 mm wall: the issue's script; refused before as 'a corner of a pad or hole touches the edge of its face'. The case replays the join from the two operands, as the joined body's pcurves at the merged vertex could not be stored as a record that reads back",
+  "why_not": []
+}
