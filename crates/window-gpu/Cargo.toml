@@ -13,7 +13,7 @@ workspace = true
 egui = { workspace = true }
 egui-wgpu = { workspace = true, features = ["winit", "capture"] }
 # The runner's input; winit's own platform features come from it.
-egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
+egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "serde", "wayland", "x11"] }
 log = { workspace = true }
 pollster = { workspace = true }
 thiserror = { workspace = true }

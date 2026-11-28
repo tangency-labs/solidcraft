@@ -10,6 +10,7 @@
 
 pub use egui_wgpu;
 pub use egui_wgpu::wgpu;
+pub use egui_winit;
 
 pub mod painter;
 pub mod runner;

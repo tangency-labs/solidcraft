@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         renderer: egui_wgpu::RendererOptions::default(),
         transparent: false,
         event_loop_builder: None,
+        window_settings: None,
     };
     run(options, |_| Box::new(Demo { clicks: 0 }))?;
     Ok(())

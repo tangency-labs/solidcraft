@@ -5,9 +5,9 @@
 //! windows present without waiting for vsync and the blur draws through our own painter, with
 //! egui-wgpu as it ships. What eframe does around the app, it does too: the settings file
 //! (`app.ron`, written the same way), egui's memory in it, saving every `auto_save_interval` and
-//! at exit, and the control channel's logic passes (#743). Not yet: the window's size and place
-//! are not restored from the last run, and `Frame::storage_mut` is `None` during a pass (the app
-//! saves through `App::save`).
+//! at exit, the main window's size and place (`persist_window`), and the control channel's logic
+//! passes (#743). Not yet: `Frame::storage_mut` is `None` during a pass (the app saves through
+//! `App::save`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -59,12 +59,17 @@ impl eframe::Storage for Settings {
 /// egui's memory in the settings file, under eframe's key.
 const EGUI_MEMORY: &str = "egui";
 
+/// The main window's size and place in the settings file, under eframe's key.
+const WINDOW: &str = "window";
+
 /// The app on our runner.
 struct OnRunner<'a> {
     app: Box<dyn eframe::App + 'a>,
     frame: eframe::Frame,
     settings: Settings,
     ctx: egui::Context,
+    /// `NativeOptions::persist_window`.
+    persist_window: bool,
 }
 
 impl OnRunner<'_> {
@@ -95,6 +100,11 @@ impl runner::App for OnRunner<'_> {
     }
     fn repaint_on_device_event(&mut self, event: &winit::event::DeviceEvent) -> Option<bool> {
         self.app.repaint_on_device_event(event)
+    }
+    fn window_settings(&mut self, settings: solidcraft_window_gpu::egui_winit::WindowSettings) {
+        if self.persist_window {
+            eframe::set_value(&mut self.settings, WINDOW, &settings);
+        }
     }
     fn save(&mut self) {
         if self.app.persist_egui_memory() {
@@ -136,7 +146,11 @@ pub fn run(options: eframe::NativeOptions, creator: eframe::AppCreator<'_>, x11:
     #[cfg(not(all(unix, not(target_os = "macos"))))]
     let _ = x11;
     let settings = Settings::open(options.persistence_path.clone());
-    let run_options = RunOptions { viewport: options.viewport, wgpu: options.wgpu_options, renderer, transparent, event_loop_builder };
+    let persist_window = options.persist_window;
+    let window_settings =
+        if persist_window { eframe::get_value::<solidcraft_window_gpu::egui_winit::WindowSettings>(&settings, WINDOW) } else { None };
+    let run_options =
+        RunOptions { viewport: options.viewport, wgpu: options.wgpu_options, renderer, transparent, event_loop_builder, window_settings };
     let failed: std::rc::Rc<std::cell::RefCell<Option<String>>> = std::rc::Rc::default();
     let failed_in_create = failed.clone();
     let wake = wake.clone();
@@ -154,7 +168,7 @@ pub fn run(options: eframe::NativeOptions, creator: eframe::AppCreator<'_>, x11:
         let mut frame = eframe::Frame::_new_kittest();
         frame.wgpu_render_state = render_state;
         match made {
-            Ok(app) => Box::new(OnRunner { app, frame, settings, ctx }),
+            Ok(app) => Box::new(OnRunner { app, frame, settings, ctx, persist_window }),
             Err(e) => {
                 *failed_in_create.borrow_mut() = Some(e.to_string());
                 Box::new(Closing)

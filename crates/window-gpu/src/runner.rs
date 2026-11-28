@@ -60,6 +60,10 @@ pub trait App {
     /// Save what the app keeps across runs: every [`App::auto_save_interval`] and before exit.
     fn save(&mut self) {}
 
+    /// The main window's size and place, given just before each [`App::save`] for the app to keep
+    /// (and hand back as [`RunOptions::window_settings`] next run).
+    fn window_settings(&mut self, _settings: egui_winit::WindowSettings) {}
+
     /// How often [`App::save`] runs while the app runs.
     fn auto_save_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(30)
@@ -116,6 +120,9 @@ pub struct RunOptions {
     pub wgpu: WgpuConfiguration,
     pub renderer: egui_wgpu::RendererOptions,
     pub transparent: bool,
+    /// The main window's size and place from the last run, restored when it opens (clamped to
+    /// the monitors there are now), as eframe's `persist_window` does.
+    pub window_settings: Option<egui_winit::WindowSettings>,
 }
 
 /// An error running the window.
@@ -162,7 +169,14 @@ pub fn run<'a>(mut options: RunOptions, create: impl FnOnce(Created) -> Box<dyn 
     let painter = pollster::block_on(Painter::new(ctx.clone(), options.wgpu, options.transparent, options.renderer));
     let mut viewports = ViewportIdMap::default();
     viewports.insert(ViewportId::ROOT, Viewport::new(ViewportIdPair::ROOT, ViewportClass::Root, options.viewport, None));
-    let shared = Rc::new(RefCell::new(Shared { ctx: ctx.clone(), painter, viewports, by_window: HashMap::new() }));
+    let shared = Rc::new(RefCell::new(Shared {
+        ctx: ctx.clone(),
+        painter,
+        viewports,
+        by_window: HashMap::new(),
+        restore: options.window_settings,
+        normal_geometry: None,
+    }));
     egui::Context::set_immediate_viewport_renderer({
         let shared = Rc::downgrade(&shared);
         move |ctx, immediate| match shared.upgrade() {
@@ -225,6 +239,10 @@ struct Shared {
     painter: Painter,
     viewports: ViewportIdMap<Viewport>,
     by_window: HashMap<WindowId, ViewportId>,
+    /// The main window's settings to restore when it opens.
+    restore: Option<egui_winit::WindowSettings>,
+    /// The main window's last size and place while neither maximized nor fullscreen.
+    normal_geometry: Option<egui_winit::WindowGeometry>,
 }
 
 impl Shared {
@@ -234,6 +252,14 @@ impl Shared {
         pending.sort_by_key(|id| *id != ViewportId::ROOT);
         for id in pending {
             let Some(viewport) = self.viewports.get_mut(&id) else { continue };
+            let restore = if id == ViewportId::ROOT { self.restore.take() } else { None };
+            if let Some(mut settings) = restore {
+                let zoom = self.ctx.zoom_factor();
+                settings.clamp_size_to_sane_values(largest_monitor_points(zoom, event_loop));
+                settings.clamp_position_to_monitors(zoom, event_loop);
+                viewport.builder = settings.initialize_viewport_builder(zoom, viewport.builder.clone());
+                self.restore = Some(settings);
+            }
             let window = match egui_winit::create_window(&self.ctx, event_loop, &viewport.builder) {
                 Ok(window) => Arc::new(window),
                 Err(error) if id == ViewportId::ROOT => return Err(error.into()),
@@ -261,6 +287,11 @@ impl Shared {
             egui_winit::update_viewport_info(&mut viewport.info, &self.ctx, &window, true);
             let commands = std::mem::take(&mut viewport.deferred_commands);
             egui_winit::process_viewport_commands(&self.ctx, &mut viewport.info, commands, &window, &mut viewport.actions);
+            if id == ViewportId::ROOT
+                && let Some(settings) = self.restore.take()
+            {
+                settings.initialize_window(&window);
+            }
             self.by_window.insert(window.id(), id);
             viewport.window = Some(window);
             viewport.state = Some(state);
@@ -382,6 +413,16 @@ impl Shared {
     }
 }
 
+/// The largest monitor's size in points (16000 a side if there is none), as eframe clamps a
+/// restored window to.
+fn largest_monitor_points(zoom: f32, event_loop: &ActiveEventLoop) -> egui::Vec2 {
+    let largest = event_loop.available_monitors().fold(egui::Vec2::ZERO, |largest, monitor| {
+        let size = monitor.size().to_logical::<f32>(f64::from(zoom) * monitor.scale_factor());
+        largest.max(egui::vec2(size.width, size.height))
+    });
+    if largest == egui::Vec2::ZERO { egui::Vec2::splat(16000.0) } else { largest }
+}
+
 /// An immediate viewport's pass, run inside its parent's: with its window, painted there;
 /// without one yet, run once with no input and painted nothing, and its window opened when the
 /// loop next waits.
@@ -477,10 +518,30 @@ impl Runner<'_> {
 
     /// The app saves every [`App::auto_save_interval`].
     fn maybe_save(&mut self) {
-        let Some(app) = self.app.as_mut() else { return };
-        if self.saved_at.elapsed() >= app.auto_save_interval() {
-            app.save();
+        let due = self.app.as_ref().is_some_and(|app| self.saved_at.elapsed() >= app.auto_save_interval());
+        if due {
+            self.save();
             self.saved_at = Instant::now();
+        }
+    }
+
+    /// The main window's settings, then the app's save.
+    fn save(&mut self) {
+        let settings = {
+            let mut shared = self.shared.borrow_mut();
+            let zoom = shared.ctx.zoom_factor();
+            let window = shared.viewports.get(&ViewportId::ROOT).and_then(|root| root.window.clone());
+            window.map(|window| {
+                let settings = egui_winit::WindowSettings::from_window(zoom, &window, shared.normal_geometry);
+                shared.normal_geometry = Some(settings.normal_geometry());
+                settings
+            })
+        };
+        if let Some(app) = self.app.as_mut() {
+            if let Some(settings) = settings {
+                app.window_settings(settings);
+            }
+            app.save();
         }
     }
 
@@ -619,8 +680,8 @@ impl ApplicationHandler<UserEvent> for Runner<'_> {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.save();
         if let Some(app) = self.app.as_mut() {
-            app.save();
             app.on_exit();
         }
         self.shared.borrow_mut().painter.destroy();
