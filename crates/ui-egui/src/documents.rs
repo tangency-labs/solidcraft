@@ -274,6 +274,11 @@ pub struct Documents {
     navigation: ViewNavigation,
     /// Recalled framing waits for selection, across passive native-window swaps.
     restore_views: bool,
+    /// Where the designs' views are remembered for "Reopen a design's views next time it opens".
+    pub(crate) view_memory: crate::view_memory::Store,
+    /// A remembered Model camera was shown ([`apply_recalled_view`]): a program's command that
+    /// opened the design leaves it as it is (`control::execute`).
+    pub(crate) camera_recalled: bool,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
@@ -1137,6 +1142,15 @@ fn apply_recalled_view(app: &mut SolveApp, view: &DesignView) {
     apply_view(app, view);
     (app.ui.perspective, app.ui.up_axis) = projection;
     show_look(app, view);
+    // The remembered camera is shown as it was left. The framing the open asked for, the app's
+    // first one in a new session, and the one the open makes once its parts are meshed would each
+    // keep its direction but change its zoom and centre (#23271).
+    if view.kind == ViewKind::Model && view.spec.is_some() {
+        app.pending_fit = None;
+        app.fitted = true;
+        crate::open_meshing::keep_camera(app);
+        app.docs.camera_recalled = true;
+    }
 }
 
 /// Run `draw` with the Model view `id` standing in for the shown one: its camera and analyses are
@@ -1231,14 +1245,14 @@ fn can_restore(session: &Session, kind: ViewKind, subject: Option<&str>) -> bool
     }
 }
 
-/// Remember the views of design tab `i` in `dir`, when it is saved to a file and Preferences ask
-/// for views to come back ([`restore_views_in`]).
-fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
+/// The views of design tab `i` to remember, by its file, when it is saved to a file and
+/// Preferences ask for views to come back ([`restore_views_from`]).
+fn views_to_remember(app: &SolveApp, i: usize) -> Option<(String, Value)> {
     if !app.preferences.design_reopen_views {
-        return;
+        return None;
     }
     let session = if i == app.docs.active { Some(&app.session) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| &slot.session) };
-    let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return };
+    let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return None };
     // Every design keeps its live camera, including one parked in a background slot.
     let mut views = views.clone();
     let camera = if i == app.docs.active { Some(app.cam) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| slot.cam) };
@@ -1253,29 +1267,77 @@ fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
     for window in windows {
         views.close_window(window);
     }
-    let remembered = crate::view_memory::remember_async(dir.to_owned(), path.to_owned(), views.to_json());
-    if let Err(e) = remembered {
+    Some((path.to_owned(), views.to_json()))
+}
+
+/// Remember the views of design tab `i` where the app keeps them ([`Documents::view_memory`]).
+pub(crate) fn remember_views(app: &mut SolveApp, i: usize) {
+    let Some((path, views)) = views_to_remember(app, i) else { return };
+    if let Err(e) = app.docs.view_memory.remember(&path, views) {
         log::warn!("could not remember the views of {path}: {e}");
     }
 }
 
-/// [`remember_views_in`] in the user's data folder.
-pub(crate) fn remember_views(app: &SolveApp, i: usize) {
-    if let Some(dir) = solidcraft_engine::recovery::data_dir() {
-        remember_views_in(app, i, &dir);
+/// Remember the views of every open design: the browser page is going away without quitting
+/// the app (closed, reloaded or left), so this is the last chance (#23271).
+pub fn remember_all_views(app: &mut SolveApp) {
+    for i in 0..app.docs.count() {
+        remember_views(app, i);
     }
 }
 
-/// Give the design just opened from `path` the views it was closed with, from `dir`: those that
-/// can still be shown ([`can_restore`]). The design shown also shows its active one.
+/// The browser's shell keeps the remembered views in the browser's storage: `saved` is what it
+/// kept last time (none: nothing yet). From now on the views are remembered in memory, and
+/// [`view_memory_to_save`] gives them back to keep.
+pub fn use_host_view_memory(app: &mut SolveApp, saved: Option<&str>) {
+    app.docs.view_memory = crate::view_memory::Store::Host(crate::view_memory::Host::load(saved));
+}
+
+/// The remembered views to keep in the host's storage: `saved_now` (what the storage holds now,
+/// which another page of the app may have changed) with this page's changes on top. The host then
+/// says whether its storage took them ([`view_memory_saved`]).
+pub fn view_memory_to_save(app: &mut SolveApp, saved_now: Option<&str>) -> Option<String> {
+    match &mut app.docs.view_memory {
+        crate::view_memory::Store::Host(host) => host.pending_text(saved_now),
+        _ => None,
+    }
+}
+
+/// Whether the host's storage took what [`view_memory_to_save`] gave; if not, the changes stay
+/// and are tried again with the next one.
+pub fn view_memory_saved(app: &mut SolveApp, taken: bool) {
+    if let crate::view_memory::Store::Host(host) = &mut app.docs.view_memory {
+        host.saved(taken);
+    }
+}
+
+/// Whether there are remembered views for the host to save now ([`view_memory_to_save`]).
+pub fn view_memory_changed(app: &SolveApp) -> bool {
+    matches!(&app.docs.view_memory, crate::view_memory::Store::Host(host) if host.changed())
+}
+
+/// Remember the views of design tab `i` in the folder `dir`.
+#[cfg(test)]
+fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
+    if let Some((path, views)) = views_to_remember(app, i) {
+        crate::view_memory::remember_async(dir.to_owned(), path, views).unwrap();
+    }
+}
+
+/// [`restore_views_from`] with what is remembered in `dir`.
+#[cfg(test)]
 fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
+    restore_views_from(app, path, crate::view_memory::recall(dir, path));
+}
+
+/// Give the design just opened from `path` the views it was closed with (`saved`): those that
+/// can still be shown ([`can_restore`]). The design shown also shows its active one.
+fn restore_views_from(app: &mut SolveApp, path: &str, saved: Option<Value>) {
     if !app.preferences.design_reopen_views {
         return;
     }
     let Some(session) = session_at(app, path) else { return };
-    let Some(mut set) = crate::view_memory::recall(dir, path)
-        .and_then(|saved| crate::view_memory::restorable(&saved, |kind, subject| can_restore(session, kind, subject)))
-    else {
+    let Some(mut set) = saved.and_then(|saved| crate::view_memory::restorable(&saved, |kind, subject| can_restore(session, kind, subject))) else {
         return;
     };
     let windows: Vec<_> = set.windows().iter().map(|window| window.id).collect();
@@ -1325,8 +1387,9 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
 /// remembered views back, and the shown one takes the view the command line asked to start on
 /// (`--view`, once).
 pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
-    if let Some(dir) = solidcraft_engine::recovery::data_dir() {
-        restore_views_in(app, path, &dir);
+    if app.preferences.design_reopen_views {
+        let saved = app.docs.view_memory.recall(path);
+        restore_views_from(app, path, saved);
     }
     if app.session.path.as_deref().is_some_and(|p| same_path(p, path))
         && let Some(kind) = crate::new_window::take_start_view().and_then(|key| ViewKind::from_key(&key))
@@ -2387,7 +2450,9 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.cam = Camera::default();
         app.fit_view();
         put_view(app, DocView::default());
-        app.docs = Documents::default();
+        // The remembered views stay where they are kept, the closed design's just added.
+        let view_memory = std::mem::take(&mut app.docs.view_memory);
+        app.docs = Documents { view_memory, ..Documents::default() };
         app.edit_in_place = Default::default();
         app.home.open = app.preferences.show_home_on_startup;
         crate::plugin_events::observe(app);
@@ -6402,6 +6467,69 @@ mod tests {
         let saved = crate::view_memory::recall(&dir, &path).unwrap();
         let views = ViewSet::from_json(&saved).unwrap();
         assert_eq!(views.active().spec.unwrap().camera.yaw, 1.7);
+    }
+
+    /// #23271: with "Reopen a design's views next time it opens" on, a design closed and opened
+    /// again from its file shows exactly the camera it was closed with: the direction, the zoom
+    /// and the centre, also in a new session, where the app frames its first view as the design
+    /// comes in. On the desktop the views are kept in a folder; in the browser the page
+    /// keeps them in memory for the browser's storage, and closing the last design must not
+    /// lose them.
+    #[test]
+    fn a_design_opened_again_shows_the_camera_it_was_closed_with() {
+        // How the design opens: the window's own open (the desktop, and the browser's files window
+        // for a design), `doc.open` run as a command (the browser's programs), or read here and now
+        // (`open_path_with`: the browser's files that aren't designs).
+        for (browser, open) in [(false, "window"), (true, "window"), (true, "command"), (true, "here")] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.design_reopen_views = true;
+            if browser {
+                use_host_view_memory(&mut h.app, None);
+            } else {
+                h.app.docs.view_memory = crate::view_memory::Store::Folder(h.dir.join("view-memory"));
+            }
+            h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            let path = h.dir.join("closed.sc").to_string_lossy().into_owned();
+            h.app.run("file.save_as", json!({"path": path})).unwrap();
+            h.settle();
+            let camera = Camera { yaw: 2.3, pitch: 0.25, distance: 150.0, target: solidcore_record::Vec3::new(5.0, -3.0, 8.0), ..h.app.cam };
+            h.app.cam = camera;
+            h.frames(2);
+            close(&mut h.app, 0, false);
+            crate::view_memory::wait_for_pending().unwrap();
+            h.settle();
+            assert_ne!(h.app.session.path.as_deref(), Some(path.as_str()), "closed");
+            assert_eq!(view_memory_changed(&h.app), browser, "the browser's page has views to keep");
+            // As in a new session: the app frames its first view in the frame the design lands in.
+            match open {
+                "command" => {
+                    h.app.fitted = false;
+                    crate::control::execute(&mut h.app, "doc.open", json!({"path": path})).unwrap();
+                }
+                "here" => {
+                    h.app.fitted = false;
+                    h.app.open_path_with(&path, &Default::default()).unwrap();
+                }
+                _ => h.app.open_path_async(&path),
+            }
+            for _ in 0..2000 {
+                if h.app.session.path.as_deref() == Some(path.as_str()) {
+                    break;
+                }
+                h.app.fitted = false;
+                h.frame();
+            }
+            h.settle();
+            h.frames(3);
+            assert_eq!(h.app.session.path.as_deref(), Some(path.as_str()), "opened again");
+            let shown = h.app.cam;
+            assert_eq!(
+                (shown.yaw, shown.pitch, shown.distance, shown.target),
+                (camera.yaw, camera.pitch, camera.distance, camera.target),
+                "browser: {browser}, open: {open}"
+            );
+        }
     }
 
     #[test]

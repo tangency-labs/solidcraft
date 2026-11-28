@@ -666,11 +666,14 @@ pub fn paint_assembly_section(
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through tracks - drawn using clipped painter p so it slides under the splitter bar when scrolled
-        p.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, purple_accent));
+        p.line_segment(
+            [pos2(line_x, line_top), pos2(line_x, line_bottom - super::canvas::MARKER_FOOT_OVERLAP)],
+            Stroke::new(line_width, purple_accent),
+        );
 
-        // Bottom handle cap on vertical line
-        let bottom_cap_rect = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
-        p.rect_filled(bottom_cap_rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, purple_accent);
+        // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
+        let rows_bottom = content_tracks_top + component_ids.len() as f32 * ROW_HEIGHT;
+        p.add(super::canvas::marker_foot(line_x, line_bottom, purple_accent, rows_bottom > section_rect.bottom() + 0.5));
 
         // Square pin handle in Tier 1 contacting vertical line
         let pin_size = if marker_hovered || marker_dragged { vec2(15.0, 15.0) } else { vec2(14.0, 14.0) };

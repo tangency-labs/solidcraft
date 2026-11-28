@@ -157,3 +157,20 @@ fn a_piece_shorter_than_the_dxf_grid_is_not_written_and_does_not_refuse_the_shee
         .collect();
     assert_eq!(vertices, [("10", "100.0"), ("20", "200.0"), ("10", "150.0"), ("20", "200.0"), ("10", "150.0"), ("20", "250.0")]);
 }
+
+/// The sheet's border is drawn in fixed ISO 5457 widths, so its 0.7 mm outline is on VISIBLE and its
+/// 0.35 mm grid and title-block cell lines on THIN in every line group, not read against the group's
+/// wide line (0.35 mm read as wide at groups 0.25 and 0.35, 0.7 mm as thin from group 1).
+#[test]
+fn border_and_title_block_lines_keep_their_layer_in_every_line_group() {
+    for wide in [0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0] {
+        for kind in [ObjectKind::DrawingBorder, ObjectKind::TitleBlock] {
+            let items = vec![stroke(10.0, 0.7, None), stroke(20.0, 0.35, None)];
+            let scene = Scene::new(p(297.0, 210.0), vec![Group { object: 1, kind, items }]);
+            let (text, _) = paper_dxf(&scene.prepare().unwrap(), &|_| wide).unwrap();
+            let (entities, _) = read(&text);
+            let on: Vec<&str> = entities.iter().map(|(_, l, _)| l.as_str()).collect();
+            assert_eq!(on, ["VISIBLE", "THIN"], "{kind:?} in line group {wide}: {entities:?}");
+        }
+    }
+}

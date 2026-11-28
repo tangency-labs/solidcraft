@@ -1224,6 +1224,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         )
         .map(|program| (program, graphics_restart_args(std::env::args().skip(1)))),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
+        browser_safari: false,
         window_system: window_system_now(),
         // Linux: the desktop's dark or light setting, which the window is not told on every
         // desktop (#7944). Windows and macOS: the window's own theme.
@@ -2338,8 +2339,8 @@ fn main() -> eframe::Result {
                     let app = &mut a.solve;
                     // Autosave, and offer what crashed sessions left behind.
                     if let Some(dir) = recovery_dir.as_ref() {
-                        let every = if app.autosave_minutes > 0.0 { app.autosave_minutes * 60.0 } else { f64::MAX / 4.0 };
-                        solidcraft_ui_egui::recovery_ui::start(app, dir, std::time::Duration::from_secs_f64(every.min(1e9)));
+                        solidcraft_ui_egui::recovery_ui::start(app, dir, std::time::Duration::MAX);
+                        solidcraft_ui_egui::prefs::set_autosave(app);
                         // Safe mode keeps autosaving but offers nothing: the entries wait for a normal start.
                         if safe_mode {
                             app.recoverable.clear();

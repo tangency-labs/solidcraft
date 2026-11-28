@@ -1,0 +1,74 @@
+{
+  "en": {
+    "plugin_install.comparison_added": "Added: {permission}",
+    "plugin_install.comparison_fuel": "Extra fuel allowance: {value}",
+    "plugin_install.comparison_heading": "Changes to previously approved permissions",
+    "plugin_install.comparison_memory": "Extra memory allowance: {value} MiB",
+    "plugin_install.comparison_removed": "Removed: {permission}",
+    "plugin_install.comparison_unavailable": "Previous approval details are unavailable. Review all requests below.",
+    "plugin_install.comparison_unchanged": "No changes to the recorded approval. Review all requests below."
+  },
+  "ar": {
+    "plugin_install.comparison_added": "مُضاف: {permission}",
+    "plugin_install.comparison_fuel": "سماح إضافي بالوقود: {value}",
+    "plugin_install.comparison_heading": "التغييرات على الأذونات الموافق عليها سابقًا",
+    "plugin_install.comparison_memory": "سماح إضافي بالذاكرة: {value} MiB",
+    "plugin_install.comparison_removed": "مُزال: {permission}",
+    "plugin_install.comparison_unavailable": "تفاصيل الموافقة السابقة غير متاحة. راجع جميع الطلبات أدناه.",
+    "plugin_install.comparison_unchanged": "لا تغييرات على الموافقة المسجلة. راجع جميع الطلبات أدناه."
+  },
+  "de": {
+    "plugin_install.comparison_added": "Hinzugefügt: {permission}",
+    "plugin_install.comparison_fuel": "Zusätzliches Fuel-Limit: {value}",
+    "plugin_install.comparison_heading": "Änderungen an zuvor genehmigten Berechtigungen",
+    "plugin_install.comparison_memory": "Zusätzliches Speicherlimit: {value} MiB",
+    "plugin_install.comparison_removed": "Entfernt: {permission}",
+    "plugin_install.comparison_unavailable": "Die Details der bisherigen Genehmigung sind nicht verfügbar. Prüfen Sie alle folgenden Anfragen.",
+    "plugin_install.comparison_unchanged": "Keine Änderungen an der gespeicherten Genehmigung. Prüfen Sie alle folgenden Anfragen."
+  },
+  "he": {
+    "plugin_install.comparison_added": "נוסף: {permission}",
+    "plugin_install.comparison_fuel": "מכסת דלק נוספת: {value}",
+    "plugin_install.comparison_heading": "שינויים בהרשאות שאושרו בעבר",
+    "plugin_install.comparison_memory": "מכסת זיכרון נוספת: {value} MiB",
+    "plugin_install.comparison_removed": "הוסר: {permission}",
+    "plugin_install.comparison_unavailable": "פרטי האישור הקודם אינם זמינים. יש לבדוק את כל הבקשות שלהלן.",
+    "plugin_install.comparison_unchanged": "אין שינויים באישור המתועד. יש לבדוק את כל הבקשות שלהלן."
+  },
+  "ja": {
+    "plugin_install.comparison_added": "追加: {permission}",
+    "plugin_install.comparison_fuel": "追加燃料上限: {value}",
+    "plugin_install.comparison_heading": "以前に承認した権限の変更",
+    "plugin_install.comparison_memory": "追加メモリ上限: {value} MiB",
+    "plugin_install.comparison_removed": "削除: {permission}",
+    "plugin_install.comparison_unavailable": "以前の承認の詳細を取得できません。以下のすべての要求を確認してください。",
+    "plugin_install.comparison_unchanged": "記録済みの承認に変更はありません。以下のすべての要求を確認してください。"
+  },
+  "ko": {
+    "plugin_install.comparison_added": "추가됨: {permission}",
+    "plugin_install.comparison_fuel": "추가 연료 허용량: {value}",
+    "plugin_install.comparison_heading": "이전에 승인된 권한의 변경 사항",
+    "plugin_install.comparison_memory": "추가 메모리 허용량: {value} MiB",
+    "plugin_install.comparison_removed": "제거됨: {permission}",
+    "plugin_install.comparison_unavailable": "이전 승인 세부 정보를 사용할 수 없습니다. 아래 모든 요청을 검토하세요.",
+    "plugin_install.comparison_unchanged": "기록된 승인에 변경 사항이 없습니다. 아래 모든 요청을 검토하세요."
+  },
+  "vi": {
+    "plugin_install.comparison_added": "Đã thêm: {permission}",
+    "plugin_install.comparison_fuel": "Hạn mức nhiên liệu bổ sung: {value}",
+    "plugin_install.comparison_heading": "Thay đổi đối với các quyền đã được phê duyệt trước đây",
+    "plugin_install.comparison_memory": "Hạn mức bộ nhớ bổ sung: {value} MiB",
+    "plugin_install.comparison_removed": "Đã bỏ: {permission}",
+    "plugin_install.comparison_unavailable": "Không có thông tin chi tiết về phê duyệt trước đó. Hãy xem xét tất cả yêu cầu bên dưới.",
+    "plugin_install.comparison_unchanged": "Không có thay đổi đối với phê duyệt đã ghi nhận. Hãy xem xét tất cả yêu cầu bên dưới."
+  },
+  "zh": {
+    "plugin_install.comparison_added": "已添加：{permission}",
+    "plugin_install.comparison_fuel": "额外燃料额度：{value}",
+    "plugin_install.comparison_heading": "先前批准的权限变更",
+    "plugin_install.comparison_memory": "额外内存额度：{value} MiB",
+    "plugin_install.comparison_removed": "已移除：{permission}",
+    "plugin_install.comparison_unavailable": "先前的批准详情不可用。请审核下方所有请求。",
+    "plugin_install.comparison_unchanged": "已记录的批准没有变更。请审核下方所有请求。"
+  }
+}

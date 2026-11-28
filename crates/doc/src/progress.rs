@@ -26,6 +26,8 @@ pub struct Progress {
     /// The item a command works through one at a time (the linked design Update Links reads
     /// again): its name, its place and how many there are ([`item`]).
     item: std::sync::Mutex<Option<(String, usize, usize)>>,
+    /// Importer name and whether it is preparing its component rather than converting.
+    importer: std::sync::Mutex<Option<(String, bool)>>,
     /// A window wants the model as far as it is built, to show while the rest is ([`Progress::want_partial`]).
     partial_wanted: AtomicBool,
     /// The latest such model and when it was offered.
@@ -56,6 +58,7 @@ impl Default for Progress {
             work_done: AtomicUsize::new(0),
             work_total: AtomicUsize::new(0),
             item: std::sync::Mutex::new(None),
+            importer: std::sync::Mutex::new(None),
             partial_wanted: AtomicBool::new(false),
             partial: std::sync::Mutex::new((None, None)),
             stop: solidcraft_kernel::Stop::new(),
@@ -98,6 +101,11 @@ impl Progress {
         let stage = self.work_stage.lock().map(|s| *s).unwrap_or("");
         (total > 0 && !stage.is_empty()).then(|| (stage, self.work_done.load(Ordering::Relaxed).min(total), total))
     }
+    /// A running importer's name and preparation flag, if it is in the importer worker.
+    pub fn importer(&self) -> Option<(String, bool)> {
+        self.importer.lock().ok().and_then(|stage| stage.clone())
+    }
+
     /// The item being worked on, as [`item`] reported it: (name, index from 0, count).
     pub fn item(&self) -> Option<(String, usize, usize)> {
         self.item.lock().ok().and_then(|i| i.clone())
@@ -115,6 +123,15 @@ pub fn item(current: Option<(&str, usize, usize)>) {
             *i = current.map(|(name, index, count)| (name.to_string(), index.min(count), count));
         }
     });
+}
+
+/// Report the importer worker's stage without disturbing linked-design or kernel progress.
+pub fn importer_stage(stage: Option<(&str, bool)>) {
+    if let Some(progress) = current()
+        && let Ok(mut slot) = progress.importer.lock()
+    {
+        *slot = stage.map(|(name, preparing)| (name.to_owned(), preparing));
+    }
 }
 
 /// The kernel's long work (STEP import) reports to the same progress and stops on Cancel.
@@ -436,4 +453,24 @@ mod tests {
         offer(&p);
         assert!(p.take_partial().is_none(), "not again within the interval");
     }
+}
+
+#[test]
+fn importer_stages_belong_to_the_watched_operation() {
+    let progress = Arc::new(Progress::default());
+    let unrelated = Progress::default();
+    watch(progress.clone(), || {
+        item(Some(("linked design", 0, 2)));
+        std::thread::scope(|scope| {
+            let p = progress.clone();
+            scope.spawn(move || watch(p, || importer_stage(Some(("Converter", true))))).join().unwrap();
+        });
+        assert_eq!(progress.importer(), Some(("Converter".into(), true)));
+        importer_stage(Some(("Converter", false)));
+        assert_eq!(progress.importer(), Some(("Converter".into(), false)));
+        assert_eq!(progress.item(), Some(("linked design".into(), 0, 2)));
+        assert_eq!(unrelated.importer(), None);
+        importer_stage(None);
+        assert_eq!(progress.importer(), None);
+    });
 }

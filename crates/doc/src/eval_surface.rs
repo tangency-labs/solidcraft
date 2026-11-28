@@ -152,15 +152,21 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, angle, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
                 crate::ExtendMode::Natural => kernel::ExtendMode::Natural,
                 crate::ExtendMode::Tangent => kernel::ExtendMode::Tangent,
                 crate::ExtendMode::Curvature => kernel::ExtendMode::Curvature,
+                crate::ExtendMode::Law => kernel::ExtendMode::Law,
             };
-            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours };
+            // Law only (0: tangent to the surface); the other modes keep no angle.
+            let angle = match angle {
+                Some(a) => val(vals, a, Kind::Angle)?,
+                None => 0.0,
+            };
+            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours, angle };
             let out = match up_to {
                 None => {
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Distance(val(vals, distance, Kind::Length)?)))?

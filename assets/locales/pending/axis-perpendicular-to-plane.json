@@ -1,0 +1,30 @@
+{
+  "en": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "AXIS PERPENDICULAR TO FACE OR PLANE",
+    "Face or plane": "Face or plane"
+  },
+  "ar": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "محور عمودي على وجه أو مستوى",
+    "Face or plane": "وجه أو مستوى"
+  },
+  "de": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "ACHSE SENKRECHT ZU FLÄCHE ODER EBENE",
+    "Face or plane": "Fläche oder Ebene"
+  },
+  "he": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "ציר ניצב לפאה או למישור",
+    "Face or plane": "פאה או מישור"
+  },
+  "ja": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "面または平面に垂直な軸",
+    "Face or plane": "面または平面"
+  },
+  "vi": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "TRỤC VUÔNG GÓC VỚI BỀ MẶT HOẶC MẶT PHẲNG",
+    "Face or plane": "Bề mặt hoặc mặt phẳng"
+  },
+  "zh": {
+    "AXIS PERPENDICULAR TO FACE OR PLANE": "垂直于面或平面的轴",
+    "Face or plane": "面或平面"
+  }
+}

@@ -246,6 +246,56 @@ fn manifest() -> Value {
         "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
         "limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000}}})
 }
+
+fn workspace_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    value["runtime"]["entries"] =
+        json!([{"name":"make", "effect":"read", "input_schema":{"type":"object","properties":{"workspace":{"type":"string"}}}}]);
+    value["runtime"]["ui"] = json!({"ui_version":1,"panels":[],"workspaces":[{
+        "id":"manufacture","name":"Manufacture","icon":"wrench","applies_to":["part"],
+        "ribbon":[],"panels":[],"builtin_panels":["browser"],"on_enter":"make","on_exit":"make"
+    }]});
+    value
+}
+
+#[test]
+fn workspace_hook_budgets_are_capped_without_raising_smaller_limits() {
+    let limits = workspace_hook_limits(&Limits::default(), HostLimits::default());
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms), (1_000_000, 32, 1000));
+    let requested = Limits { fuel: 100, memory_mib: 1, deadline_ms: 5, stack_kib: Some(64), ..Limits::default() };
+    let limits = workspace_hook_limits(&requested, HostLimits::default());
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (100, 1, 5, Some(64)));
+    let limits = workspace_hook_limits(
+        &Limits { stack_kib: Some(1024), ..Limits::default() },
+        HostLimits { max_fuel: 500, max_memory_mib: 2, ..HostLimits::default() },
+    );
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (500, 2, 1000, Some(256)));
+}
+
+#[test]
+fn workspace_hooks_require_enabled_plugins_and_the_ui_capability() {
+    let mut session = Session::default();
+    let package = |value: Value| Package {
+        manifest: parse_manifest(&serde_json::to_vec(&value).unwrap(), "sample").unwrap(),
+        approval: "approved".into(),
+        component: vec![],
+    };
+    let before = session.doc.clone();
+    let state = session.plugin_state.clone();
+    assert!(run_workspace_hook(&mut session, package(manifest()), "manufacture", true).unwrap_err().to_string().contains("ui@0.1"));
+    session.disabled_plugins.insert("sample".into());
+    assert!(run_workspace_hook(&mut session, package(workspace_manifest()), "manufacture", false).unwrap_err().to_string().contains("disabled"));
+    session.disabled_plugins.clear();
+    assert!(run_workspace_hook(&mut session, package(workspace_manifest()), "missing", true).unwrap_err().to_string().contains("unknown workspace"));
+    let mut value = workspace_manifest();
+    value["runtime"]["ui"]["workspaces"][0]["on_enter"] = Value::Null;
+    assert_eq!(run_workspace_hook(&mut session, package(value), "manufacture", true).unwrap().0.result, json!({}));
+    assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+    assert_eq!(session.plugin_state, state);
+    assert!(session.undo.is_empty() && session.redo.is_empty());
+}
+
 #[test]
 fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
     assert!(parse_manifest(br#"{"id":"sample","name":"Sample","version":"1"}"#, "sample").unwrap().runtime.is_none());
@@ -634,6 +684,10 @@ fn file_scopes_require_separate_read_and_write_approvals() {
 
     for command in [
         "component.insert_design",
+        "component.links",
+        "component.relink",
+        "component.replace_with_link",
+        "component.update_links",
         "file.insert_step",
         "file.insert_mesh",
         "file.insert_gerber",
@@ -743,6 +797,70 @@ fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
         }
     }
     assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A plugin keeps the designs it links current, as it inserts them: List Links, Update Links,
+/// Relink Source and Replace with Link read designs in its folders, named by `grant:`, under a
+/// read-only grant. A design outside them is refused, and so is a plugin without `file`.
+#[test]
+fn link_commands_read_designs_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-link-grants-{}", std::process::id()));
+    let lib = root.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let save_box = |path: &Path, height: u32| {
+        let mut design = Session::default();
+        design.execute("solid.box", &json!({"length":10,"width":10,"height":height})).unwrap();
+        design.execute("file.save_as", &json!({"path":path})).unwrap();
+    };
+    save_box(&lib.join("part.sc"), 10);
+    save_box(&lib.join("other.sc"), 15);
+    save_box(&lib.join("plate.sc"), 5);
+    save_box(&root.join("outside.sc"), 30);
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![lib.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+        input_folders: Vec::new(),
+        messages: Vec::new(),
+        user_data: None,
+    };
+    host.session.plugin_state.file_grants = vec![FileGrant { name: "lib".into(), folder: lib.clone(), read: true, write: false }];
+    host.begin_transaction().unwrap();
+    host.run_command("component.insert_design", &json!({"path":"grant:lib/part.sc","name":"Part"})).unwrap();
+    save_box(&lib.join("part.sc"), 20);
+
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!((&links["links"][0]["found"], &links["links"][0]["changed"]), (&json!(true), &json!(true)), "{links}");
+    let updated = host.run_command("component.update_links", &json!({})).unwrap();
+    assert_eq!(updated["updated"], json!(["Part"]), "{updated}");
+    let relinked = host.run_command("component.relink", &json!({"component":"Part","path":"grant:lib/other.sc"})).unwrap();
+    assert_eq!(relinked["path"], json!(lib.join("other.sc").to_string_lossy()), "{relinked}");
+
+    let outside = host.run_command("component.relink", &json!({"component":"Part","path":root.join("outside.sc")}));
+    assert!(matches!(&outside, Err(HostError::CommandFailed { .. })), "a design outside the folders is refused: {outside:?}");
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!(links["links"][0]["file"], json!(lib.join("other.sc").to_string_lossy()), "the refused relink changed nothing: {links}");
+
+    host.run_command("component.activate", &json!({"component":0})).unwrap();
+    host.run_command("component.create", &json!({"name":"Plate"})).unwrap();
+    host.run_command("solid.box", &json!({"length":10,"width":10,"height":5})).unwrap();
+    let replaced = host.run_command("component.replace_with_link", &json!({"component":"Plate","path":"grant:lib/plate.sc"}));
+    assert!(replaced.is_ok(), "a copy is replaced by a link to a granted design: {replaced:?}");
+
+    host.groups.clear();
+    for id in ["component.links", "component.update_links", "component.relink", "component.replace_with_link"] {
+        let refused = host.run_command(id, &json!({"component":"Part","path":"grant:lib/part.sc"}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.contains("`file` permission")), "{id}: {refused:?}");
+    }
     host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1227,6 +1345,8 @@ mod native {
     (data (i32.const 64) "project")
     (data (i32.const 96) "{path}")
     (data (i32.const 128) "changed")
+    (data (i32.const 0) "\00\00\00\00\10\00\00\00\02\00\00\00")
+    (data (i32.const 16) "{{}}")
     (func (export "execute") (param i32 i32 i32 i32) (result i32)
       i32.const 64 i32.const 7 i32.const 96 i32.const {path_len} {arguments} i32.const 0 call $file
       i32.const 0)
@@ -1535,6 +1655,206 @@ mod native {
             }
         }
     }
+    fn sync_panels_for_test(session: &mut Session, fixture: &Fixture) {
+        panels::register_package(session, &read_package(&fixture.path()).unwrap()).unwrap();
+    }
+    /// The ui fixture's describe reply with one workspace (`manufacture`: part, builtin browser, hooks `make`):
+    /// the header at 3000 points at the record at 5000, whose strings and lists follow it.
+    const WORKSPACE_DESCRIPTION: &str = concat!(
+        r#"(data (i32.const 3000) "\01\00\00\00\1c\0c\00\00\01\00\00\00\88\13\00\00\01\00\00\00")"#,
+        r#"(data (i32.const 5000) "\ec\13\00\00\0b\00\00\00\f8\13\00\00\0b\00\00\00\04\14\00\00\06\00\00\00\14\14\00\00\01\00\00\00"#,
+        r#"\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\28\14\00\00\01\00\00\00"#,
+        r#"\01\00\00\00\32\14\00\00\04\00\00\00\01\00\00\00\32\14\00\00\04\00\00\00")"#,
+        r#"(data (i32.const 5100) "manufacture")(data (i32.const 5112) "Manufacture")(data (i32.const 5124) "wrench")(data (i32.const 5140) "\00")"#,
+        r#"(data (i32.const 5144) "browser")(data (i32.const 5160) "\18\14\00\00\07\00\00\00")(data (i32.const 5170) "make")"#,
+    );
+    /// A ui@0.1 plugin whose `make` entry is read-only and runs `command` once, then posts to its panel.
+    fn workspace_fixture(command: &str, args: &str) -> Fixture {
+        workspace_fixture_running(command, args, "call $box")
+    }
+    /// The same plugin, whose entry runs `code` in place of its one command call.
+    fn workspace_fixture_running(command: &str, args: &str, code: &str) -> Fixture {
+        let fixture = Fixture::new("call $box");
+        let mut manifest = workspace_manifest();
+        manifest["runtime"]["commands"] = json!([command]);
+        // Ordinary commands may have generous limits; hooks always narrow them without
+        // invalidating approvals for the exact manifest and component on disk.
+        manifest["runtime"]["limits"] = json!({"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":5000});
+        manifest["runtime"]["ui"]["panels"] = json!([{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+        }}}]}}]);
+        let (package, version) = API.split_once('@').unwrap();
+        let source = include_str!("../../../craft-plugin-wasm/src/ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", command)
+            .replace("__COMMAND_LEN__", &command.len().to_string())
+            .replace("__ARGS__", &args.replace('"', "\\22"))
+            .replace("__ARGS_LEN__", &args.len().to_string())
+            .replacen("      call $box\n      i32.const 6016", &format!("      {code}\n      i32.const 6016"), 1);
+        assert!(source.contains(code), "the entry body is replaced");
+        // describe must repeat the manifest's one workspace, so it points `workspaces` at a record in memory.
+        let (empty, declared) = (r#"(data (i32.const 3000) "\01\00\00\00\1c\0c\00\00\01\00\00\00\00\00\00\00\00\00\00\00")"#, WORKSPACE_DESCRIPTION);
+        assert!(source.contains(empty), "the fixture describes no workspace");
+        let source = source.replacen(empty, declared, 1);
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        fixture
+    }
+    #[test]
+    fn workspace_enter_and_exit_hooks_read_without_adopting_session_state() {
+        let f = workspace_fixture("document.inspect", "{}");
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(package.approval.clone()), ..Default::default() });
+        let before = session.doc.clone();
+        let state = session.plugin_state.clone();
+        let history = (session.undo.len(), session.redo.len());
+        let camera = session.camera;
+        let token = session.design_token();
+        for entering in [true, false] {
+            let (result, _) = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", entering).unwrap();
+            assert!(result.sketch_exits.is_empty() && result.view.is_none());
+            assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+            assert_eq!(session.plugin_state, state, "the hook's panel data and grants stay in its scratch session");
+            assert_eq!((session.undo.len(), session.redo.len()), history);
+            assert_eq!(session.camera, camera);
+            assert_eq!(session.design_token(), token);
+        }
+    }
+
+    #[test]
+    fn workspace_hooks_stop_at_the_fuel_and_memory_caps() {
+        for (code, diagnostic) in [("(loop $forever br $forever)", "1000000 fuel"), ("i32.const 10000 memory.grow drop", "32 MiB")] {
+            let f = workspace_fixture_running("document.inspect", "{}", code);
+            let mut session = Session::default();
+            let before = session.doc.clone();
+            let token = session.design_token();
+            let error = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", true).unwrap_err();
+            assert!(error.to_string().contains(diagnostic), "{code}: {error}");
+            assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+            assert_eq!(session.design_token(), token);
+        }
+    }
+
+    #[test]
+    fn workspace_hooks_run_under_the_one_second_deadline() {
+        // The fuel cap ends any guest loop in milliseconds, so the deadline is checked where it is
+        // set: a package asking for minutes still gets one second, and a smaller ask is kept.
+        let long = Limits { fuel: u64::MAX, memory_mib: 256, deadline_ms: 600_000, stack_kib: None, ..Limits::default() };
+        assert_eq!(workspace_hook_limits(&long, HostLimits::default()).deadline_ms, 1000);
+        assert_eq!(workspace_hook_limits(&Limits { deadline_ms: 50, ..long }, HostLimits::default()).deadline_ms, 50);
+    }
+
+    #[test]
+    fn workspace_hooks_write_no_file_through_a_granted_folder() {
+        // The guest's own write-file: an edit entry, so only the stripped write grant stands in the way.
+        let f = Fixture::new("");
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(true)).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants {
+                package_hash: Some(package.approval.clone()),
+                folders: vec![FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true }],
+                ..Default::default()
+            },
+        );
+        let state = session.plugin_state.clone();
+        let error = run_package(&mut session.scratch(), package, "make", &json!({}), None, true).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.starts_with("files.write")), "{error}");
+        assert!(!f.0.join("sample/secret.txt").exists());
+        assert_eq!(session.plugin_state, state);
+        // The same call without the hook flag does write: the refusal comes from the flag.
+        let package = read_package(&f.path()).unwrap();
+        let mut scratch = session.scratch();
+        run_package(&mut scratch, package, "make", &json!({}), None, false).unwrap();
+        assert!(f.0.join("sample/secret.txt").exists());
+    }
+
+    #[test]
+    fn workspace_hooks_refuse_a_grouped_read_command_that_writes_a_file() {
+        let f = workspace_fixture("file.export", r#"{"path":"hook-export.step","format":"step"}"#);
+        let mut m: Value = serde_json::from_slice(&std::fs::read(f.0.join("sample/plugin.json")).unwrap()).unwrap();
+        m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants {
+                package_hash: Some(package.approval.clone()),
+                command_groups: BTreeSet::from(["file".into()]),
+                folders: vec![FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true }],
+                ..Default::default()
+            },
+        );
+        let error = run_workspace_hook(&mut session, package, "manufacture", true).unwrap_err();
+        // Refused either as a file-writing command from a hook or, since `file.export` is an
+        // edit command, as an edit from a read entry: in both cases nothing is written.
+        let text = error.to_string();
+        assert!(text.contains("from a workspace hook") || text.contains("from read entry"), "{error}");
+        assert!(!f.0.join("sample/hook-export.step").exists());
+    }
+
+    #[test]
+    fn a_failed_workspace_hook_leaves_plugin_state_and_grants_unchanged() {
+        let f = workspace_fixture_running("document.inspect", "{}", "(loop $forever br $forever)");
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(package.approval.clone()), ..Default::default() });
+        let state = session.plugin_state.clone();
+        assert!(run_workspace_hook(&mut session, package, "manufacture", true).is_err());
+        assert_eq!(session.plugin_state, state);
+    }
+
+    #[test]
+    fn workspace_hooks_hand_back_only_their_panel_updates() {
+        let f = workspace_fixture("document.inspect", "{}");
+        let package = read_package(&f.path()).unwrap();
+        let approval = package.approval.clone();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(approval.clone()), ..Default::default() });
+        sync_panels_for_test(&mut session, &f);
+        let doc = session.doc.clone();
+        let (_, updates) = run_workspace_hook(&mut session, package, "manufacture", true).unwrap();
+        assert_eq!((updates.plugin.as_str(), updates.approval.as_str()), ("sample", approval.as_str()));
+        assert!(updates.data.contains_key("jobs"), "the hook filled its panel");
+        assert!(session.plugin_panels().iter().all(|panel| panel.data.values().is_empty()), "nothing is adopted until the window asks");
+        adopt_panel_updates(&mut session, updates.clone());
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&ui::UiValue::Text("ready".into())));
+        assert!(std::sync::Arc::ptr_eq(&session.doc, &doc));
+        // Updates for another approval of the package are dropped.
+        let mut stale = updates;
+        stale.approval = "other".into();
+        session.plugin_state.panels.get_mut("sample").unwrap().data.get_mut("jobs").unwrap().clear_data();
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), None);
+        adopt_panel_updates(&mut session, stale);
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), None, "another approval's updates are not adopted");
+    }
+
+    #[test]
+    fn workspace_hooks_refuse_design_edits() {
+        let f = workspace_fixture("solid.box", r#"{"length":2,"width":3,"height":4}"#);
+        let mut session = Session::default();
+        let before = session.doc.clone();
+        let token = session.design_token();
+        let error = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", true).unwrap_err();
+        assert!(error.to_string().contains("edit command solid.box from read entry"), "{error}");
+        assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+        assert_eq!(session.design_token(), token);
+        assert!(session.undo.is_empty() && session.redo.is_empty());
+    }
+
     #[test]
     fn nested_plugin_failure_restores_the_callers_session_token_and_authored_bytes() {
         let f = Fixture::new("call $box unreachable");
@@ -4293,7 +4613,9 @@ mod importers {
         let file = put(&root, "bracket.smp", &design());
         let importer = importer_for(&s, &file, None).unwrap().unwrap();
         let params = json!({"library":library});
-        assert!(import_file(&mut s, &importer, &file, &params).is_err());
+        let refused = s.execute("file.import", &json!({"path": file, "options": params})).unwrap_err();
+        assert!(matches!(refused.host_error(), Some(HostError::PermissionDenied { .. })), "{refused}");
+        assert!(refused.to_string().contains("the option library needs read approval for its folder"), "{refused}");
         s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,

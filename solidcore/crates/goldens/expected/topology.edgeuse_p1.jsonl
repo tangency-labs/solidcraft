@@ -4602,7 +4602,7 @@
 {"case":"review_uvgap_ellips_ts2.smb_0_6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[0.0]}}
 {"case":"review_uvgap_ellips_ts2.smb_0_9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[0.0]}}
 {"case":"review_uvgap_ellips_ts2.smb_1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[1.9860273225978185e-15]}}
-{"case":"review_uvgap_ellips_ts2.smb_1_12","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[2.6645352591003757e-15]}}
+{"case":"review_uvgap_ellips_ts2.smb_1_12","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[0.0]}}
 {"case":"review_uvgap_ellips_ts2.smb_1_15","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[0.0]}}
 {"case":"review_uvgap_ellips_ts2.smb_1_18","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[3.2366318412765973e-12]}}
 {"case":"review_uvgap_ellips_ts2.smb_1_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"gap":[2.3400290550821617e-12]}}

@@ -2126,6 +2126,74 @@ fn plane_measurements_and_circle_operands_have_closed_form_values() {
     assert!(!k::same_plane(&frame, &other));
 }
 
+/// A corner is rounded by the arc tangent to both segments: a square corner by a quarter circle,
+/// a skew one in the plane of its segments, with the closed-form setback r / tan(θ/2).
+#[test]
+fn a_corner_round_is_tangent_to_both_segments_and_refuses_what_has_no_corner() {
+    use super::constraint::{self as k, NoCorner, V};
+    let p = |x: f64, y: f64, z: f64| V::<f64>::of([x, y, z]);
+    let ([on_a, middle, on_b], setback) = k::corner_round(
+        p(100.0, 0.0, 0.0),
+        p(0.0, 0.0, 0.0),
+        p(100.0, 0.0, 80.0),
+        20.0,
+    )
+    .unwrap();
+    assert!((setback - 20.0).abs() < 1e-12);
+    let near = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-12);
+    assert!(near(on_a, [80.0, 0.0, 0.0]) && near(on_b, [100.0, 0.0, 20.0]));
+    // The centre is (80, 0, 20); the middle is 20 from it towards the corner.
+    let h = 20.0 * std::f64::consts::FRAC_PI_4.cos();
+    assert!(near(middle, [80.0 + h, 0.0, 20.0 - h]), "{middle:?}");
+
+    // A skew corner: cos θ = -30 / √3400 between (-1, 0, 0) and (30, 40, 30) / √3400.
+    let (corner, far_a, far_b, r) = (
+        p(60.0, 0.0, 0.0),
+        p(0.0, 0.0, 0.0),
+        p(90.0, 40.0, 30.0),
+        10.0,
+    );
+    let ([on_a, middle, on_b], setback) = k::corner_round(corner, far_a, far_b, r).unwrap();
+    let theta = (-30.0 / 3400.0_f64.sqrt()).acos();
+    assert!((setback - r / (0.5 * theta).tan()).abs() < 1e-12);
+    let centre = k::circumcenter(V::of(on_a), V::of(middle), V::of(on_b));
+    assert!((k::circumradius(V::<f64>::of(on_a), V::of(middle), V::of(on_b)) - r).abs() < 1e-9);
+    assert!(((centre - corner).len() - r / (0.5 * theta).sin()).abs() < 1e-9);
+    // Tangent: each radius to an end is square to its segment, and all lies in their plane.
+    let normal = (far_a - corner).cross(far_b - corner);
+    for (end, far) in [(on_a, far_a), (on_b, far_b)] {
+        assert!((V::of(end) - centre).dot(far - corner).abs() < 1e-9);
+        assert!(((V::of(end) - corner).len() - setback).abs() < 1e-12);
+    }
+    for point in [V::of(on_a), V::of(middle), V::of(on_b), centre] {
+        assert!((point - corner).dot(normal).abs() < 1e-9);
+    }
+
+    let no = |far_a, far_b, r| k::corner_round(p(10.0, 0.0, 5.0), far_a, far_b, r).unwrap_err();
+    assert_eq!(
+        no(p(0.0, 0.0, 0.0), p(20.0, 0.0, 10.0), 2.0),
+        NoCorner::Straight
+    );
+    assert_eq!(
+        no(p(0.0, 0.0, 0.0), p(4.0, 0.0, 2.0), 2.0),
+        NoCorner::Overlapping
+    );
+    assert_eq!(
+        no(p(10.0, 0.0, 5.0), p(4.0, 0.0, 2.0), 2.0),
+        NoCorner::NoLength
+    );
+    for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            no(p(0.0, 0.0, 5.0), p(10.0, 9.0, 5.0), r),
+            NoCorner::OutOfRange
+        );
+    }
+    // A turn of a hundred-millionth of a radian is one straight line.
+    let turn = 1e-8_f64;
+    let barely = p(10.0 + 100.0 * turn.cos(), 100.0 * turn.sin(), 5.0);
+    assert_eq!(no(p(-90.0, 0.0, 5.0), barely, 2.0), NoCorner::Straight);
+}
+
 /// A lune half a turn wide (a half sphere whose rim is a meridian circle) is as wide as the
 /// other half, so its width says nothing of which half it is: the face is the half on the loop's
 /// left in (u, v), whichever way the loop runs, wherever it starts and wherever the seam lies,
