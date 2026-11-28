@@ -304,6 +304,8 @@ mod edit_tests {
     /// pair is named with its reason.
     #[test]
     fn tab_slot_summary_from_the_reply() {
+        // The counts are formatted from the catalogs, which the host installs (English in tests).
+        crate::i18n::install();
         let mut s = Session::default();
         for (corner, size, name) in [([0, 0, 0], [160, 100, 6], "Bottom"), ([20, 30, 6], [120, 6, 60], "Wall")] {
             let p = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name, "operation": "new"});

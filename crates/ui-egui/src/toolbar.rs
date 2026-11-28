@@ -5246,7 +5246,9 @@ mod dropdown_tests {
         for theme in ["dark", "blueprint"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
-            h.call("ui.resize", json!({"width":1280,"height":800}));
+            // Tall enough that the whole MODIFY menu (Transform Face made it one row longer) fits without
+            // scrolling, so its separator before the ungrouped commands is on screen to count.
+            h.call("ui.resize", json!({"width":1280,"height":1100}));
             h.call("ui.prefs", json!({"theme": theme, "construct_menu_groups": true, "ribbon_icon_grid": false}));
             for panel in ["panel:MODEL:MODIFY", "panel:MODEL:CONSTRUCT"] {
                 h.frames(4);
@@ -5254,7 +5256,7 @@ mod dropdown_tests {
                 h.frames(6);
                 let bounds = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
                 let mut output = h.ctx.run_ui(
-                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() },
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 1100.0))), ..Default::default() },
                     |ui| h.app.ui(ui),
                 );
                 output.textures_delta.clear();
