@@ -33,16 +33,61 @@ pub struct CoatNumbers {
     pub weight: f64,
     pub roughness: f64,
     pub ior: f64,
+    /// Metallic paint flakes under the coat; absent for none.
+    pub flakes: Option<FlakeNumbers>,
 }
 impl Default for CoatNumbers {
     fn default() -> Self {
         let coat = solidcraft_doc::render_coat::CoatMaterial::default();
-        Self { weight: coat.weight, roughness: coat.roughness, ior: coat.ior }
+        Self { weight: coat.weight, roughness: coat.roughness, ior: coat.ior, flakes: None }
     }
 }
 impl CoatNumbers {
     pub fn material(self) -> solidcraft_doc::render_coat::CoatMaterial {
-        solidcraft_doc::render_coat::CoatMaterial { weight: self.weight, roughness: self.roughness, ior: self.ior }
+        solidcraft_doc::render_coat::CoatMaterial {
+            weight: self.weight,
+            roughness: self.roughness,
+            ior: self.ior,
+            flakes: self.flakes.map(FlakeNumbers::material),
+        }
+    }
+}
+/// Paint flake numbers (docs/render-flakes.md); the handler validates their ranges.
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct FlakeNumbers {
+    /// Share of the surface covered, 0..1.
+    pub coverage: f64,
+    /// About the width of one flake, 0.005..10 mm.
+    pub size_mm: f64,
+    /// Tilt from the surface as a share of 45 degrees, 0..1.
+    pub spread: f64,
+    /// Depth of the deepest flake in the paint, 0..1.
+    pub depth: f64,
+    /// sRGB color.
+    pub color: [u8; 3],
+    pub metallic: f64,
+    /// Perceptual roughness, 0.045..1.
+    pub roughness: f64,
+}
+impl Default for FlakeNumbers {
+    fn default() -> Self {
+        let f = solidcraft_doc::render_coat::FlakeMaterial::default();
+        Self {
+            coverage: f.coverage,
+            size_mm: f.size_mm,
+            spread: f.spread,
+            depth: f.depth,
+            color: f.color,
+            metallic: f.metallic,
+            roughness: f.roughness,
+        }
+    }
+}
+impl FlakeNumbers {
+    pub fn material(self) -> solidcraft_doc::render_coat::FlakeMaterial {
+        let Self { coverage, size_mm, spread, depth, color, metallic, roughness } = self;
+        solidcraft_doc::render_coat::FlakeMaterial { coverage, size_mm, spread, depth, color, metallic, roughness }
     }
 }
 #[derive(Deserialize, JsonSchema)]

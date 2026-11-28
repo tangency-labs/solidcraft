@@ -555,7 +555,7 @@ pub(crate) fn modifier_motion(
 ) -> Option<(NavMode, egui::Vec2)> {
     let owns = inside
         && ui.input(|i| i.focused && !i.pointer.any_down() && !i.pointer.any_released() && !i.pointer.any_pressed())
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && !crate::dim_view::editing()
         && app.viewport.context_menu.is_none()
         && app.viewport.axis_drag.is_none()
@@ -604,7 +604,7 @@ pub(crate) struct KeyHold {
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
     (app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_LAYOUT)
-        || egui::Popup::is_any_open(ctx)
+        || (egui::Popup::is_any_open(ctx) || crate::ui_kit::Menu::any_open(ctx))
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
         || ctx.memory(|m| m.focused().is_some_and(|focused| Some(focused) != canvas))
@@ -3094,7 +3094,9 @@ mod tests {
                     let roll = f64::from(quarter) * std::f64::consts::FRAC_PI_2;
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
                     app.preferences.free_orbit = true;
-                    app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up };
+                    // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+                    app.cam =
+                        Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up, frame: None };
                     let expected = Camera { yaw: 0.0, pitch: 0.0, roll, ..app.cam };
                     orbit_drag(&mut app, rect, 0.0, 0.0, None, true, false);
                     let (right, vertical, back) = app.cam.basis();
@@ -5855,7 +5857,7 @@ mod view_key_tests {
         let ctx = crate::fonts::test_context();
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
-            assert!(!egui::Popup::is_any_open(ui.ctx()));
+            assert!(!(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx())));
             app.prefs_window.shell.open = true;
             app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
@@ -6086,6 +6088,20 @@ mod view_key_tests {
                 }
             }
         }
+    }
+
+    /// Look At a sketch under a design's frame, from straight down the design's top: seen from the
+    /// sketch's own normal (X × Z, along -Y here), its +X points to the screen's right.
+    #[test]
+    fn a_sketch_look_at_under_a_frame_keeps_its_x_to_the_right() {
+        use solidcore_record::Vec3;
+        use solidcraft_viewport::{Camera, ViewFrame};
+        let f = ViewFrame::new(Vec3::Z, -Vec3::Y).unwrap();
+        let cam = Camera { frame: Some(f), ..Default::default() }.looking_from(-Vec3::Y);
+        let framed = crate::dialogs::square_sketch_axes(cam, Vec3::X, Vec3::Z);
+        let (right, _, back) = framed.basis();
+        assert!(back.dist(-Vec3::Y) < 1e-4, "the sketch's normal is the view: back {back:?}");
+        assert!(right.dot(Vec3::X) > 0.999, "the sketch's +X points to the screen's right: right {right:?}");
     }
 
     /// Holding Ctrl (or Shift) before middle-dragging into an unfocused SolidCraft window in

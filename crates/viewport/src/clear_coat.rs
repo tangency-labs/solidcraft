@@ -90,15 +90,31 @@ pub fn surface_pdf(surface: OpaqueSurface, normal: Vec3, view: Vec3, light: Vec3
     let nh = n.dot(h).clamp(0.0, 1.0);
     // Visible normal density times the reflection Jacobian. The view-half
     // cosine cancels, and G1 / nv has a finite grazing limit.
-    let ggx = |roughness: f64| {
+    let ggx = |roughness: f64, nv: f64, nh: f64| {
         let a2 = roughness.powi(4);
         let d = (1.0 - nh * nh) + nh * nh * a2;
         let root = (nv * nv + a2 * (1.0 - nv * nv)).sqrt();
         a2 / (PI * d * d) / (2.0 * (nv + root))
     };
     let [diffuse, specular, coat] = lobe_probabilities(surface);
-    let base = diffuse * nl / PI + specular * ggx(surface.roughness());
-    Ok(surface.clear_coat().map_or(base, |layer| base + coat * ggx(layer.roughness())))
+    // On a flake the base lobes are drawn about the flake's normal; the coat keeps the surface's.
+    // A flake seen from behind draws nothing: its share of the samples is lost, never renormalized.
+    let flake = surface.base_normal(n);
+    let base = if flake == n {
+        diffuse * nl / PI + specular * ggx(surface.roughness(), nv, nh)
+    } else {
+        let m = unit_direction(flake)?;
+        let mv = m.dot(v).min(1.0);
+        let mh = m.dot(h).min(1.0);
+        if mv <= 0.0 {
+            0.0
+        } else {
+            // Visible normals lie above the flake: a half vector below it is never drawn.
+            let lobe = if mh <= 0.0 { 0.0 } else { ggx(surface.roughness(), mv, mh) };
+            diffuse * m.dot(l).max(0.0) / PI + specular * lobe
+        }
+    };
+    Ok(surface.clear_coat().map_or(base, |layer| base + coat * ggx(layer.roughness(), nv, nh)))
 }
 
 #[cfg(test)]

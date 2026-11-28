@@ -477,8 +477,24 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     escape(&mut h);
     h.app.start("inspect.colored_components");
     click(&mut h, "appbar:file");
-    assert!(h.widget("Export Current View as DXF…").is_some(), "painted File rows retain accessible action labels");
     collect(&mut h, "File", &mut requested);
+    for (group, category) in [
+        ("Insert", None),
+        ("Export", Some("CAD & 2D")),
+        ("Export", Some("Mesh")),
+        ("Export", Some("Scene")),
+        ("Export", Some("Simulation & Robotics")),
+        ("Settings", None),
+    ] {
+        escape(&mut h);
+        click(&mut h, "appbar:file");
+        click(&mut h, &format!("menu:{group}"));
+        if let Some(category) = category {
+            click(&mut h, &format!("menu:{category}"));
+        }
+        collect(&mut h, group, &mut requested);
+    }
+    assert!(requested.contains_key("mesh_import"));
     escape(&mut h);
     click(&mut h, "appbar:help");
     collect(&mut h, "Help", &mut requested);

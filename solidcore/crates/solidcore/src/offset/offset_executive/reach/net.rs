@@ -29,12 +29,15 @@
 //! and nothing past it is enclosed.
 //!
 //! A surface of revolution is the net of its generator turned and weighted, exactly. The
-//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`); past
-//! them its end span continued is the surface turned on (a rational quadratic piece
-//! continued stays on its conic, the circle each row's point sweeps), which Krawczyk's boxes
-//! may straddle. A meeting is taken only where the box proved to hold it is within the
-//! B-rep's tolerance of the side as built ([`Net::jet_as_built`]): one past the turn's end
-//! by more is not on the executive's surfaces, and is not proved. Its partials are enclosed
+//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`), but
+//! for one whose generator is an arc of one circle (a torus but for its label), which it
+//! turns on as a torus's, up to a quarter of the turn it leaves open; past them its end span
+//! continued is the surface turned on (a rational quadratic piece continued stays on its
+//! conic, the circle each row's point sweeps), which Krawczyk's boxes may straddle. A meeting
+//! is taken only where the box proved to hold it is within the B-rep's tolerance of the side
+//! as built ([`Net::jet_as_built`]): one past the turn's end by more is not proved, though on
+//! a revolved circle it may be on the executive's turned-on surface (the reach then falls
+//! short of it: the operation is refused, it builds nothing wrong). Its partials are enclosed
 //! about a point near the box ([`Net::jet_near`]): its rows' weights vary round the axis,
 //! and taken about the origin the quotient's enclosure grows with the point's distance from
 //! it.
@@ -60,7 +63,7 @@ use crate::blend::fillet_section::certificate::{
     nurbs_partials_over_piece_about, partials_hull, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::{round_up, Ivl};
-use crate::blend::fillet_section::station::{span, Nurbs};
+use crate::blend::fillet_section::station::{nurbs_partials, span, Nurbs};
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{
     inverse_of_columns2, inverse_of_columns3, inverse_of_columns4, krawczyk, newton, Linearised,
@@ -228,8 +231,9 @@ impl Net {
     /// generator's exact form) or a surface of revolution (its net is its generator turned
     /// and weighted, exactly), with no analytic label and no definition (a blend's or sweep's
     /// net is only its approximation); or an offset surface of such a net ([`Net::offset`]);
-    /// `None` for any other. A revolution's sides round its
-    /// axis are not extended, as the executive leaves them (`SideExtension::AroundAxis`):
+    /// `None` for any other. A revolution's sides round its axis are not extended, as the
+    /// executive leaves them (`SideExtension::AroundAxis`; one of a single circle arc it turns
+    /// on, which only makes this enclosure short of it):
     /// past them the net's end span continued is enclosed only within `tolerance` of the side
     /// ([`Net::continues`]).
     ///
@@ -318,8 +322,8 @@ impl Net {
                 continue;
             }
             // (as the executive's extension decides: a closed direction, a collapsed side
-            // and a revolution's side round its axis are left; the last continues as its
-            // net's end span, round the axis)
+            // and a revolution's side round its axis are left, but for one of a single circle
+            // arc; the last continues as its net's end span, round the axis)
             if crate::surface::extend::round_the_axis(surface, side) == Some(true) {
                 *c = true;
             } else {
@@ -966,8 +970,8 @@ impl Net {
     /// ([`Part::Beyond`]) is not within [`Net::tolerance`] of the side ([`Net::near_as_built`]).
     /// Krawczyk's boxes are taken over the continuation (the net's end span continued is the
     /// surface's own, a revolution turned on), and only the box it proves is asked to be
-    /// built: a meeting past the side by more than the tolerance is one the executive's
-    /// surfaces do not hold.
+    /// built: a meeting past the side by more than the tolerance is not taken, whether or not
+    /// the executive's surface holds it (a revolved circle's, turned on, may).
     ///
     /// # Errors
     ///
@@ -1011,10 +1015,81 @@ impl Net {
         du <= self.tolerance && dv <= self.tolerance
     }
 
+    /// Fast floating-point evaluation of point and first partials on the knots or past an
+    /// extended v side (Newton / grid search heuristic only; every certified result goes
+    /// through [`Net::jet_near`]). Returns `None` for an offset net ([`Net::offset`]) or
+    /// outside the fast path to fall back to [`Net::jet_as`].
+    fn at_fast(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        if self.offset.is_some() || !(u.is_finite() && v.is_finite()) {
+            return None;
+        }
+        let [(u0, u1), (v0, v1)] = self.range;
+        let [closed_u, closed_v] = self.closed;
+        let [_, _, ext_v0, ext_v1] = self.extends;
+        let wrap = |x: f64, r0: f64, r1: f64| -> Option<f64> {
+            let period = r1 - r0;
+            if !(period.is_finite() && period > 0.0) {
+                return None;
+            }
+            let w = (r0 + (x - r0).rem_euclid(period)).min(r1);
+            (r0 <= w && w <= r1).then_some(w)
+        };
+        let uu = if closed_u {
+            wrap(u, u0, u1)?
+        } else if u0 <= u && u <= u1 {
+            u
+        } else {
+            return None;
+        };
+        let (vv, dv) = if closed_v {
+            (wrap(v, v0, v1)?, None)
+        } else if v0 <= v && v <= v1 {
+            (v, None)
+        } else if v < v0 && ext_v0 {
+            (v0, Some(v - v0))
+        } else if v > v1 && ext_v1 {
+            (v1, Some(v - v1))
+        } else {
+            return None;
+        };
+        if !(Self::within(&self.cn.u, self.cn.p, self.cn.nu, uu, uu)
+            && Self::within(&self.cn.v, self.cn.q, self.cn.nv, vv, vv))
+        {
+            return None;
+        }
+        let ku = span(&self.cn.u, self.cn.p, self.cn.nu, uu);
+        let kv = span(&self.cn.v, self.cn.q, self.cn.nv, vv);
+        let lk = if dv.is_some() { 2 } else { 1 };
+        let g = nurbs_partials(&self.cn, ku, kv, uu, vv, lk);
+        let vec = |p: crate::blend::fillet_section::series::V3<f64>| Vec3::new(p.x, p.y, p.z);
+        let (x, xu, xv) = (vec(g.at(0, 0)), vec(g.at(1, 0)), vec(g.at(0, 1)));
+        let (pt, su, sv) = match dv {
+            None => (x, xu, xv),
+            Some(d) => {
+                let xuv = vec(g.at(1, 1));
+                (x + xv * d, xu + xuv * d, xv)
+            }
+        };
+        let finite = |a: Vec3| a.x.is_finite() && a.y.is_finite() && a.z.is_finite();
+        (finite(pt) && finite(su) && finite(sv)).then_some((pt, su, sv))
+    }
+
+    /// Whether the net closes in at least one parameter direction (e.g. a periodic spline
+    /// wall or closed fillet loop).
+    pub(super) fn is_closed(&self) -> bool {
+        let [u, v] = self.closed;
+        u || v
+    }
+
     /// The point and partials at `(u, v)`, as floating point numbers (for Newton's
     /// steps), past a u side on the homogeneous lines ([`Form::Lines`]); `None` where
     /// [`Net::jet`] encloses nothing there.
     fn at(&self, u: f64, v: f64) -> Result<Option<(Vec3, Vec3, Vec3)>> {
+        if self.is_closed() {
+            if let Some(hit) = self.at_fast(u, v) {
+                return Ok(Some(hit));
+            }
+        }
         Ok(self
             .jet_as(Ivl::from(u), Ivl::from(v), Form::Lines, None)?
             .map(|j| (middle(j.p), middle(j.su), middle(j.sv))))
@@ -1043,19 +1118,23 @@ impl Net {
 
     /// The net's data as bits, for an edge's bound to be taken again from its other face
     /// ([`super::EdgeBounds`]): the offset, the degrees and counts, the knots, the
-    /// homogeneous control points, which sides are extended or continued, and the tolerance.
-    /// Two nets with the same bits are the same surface, extended alike.
+    /// homogeneous control points, the parameter range, which directions are closed and which
+    /// sides are extended or continued, and the tolerance. Two nets with the same bits are the
+    /// same surface, extended alike.
     pub(super) fn bits(&self) -> Vec<u64> {
         let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+        let [(u0, u1), (v0, v1)] = self.range;
         let mut out = vec![3, self.offset.map_or(u64::MAX, f64::to_bits)];
         out.extend([self.cn.p, self.cn.q, self.cn.nu, self.cn.nv].map(count));
         for list in [&self.cn.u, &self.cn.v, &self.cn.pw] {
             out.push(count(list.len()));
             out.extend(list.iter().map(|x| x.to_bits()));
         }
+        out.extend([u0.to_bits(), u1.to_bits(), v0.to_bits(), v1.to_bits()]);
         out.extend(
-            self.extends
+            self.closed
                 .iter()
+                .chain(&self.extends)
                 .chain(&self.continues)
                 .map(|&b| u64::from(b)),
         );
@@ -1550,26 +1629,62 @@ fn clamped_and_continuous(knots: &[f64], p: usize) -> bool {
     true
 }
 
-/// A line `x0 + τ u` (`u` a unit vector, both enclosed over a piece of an edge's
-/// parameters; `mid` the same at the piece's middle, as numbers) meeting the net: the
-/// enclosure of `τ` at a meeting proved for every parameter of the piece, by Krawczyk's
-/// test on `G(u, v) − x0 − τ u = 0` (module docs), or `None`. `guess` carries the last root
-/// found from one call to the next (Newton's start; else the grid point nearest the line). The
-/// start only steers Newton to a root for Krawczyk's box: a carried start from another piece
-/// that leads nowhere is replaced by the grid's once, and what is proved is decided by the box
-/// alone.
-///
-/// # Errors
-///
-/// A cancel.
-pub(super) fn line_meets(
+/// A line `x0(s) + τ u(s)` over a parameter piece `[t0, t1]` about its middle `tm`:
+/// the point-box values at `tm`, the centred values and first derivatives over the piece,
+/// the midpoint values and derivatives as floating-point numbers (for Newton and the linear
+/// tangent predictor), and `dt = [t0 - tm, t1 - tm]` holding `0`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct LinePiece {
+    pub(super) x0_mid: I3,
+    pub(super) u_mid: I3,
+    pub(super) x0_over: I3,
+    pub(super) dx0_over: I3,
+    pub(super) u_over: I3,
+    pub(super) du_over: I3,
+    pub(super) mid_x0: Vec3,
+    pub(super) mid_u: Vec3,
+    pub(super) mid_dx0: Vec3,
+    pub(super) mid_du: Vec3,
+    pub(super) dt: Ivl,
+}
+
+fn intersect_ivl(a: Ivl, b: Ivl) -> Ivl {
+    if a.lo.is_nan() || a.hi.is_nan() {
+        return b;
+    }
+    if b.lo.is_nan() || b.hi.is_nan() {
+        return a;
+    }
+    let lo = a.lo.max(b.lo);
+    let hi = a.hi.min(b.hi);
+    if lo <= hi {
+        Ivl::new(lo, hi)
+    } else {
+        b
+    }
+}
+
+fn intersect3(a: I3, b: I3) -> I3 {
+    let [a0, a1, a2] = a;
+    let [b0, b1, b2] = b;
+    [
+        intersect_ivl(a0, b0),
+        intersect_ivl(a1, b1),
+        intersect_ivl(a2, b2),
+    ]
+}
+
+/// Newton root and inverse Jacobian for `G(a, b) − mx0 − τ mu = 0`.
+type LineRoot = ([f64; 3], [[f64; 3]; 3]);
+
+/// Newton root and inverse Jacobian for `G(a, b) − mx0 − τ mu = 0`, warm-started from
+/// `guess` (falling back to the grid when Newton fails or jumps to a far branch).
+fn solve_line_root(
     net: &Net,
-    line: (I3, I3),
-    mid: (Vec3, Vec3),
+    mx0: Vec3,
+    mu: Vec3,
     guess: &Cell<Option<[f64; 3]>>,
-) -> Result<Option<Ivl>> {
-    let (x0, u) = line;
-    let (mx0, mu) = mid;
+) -> Result<Option<LineRoot>> {
     let at = |y: [f64; 3]| -> Result<Linearised<3>> {
         let [a, b, tau] = y;
         Ok(net.at(a, b)?.map(|(p, su, sv)| {
@@ -1594,7 +1709,8 @@ pub(super) fn line_meets(
         }
         net.nearest_to_line(mx0, mu)
     };
-    let start = match guess.get() {
+    let carried = guess.get();
+    let start = match carried {
         Some(g) => g,
         None => match first(net)? {
             Some(g) => g,
@@ -1602,9 +1718,36 @@ pub(super) fn line_meets(
         },
     };
     let mut root = newton(start, &at, &inverse_of_columns3)?;
-    if root.is_none() && guess.get().is_some() {
+    if root.is_none() && carried.is_some() {
         if let Some(g) = first(net)? {
             root = newton(g, &at, &inverse_of_columns3)?;
+        }
+    }
+    // On a closed net (e.g. a periodic spline extrusion), jumping between distant pieces
+    // in `interval_maximum`'s heap can carry a warm start from the opposite side of the
+    // loop and converge to a far crossing. When `|tau|` jumps far past the carried root's,
+    // also try Newton from the nearest point on the net and keep the nearer crossing.
+    if net.is_closed() {
+        if let (Some([_, _, tau_g]), Some([_, _, tau_r])) = (carried, root) {
+            if tau_r.abs() > tau_g.abs() * 2.0 + 1e-3 {
+                let near_uv = if net.offset.is_some() {
+                    net.foot(mx0, None)?.map(|[a, b]| (a, b))
+                } else {
+                    net.nearest_on_grid(mx0)?
+                };
+                if let Some((a, b)) = near_uv {
+                    if let Some((p, _, _)) = net.at(a, b)? {
+                        if let Some(near) =
+                            newton([a, b, (p - mx0).dot(mu)], &at, &inverse_of_columns3)?
+                        {
+                            let [_, _, tau_n] = near;
+                            if tau_n.abs() < tau_r.abs() {
+                                root = Some(near);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     let Some(root) = root else {
@@ -1615,6 +1758,32 @@ pub(super) fn line_meets(
         return Ok(None);
     };
     let Some(c) = inverse_of_columns3(&j) else {
+        return Ok(None);
+    };
+    Ok(Some((root, c)))
+}
+
+/// A line `x0 + τ u` (`u` a unit vector, both enclosed over a piece of an edge's
+/// parameters; `mid` the same at the piece's middle, as numbers) meeting the net: the
+/// enclosure of `τ` at a meeting proved for every parameter of the piece, by Krawczyk's
+/// test on `G(u, v) − x0 − τ u = 0` (module docs), or `None`. `guess` carries the last root
+/// found from one call to the next (Newton's start; else the grid point nearest the line). The
+/// start only steers Newton to a root for Krawczyk's box: a carried start from another piece
+/// that leads nowhere is replaced by the grid's once, and what is proved is decided by the box
+/// alone.
+///
+/// # Errors
+///
+/// A cancel.
+pub(super) fn line_meets(
+    net: &Net,
+    line: (I3, I3),
+    mid: (Vec3, Vec3),
+    guess: &Cell<Option<[f64; 3]>>,
+) -> Result<Option<Ivl>> {
+    let (x0, u) = line;
+    let (mx0, mu) = mid;
+    let Some((root, c)) = solve_line_root(net, mx0, mu, guess)? else {
         return Ok(None);
     };
     let value = |y: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> {
@@ -1634,6 +1803,113 @@ pub(super) fn line_meets(
         return Ok(None);
     };
     Ok(net.jet_as_built(a, b, mx0)?.map(|_| tau))
+}
+
+/// [`line_meets`] over a parameter piece `[t0, t1]` using a first-order linear predictor
+/// `y(δ) = root + δ slope + z(δ)` (`δ = s − tm ∈ piece.dt`) so that the Krawczyk residual
+/// `z` shrinks quadratically (`O(h²)`) instead of suffering first-order axis-aligned interval
+/// wrapping (`O(h)`). Returns `(tau_piece, tau_mid)` from a single Newton solve and shared
+/// midpoint evaluation at `tm`.
+///
+/// # Errors
+///
+/// A cancel.
+pub(super) fn line_meets_piece(
+    net: &Net,
+    piece: &LinePiece,
+    guess: &Cell<Option<[f64; 3]>>,
+) -> Result<Option<(Ivl, Option<Ivl>)>> {
+    let (mx0, mu) = (piece.mid_x0, piece.mid_u);
+    let Some((root, c)) = solve_line_root(net, mx0, mu, guess)? else {
+        return Ok(None);
+    };
+    let [a_m, b_m, tau_m] = root;
+    let Some(j_mid) = net.jet_near(Ivl::from(a_m), Ivl::from(b_m), mx0)? else {
+        return Ok(None);
+    };
+    // Value of F_0(root) = G(a_m, b_m) - x0(tm) - tau_m u(tm), shared between the
+    // linear-predictor mean-value remainder and the midpoint Krawczyk check.
+    let g0 = sub(
+        sub(j_mid.p, piece.x0_mid),
+        scale(piece.u_mid, Ivl::from(tau_m)),
+    );
+    let has_continued = net.continues.iter().any(|&flag| flag);
+    let dt = piece.dt;
+    let dt_has_zero = dt.lo <= 0.0 && dt.hi >= 0.0;
+
+    // Linear tangent predictor y'(0) = C (x0'(tm) + tau_m u'(tm)) in floating point.
+    // Any finite slope is sound when `0 ∈ dt`: Krawczyk below certifies a residual z(δ)
+    // such that y(δ) = root + δ slope + z(δ) solves F_δ(y(δ)) = 0 for every δ ∈ dt.
+    let rhs = piece.mid_dx0 + piece.mid_du * tau_m;
+    let cand_slope = c.map(|[c0, c1, c2]| c0 * rhs.x + c1 * rhs.y + c2 * rhs.z);
+    let (slope, a_lin, b_lin, j_lin) = if dt_has_zero && cand_slope.iter().all(|x| x.is_finite()) {
+        let [a_p, b_p, _] = cand_slope;
+        let a_l = Ivl::from(a_m) + dt * Ivl::from(a_p);
+        let b_l = Ivl::from(b_m) + dt * Ivl::from(b_p);
+        match net.jet_near(a_l, b_l, mx0)? {
+            Some(jet) => (cand_slope, a_l, b_l, jet),
+            None => ([0.0; 3], Ivl::from(a_m), Ivl::from(b_m), j_mid),
+        }
+    } else {
+        ([0.0; 3], Ivl::from(a_m), Ivl::from(b_m), j_mid)
+    };
+    let [a_p, b_p, tau_p] = slope;
+    let tau_lin = Ivl::from(tau_m) + dt * Ivl::from(tau_p);
+    let plain = sub(sub(j_lin.p, piece.x0_over), scale(piece.u_over, tau_lin));
+    let f0 = if dt_has_zero {
+        // Mean-value enclosure of phi(δ) = G(a_m + δ a_p, b_m + δ b_p) - x0(tm + δ)
+        // - (tau_m + δ tau_p) u(tm + δ) about δ = 0, valid across knot lines and
+        // extended sides (Neumaier 1990 §2.1), intersected with the plain enclosure.
+        let dphi = sub(
+            sub(
+                sub(
+                    add(
+                        scale(j_lin.su, Ivl::from(a_p)),
+                        scale(j_lin.sv, Ivl::from(b_p)),
+                    ),
+                    piece.dx0_over,
+                ),
+                scale(piece.u_over, Ivl::from(tau_p)),
+            ),
+            scale(piece.du_over, tau_lin),
+        );
+        intersect3(add(g0, scale(dphi, dt)), plain)
+    } else {
+        plain
+    };
+    let minus_u = scale(piece.u_over, Ivl::from(-1.0));
+    let value = |_: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> { Ok(Some(f0)) };
+    let jacobian = |z: [Ivl; 3]| -> Result<Option<[[Ivl; 3]; 3]>> {
+        let [za, zb, _] = z;
+        Ok(net
+            .jet_near(a_lin + za, b_lin + zb, mx0)?
+            .map(|jet| [jet.su, jet.sv, minus_u]))
+    };
+    let Some([za, zb, ztau]) = krawczyk([0.0; 3], c, &value, &jacobian)? else {
+        return Ok(None);
+    };
+    if has_continued && net.jet_as_built(a_lin + za, b_lin + zb, mx0)?.is_none() {
+        return Ok(None);
+    }
+    let tau_piece = tau_lin + ztau;
+
+    // Midpoint root at δ = 0 (steers interval_maximum halving), reusing root, c, and g0.
+    let minus_u_mid = scale(piece.u_mid, Ivl::from(-1.0));
+    let mid_value = |_: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> { Ok(Some(g0)) };
+    let mid_jacobian = |y: [Ivl; 3]| -> Result<Option<[[Ivl; 3]; 3]>> {
+        let [a, b, _] = y;
+        Ok(net
+            .jet_near(a, b, mx0)?
+            .map(|jet| [jet.su, jet.sv, minus_u_mid]))
+    };
+    let tau_mid = match krawczyk(root, c, &mid_value, &mid_jacobian)? {
+        Some([a0, b0, tau0]) => {
+            (!has_continued || net.jet_as_built(a0, b0, mx0)?.is_some()).then_some(tau0)
+        }
+        None => None,
+    };
+
+    Ok(Some((tau_piece, tau_mid)))
 }
 
 /// Where the plane `(origin, normal)` and the nets `a` and `b` meet, near the vertex `p`:
@@ -2553,5 +2829,103 @@ mod tests {
                 "H={height}: {found} vs {want}"
             );
         }
+    }
+
+    /// #22808: on a curved net (quarter cylinder r = 2) moved vertically by +2 past its top
+    /// side, a non-axis-aligned arc piece around θ = π/4 has exact meeting τ(s) = 0 across
+    /// the whole piece. Linear-predictor Krawczyk (`line_meets_piece`) shrinks the residual
+    /// quadratically (`O(h²)`) instead of suffering first-order box wrapping (`O(h)`).
+    #[test]
+    fn line_meets_piece_eliminates_first_order_wrapping_on_curved_net() {
+        use crate::math::det;
+        let k = Kernel::default();
+        let n = net(&k, &quarter_cylinder());
+        let r = 2.0_f64;
+        let z = 5.0_f64;
+        let theta_m = core::f64::consts::FRAC_PI_4;
+        let half = 0.05_f64;
+        let dt = Ivl::checked(-half, half);
+        let t0 = theta_m - half;
+        let t1 = theta_m + half;
+        let cos_over = Ivl::new(det::cos(t1), det::cos(t0));
+        let sin_over = Ivl::new(det::sin(t0), det::sin(t1));
+        let (cm, sm) = (det::cos(theta_m), det::sin(theta_m));
+        let x0_mid = [Ivl::from(r * cm), Ivl::from(r * sm), Ivl::from(z)];
+        let u_mid = [Ivl::from(-cm), Ivl::from(-sm), Ivl::from(0.0)];
+        let dx0_over = [
+            Ivl::from(-r) * sin_over,
+            Ivl::from(r) * cos_over,
+            Ivl::from(0.0),
+        ];
+        let du_over = [sin_over, Ivl::from(-1.0) * cos_over, Ivl::from(0.0)];
+        let x0_over = [
+            x0_mid[0] + dx0_over[0] * dt,
+            x0_mid[1] + dx0_over[1] * dt,
+            Ivl::from(z),
+        ];
+        let u_over = [
+            u_mid[0] + du_over[0] * dt,
+            u_mid[1] + du_over[1] * dt,
+            Ivl::from(0.0),
+        ];
+        let mid_x0 = Vec3::new(r * cm, r * sm, z);
+        let mid_u = Vec3::new(-cm, -sm, 0.0);
+        let mid_dx0 = Vec3::new(-r * sm, r * cm, 0.0);
+        let mid_du = Vec3::new(sm, -cm, 0.0);
+        let piece = LinePiece {
+            x0_mid,
+            u_mid,
+            x0_over,
+            dx0_over,
+            u_over,
+            du_over,
+            mid_x0,
+            mid_u,
+            mid_dx0,
+            mid_du,
+            dt,
+        };
+        let guess = Cell::new(None);
+        let (tau_piece, tau_mid) = line_meets_piece(&n, &piece, &guess)
+            .unwrap()
+            .expect("linear-predictor Krawczyk certifies the piece");
+        assert!(
+            tau_piece.lo <= 0.0 && tau_piece.hi >= 0.0,
+            "tau_piece must enclose 0: {tau_piece:?}"
+        );
+        let tau_mid = tau_mid.expect("midpoint root certified");
+        assert!(
+            tau_mid.lo <= 0.0 && tau_mid.hi >= 0.0 && tau_mid.mag() < 1e-11,
+            "tau_mid must tightly enclose 0: {tau_mid:?}"
+        );
+        // Compare against plain box wrapping (without linear predictor): at `half = 0.05`,
+        // plain box wrapping either fails to certify altogether or produces a >=5x wider
+        // enclosure (O(h) wrapping vs O(h^2) linear-predictor residual).
+        let guess_plain = Cell::new(None);
+        if let Some(tau_plain) =
+            line_meets(&n, (x0_over, u_over), (mid_x0, mid_u), &guess_plain).unwrap()
+        {
+            assert!(
+                tau_piece.mag() * 5.0 < tau_plain.mag(),
+                "expected >=5x tighter tau bound: piece={tau_piece:?} vs plain={tau_plain:?}"
+            );
+        }
+    }
+
+    /// `Net::bits` produces identical bits for equal nets and differs when geometry or
+    /// tolerance changes.
+    #[test]
+    fn net_bits_tracks_geometry_and_tolerance() {
+        let k = Kernel::default();
+        let surf = quarter_cylinder();
+        let a = Net::of(&k, &surf, 1e-6).unwrap().unwrap();
+        let b = Net::of(&k, &surf, 1e-6).unwrap().unwrap();
+        let c = Net::of(&k, &surf, 2e-6).unwrap().unwrap();
+        let d = Net::of(&k, &plane_net_at_height(1.0, 0.0), 1e-6)
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.bits(), b.bits());
+        assert_ne!(a.bits(), c.bits());
+        assert_ne!(a.bits(), d.bits());
     }
 }

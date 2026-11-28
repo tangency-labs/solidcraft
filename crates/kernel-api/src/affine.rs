@@ -45,6 +45,14 @@ pub struct SquareFaceLevel {
 
 /// The placement maths of one kernel ([`crate::OpKind::Affine`]).
 pub trait Affine: Backend {
+    /// Signed volume scale of the linear part.
+    fn linear_determinant(&self, matrix: &Matrix) -> f64;
+    /// Unit direction with the input sense; none for a zero or non-finite direction.
+    fn directed_unit(&self, axis: [f64; 3]) -> Option<[f64; 3]>;
+    /// Point displaced by `by`, in the same frame.
+    fn translated_point(&self, point: [f64; 3], by: [f64; 3]) -> [f64; 3];
+    /// Axis and radians after applying the first turn, then the world-space turn.
+    fn compose_turn(&self, first: [f64; 3], radians: f64, world: [f64; 3], turn: f64) -> Option<([f64; 3], f64)>;
     /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
     /// line through `point` along it.
     fn rotation(&self, point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused>;
@@ -106,6 +114,12 @@ pub trait Affine: Backend {
     /// its bottom edge from `bl` to `br`, its top-left corner `top_left` when it may stretch, else
     /// `aspect` (height over width) times as high as wide. `None` for no area.
     fn rect_of_aspect(&self, bl: [f64; 2], br: [f64; 2], top_left: Option<[f64; 2]>, aspect: f64) -> Option<[[f64; 2]; 4]>;
+    /// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+    /// through `at` along the unit direction `dir`: tilted by the least turn that makes it
+    /// parallel to the line, then moved along its normal until it holds the line; a plane that
+    /// already holds it comes back unchanged. The new origin and axes; `None` for a number not
+    /// finite or a line square to the plane.
+    fn plane_onto_line(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])>;
     /// How a rectangle `aspect` times as high as wide fits a frame pinned at `bl`, `br` and `tl`:
     /// its width, and whether the frame stretches it. `None` for no area.
     fn fit_aspect(&self, bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)>;

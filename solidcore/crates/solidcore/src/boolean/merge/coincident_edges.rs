@@ -200,6 +200,7 @@ pub fn certified_line_gap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::primitive::api_curves as curves;
 
     fn line(a: Point3, b: Point3) -> Curve {
@@ -222,12 +223,12 @@ mod tests {
         let (r, deg) = (5.0_f64, 0.02_f64);
         let a = arc((5.0, 10.0), r, 0.0, deg);
         let end = Point3::new(
-            5.0 + r * deg.to_radians().cos(),
-            10.0 + r * deg.to_radians().sin(),
+            5.0 + r * det::cos(deg.to_radians()),
+            10.0 + r * det::sin(deg.to_radians()),
             0.0,
         );
         let l = line(Point3::new(10.0, 10.0, 0.0), end);
-        let sagitta = r * (1.0 - (deg.to_radians() / 2.0).cos());
+        let sagitta = r * (1.0 - det::cos(deg.to_radians() / 2.0));
         let d = certified_line_gap(&l, &whole(&l), &a, &whole(&a), false).unwrap();
         assert!(d >= sagitta, "{d} below the sagitta {sagitta}");
         assert!(d < 1e-5, "{d}");
@@ -254,7 +255,7 @@ mod tests {
     fn a_bowed_arc_and_its_chord_are_farther_than_the_sagitta() {
         let a = arc((0.0, 0.0), 1.0, 0.0, 90.0);
         let l = line(Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0));
-        let sagitta = 1.0 - (45.0_f64).to_radians().cos();
+        let sagitta = 1.0 - det::cos((45.0_f64).to_radians());
         let d = certified_line_gap(&l, &whole(&l), &a, &whole(&a), false).unwrap();
         assert!(d >= sagitta, "{d} below the sagitta {sagitta}");
         // reversed pairing of the ends is farther still

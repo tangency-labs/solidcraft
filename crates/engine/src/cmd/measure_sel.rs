@@ -760,7 +760,6 @@ fn spacing(cmd: &str, items: &[Item]) -> Result<Spacing> {
         solidcraft_kernel::points::SpacingPattern::Circle => SpacingPattern::Circle,
         solidcraft_kernel::points::SpacingPattern::None => SpacingPattern::None,
     };
-    let angle_pitch_deg = k.circle.as_ref().filter(|c| k.even && !c.angles_deg.is_empty()).map(|c| 360.0 / c.angles_deg.len() as f64);
     Ok(Spacing {
         pattern,
         order: k.order,
@@ -772,8 +771,8 @@ fn spacing(cmd: &str, items: &[Item]) -> Result<Spacing> {
         odd_gaps: k.odd_gaps,
         pcd: k.circle.as_ref().map(|c| c.diameter),
         pcd_center: k.circle.as_ref().map(|c| c.centre),
+        angle_pitch_deg: k.circle.as_ref().and_then(|c| c.angle_pitch_deg),
         angle_deg: k.circle.map(|c| c.angles_deg),
-        angle_pitch_deg,
     })
 }
 

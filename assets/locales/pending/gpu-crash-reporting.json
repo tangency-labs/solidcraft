@@ -1,0 +1,32 @@
+{
+  "en": {
+    "crash.kind_device_lost": "Graphics device lost",
+    "crash.graphics_retry_note": "The graphics failed on an earlier start. {api} often works where another graphics API fails; you can change this later in Preferences › Graphics.",
+    "crash.graphics_retry": "Start with {api}"
+  },
+  "ar": {
+    "crash.kind_device_lost": "فُقد جهاز الرسومات",
+    "crash.graphics_retry_note": "تعطّلت الرسومات في تشغيل سابق. غالبًا ما تعمل {api} حيث تفشل واجهة رسومات أخرى؛ يمكنك تغيير ذلك لاحقًا من التفضيلات › الرسومات.",
+    "crash.graphics_retry": "التشغيل باستخدام {api}"
+  },
+  "he": {
+    "crash.kind_device_lost": "התקן הגרפיקה אבד",
+    "crash.graphics_retry_note": "הגרפיקה נכשלה בהפעלה קודמת. {api} עובד לעתים קרובות כשממשק גרפי אחר נכשל; אפשר לשנות זאת בהמשך בהעדפות › גרפיקה.",
+    "crash.graphics_retry": "הפעלה עם {api}"
+  },
+  "ja": {
+    "crash.kind_device_lost": "グラフィックスデバイスが失われました",
+    "crash.graphics_retry_note": "以前の起動でグラフィックスが失敗しました。他のグラフィックス API が失敗する環境でも {api} は動作することがよくあります。この設定は後で［環境設定］›［グラフィックス］で変更できます。",
+    "crash.graphics_retry": "{api} で起動"
+  },
+  "vi": {
+    "crash.kind_device_lost": "Mất thiết bị đồ họa",
+    "crash.graphics_retry_note": "Đồ họa đã gặp lỗi ở lần khởi động trước. {api} thường hoạt động khi một API đồ họa khác bị lỗi; bạn có thể đổi lại sau trong Tùy chọn cài đặt › Đồ họa.",
+    "crash.graphics_retry": "Khởi động với {api}"
+  },
+  "zh": {
+    "crash.kind_device_lost": "图形设备丢失",
+    "crash.graphics_retry_note": "之前的一次启动中图形出现故障。在其他图形 API 失败的情况下，{api} 通常可以正常工作；之后可在“首选项 › 图形”中更改。",
+    "crash.graphics_retry": "使用 {api} 启动"
+  }
+}

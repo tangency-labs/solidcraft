@@ -802,7 +802,7 @@ impl<'a> Looks<'a> {
             return (None, None);
         }
         let color = own.and_then(rgb);
-        (color, Some(solidcraft_kernel::Paint { opacity: own.map_or(1.0, opacity), faces, name: own.and_then(named) }))
+        (color, Some(solidcraft_kernel::Paint { opacity: own.map_or(1.0, opacity), faces, name: own.and_then(named), layer: None }))
     }
 }
 mod design;

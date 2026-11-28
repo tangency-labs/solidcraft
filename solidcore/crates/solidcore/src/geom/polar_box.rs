@@ -73,6 +73,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos, Vec3};
+use crate::math::det;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// State of a [`PolarBox`] (`SmPolarBoxState`), ordered from most degenerate to most
@@ -293,15 +294,15 @@ impl PolarBox {
                 let a_min = self.domain.min();
                 let a_max = self.domain.max();
 
-                let ca1_min = a_min.x.cos();
-                let sa1_min = a_min.x.sin();
-                let ca2_min = a_min.y.cos();
-                let sa2_min = a_min.y.sin();
+                let ca1_min = det::cos(a_min.x);
+                let sa1_min = det::sin(a_min.x);
+                let ca2_min = det::cos(a_min.y);
+                let sa2_min = det::sin(a_min.y);
 
-                let ca1_max = a_max.x.cos();
-                let sa1_max = a_max.x.sin();
-                let ca2_max = a_max.y.cos();
-                let sa2_max = a_max.y.sin();
+                let ca1_max = det::cos(a_max.x);
+                let sa1_max = det::sin(a_max.x);
+                let ca2_max = det::cos(a_max.y);
+                let sa2_max = det::sin(a_max.y);
 
                 // normal of each great circle plane
                 let a1_min_norm = -sa1_min * b0 - ca1_min * b2;
@@ -521,7 +522,7 @@ impl PolarBox {
             PolarBoxState::Arc => {
                 // all vectors lie in the v0/v2 plane
                 let p = self.domain.evaluate(alpha, beta);
-                p.x.cos() * b0 - p.x.sin() * b2
+                det::cos(p.x) * b0 - det::sin(p.x) * b2
             }
             PolarBoxState::Region => {
                 // rebuild the vector from its projection angles onto the v0/v2
@@ -532,8 +533,8 @@ impl PolarBox {
                 // can differ from sin by 1 ulp. black_box keeps both halves of each pair
                 // in one block so LLVM fuses them too instead of sinking sin past the
                 // early return below (plan/findings.md, issue #357)
-                let (sa1, ca1) = core::hint::black_box(p.x.sin_cos());
-                let (sa2, ca2) = core::hint::black_box(p.y.sin_cos());
+                let (sa1, ca1) = core::hint::black_box(det::sin_cos(p.x));
+                let (sa2, ca2) = core::hint::black_box(det::sin_cos(p.y));
 
                 // no unique vector at 90 degrees
                 if ca1 <= EFF_ZERO || ca2 <= EFF_ZERO {
@@ -1000,8 +1001,8 @@ mod tests {
     }
 
     fn dir_from_polar(b0: Vec3, b1: Vec3, b2: Vec3, ax: f64, ay: f64) -> Vec3 {
-        let (sa1, ca1) = ax.sin_cos();
-        let (sa2, ca2) = ay.sin_cos();
+        let (sa1, ca1) = det::sin_cos(ax);
+        let (sa2, ca2) = det::sin_cos(ay);
         (ca1 * b0 - sa1 * b2 + sa2 * ca1 / ca2 * b1).unitize_or_z()
     }
 
@@ -1009,8 +1010,8 @@ mod tests {
     fn wr9_preset_basis_region_collapse_transposes_arc_domain() {
         let basis2 = v(0.0, 0.0, 1.0);
         let v0 = v(1.0, 0.0, 0.0);
-        let v1 = v(0.25_f64.cos(), 0.25_f64.sin(), 0.0);
-        let v2 = v((-0.15_f64).cos(), (-0.15_f64).sin(), 0.0);
+        let v1 = v(det::cos(0.25_f64), det::sin(0.25_f64), 0.0);
+        let v2 = v(det::cos(-0.15_f64), det::sin(-0.15_f64), 0.0);
 
         let mut b_fix = PolarBox::new();
         b_fix.add_vector(v0, Some(basis2));
@@ -1098,8 +1099,8 @@ mod tests {
     fn wr9_single_point_arc_region_collapse() {
         let v0 = v(1.0, 0.0, 0.0);
         let v1 = v(1.0, 0.0, 4.0e-7).unitize_or_z();
-        let v2 = v(0.30_f64.cos(), 0.30_f64.sin(), 0.0);
-        let v3 = v((-0.18_f64).cos(), (-0.18_f64).sin(), 0.0);
+        let v2 = v(det::cos(0.30_f64), det::sin(0.30_f64), 0.0);
+        let v3 = v(det::cos(-0.18_f64), det::sin(-0.18_f64), 0.0);
 
         let mut b_k_on = PolarBox::new();
         for w in [v0, v1, v2, v3] {

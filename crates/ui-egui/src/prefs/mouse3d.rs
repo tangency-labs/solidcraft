@@ -263,60 +263,106 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         let calibration = app.space_mouse.device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get(device));
         let meters: [_; 6] = std::array::from_fn(|axis| axis_meter(calibration, raw, app.preferences.space_mouse_axis_source, axis));
-        let columns = ui_kit::AxisColumns {
-            axis: solidcraft_ui_text::tr("prefs.axis"),
-            live_input: solidcraft_ui_text::tr("prefs.live_input"),
-            speed: solidcraft_ui_text::tr("prefs.speed"),
-            source: solidcraft_ui_text::tr("prefs.source"),
-        };
-        ui_kit::settings_axis_header(ui, &columns);
-        for (axis, (name, off)) in rows.iter().enumerate() {
-            ui.push_id(("space_mouse_axis", axis), |ui| {
-                let (value, zone) = meters[axis];
-                let prefs = &mut app.preferences;
-                let (reverse, speed, source) =
-                    (prefs.space_mouse_reverse.get_mut(axis), prefs.space_mouse_axis_speed.get_mut(axis), &mut prefs.space_mouse_axis_source);
-                ui_kit::settings_axis_row(
-                    ui,
-                    &columns,
-                    name,
-                    value,
-                    zone,
-                    // Invert and speed do nothing on a row the driver turns off. The motion choice
-                    // stays live, so a motion can still be swapped out of it.
-                    |ui| {
-                        ui.add_enabled_ui(enabled && !off, |ui| {
-                            if let Some(reverse) = reverse {
-                                ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Invert"), reverse);
-                            }
-                        });
-                    },
-                    |ui| {
-                        ui.add_enabled_ui(enabled && !off, |ui| {
-                            if let Some(speed) = speed {
-                                ui_kit::settings_axis_gain(ui, speed);
-                            }
-                        });
-                    },
-                    |ui| {
-                        ui.add_enabled_ui(enabled, |ui| {
-                            let current = source.get(axis).copied().unwrap_or(axis);
-                            let mut chosen = current;
-                            ui_kit::dropdown_menu(ui, ("sc_space_mouse_source", axis), motions.get(current).map_or("", String::as_str), |ui| {
-                                for (from, name) in motions.iter().enumerate() {
-                                    if ui_kit::list_picker(ui, name, name, chosen == from).clicked() {
-                                        chosen = from;
-                                    }
-                                }
-                            })
-                            .backing_on_hover_text(if *off { &off_tip } else { &driven_by });
-                            if chosen != current {
-                                crate::space_mouse::reassign(source, axis, chosen);
-                            }
-                        });
-                    },
-                );
-            });
+        let t = Tokens::get();
+        let columns = [
+            ui_kit::Column::new(solidcraft_ui_text::tr("prefs.axis"), 1.5).flex(),
+            ui_kit::Column::new(solidcraft_ui_text::tr("prefs.live_input"), 1.0).flex(),
+            ui_kit::Column::new(solidcraft_ui_text::tr_label("Invert"), 0.5).flex(),
+            ui_kit::Column::new(solidcraft_ui_text::tr("prefs.speed"), 0.0).min_content_width(t.space_24 * 2.0 + t.space_16),
+            ui_kit::Column::new(solidcraft_ui_text::tr("prefs.source"), 2.0).flex(),
+        ];
+        let mut shown = Vec::new();
+        ui_kit::table_fitted(ui, "space_mouse_axes", &columns, "", |ui, table| {
+            if !ui_kit::settings_search::suppress_chrome(ui) {
+                table.headers(ui, |_, _| false);
+            }
+            for (axis, (name, off)) in rows.iter().enumerate() {
+                ui.push_id(("space_mouse_axis", axis), |ui| {
+                    let (value, zone) = meters[axis];
+                    let prefs = &mut app.preferences;
+                    let (reverse, speed, source) =
+                        (prefs.space_mouse_reverse.get_mut(axis), prefs.space_mouse_axis_speed.get_mut(axis), &mut prefs.space_mouse_axis_source);
+                    ui_kit::settings_search::set_control(ui, name);
+                    let show = ui_kit::settings_search::visible(ui, &[name]);
+                    let draw = |ui: &mut egui::Ui| {
+                        table.row(ui, &axis.to_string(), false, |row| {
+                            row.cell(|ui| ui_kit::text(ui, name, ui_kit::Text::Cell));
+                            row.cell(|ui| {
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), t.space_14), egui::Sense::hover());
+                                ui_kit::live_axis_bar_in(ui, rect, value, zone);
+                            });
+                            // Invert and speed do nothing on a row the driver turns off. The motion choice
+                            // stays live, so a motion can still be swapped out of it.
+                            row.cell(|ui| {
+                                ui_kit::named_control(ui, name, |ui| {
+                                    ui.add_enabled_ui(enabled && !off, |ui| {
+                                        if let Some(reverse) = reverse {
+                                            let response =
+                                                ui_kit::checkbox(ui, "", reverse).backing_on_hover_text(solidcraft_ui_text::tr_label("Invert"));
+                                            response.widget_info(|| {
+                                                egui::WidgetInfo::selected(
+                                                    egui::Role::CheckBox,
+                                                    ui.is_enabled(),
+                                                    *reverse,
+                                                    solidcraft_ui_text::tr_label("Invert"),
+                                                )
+                                            });
+                                        }
+                                    });
+                                })
+                            });
+                            row.cell(|ui| {
+                                ui_kit::named_control(ui, name, |ui| {
+                                    ui.add_enabled_ui(enabled && !off, |ui| {
+                                        if let Some(speed) = speed {
+                                            ui_kit::settings_axis_gain(ui, speed);
+                                        }
+                                    });
+                                })
+                            });
+                            row.cell(|ui| {
+                                ui_kit::named_control(ui, name, |ui| {
+                                    ui.add_enabled_ui(enabled, |ui| {
+                                        let current = source.get(axis).copied().unwrap_or(axis);
+                                        let mut chosen = current;
+                                        ui_kit::dropdown_menu(
+                                            ui,
+                                            ("sc_space_mouse_source", axis),
+                                            motions.get(current).map_or("", String::as_str),
+                                            |ui| {
+                                                for (from, name) in motions.iter().enumerate() {
+                                                    if ui_kit::list_picker(ui, name, name, chosen == from).clicked() {
+                                                        chosen = from;
+                                                    }
+                                                }
+                                            },
+                                        )
+                                        .backing_on_hover_text(if *off { &off_tip } else { &driven_by });
+                                        if chosen != current {
+                                            crate::space_mouse::reassign(source, axis, chosen);
+                                        }
+                                    });
+                                })
+                            });
+                        })
+                    };
+                    if show {
+                        ui_kit::settings_search::push_passthrough(ui);
+                        let response = draw(ui);
+                        ui_kit::settings_search::pop_passthrough(ui);
+                        shown.push((name.clone(), response.rect));
+                    } else {
+                        ui_kit::settings_search::run_hidden(ui, name, draw);
+                        ui_kit::settings_search::recheck(ui, &[name]);
+                    }
+                });
+            }
+        });
+        for (name, rect) in shown {
+            ui_kit::settings_search::remember(ui, &name, rect);
+            ui_kit::settings_search::follow(ui, &name, rect);
+            crate::scenario::publish_rect(&format!("prefs:axis:{name}"), rect);
+            crate::scenario::publish_target(&format!("dialog:row:{name}"), rect);
         }
         ui_kit::row(ui, "", |ui| {
             let reassigned = app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES;

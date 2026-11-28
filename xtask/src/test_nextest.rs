@@ -3,9 +3,9 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cargo;
 
@@ -68,7 +68,23 @@ impl Prepared {
 
 pub fn run(side: Vec<(String, Command)>) -> Result<(), String> {
     let prepared = prepare()?;
-    execute(("nextest full workspace".into(), prepared.command()), side)
+    // Keep each JUnit report with its run's metadata so stale or concurrent runs cannot supply it.
+    let report = prepared.cargo_metadata.with_file_name("junit.xml");
+    let config = prepared.cargo_metadata.with_file_name("junit.toml");
+    let report_path = report.to_str().ok_or("nextest JUnit path is not UTF-8")?;
+    let path = toml::Value::String(report_path.into());
+    std::fs::write(&config, format!("[profile.local-ci.junit]\npath = {path}\n")).map_err(|e| format!("write {}: {e}", config.display()))?;
+    let mut overlay = OsString::from("solidcraft:");
+    overlay.push(config);
+    let mut native = prepared.command();
+    native.arg("--tool-config-file").arg(overlay);
+    execute(("nextest full workspace".into(), native), side, |status| {
+        // Nextest reserves exit code 100 for test failures. Setup failures and signals remain errors.
+        if status.code() != Some(100) {
+            check_status(status)?;
+        }
+        crate::known_failing::grade_report(&crate::root(), &report)
+    })
 }
 
 pub fn prepare() -> Result<Prepared, String> {
@@ -81,8 +97,11 @@ pub fn prepare() -> Result<Prepared, String> {
     let cargo_json = capture(metadata, "cargo metadata")?;
     let parsed: serde_json::Value = serde_json::from_slice(&cargo_json).map_err(|e| format!("Cargo metadata: {e}"))?;
     let target = parsed.get("target_directory").and_then(|v| v.as_str()).ok_or("Cargo metadata has no target_directory")?;
-    let dir = PathBuf::from(target).join("xtask-nextest").join(std::process::id().to_string());
+    let dir = PathBuf::from(target).join("xtask-nextest");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| format!("nextest run timestamp: {e}"))?;
+    let dir = dir.join(format!("{}-{}", std::process::id(), now.as_nanos()));
+    std::fs::create_dir(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let cargo_metadata = dir.join("cargo-metadata.json");
     std::fs::write(&cargo_metadata, cargo_json).map_err(|e| format!("write {}: {e}", cargo_metadata.display()))?;
     let mut build = cargo();
@@ -101,17 +120,21 @@ fn capture(mut c: Command, label: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Keep every gate running after failures, and stream native test names/times as they finish.
-pub fn execute(native: (String, Command), side: Vec<(String, Command)>) -> Result<(), String> {
+fn execute(
+    native: (String, Command),
+    side: Vec<(String, Command)>,
+    grade_native: impl FnOnce(ExitStatus) -> Result<(), String> + Send,
+) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
     let mut failures = Vec::new();
     std::thread::scope(|scope| {
         let tx_native = tx.clone();
         scope.spawn(move || {
-            let _ = tx_native.send(run_job(native));
+            let _ = tx_native.send(run_job(native, grade_native));
         });
         scope.spawn(move || {
             for job in side {
-                let _ = tx.send(run_job(job));
+                let _ = tx.send(run_job(job, check_status));
             }
         });
         for (label, result, seconds) in rx {
@@ -127,16 +150,119 @@ pub fn execute(native: (String, Command), side: Vec<(String, Command)>) -> Resul
     if failures.is_empty() { Ok(()) } else { Err(format!("failed: {}", failures.join(", "))) }
 }
 
-fn run_job((label, mut c): (String, Command)) -> (String, Result<(), String>, f64) {
+fn run_job((label, mut c): (String, Command), grade: impl FnOnce(ExitStatus) -> Result<(), String>) -> (String, Result<(), String>, f64) {
     let started = Instant::now();
-    let result = c.stdin(Stdio::null()).status().map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err(s.to_string()) });
+    let result = c.stdin(Stdio::null()).status().map_err(|e| e.to_string()).and_then(grade);
     (label, result, started.elapsed().as_secs_f64())
+}
+
+fn check_status(status: ExitStatus) -> Result<(), String> {
+    if status.success() { Ok(()) } else { Err(status.to_string()) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(unix)]
+    #[test]
+    fn local_ci_fixture() {
+        if std::env::var_os("SOLIDCRAFT_XTASK_NEXTEST_FIXTURE").is_some() {
+            run_selected(Vec::new()).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_ci_grades_the_nextest_report() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("solidcraft-xtask-nextest-junit-{}", std::process::id()));
+        let target = dir.join("build");
+        fs::create_dir_all(dir.join("tests")).unwrap();
+        fs::write(dir.join("tests/QUARANTINED_TESTS"), "").unwrap();
+        fs::write(dir.join("metadata.json"), serde_json::json!({"target_directory": target}).to_string()).unwrap();
+        let fake_cargo = dir.join("cargo");
+        fs::write(
+            &fake_cargo,
+            r#"#!/bin/sh
+set -eu
+case "$*" in
+  "nextest --version") echo "cargo-nextest fixture" ;;
+  "metadata "*) cat metadata.json ;;
+  "nextest list "*) echo '{}' ;;
+  "nextest "*)
+    run=
+    config=
+    for arg do
+      case "$arg" in
+        run) run=1 ;;
+        solidcraft:*) config=${arg#solidcraft:} ;;
+      esac
+    done
+    [ "$run" = 1 ]
+    report=build/nextest/local-ci/junit.xml
+    if [ -n "$config" ]; then
+      report=$(awk -F '"' '
+        /^\[profile\.local-ci\.junit\]/ { junit=1; next }
+        /^\[/ { junit=0 }
+        junit && /^[[:space:]]*path[[:space:]]*=/ { print $2; exit }
+      ' "$config")
+      [ -n "$report" ]
+    fi
+    touch nextest-ran
+    if [ -f report.xml ]; then
+      mkdir -p "$(dirname "$report")"
+      mv report.xml "$report"
+    fi
+    exit "$FIXTURE_NEXTEST_STATUS"
+    ;;
+  *) exit 2 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let failure = r#"<testcase name="case"><failure>fixture failure</failure></testcase>"#;
+        let pass = r#"<testcase name="case"/>"#;
+        let known = "fixture::case Synthetic tracked failure\n";
+        let cases = [
+            ("known failure", known, Some(failure), "100", true),
+            ("missing report after a previous failure", known, None, "100", false),
+            ("unlisted failure", "", Some(failure), "100", false),
+            ("fixed failure", known, Some(pass), "0", false),
+            ("ordinary pass", "", Some(pass), "0", true),
+            ("missing report after a previous pass", "", None, "0", false),
+            ("nextest error", known, Some(failure), "2", false),
+        ];
+        let mut results = Vec::new();
+        for (label, known, testcase, status, expected) in cases {
+            fs::write(dir.join("tests/KNOWN_FAILING_TESTS"), known).unwrap();
+            let report = dir.join("report.xml");
+            if let Some(testcase) = testcase {
+                fs::write(&report, format!(r#"<testsuites><testsuite name="fixture">{testcase}</testsuite></testsuites>"#)).unwrap();
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "test_nextest::tests::local_ci_fixture", "--nocapture"])
+                .env("SOLIDCRAFT_XTASK_NEXTEST_FIXTURE", "1")
+                .env("SOLIDCRAFT_TEST_RUNNER", "nextest")
+                .env("CARGO_MANIFEST_DIR", dir.join("xtask"))
+                .env("CARGO", &fake_cargo)
+                .env("FIXTURE_NEXTEST_STATUS", status)
+                .output()
+                .unwrap();
+            assert!(dir.join("nextest-ran").is_file(), "{label}: the fixture did not run nextest: {out:?}");
+            fs::remove_file(dir.join("nextest-ran")).unwrap();
+            results.push((label, expected, out));
+        }
+        fs::remove_dir_all(dir).unwrap();
+        for (label, expected, out) in results {
+            assert_eq!(out.status.success(), expected, "{label}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
 
     #[test]
     fn full_ci_does_not_drop_heavy_tests_stop_on_failure_or_retry_failures() {
@@ -215,6 +341,7 @@ mod tests {
             let result = execute(
                 ("native".into(), fixture(&native, native_fails)),
                 vec![("first".into(), fixture(&first, side_fails)), ("last".into(), fixture(&last, false))],
+                check_status,
             );
             assert_eq!(result, expected.map_or(Ok(()), |label| Err(format!("failed: {label}"))));
             assert!(native.is_file() && first.is_file() && last.is_file());

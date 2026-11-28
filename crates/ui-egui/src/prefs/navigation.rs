@@ -20,7 +20,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 /// The legend follows the runtime preset, ring ownership, wheel anchor and right-orbit switch.
-pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
+pub(crate) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     let chosen = |button: NavButton| nav_choice(&app.preferences, button);
     let row = |button: NavButton, keys: NavKeys, mode: NavMode| {
         let button = button_label(button);
@@ -159,7 +159,7 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
-        button_rows(app, ui, t);
+        button_rows(app, ui);
         crate::mouse_gesture::nav_rows(app, ui, t);
     });
 }
@@ -463,75 +463,113 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 
 /// One row per mouse button: what dragging it does, with an optional key held. The side buttons
 /// are here too; a plain click on one still goes Back.
-fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_inline_note(ui, app.tr("nav.buttons.help"));
     // The further buttons (6 and up) of a mouse with many have a row once they are mapped.
     let buttons: Vec<NavButton> = NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).collect();
-    let width = buttons.iter().map(|b| ui_kit::ContentWidth::label(ui, &button_label(*b))).fold(0.0, f32::max) + t.space_16 + t.space_4;
-    ui_kit::settings_form(ui, width, |ui| {
+    let actions = ["nav.buttons.as_preset", "nav.buttons.nothing", "prefs.gesture_orbit", "prefs.gesture_pan", "prefs.gesture_zoom"]
+        .map(solidcraft_ui_text::tr);
+    let keys = [solidcraft_ui_text::tr("nav.buttons.no_key"), solidcraft_ui_text::tr("prefs.shift"), "Ctrl/Cmd", "Alt/Option"];
+    let columns = [
+        ui_kit::Column::new(solidcraft_ui_text::tr("ui.3d_mouse_buttons"), 1.0)
+            .flex()
+            .min_content_width(buttons.iter().map(|b| ui_kit::ContentWidth::label(ui, &button_label(*b))).fold(0.0, f32::max)),
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Actions"), 1.5).flex().min_content_width(ui_kit::ContentWidth::dropdown(ui, &actions)),
+        ui_kit::Column::new(solidcraft_ui_text::tr("prefs.navigation.held_key"), 1.0)
+            .flex()
+            .min_content_width(ui_kit::ContentWidth::dropdown(ui, &keys)),
+    ];
+    let mut shown = Vec::new();
+    ui_kit::table_custom(ui, "nav_buttons", &columns, "", |ui, table| {
+        if !ui_kit::settings_search::suppress_chrome(ui) {
+            table.headers(ui, |_, _| false);
+        }
         for button in buttons {
-            ui_kit::row(ui, &button_label(button), |ui| {
-                let side = button.is_side();
-                let current = nav_choice(&app.preferences, button);
-                let action_text = match current {
-                    None => solidcraft_ui_text::tr(if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
-                    Some(NavChoice { mode: Some(NavMode::Orbit), .. }) => solidcraft_ui_text::tr("prefs.gesture_orbit"),
-                    Some(NavChoice { mode: Some(NavMode::Pan), .. }) => solidcraft_ui_text::tr("prefs.gesture_pan"),
-                    Some(NavChoice { mode: Some(NavMode::Zoom), .. }) => solidcraft_ui_text::tr("prefs.gesture_zoom"),
-                    Some(NavChoice { mode: None, .. }) => solidcraft_ui_text::tr("nav.buttons.nothing"),
-                };
-                let keys = current.map_or(NavKeys::NONE, |c| c.keys);
-                let mut next: Option<Option<NavChoice>> = None;
-                ui.horizontal(|ui| {
-                    ui_kit::settings_control_width(ui, t.space_24 * 8.0, |ui| {
-                        let response = ui_kit::dropdown_menu(ui, ("pref_nav_button", button.id()), action_text, |ui| {
-                            let options: [(Option<Option<NavMode>>, &str); 5] = [
-                                (None, if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
-                                (Some(Some(NavMode::Orbit)), "prefs.gesture_orbit"),
-                                (Some(Some(NavMode::Pan)), "prefs.gesture_pan"),
-                                (Some(Some(NavMode::Zoom)), "prefs.gesture_zoom"),
-                                (Some(None), "nav.buttons.nothing"),
-                            ];
-                            for (pick, label) in options {
-                                if side && pick == Some(None) {
-                                    continue;
-                                }
-                                let on = current.map(|c| c.mode) == pick;
-                                if ui_kit::list_picker(ui, label, solidcraft_ui_text::tr(label), on).clicked() {
-                                    next = Some(pick.map(|mode| NavChoice { keys, mode }));
-                                }
-                            }
-                        });
-                        crate::scenario::publish_target(&format!("prefs:nav_button:{}", button.id()), response.rect);
-                    });
-                    if current.is_some_and(|c| c.mode.is_some()) {
-                        let key_text = key_label(keys);
-                        ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
-                            let response = ui_kit::dropdown_menu(ui, ("pref_nav_button_keys", button.id()), &key_text, |ui| {
-                                for (pick, label) in [
-                                    (NavKeys::NONE, solidcraft_ui_text::tr("nav.buttons.no_key")),
-                                    (NavKeys { shift: true, ctrl: false, alt: false }, solidcraft_ui_text::tr("prefs.shift")),
-                                    (NavKeys { shift: false, ctrl: true, alt: false }, "Ctrl/Cmd"),
-                                    (NavKeys { shift: false, ctrl: false, alt: true }, "Alt/Option"),
-                                ] {
-                                    if ui_kit::list_picker(ui, label, label, keys == pick).clicked() {
-                                        next = current.map(|c| Some(NavChoice { keys: pick, ..c }));
+            let name = button_label(button);
+            ui_kit::settings_search::set_control(ui, &name);
+            let show = ui_kit::settings_search::visible(ui, &[&name]);
+            let draw = |ui: &mut egui::Ui| {
+                table.row(ui, button.id(), false, |row| {
+                    row.cell(|ui| ui_kit::text(ui, &name, ui_kit::Text::Cell));
+                    let side = button.is_side();
+                    let current = nav_choice(&app.preferences, button);
+                    let action_text = match current {
+                        None => solidcraft_ui_text::tr(if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
+                        Some(NavChoice { mode: Some(NavMode::Orbit), .. }) => solidcraft_ui_text::tr("prefs.gesture_orbit"),
+                        Some(NavChoice { mode: Some(NavMode::Pan), .. }) => solidcraft_ui_text::tr("prefs.gesture_pan"),
+                        Some(NavChoice { mode: Some(NavMode::Zoom), .. }) => solidcraft_ui_text::tr("prefs.gesture_zoom"),
+                        Some(NavChoice { mode: None, .. }) => solidcraft_ui_text::tr("nav.buttons.nothing"),
+                    };
+                    let keys = current.map_or(NavKeys::NONE, |c| c.keys);
+                    let mut next: Option<Option<NavChoice>> = None;
+                    row.cell(|ui| {
+                        ui_kit::named_control(ui, &name, |ui| {
+                            let response = ui_kit::dropdown_menu(ui, ("pref_nav_button", button.id()), action_text, |ui| {
+                                let options: [(Option<Option<NavMode>>, &str); 5] = [
+                                    (None, if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
+                                    (Some(Some(NavMode::Orbit)), "prefs.gesture_orbit"),
+                                    (Some(Some(NavMode::Pan)), "prefs.gesture_pan"),
+                                    (Some(Some(NavMode::Zoom)), "prefs.gesture_zoom"),
+                                    (Some(None), "nav.buttons.nothing"),
+                                ];
+                                for (pick, label) in options {
+                                    if side && pick == Some(None) {
+                                        continue;
+                                    }
+                                    let on = current.map(|c| c.mode) == pick;
+                                    if ui_kit::list_picker(ui, label, solidcraft_ui_text::tr(label), on).clicked() {
+                                        next = Some(pick.map(|mode| NavChoice { keys, mode }));
                                     }
                                 }
                             });
-                            crate::scenario::publish_target(&format!("prefs:nav_button_keys:{}", button.id()), response.rect);
-                        });
+                            crate::scenario::publish_target(&format!("prefs:nav_button:{}", button.id()), response.rect);
+                        })
+                    });
+                    row.cell(|ui| {
+                        ui_kit::named_control(ui, &name, |ui| {
+                            if current.is_some_and(|c| c.mode.is_some()) {
+                                let key_text = key_label(keys);
+                                let response = ui_kit::dropdown_menu(ui, ("pref_nav_button_keys", button.id()), &key_text, |ui| {
+                                    for (pick, label) in [
+                                        (NavKeys::NONE, solidcraft_ui_text::tr("nav.buttons.no_key")),
+                                        (NavKeys { shift: true, ctrl: false, alt: false }, solidcraft_ui_text::tr("prefs.shift")),
+                                        (NavKeys { shift: false, ctrl: true, alt: false }, "Ctrl/Cmd"),
+                                        (NavKeys { shift: false, ctrl: false, alt: true }, "Alt/Option"),
+                                    ] {
+                                        if ui_kit::list_picker(ui, label, label, keys == pick).clicked() {
+                                            next = current.map(|c| Some(NavChoice { keys: pick, ..c }));
+                                        }
+                                    }
+                                });
+                                crate::scenario::publish_target(&format!("prefs:nav_button_keys:{}", button.id()), response.rect);
+                            }
+                        })
+                    });
+                    if let Some(choice) = next {
+                        match choice {
+                            Some(choice) => app.preferences.nav_button_map.insert(button.id().to_owned(), choice.text()),
+                            None => app.preferences.nav_button_map.remove(button.id()),
+                        };
                     }
-                });
-                if let Some(choice) = next {
-                    match choice {
-                        Some(choice) => app.preferences.nav_button_map.insert(button.id().to_owned(), choice.text()),
-                        None => app.preferences.nav_button_map.remove(button.id()),
-                    };
-                }
-            });
+                })
+            };
+            if show {
+                ui_kit::settings_search::push_passthrough(ui);
+                let response = ui_kit::named_control(ui, &name, draw);
+                ui_kit::settings_search::pop_passthrough(ui);
+                shown.push((name, response.rect));
+            } else {
+                ui_kit::settings_search::run_hidden(ui, &name, draw);
+                ui_kit::settings_search::recheck(ui, &[&name]);
+            }
         }
     });
+    // Search reveals belong to the enclosing vertical scroller, outside the table's viewport.
+    for (name, rect) in shown {
+        ui_kit::settings_search::remember(ui, &name, rect);
+        ui_kit::settings_search::follow(ui, &name, rect);
+        crate::scenario::publish_target(&format!("dialog:row:{name}"), rect);
+    }
     let reset = ui_kit::button(ui, app.tr("nav.buttons.reset"), ui_kit::Button::Enabled(!app.preferences.nav_button_map.is_empty()));
     crate::scenario::publish_target("prefs:nav_button_reset", reset.rect);
     if reset.clicked() && !app.preferences.nav_button_map.is_empty() {

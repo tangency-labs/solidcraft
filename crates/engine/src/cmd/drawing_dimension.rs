@@ -11,8 +11,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status, TextPlace,
-    check_chain_length, check_set_targets,
+    Candidate, DEFAULT_DECIMALS, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status,
+    TextPlace, check_chain_length, check_set_targets,
 };
 use solidcraft_doc::drawing::line_maths::LineCoords;
 use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
@@ -51,8 +51,6 @@ const DEFAULT_OFFSET_MM: f64 = 10.0;
 const LOOK_PAST_MM: f64 = 0.5;
 /// How near the middle of a view's model box, in model mm, a line's middle is on it.
 const ON_CENTRE_MM: f64 = 1e-6;
-/// How many decimals a new dimension shows unless told.
-const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add)).begins_edit()
@@ -571,7 +569,11 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
 /// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
 /// or to the left ([`LineCoords::forward`]).
 fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
-    let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
+    let copy = (!s.pending_moves.is_empty()).then(|| crate::drawing_scene::designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let Ok(resolved) = crate::drawing_view::drawn_view(s, drawing, view) else { return 1.0 };
+    let all = crate::drawing_view::shown_by(&mut crate::drawing_view::ViewSessions::new(s), &resolved);
+    let Ok((shown, extents)) = crate::drawing_view::measured(&all, &resolved) else { return 1.0 };
     let basis = resolved.basis;
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
     let (a, b) = (basis.to_local(*first), basis.to_local(*last));
@@ -588,7 +590,7 @@ fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearD
         (true, false) => -1.0,
         (false, true) => 1.0,
         _ => {
-            let from_centre = crate::drawing_view::measure(&shown, &basis).map_or(0.0, |e| (middle - e.model.center()).dot(n));
+            let from_centre = (middle - extents.model.center()).dot(n);
             if from_centre < -ON_CENTRE_MM { -1.0 } else { 1.0 }
         }
     }

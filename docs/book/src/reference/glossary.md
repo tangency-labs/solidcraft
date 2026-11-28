@@ -130,6 +130,19 @@ chart often gives it for a 90° bend. Compare *bend allowance*.
 - **Elsewhere:** BD.
 - **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
 
+### bend offset
+
+The distance an edge flange's bend is moved out past where its bend position starts it.
+
+The panel the flange stands on grows by the strip between, and so does the flat. A negative bend
+offset moves the bend in.
+
+- **In SolidCraft:** the Flange dialog's Bend Offset; `sheet.flange`'s `offset` and the edge
+  flange feature's `offset` key.
+- **Don't use:** flange offset, bend shift.
+- **Elsewhere:** offset (of a flange position).
+- **For translators:** not an offset plane, not the Combine offset, and not a sketch offset.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -841,6 +854,22 @@ to each other keep a quarter, three an eighth. A section has at most six.
 - **Elsewhere:** section plane, cutting plane, clipping plane.
 - **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
   feature.
+
+### section stack
+
+A row of parallel planes through a mesh body, each with a sketch of the curves fitted to the
+mesh's section there, and optionally the slabs extruded between them.
+
+The planes run along one plane's normal at a set spacing; a plane that misses the mesh gets no
+sketch. The sketches and slabs are ordinary features in one timeline folder.
+
+- **In SolidCraft:** `mesh.section_stack` (`body`, `plane`, `from`, `to`, `spacing`,
+  `max_sections`, `extrude`, `name`); the Section Stack button under SURFACE › Convert.
+- **Don't use:** slice stack, X-ray (for the command), section sketch.
+- **Elsewhere:** mesh slicing, cross-section stack.
+- **For translators:** "section" is a cut through a mesh body that makes sketch geometry, not
+  a section plane of Section Analysis, which only changes the view; "slabs" are the solid layers
+  extruded between the planes.
 
 ### settings profile
 

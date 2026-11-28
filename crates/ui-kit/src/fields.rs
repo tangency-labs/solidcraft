@@ -1121,7 +1121,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     super::disclosure(painter, egui::pos2(rect.left() + t.form_inset + t.space_8 * 0.5, y), open, t.text_dim);
     let small = egui::FontId::proportional(t.font_small);
     let title = painter.layout_no_wrap(compact(&name.to_uppercase(), SEARCH_LABEL_CAP), small.clone(), t.text);
-    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0);
+    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &title));
     let title_width = title.size().x;
     painter.galley(title_pos, title, t.text);
     let number = painter.layout_no_wrap(count.to_string(), small, t.text_dim);
@@ -1132,7 +1132,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
         vec2(number.size().x + pad * 2.0, badge_height),
     );
     painter.rect_filled(badge, t.radius_sm, t.chip);
-    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0), number, t.text_dim);
+    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &number)), number, t.text_dim);
     let (rule_from, rule_to) = (badge.right() + t.space_8, rect.right() - t.form_inset);
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
@@ -1342,6 +1342,11 @@ pub fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&
 /// application handles. Tokens: dropdown tokens. Use `dropdown` for a simple indexed list.
 pub fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: impl FnOnce(&mut Ui)) -> Response {
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
+}
+
+/// Whether the dropdown with this salt currently has its value popup open.
+pub fn dropdown_is_open(ui: &Ui, id: impl egui::AsIdSalt) -> bool {
+    egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new(&id)))
 }
 
 /// A width-bounded toolbar picker. Long selected values and popup rows truncate;
@@ -1911,11 +1916,12 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
                                 if opening || button.clicked() || ui.is_sizing_pass() {
                                     response.request_focus();
                                 }
+                                let menu_was_open = crate::Menu::response_is_open(&response);
                                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                                 let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
                                     egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
                                 )));
-                                if response.has_focus() && enter {
+                                if response.has_focus() && enter && !menu_was_open {
                                     response.surrender_focus();
                                 }
                                 publish(ui, &response, egui::Role::TextInput);
@@ -1927,6 +1933,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             });
         response = shown.inner.with_new_rect(shown.response.rect);
         if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || crate::Menu::response_is_open(&response)
             || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
         {
             response.request_focus();
@@ -2130,7 +2137,9 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         // rectangle would flatten translucent/blurred parents. Unexpected painting
         // (including an invisible or clipped widget) keeps the native shapes intact.
         ui.ctx().graphics_mut(|graphics| {
-            let Some(list) = graphics.get_mut(layer) else { return };
+            let Some(list) = graphics.get_mut(layer) else {
+                return;
+            };
             let paint_end = list.next_idx();
             if paint_end.0.saturating_sub(paint_start.0) < 2 {
                 return;

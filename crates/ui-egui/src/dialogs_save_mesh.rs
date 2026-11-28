@@ -232,6 +232,10 @@ fn send_to_slicer(app: &mut SolveApp, params: Value) {
     let mut params = params;
     params["single_instance"] = json!(app.preferences.slicer_single_instance);
     params["wait"] = json!("return");
+    // The Send to Slicer file name preference names the file; empty, the command names it as before.
+    if let Some(name) = crate::export_name::sent(app, params["bodies"][0].as_str()) {
+        params["name"] = json!(name);
+    }
     let Ok(result) = app.run("file.send_to_slicer", params.clone()) else { return };
     if result.get("starting").is_none() {
         return report(app, &result);
@@ -351,7 +355,8 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
             let t = Tokens::get();
             ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.chip);
             let letter = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            ui.painter().text(
+            crate::ui_kit::paint_anchored(
+                ui.painter(),
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 letter,
@@ -620,7 +625,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             }
             paint_icon(ui, egui::Rect::from_min_size(rect.left_center() + vec2(3.0, -ICON / 2.0), vec2(ICON, ICON)), tex, &e.slicer.name);
             let text = fitted(ui, &e.slicer.name, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
-            let (elided, at) = (text.elided, rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0));
+            let rise = egui::galley_cap_ink_rise(ui.painter(), &text);
+            let (elided, at) = (text.elided, rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0 - rise));
             ui.painter().galley(at, text, Tokens::get().text);
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
@@ -644,7 +650,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 ui.painter().rect_filled(rect, 2.0, fill);
             }
             let text = fitted(ui, easyprint_label, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
-            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, Tokens::get().text);
+            let rise = egui::galley_cap_ink_rise(ui.painter(), &text);
+            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0 - rise), text, Tokens::get().text);
             crate::scenario::publish_handle("dialog:Slicer:EasyPrint", rect.center());
             if resp.clicked() {
                 chosen = Some(EASYPRINT.to_string());
@@ -662,7 +669,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         if resp.hovered() {
             ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, Tokens::get().hover);
         }
-        ui.painter().text(
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
             rect.left_center() + vec2(ICON + 9.0, 0.0),
             egui::Align2::LEFT_CENTER,
             solidcraft_ui_text::tr_label("Custom…"),
@@ -1436,6 +1444,57 @@ mod tests {
         h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
         h.app.preferences.export_name = "{part_number}_rev{revision}".into();
         assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl", "RV-102_revC.step"]);
+    }
+
+    /// The Send to Slicer file name preference names the file a slicer is sent. Left empty, the
+    /// default, no name is asked for and `file.send_to_slicer` names the file as before.
+    #[test]
+    fn the_slicer_file_name_preference_names_the_file_a_slicer_is_sent() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Base"})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        let name = |h: &crate::scenario::Harness| crate::export_name::sent(&h.app, Some("Base"));
+        assert_eq!(h.app.preferences.slicer_file_name, "", "empty by default");
+        assert_eq!(name(&h), None, "empty: the command names the file as before");
+        // The Export file name preference is for the save dialogs only.
+        h.app.preferences.export_name = "{design}".into();
+        assert_eq!(name(&h), None);
+
+        h.app.preferences.slicer_file_name = "{design}-{body}".into();
+        assert_eq!(name(&h).as_deref(), Some("Bracket-Base"));
+        h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
+        h.app.preferences.slicer_file_name = "{part_number}_rev{revision}".into();
+        assert_eq!(name(&h).as_deref(), Some("RV-102_revC"));
+        h.app.preferences.slicer_file_name = "///".into();
+        assert_eq!(name(&h), None, "nothing usable is left: the old name");
+
+        // Every name the preference makes is one `file.send_to_slicer` takes as `name`.
+        let long_device = format!("CON.{}", "🔧".repeat(59));
+        for template in
+            [" .{design}. ", "{design}/{body}:?", "CON", "nul.v2", &long_device, "a\tb", &"{design}".repeat(100), &"🔧".repeat(70), "..{body}"]
+        {
+            h.app.preferences.slicer_file_name = template.into();
+            let made = name(&h).unwrap_or_else(|| panic!("{template:?} makes a name"));
+            assert_eq!(solidcraft_engine::slicer_files::check_name(&made), Ok(()), "{template:?} gave {made:?}");
+        }
+    }
+
+    /// Send, as the Send to Slicer window runs it, writes the file under the preference's name
+    /// and hands that file to the slicer.
+    #[cfg(unix)]
+    #[test]
+    fn send_writes_the_file_under_the_name_the_preference_makes() {
+        let (mut app, seen, params) = app_with_fake_slicer("name");
+        app.session.doc_mut().name = "Bracket".into();
+        app.preferences.slicer_file_name = "{design}-{body}".into();
+        send_to_slicer(&mut app, params);
+        assert_eq!(sent(&seen), 1);
+        let file = std::path::PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
+        assert_eq!(file.file_name().unwrap(), "Bracket-Part.3mf");
+        assert!(std::fs::read(&file).unwrap().starts_with(b"PK"), "the file is written");
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(seen.parent().unwrap());
+        solidcraft_engine::slicers::set_chosen_programs(&[]);
     }
 
     /// A picked body of a multi-body design keeps its own name; selecting every body uses

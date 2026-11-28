@@ -66,6 +66,10 @@ impl PluginState {
             create: Box::new(move |_, _| Ok(Box::new(PluginController { id: id.clone(), state: state.clone() }))),
         }
     }
+    #[cfg(test)]
+    pub(super) fn queued_entries_for_test(&self) -> Vec<(String, model::EventKind, Option<String>)> {
+        self.0.borrow().actions.iter().map(|a| (a.entry.clone(), a.event.event, a.event.row.clone())).collect()
+    }
 }
 
 fn instance(panel: &PanelSnapshot) -> PanelResult<InstanceId> {
@@ -332,6 +336,7 @@ impl PanelController for PluginController {
             status: Some(solidcraft_ui_text::tr("ui.plugin_panel_badge").into()),
             attention: false,
             actions: Vec::new(),
+            menu_heading: None,
         }
     }
     fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {
@@ -491,7 +496,11 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
             });
             let row = selected.clone();
             ui.ctx().data_mut(|data| {
-                data.insert_temp(selected_id, selected.unwrap_or_default());
+                // Nothing selected stores nothing: an empty row id would have every press of the
+                // panel's buttons refused (#23395).
+                if let Some(selected) = selected {
+                    data.insert_temp(selected_id, selected);
+                }
                 data.insert_temp(panel_selection_id(panel), row);
             });
         }
@@ -548,7 +557,9 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
                                     if column_index == 0 && indent > 0 {
                                         ui.add_space(indent as f32 * TABLE_ROW_INDENT);
                                     }
-                                    ui.label(value_text(fields.get(&column.key), column.unit.as_deref(), units));
+                                    // Keep cell text non-selectable so clicks and double-clicks over
+                                    // cell labels reach `table.row`'s row interaction (#23396).
+                                    ui.add(egui::Label::new(value_text(fields.get(&column.key), column.unit.as_deref(), units)).selectable(false));
                                 });
                             }
                         });

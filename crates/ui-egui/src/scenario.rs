@@ -152,6 +152,11 @@ pub struct Harness {
     /// The pixels per point of the screen the window is on, as the platform reports it for each
     /// screen (none: not reported, and egui takes 1).
     pub screen_scale: Option<f32>,
+    /// The window does not have the platform's focus, as when a script drives the app while
+    /// another window is in front.
+    pub window_unfocused: bool,
+    /// `window_unfocused` as the last frame had it, to tell egui when it changes.
+    was_unfocused: bool,
     /// The camera as the last `camera` step left it.
     cam_mark: Option<solidcraft_viewport::Camera>,
 }
@@ -192,6 +197,8 @@ impl Harness {
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
             screen_scale: None,
+            window_unfocused: false,
+            was_unfocused: false,
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
@@ -269,12 +276,17 @@ impl Harness {
     }
 
     /// The next frame's input: the window's size on its screen, `events`, and the time a frame on.
-    fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
+    fn input(&mut self, mut events: Vec<egui::Event>) -> egui::RawInput {
         self.tick();
+        // A platform says when the focus changes; egui then lets go of held keys and modifiers.
+        if self.window_unfocused != self.was_unfocused {
+            self.was_unfocused = self.window_unfocused;
+            events.insert(0, egui::Event::WindowFocused(!self.window_unfocused));
+        }
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
-            focused: true,
+            focused: !self.window_unfocused,
             events,
             ..Default::default()
         };
@@ -430,6 +442,12 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let menu_action = self.output.accesskit_update.as_ref().is_some_and(|tree| {
+                tree.nodes.iter().any(|(_, node)| node.supports_action(egui::accesskit::Action::Click) && widget_centre(node) == Some(point))
+            });
+            if menu_action && crate::ui_kit::Menu::contains_point(&self.ctx, at) {
+                return Ok(point);
+            }
             let page = if self.app.prefs_window.shell.open {
                 rect_of("prefs:page_body")
             } else {

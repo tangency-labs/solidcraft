@@ -1582,7 +1582,7 @@ fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Ve
                 })
                 .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
                 .collect();
-            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None })) }
+            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None, layer: None })) }
         })
         .collect();
     Ok((bodies, holes_lost, notes))

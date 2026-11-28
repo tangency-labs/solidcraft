@@ -404,6 +404,90 @@ mod tests {
         assert!(!h.app.session.doc.features.iter().any(|f| f.id == f0), "Feature must be removed after confirmation");
     }
 
+    #[test]
+    fn repaints_reuse_history_until_the_design_changes() {
+        let mut h = Harness::new();
+        h.app.preferences.timeline_2d = true;
+        h.app.run("solid.box", json!({"name": "Base", "length": 10, "width": 10, "height": 10})).unwrap();
+        let base = h.app.session.doc.features[0].id;
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        h.frames(2);
+        assert_eq!(checked() - start, 1, "discover the box's tracks once");
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": base}]})).unwrap();
+        h.frames(3);
+        assert_eq!(checked() - start, 1, "selection and repaint reuse the analysis");
+
+        h.app.run("timeline.rename", json!({"feature": base, "name": "Frame"})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 2);
+        assert!(crate::scenario::handle_at("timeline_2d:Frame").is_some());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 3);
+        assert!(crate::scenario::handle_at("timeline_2d:Base").is_some());
+    }
+
+    #[test]
+    fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
+        let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+        let first = doc.features[0].clone();
+        for i in 1..256 {
+            doc.features.push(solidcraft_engine::doc::Feature { id: first.id + i, name: format!("Step {i}"), ..first.clone() });
+        }
+        h.frames(3);
+        assert!(panel_rect(&h, "history").is_some());
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_none());
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        let expand = HostPointerTarget::HeaderAction { instance: InstanceId("history".into()), action: ControlId("timeline-expand".into()) };
+        click_control(&mut h, &HostControlTarget::Pointer(expand));
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
+        assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
+
+        let uid = Some(h.app.session.uid);
+        let mut state = state::Timeline2DState::load_scoped(&h.ctx, uid);
+        state.scroll_x = 256.0 * canvas::COL_WIDTH;
+        state.store_scoped(&h.ctx, uid);
+        h.frame();
+        assert!(crate::scenario::handle_at("timeline_2d:Step 255").is_some());
+        assert!(checked() - start < 256, "jumping to the last columns must not analyze the intervening steps");
+    }
+
+    #[test]
+    fn component_tracks_keep_changed_and_removed_bodies_after_a_reorder() {
+        use std::sync::Arc;
+        let mut h = Harness::new();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            h.app.run("solid.box", json!({"name": name, "length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]})).unwrap();
+        }
+        let s = &mut h.app.session;
+        let previous = s.model.results[0].state.bodies[0].clone();
+        let current = s.model.results[1].state.bodies[1].clone();
+        let body = |source: &solidcraft_engine::doc::ModelBody, name: &str, owner| {
+            let mut b = source.clone();
+            b.name = name.into();
+            b.transferred = true;
+            b.component = owner;
+            b
+        };
+        // A saved state may have repeated names. A lookup by name still takes its first match.
+        Arc::make_mut(&mut s.model.results[0].state).bodies =
+            vec![body(&previous, "Gone", 1), body(&previous, "Moved", 2), body(&previous, "Same", 3)];
+        Arc::make_mut(&mut s.model.results[1].state).bodies =
+            vec![body(&previous, "Same", 3), body(&current, "Moved", 4), body(&previous, "Moved", 5), body(&previous, "New", 6)];
+        let f = &s.doc.features[1];
+        assert_eq!(canvas::feature_affected_components(&s.doc, Some(&s.model), f), [0, 1, 2, 4, 6]);
+        let (rows, _) = canvas::discover_component_tracks(&h.app);
+        assert_eq!(rows, [0, 1, 2, 3, 4, 6], "undeclared rows appear in first-use order across both steps");
+    }
+
     /// Verifies rendering of multi-component feature chips and vertical connector lines across tracks.
     #[test]
     fn test_multi_component_chips_and_connector() {

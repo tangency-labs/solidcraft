@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.palette_constraint_glyphs_selected_only": "Show constraint glyphs only for selected geometry"
+  },
+  "ar": {
+    "ui.palette_constraint_glyphs_selected_only": "إظهار رموز القيود للهندسة المحددة فقط"
+  },
+  "de": {
+    "ui.palette_constraint_glyphs_selected_only": "Zwangsbedingungssymbole nur für ausgewählte Geometrie anzeigen"
+  },
+  "he": {
+    "ui.palette_constraint_glyphs_selected_only": "הצגת סמלי אילוצים רק לגאומטריה שנבחרה"
+  },
+  "ja": {
+    "ui.palette_constraint_glyphs_selected_only": "選択した形状の拘束アイコンのみ表示"
+  },
+  "ko": {
+    "ui.palette_constraint_glyphs_selected_only": "선택한 형상에 연결된 구속조건 아이콘만 표시"
+  },
+  "vi": {
+    "ui.palette_constraint_glyphs_selected_only": "Chỉ hiện biểu tượng ràng buộc của hình học đã chọn"
+  },
+  "zh": {
+    "ui.palette_constraint_glyphs_selected_only": "只显示所选几何体的约束图标"
+  }
+}

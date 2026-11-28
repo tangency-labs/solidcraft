@@ -8,11 +8,14 @@
 //! The circle through three points is their circumcircle (Euclid, Elements IV.5), taken in the
 //! plane's own frame with one point at the origin and one on the x axis.
 //!
-//! Coordinates are finite within ±1e9; a call takes 2..=[`MAX_ITEMS`] items.
+//! Coordinates are finite within ±1e9; a call takes 2..=[`MAX_ITEMS`] items. Distances are
+//! compared to the kernel's zone tolerance for a model of the pattern's size
+//! ([`size_estimate_to_zone_tol_3d`]).
 
 use std::f64::consts::TAU;
 
 use crate::error::{Result, SolidError};
+use crate::geom::tol::size_estimate_to_zone_tol_3d;
 use crate::geom::vector3d::Vec3;
 
 /// The most items one call takes.
@@ -20,8 +23,6 @@ pub const MAX_ITEMS: usize = 64;
 const LIMIT: f64 = 1.0e9;
 /// How far from parallel two unit axes may be: the length of their cross product.
 const PARALLEL: f64 = 1.0e-6;
-/// The tolerance on a distance, as a share of the pattern's size (at least of 1).
-const RELATIVE_TOL: f64 = 1.0e-6;
 
 /// What the projected centres lie on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +44,8 @@ pub struct PitchCircle {
     pub centre: [f64; 3],
     /// The angle at the centre between neighbours, in degrees, one for each gap.
     pub angles_deg: Vec<f64>,
+    /// Where the gaps are even: the angle between neighbours, a whole turn shared among them.
+    pub angle_pitch_deg: Option<f64>,
 }
 
 /// The spacing of the items, see [`spacing`].
@@ -60,7 +63,7 @@ pub struct Spacing {
     pub gap_points: Vec<[[f64; 3]; 2]>,
     /// The distance from the first centre in `order` to the last.
     pub span: f64,
-    /// Whether every gap is the same, to within the tolerance.
+    /// Whether every gap is the same, to within the zone tolerance.
     pub even: bool,
     /// The gaps' mean where they are even; otherwise the gap most of the others equal (the
     /// smallest such where several tie), and none where no two gaps are the same.
@@ -176,11 +179,11 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
     }
     let mut axes = Vec::new();
     for (_, a) in items {
-        axes.push(
-            Vec3::from_array(*a)
-                .unitize()
-                .map_err(|_| refused("an axis has no direction"))?,
-        );
+        // Any length but zero has a direction, however short.
+        let (_, unit) = Vec3::from_array(*a)
+            .length_and_unit()
+            .ok_or_else(|| refused("an axis has no direction"))?;
+        axes.push(unit);
     }
     let (Some(normal), Some((origin, _))) = (axes.first().copied(), items.first()) else {
         return Err(refused("the spacing takes 2 to 64 round items"));
@@ -198,7 +201,11 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
     let Some((i, j, size)) = farthest(&points) else {
         return Err(refused("the spacing takes 2 to 64 round items"));
     };
-    let tol = RELATIVE_TOL * size.max(1.0);
+    // Two places are one where the kernel takes them for one in a model of the pattern's size:
+    // its zone tolerance (1e-5 for sizes from 0.5 to 500, growing with the square root of the
+    // size, not with the size). Centres that close share one centre, and a centre that far from
+    // a line or a circle is off it.
+    let tol = size_estimate_to_zone_tol_3d(size);
     let shared = points
         .iter()
         .enumerate()
@@ -241,8 +248,8 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
         let x0 = 0.5 * size;
         let y0 = (cx * cx + cy * cy - size * cx) / (2.0 * cy);
         let radius = x0.hypot(y0);
+        // The circle of centres within the limit can be larger than the limit.
         let on_circle = radius.is_finite()
-            && radius <= LIMIT
             && planar
                 .iter()
                 .all(|(x, y)| ((x - x0).hypot(y - y0) - radius).abs() <= tol);
@@ -268,6 +275,7 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
                 diameter: 2.0 * radius,
                 centre: (a + u * x0 + v * y0).to_array(),
                 angles_deg,
+                angle_pitch_deg: None,
             });
         }
     }
@@ -281,6 +289,9 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
         _ => 0.0,
     };
     let (even, pitch, odd_gaps) = pitch_of(&gaps, tol);
+    if let (true, Some(circle)) = (even, centre.as_mut()) {
+        circle.angle_pitch_deg = Some(360.0 / circle.angles_deg.len().max(1) as f64);
+    }
     Ok(Spacing {
         pattern,
         order,
@@ -383,6 +394,7 @@ mod tests {
         assert_eq!(s.gaps.len(), 6);
         assert!(s.gaps.iter().all(|g| close(*g, 40.0)));
         assert!(s.even && close(s.pitch.unwrap(), 40.0));
+        assert_eq!(c.angle_pitch_deg, Some(60.0));
     }
 
     #[test]
@@ -397,6 +409,44 @@ mod tests {
         assert!(close(c.angles_deg[3], 180.0) && close(c.diameter, 80.0));
         assert!(!s.even && close(s.pitch.unwrap(), 40.0));
         assert_eq!(s.odd_gaps, vec![3]);
+        assert_eq!(c.angle_pitch_deg, None);
+    }
+
+    #[test]
+    fn near_holes_on_a_long_row_are_not_one_centre() {
+        // Holes 1 apart on a row 2 000 000 long: a tolerance that grew with the row's length
+        // would take the first two for one hole.
+        let items: Vec<_> = [0.0, 1.0, 2.0e6]
+            .iter()
+            .map(|x| ([*x, 0.0, 0.0], Z))
+            .collect();
+        let s = spacing(&items).unwrap();
+        assert_eq!(s.pattern, Pattern::Line);
+        assert!(close(s.gaps[0], 1.0) && close(s.gaps[1], 1_999_999.0) && close(s.span, 2.0e6));
+        // The same centre twice is refused whatever the size.
+        assert!(spacing(&[([0.0; 3], Z), ([2.0e6, 0.0, 0.0], Z), ([0.0; 3], Z)]).is_err());
+    }
+
+    #[test]
+    fn a_short_axis_has_a_direction_and_a_circle_may_pass_the_coordinate_limit() {
+        let row = |axis: [f64; 3]| {
+            spacing(&[
+                ([0.0; 3], axis),
+                ([5.0, 0.0, 0.0], Z),
+                ([10.0, 0.0, 0.0], Z),
+            ])
+            .unwrap()
+        };
+        assert_eq!(row([0.0, 0.0, 5.0e-13]), row(Z));
+        // Four centres at the limit: their circle's radius is sqrt(2) times it.
+        let far = 1.0e9;
+        let corners = [[far, far], [-far, far], [-far, -far], [far, -far]];
+        let items: Vec<_> = corners.iter().map(|[x, y]| ([*x, *y, 0.0], Z)).collect();
+        let s = spacing(&items).unwrap();
+        assert_eq!(s.pattern, Pattern::Circle);
+        let c = s.circle.unwrap();
+        assert!((c.diameter - 2.0 * far * 2f64.sqrt()).abs() < 1e-3);
+        assert_eq!((s.even, c.angle_pitch_deg), (true, Some(90.0)));
     }
 
     #[test]

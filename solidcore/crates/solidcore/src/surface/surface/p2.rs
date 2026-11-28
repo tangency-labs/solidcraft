@@ -1311,9 +1311,22 @@ impl Surface {
     #[must_use]
     pub fn procedural_sweep(&self) -> Option<SweepRef<'_>> {
         match (self.definition.as_deref(), self.kind()) {
-            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) => {
+            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net))
+                if !sweep.is_label() =>
+            {
                 Some(SweepRef { sweep, net })
             }
+            _ => None,
+        }
+    }
+
+    /// The screw-swept wall's definition this B-spline net keeps, live or as its label only
+    /// ([`ProceduralSweep::is_label`]): what a record names the wall by. `None` for any other
+    /// surface.
+    #[must_use]
+    pub fn kept_sweep(&self) -> Option<&ProceduralSweep> {
+        match (self.definition.as_deref(), self.kind()) {
+            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(_)) => Some(sweep),
             _ => None,
         }
     }
@@ -2061,16 +2074,28 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
-        self.copy_and_add_analytics_of_kind(k)
+        self.copy_and_add_analytics_within(k, f64::INFINITY)
+    }
+
+    /// [`Surface::copy_and_add_analytics`], a B-spline made analytic only where the analytic
+    /// gives its points within `tol` too, a hard bound (`f64::INFINITY`: none)
+    /// ([`crate::nurbs::b_spline_surface::BSplineSurface::copy_and_add_analytics_within`],
+    /// not upstream, #22584).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::copy_and_add_analytics`].
+    pub fn copy_and_add_analytics_within(&self, k: &Kernel, tol: f64) -> Result<Self> {
+        self.copy_and_add_analytics_of_kind(k, tol)
             .map(|c| self.carry_definition(c))
     }
 
-    /// [`Surface::copy_and_add_analytics`] of the kind alone.
-    fn copy_and_add_analytics_of_kind(&self, k: &Kernel) -> Result<Self> {
+    /// [`Surface::copy_and_add_analytics_within`] of the kind alone.
+    fn copy_and_add_analytics_of_kind(&self, k: &Kernel, tol: f64) -> Result<Self> {
         self.check_evaluation_copy_depth(0)?;
         self.make_revolution_nurb_for_copy(k)?;
         match self.kind() {
-            SurfaceKind::BSpline(s) => s.copy_and_add_analytics(k),
+            SurfaceKind::BSpline(s) => s.copy_and_add_analytics_within(k, tol),
             // SmBSplineSurface::CopyAndAddAnalytics: not SmBSplineSurface_TYPE, so Copy
             SurfaceKind::ProceduralBlend(s) => Ok(Self::from(s.copy(k))),
             SurfaceKind::BallPatch(s) => Ok(Self::from(s.copy())),
@@ -3712,12 +3737,19 @@ impl Surface {
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
         // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
         // follow the motion is left behind: the net moves as it did without it.
+        // A sweep kept as its label only is left behind by a motion it cannot follow: the net
+        // moves exactly as a plain one does.
+        let label =
+            matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(s)) if s.is_label());
         let moved = match self.definition.as_deref() {
             Some(kept) if !kept.follows(scale) => Some(None),
             Some(kept) => {
                 let mut moved = kept.clone();
-                moved.transform(k, rotate_n_move, scale, depth)?;
-                Some(Some(Box::new(moved)))
+                match moved.transform(k, rotate_n_move, scale, depth) {
+                    Ok(()) => Some(Some(Box::new(moved))),
+                    Err(_) if label => Some(None),
+                    Err(e) => return Err(e),
+                }
             }
             None => None,
         };
@@ -3726,10 +3758,18 @@ impl Surface {
             self.definition = moved;
         }
         // a sweep's bound takes in the rounding of moving its net, as a blend's does
+        let mut drop_label = false;
         if let (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) =
             (self.definition.as_deref_mut(), &self.kind)
         {
-            sweep.add_motion_rounding(net)?;
+            match sweep.add_motion_rounding(net) {
+                Ok(()) => {}
+                Err(_) if label => drop_label = true,
+                Err(e) => return Err(e),
+            }
+        }
+        if drop_label {
+            self.definition = None;
         }
         Ok(())
     }
@@ -4246,7 +4286,15 @@ impl Surface {
                 intersect(k, s, uv_domain, p, other_uv_domain, tolerance)
             }
             (SurfaceKind::Plane(p), SurfaceKind::BSpline(s)) => {
-                intersect(k, s, other_uv_domain, p, uv_domain, tolerance)
+                intersect(k, s, other_uv_domain, p, uv_domain, tolerance).map(|opt| {
+                    opt.map(|mut section| {
+                        std::mem::swap(
+                            &mut section.surface1_uv_curves,
+                            &mut section.surface2_uv_curves,
+                        );
+                        section
+                    })
+                })
             }
             _ => Ok(None),
         };

@@ -66,64 +66,70 @@ fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() 
 }
 
 #[test]
-fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
+fn axis_gain_invert_and_source_fit_the_table_without_horizontal_scrolling() {
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
-        for width in [180.0, 280.0, 646.0] {
+        for width in [280.0, 420.0, 646.0] {
             let ctx = crate::test_support::context();
             let mut reverse = false;
             let mut gain = 1.0;
             let mut source = 0;
             let (mut inverted, mut speed, mut motion) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
-            let (mut invert_clip, mut speed_clip, mut source_clip) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
+            let (mut invert_cell, mut speed_cell, mut source_cell) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
             let output = crate::test_support::raw_frame(
                 &ctx,
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1200.0))), ..Default::default() },
                 |ui| {
                     scope(ui, |ui| {
                         ui.set_width(width);
-                        settings_axis_row(
-                            ui,
-                            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
-                            "Pan X",
-                            0.5,
-                            [0.2, 0.3],
-                            |ui| {
-                                inverted = checkbox(ui, "Invert", &mut reverse).rect;
-                                invert_clip = ui.clip_rect();
-                            },
-                            |ui| {
-                                speed = settings_axis_gain(ui, &mut gain).rect;
-                                speed_clip = ui.clip_rect();
-                            },
-                            |ui| {
-                                motion = dropdown(ui, "axis_containment", &mut source, &["Translation X", "Translation Y"]).rect;
-                                source_clip = ui.clip_rect();
-                            },
-                        );
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                        let columns = [
+                            Column::new("Axis", 1.5).flex(),
+                            Column::new("Live", 1.0).flex(),
+                            Column::new("Invert", 0.5).flex(),
+                            Column::new("Speed", 0.0).min_content_width(64.0),
+                            Column::new("Source", 2.0).flex(),
+                        ];
+                        table_fitted(ui, "axes", &columns, "", |ui, table| {
+                            table.headers(ui, |_, _| false);
+                            table.row(ui, "pan_x", false, |row| {
+                                row.cell(|ui| text(ui, "Pan X", Text::Cell));
+                                row.cell(|ui| {
+                                    let (rect, _) =
+                                        ui.allocate_exact_size(egui::vec2(ui.available_width(), Tokens::get().space_14), egui::Sense::hover());
+                                    live_axis_bar_in(ui, rect, 0.5, [0.2, 0.3]);
+                                });
+                                row.cell(|ui| {
+                                    inverted = checkbox(ui, "", &mut reverse).rect;
+                                    invert_cell = ui.max_rect();
+                                });
+                                row.cell(|ui| {
+                                    speed = settings_axis_gain(ui, &mut gain).rect;
+                                    speed_cell = ui.max_rect();
+                                });
+                                row.cell(|ui| {
+                                    motion = dropdown(ui, "axis_containment", &mut source, &["Translation X", "Translation Y"]).rect;
+                                    source_cell = ui.max_rect();
+                                });
+                            });
+                        });
                     });
                 },
             );
-            let row = registry::rect_of("prefs:axis:Pan X").unwrap();
+            let row = registry::rect_of("dialog:table:axes:pan_x").unwrap();
             let controls = [inverted, speed, motion];
             assert!(controls.into_iter().all(|control| row.expand(0.5).contains_rect(control)), "{width}: {controls:?} in {row:?}");
-            for (control, clip) in controls.into_iter().zip([invert_clip, speed_clip, source_clip]) {
-                assert!(clip.expand(0.5).contains_rect(control), "{width}: control {control:?} is clipped by {clip:?}");
+            for (control, cell) in controls.into_iter().zip([invert_cell, speed_cell, source_cell]) {
+                assert!(cell.expand(0.5).contains_rect(control), "{width}: control {control:?} escapes its cell {cell:?}");
             }
-            assert_eq!(row, registry::rect_of("dialog:control:Pan X").unwrap(), "paint bounds use the allocated row, not its centered cursor");
+            let viewport = registry::rect_of("dialog:table:axes:viewport").unwrap();
+            assert!(viewport.width() <= width);
+            assert!(row.width() <= viewport.width(), "axis columns fit the viewport at {width}");
+            assert!(registry::count_of("dialog:table:axes:content_width").unwrap() <= f64::from(viewport.width()) + 0.5);
             let mut bars = 0;
             for clipped in &output.shapes {
                 crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
-                    egui::Shape::Text(text) => {
-                        let painted = text.galley.rect.translate(text.pos.to_vec2());
-                        assert!(
-                            clipped.clip_rect.expand(1.0).contains_rect(painted),
-                            "{width}: text {} clipped at {painted:?} by {:?}",
-                            text.galley.text(),
-                            clipped.clip_rect
-                        );
-                    }
                     egui::Shape::Rect(rect)
                         if rect.fill == Tokens::get().dialog_rule && (rect.rect.height() - Tokens::get().space_14).abs() < 0.5 =>
                     {
@@ -196,6 +202,68 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn mouse_mapping_paints_a_headerless_card_and_keycaps_beside_the_figure() {
+    for dark in [false, true] {
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        let ctx = crate::test_support::context();
+        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            scope(ui, |ui| {
+                ui.set_width(646.0);
+                settings_mouse_mapping(
+                    ui,
+                    &[
+                        (vec!["Shift".into(), "Middle drag".into()], "Orbit".into()),
+                        (vec!["Wheel".into()], "Zoom toward the cursor".into()),
+                        (vec!["Left click".into()], "Select".into()),
+                    ],
+                    |_| {},
+                );
+            });
+        });
+        let viewport = registry::rect_of("dialog:table:mouse_mapping:viewport").unwrap();
+        let card = output
+            .shapes
+            .iter()
+            .find(|shape| {
+                matches!(&shape.shape, egui::Shape::Rect(rect)
+            if rect.fill == t.table_fill() && rect.rect.contains_rect(viewport))
+            })
+            .expect("the mapping table paints its card");
+        assert!(card.clip_rect.contains_rect(viewport), "the card is visible beside the picture: {card:?}");
+        assert!(
+            !output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
+            if rect.fill == t.text.gamma_multiply(0.08) && rect.rect.intersects(viewport))),
+            "no header band"
+        );
+        let first = registry::rect_of("dialog:table:mouse_mapping:0").unwrap();
+        assert!((first.top() - viewport.top()).abs() <= 0.5, "no space reserved for a header");
+        for index in 0..2 {
+            let row = registry::rect_of(&format!("dialog:table:mouse_mapping:{index}")).unwrap();
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment {points, ..}
+                if (points[0].y - row.bottom()).abs() <= 0.5 && (points[1].y - row.bottom()).abs() <= 0.5
+                    && points[0].x <= row.left() + 0.5 && points[1].x >= row.right() - 0.5)),
+                "shared separator after row {index}"
+            );
+        }
+        let input = registry::rect_of("dialog:table:mouse_mapping:0:cell:input").unwrap();
+        for key in ["Shift", "Middle drag"] {
+            let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == key).expect("individual keycap text");
+            let painted = text.galley.rect.translate(text.pos.to_vec2());
+            assert!(input.contains_rect(painted), "{key} stays inside the Input cell");
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
+                if rect.fill == t.dialog_footer && rect.rect.contains_rect(painted) && input.contains_rect(rect.rect))),
+                "{key} has a keycap"
+            );
+        }
+        let text: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
+        assert!(!text.contains(&"Input") && !text.contains(&"Action"));
+    }
 }
 
 #[test]

@@ -47,7 +47,7 @@ uint32_t blend(uint32_t h, const void* edges, size_t count, double value, const 
 
 // --- module -----------------------------------------------------------------
 
-API uint32_t occt_abi_version() { return 3; }
+API uint32_t occt_abi_version() { return 10; }
 API const char* occt_library_version_ptr() { return OCC_VERSION_STRING_EXT; }
 API size_t occt_library_version_len() { return std::strlen(OCC_VERSION_STRING_EXT); }
 API const char* occt_last_error_ptr() { return last_error().c_str(); }

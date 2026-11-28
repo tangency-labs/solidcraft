@@ -78,7 +78,9 @@ pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
+pub(crate) mod proved_trim;
 pub mod rollover;
+pub mod section_mitre;
 pub mod separate_ends;
 pub mod setback;
 pub mod support_ball;
@@ -639,7 +641,7 @@ fn foot_step(
 /// `sm_FootOnSurface`: the point of `surface` nearest `point` (on it), from the guess
 /// `uv`: Newton on the foot's normal equations, to rounding. `None` where it does not
 /// converge in 40 steps (or the normal equations are singular).
-fn foot_on_surface(
+pub(crate) fn foot_on_surface(
     k: &Kernel,
     surface: &Surface,
     point: Point3,

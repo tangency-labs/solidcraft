@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: DXF, ASCII or (by `path`) binary (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
@@ -95,7 +95,7 @@ fn source_text(p: &Value, cmd: &str, svg: bool) -> Result<String> {
     if svg {
         return solidcraft_io::decode_svg(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()));
     }
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    solidcraft_io::dxf_text_from_bytes(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()))
 }
 
 /// A problem with the drawing file's contents (not with the command's parameters), named after
@@ -1608,6 +1608,37 @@ EOF
         let r = s.execute("sketch.insert_svg", &json!({"path": utf16.to_string_lossy()})).unwrap();
         assert_eq!(r["curves"], 4, "{r}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A binary DXF file inserts like its ASCII twin: here one 10 mm line, written with the
+    /// two-byte group codes of release 13 and later (DXF reference, "Binary DXF Files").
+    #[test]
+    fn a_binary_dxf_file_inserts_its_drawing() {
+        let mut bytes = b"AutoCAD Binary DXF\r\n\x1a\0".to_vec();
+        let text = |b: &mut Vec<u8>, code: i16, v: &str| {
+            b.extend(code.to_le_bytes());
+            b.extend(v.as_bytes());
+            b.push(0);
+        };
+        let double = |b: &mut Vec<u8>, code: i16, v: f64| {
+            b.extend(code.to_le_bytes());
+            b.extend(v.to_le_bytes());
+        };
+        for (code, v) in [(0, "SECTION"), (2, "ENTITIES"), (0, "LINE"), (8, "0")] {
+            text(&mut bytes, code, v);
+        }
+        for (code, v) in [(10, 0.0), (20, 0.0), (11, 10.0), (21, 0.0)] {
+            double(&mut bytes, code, v);
+        }
+        for (code, v) in [(0, "ENDSEC"), (0, "EOF")] {
+            text(&mut bytes, code, v);
+        }
+        let file = std::env::temp_dir().join(format!("solidcraft-binary-dxf-{}.dxf", std::process::id()));
+        std::fs::write(&file, &bytes).unwrap();
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &json!({"path": file.to_string_lossy()}));
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(r.unwrap()["curves"], 1);
     }
 
     /// #8155: an elliptical arc of a DXF (as Fusion writes one) comes into the sketch as exact

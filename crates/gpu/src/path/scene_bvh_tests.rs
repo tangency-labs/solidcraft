@@ -28,6 +28,7 @@ fn decades(count: usize) -> Vec<Triangle> {
                 transmission: None,
                 medium: 0,
                 scalar_face: false,
+                flakes: 0,
             }
         })
         .collect()
@@ -50,7 +51,7 @@ fn sphere_triangles(rows: u32, columns: u32) -> Vec<Triangle> {
             let b = a + columns + 1;
             for idx in [[a, b, a + 1], [a + 1, b, b + 1]] {
                 let p = idx.map(|k| positions[k as usize]);
-                triangles.push(Triangle { p, indices: idx, surface, transmission: None, medium: 1, scalar_face: false });
+                triangles.push(Triangle { p, indices: idx, surface, transmission: None, medium: 1, scalar_face: false, flakes: 0 });
             }
         }
     }
@@ -89,6 +90,7 @@ fn clone_triangles(src: &[Triangle]) -> Vec<Triangle> {
             transmission: t.transmission,
             medium: t.medium,
             scalar_face: t.scalar_face,
+            flakes: t.flakes,
         })
         .collect()
 }

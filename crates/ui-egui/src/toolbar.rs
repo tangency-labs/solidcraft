@@ -338,7 +338,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             }
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left());
+                d.insert_temp(egui::Id::unique("sc_file_menu_anchor"), out.file);
+            });
             let editing = customizing;
             if editing {
                 out.actions.clear();
@@ -696,9 +699,13 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let rows = file_rows(app);
     let at = pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::unique("sc_file_menu_x"))).unwrap_or(100.0), APP_BAR_HEIGHT);
     let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_file_menu_opened"))) == Some(ctx.cumulative_pass_nr());
-    let out = app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_file_area"), just_opened);
-    if let Some(chosen) = out.chosen {
-        run_file_row(app, &chosen);
+    let anchor = ctx
+        .data(|data| data.get_temp::<Rect>(egui::Id::unique("sc_file_menu_anchor")))
+        .filter(|rect| rect.is_finite() && rect.is_positive())
+        .map_or(crate::ui_kit::MenuAnchor::Point(at), crate::ui_kit::MenuAnchor::Rect);
+    let out = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_file_area"), anchor, &rows, just_opened);
+    if let Some(chosen) = out.picked {
+        run_file_row(app, &chosen.id);
     }
     if out.close {
         ctx.data_mut(|d| d.insert_temp(id, false));
@@ -706,14 +713,13 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The File menu's rows, each named by what it runs ([`run_file_row`]).
-pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
-    use app_bar::{FileItem, FileRow};
-    let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
-        FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
-    };
-    let button = |id: &str, label: &str, icon: &str, tip: Option<&str>| FileRow::Button {
-        item: FileItem { id: id.to_string(), label: label.to_string(), key: String::new(), icon: icon.to_string(), enabled: true },
-        tip: tip.map(str::to_string),
+pub(crate) fn file_rows(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
+    let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| Item::action(id, label, icon).key(key).on_if(enabled);
+    let button = |id: &str, label: &str, icon: &str, tip: Option<&str>| {
+        let mut item = Item::action(id, label, icon);
+        item.tip = tip.map(str::to_string);
+        item
     };
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
@@ -721,7 +727,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // The icon `drawing.create` itself uses.
     rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
-    let mut recent: Vec<FileRow> = app
+    let mut recent: Vec<Item> = app
         .home
         .recent
         .iter()
@@ -732,74 +738,119 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
             button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
-    recent.push(FileRow::Separator);
+    recent.push(Item::sep());
     recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
-    rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
-    rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
-    rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
-    rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
-    rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
+    rows.push(Item::submenu("file.open_recent", app.tr("ui.open_recent"), "open", recent));
+    if app.services.browser_files.is_some() {
+        rows.push(row("browser_files", app.tr("file_menu.browser_files"), "", "open", true));
+    }
+    rows.push(Item::sep());
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
-    // Save As shows the shortcut of the command it runs, from the app's own registry.
-    let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
-    rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
+    rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &key("file.save_as"), "save", shown));
     rows.push(row("revert", app.tr("ui.revert_to_saved"), "", "open", shown && app.session.path.is_some()));
-    rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
-    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
-    // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
         rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
     }
-    if app.services.browser_files.is_some() {
-        rows.push(row("browser_files", "Files in this browser…", "", "open", true));
+    rows.push(Item::sep());
+    let sub = |id: &str, label: &str, icon: &str, rows| Item::submenu(id, label, icon, rows);
+    rows.push(sub(
+        "file.menu.insert",
+        app.tr("file_menu.insert"),
+        "import",
+        vec![
+            row("component.insert_design", app.tr("file_menu.design"), "", "component", shown),
+            row("file.insert_step", app.tr("file_menu.step"), &key("file.insert_step"), "import", shown),
+            row("file.insert_mesh", app.tr("file_menu.mesh_file"), &key("file.insert_mesh"), "mesh_import", shown),
+            row("pointcloud.insert", app.tr("file_menu.point_cloud"), &key("pointcloud.insert"), "import", shown),
+        ],
+    ));
+    let mut exports = vec![
+        sub(
+            "file.menu.cad_2d",
+            app.tr("file_menu.cad_2d"),
+            "export",
+            vec![
+                row("file.export_step", app.tr("file_menu.step"), &key("file.export_step"), "export", shown),
+                row("file.export_view_dxf", app.tr("file_menu.view_dxf"), &key("file.export_view_dxf"), "export", shown),
+            ],
+        ),
+        sub(
+            "file.menu.mesh",
+            app.tr("file_menu.mesh"),
+            "mesh_export",
+            vec![
+                row("file.export_3mf", app.tr("file_menu.3mf"), &key("file.export_3mf"), "mesh_export", shown),
+                row("file.export_stl", app.tr("file_menu.stl"), &key("file.export_stl"), "mesh_export", shown),
+                row("file.export_obj", app.tr("file_menu.obj"), &key("file.export_obj"), "mesh_export", shown),
+            ],
+        ),
+        sub(
+            "file.menu.scene",
+            app.tr("file_menu.scene"),
+            "export",
+            vec![
+                row("export_glb", app.tr("file_menu.glb"), "", "export", shown),
+                row("export_usd", app.tr("file_menu.openusd"), "", "export", shown),
+            ],
+        ),
+        sub(
+            "file.menu.simulation",
+            app.tr("file_menu.simulation"),
+            "export",
+            vec![
+                row("file.export_urdf", app.tr("file_menu.urdf"), &key("file.export_urdf"), "export", shown),
+                row("file.export_mjcf", app.tr("file_menu.mjcf"), &key("file.export_mjcf"), "export", shown),
+                row("file.export_sdf", app.tr("file_menu.sdf"), &key("file.export_sdf"), "export", shown),
+            ],
+        ),
+        Item::sep(),
+        row("export_json", app.tr("file_menu.design_json"), "", "export", shown),
+    ];
+    let plugin_exports = crate::plugin_slots::export_slots(app)
+        .into_iter()
+        .map(|(format, label)| row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown))
+        .collect::<Vec<_>>();
+    if !plugin_exports.is_empty() {
+        exports.push(sub("file.menu.additional_formats", app.tr("file_menu.additional_formats"), "export", plugin_exports));
     }
-    rows.push(FileRow::Separator);
-    // Each format's item runs its own command, so it shows that command's key.
-    let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
-    rows.push(row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown));
-    rows.push(row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown));
-    rows.push(row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
-    rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
-    rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
-    rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
-    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
-    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
-    rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
-    rows.push(row("file.export_mjcf", app.tr_label("Export MJCF…"), &key("file.export_mjcf"), "export", shown));
-    rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
-    rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
-    // Each installed export slot is a format of its own, labelled with the plugin's name.
-    for (format, label) in crate::plugin_slots::export_slots(app) {
-        rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
-    }
-    // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
+    rows.push(sub("file.menu.export", app.tr("file_menu.export"), "export", exports));
+    rows.push(row(
+        "file.send_to_slicer",
+        app.tr("cmd.file_send_to_slicer"),
+        &key("file.send_to_slicer"),
+        "mesh_export",
+        shown && crate::dialogs_save_mesh::available(app),
+    ));
+    // Print stays directly accessible when a drawing is open.
     if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
         rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
     }
-    rows.push(FileRow::Separator);
+    rows.push(Item::sep());
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
-    rows.push(FileRow::Separator);
-    // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
-    // there. The web build runs no plugins.
+    rows.push(row("file.verify", app.tr("cmd.file.verify"), &key("file.verify"), "shield", shown && app.session.path.is_some()));
+    rows.push(Item::sep());
+    let mut settings = vec![
+        row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true),
+        row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true),
+        row("ui.appBarCustomize", app.tr("cmd.ui.appBarCustomize"), "", "settings", true),
+    ];
     if !cfg!(target_arch = "wasm32") {
-        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
-        rows.push(FileRow::Separator);
+        settings.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
     }
-    // The browser can install SolidCraft as an app (`install`): only while it offers to.
-    if crate::install::offered(app).is_some() {
-        rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
-    }
-    rows.push(row("ui.appBarCustomize", app.tr("cmd.ui.appBarCustomize"), "", "settings", true));
-    rows.push(row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true));
-    rows.push(row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true));
-    rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
+    rows.push(sub("file.menu.settings", app.tr("file_menu.settings"), "settings", settings));
     let entries = crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File"));
     if !entries.is_empty() {
-        rows.push(FileRow::Separator);
+        rows.push(Item::sep());
     }
     for item in entries {
         rows.push(row(&item.command, &item.label, "", &item.icon, shown || item.importer));
     }
+    rows.push(Item::sep());
+    if crate::install::offered(app).is_some() {
+        rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
+    }
+    rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
     rows
 }
 
@@ -1564,17 +1615,6 @@ impl PanelButton {
     }
 }
 
-/// A row of a panel in the » menu.
-struct PanelMoreRow {
-    id: &'static str,
-    label: &'static str,
-    icon: &'static str,
-    shortcut: String,
-    enabled: bool,
-    checked: Option<bool>,
-    hint: Option<String>,
-}
-
 /// One panel of the tab as the ribbon component's group.
 struct Panel {
     panel: &'static str,
@@ -1588,7 +1628,7 @@ struct Panel {
     open: bool,
     large: Vec<PanelButton>,
     gallery: Vec<PanelButton>,
-    more: Vec<PanelMoreRow>,
+    more: Vec<ui_kit::Item>,
 }
 
 /// The ribbon's Plugins group (Model tab): commands and explicitly declared plugin menus.
@@ -1692,15 +1732,12 @@ impl RibbonPanels {
                         let info = crate::render_workspace::interactive_command_info(app, c);
                         let checked =
                             (persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed).then(|| persistent_pressed(app, c.id));
-                        PanelMoreRow {
-                            id: c.id,
-                            label: info.label,
-                            icon: info.icon,
-                            shortcut: crate::keymap::display_for(app, c.id).unwrap_or_default(),
-                            enabled: can_start(app, c),
-                            checked,
-                            hint: persistent_hint(app, c, info.enabled),
-                        }
+                        let mut item = ui_kit::Item::action(c.id, info.label, info.icon)
+                            .key(&crate::keymap::display_for(app, c.id).unwrap_or_default())
+                            .on_if(can_start(app, c));
+                        item.checked = checked;
+                        item.tip = persistent_hint(app, c, info.enabled);
+                        item
                     })
                     .collect();
                 // Per tab: panels of the same name on other tabs (MODIFY, CREATE…) list other
@@ -1767,19 +1804,7 @@ impl RibbonPanels {
                     enabled: p.enabled,
                     open: p.open,
                     running: self.running.as_deref(),
-                    more: p
-                        .more
-                        .iter()
-                        .map(|m| ribbon::MoreRow {
-                            id: m.id,
-                            label: m.label,
-                            icon: m.icon,
-                            shortcut: &m.shortcut,
-                            enabled: m.enabled,
-                            checked: m.checked,
-                            hint: m.hint.as_deref(),
-                        })
-                        .collect(),
+                    more: p.more.clone(),
                 })
                 .chain(self.plugins.iter().map(|g| {
                     let button = |(b, size): (&'a crate::plugin_menu::RibbonButton, &ButtonSize)| ribbon::Button {
@@ -1818,14 +1843,10 @@ impl RibbonPanels {
                         more: g
                             .buttons
                             .iter()
-                            .map(|b| ribbon::MoreRow {
-                                id: &b.id,
-                                label: &b.label,
-                                icon: &b.icon,
-                                shortcut: "",
-                                enabled: true,
-                                checked: None,
-                                hint: Some(&b.name),
+                            .map(|b| {
+                                let mut item = ui_kit::Item::action(&b.id, &b.label, &b.icon);
+                                item.tip = Some(b.name.clone());
+                                item
                             })
                             .collect(),
                     }
@@ -2006,13 +2027,13 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         // A command's menu to open, and whether the drop-down stays open under it (its ⋯).
         let mut menu: Option<(egui::Pos2, &'static str, bool)> = None;
         // A drop-down row's pin icon clicked: pin or unpin that command.
-        let mut toggle: Option<&'static str> = None;
         // A command dragged to another place in its own drop-down: (panel, command, before).
         let mut menu_move: Option<(&'static str, &'static str, Option<&'static str>)> = None;
         // The open drop-down (a button dropped on it leaves the toolbar).
         let mut popup_rect: Option<Rect> = None;
         // Search can draw a preview of its own. Only the open panel menu follows the pointer.
         let mut open_panel_menu = None;
+        let mut open_panel_pointer_inside = None;
         let mut hovered_panel_menu = None;
         let follow_panel_hover = app.preferences.ribbon_menus_follow_hover
             && ui.input(|i| {
@@ -2071,20 +2092,18 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             row.groups.push(finish);
         }
         let mut out = {
-            let mut more_rows = |ui: &mut egui::Ui, group: usize| {
-                let Some((panel, cmds, shown)) = panels.panel_index(group).and_then(|i| lists.get(i)) else { return false };
-                if tab == "SKETCH" && *panel == "CREATE" {
-                    let cmds = menu_commands(cmds, shown);
-                    sketch_create_menu(app, ui, &cmds, dropdown_width(app, ui, &cmds), &mut menu, &mut toggle);
-                    return true;
-                }
-                if *panel == "SELECT" {
-                    selection_filter(app, ui);
-                }
-                false
+            let mut more_items = |group: usize| {
+                let original = crate::plugin_slots::original_group_index(group, builtin_groups, plugin_groups.len(), panels.exit);
+                let (panel, cmds, shown) = panels.panel_index(original).and_then(|index| lists.get(index))?;
+                Some(command_menu_items(app, &tab, panel, &menu_commands(cmds, shown)))
             };
-            ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_rows)
+            ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_items)
         };
+        record_command_menu_rows(app, ui, &out.menu_rows);
+        for picked in std::mem::take(&mut out.menu_picked) {
+            let rect = out.menu_rows.iter().find(|(item, _)| item == &picked).map(|(_, response)| response.rect);
+            dispatch_command_menu(app, &picked, rect);
+        }
         crate::plugin_slots::restore_group_indices(&mut out, builtin_groups, plugin_groups.len(), panels.exit);
         // The app's part of each button: its hover text, drags, the search's preview, deferred
         // persistent paint and a family's variants menu.
@@ -2129,12 +2148,14 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let _ = ribbon_tooltip(app, resp.clone(), b.selected, b.disabled.as_deref());
             }
             if let (Some(arrow), Some(f)) = (&d.split, b.family) {
-                Container::new(ui.ctx(), Surface::Popup).menu(arrow).show(|ui| {
-                    let variants: Vec<_> = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
-                    dropdown_keys(app, ui, &variants);
-                    let width = dropdown_width(app, ui, &variants);
-                    sketch_menu_rows(app, ui, &variants, width, &mut menu, &mut toggle);
-                });
+                let variants = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect::<Vec<_>>();
+                let items = command_items(app, &variants);
+                let output = ui_kit::Menu::button_items_output(arrow, &items);
+                record_command_menu_rows(app, ui, &output.rows);
+                if let Some(picked) = output.picked {
+                    let rect = output.rows.iter().find(|(item, _)| item.id == picked.id).map(|(_, row)| row.rect);
+                    dispatch_command_menu(app, &picked, rect);
+                }
             }
         }
         // What was chosen on the row, in order.
@@ -2236,7 +2257,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let popup_id = data.popup_id;
-            let (collapsed, trimmed, lr, lresp) = (g.collapsed, g.trimmed, g.label, &g.label_response);
+            let (collapsed, trimmed, lr) = (g.collapsed, g.trimmed, g.label);
             let opened = opened.contains(&g.group);
             if follow_panel_hover && g.hot {
                 hovered_panel_menu = Some(popup_id);
@@ -2251,131 +2272,38 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             if open || previewed {
                 let cmds = if collapsed || trimmed { menu_commands(cmds, shown) } else { cmds.clone() };
                 let cmds = if app.preferences.ribbon_menus_skip_pinned { skip_on_ribbon(cmds, &on_ribbon) } else { cmds };
-                let area = Container::new(ui.ctx(), Surface::Popup)
-                    .area(popup_id)
-                    .fixed_pos(lr.left_bottom())
-                    .order(if open { egui::Order::Foreground } else { egui::Order::Middle })
-                    .show(ui.ctx(), |ui| {
-                        crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            ui.set_min_width(200.0);
-                            if *panel == "SELECT" {
-                                selection_filter(app, ui);
-                            } else if cmds.is_empty() {
-                                ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Not available yet")).color(t.text_dim));
-                            }
-                            if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
-                                let mut paints = Vec::new();
-                                // Built from the families, not the panel's order: no reordering here.
-                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[], &mut paints, &mut Vec::new());
-                                grid_action(app, ui, action, &mut menu, &mut toggle);
-                                paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
-                                return;
-                            }
-                            if sketch_create {
-                                // One width for every row and the footer, as in the other panels.
-                                let row_w = dropdown_width(app, ui, &cmds);
-                                ui.set_width(row_w);
-                                sketch_create_menu(app, ui, &cmds, row_w, &mut menu, &mut toggle);
-                                ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
-                                return;
-                            }
-                            let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
-                                cmds.iter().map(|c| (None, *c)).collect()
-                            } else {
-                                crate::workspace::grouped_commands(&tab, panel, &cmds)
-                            };
-                            let grouped = crate::toolbar_custom::order_grouped(app, &tab, panel, grouped);
-                            // Where each command was drawn, for a drag to another place (#5080).
-                            let mut placed: Vec<(&'static str, Rect)> = Vec::new();
-                            if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
-                                let mut paints = Vec::new();
-                                let action = dropdown_grid(
-                                    app,
-                                    ui,
-                                    &tab,
-                                    &grouped,
-                                    &crate::workspace::ungrouped(&tab, panel, &cmds),
-                                    &mut paints,
-                                    &mut placed,
-                                );
-                                placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
-                                if let Some((id, before)) = menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
-                                    menu_move = Some((*panel, id, before));
-                                }
-                                grid_action(app, ui, action, &mut menu, &mut toggle);
-                                // Paint in this popup's layer, after its command has changed the session.
-                                paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
-                                return;
-                            }
-                            let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
-                            let row_w = dropdown_width(app, ui, &cmds);
-                            ui.set_width(row_w);
-                            // Up and Down move the keyboard focus through the enabled rows (from none
-                            // focused: the first or the last), instead of egui's own spatial move.
-                            let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
-                            if down || up {
-                                let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
-                                let focused = ui.ctx().memory(|m| m.focused());
-                                let at = enabled.iter().position(|id| focused == Some(menu_style(app).focus_id(id)));
-                                let n = enabled.len();
-                                let next = match (at, down) {
-                                    (None, true) => Some(0),
-                                    (None, false) => n.checked_sub(1),
-                                    (Some(i), true) => Some((i + 1) % n.max(1)),
-                                    (Some(i), false) => Some((i + n.max(1) - 1) % n.max(1)),
-                                };
-                                if let Some(id) = next.and_then(|i| enabled.get(i)) {
-                                    ui.ctx().memory_mut(|m| {
-                                        m.request_focus(menu_style(app).focus_id(id));
-                                        m.move_focus(egui::FocusDirection::None);
-                                    });
-                                }
-                            }
-                            // The rows scroll when the drop-down would run past the window's bottom.
-                            // `min_scrolled_height` lets the rows grow past the size the area kept from
-                            // an earlier, shorter list (#874); they still shrink to fit their content.
-                            let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
-                            egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-                                for (heading, c) in &grouped {
-                                    if let Some(heading) = heading {
-                                        ribbon::section_heading(ui, &group_heading_text(heading), row_w);
-                                    }
-                                    let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
-                                    // Only the part the menu's scroll area shows takes a drop.
-                                    placed.push((c.id, Rect::from_min_size(ui.cursor().min, vec2(row_w, ROW_H)).intersect(ui.clip_rect())));
-                                    let revealed = reveal.as_ref().is_some_and(|r| r.id == c.id);
-                                    match dropdown_row(app, ui, c, row_w, pinned, revealed.then_some(pulse)) {
-                                        None => {}
-                                        Some(ribbon::MenuAction::Menu(at)) => menu = Some((at, c.id, false)),
-                                        Some(ribbon::MenuAction::More(at)) => menu = Some((at, c.id, true)),
-                                        Some(ribbon::MenuAction::TogglePin) => toggle = Some(c.id),
-                                        Some(ribbon::MenuAction::Run(rect)) => {
-                                            app.start_at(c.id, Some(rect));
-                                            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
-                                        }
-                                    }
-                                }
-                            });
-                            placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
-                            if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
-                                menu_move = Some((*panel, id, before));
-                            }
-                            ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
-                        });
-                    });
-                popup_rect = Some(area.response.rect);
-                if open {
-                    open_panel_menu = Some((popup_id, area.response.rect));
+                let items = command_menu_items(app, &tab, panel, &cmds);
+                if let Some(revealed) = reveal.as_ref().filter(|revealed| revealed.preview) {
+                    ui_kit::Menu::reveal(ui.ctx(), popup_id, &items, revealed.id);
                 }
-                crate::scenario::publish_rect("toolbar_dropdown", area.response.rect);
-                // A drag out of the drop-down ends with a release elsewhere: not a click elsewhere.
-                let dragging = ribbon::dragging(ui.ctx());
-                if open
-                    && ((area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging)
-                        || ui.input(|i| i.key_pressed(egui::Key::Escape)))
-                {
-                    ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+                let output = if open {
+                    ui_kit::Menu::popup(ui.ctx(), popup_id, ui_kit::MenuAnchor::Rect(lr), &items, opened)
+                } else {
+                    ui_kit::Menu::preview(ui.ctx(), popup_id, ui_kit::MenuAnchor::Rect(lr), &items)
+                };
+                if let Some(rect) = output.rect {
+                    popup_rect = Some(rect);
+                    if open {
+                        open_panel_menu = Some((popup_id, rect));
+                        open_panel_pointer_inside = Some((popup_id, output.inside));
+                    }
+                    crate::scenario::publish_rect("toolbar_dropdown", rect);
+                }
+                let mut placed = record_command_menu_rows(app, ui, &output.rows);
+                if !sketch_create {
+                    placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
+                    if let Some(layer) = output.rows.first().map(|(_, response)| response.layer_id)
+                        && let Some((id, before)) = menu_drop(ui, &placed, &|id| crate::toolbar_custom::group_index(&tab, panel, id), layer)
+                    {
+                        menu_move = Some((*panel, id, before));
+                    }
+                }
+                if open && let Some(picked) = output.picked {
+                    let rect = output.rows.iter().find(|(item, _)| item.id == picked.id).map(|(_, row)| row.rect);
+                    dispatch_command_menu(app, &picked, rect);
+                }
+                if open && output.close && !ribbon::dragging(ui.ctx()) {
+                    ui.ctx().data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }
             }
         }
@@ -2391,8 +2319,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let key = egui::Id::unique("sc_panel_open");
                 let Some(open) = d.get_temp::<egui::Id>(key) else { return false };
                 let menu = open_panel_menu.filter(|(id, _)| *id == open).map(|(_, rect)| rect);
-                let stays_open =
-                    pointer.zip(menu).is_some_and(|(p, menu)| ribbon.expand(t.space_4).contains(p) || menu.expand(t.space_4).contains(p));
+                let stays_open = open_panel_pointer_inside.is_some_and(|(id, inside)| id == open && inside)
+                    || pointer.zip(menu).is_some_and(|(p, menu)| ribbon.expand(t.space_4).contains(p) || menu.expand(t.space_4).contains(p));
                 if !stays_open {
                     d.remove::<egui::Id>(key);
                     true
@@ -2420,9 +2348,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         if let Some((panel, id, before)) = menu_move {
             crate::toolbar_custom::move_in_menu(app, &tab, panel, id, before);
-        }
-        if let Some(id) = toggle {
-            crate::toolbar_custom::toggle(app, &tab, id);
         }
         // A right-click closes the drop-down; a row's ⋯ opens its menu over it.
         if let Some((at, id, keep_open)) = menu {
@@ -2519,22 +2444,6 @@ pub(crate) fn assistant_state(app: &SolveApp) -> crate::ui_kit::AssistantEntrySt
     }
 }
 
-/// SolidCraft's group menus: the search's accent, its pin tips and where rows publish.
-fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
-    ribbon::MenuStyle {
-        pin_tip: solidcraft_ui_text::tr_label("Pin to Toolbar"),
-        unpin_tip: solidcraft_ui_text::tr_label("Remove from Toolbar"),
-        accent: crate::workspace::tab_accent(&Tokens::get(), &app.ui.tab),
-        focus: egui::Id::unique("dropdown_row"),
-        entry: &["toolbar:", "dropdown:"],
-        pin: "dropdown_pin:",
-        more: "dropdown_more:",
-        more_tip: solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"),
-        hot: "dropdown_hot:",
-        reveal: "ribbon:reveal",
-    }
-}
-
 /// Command `c` as a menu row: its label, shortcut, check mark and hover text.
 struct RowData {
     label: String,
@@ -2577,112 +2486,141 @@ impl RowData {
         };
         RowData { label, shortcut, checked, enabled: can_start(app, c), icon: info.icon, tip, help, hint }
     }
-
-    fn entry<'a>(&'a self, c: &'static solidcraft_engine::CommandSpec, pinned: bool) -> ribbon::MenuEntry<'a> {
-        ribbon::MenuEntry {
-            id: c.id,
-            label: &self.label,
-            icon: self.icon,
-            shortcut: &self.shortcut,
-            enabled: self.enabled,
-            checked: self.checked,
-            pinned,
-            tip: self
-                .tip
-                .as_deref()
-                .map(|text| if self.hint { ribbon::RowTip::Plain(text) } else { ribbon::RowTip::Help { text, help: self.help.as_deref() } }),
-            app_paints: false,
-        }
-    }
 }
 
-/// One command row of a panel drop-down ([`ribbon::menu_row`]); every row drags onto the
-/// toolbar to pin it there. `revealed` is the pulse strength when the command search points
-/// this row out (#7287).
-fn dropdown_row(
-    app: &SolveApp,
-    ui: &mut egui::Ui,
-    c: &'static solidcraft_engine::CommandSpec,
-    width: f32,
-    pinned: bool,
-    revealed: Option<f32>,
-) -> Option<ribbon::MenuAction> {
-    let row = RowData::new(app, c);
-    let (action, resp) = ribbon::menu_row(ui, &row.entry(c, pinned), width, revealed, &menu_style(app));
-    if revealed.is_some() {
-        reveal_tooltip(app, ui, resp.rect, c, egui::RectAlign::RIGHT_START);
-    }
-    action
-}
-
-/// Up and Down through these commands' enabled rows ([`ribbon::list_keys`]).
-fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) {
-    let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
-    ribbon::list_keys(ui, &enabled, &menu_style(app));
-}
-
-/// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
-fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
-    let rows: Vec<_> = cmds
+/// Command definitions are shared by ribbon menus, family variants and overflow.
+fn command_items(app: &SolveApp, commands: &[&'static solidcraft_engine::CommandSpec]) -> Vec<ui_kit::Item> {
+    commands
         .iter()
-        .map(|c| {
-            let info = c.info(&app.session);
-            (
-                app.tr_command(c.id, info.label).to_string(),
-                crate::keymap::display_for(app, c.id).unwrap_or_default(),
-                info.icon,
-                dropdown_checkable(app, c.id),
-            )
+        .map(|command| {
+            let data = RowData::new(app, command);
+            let mut item = ui_kit::Item::action(command.id, &data.label, data.icon).key(&data.shortcut).on_if(data.enabled);
+            item.checked = data.checked;
+            item.tip = match (data.tip, data.help.filter(|_| !data.hint)) {
+                (Some(tip), Some(help)) => Some(format!("{tip}\n\n{help}")),
+                (tip, help) => tip.or(help),
+            };
+            item.draggable = true;
+            item.widget_id = Some(egui::Id::unique("dropdown_row").with(command.id));
+            item.aliases = vec![format!("toolbar:{}", command.id), format!("dropdown:{}", command.id)];
+            item.selected = app.sbox.reveal.as_ref().is_some_and(|reveal| reveal.preview && reveal.id == command.id);
+            let context = crate::context_menu::items(app, &crate::context_menu::Target::ToolbarCommand { id: command.id.to_owned() });
+            let mut more = ui_kit::Item::submenu(
+                &format!("command_options:{}", command.id),
+                solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"),
+                "dots",
+                context.clone(),
+            );
+            more.tip = Some(solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar").to_owned());
+            more.aliases.push(format!("dropdown_more:{}", command.id));
+            item.secondary = Some(Box::new(more));
+            item.context = context;
+            item
         })
-        .collect();
-    ribbon::menu_width(ui, rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)))
+        .collect()
 }
 
-/// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):
-/// the same commands, headings and actions as the list, the names in the tooltips. Returns the
-/// command acted on, and how.
-fn dropdown_grid(
-    app: &SolveApp,
-    ui: &mut egui::Ui,
-    tab: &str,
-    grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
-    loose: &[&str],
-    paints: &mut Vec<PersistentRibbonPaint>,
-    placed: &mut Vec<(&'static str, Rect)>,
-) -> Option<(&'static str, ribbon::MenuAction)> {
-    let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_command(c.id, c.label).to_string()).collect();
-    let headings: Vec<Option<String>> = grouped.iter().map(|(heading, _)| heading.map(group_heading_text)).collect();
-    let entries: Vec<(Option<&str>, ribbon::MenuEntry)> = grouped
-        .iter()
-        .zip(&labels)
-        .zip(&headings)
-        .map(|(((_, c), label), heading)| (heading.as_deref(), grid_entry(app, c, label, crate::toolbar_custom::pinned_on(app, tab, c.id).is_some())))
-        .collect();
-    let out = ribbon::grid(ui, &entries, loose, &menu_style(app));
-    for cell in out.cells {
-        if let Some((_, c)) = grouped.get(cell.index) {
-            placed.push((c.id, cell.rect.intersect(ui.clip_rect())));
-            grid_cell_extras(app, ui, c, cell, paints);
-        }
+fn command_menu_items(app: &SolveApp, tab: &str, panel: &str, commands: &[&'static solidcraft_engine::CommandSpec]) -> Vec<ui_kit::Item> {
+    if panel == "SELECT" {
+        return selection_filter_items(app);
     }
-    out.action.and_then(|(index, action)| grouped.get(index).map(|(_, c)| (c.id, action)))
+    if tab == "SKETCH" && panel == "CREATE" {
+        let mut items = Vec::new();
+        for family in crate::sketch_families::FAMILIES {
+            let variants = family.commands.iter().filter_map(|id| commands.iter().find(|command| command.id == *id).copied()).collect::<Vec<_>>();
+            if let Some(first) = variants.first() {
+                let mut item =
+                    ui_kit::Item::submenu(family.label, solidcraft_ui_text::tr_label(family.label), first.icon, command_items(app, &variants));
+                item.aliases.push(format!("create_family:{}", family.label));
+                items.push(item);
+            }
+        }
+        let rest = commands.iter().copied().filter(|command| crate::sketch_families::family(command.id).is_none()).collect::<Vec<_>>();
+        if !items.is_empty() && !rest.is_empty() {
+            items.push(ui_kit::Item::sep());
+        }
+        items.extend(command_items(app, &rest));
+        return items;
+    }
+    let grouped = if panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
+        commands.iter().map(|command| (None, *command)).collect()
+    } else {
+        crate::workspace::grouped_commands(tab, panel, commands)
+    };
+    let grouped = crate::toolbar_custom::order_grouped(app, tab, panel, grouped);
+    let loose = crate::workspace::ungrouped(tab, panel, commands);
+    let mut items = Vec::new();
+    let mut loose_started = false;
+    for (heading, command) in grouped {
+        if !loose_started && loose.contains(&command.id) {
+            if !items.is_empty() {
+                items.push(ui_kit::Item::sep());
+            }
+            loose_started = true;
+        }
+        if let Some(heading) = heading {
+            items.push(ui_kit::Item::heading(&group_heading_text(heading)));
+        }
+        items.extend(command_items(app, &[command]));
+    }
+    if items.is_empty() {
+        items.push(ui_kit::Item::action("unavailable", solidcraft_ui_text::tr_label("Not available yet"), "").on_if(false));
+    }
+    items
 }
 
-/// A command of this drop-down dragged over it (#5080): a marker shows where it would go, before
-/// or after the command under the pointer (the nearer side: across in the grid, up or down in
-/// the list), and on release it goes there. `placed`: where each command was drawn, in order.
-/// Returns the command and the one it goes before (None: after the last).
+fn record_command_menu_rows(app: &SolveApp, ui: &egui::Ui, rows: &[(ui_kit::Item, egui::Response)]) -> Vec<(&'static str, Rect)> {
+    let mut placed = Vec::new();
+    for (item, response) in rows {
+        let Some(command) = solidcraft_engine::find_command(&item.id) else { continue };
+        if response.drag_started() {
+            response.dnd_set_drag_payload(ui_kit::ReorderPayload { id: command.id.to_string(), from_menu: true });
+        }
+        if ui_kit::Menu::row_is_hot(response) {
+            crate::scenario::publish_handle(&format!("dropdown_hot:{}", command.id), response.rect.center());
+        }
+        if item.selected {
+            crate::scenario::publish_rect("ribbon:reveal", response.rect);
+            reveal_tooltip(app, ui, response.rect, command, egui::RectAlign::RIGHT_START);
+        }
+        placed.push((command.id, response.interact_rect));
+    }
+    placed
+}
+
+fn dispatch_command_menu(app: &mut SolveApp, item: &ui_kit::Item, rect: Option<Rect>) {
+    if !item.enabled {
+        return;
+    }
+    if let Some(mode) = item.id.strip_prefix("selection_mode:") {
+        let mode = if mode == "bodies" { solidcraft_engine::PickMode::Bodies } else { solidcraft_engine::PickMode::Parts };
+        crate::selection_mode::set(app, if app.ui.pick_mode == mode { solidcraft_engine::PickMode::Faces } else { mode });
+    } else if let Some(filter) = item.id.strip_prefix("selection_filter:") {
+        if app.ui.pick_off.iter().any(|value| value == filter) {
+            app.ui.pick_off.retain(|value| value != filter);
+        } else {
+            app.ui.pick_off.push(filter.to_owned());
+        }
+    } else if item.id == "selection_lasso" {
+        app.ui.lasso_select = !app.ui.lasso_select;
+    } else if let Some(command) = solidcraft_engine::find_command(&item.id) {
+        app.start_at(command.id, rect);
+    } else {
+        crate::context_menu::run_item(app, item, rect.map_or(egui::Pos2::ZERO, |rect| rect.left_bottom()));
+    }
+}
+
 fn menu_drop(
     ui: &egui::Ui,
     placed: &[(&'static str, Rect)],
-    grid: bool,
     group_of: &dyn Fn(&str) -> usize,
+    layer: egui::LayerId,
 ) -> Option<(&'static str, Option<&'static str>)> {
     let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(ui.ctx()).filter(|d| d.from_menu)?;
     let dragged = placed.iter().map(|(id, _)| *id).find(|id| *id == payload.id)?;
     let pointer = ui.ctx().pointer_latest_pos()?;
     let (at, &(target, rect)) = placed.iter().enumerate().find(|(_, (_, r))| r.is_positive() && r.contains(pointer))?;
-    let mut after = if grid { pointer.x > rect.center().x } else { pointer.y > rect.center().y };
+    let mut after = pointer.y > rect.center().y;
     let mut at = at;
     let mut rect = rect;
     // A command stays within its group: over another group's command, the marker shows at its
@@ -2696,63 +2634,17 @@ fn menu_drop(
     }
     let before = if after { placed.get(at + 1).map(|(id, _)| *id) } else { placed.get(at).map(|(id, _)| *id) };
     let t = Tokens::get();
-    let painter = ui.ctx().layer_painter(ui.layer_id());
+    let painter = ui.ctx().layer_painter(layer);
     let stroke = Stroke::new(2.0, t.accent);
-    if grid {
-        let x = if after { rect.right() - 1.0 } else { rect.left() + 1.0 };
-        painter.line_segment([pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 4.0)], stroke);
-    } else {
-        let y = if after { rect.bottom() - 1.0 } else { rect.top() + 1.0 };
-        painter.line_segment([pos2(rect.left() + 4.0, y), pos2(rect.right() - 4.0, y)], stroke);
-    }
-    crate::scenario::publish_handle("menu_drop_marker", pos2(if grid { rect.center().x } else { rect.left() }, rect.center().y));
+    let y = if after { rect.bottom() - 1.0 } else { rect.top() + 1.0 };
+    painter.line_segment([pos2(rect.left() + 4.0, y), pos2(rect.right() - 4.0, y)], stroke);
+    crate::scenario::publish_handle("menu_drop_marker", pos2(rect.left(), rect.center().y));
     if !ui.input(|i| i.pointer.any_released()) {
         return None;
     }
     egui::DragAndDrop::take_payload::<ui_kit::ReorderPayload<String>>(ui.ctx())?;
     Some((dragged, before))
 }
-
-/// Command `c` as a grid icon.
-fn grid_entry<'a>(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec, label: &'a str, pinned: bool) -> ribbon::MenuEntry<'a> {
-    ribbon::MenuEntry {
-        id: c.id,
-        label,
-        icon: c.icon,
-        shortcut: "",
-        enabled: can_start(app, c),
-        checked: None,
-        pinned,
-        tip: None,
-        app_paints: app.preferences.persistent_ribbon_pressed && persistent_available(app, c.id),
-    }
-}
-
-/// SolidCraft's part of a grid icon: it drags onto the toolbar, and its tooltip or its deferred
-/// persistent paint.
-fn grid_cell_extras(
-    app: &SolveApp,
-    ui: &egui::Ui,
-    c: &'static solidcraft_engine::CommandSpec,
-    cell: ribbon::GridCell,
-    paints: &mut Vec<PersistentRibbonPaint>,
-) {
-    let info = c.info(&app.session);
-    if let Some(deferred) = cell.deferred {
-        // Reuse the native ribbon recipe; only responses/paint slots survive until dispatch.
-        paints.push(PersistentRibbonPaint {
-            command: c,
-            deferred,
-            label: None,
-            enabled: ui.is_enabled() && info.enabled,
-            disabled: info.disabled_reason,
-        });
-    } else {
-        let _ = ribbon_tooltip(app, cell.response, c, info.disabled_reason.as_deref());
-    }
-}
-
-use ribbon::ROW_H;
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
 /// where present; other commands intentionally show only their name and registered shortcut.
@@ -2855,46 +2747,6 @@ fn group_heading_text(label: &str) -> String {
     if label.starts_with("ui.") { solidcraft_ui_text::tr(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
 }
 
-/// Take up what was done in a grid drop-down, as for a list row: start the command (and close
-/// the drop-down), open its menu, or pin or unpin it.
-fn grid_action(
-    app: &mut SolveApp,
-    ui: &egui::Ui,
-    action: Option<(&'static str, ribbon::MenuAction)>,
-    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
-    toggle: &mut Option<&'static str>,
-) {
-    match action {
-        Some((id, ribbon::MenuAction::Menu(at))) => *menu = Some((at, id, false)),
-        Some((id, ribbon::MenuAction::More(at))) => *menu = Some((at, id, true)),
-        Some((id, ribbon::MenuAction::TogglePin)) => *toggle = Some(id),
-        Some((id, ribbon::MenuAction::Run(rect))) => {
-            app.start_at(id, Some(rect));
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
-        }
-        None => {}
-    }
-}
-
-/// Sketch › Create in the grid: each family of variants under its own heading (Line, Rectangle,
-/// Circle…), then the other tools under "More". The list keeps its family sub-menus.
-fn sketch_create_grouped(cmds: &[&'static solidcraft_engine::CommandSpec]) -> Vec<(Option<&'static str>, &'static solidcraft_engine::CommandSpec)> {
-    let mut out = Vec::new();
-    for f in crate::sketch_families::FAMILIES {
-        let mut heading = Some(f.label);
-        for id in f.commands {
-            if let Some(c) = cmds.iter().find(|c| c.id == *id) {
-                out.push((heading.take(), *c));
-            }
-        }
-    }
-    let mut heading = Some("More");
-    for c in cmds.iter().filter(|c| crate::sketch_families::family(c.id).is_none()) {
-        out.push((heading.take(), *c));
-    }
-    out
-}
-
 /// A drop-down's commands without those the ribbon shows as buttons (`ribbon_menus_skip_pinned`),
 /// unless that leaves none.
 fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon: &[&str]) -> Vec<&'static solidcraft_engine::CommandSpec> {
@@ -2902,74 +2754,18 @@ fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon:
     if rest.is_empty() { cmds } else { rest }
 }
 
-/// Creation menus keep related variants together, including collapsed and overflow panels.
-/// The plain rows are `width` wide, the width the menu gives its family rows.
-fn sketch_create_menu(
-    app: &mut SolveApp,
-    ui: &mut egui::Ui,
-    cmds: &[&'static solidcraft_engine::CommandSpec],
-    width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
-    toggle: &mut Option<&'static str>,
-) {
-    let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
-    egui::ScrollArea::vertical().id_salt("sketch_create_rows").max_height(room).show(ui, |ui| {
-        for f in crate::sketch_families::FAMILIES {
-            let variants: Vec<_> = f.commands.iter().filter_map(|id| cmds.iter().find(|c| c.id == *id).copied()).collect();
-            if let Some(first) = variants.first() {
-                // The row translates its own label.
-                let mut item = crate::ui_kit::MenuItem::new(f.label, f.label, first.icon);
-                item.submenu = true;
-                let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
-                    dropdown_keys(app, ui, &variants);
-                    let variants_w = dropdown_width(app, ui, &variants);
-                    sketch_menu_rows(app, ui, &variants, variants_w, menu, toggle);
-                });
-                crate::scenario::publish_handle(&format!("create_family:{}", f.label), response.response.rect.center());
-            }
-        }
-        crate::ui_kit::Menu::separator(ui);
-        let rest: Vec<_> = cmds.iter().copied().filter(|c| crate::sketch_families::family(c.id).is_none()).collect();
-        dropdown_keys(app, ui, &rest);
-        sketch_menu_rows(app, ui, &rest, width, menu, toggle);
-    });
-}
-
-fn sketch_menu_rows(
-    app: &mut SolveApp,
-    ui: &mut egui::Ui,
-    cmds: &[&'static solidcraft_engine::CommandSpec],
-    width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
-    toggle: &mut Option<&'static str>,
-) {
-    for c in cmds {
-        let pinned = crate::toolbar_custom::pinned_on(app, "SKETCH", c.id).is_some();
-        // A hovered search result in a sketch creation menu is marked steadily (#7287).
-        let revealed = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == c.id);
-        match dropdown_row(app, ui, c, width, pinned, revealed.then_some(1.0)) {
-            None => {}
-            Some(ribbon::MenuAction::Menu(at)) => *menu = Some((at, c.id, false)),
-            Some(ribbon::MenuAction::More(at)) => *menu = Some((at, c.id, true)),
-            Some(ribbon::MenuAction::TogglePin) => *toggle = Some(c.id),
-            Some(ribbon::MenuAction::Run(rect)) => {
-                app.start_at(c.id, Some(rect));
-                ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
-                ui.close();
-            }
-        }
+fn selection_filter_items(app: &SolveApp) -> Vec<ui_kit::Item> {
+    let mut items = vec![ui_kit::Item::heading(solidcraft_ui_text::tr_label("Selection filter"))];
+    for (id, mode, label) in [
+        ("bodies", solidcraft_engine::PickMode::Bodies, app.tr_label("Select bodies (a face picks its body)")),
+        ("parts", solidcraft_engine::PickMode::Parts, app.tr("ui.select_components_by_face")),
+    ] {
+        let mut item = ui_kit::Item::action(&format!("selection_mode:{id}"), label, "");
+        item.checked = Some(app.ui.pick_mode == mode);
+        item.keep_open = true;
+        items.push(item);
     }
-}
-
-/// The SELECT panel: what a click in the view picks.
-pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    let bodies = app.tr_label("Select bodies (a face picks its body)");
-    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Bodies, bodies);
-    let components = app.tr("ui.select_components_by_face");
-    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Parts, components);
-    for (k, label) in [
+    for (filter, label) in [
         ("faces", "Faces"),
         ("edges", "Edges"),
         ("vertices", "Vertices"),
@@ -2979,17 +2775,40 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("dimensions", "Sketch dimensions"),
         ("constraints", "Sketch constraints"),
     ] {
-        let mut on = !app.ui.pick_off.iter().any(|x| x == k);
-        if crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label(label), &mut on).changed() {
-            app.ui.pick_off.retain(|x| x != k);
-            if !on {
-                app.ui.pick_off.push(k.to_string());
-            }
-        }
+        let mut item = ui_kit::Item::action(&format!("selection_filter:{filter}"), solidcraft_ui_text::tr_label(label), "");
+        item.checked = Some(!app.ui.pick_off.iter().any(|value| value == filter));
+        item.keep_open = true;
+        items.push(item);
     }
-    // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
-    let label = app.tr("ui.lasso_select").to_string();
-    ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
+    let mut lasso = ui_kit::Item::action("selection_lasso", app.tr("ui.lasso_select"), "");
+    lasso.checked = Some(app.ui.lasso_select);
+    lasso.keep_open = true;
+    items.push(lasso);
+    items
+}
+
+#[cfg(test)]
+fn sketch_create_menu(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    commands: &[&'static solidcraft_engine::CommandSpec],
+    _width: f32,
+    _menu: &mut Option<(egui::Pos2, &'static str, bool)>,
+    _toggle: &mut Option<&'static str>,
+) {
+    let items = command_menu_items(app, "SKETCH", "CREATE", commands);
+    let output = ui_kit::Menu::items(ui, ui.scope_id().with("sketch_create_menu"), &items, false);
+    if let Some(item) = output.picked {
+        dispatch_command_menu(app, &item, None);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let output = ui_kit::Menu::items(ui, ui.scope_id().with("selection_filter"), &selection_filter_items(app), false);
+    if let Some(item) = output.picked {
+        dispatch_command_menu(app, &item, None);
+    }
 }
 
 /// Ends the active sketch tool or dialog when `id` is its command, as `Esc` does.
@@ -3071,6 +2890,48 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
+    if ui_kit::Menu::any_open(ctx) {
+        // Contextual keys still act on the menu's target; other global commands stay blocked.
+        if app.viewport.context_menu.is_some() && !ctx.text_edit_focused() {
+            let presses = ctx.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let mut ran = Vec::new();
+            for (index, (key, modifiers)) in presses.into_iter().enumerate() {
+                let chord = crate::keymap::key_name(key, modifiers);
+                // Availability comes from the contextual row, not the unrelated selection.
+                let visibility =
+                    crate::keymap::commands_for(app, &chord).iter().any(|id| matches!(*id, "ui.toggle_visibility" | "browser.visibility"))
+                        || (matches!(chord.as_str(), "Shift+V" | "Alt+V" | "Alt+Shift+V")
+                            && crate::keymap::effective(app, "ui.toggle_visibility").as_deref() == Some("V")
+                            && crate::keymap::commands_for(app, &chord).is_empty());
+                let tag = if key == egui::Key::F2 && modifiers == egui::Modifiers::NONE {
+                    Some("F2")
+                } else if visibility {
+                    Some("V")
+                } else {
+                    None
+                };
+                if let Some(tag) = tag
+                    && crate::context_menu::press_shortcut(app, tag)
+                {
+                    ctx.input_mut(|input| input.consume_key(modifiers, key));
+                    ran.push(index);
+                }
+            }
+            drop_shortcut_text(ctx, &ran);
+        }
+        app.last_escape = None;
+        app.viewport.key_hold = None;
+        return;
+    }
     if crate::view_window_drag::keyboard_active(app, ctx) {
         return;
     }
@@ -3097,24 +2958,6 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         && (app.esc_handled || app.escape_owner.is_some())
         && ctx.input(|input| input.key_pressed(egui::Key::Escape))
     {
-        return;
-    }
-    // Application bar menus claim Escape before the underlying editors and sketch
-    // shortcuts. Clear raw events too: egui may replay them on a layout pass.
-    let menu = [("sc_file_menu", !app.native_file_menu), ("sc_appbar_overflow_open", true)].into_iter().find_map(|(name, enabled)| {
-        let id = egui::Id::unique(name);
-        (enabled && ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false))).then_some(id)
-    });
-    if let Some(menu_id) = menu
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
-        ctx.data_mut(|d| d.insert_temp(menu_id, false));
-        egui::Popup::close_all(ctx);
-        ctx.input_mut(|i| {
-            i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
-        });
-        app.esc_handled = true;
-        app.last_escape = None;
         return;
     }
     // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
@@ -3148,6 +2991,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
     // starting with L or D), even on the frame before its field holds the focus.
     let popup_owner = egui::Popup::is_any_open(ctx)
+        || ui_kit::Menu::any_open(ctx)
         || crate::dialogs_save_mesh::popup_open(ctx)
         || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
         || crate::personal_sheet_rules::name_prompt_open(ctx, app.dialog.as_ref());
@@ -3244,6 +3088,12 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 app.esc_handled = true;
                 let _ = app.run("select.clear", json!({}));
             }
+            continue;
+        }
+        // Enter places the Dimension tool's dimension where its preview is, as a click there does
+        // (#22661). A focused button keeps its own Enter: no shortcut runs while a widget has the
+        // keyboard (above). Otherwise Enter goes on to the keymap.
+        if drawing && k == Key::Enter && mods.is_none() && crate::drawing_workspace::dimension::place_preview(app) {
             continue;
         }
         // Delete and Backspace delete the selection through the model's own path.
@@ -3503,31 +3353,28 @@ fn header_geometry(width: f32, captions: f32, label: f32, version: f32, layout: 
     };
     place(&application::spec(width, 0.0, captions, m))
 }
-/// A grid drop-down's commands as the grid lays them out: their ids under their headings.
-#[cfg(test)]
-fn grid_ids(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)]) -> Vec<(Option<&'static str>, &'static str)> {
-    grouped.iter().map(|(heading, c)| (*heading, c.id)).collect()
-}
-
-/// One icon of a grid drop-down at `rect` ([`ribbon::grid_cell`]).
-#[cfg(test)]
-fn dropdown_cell(
-    app: &SolveApp,
-    ui: &mut egui::Ui,
-    c: &'static solidcraft_engine::CommandSpec,
-    rect: Rect,
-    pinned: bool,
-    paints: &mut Vec<PersistentRibbonPaint>,
-) -> Option<ribbon::MenuAction> {
-    let label = app.tr_command(c.id, c.label).to_string();
-    let (action, cell) = ribbon::grid_cell(ui, &grid_entry(app, c, &label, pinned), rect, &menu_style(app));
-    grid_cell_extras(app, ui, c, cell, paints);
-    action
-}
 
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn shared_select_bodies_row_tracks_and_toggles_the_mode() {
+        use solidcraft_engine::PickMode;
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        for (from, to) in [
+            (PickMode::Faces, PickMode::Bodies),
+            (PickMode::Bodies, PickMode::Faces),
+            (PickMode::Features, PickMode::Bodies),
+            (PickMode::Components, PickMode::Bodies),
+        ] {
+            crate::selection_mode::set(&mut app, from);
+            let item = selection_filter_items(&app).into_iter().find(|item| item.id == "selection_mode:bodies").unwrap();
+            assert_eq!(item.checked, Some(from == PickMode::Bodies));
+            dispatch_command_menu(&mut app, &item, None);
+            assert_eq!(app.ui.pick_mode, to);
+        }
+    }
 
     #[test]
     fn custom_view_chords_run_before_builtin_view_shortcuts() {
@@ -3641,7 +3488,7 @@ mod header_report_tests {
             h.step(&json!({"click":{"handle":"appbar:redo"}})).unwrap();
             assert_eq!(h.app.session.undo.len(), depth);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
-            assert!(h.widget("Save As JSON…").is_some(), "the in-window File menu still opens");
+            assert!(h.widget("Save As…").is_some(), "the in-window File menu still opens");
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
             assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false)));
             h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
@@ -3931,6 +3778,118 @@ mod header_report_tests {
     }
 
     #[test]
+    fn file_menu_submenus_support_right_and_left_keys() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Insert"}})).unwrap();
+        // Move off the anchor so hover cannot reopen the child while testing the keys.
+        let outside = h.app.viewport.rect.unwrap().right_bottom() - vec2(30.0, 30.0);
+        h.step(&json!({"move":[outside.x,outside.y]})).unwrap();
+        h.frames(3);
+        // Clicking opens the flyout with focus on its anchor; Right enters its first row.
+        h.step(&json!({"key":"ArrowRight"})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"ArrowLeft"})).unwrap();
+        h.frames(3);
+        assert!(h.widget("Point Cloud…").is_none(), "Left closes the child");
+        assert!(h.widget("Save As…").is_some(), "Left keeps File open");
+        h.step(&json!({"key":"ArrowRight"})).unwrap();
+        h.frames(3);
+        assert!(h.widget("Point Cloud…").is_some(), "Right opens the focused submenu");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.widget("Point Cloud…").is_none(), "Escape closes the cascade");
+    }
+
+    #[test]
+    fn file_menu_cascades_keep_parents_open_and_close_after_a_mesh_action() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.call("ui.resize", json!({"width":1280,"height":800}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        assert!(h.widget("STL…").is_none(), "formats stay inside their categories");
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Mesh"}})).unwrap();
+        assert!(h.widget("Save As…").is_some(), "clicking a child keeps File open");
+        assert!(h.widget("CAD & 2D").is_some(), "Export stays open too");
+        let parent = crate::scenario::rect_of("menu:Export").unwrap();
+        let category = crate::scenario::rect_of("menu:Mesh").unwrap();
+        let format = crate::scenario::rect_of("menu:STL…").unwrap();
+        assert!(category.left() >= parent.right(), "Export opens beside File");
+        assert!(format.left() >= category.right(), "formats open beside Export");
+        assert!(parent.width() < 350.0 && category.width() < 350.0, "each level hugs its own contents");
+        h.step(&json!({"widget":"STL…"})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|dialog| &dialog.kind), Some(crate::dialogs::Kind::SaveMesh(_))));
+        h.frames(3);
+        assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false));
+        assert!(h.widget("CAD & 2D").is_none(), "the entire cascade closes after dispatch");
+    }
+
+    #[test]
+    fn file_menu_groups_preserve_formats_accents_and_home_enablement() {
+        fn collect(rows: &[crate::ui_kit::Item], result: &mut Vec<crate::ui_kit::Item>) {
+            for item in rows {
+                result.push(item.clone());
+                collect(&item.children, result);
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let rows = file_rows(&h.app);
+        let mut all = Vec::new();
+        collect(&rows, &mut all);
+        assert!(!all.iter().any(|item| item.id == "save_json"), "JSON remains in Save As without a duplicate row");
+        for id in [
+            "file.export_step",
+            "file.export_view_dxf",
+            "file.export_3mf",
+            "file.export_stl",
+            "file.export_obj",
+            "export_glb",
+            "export_usd",
+            "file.export_urdf",
+            "file.export_mjcf",
+            "file.export_sdf",
+            "export_json",
+        ] {
+            assert_eq!(all.iter().filter(|item| item.id == id).count(), 1, "each format occurs once: {id}");
+            assert!(!rows.iter().any(|row| row.id == id), "{id} lives under Export");
+        }
+        for id in ["file.export_stl", "file.export_3mf", "file.export_obj", "file.send_to_slicer"] {
+            assert_eq!(all.iter().find(|item| item.id == id).unwrap().icon, "mesh_export");
+        }
+        assert_eq!(all.iter().find(|item| item.id == "file.insert_mesh").unwrap().icon, "mesh_import");
+        assert_eq!(solidcraft_engine::find_command("file.insert_mesh").unwrap().icon, "import", "other command surfaces keep their icon");
+        assert_eq!(solidcraft_engine::find_command("file.export_obj").unwrap().icon, "export", "OBJ's mesh accent is local to File");
+        for id in [
+            "file.export_step",
+            "file.export_view_dxf",
+            "export_glb",
+            "export_usd",
+            "file.export_urdf",
+            "file.export_mjcf",
+            "file.export_sdf",
+            "export_json",
+        ] {
+            assert_eq!(all.iter().find(|item| item.id == id).unwrap().icon, "export");
+        }
+        h.app.home.open = true;
+        let mut on_home = Vec::new();
+        collect(&file_rows(&h.app), &mut on_home);
+        for item in on_home.iter().filter(|item| {
+            item.id.starts_with("file.export_")
+                || item.id.starts_with("file.insert_")
+                || matches!(item.id.as_str(), "export_json" | "export_glb" | "export_usd" | "pointcloud.insert" | "component.insert_design")
+        }) {
+            assert!(!item.enabled, "design action stays visible and off on Home: {}", item.id);
+        }
+    }
+
+    #[test]
     fn file_menu_json_save_and_export_use_commands_and_keep_distinct_paths() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
@@ -3939,7 +3898,12 @@ mod header_report_tests {
             Some(Box::new(move |name, _extensions| Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
-        h.step(&json!({"widget":"Save As JSON…"})).unwrap();
+        let json_path = h.dir.join("Menu copy.json").to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_, extensions| {
+            assert!(extensions.contains(&"json"), "Save As still offers JSON");
+            Box::pin(std::future::ready(Some(json_path.clone())))
+        }));
+        h.step(&json!({"widget":"Save As…"})).unwrap();
         // Written on a worker: the window keeps drawing until it is done.
         h.settle();
         let saved = h.app.session.path.clone().unwrap();
@@ -3947,9 +3911,12 @@ mod header_report_tests {
         assert!(!solidcraft_engine::io::is_design_container(&bytes));
         assert_eq!(solidcraft_engine::io::read_design(&bytes).unwrap(), *h.app.session.doc);
         h.app.session.doc_mut().name = "Exported copy".into();
+        let dir = h.dir.clone();
+        h.app.services.pick_save = Some(Box::new(move |name, _| Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
-        h.step(&json!({"widget":"Export Design as JSON…"})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+        h.step(&json!({"widget":"Design as JSON…"})).unwrap();
         assert_eq!(h.app.session.path.as_deref(), Some(saved.as_str()));
         assert!(h.dir.join("Exported copy.json").is_file());
         h.app.run("file.save", json!({})).unwrap();
@@ -3963,9 +3930,11 @@ mod header_report_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
         h.app.preferences.save_mesh_format = "3mf".into();
-        for (item, format) in [("Export STL…", "stl"), ("Export 3MF…", "3mf")] {
+        for (item, format) in [("STL…", "stl"), ("3MF…", "3mf")] {
             h.frames(3);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+            h.step(&json!({"click":{"handle":"menu:Mesh"}})).unwrap();
             h.step(&json!({"widget": item})).unwrap();
             let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("{item}: no Save as mesh dialog") };
             assert_eq!(k.format_name(), format, "{item}");
@@ -4616,7 +4585,9 @@ mod home_tests {
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
         let at = crate::scenario::handle_at("appbar:folder").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
-        let _ = h.step(&json!({"widget": "Export URDF…"}));
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Simulation & Robotics"}})).unwrap();
+        h.step(&json!({"widget": "URDF…"})).unwrap();
         h.settle();
         let files: Vec<String> = std::fs::read_dir(&h.dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(files.iter().any(|f| f.ends_with(".urdf")) && files.iter().any(|f| f.ends_with("-base.stl")), "{files:?}");
@@ -4678,6 +4649,61 @@ mod dropdown_tests {
         }
     }
 
+    #[test]
+    fn sketch_create_overflow_drag_pins_without_starting_the_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let width = [600, 500, 400, 300, 220].into_iter().find(|width| {
+            h.call("ui.resize", json!({"width":width,"height":2400}));
+            h.frames(3);
+            crate::scenario::rect_of("panel:SKETCH:CREATE").is_none() && crate::scenario::rect_of("toolbar:overflow").is_some()
+        });
+        assert!(width.is_some(), "Create is folded into overflow");
+        // The overflow opens beneath its compact button and covers the lower group labels.
+        // Drop on the exposed top of Finish instead, as a pointer user can.
+        let finish = crate::scenario::rect_of("button:sketch.finish").unwrap();
+        let to = finish.center_top() + vec2(0.0, Tokens::get().space_4);
+        let target_layer = h.ctx.layer_id_at(to).expect("the visible ribbon drop target has a layer");
+        let (commands, _) = crate::workspace::layout("SKETCH", "CREATE", &solidcraft_engine::command_specs()).unwrap();
+        let definitions = command_menu_items(&h.app, "SKETCH", "CREATE", &commands);
+        let family = definitions.iter().find(|item| item.enabled && !item.children.is_empty()).unwrap();
+        let command = family.children.iter().find(|item| item.enabled && item.draggable && item.children.is_empty()).unwrap().id.clone();
+        assert_ne!(crate::toolbar_custom::pinned_on(&h.app, "SKETCH", &command), Some("FINISH SKETCH"));
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"handle":"toolbar:overflow"}})).unwrap();
+        // Enter Create, then its first family without leaving the pointer over an overlapping opener.
+        for key in ["Home", "ArrowRight", "Home", "ArrowRight"] {
+            h.step(&json!({"key":key})).unwrap();
+        }
+        h.frames(4);
+        let row_id = egui::Id::unique("dropdown_row").with(command.as_str());
+        let row = h.ctx.read_response(row_id).unwrap();
+        assert_eq!(row.interact_rect, row.rect, "the first command is fully exposed");
+        let from = row.rect.center();
+        assert_eq!(h.ctx.layer_id_at(from), Some(row.layer_id), "the command owns its pointer target");
+        h.frame_with(vec![egui::Event::PointerMoved(from)]);
+        h.frame_with(crate::test_support::pointer(from, true));
+        let start = from + vec2(0.0, -12.0);
+        h.frame_with(vec![egui::Event::PointerMoved(start)]);
+        let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(&h.ctx).expect("overflow starts a command drag");
+        assert_eq!((payload.id.as_str(), payload.from_menu), (command.as_str(), true));
+        for step in 1..=20 {
+            h.frame_with(vec![egui::Event::PointerMoved(start + (to - start) * (step as f32 / 20.0))]);
+        }
+        assert_eq!(h.ctx.layer_id_at(to), Some(target_layer), "the ribbon drop target stays exposed rather than covered by a flipped flyout");
+        h.frame_with(crate::test_support::pointer(to, false));
+        h.frames(3);
+        assert_eq!(
+            crate::toolbar_custom::pinned_on(&h.app, "SKETCH", &command),
+            Some("FINISH SKETCH"),
+            "{command} is pinned in the actual drop target, from={from:?}, to={to:?}, panels={:?}",
+            h.app.toolbar_custom.panels
+        );
+        assert_eq!(h.app.session.doc.to_json(), before, "dragging does not execute the command");
+        assert!(h.app.tool.is_none());
+    }
+
     /// #5080: a command dragged to another place in its drop-down (list or grid) goes there,
     /// a marker showing where while dragging; the order stays after a restart, and dropped on
     /// itself nothing changes. It is not pinned.
@@ -4699,7 +4725,7 @@ mod dropdown_tests {
             let before = order(&mut h);
             let at_box = crate::scenario::handle_at("dropdown:solid.box").unwrap();
             // The near side of Box: its left in the grid, its top in the list.
-            let to = at_box - if grid { vec2(ribbon::GRID_CELL / 4.0, 0.0) } else { vec2(0.0, ROW_H / 4.0) };
+            let to = at_box - vec2(0.0, (Tokens::get().control_height + Tokens::get().space_2) / 4.0);
             let from = crate::scenario::handle_at("dropdown:solid.sphere").unwrap();
             h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 30, "hold_end": 10}));
             h.frames(4);
@@ -4746,7 +4772,9 @@ mod dropdown_tests {
         h.frames(4);
         h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
         h.frames(4);
-        let point = crate::scenario::rect_of("menu:sketch.point").expect("Point is a plain row");
+        let primary = crate::scenario::rect_of("menu:sketch.point").expect("Point is a plain row");
+        let more = crate::scenario::rect_of("dropdown_more:sketch.point").expect("Point reserves its shared secondary action");
+        let point = primary.union(more);
         let slot = crate::scenario::rect_of("menu:Slot").expect("Slot is a family row");
         assert!((point.left() - slot.left()).abs() < 0.5, "left edges differ: Point {point:?}, Slot {slot:?}");
         assert!((point.right() - slot.right()).abs() < 0.5, "right edges differ: Point {point:?}, Slot {slot:?}");
@@ -4876,7 +4904,7 @@ mod dropdown_tests {
             }
             for heading in ["Planes", "Axes", "Points"] {
                 assert_eq!(
-                    output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == heading)),
+                    crate::ui_kit::test_support::text_shapes(&output).any(|text| text.galley.text() == heading.to_uppercase()),
                     grouped,
                     "{heading} in grid={grid}, grouped={grouped}"
                 );
@@ -4900,176 +4928,53 @@ mod dropdown_tests {
         }
     }
 
-    /// The grid's rows: a heading starts a new one, and the arrow keys move along and between
-    /// them over the enabled icons only, wrapping at the ends (#4739).
-    #[test]
-    fn grid_rows_break_at_headings_and_arrow_keys_skip_disabled_icons() {
-        let c = |id| solidcraft_engine::find_command(id).unwrap();
-        let grouped = [
-            (Some("Primitives"), c("solid.box")),
-            (None, c("solid.cylinder")),
-            (None, c("solid.sphere")),
-            (None, c("solid.torus")),
-            (None, c("solid.pipe")),
-            (Some("Other"), c("solid.extrude")),
-            (None, c("solid.revolve")),
-        ];
-        // Too narrow for the groups side by side (two icons wide): rows as wide as the window, a
-        // heading starting a row.
-        let rows = ribbon::grid_layout(&grid_ids(&grouped), &[], 100.0);
-        let at = |l: &ribbon::GridLayout| l.cells.iter().map(|(_, at)| *at).collect::<Vec<_>>();
-        assert_eq!(at(&rows), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1)]);
-        assert_eq!(rows.headings.len(), 2);
-        // Room enough: each group a column of two under its heading, the groups side by side.
-        let side = ribbon::grid_layout(&grid_ids(&grouped), &[], 1000.0);
-        assert_eq!(at(&side), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (0, 2), (0, 3)]);
-        let headings: Vec<_> = side.headings.iter().map(|(p, _, h)| (p.x, *h)).collect();
-        assert_eq!(headings, [(0.0, "Primitives"), (2.0 * ribbon::GRID_CELL, "Other")]);
-        assert_eq!(side.size, vec2(4.0 * ribbon::GRID_CELL, ribbon::GRID_HEADING + 3.0 * ribbon::GRID_CELL));
-        assert_eq!(side.separators, [2.0 * ribbon::GRID_CELL], "a line between the two groups");
-        assert!(rows.separators.is_empty(), "rows have none");
-        assert!(side.cells.iter().all(|(r, _)| r.top() >= ribbon::GRID_HEADING), "icons below the headings");
-        // A menu without groups keeps its rows of five.
-        let plain: Vec<_> = grouped.iter().map(|(_, c)| (None, *c)).collect();
-        assert_eq!(at(&ribbon::grid_layout(&grid_ids(&plain), &[], 1000.0)), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
-        let cells = at(&side);
-        // `solid.pipe` (index 4) is disabled: `enabled` holds the others.
-        let enabled = [0, 1, 2, 3, 5, 6];
-        let step = |at, key| ribbon::grid_step(&cells, &enabled, at, key).map(|k: usize| enabled[k]);
-        assert_eq!((step(None, ribbon::GridKey::Right), step(None, ribbon::GridKey::Down)), (Some(0), Some(0)));
-        assert_eq!((step(None, ribbon::GridKey::Left), step(None, ribbon::GridKey::Up)), (Some(6), Some(6)));
-        assert_eq!(step(Some(2), ribbon::GridKey::Right), Some(3), "Right runs on into the next row");
-        assert_eq!(step(Some(0), ribbon::GridKey::Left), Some(6), "and wraps");
-        assert_eq!(step(Some(1), ribbon::GridKey::Down), Some(3), "Down goes to the nearest enabled icon below");
-        assert_eq!(step(Some(4), ribbon::GridKey::Down), Some(3), "from the next group's column too");
-        assert_eq!(step(Some(2), ribbon::GridKey::Down), Some(0), "from the last enabled row Down wraps to the first");
-        assert_eq!(step(Some(5), ribbon::GridKey::Up), Some(3), "from the first row Up wraps to the last, nearest column");
-        assert_eq!(step(Some(1), ribbon::GridKey::Up), Some(3));
-        assert_eq!(ribbon::grid_step(&cells, &[], None, ribbon::GridKey::Down), None);
-    }
-
     /// A command in no group (Model › Modify's Delete) stands apart after the groups, without a
     /// heading: leaving out a pinned group (Specialise's Convert to Sheet Metal) must not move it
     /// under the group before (Bodies) (#4739).
     #[test]
     fn a_command_in_no_group_stays_apart_when_a_group_is_left_out() {
+        let h = crate::scenario::Harness::new();
         let specs = solidcraft_engine::command_specs();
-        let (cmds, _) = crate::workspace::layout("MODEL", "MODIFY", &specs).unwrap();
-        let loose = crate::workspace::ungrouped("MODEL", "MODIFY", &cmds);
-        assert_eq!(loose, ["timeline.delete"]);
-        let column_of = |cmds: &[&'static solidcraft_engine::CommandSpec], id: &str| {
-            let grouped = crate::workspace::grouped_commands("MODEL", "MODIFY", cmds);
-            let layout = ribbon::grid_layout(&grid_ids(&grouped), &loose, 4000.0);
-            let x = |id: &str| grouped.iter().position(|(_, c)| c.id == id).and_then(|i| layout.cells.get(i)).map(|(r, _)| r.left());
-            let last_group = layout.separators.last().copied();
-            (x(id), last_group)
-        };
-        let (delete, separator) = column_of(&cmds, "timeline.delete");
-        assert_eq!(delete, separator, "Delete in a column of its own after Specialise");
-        let skipped = skip_on_ribbon(cmds.clone(), &["sheet.convert"]);
-        let (delete, separator) = column_of(&skipped, "timeline.delete");
-        let (remove, _) = column_of(&skipped, "solid.remove");
-        assert_eq!(delete, separator, "still apart without Specialise");
-        assert!(delete > remove, "not under Bodies: {delete:?} vs {remove:?}");
-    }
-
-    /// Group headings sit below the drop-down's own header in the hierarchy: a smaller font than
-    /// the header's, and written as named rather than in capitals (list and grid alike).
-    #[test]
-    fn group_headings_are_smaller_than_the_drop_down_header() {
-        let t = Tokens::get();
-        assert!(ribbon::heading_font().size < t.font_caption, "{} vs the header's {}", ribbon::heading_font().size, t.font_caption);
-        assert_eq!(group_heading_text("Edges"), "Edges", "written as named, not in capitals");
-    }
-
-    /// Every panel's drop-down of every tab, and Sketch › Create's families, is at most
-    /// ribbon::GRID_ROWS high in the grid when the window is wide enough: big menus grow to the right.
-    #[test]
-    fn every_grid_menu_is_at_most_three_rows_high() {
-        let rows = |l: &ribbon::GridLayout| l.cells.iter().map(|(r, _)| r.top().round() as i32).collect::<std::collections::BTreeSet<_>>().len();
-        let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).collect();
-        for tab in tabs {
-            for (panel, cmds, _) in crate::toolbar_custom::panel_lists(tab) {
-                let grouped = crate::workspace::grouped_commands(tab, panel, &cmds);
-                let layout = ribbon::grid_layout(&grid_ids(&grouped), &crate::workspace::ungrouped(tab, panel, &cmds), 4000.0);
-                assert!(rows(&layout) <= ribbon::GRID_ROWS, "{tab} {panel}: {} rows", rows(&layout));
-                if tab == "SKETCH" && panel == "CREATE" {
-                    let families = ribbon::grid_layout(&grid_ids(&sketch_create_grouped(&cmds)), &[], 4000.0);
-                    assert!(rows(&families) <= ribbon::GRID_ROWS, "Sketch › Create families: {} rows", rows(&families));
-                }
-            }
+        let (commands, _) = crate::workspace::layout("MODEL", "MODIFY", &specs).unwrap();
+        for commands in [commands.clone(), skip_on_ribbon(commands, &["sheet.convert"])] {
+            let items = command_menu_items(&h.app, "MODEL", "MODIFY", &commands);
+            let delete = items.iter().position(|item| item.id == "timeline.delete").unwrap();
+            assert!(delete > 0);
+            assert_eq!(items[delete - 1].id, "-", "ungrouped Delete has a separator before it");
         }
-        // A window too narrow for the width wraps into more rows instead of running off it.
-        let c = |id| solidcraft_engine::find_command(id).unwrap();
-        let many: Vec<_> = solidcraft_engine::command_specs().into_iter().take(30).map(|c| (None, c)).collect();
-        let narrow = ribbon::grid_layout(&grid_ids(&many), &[], 4.0 * ribbon::GRID_CELL);
-        assert!(narrow.size.x <= 4.0 * ribbon::GRID_CELL && rows(&narrow) > ribbon::GRID_ROWS);
-        let few = [(None, c("solid.box")), (None, c("solid.sphere"))];
-        assert_eq!(
-            ribbon::grid_layout(&grid_ids(&few), &[], 4000.0).size,
-            vec2(2.0 * ribbon::GRID_CELL, ribbon::GRID_CELL),
-            "a small menu is one row"
-        );
+    }
+
+    /// Shared menu headings retain localized names rather than all caps.
+    #[test]
+    fn group_headings_keep_their_localized_names() {
+        assert_eq!(group_heading_text("Edges"), "Edges", "written as named, not in capitals");
     }
 
     /// With `ribbon_icon_grid` on, a panel's drop-down shows the same commands as its list, as
     /// large icons in rows of at most five; arrow keys move across and down; a click starts the
     /// command, and a drag pins it, as from the list (#4739).
     #[test]
-    fn the_icon_grid_shows_the_lists_commands_and_acts_like_it() {
+    fn the_legacy_grid_preference_uses_the_shared_command_list() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
-        let open = |h: &mut crate::scenario::Harness| {
+        let mut previous = None;
+        for legacy in [false, true] {
+            h.app.preferences.ribbon_icon_grid = legacy;
             h.frames(4);
             h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
-            h.frames(6);
-            let menu = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
-            (menu, crate::scenario::handles("dropdown:"))
-        };
-        let (_, list) = open(&mut h);
-        h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(!h.app.preferences.ribbon_icon_grid, "the list stays the default");
-        h.call("ui.prefs", json!({"ribbon_icon_grid": true}));
-        assert!(h.app.preferences.ribbon_icon_grid);
-        let (menu, grid) = open(&mut h);
-        let ids = |rows: &[(String, egui::Pos2)]| rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&grid), ids(&list), "the grid shows the list's commands in its order");
-        assert!(grid.len() > ribbon::GRID_COLUMNS * ribbon::GRID_ROWS, "MODEL CREATE is a big menu: {grid:?}");
-        for (id, at) in &grid {
-            assert!(menu.contains(*at), "{id} at {at:?} is outside the drop-down {menu:?}");
+            h.frames(4);
+            let rows = crate::scenario::handles("dropdown:");
+            assert!(!rows.is_empty());
+            let ids = rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+            if let Some(previous) = &previous {
+                assert_eq!(&ids, previous);
+            }
+            previous = Some(ids);
+            let ys = rows.iter().map(|(_, at)| at.y.round() as i32).collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(ys.len(), rows.len(), "each shared command occupies its own row");
+            h.step(&json!({"key":"Escape"})).unwrap();
         }
-        let ys: std::collections::BTreeSet<i32> = grid.iter().map(|(_, at)| at.y.round() as i32).collect();
-        assert_eq!(ys.len(), ribbon::GRID_ROWS, "laid out in {} rows, growing to the right: {ys:?}", ribbon::GRID_ROWS);
-        let columns = grid.len().div_ceil(ribbon::GRID_ROWS);
-        assert!(menu.width() <= columns as f32 * ribbon::GRID_CELL + 40.0, "no wider than its columns: {menu:?}");
-
-        let hot = |h: &mut crate::scenario::Harness, key: &str| {
-            h.step(&json!({"key": key})).unwrap();
-            h.frames(3);
-            let hot = crate::scenario::handles("dropdown_hot:");
-            let [(_, at)] = hot.as_slice() else { panic!("one highlighted icon after {key}: {hot:?}") };
-            *at
-        };
-        let first = hot(&mut h, "ArrowRight");
-        let second = hot(&mut h, "ArrowRight");
-        assert!(second.x > first.x && (second.y - first.y).abs() < 1.0, "Right moves along the row: {first:?} → {second:?}");
-        let below = hot(&mut h, "ArrowDown");
-        assert!(below.y > second.y, "Down moves to the row below: {second:?} → {below:?}");
-
-        h.step(&json!({"click":{"handle":"dropdown:solid.box"}})).unwrap();
-        h.frames(3);
-        assert!(crate::scenario::rect_of("toolbar_dropdown").is_none(), "a click closes the drop-down");
-        assert!(h.app.dialog.is_some() || h.app.tool.is_some(), "and starts the command");
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.frames(3);
-
-        open(&mut h);
-        let label = crate::scenario::handle_at("panel:MODEL:CREATE").unwrap();
-        h.step(&json!({"drag":[{"handle":"dropdown:solid.cylinder"}, [label.x, label.y]],"steps":12})).unwrap();
-        h.step(&json!({"key":"Escape"})).unwrap();
-        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.cylinder").is_some(), "dragged onto the ribbon, it is pinned");
-        assert!(h.app.session.doc.features.is_empty(), "pinning does not run the command");
     }
 
     /// A right-click on a drop-down's command, in the list and in the grid, opens its menu:
@@ -5087,7 +4992,7 @@ mod dropdown_tests {
                 h.frames(4);
                 h.step(&json!({"click":{"handle":"dropdown:solid.box"},"button":"right"})).unwrap();
                 h.frames(4);
-                assert!(h.app.viewport.context_menu.is_some(), "grid {grid}: the right-click opens the command's menu");
+                assert!(ui_kit::Menu::any_open(&h.ctx), "the shared context menu opens");
                 h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("grid {grid}: {item}: {e}"));
                 h.frames(4);
             };
@@ -5097,28 +5002,16 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at icon pins it and again unpins it. A grid icon's pin
-            // takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY. A row has
-            // no pin (#11853): its ⋯ menu does it.
+            // Both compatibility settings use the shared secondary menu to pin and unpin.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
                 h.step(&json!({"move":{"handle":"dropdown:solid.box"}})).unwrap();
                 h.frames(3);
-                if grid {
-                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
-                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
-                }
-                if grid {
-                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
-                } else {
-                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
-                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
-                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
-                    h.frames(3);
-                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
-                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
-                }
+                h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                h.frames(3);
+                let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item}: {e}"));
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
                 assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}");
@@ -5127,10 +5020,9 @@ mod dropdown_tests {
         }
     }
 
-    /// A quick click on a grid icon's corner, where its pin appears after ribbon::PIN_DELAY, starts the
-    /// command instead of pinning it.
+    /// A command row starts the command; its secondary menu owns pinning.
     #[test]
-    fn a_quick_click_on_the_pin_corner_starts_the_command() {
+    fn a_click_on_a_shared_command_row_starts_the_command() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5138,7 +5030,7 @@ mod dropdown_tests {
         h.frames(4);
         h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
         h.frames(4);
-        let at = crate::scenario::handle_at("dropdown:solid.box").unwrap() + vec2(ribbon::GRID_CELL / 2.0 - 7.0, -ribbon::GRID_CELL / 2.0 + 7.0);
+        let at = crate::scenario::handle_at("dropdown:solid.box").unwrap();
         h.step(&json!({"click":[at.x, at.y]})).unwrap();
         h.frames(3);
         assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "not pinned");
@@ -5165,8 +5057,10 @@ mod dropdown_tests {
         h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
         h.frames(4);
         h.step(&json!({"move":{"handle":"dropdown:solid.loft"}})).unwrap();
-        h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
-        h.step(&json!({"click":{"handle":"dropdown_pin:solid.loft"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dropdown_more:solid.loft"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"widget":"Pin to Toolbar"})).unwrap();
         h.frames(3);
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(4);
@@ -5183,29 +5077,16 @@ mod dropdown_tests {
     /// Sketch › Create in the grid shows every variant of each family (Line, Rectangle, …) under
     /// the family's heading, then the other tools, as large icons; a click starts the tool.
     #[test]
-    fn sketch_create_in_the_grid_shows_every_variant() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.call("ui.resize", json!({"width":1600,"height":1000}));
-        h.app.preferences.ribbon_icon_grid = true;
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.frames(4);
-        h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
-        h.frames(4);
-        let cells: Vec<String> = crate::scenario::handles("dropdown:").into_iter().map(|(id, _)| id).collect();
+    fn sketch_create_defines_every_variant_in_shared_family_submenus() {
+        let h = crate::scenario::Harness::new();
+        let specs = solidcraft_engine::command_specs();
+        let (commands, _) = crate::workspace::layout("SKETCH", "CREATE", &specs).unwrap();
+        let items = command_menu_items(&h.app, "SKETCH", "CREATE", &commands);
+        let ids = items.iter().flat_map(|item| std::iter::once(item).chain(item.children.iter())).map(|item| item.id.as_str()).collect::<Vec<_>>();
         for id in ["sketch.line", "sketch.rectangle.center", "sketch.circle.three_point", "sketch.arc.tangent", "sketch.polygon.edge", "sketch.point"]
         {
-            assert!(cells.iter().any(|c| *c == format!("dropdown:{id}")), "{id} is an icon of the grid: {cells:?}");
+            assert!(ids.contains(&id), "{id} remains available in its family");
         }
-        let grouped = sketch_create_grouped(
-            &solidcraft_engine::command_specs().into_iter().filter(|c| c.id.starts_with("sketch.rectangle")).collect::<Vec<_>>(),
-        );
-        assert_eq!(grouped.first().and_then(|(h, _)| *h), Some("Rectangle"));
-        assert!(grouped.iter().skip(1).all(|(h, _)| h.is_none()), "one heading per family");
-        h.step(&json!({"click":{"handle":"dropdown:sketch.rectangle.center"}})).unwrap();
-        h.frames(3);
-        assert!(crate::scenario::rect_of("toolbar_dropdown").is_none(), "a click closes the drop-down");
-        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.rectangle.center"), "and starts the tool");
     }
 
     /// With `ribbon_menus_skip_pinned`, a drop-down leaves out the commands the ribbon shows as
@@ -5254,7 +5135,9 @@ mod dropdown_tests {
         for theme in ["dark", "blueprint"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
-            h.call("ui.resize", json!({"width":1280,"height":800}));
+            // Tall enough that the whole MODIFY menu (Transform Face made it one row longer) fits without
+            // scrolling, so its separator before the ungrouped commands is on screen to count.
+            h.call("ui.resize", json!({"width":1280,"height":1100}));
             h.call("ui.prefs", json!({"theme": theme, "construct_menu_groups": true, "ribbon_icon_grid": false}));
             for panel in ["panel:MODEL:MODIFY", "panel:MODEL:CONSTRUCT"] {
                 h.frames(4);
@@ -5262,7 +5145,7 @@ mod dropdown_tests {
                 h.frames(6);
                 let bounds = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
                 let mut output = h.ctx.run_ui(
-                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() },
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 1100.0))), ..Default::default() },
                     |ui| h.app.ui(ui),
                 );
                 output.textures_delta.clear();
@@ -5279,13 +5162,20 @@ mod dropdown_tests {
                         }
                     });
                 }
-                assert_eq!(rules.len(), 1, "{theme} {panel}: expected only the footer separator, got {rules:?}");
+                let panel_name = panel.rsplit(':').next().unwrap();
+                let (commands, _) = crate::workspace::layout("MODEL", panel_name, &solidcraft_engine::command_specs()).unwrap();
+                let definitions = command_menu_items(&h.app, "MODEL", panel_name, &commands);
+                assert_eq!(
+                    rules.len(),
+                    definitions.iter().filter(|item| item.is_sep()).count(),
+                    "{theme} {panel}: each definition separator is rendered once"
+                );
                 let expected = crate::ui_kit::Menu::separator_stroke(&Tokens::get());
-                assert_eq!(rules[0], expected, "{theme} {panel}: expected shared menu separator stroke");
+                assert!(rules.iter().all(|stroke| *stroke == expected), "{theme} {panel}: expected shared menu separator stroke");
                 assert!(
-                    solidcraft_theme::contrast_ratio(rules[0].color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
+                    solidcraft_theme::contrast_ratio(expected.color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
                     "{theme} {panel}: separator {:?} blends into {:?}",
-                    rules[0],
+                    expected,
                     Tokens::get().dialog_body
                 );
                 h.step(&json!({"key":"Escape"})).unwrap();
@@ -5405,6 +5295,28 @@ mod dropdown_toggle_tests {
                 assert!(rect_of("toolbar_dropdown").is_none(), "returning to the ribbon still needs a click");
             }
         }
+    }
+
+    #[test]
+    fn hover_follow_keeps_the_panel_open_inside_a_shared_flyout() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ribbon_menus_follow_hover = true;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
+        h.frames(3);
+        let root = rect_of("toolbar_dropdown").unwrap();
+        h.step(&json!({"move":{"handle":"create_family:Rectangle"}})).unwrap();
+        h.frames(30);
+        let child = crate::scenario::handle_at("dropdown:sketch.rectangle.center").unwrap();
+        assert!(!root.contains(child), "the regression must exercise a row outside the root popup");
+        h.step(&json!({"move":[child.x,child.y]})).unwrap();
+        h.frames(4);
+        assert!(rect_of("toolbar_dropdown").is_some(), "a child flyout belongs to the open panel");
+        h.step(&json!({"click":{"handle":"dropdown:sketch.rectangle.center"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.rectangle.center"));
     }
 
     /// A click on the lit button of the sketch tool in use ends it, so clicks in the view select
@@ -5606,8 +5518,10 @@ mod dropdown_toggle_tests {
         h.frames(2);
         h.step(&json!({"move": {"handle": "dropdown:solid.shell"}})).unwrap();
         h.frames(40);
-        let shell = h.app.tr_label("Shell").to_string();
-        assert!(h.widget(&format!("{shell}  (Shift+J)")).is_some(), "the tooltip shows the new key");
+        let command = solidcraft_engine::find_command("solid.shell").unwrap();
+        let tip = super::command_items(&h.app, &[command]).remove(0).tip.expect("Shell has a shared command tooltip");
+        assert!(tip.contains("Shift+J"), "the command tooltip names the rebound key");
+        assert!(h.widget(&tip).is_some(), "the actual shared tooltip renders the rebound key and command help");
     }
 }
 
@@ -5987,7 +5901,7 @@ mod app_bar_tests {
         assert!(h.app.toolbar_custom.app_bar_customizing);
         h.call("ui.start", json!({"command":"ui.appBarCustomize"}));
         assert!(!h.app.toolbar_custom.app_bar_customizing, "the command toggles edit mode");
-        assert!(file_rows(&h.app).iter().any(|row| matches!(row, app_bar::FileRow::Item(item) if item.id == "ui.appBarCustomize")));
+        assert!(file_rows(&h.app).iter().any(|row| row.label == "Settings" && row.children.iter().any(|item| item.id == "ui.appBarCustomize")));
         run_file_row(&mut h.app, "ui.appBarCustomize");
         assert!(h.app.toolbar_custom.app_bar_customizing);
         h.app.toolbar_custom.app_bar_customizing = false;
@@ -6337,6 +6251,55 @@ mod app_bar_tests {
     }
 
     #[test]
+    fn sketch_plugin_overflow_keeps_its_commands_before_the_finish_group() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let root = h.dir.join("plugins-slots");
+        let package = root.join("workshop-helper");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("entry.wasm"), []).unwrap();
+        std::fs::write(
+            package.join("plugin.json"),
+            json!({
+                "id":"workshop-helper","name":"Workshop helper","version":"1.0","capabilities":["commands@0.1"],
+                "runtime":{"module":"entry.wasm","commands":[],"entries":[{
+                    "name":"measure","effect":"read",
+                    "input_schema":{"type":"object","properties":{"length":{"type":"number","default":12}}},
+                    "slots":[{"kind":"ribbon","name":"Sketch"}]
+                }]}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        crate::plugin_slots::invalidate(&mut h.app);
+        crate::plugin_slots::refresh(&mut h.app);
+        crate::plugin_slots::wait_for_discovery(&mut h.app);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let hidden = [1000, 800, 600, 400].into_iter().any(|width| {
+            h.call("ui.resize", json!({"width":width,"height":2000}));
+            h.frames(3);
+            crate::scenario::rect_of("panel:SKETCH:plugin:workshop-helper").is_none() && crate::scenario::rect_of("toolbar:overflow").is_some()
+        });
+        assert!(hidden, "the plugin group is in overflow while Finish Sketch retains its room");
+        assert!(crate::scenario::rect_of("panel:SKETCH:FINISH SKETCH").is_some());
+        let sketch = h.app.session.active_sketch;
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"handle":"toolbar:overflow"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Workshop helper"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("menu:workshop-helper.measure").is_some(), "plugin overflow keeps its own definition");
+        assert!(crate::scenario::rect_of("dropdown:sketch.finish").is_none(), "Finish Sketch commands cannot replace plugin entries");
+        h.step(&json!({"click":{"handle":"menu:workshop-helper.measure"}})).unwrap();
+        let dialog = h.app.plugin_menu.dialog().expect("the plugin's own input dialog opens");
+        assert_eq!(dialog.entry, "measure");
+        assert_eq!(dialog.ready(&h.app), Ok(json!({"length":12.0})));
+        assert_eq!(h.app.session.active_sketch, sketch, "the click does not finish the sketch");
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.plugin_state.packages.is_empty(), "opening an entry never executes its wasm");
+    }
+
+    #[test]
     fn plugins_host_menu_and_ribbon_slots_show_identity_and_obey_disabled_policy() {
         let mut h = crate::scenario::Harness::new();
         let root = h.dir.join("plugins-slots");
@@ -6358,15 +6321,7 @@ mod app_bar_tests {
         let file = crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File"));
         assert_eq!(file[0].label, "Workshop helper · measure");
         assert_eq!(
-            file_rows(&h.app)
-                .iter()
-                .filter_map(|r| match r {
-                    app_bar::FileRow::Item(i) => Some(i),
-                    _ => None,
-                })
-                .find(|i| i.id == "workshop-helper.measure")
-                .unwrap()
-                .icon,
+            file_rows(&h.app).iter().filter(|item| item.children.is_empty()).find(|i| i.id == "workshop-helper.measure").unwrap().icon,
             "prefs_plugins"
         );
         assert_eq!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("Help"))[0].label, "Workshop helper · report");
@@ -7569,7 +7524,10 @@ mod persistent_ribbon_tests {
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
         assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
         let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
-        assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
+        assert_eq!(
+            mesh.iter().map(|c| c.id).collect::<Vec<_>>(),
+            ["mesh.reduce", "mesh.convert", "mesh.section_stack", "file.insert_mesh", "file.save_mesh"]
+        );
         assert_eq!(
             crate::toolbar_custom::buttons(&h.app, "SURFACE", "MESH", mesh, *count).iter().map(|c| c.id).collect::<Vec<_>>(),
             ["mesh.reduce", "mesh.convert"]
@@ -7588,7 +7546,7 @@ mod persistent_ribbon_tests {
         assert!(!create.iter().any(|c| c.id == "surface.thicken"));
         assert_eq!(*count, 4);
         let (_, convert, count) = lists.iter().find(|(p, _, _)| *p == "CONVERT").unwrap();
-        assert_eq!(convert.iter().map(|c| c.id).collect::<Vec<_>>(), ["surface.thicken", "mesh.convert", "mesh.reduce"]);
+        assert_eq!(convert.iter().map(|c| c.id).collect::<Vec<_>>(), ["surface.thicken", "mesh.convert", "mesh.reduce", "mesh.section_stack"]);
         assert_eq!(*count, 2);
         assert!(scenario::handle_at("button:surface.thicken").is_some());
         assert!(scenario::handle_at("button:mesh.convert").is_some());
@@ -7731,7 +7689,7 @@ mod persistent_ribbon_tests {
         }
     }
 
-    fn open_status_grid(h: &mut Harness, panel: &str) {
+    fn open_status_menu(h: &mut Harness, panel: &str) {
         h.app.preferences.ribbon_icon_grid = true;
         h.app.preferences.ribbon_menus_skip_pinned = false;
         h.frames(3);
@@ -7742,136 +7700,29 @@ mod persistent_ribbon_tests {
         assert!(scenario::rect_of("toolbar_dropdown").is_some());
     }
 
-    fn close_status_grid(h: &mut Harness, panel: &str) {
+    fn close_status_menu(h: &mut Harness, panel: &str) {
         // Use the real header toggle so closing a menu never supplies an idle effect Escape.
         h.step(&json!({"click":{"handle":format!("panel:INSPECT:{panel}")}})).unwrap();
         h.frames(3);
         assert!(scenario::rect_of("toolbar_dropdown").is_none());
     }
 
-    fn status_grid_rect(_h: &Harness, id: &str) -> Rect {
-        let at = scenario::handle_at(&format!("dropdown:{id}")).unwrap();
-        Rect::from_center_size(at, vec2(ribbon::GRID_CELL, ribbon::GRID_CELL)).shrink(2.0)
-    }
-
-    fn assert_status_grid(h: &Harness, id: &str, selected: bool, toggled: Option<egui::accesskit::Toggled>) {
-        let rect = status_grid_rect(h, id);
-        let t = Tokens::get();
-        let mut drawn = Vec::new();
-        for shape in &h.shapes {
-            shapes(&shape.shape, &mut drawn);
-        }
-        // A kept section has no pressed fill, but a focused cell's own background may share its colour.
-        if !persistent_kept(&h.app, id) {
-            assert_eq!(
-                drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.selected_bg)),
-                selected,
-                "{id} grid fill"
-            );
-        }
-        assert_eq!(drawn.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && stroke.color == t.accent && points[0].y == rect.bottom() - t.space_4 && rect.contains(points[0]))), selected, "{id} grid underline");
+    fn assert_status_menu(h: &Harness, id: &str, selected: bool, toggled: Option<egui::accesskit::Toggled>) {
+        assert!(scenario::rect_of(&format!("dropdown:{id}")).is_some());
         let command = solidcraft_engine::find_command(id).unwrap();
-        let label = if toggled.is_some() { persistent_button_name(&h.app, command) } else { h.app.tr_label(command.label).to_string() };
-        let node = h
-            .output
-            .accesskit_update
-            .as_ref()
-            .and_then(|tree| {
-                tree.nodes.iter().find(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Button
-                        && node.label() == Some(label.as_str())
-                        && node.bounds().is_some_and(|b| rect.contains(pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
-                })
-            })
-            .map(|(_, node)| node)
-            .expect("the actual grid button, distinguished from a same-named pinned ribbon button by bounds");
-        assert_eq!(node.toggled(), toggled, "{id} grid accessibility");
+        let items = command_items(&h.app, &[command]);
+        assert_eq!(items[0].checked == Some(true), selected, "{id} checked state follows the effect and presentation preferences");
+        assert_eq!(items[0].checked, toggled.map(|state| state == egui::accesskit::Toggled::True), "{id} retains the expected check semantics");
+        let data = RowData::new(&h.app, command);
+        let expected_tip = match (data.tip, data.help.filter(|_| !data.hint)) {
+            (Some(tip), Some(help)) => Some(format!("{tip}\n\n{help}")),
+            (tip, help) => tip.or(help),
+        };
+        assert_eq!(items[0].tip, expected_tip);
     }
 
     #[test]
-    fn persistent_grid_deferred_paint_retains_partial_and_offscreen_scroll_clips() {
-        let mut saw_partial = false;
-        let mut saw_offscreen = false;
-        for offset in [0.0, 24.0, 96.0] {
-            let mut h = harness();
-            h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
-            h.app.session.execute("inspect.zebra", &json!({})).unwrap();
-            let effects = h.app.session.status_items();
-            let ctx = h.ctx.clone();
-            let mut expected = Vec::new();
-            let mut output = ctx.run_ui(
-                egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 240.0))), focused: true, ..Default::default() },
-                |ui| {
-                    expected.clear(); // Context layout passes never accumulate stale paint expectations.
-                    // Leave visible space above the scroll viewport, where a broadened clip leaks.
-                    ui.add_space(80.0);
-                    let mut paints = Vec::new();
-                    egui::ScrollArea::vertical()
-                        .id_salt("persistent_grid_clip_regression")
-                        .auto_shrink([false, false])
-                        .max_height(64.0)
-                        .min_scrolled_height(64.0)
-                        .vertical_scroll_offset(offset)
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            for id in ["inspect.section", "inspect.zebra", "inspect.draft"] {
-                                let command = solidcraft_engine::find_command(id).unwrap();
-                                let (rect, _) = ui.allocate_exact_size(vec2(ribbon::GRID_CELL, ribbon::GRID_CELL), Sense::hover());
-                                let clip = ui.clip_rect().intersect(rect);
-                                let _ = dropdown_cell(&h.app, ui, command, rect, false, &mut paints);
-                                if id != "inspect.draft" {
-                                    expected.push((id, rect.shrink(2.0), clip));
-                                }
-                            }
-                        });
-                    // This is deliberately the larger parent Ui, matching the real post-dispatch call.
-                    paint_persistent_ribbon(&h.app, ui, paints, "INSPECT", "ribbon_grid");
-                },
-            );
-            output.textures_delta.clear();
-            assert_eq!(h.app.session.status_items(), effects, "rendering real active cells never changes their effects");
-            for (id, cell, original_clip) in expected {
-                let mut backgrounds = Vec::new();
-                for clipped in &output.shapes {
-                    let mut drawn = Vec::new();
-                    shapes(&clipped.shape, &mut drawn);
-                    if drawn.iter().any(|shape| match shape {
-                        egui::Shape::Rect(rect) => rect.rect == cell && rect.fill == Tokens::get().selected_bg,
-                        // A kept section is marked by its underline alone (#20663).
-                        egui::Shape::LineSegment { points, stroke } => {
-                            id == "inspect.section"
-                                && stroke.color == Tokens::get().accent
-                                && points[0].y == cell.bottom() - Tokens::get().space_4
-                                && cell.x_range().contains(points[0].x)
-                                && cell.x_range().contains(points[1].x)
-                        }
-                        _ => false,
-                    }) {
-                        backgrounds.push(clipped.clip_rect);
-                    }
-                }
-                if original_clip.intersect(cell).is_positive() {
-                    assert!(!backgrounds.is_empty(), "{id} actually paints its visible selected fragment at offset {offset}");
-                    assert!(
-                        backgrounds.iter().all(|clip| *clip == original_clip),
-                        "{id} retains its original cell/scroll clip, not the parent clip, at offset {offset}"
-                    );
-                    saw_partial |= !original_clip.contains_rect(cell);
-                } else {
-                    assert!(
-                        backgrounds.iter().all(|clip| !clip.intersect(cell).is_positive()),
-                        "offscreen {id} must not paint into the space above its scroll viewport"
-                    );
-                    saw_offscreen = true;
-                }
-            }
-        }
-        assert!(saw_partial, "the native ScrollArea must actually partly clip an active cell");
-        assert!(saw_offscreen, "the native ScrollArea must actually scroll an active cell out of view");
-    }
-
-    #[test]
-    fn persistent_grid_uses_actual_section_and_analysis_with_independent_compatibility_preferences() {
+    fn persistent_menu_uses_actual_section_and_analysis_with_independent_compatibility_preferences() {
         for section in [false, true] {
             for ribbon in [false, true] {
                 let mut h = harness();
@@ -7881,20 +7732,20 @@ mod persistent_ribbon_tests {
                 h.app.session.execute("inspect.zebra", &json!({"stripes":14})).unwrap();
                 h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
                 let effects = h.app.session.status_items();
-                open_status_grid(&mut h, "SECTION");
-                assert_status_grid(&h, "inspect.section", section && ribbon, (section && ribbon).then_some(egui::accesskit::Toggled::True));
+                open_status_menu(&mut h, "SECTION");
+                assert_status_menu(&h, "inspect.section", section && ribbon, (section && ribbon).then_some(egui::accesskit::Toggled::True));
                 assert_eq!(h.app.session.status_items(), effects);
-                close_status_grid(&mut h, "SECTION");
-                open_status_grid(&mut h, "SURFACE QUALITY");
-                assert_status_grid(&h, "inspect.zebra", ribbon, ribbon.then_some(egui::accesskit::Toggled::True));
+                close_status_menu(&mut h, "SECTION");
+                open_status_menu(&mut h, "SURFACE QUALITY");
+                assert_status_menu(&h, "inspect.zebra", ribbon, ribbon.then_some(egui::accesskit::Toggled::True));
                 assert_eq!(h.app.session.status_items(), effects, "presentation preferences and menu navigation never mutate effects");
-                close_status_grid(&mut h, "SURFACE QUALITY");
+                close_status_menu(&mut h, "SURFACE QUALITY");
             }
         }
     }
 
     #[test]
-    fn persistent_grid_tracks_all_six_analysis_replacements_queries_and_failed_activation() {
+    fn persistent_menu_tracks_all_six_analysis_replacements_queries_and_failed_activation() {
         let mut h = harness();
         h.app.session.execute("inspect.section", &json!({"plane":"YZ","at":3})).unwrap();
         let cut = h.app.session.section.clone();
@@ -7905,22 +7756,22 @@ mod persistent_ribbon_tests {
             assert!(h.app.session.execute("inspect.draft", &json!({"pull":[0,0,0]})).is_err());
             assert_eq!(h.app.session.status_items(), before);
             let panel = if matches!(id, "inspect.draft" | "inspect.accessibility") { "CHECK" } else { "SURFACE QUALITY" };
-            open_status_grid(&mut h, panel);
-            assert_status_grid(&h, id, true, Some(egui::accesskit::Toggled::True));
+            open_status_menu(&mut h, panel);
+            assert_status_menu(&h, id, true, Some(egui::accesskit::Toggled::True));
             assert_eq!(h.app.session.section, cut, "analysis replacement leaves Section independent");
-            close_status_grid(&mut h, panel);
+            close_status_menu(&mut h, panel);
         }
     }
 
     #[test]
-    fn persistent_grid_keeps_native_keyboard_focus_and_active_tooltip() {
+    fn persistent_menu_keeps_native_keyboard_focus_and_active_tooltip() {
         let mut h = harness();
         h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
-        open_status_grid(&mut h, "SECTION");
-        h.step(&json!({"key":"ArrowRight"})).unwrap();
+        open_status_menu(&mut h, "SECTION");
+        h.step(&json!({"key":"Home"})).unwrap();
         h.frames(3);
-        assert!(scenario::rect_of("ribbon_grid:focus:inspect.section").is_some());
-        assert_status_grid(&h, "inspect.section", true, Some(egui::accesskit::Toggled::True));
+        assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::unique("dropdown_row").with("inspect.section"))));
+        assert_status_menu(&h, "inspect.section", true, Some(egui::accesskit::Toggled::True));
         h.step(&json!({"move":{"handle":"dropdown:inspect.section"}})).unwrap();
         h.frames(100);
         let command = solidcraft_engine::find_command("inspect.section").unwrap();
@@ -7937,50 +7788,21 @@ mod persistent_ribbon_tests {
     }
 
     #[test]
-    fn persistent_grid_clear_uses_post_dispatch_session_without_stale_paint_or_cross_effect_clear() {
+    fn persistent_menu_clear_uses_post_dispatch_session_without_stale_paint_or_cross_effect_clear() {
         for (id, panel) in [("inspect.section", "SECTION"), ("inspect.zebra", "SURFACE QUALITY")] {
             let mut h = harness();
             h.app.session.execute("inspect.zebra", &json!({})).unwrap();
             h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
-            open_status_grid(&mut h, panel);
-            assert_status_grid(&h, id, true, Some(egui::accesskit::Toggled::True));
-            let rect = status_grid_rect(&h, id);
+            open_status_menu(&mut h, panel);
+            assert_status_menu(&h, id, true, Some(egui::accesskit::Toggled::True));
             let at = scenario::handle_at(&format!("dropdown:{id}")).unwrap();
             let before = h.app.session.status_items();
             h.frame_with(crate::test_support::pointer(at, true));
-            assert_eq!(h.app.session.status_items(), before, "pointer down is not a command activation");
+            assert_eq!(h.app.session.status_items(), before, "pointer down is not activation");
             h.frame_with(crate::test_support::pointer(at, false));
-            // Check the release frame, with no settling frame: both paint paths resolve after dispatch.
             assert_paint(&h, id, false);
-            let mut drawn = Vec::new();
-            for shape in &h.shapes {
-                shapes(&shape.shape, &mut drawn);
-            }
-            let t = Tokens::get();
-            // The pointer still hovers this cell: native hover may share the selected fill.
-            // Persistence is distinguished by the underline, identity and native toggled state.
-            assert!(
-                drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.accent_soft)),
-                "{id} retains its normal hovered fill on release"
-            );
-            assert!(!drawn.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && stroke.color == t.accent && points[0].y == rect.bottom() - t.space_4 && rect.contains(points[0]))), "{id} has no persistent underline on release");
-            assert!(scenario::rect_of(&format!("ribbon_grid:pressed:{id}")).is_none(), "{id} has no published pressed identity on release");
             let command = solidcraft_engine::find_command(id).unwrap();
-            let label = persistent_button_name(&h.app, command);
-            let node = h
-                .output
-                .accesskit_update
-                .as_ref()
-                .and_then(|tree| {
-                    tree.nodes.iter().find(|(_, node)| {
-                        node.role() == egui::accesskit::Role::Button
-                            && node.label() == Some(label.as_str())
-                            && node.bounds().is_some_and(|b| rect.contains(pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
-                    })
-                })
-                .map(|(_, node)| node)
-                .expect("the actual cleared grid button, distinguished from its pinned ribbon button by bounds");
-            assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::False), "{id} grid accessibility is off on the release frame");
+            assert_eq!(command_items(&h.app, &[command])[0].checked, Some(false));
             assert_eq!(!h.app.session.section.is_empty(), id != "inspect.section");
             assert_eq!(h.app.session.analysis.is_some(), id != "inspect.zebra");
         }

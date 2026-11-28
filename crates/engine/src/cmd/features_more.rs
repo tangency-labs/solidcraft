@@ -40,8 +40,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
-        "diameter; two of revolutions (or turns), height, pitch; height_measure?: center_line|overall (what height measures: the helix's centre line, the default, or end to end; overall with square ends needs pitch); section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
+        "diameter (optional when axis is a circular edge, a cylinder face or a flat end face with a round outline: it then follows that circle); two of revolutions (or turns), height, pitch; height_measure?: center_line|overall (what height measures: the helix's centre line, the default, or end to end; overall with square ends needs pitch); section_size (a circle's diameter, a square's or an equilateral triangle's side); section?: circular|square|triangle (a triangle points at the axis); section_position?: inside|center|outside; \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference|{face: [x,y,z]} on a flat end face (the coil starts at the face's centre, or its round outline's, and grows along its outward normal; reversed grows into the body) (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
          end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
@@ -119,12 +119,30 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         (axis_expr_param(s, p, cmd)?.0, None)
     };
-    let diameter = if profile_mode {
+    // A circular edge, a cylinder or a flat end face picked as the axis gives the diameter when
+    // none is typed; the coil then follows it as the model changes.
+    let typed_diameter = p.get("diameter").filter(|v| !v.is_null() && v.as_str().is_none_or(|t| !t.trim().is_empty()));
+    let picked_diameter = match (&axis_ref, profile_mode || typed_diameter.is_some()) {
+        (Some(solidcraft_doc::AxisRef::Model { geo }), false) => coil_picked_diameter(s, geo, cmd)?,
+        _ => None,
+    };
+    let diameter = if profile_mode || picked_diameter.is_some() {
         None
     } else {
         let d = req_expr(cmd, p, "diameter")?;
         check_expr(s, &d, Kind::Length, cmd, "diameter")?;
         Some(d)
+    };
+    // What the overall height works out from: the typed diameter, else the picked one now.
+    let sized;
+    let p = match picked_diameter {
+        Some(d) => {
+            let mut with = p.clone();
+            with["diameter"] = serde_json::json!(format!("{d} mm"));
+            sized = with;
+            &sized
+        }
+        None => p,
     };
     let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));
     let (height, pitch) = (expr(p, "height"), expr(p, "pitch"));
@@ -155,7 +173,8 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let section = match str_(p, "section").map(str::to_ascii_lowercase).as_deref() {
         None | Some("circular" | "circle") => solidcraft_doc::CoilSection::Circular,
         Some("square") => solidcraft_doc::CoilSection::Square,
-        Some(o) => return Err(bad(cmd, format!("unknown section `{o}` (circular or square)"))),
+        Some("triangle" | "triangular") => solidcraft_doc::CoilSection::Triangle,
+        Some(o) => return Err(bad(cmd, format!("unknown section `{o}` (circular, square or triangle)"))),
     };
     let position = match str_(p, "section_position").map(str::to_ascii_lowercase).as_deref() {
         None | Some("center" | "on" | "on_center") => 0,
@@ -993,6 +1012,21 @@ fn overall_height(s: &Session, p: &Value, cmd: &str, profile_mode: bool, height:
     let [h, size, pitch, diameter] = length_operands(s, [(&h, &unit), (&size, &unit), (pitch, &unit), (&diameter, &unit)]);
     // The section's centre runs round a circle of diameter `diameter + position * size`.
     Ok(Some(format!("({h}) - ({size}) / sqrt(1 + (({pitch}) / (pi * (({diameter}) + {position} * ({size}))))^2)").into()))
+}
+
+/// The diameter a Coil's picked axis gives it now (a circular edge, a cylinder face, a flat end
+/// face's round outline), `None` for a pick with no diameter of its own.
+fn coil_picked_diameter(s: &Session, geo: &solidcraft_doc::construct::GeoRef, cmd: &str) -> Result<Option<f64>> {
+    let found = match geo {
+        solidcraft_doc::construct::GeoRef::PlacedEdge { .. } => {
+            solidcraft_doc::construct::coil_placed_edge_diameter(&s.placed_document(), &s.model.state(), geo)
+        }
+        _ => {
+            let world = s.world_state()?;
+            solidcraft_doc::construct::coil_model_diameter(world.as_ref(), geo)
+        }
+    };
+    Ok(found.map_err(|error| bad(cmd, format!("`axis`: {error}")))?.filter(|d| d.is_finite() && *d > 0.0))
 }
 
 pub(crate) fn coil_placed_edge(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {

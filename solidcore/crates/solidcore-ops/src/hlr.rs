@@ -178,6 +178,9 @@ fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
         Surface::Blend { .. } => Err(HlrError::Unsupported(
             "a blend's label (draw its NURBS form)",
         )),
+        Surface::Sweep { .. } => Err(HlrError::Unsupported(
+            "a sweep's label (draw its NURBS form)",
+        )),
         s => solidcore_convert::surface(s).map_err(|_| HlrError::Unsupported("face surface")),
     };
     let edges = b
@@ -197,7 +200,7 @@ fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
         .map(|f| {
             // A blend's label has no surface of its own: its face is drawn as its NURBS form.
             let (label, form) = match (&f.surface, &f.nurbs) {
-                (Surface::Blend { .. }, Some(net)) => (net, None),
+                (Surface::Blend { .. } | Surface::Sweep { .. }, Some(net)) => (net, None),
                 (label, form) => (label, form.as_ref()),
             };
             Ok(k::body::Face {

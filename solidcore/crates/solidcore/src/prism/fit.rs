@@ -14,6 +14,7 @@
 //! node tests against n² + n and refuses past it.
 
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::math::Point2;
 
 const OP: &str = "prism::fit::straight_runs_joined";
@@ -46,7 +47,7 @@ fn cross(a: Point2, b: Point2) -> f64 {
 
 fn dist(a: Point2, b: Point2) -> f64 {
     let d = sub(a, b);
-    d.x.hypot(d.y)
+    det::hypot(d.x, d.y)
 }
 
 /// How far `p` lies from the segment `a`–`b`: from its closest point, the projection clamped to
@@ -111,7 +112,7 @@ pub fn fit_loop(points: &[Point2], tolerance: f64, epsilon: f64) -> Result<Fitte
                         return false;
                     };
                     let (a, b) = (sub(a, center), sub(b, center));
-                    let signed = cross(a, b).atan2(dot(a, b));
+                    let signed = det::atan2(cross(a, b), dot(a, b));
                     if direction == 0. {
                         direction = signed.signum();
                     }
@@ -121,7 +122,7 @@ pub fn fit_loop(points: &[Point2], tolerance: f64, epsilon: f64) -> Result<Fitte
                     sweep += signed;
                     let angle = signed.abs();
                     angle <= std::f64::consts::PI / 6. + 1e-8
-                        && radius * (1. - (angle * 0.5).cos()) + epsilon * 10. <= tolerance
+                        && radius * (1. - det::cos(angle * 0.5)) + epsilon * 10. <= tolerance
                 });
                 if valid && (sweep.abs() - std::f64::consts::TAU).abs() <= 1e-7 {
                     return Ok(FittedLoop::Circle { center, radius });
@@ -207,7 +208,7 @@ mod tests {
         (0..n)
             .map(|i| {
                 let angle = i as f64 * std::f64::consts::TAU / n as f64;
-                Point2::new(angle.cos() * 10., angle.sin() * 10.)
+                Point2::new(det::cos(angle) * 10., det::sin(angle) * 10.)
             })
             .collect()
     }

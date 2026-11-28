@@ -59,6 +59,21 @@ pub struct TessPlan {
     pub edge_faces: Vec<Vec<u32>>,
 }
 
+/// Minimum total vertices across faces to evaluate faces in parallel (thread wakeup overhead).
+const PARALLEL_EVAL_VERTICES: usize = 2048;
+/// Minimum vertices on curved (non-planar) faces to evaluate in parallel.
+const PARALLEL_CURVED_VERTICES: usize = 256;
+
+/// One face's evaluated result before sequential concatenation into the mesh.
+enum EvaluatedFace {
+    Ok {
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        triangles: Option<Vec<[u32; 3]>>,
+    },
+    Refused(crate::RefusedFace),
+}
+
 /// One face's nodes as the mesh has them ([`TessPlan::nodes`]).
 pub(crate) struct FaceNodes {
     /// Each node's position.
@@ -124,56 +139,144 @@ impl TessPlan {
         }
     }
 
+    /// Whether evaluating this plan's faces is large enough to pay for waking worker threads.
+    pub(crate) fn parallel_eval(&self) -> bool {
+        if self.faces.len() <= 1 {
+            return false;
+        }
+        let mut total = 0usize;
+        let mut curved = 0usize;
+        for f in &self.faces {
+            let n = f.uv.len();
+            total = total.saturating_add(n);
+            if total >= PARALLEL_EVAL_VERTICES {
+                return true;
+            }
+            let is_curved = f
+                .surface
+                .and_then(|i| self.surfaces.get(i as usize))
+                .is_some_and(|s| !matches!(s, EvalSurface::Plane { .. }));
+            if is_curved {
+                curved = curved.saturating_add(n);
+                if curved >= PARALLEL_CURVED_VERTICES {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Evaluate one face's nodes and pole rules independently of other faces.
+    fn evaluate_face(&self, f: &FacePlan) -> EvaluatedFace {
+        let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
+        let FaceNodes {
+            mut positions,
+            mut normals,
+            mut kernel,
+            failure,
+        } = self.nodes(f);
+        if let Some(reason) = failure {
+            return EvaluatedFace::Refused(crate::RefusedFace {
+                face: f.face as usize,
+                reason,
+            });
+        }
+        // At the poles of higher order the plan names: one copy per triangle with its limit
+        // normal, or the mean of the triangles' normals, by the kernel's evaluator.
+        let mut triangles = None;
+        if let Some(s) = surface
+            && !f.poles.is_empty()
+        {
+            let at_poles: Vec<usize> = f
+                .poles
+                .iter()
+                .map(|p| p.node as usize)
+                .filter(|&k| k < f.fixed.len())
+                .collect();
+            let k = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+            match crate::pole::apply(k, f, &at_poles, positions, normals) {
+                Ok((p, n, t)) => {
+                    (positions, normals) = (p, n);
+                    triangles = Some(t);
+                }
+                // A normal the rule cannot give refuses the face, nothing substituted.
+                Err(reason) => {
+                    return EvaluatedFace::Refused(crate::RefusedFace {
+                        face: f.face as usize,
+                        reason,
+                    });
+                }
+            }
+        }
+        EvaluatedFace::Ok {
+            positions,
+            normals,
+            triangles,
+        }
+    }
+
     /// Evaluate on the CPU into an indexed mesh (vertices are shared within a face, not
     /// across faces, so creases keep their own normals), with the faces left out of it.
     #[must_use]
     pub fn evaluate(&self) -> (Mesh, Vec<crate::RefusedFace>) {
-        let mut out = Mesh::default();
-        let mut refused = Vec::new();
-        for f in &self.faces {
-            let base = out.positions.len();
-            let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
-            let FaceNodes {
-                mut positions,
-                mut normals,
-                mut kernel,
-                failure,
-            } = self.nodes(f);
-            if let Some(reason) = failure {
-                refused.push(crate::RefusedFace {
-                    face: f.face as usize,
-                    reason,
-                });
-                continue;
-            }
-            // At the poles of higher order the plan names: one copy per triangle with its limit
-            // normal, or the mean of the triangles' normals, by the kernel's evaluator.
-            let mut triangles = std::borrow::Cow::Borrowed(&f.triangles);
-            if let Some(s) = surface
-                && !f.poles.is_empty()
+        self.evaluate_with_parallel(self.parallel_eval())
+    }
+
+    pub(crate) fn evaluate_with_parallel(&self, parallel: bool) -> (Mesh, Vec<crate::RefusedFace>) {
+        let evaluated = crate::par::map("face evaluation", &self.faces, parallel, |f| {
+            Ok(self.evaluate_face(f))
+        });
+        let mut total_verts = 0usize;
+        let mut total_tris = 0usize;
+        for (f, res) in self.faces.iter().zip(&evaluated) {
+            if let Ok(EvaluatedFace::Ok {
+                positions,
+                triangles,
+                ..
+            }) = res
             {
-                let at_poles: Vec<usize> = f
-                    .poles
-                    .iter()
-                    .map(|p| p.node as usize)
-                    .filter(|&k| k < f.fixed.len())
-                    .collect();
-                let k = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
-                match crate::pole::apply(k, f, &at_poles, positions.clone(), normals.clone()) {
-                    Ok((p, n, t)) => {
-                        (positions, normals) = (p, n);
-                        triangles = std::borrow::Cow::Owned(t);
-                    }
-                    // A normal the rule cannot give refuses the face, nothing substituted.
-                    Err(reason) => {
-                        refused.push(crate::RefusedFace {
-                            face: f.face as usize,
-                            reason,
-                        });
-                        continue;
-                    }
+                let nodes = positions.len();
+                let Some(end) = total_verts.checked_add(nodes) else {
+                    continue;
+                };
+                if u32::try_from(end).is_err() {
+                    continue;
                 }
+                total_verts = end;
+                let tris = triangles.as_deref().unwrap_or(&f.triangles);
+                let valid = tris
+                    .iter()
+                    .filter(|t| t.iter().all(|&i| (i as usize) < nodes))
+                    .count();
+                total_tris = total_tris.saturating_add(valid);
             }
+        }
+        let mut out = Mesh::default();
+        let _ = out.positions.try_reserve_exact(total_verts);
+        let _ = out.normals.try_reserve_exact(total_verts);
+        let _ = out.triangles.try_reserve_exact(total_tris);
+        let _ = out.tri_face.try_reserve_exact(total_tris);
+        let mut refused = Vec::new();
+        for (f, res) in self.faces.iter().zip(evaluated) {
+            let (positions, normals, triangles) = match res {
+                Ok(EvaluatedFace::Ok {
+                    positions,
+                    normals,
+                    triangles,
+                }) => (positions, normals, triangles),
+                Ok(EvaluatedFace::Refused(r)) => {
+                    refused.push(r);
+                    continue;
+                }
+                Err(e) => {
+                    refused.push(crate::RefusedFace {
+                        face: f.face as usize,
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+            let base = out.positions.len();
             let nodes = positions.len();
             // Every index the face's triangles take must fit the mesh's u32 indices: a face past
             // them is refused, never numbered at u32::MAX.
@@ -189,7 +292,8 @@ impl TessPlan {
             }
             out.positions.extend(positions);
             out.normals.extend(normals);
-            for t in triangles.iter() {
+            let tris = triangles.as_deref().unwrap_or(&f.triangles);
+            for t in tris {
                 if t.iter().all(|&i| (i as usize) < nodes) {
                     let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
                     out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
@@ -462,5 +566,108 @@ mod tests {
         }
         assert_eq!(has, evaluated);
         assert_eq!(has, vec![false, false, true, true, false]);
+    }
+
+    #[test]
+    fn parallel_evaluate_matches_serial_bit_for_bit() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let nurbs = EvalSurface::nurbs(
+            [2, 1],
+            [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+            [3, 2],
+            vec![
+                [1.0, 0.0, 0.0, 1.0],
+                [w, w, 0.0, w],
+                [0.0, 1.0, 0.0, 1.0],
+                [1.0, 0.0, 2.0, 1.0],
+                [w, w, 2.0 * w, w],
+                [0.0, 1.0, 2.0, 1.0],
+            ],
+        );
+        let revolved = EvalSurface::Revolved {
+            profile: line(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0)),
+            origin: K::ZERO,
+            axis: K::Z,
+            transform: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            swap: false,
+        };
+        let plane = EvalSurface::Plane {
+            origin: K::ZERO,
+            du: K::X,
+            dv: K::Y,
+        };
+        let degenerate = EvalSurface::Plane {
+            origin: K::ZERO,
+            du: K::ZERO,
+            dv: K::ZERO,
+        };
+        let grid_uv: Vec<[f64; 2]> = (0..64u32)
+            .map(|k| {
+                let u = f64::from(k % 8) / 7.0;
+                let v = f64::from(k / 8) / 7.0;
+                [u, v]
+            })
+            .collect();
+        let mut grid_tris = Vec::new();
+        for r in 0..7u32 {
+            for c in 0..7u32 {
+                let i = r * 8 + c;
+                grid_tris.push([i, i + 1, i + 8]);
+                grid_tris.push([i + 1, i + 9, i + 8]);
+            }
+        }
+        // Include an out-of-range triangle index to verify filtering matches too.
+        grid_tris.push([0, 1, 999]);
+        let mut faces = Vec::new();
+        for fi in 0..10u32 {
+            let surface = match fi {
+                3 | 7 => Some(3),
+                0 | 2 | 4 | 6 => Some(0),
+                1 | 5 | 8 => Some(1),
+                _ => Some(2),
+            };
+            faces.push(FacePlan {
+                face: fi,
+                surface,
+                uv: grid_uv.clone(),
+                fixed: vec![Vec3::new(f64::from(fi), 0.25, -0.5)],
+                normals: vec![],
+                flip: fi % 2 == 1,
+                triangles: grid_tris.clone(),
+                poles: vec![],
+            });
+        }
+        let plan = TessPlan {
+            surfaces: vec![nurbs, revolved, plane, degenerate],
+            faces,
+            edges: vec![vec![Vec3::new(0.0, 0.25, -0.5), Vec3::new(1.0, 0.25, -0.5)]],
+            edge_faces: vec![vec![0, 1]],
+        };
+        assert!(plan.parallel_eval());
+        let (serial_mesh, serial_refused) = plan.evaluate_with_parallel(false);
+        let (par_mesh, par_refused) = plan.evaluate_with_parallel(true);
+        let (auto_mesh, auto_refused) = plan.evaluate();
+        assert_eq!(serial_refused.len(), 2);
+        assert_eq!(serial_refused[0].face, 3);
+        assert_eq!(serial_refused[1].face, 7);
+        assert_eq!(serial_refused, par_refused);
+        assert_eq!(serial_refused, auto_refused);
+        let bits = |vs: &[Vec3]| -> Vec<[u64; 3]> {
+            vs.iter()
+                .map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()])
+                .collect()
+        };
+        for other in [&par_mesh, &auto_mesh] {
+            assert_eq!(bits(&serial_mesh.positions), bits(&other.positions));
+            assert_eq!(bits(&serial_mesh.normals), bits(&other.normals));
+            assert_eq!(serial_mesh.triangles, other.triangles);
+            assert_eq!(serial_mesh.tri_face, other.tri_face);
+            assert_eq!(serial_mesh.edges, other.edges);
+            assert_eq!(serial_mesh.edge_faces, other.edge_faces);
+        }
     }
 }

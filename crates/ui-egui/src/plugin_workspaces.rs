@@ -507,10 +507,7 @@ fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &W
                 enabled: true,
                 open: open == Some(index),
                 running: None,
-                more: buttons
-                    .iter()
-                    .map(|b| ribbon::MoreRow { id: &b.id, label: &b.label, icon: &b.icon, shortcut: "", enabled: true, checked: None, hint: None })
-                    .collect(),
+                more: buttons.iter().map(|button| crate::ui_kit::Item::action(&button.id, &button.label, &button.icon)).collect(),
             })
             .collect(),
         labels,
@@ -521,7 +518,7 @@ fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &W
         handles: crate::toolbar::RIBBON_HANDLES,
     };
     let below = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + ribbon::TAB_ROW_HEIGHT), rect.max);
-    let out = ribbon::show(ui, &row, below, &mut |_, _| false);
+    let out = ribbon::show(ui, &row, below, &mut |_| None);
     let button_of = |id: &str| built.iter().flat_map(|(_, buttons)| buttons).find(|b| b.id == id);
     for drawn in &out.buttons {
         if let Some(button) = built.get(drawn.group).and_then(|(_, buttons)| buttons.get(drawn.index)) {
@@ -535,6 +532,9 @@ fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &W
             queue.push_back((workspace.plugin.id.clone(), button.entry.clone()));
         }
     };
+    for picked in &out.menu_picked {
+        run(app, &picked.id);
+    }
     for action in &out.actions {
         match action {
             ribbon::Action::Run { id, .. } => run(app, id),
@@ -549,27 +549,13 @@ fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &W
     let Some(drawn) = out.groups.iter().find(|drawn| drawn.group == index) else { return };
     let ctx = ui.ctx().clone();
     let popup = ui.scope_id().with(("plugin-workspace-group-menu", index));
-    let mut chosen = None;
-    let shown = crate::ui_kit::Container::new(&ctx, crate::ui_kit::Surface::Popup)
-        .area(popup)
-        .fixed_pos(drawn.label.left_bottom())
-        .order(egui::Order::Foreground)
-        .show(&ctx, |ui| {
-            crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
-                crate::ui_kit::Menu::heading(ui, &group.0);
-                for button in &group.1 {
-                    if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action(&button.id, &button.label, &button.icon)).is_some() {
-                        chosen = Some(button.id.clone());
-                    }
-                }
-            });
-        });
-    if let Some(id) = chosen {
-        run(app, &id);
-        app.plugin_workspaces.menu = None;
-    } else if ctx.input(|i| i.key_pressed(egui::Key::Escape))
-        || (ctx.input(|i| i.pointer.any_pressed()) && !shown.response.contains_pointer() && !drawn.label_response.contains_pointer())
-    {
+    let mut items = vec![crate::ui_kit::Item::heading(&group.0)];
+    items.extend(group.1.iter().map(|button| crate::ui_kit::Item::action(&button.id, &button.label, &button.icon)));
+    let output = crate::ui_kit::Menu::popup(&ctx, popup, crate::ui_kit::MenuAnchor::Rect(drawn.label), &items, open != Some(index));
+    if let Some(picked) = output.picked {
+        run(app, &picked.id);
+    }
+    if output.close {
         app.plugin_workspaces.menu = None;
     }
 }

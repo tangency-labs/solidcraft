@@ -1665,3 +1665,183 @@ fn center_rule_is_one_undo_step_and_reopens() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.assembly.joints.len(), 0);
 }
+
+/// #22615: A between-two-faces midplane origin with a circle snap centers an asymmetric shaft
+/// through clevis holes via a Revolute joint without manual offset math, re-centers automatically
+/// when wall spacing or hole position changes parametrically, and survives cold reopen.
+#[test]
+fn midplane_origin_with_hole_snap_centers_asymmetric_shaft_and_follows_edits() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "HX", "expression": "14 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HY", "expression": "18 mm"}));
+    // Clevis with two parallel horizontal ear plates (inner faces z = 5 and z = 25 -> midplane z = 15)
+    // and an off-center hole through the lower ear at (HX, HY).
+    run(&mut s, "component.create", json!({"name": "Clevis"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [0, 0, 0], "body_name": "LowerEar"}));
+    run(&mut s, "solid.hole", json!({"position": ["HX", "HY", 5], "diameter": 8}));
+    let upper = run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [0, 0, 25], "body_name": "UpperEar"}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let clevis = occ(&s, "Clevis");
+    run(&mut s, "occurrence.ground", json!({"occurrence": clevis, "grounded": true}));
+
+    // Asymmetric shaft extending 10 mm below its lower shoulder (z = 0) and 34 mm above its upper
+    // shoulder (z = 16): shoulder midpoint is z = 8, NOT the shaft's overall midpoint (z = 20).
+    run(&mut s, "component.create", json!({"name": "Shaft"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, -10], "radius": 4, "height": 60, "body_name": "Pin"}));
+    run(&mut s, "solid.box", json!({"length": 16, "width": 16, "height": 16, "corner": [-8, -8, 0], "operation": "join", "participants": ["Pin"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Named midplane origin on Clevis: faces at z = 5 and z = 25, snapped to the hole cylinder wall.
+    let made = run(
+        &mut s,
+        "joint.origin",
+        json!({
+            "name": "ClevisMid",
+            "occurrence": "Clevis:1",
+            "faces": [[2, 2, 5], [2, 2, 25]],
+            "snap": {"circle": [18, 18, 2.5]},
+        }),
+    );
+    assert_eq!(made["origin"], json!("ClevisMid"));
+
+    // Revolute joint between ClevisMid and an inline between-faces+snap origin on Shaft's shoulders.
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "name": "PinHinge",
+            "type": "revolute",
+            "a": "ClevisMid",
+            "b": {
+                "occurrence": "Shaft:1",
+                "faces": [[6, 0, 0], [6, 0, 16]],
+                "snap": {"circle": [4, 0, -5]},
+            },
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+
+    // Shoulder midpoint (0, 0, 8) lands at (14, 18, 15) — dead center between z = 5 and z = 25 and
+    // coaxial with the hole, while the shaft extends asymmetrically past both ears.
+    assert!(near(place(&s, "Shaft", Vec3::new(0.0, 0.0, 8.0)), Vec3::new(14.0, 18.0, 15.0)));
+    let lo_z = place(&s, "Shaft", Vec3::new(0.0, 0.0, 0.0)).z;
+    let hi_z = place(&s, "Shaft", Vec3::new(0.0, 0.0, 16.0)).z;
+    assert!(((lo_z.min(hi_z) - 5.0) - (25.0 - lo_z.max(hi_z))).abs() < 1e-6, "equal clearance: {lo_z}..{hi_z}");
+
+    // `joint.inspect` conforms to its output schema and lists both boundary faces + inner snap refs.
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "PinHinge"}));
+    let schema = serde_json::to_value(crate::schema::output_schema_for::<crate::schema::joints::InspectJointResult>()).unwrap();
+    assert!(crate::schema::tests::conforms(&schema, &schema, &inspected), "{inspected}");
+    assert_eq!(inspected["joints"][0]["a"]["snap"]["type"], json!("between_faces"));
+    assert!(inspected["joints"][0]["a"]["snap"]["snap"].is_object(), "{inspected}");
+    assert!(inspected["joints"][0]["a"]["references"].as_array().unwrap().len() >= 3, "{inspected}");
+
+    // Parametric edits: widen clevis gap (upper ear z = 25 -> z = 35, midplane z = 20) and move hole.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": upper, "command": "solid.box", "params": {"length": 40, "width": 40, "height": 5, "corner": [0, 0, 35], "body_name": "UpperEar"}}),
+    );
+    run(&mut s, "parameters.change", json!({"name": "HX", "expression": "22 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HY", "expression": "26 mm"}));
+    assert!(near(place(&s, "Shaft", Vec3::new(0.0, 0.0, 8.0)), Vec3::new(22.0, 26.0, 20.0)));
+
+    // Cold reopen preserves the midplane + snap origin and resolves identically.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let solved = run(&mut reopened, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    assert!(near(place(&reopened, "Shaft", Vec3::new(0.0, 0.0, 8.0)), Vec3::new(22.0, 26.0, 20.0)));
+}
+
+/// #22615: Reversing the face order leaves the resolved midplane+snap frame unchanged, and `snap`
+/// accepts face centers, sketch points, explicit points and named origins on the same occurrence.
+#[test]
+fn midplane_origin_with_snap_is_order_independent_and_supports_face_and_sketch_snaps() {
+    let mut s = slot();
+    run(&mut s, "component.activate", json!({"component": "Slot"}));
+    run(&mut s, "sketch.create", json!({"name": "RefSk", "plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [5, 14], "radius": 2, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let sk_id = s.doc.find_feature("RefSk").unwrap().id;
+
+    // Reverse face order with a face-center snap -> identical world frame.
+    let make = |s: &mut Session, name: &str, rev: bool| {
+        let mut faces = vec![json!([10, 2, 2]), json!([30, 2, 2])];
+        if rev {
+            faces.reverse();
+        }
+        run(s, "joint.origin", json!({"name": name, "occurrence": "Slot:1", "faces": faces, "snap": {"face": [5, 10, 10]}}));
+        let o = s.doc.assembly.origins.iter().find(|o| o.name == name).unwrap().origin.clone();
+        s.doc.origin_world(&s.model.state(), &o).unwrap()
+    };
+    let f1 = make(&mut s, "Fwd", false);
+    let f2 = make(&mut s, "Rev", true);
+    for col in 0..4 {
+        for row in 0..4 {
+            assert!((f1[col][row] - f2[col][row]).abs() < 1e-9, "f1={f1:?} f2={f2:?}");
+        }
+    }
+    // Top face of left wall has centroid (5, 10, 10) -> projected onto midplane x = 20 gives (20, 10, 10).
+    assert!(near(Vec3::new(f1[3][0], f1[3][1], f1[3][2]), Vec3::new(20.0, 10.0, 10.0)));
+
+    // Sketch-point snap projected onto midplane x = 20 -> (20, 14, 0), and follows sketch edits.
+    run(
+        &mut s,
+        "joint.origin",
+        json!({"name": "SkMid", "occurrence": "Slot:1", "faces": [[10, 2, 2], [30, 2, 2]], "snap": {"sketch": sk_id, "point": "c1.center"}}),
+    );
+    let sk_origin = s.doc.assembly.origins.iter().find(|o| o.name == "SkMid").unwrap().origin.clone();
+    let m = s.doc.origin_world(&s.model.state(), &sk_origin).unwrap();
+    assert!(near(Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(20.0, 14.0, 0.0)));
+
+    // Named origin on the same occurrence used as `snap`.
+    run(&mut s, "joint.origin", json!({"name": "PtRef", "occurrence": "Slot:1", "point": [0, 7, 3]}));
+    run(&mut s, "joint.origin", json!({"name": "NamedMid", "occurrence": "Slot:1", "faces": [[10, 2, 2], [30, 2, 2]], "snap": "PtRef"}));
+    let named_o = s.doc.assembly.origins.iter().find(|o| o.name == "NamedMid").unwrap().origin.clone();
+    let nm = s.doc.origin_world(&s.model.state(), &named_o).unwrap();
+    assert!(near(Vec3::new(nm[3][0], nm[3][1], nm[3][2]), Vec3::new(20.0, 7.0, 3.0)));
+}
+
+/// #22615: Invalid between-faces + snap combinations are cleanly refused, and a deleted boundary
+/// face reports a joint solve error instead of silently attaching elsewhere.
+#[test]
+fn midplane_origin_with_snap_refuses_invalid_inputs_and_reports_missing_face() {
+    let mut s = slot_and_slider();
+    let before = s.doc.clone();
+    for (origin, msg) in [
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5]], "snap": {"faces": [[10, 10, 5], [30, 10, 5]]}}), "cannot nest"),
+        (json!({"occurrence": "Slot:1", "face": [10, 10, 5], "snap": {"point": [10, 10, 5]}}), "only valid with `faces`"),
+        (
+            json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5]], "snap": {"occurrence": "Slider:1", "point": [0, 0, 0]}}),
+            "same occurrence",
+        ),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [5, 10, 10]], "snap": {"point": [10, 10, 5]}}), "two parallel faces"),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [10, 10, 8]], "snap": {"point": [10, 10, 5]}}), "two different faces"),
+    ] {
+        let e = s.execute("joint.origin", &origin).expect_err("refused").to_string();
+        assert!(e.contains(msg), "{origin}: {e}");
+        assert_eq!(s.doc, before, "refusal mutated doc: {origin}");
+    }
+
+    // Create a valid midplane+snap joint, then delete one of the boundary wall bodies -> clean error.
+    let j = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "name": "CenterRigid",
+            "type": "rigid",
+            "a": {"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5]], "snap": {"face": [5, 10, 10]}},
+            "b": {"occurrence": "Slider:1", "face": [0, 0, 8]},
+        }),
+    );
+    assert_eq!(j["errors"], json!([]), "{j}");
+    let wall2 = s.doc.find_feature("Box2").unwrap().id;
+    run(&mut s, "timeline.suppress", json!({"feature": wall2, "suppressed": true}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    let errs = solved["errors"].as_array().unwrap();
+    assert_eq!(errs.len(), 1, "{solved}");
+    assert!(errs[0]["why"].as_str().unwrap().contains("no longer exists"), "{solved}");
+}

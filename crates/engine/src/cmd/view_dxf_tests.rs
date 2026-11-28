@@ -314,6 +314,46 @@ fn view_dxf_exports_a_sketch_only_design_on_the_sketch_layer() {
     }
 }
 
+/// A visible sketch's four straight sides, one circle and one quarter arc are six source
+/// curves. In arcs mode those remain four LINEs, one CIRCLE and one ARC, on SKETCH;
+/// finishing the sketch changes neither their geometry nor the requested representation.
+#[test]
+fn view_dxf_curves_arcs_preserve_visible_sketch_circles_and_arcs() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[60,40]}));
+    run(&mut s, "sketch.circle.center", json!({"center":[30,20],"radius":8}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[45,20],"start":[51,20],"end":[45,26]}));
+    for finish in [false, true] {
+        if finish {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        let doc = s.doc.clone();
+        let undo = s.undo.len();
+        let top = camera(StandardView::Top);
+        let default = export(&mut s, top, "omit");
+        let as_lines = run(&mut s, CMD, json!({"camera":top,"curves":"lines"}));
+        assert_eq!(default["dxf"], as_lines["dxf"], "the default remains lines; finish={finish}");
+        let line_file = solidcraft_io::read_dxf_file(as_lines["dxf"].as_str().unwrap()).unwrap();
+        assert_eq!(line_file.entities().len(), 6, "finish={finish}");
+        assert!(line_file.entities().iter().all(|e| !matches!(e.geometry(), DxfShape::Circle { .. } | DxfShape::Arc { .. })));
+
+        let as_arcs = run(&mut s, CMD, json!({"camera":top,"curves":"arcs"}));
+        assert_eq!(as_arcs["sketch"], 6, "finish={finish}");
+        let file = solidcraft_io::read_dxf_file(as_arcs["dxf"].as_str().unwrap()).unwrap();
+        assert_eq!(file.entities().len(), 6, "finish={finish}");
+        assert!(file.entities().iter().all(|e| file.layer(e.layer()).unwrap().name() == "SKETCH"));
+        let kinds = [
+            file.entities().iter().filter(|e| matches!(e.geometry(), DxfShape::Line(..))).count(),
+            file.entities().iter().filter(|e| matches!(e.geometry(), DxfShape::Circle { .. })).count(),
+            file.entities().iter().filter(|e| matches!(e.geometry(), DxfShape::Arc { .. })).count(),
+        ];
+        assert_eq!(kinds, [4, 1, 1], "four sides, a circle and a quarter arc; finish={finish}");
+        assert_eq!(s.undo.len(), undo, "export is not an edit; finish={finish}");
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    }
+}
+
 #[test]
 fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on_top() {
     let mut s = Session::default();
@@ -429,6 +469,200 @@ fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<(Vec2, Vec2)> {
         Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
     };
     (0..n).map(|i| (at(i), at(i + 1))).collect()
+}
+
+/// Top has right=X and up=(0,sin(pitch),cos(pitch)). All source curves lie at z=0,
+/// so their projected Y is (worldY-15)*sin(pitch)-5*cos(pitch), including the existing
+/// pole clamp. The projected radius anisotropy is at most R*(1-cos(1e-6)), below
+/// 4e-12 mm for R<=8. Expectations come from this frame, not the exported output.
+#[test]
+fn view_dxf_sketch_arcs_keep_projected_centers_radii_angles_and_rectangle_corners() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[60,40]}));
+    run(&mut s, "sketch.circle.center", json!({"center":[30,20],"radius":8}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[45,20],"start":[51,20],"end":[45,26]}));
+    let top = camera(StandardView::Top);
+    let (sin, cos) = top.pitch.sin_cos();
+    let projected_y = |world_y: f64| (world_y - 15.) * sin - 5. * cos;
+    let center_y = projected_y(20.);
+    let near = |a: Vec2, b: Vec2| a.dist(b) < 1e-9;
+    let corners =
+        [Vec2::new(-20., projected_y(0.)), Vec2::new(40., projected_y(0.)), Vec2::new(40., projected_y(40.)), Vec2::new(-20., projected_y(40.))];
+    let sides = [(corners[0], corners[1]), (corners[1], corners[2]), (corners[2], corners[3]), (corners[3], corners[0])];
+    for finish in [false, true] {
+        if finish {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        let v = run(&mut s, CMD, json!({"camera":top,"curves":"arcs"}));
+        let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+        let (mut found_sides, mut circles, mut arcs) = (Vec::new(), 0, 0);
+        for entity in file.entities() {
+            match entity.geometry() {
+                DxfShape::Line(a, b) => {
+                    let side = sides.iter().position(|&(p, q)| (near(*a, p) && near(*b, q)) || (near(*a, q) && near(*b, p)));
+                    found_sides.push(side.expect("one original rectangle side"));
+                }
+                DxfShape::Circle { c, r } => {
+                    circles += 1;
+                    assert!(near(*c, Vec2::new(10., center_y)) && (*r - 8.).abs() < 1e-9, "finish={finish}: {c:?}, {r}");
+                }
+                DxfShape::Arc { c, r, a0, a1 } => {
+                    arcs += 1;
+                    assert!(near(*c, Vec2::new(25., center_y)) && (*r - 6.).abs() < 1e-9, "finish={finish}: {c:?}, {r}");
+                    assert!(a0.abs() < 1e-6 && (*a1 - 90.).abs() < 1e-6, "finish={finish}: {a0}..{a1}");
+                }
+                shape => panic!("unexpected sketch representation: {shape:?}"),
+            }
+        }
+        found_sides.sort_unstable();
+        assert_eq!(found_sides, [0, 1, 2, 3], "finish={finish}");
+        assert_eq!((circles, arcs), (1, 1), "finish={finish}");
+    }
+}
+
+#[test]
+fn view_dxf_sketch_arc_planning_keeps_original_fallback_points_and_hidden_policy() {
+    let points = |segments: Vec<(Vec2, Vec2)>| {
+        let mut points: Vec<_> = segments.iter().map(|(a, _)| *a).collect();
+        points.push(segments.last().unwrap().1);
+        points
+    };
+    let hidden_ring = points(ring(Vec2::new(40., 0.), 10., 64, 0., std::f64::consts::TAU));
+    let mut mixed = points(ring(Vec2::ZERO, 10., 20, 0., std::f64::consts::FRAC_PI_2));
+    mixed.push(Vec2::new(20., 20.));
+    let sources = [
+        (vec![Vec2::new(-0.0, 0.), Vec2::new(1e-14, -0.0)], false),
+        (vec![Vec2::ZERO, Vec2::ZERO], false),
+        (vec![Vec2::ZERO, Vec2::X, Vec2::new(1., 1.), Vec2::Y, Vec2::ZERO], false),
+        (mixed, false),
+        (hidden_ring, true),
+    ];
+    let bits = |points: &[Vec2]| points.iter().map(|p| [p.x.to_bits(), p.y.to_bits()]).collect::<Vec<_>>();
+    for dashed in [false, true] {
+        let paths: Vec<_> = sources.iter().map(|(p, hidden)| mesh_lines::Path { points: p.clone(), closed: false, hidden: *hidden }).collect();
+        let count = paths.iter().map(|p| p.points.len()).sum();
+        let plan = PlannedViewArcs::sketch(&paths, 0.01, &Stage::new("dxf_write", 1)).unwrap();
+        assert!(plan.sketch_shapes.is_empty() && plan.arc_source_points.is_empty(), "no full visible path is one circle/arc");
+        let mut file = DxfFile::for_current_view_arc_export_with_sketch_arcs(0, paths.len(), count, &plan.arc_source_points).unwrap();
+        let sketch = file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+        let hidden = dashed.then(|| file.declare_layer("HIDDEN", 8, DxfLinetype::Hidden, None).unwrap());
+        assert_eq!(sketch_entities(paths, plan.sketch_shapes, dashed, &mut file, hidden, Some(sketch)).unwrap(), 4);
+        let expected: Vec<_> = sources.iter().filter(|(_, hidden)| dashed || !hidden).collect();
+        assert_eq!(file.entities().len(), expected.len());
+        for (entity, (original, hidden)) in file.entities().iter().zip(expected) {
+            assert_eq!(file.layer(entity.layer()).unwrap().name(), if *hidden { "HIDDEN" } else { "SKETCH" });
+            let retained = match entity.geometry() {
+                DxfShape::Line(a, b) => vec![*a, *b],
+                DxfShape::Polyline { points } => points.clone(),
+                shape => panic!("fallback changed representation: {shape:?}"),
+            };
+            assert_eq!(bits(&retained), bits(original), "fallback does not snap, deduplicate or reorder source points");
+        }
+        solidcraft_io::write_dxf_file(&file).unwrap();
+    }
+}
+
+#[test]
+fn view_dxf_sketch_arc_planning_does_not_join_separate_curves_into_one_circle() {
+    let mut paths = Vec::new();
+    for (from, to) in [(0., std::f64::consts::PI), (std::f64::consts::PI, std::f64::consts::TAU)] {
+        let segments = ring(Vec2::ZERO, 10., 40, from, to);
+        let mut points: Vec<_> = segments.iter().map(|(a, _)| *a).collect();
+        points.push(segments.last().unwrap().1);
+        paths.push(mesh_lines::Path { points, closed: false, hidden: false });
+    }
+    let plan = PlannedViewArcs::sketch(&paths, 0.01, &Stage::new("dxf_write", 1)).unwrap();
+    assert_eq!(plan.arc_source_points, [41, 41]);
+    assert_eq!(plan.sketch_shapes.len(), 2);
+    assert!(plan.sketch_shapes.iter().all(|(_, shape)| matches!(shape, DxfShape::Arc { .. })));
+    let mut file = DxfFile::for_current_view_arc_export_with_sketch_arcs(0, 2, 82, &plan.arc_source_points).unwrap();
+    let layer = file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+    assert_eq!(sketch_entities(paths, plan.sketch_shapes, false, &mut file, None, Some(layer)).unwrap(), 2);
+    solidcraft_io::write_dxf_file(&file).unwrap();
+}
+
+#[test]
+fn view_dxf_open_sketch_arc_far_from_origin_does_not_close_its_gap() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[1_000_000,1_000_000],"start":[1_000_008,1_000_000],"sweep":359.995}));
+    let segments = s.doc.sketch(s.active_sketch.unwrap()).unwrap().segs(0);
+    let [solidcore_record::Seg2::Arc { sweep, .. }] = segments.as_slice() else { panic!("{segments:?}") };
+    assert!((sweep.to_degrees() - 359.995).abs() < 1e-6, "the actual command must retain the open arc: {segments:?}");
+    let mut top = camera(StandardView::Top);
+    top.target = Vec3::ZERO;
+    let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    assert_eq!(file.entities().len(), 1);
+    let entity = &file.entities()[0];
+    assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+    let DxfShape::Arc { a0, a1, .. } = entity.geometry() else {
+        panic!("an open sketch arc must not become a closed circle: {:?}", entity.geometry())
+    };
+    // The omitted0.005 degree arc spans0.000698 mm atR8, larger than the requested0.0001 mm.
+    assert!(((a1 - a0).rem_euclid(360.) - 359.995).abs() < 1e-6, "{a0}..{a1}");
+}
+
+#[test]
+fn view_dxf_true_sketch_circle_at_origin_stays_closed_with_zero_camera_target() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":8}));
+    let mut top = camera(StandardView::Top);
+    top.target = Vec3::ZERO;
+    let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    assert_eq!(file.entities().len(), 1);
+    let entity = &file.entities()[0];
+    assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+    let DxfShape::Circle { c, r } = entity.geometry() else { panic!("a true source circle must stay closed: {:?}", entity.geometry()) };
+    // The source is centered on the camera target; Top's pole clamp changes R8 by less than4e-12 mm.
+    assert!(c.len() < 1e-9 && (r - 8.).abs() < 1e-9, "center={c:?}, radius={r}");
+}
+
+#[test]
+fn view_dxf_clockwise_open_arc_preserves_sweep_when_camera_target_changes() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[1_000_000,1_000_000],"start":[1_000_008,1_000_000],"sweep":-359.995}));
+    for target in [Vec3::ZERO, Vec3::new(1_000_000., 1_000_000., 0.)] {
+        let mut top = camera(StandardView::Top);
+        top.target = target;
+        let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+        let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+        assert_eq!(file.entities().len(), 1, "target={target:?}");
+        let entity = &file.entities()[0];
+        assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+        let DxfShape::Arc { r, a0, a1, .. } = entity.geometry() else {
+            panic!("the open clockwise source must remain an ARC: {:?}; target={target:?}", entity.geometry())
+        };
+        // DXF writes arcs counter-clockwise, exchanging the clockwise source's endpoints.
+        // Moving the camera target changes coordinates, not radius or the359.995 degree sweep.
+        assert!((r - 8.).abs() < 1e-9, "radius={r}; target={target:?}");
+        assert!(((a1 - a0).rem_euclid(360.) - 359.995).abs() < 1e-6, "{a0}..{a1}; target={target:?}");
+    }
+}
+
+#[test]
+fn view_dxf_tilted_sketch_circle_keeps_original_polyline_within_requested_tolerance() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[30,20],"radius":8}));
+    let mut cam = camera(StandardView::Top);
+    cam.pitch = 89.0_f64.to_radians();
+    // The projected ellipse has radii 8 and 8*sin(89 degrees). Its approximately
+    // 0.000609 mm circle-fit error exceeds this 0.0001 mm export tolerance.
+    let as_lines = run(&mut s, CMD, json!({"camera":cam,"curves":"lines","tolerance":0.0001}));
+    let as_arcs = run(&mut s, CMD, json!({"camera":cam,"curves":"arcs","tolerance":0.0001}));
+    let file = solidcraft_io::read_dxf_file(as_arcs["dxf"].as_str().unwrap()).unwrap();
+    assert_eq!(file.entities().len(), 1);
+    let entity = &file.entities()[0];
+    assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+    let DxfShape::Polyline { points } = entity.geometry() else { panic!("{:?}", entity.geometry()) };
+    assert!(points.len() > 2);
+    // Falling back must retain all original projected coordinates and their serialized bytes.
+    assert_eq!(as_arcs["dxf"].as_str().unwrap().as_bytes(), as_lines["dxf"].as_str().unwrap().as_bytes());
 }
 
 #[test]

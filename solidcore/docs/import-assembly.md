@@ -10,10 +10,11 @@ A reader creates an `Assembly` with a tolerance (mm) and, optionally, a `Trims`:
 
 - **Vertices** (`add_vertex`): a point each.
 - **Edges**, each on a record curve between two vertices:
-  - `add_edge` takes the edge's interval on the curve, from min to max. It keeps whichever way round puts the vertices nearer the curve's points at the interval's ends, and notes an edge it turns. Each vertex's tolerance grows to cover its gap; a vertex too far off refuses the edge.
+  - `add_edge` takes the edge's interval on the curve, from min to max. Its `origin` is the reader's name for the edge, which the record keeps (`Solid::edge_origin`; a piece of an edge the stage splits keeps its edge's, and an edge the stage makes, a seam, has none). It keeps whichever way round puts the vertices nearer the curve's points at the interval's ends, and notes an edge it turns. Each vertex's tolerance grows to cover its gap; a vertex too far off refuses the edge.
   - `add_edge_on` is for a producer that bounds an edge by its vertices alone. It finds the interval where the vertices lie on the curve, and starts a closed curve at its vertex.
   - `periodic_edge`, `parabola_curve` and `hyperbola_curve` give the record curve and interval for an edge on a periodic spline, a parabola or a hyperbola.
 - **Faces** (`add_face`), each on a record surface with its bounds. A bound is a closed chain of edge uses (`Bound::Edges`) or one vertex (`Bound::Vertex`: a pole or an apex). Bounds are relative to the surface's natural normal: seen from that normal, an outer loop runs counter-clockwise. `forward` says whether the face's side is that normal. `origin` is the reader's name for the face; refusals name the face by it, and the record keeps it (`Solid::face_origin`).
+- **Faces with the producer's pcurves** (`add_face_with_pcurves`): as `add_face`, with the pcurve of each use the producer holds, in the surface's own (u, v), on the edge's interval. A reader of a body in memory gives these (SolidCraft's exact exchange between kernels). A use with a closed form keeps it, and one without takes the given pcurve instead of one the `Trims` fit; nothing given is used on a face whose surface has a NURBS form of its own in the record (its pcurves are on that form), for an edge on a conic (its pcurves run in its NURBS form's parameter), on a bound the stage joins, splits or turns, or on a surface whose parameters it moves (a closed patch whose seam it moves). Each edge's tolerance covers its given pcurves' gaps as it covers a file's (step 9), and the record's check holds them to their edges.
 - **Spline curves and surfaces** come from full knot vectors through `spline_curve` and `spline_surface`. These refuse knots that are not finite or decrease, an empty domain, coordinates or weighted coordinates that are not finite, and weights that are not positive. Unclamped knots are clamped exactly, by knot insertion.
 
 Everything is in millimetres and radians.
@@ -66,7 +67,7 @@ The STEP reader reads its own surfaces of linear extrusion and of revolution, an
 12. Builds the regions and puts everything in the record's canonical order. After parity repair, certifies every shell's signed volume with the kernel's volume enclosure, turns the outer shell outward and the cavities inward, and restores canonical order.
 13. Checks the record's structure (`record_check::validate`) and its geometry against its topology (`record_check::agreement`).
 
-The result is a `Solid`: the record, each face's origin, whether it is a sheet, the notes on what was repaired, and the faces turned over.
+The result is a `Solid`: the record, each face's and edge's origin, whether it is a sheet, the notes on what was repaired, and the faces turned over.
 
 ## What it refuses
 
@@ -86,4 +87,4 @@ What a reader does with a refusal is up to it. Both readers read a refused solid
 
 ## Where it is
 
-The stage is in `solidcore-step`, under the transitional entry that lets SolidCraft use that crate until STEP import becomes kernel primitives under an ops recipe (RFC 0003, 1.6). Its geometry is the STEP reader's, moved without change, so moving it to its final layers is one job for both readers.
+The stage is in `solidcore-step`, under the transitional entry that lets SolidCraft use that crate until STEP import becomes kernel primitives under an ops recipe (RFC 0003, 1.6). Its geometry is the STEP reader's, moved without change, so moving it to its final layers is one job for every reader: the STEP and CADIR readers, and SolidCraft's exact exchange of bodies in memory.

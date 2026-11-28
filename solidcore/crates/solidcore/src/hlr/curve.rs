@@ -29,6 +29,7 @@ use super::CurveAccuracy;
 use super::HlrError;
 use crate::eval::{Curve, Frame};
 use crate::eval::{CurveEval, SurfaceEval};
+use crate::math::det;
 use crate::math::Vec3;
 
 #[derive(Clone, Debug)]
@@ -257,7 +258,9 @@ impl C3 {
     pub fn at(&self, t: f64) -> Vec3 {
         match self {
             C3::Line { a, b } => *a + (*b - *a) * t,
-            C3::Arc { o, x, y, r, .. } => *o + *x * (r[0] * t.cos()) + *y * (r[1] * t.sin()),
+            C3::Arc { o, x, y, r, .. } => {
+                *o + *x * (r[0] * det::cos(t)) + *y * (r[1] * det::sin(t))
+            }
             C3::Spline {
                 degree,
                 knots,
@@ -284,7 +287,7 @@ impl C3 {
     pub fn d1(&self, t: f64) -> Vec3 {
         match self {
             C3::Line { a, b } => *b - *a,
-            C3::Arc { x, y, r, .. } => *x * (-r[0] * t.sin()) + *y * (r[1] * t.cos()),
+            C3::Arc { x, y, r, .. } => *x * (-r[0] * det::sin(t)) + *y * (r[1] * det::cos(t)),
             _ => {
                 let [t0, t1] = self.domain();
                 let h = (t1 - t0) * 1e-6;
@@ -648,9 +651,9 @@ pub(crate) fn as_circle(c: &C3, tol: f64) -> Option<(Vec3, Vec3, f64)> {
                 for k in 0..n {
                     d = d.max(off(c.at(mid
                         + half
-                            * (std::f64::consts::PI * (2 * k + 1) as f64
-                                / (2 * n) as f64)
-                                .cos())));
+                            * det::cos(
+                                std::f64::consts::PI * (2 * k + 1) as f64 / (2 * n) as f64,
+                            ))));
                 }
             }
             // Relative to the curve's own size when that is smaller than the radius: a nearly
@@ -667,7 +670,8 @@ pub(crate) fn as_circle(c: &C3, tol: f64) -> Option<(Vec3, Vec3, f64)> {
                     acc.map(|(lo, hi)| (lo.min(*p), hi.max(*p)))
                 });
             let size = size.map_or(r, |(lo, hi)| (hi - lo).len());
-            (4. * (w_max / w_min).powi(2) * d <= tol * r.min(size)).then_some((centre, normal, r))
+            (4. * det::powi(w_max / w_min, 2) * d <= tol * r.min(size))
+                .then_some((centre, normal, r))
         }
         _ => None,
     }

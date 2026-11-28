@@ -319,6 +319,55 @@ fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     assert!(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).is_err());
 }
 
+/// Turning with the path, a profile keeps its angle to the path all the way, so one whose
+/// plane holds the path's direction where it starts sweeps no volume, round a circle in its own
+/// plane or with a twist: SMLib can only make a flat solid, and the refusal says why. The same
+/// square across the path sweeps A L (an 8 x 8 square round a circle of radius 30).
+#[test]
+fn a_profile_lying_along_the_path_is_refused_when_it_turns_with_it() {
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let square = region(Loop2::polygon(&[Vec2::new(26.0, -4.0), Vec2::new(34.0, -4.0), Vec2::new(34.0, 4.0), Vec2::new(26.0, 4.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    // Round the Y axis: a circle in the XZ plane, the square's own.
+    let flat = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+    ];
+    let along = |e: crate::KernelError| assert!(e.to_string().contains("the profile lies along the path"), "{e}");
+    along(smlib_sweeps::sweep(&xz, &pieces_of(&square), &flat, false).unwrap_err());
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    along(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &flat, &ctl).unwrap_err());
+    // Round the Z axis the path crosses the square's plane square to it.
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    close(volume(&smlib_sweeps::sweep(&xz, &pieces_of(&square), &round, false).unwrap()), 64.0 * TAU * 30.0, 1e-3, "ring");
+}
+
+/// A profile whose plane holds the path's direction at the start but that sits off the path still
+/// sweeps a volume, and is not refused for it: a 2 x 2 rectangle in the plane x = 30 (spanning
+/// y 10 to 12, z -1 to 1) turned once about the Z axis does not overlap itself (a point's radius
+/// r satisfies r^2 = 900 + y^2, so each (r, z) comes from one point). Its volume is the integral
+/// of 2 pi r dr dz over the region, and r dr = y dy, so V = 2 pi (2) (12^2 - 10^2) / 2 = 88 pi.
+#[test]
+fn a_profile_off_the_path_in_a_plane_holding_its_direction_still_sweeps() {
+    let yz = Plane { origin: Vec3::new(30.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
+    let rect = region(Loop2::polygon(&[Vec2::new(10.0, -1.0), Vec2::new(12.0, -1.0), Vec2::new(12.0, 1.0), Vec2::new(10.0, 1.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    let want = 88.0 * PI;
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&rect), &round, false).unwrap()), want, 1e-3, "ring");
+    // A rectangle a thousandth off the path (its corner at local 0.001, 0.001) is off it too: its
+    // points turn at radius sqrt(30^2 + y^2), so V = 2 pi h (b^2 - a^2) / 2 with h = 2, a = 0.001
+    // and b = 2.001, which is 8.008 pi.
+    let near = region(Loop2::polygon(&[Vec2::new(0.001, 0.001), Vec2::new(2.001, 0.001), Vec2::new(2.001, 2.001), Vec2::new(0.001, 2.001)]));
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&near), &round, false).unwrap()), 8.008 * PI, 1e-3, "near ring");
+}
+
 #[test]
 fn a_sweep_follows_a_free_form_path_as_a_curve() {
     // A 4 x 4 square along a planar S-shaped cubic Bézier (curvature radius above 20): V = A L.

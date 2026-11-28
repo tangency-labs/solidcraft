@@ -234,6 +234,57 @@ fn a_ledge_shorter_than_the_tolerance_reads_back_as_one_region() {
     assert!((area(top) - area(&ledged)).abs() < 1e-9, "{}", area(top));
 }
 
+/// A rectangle with a vertex in line with its right edge a hair beside a strip's edge, the
+/// strip cut out of it (a sheet-metal fold's bend zone, SolidCraft #23209): the boolean takes
+/// the vertex and the strip's corner for one, and the result closes exactly where an edge of
+/// the outline meets one of the strip, so a boolean at a finer tolerance takes it as it is.
+#[test]
+fn a_vertex_a_hair_beside_a_strip_edge_leaves_its_band_closed() {
+    all_fixes();
+    let (edge, width) = (26.952_655_126_018, 6.094_689_747_964);
+    for d in [2e-7, -2e-7, 1e-6, -1e-6, 1e-5, -1e-5] {
+        let plate = Region2 {
+            outer: Loop2::polygon(&[
+                v(0.0, 0.0),
+                v(200.0, 0.0),
+                v(200.0, edge + d),
+                v(200.0, 100.0),
+                v(0.0, 100.0),
+            ]),
+            holes: vec![],
+        };
+        let strip = rectangle(v(-1000.0, edge), v(1000.0, edge + width));
+        // The tolerance the fold reads its band at: the plate's size over a billion.
+        let tol = 100.0_f64.hypot(200.0) * 1e-9;
+        let band = planar_regions_boolean(
+            std::slice::from_ref(&plate),
+            std::slice::from_ref(&strip),
+            BooleanOp::Intersect,
+            tol,
+        )
+        .unwrap();
+        assert_eq!(band.len(), 1, "{d:e}: {band:?}");
+        assert!(closed(&band[0].outer, 1e-12), "{d:e}: {band:?}");
+        assert!(
+            (area(&band[0]) - 200.0 * width).abs() < 200.0 * d.abs(),
+            "{d:e}: {}",
+            area(&band[0])
+        );
+        let left = planar_regions_boolean(
+            std::slice::from_ref(&plate),
+            &band,
+            BooleanOp::Subtract,
+            1e-9,
+        )
+        .unwrap();
+        let kept: f64 = left.iter().map(area).sum();
+        assert!(
+            (kept - 200.0 * (100.0 - width)).abs() < 200.0 * d.abs() + 1e-6,
+            "{d:e}: {kept}"
+        );
+    }
+}
+
 /// The flange outline of SolidCraft's `a_cut_passing_a_hair_off_a_flange_corner_builds`, and
 /// its corner V = (left, top) the cuts below pass near.
 fn flange_outline() -> ([Vec2; 4], Vec2) {

@@ -149,6 +149,7 @@ pub use airfoil::MAX_AIRFOIL_POINTS;
 pub use airfoil::read_airfoil;
 pub use dxf::DxfReadProfile;
 pub use dxf::DxfWriteOptions;
+pub use dxf::dxf_text_from_bytes;
 pub use dxf::read_dxf;
 pub use dxf::read_dxf_file;
 pub use dxf::read_dxf_file_with_profile;

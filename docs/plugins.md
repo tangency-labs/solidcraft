@@ -1039,7 +1039,8 @@ key is the argument the plugin receives. The design follows the
   is only `{"type": "object"}`.
 - **Reserved lists.** Without the annotation, `bodies` and `body_ids` take bodies and send their
   names (`items` may be `{"type": "string"}`), and `selection`, `target` and `targets` take edges,
-  faces and bodies as references. Any other array still leaves Run off.
+  faces and bodies as references. A list of options to tick (`items` a string `oneOf`, see
+  "Icons and pictures") is not a selection field. Any other array still leaves Run off.
 - **Picking.** The first selection field takes the viewport's picks when the dialog opens, and
   starts with what is selected that it takes. The other fields start empty, so one selection never
   fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
@@ -1079,6 +1080,30 @@ relative path to an `.svg` file inside the package:
   entry has the generic plugin icon. Importers use the same image checks and fallback as commands.
 - On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
   of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
+- **Icon buttons.** `"x-solidcraft-choice": {"version": 1, "style": "buttons"}` on the choice
+  draws its options as a row of icon buttons instead of the dropdown. Each button's tooltip is the
+  option's title. The selected button has the dialog's accent fill, and its icon is drawn with the
+  lighter lines the app uses on a dark surface, so it follows the theme, the accent and the
+  colour-vision setting. The dialog draws the dropdown instead when an option has no picture that
+  passed the check, or when the row is wider than the dialog.
+- **Toggle buttons.** On an `array` with `uniqueItems: true` whose `items` is exactly
+  `{"type": "string", "oneOf": [...]}`, the same annotation draws one toggle button per option.
+  The value is the list of the selected consts, in the order of the options; `minItems` and
+  `maxItems` are the counts Run checks, and `default` is a list of consts. Without the annotation,
+  or when the buttons cannot be drawn, the list shows one checkbox per option. Options of such a
+  list take no `x-solidcraft-when`.
+
+  ```json
+  "sides": {"type": "array", "title": "Edge banding", "uniqueItems": true, "default": ["front"],
+    "x-solidcraft-choice": {"version": 1, "style": "buttons"},
+    "items": {"type": "string", "oneOf": [
+      {"const": "front", "title": "Front", "x-solidcraft-icon": "icons/front.svg"},
+      {"const": "back", "title": "Back", "x-solidcraft-icon": "icons/back.svg"}
+    ]}}
+  ```
+
+  The annotation changes only how the dialog draws the field. The manifest check refuses any other
+  `version` or `style`, and the annotation on a property that is not one of these two.
 - The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
   (the check the built-in icons pass, see `crates/look/icons/design/tools/lint_icons.py`).
   `viewBox="0 0 64 64"`; absolute `M L C Q A Z` paths, circles, groups with a clip or opacity,

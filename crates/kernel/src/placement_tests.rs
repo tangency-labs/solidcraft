@@ -365,3 +365,18 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let _ = again.mesh(&crate::MeshTolerance::chord(1e-2)).unwrap();
     assert!(again.record.pending(), "meshed from the part's display");
 }
+
+/// A translation that lands a vertex past `validate_built`'s ceiling (finite, absolute
+/// value at most 1e12) is an error. The same cylinder translated by 1e9, or by 10 mm, stays a
+/// lazy record: 1e9 plus the radius is still under the ceiling, which is not the 1e9 parameter cap.
+#[test]
+fn a_translation_past_the_coordinate_ceiling_is_refused() {
+    let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 4.0, 8.0).unwrap();
+    let shift = |tx: f64| [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [tx, 0.0, 0.0, 1.0]];
+    let err = transform_matrix(&body, shift(1e12)).unwrap_err();
+    assert!(err.to_string().contains("excessive coordinate"), "{err}");
+    let near = transform_matrix(&body, shift(1e9)).unwrap();
+    assert!(near.record.pending(), "a 1e9 translation stays lazy");
+    let short = transform_matrix(&body, shift(10.0)).unwrap();
+    assert!(short.record.pending(), "a 10 mm translation stays lazy");
+}

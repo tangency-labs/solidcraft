@@ -127,6 +127,7 @@ drawing.fill.delete               a drawing fill: crates/engine/src/cmd/drawing_
 drawing.fill.edit                 a drawing fill: crates/engine/src/cmd/drawing_tests.rs
 drawing.fill.inspect              a drawing fill: crates/engine/src/cmd/drawing_tests.rs
 drawing.fill.profiles             drawing profile choices: crates/engine/src/cmd/drawing_tests.rs
+drawing.hole_callout              a drawing: tested in crates/engine/src/cmd/hole_callout_tests.rs
 drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -259,6 +260,7 @@ material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
 mesh.reduce                       reduces a mesh without changing the source; tested in crates/engine/src/tests/mesh_convert.rs::reduction_persists_a_separate_mesh_for_conversion_and_undo
+mesh.section_stack                sketches on a row of planes through a mesh body, and slabs between them; crates/engine/src/cmd/mesh_tests.rs
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
@@ -395,6 +397,7 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+scan.align                        rigid 3-2-1 scan placement; tested in solidcore/crates/solidcore/src/geom/scan_frame.rs, solidcore/crates/solidcore-ops/src/scan_align.rs, crates/engine/src/cmd/scan_align.rs and crates/ui-egui/src/dialogs_scan_align.rs
 select.all                        the selection
 select.boundary                   the selection; crates/engine/src/cmd/edit_tests.rs::select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes
 select.clear                      the selection
@@ -539,6 +542,7 @@ sketch.update_references          projection links: engine tests in crates/engin
 solid.cell_grid                   crates/engine/src/cmd/cell_grid_tests.rs (volumes against hand-derived values) and the planner tests in solidcore/crates/solidcore/src/cell_grid/tests.rs
 solid.dogbone                     inside-corner reliefs; tested in crates/engine/src/cmd/dogbone_tests.rs (and solidcore's and solidcore-ops' dogbone unit tests)
 solid.finger_joint                finger-joint geometry and command behavior: crates/engine/src/cmd/finger_joint_tests.rs
+solid.transform_face              crates/engine/src/cmd/face_tests.rs and solidcore/crates/solidcore/tests/kernel_cases/shell/transform-face-tilt.json (tilted top, exact corner positions and volume)
 storage.delete_blob               plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.get                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
@@ -546,6 +550,7 @@ storage.patch                     plugins: a plugin's own data in the design, no
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
 surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
+surface.morph                     tested in the engine: crates/engine/src/cmd/surface_morph.rs (and solidcore deform:: unit tests in solidcore/crates/solidcore/src/deform/brep.rs)
 tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI
@@ -601,6 +606,7 @@ view.bottom                       the view: camera, layout, display
 view.browser                      the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
+view.frame                        the view: camera, layout, display
 view.front                        the view: camera, layout, display
 view.graphics_preset              the view: camera, layout, display
 view.grid                         the view: camera, layout, display

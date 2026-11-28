@@ -1685,3 +1685,117 @@ fn exports_round_reported_numbers() {
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }
+
+/// #14426: a named driven sketch dimension appears as a read-only parameter in `parameters.list`,
+/// drives downstream features and later sketches, updates automatically when upstream geometry
+/// changes, and follows `parameters.rename`.
+#[test]
+fn driven_dimension_as_read_only_parameter_drives_extrude_and_later_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "30 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 40]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "h"}));
+    let driven = run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true, "name": "diag"}));
+    assert_eq!(driven["driven"], true, "{driven}");
+    assert_eq!(driven["param"], "diag", "{driven}");
+    assert!((driven["measured"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{driven}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let all = run(&mut s, "parameters.list", json!({}));
+    let diag = row(&all, "diag");
+    assert_eq!(diag["source"], "driven", "{all}");
+    assert_eq!(diag["read_only"], true, "{all}");
+    assert_eq!(diag["feature"], "Sketch1", "{all}");
+    assert!((diag["value"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{diag}");
+    let only_driven = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert_eq!(only_driven["parameters"].as_array().map(Vec::len), Some(1), "{only_driven}");
+
+    let ev = run(&mut s, "expr.evaluate", json!({"expression": "diag * 2"}));
+    assert!((ev["value"].as_f64().unwrap_or_default() - 100.0).abs() < 1e-6, "{ev}");
+
+    run(&mut s, "solid.extrude", json!({"distance": "diag / 2", "body_name": "Block"}));
+    assert!(rel(volume(&mut s), 30.0 * 40.0 * 25.0) < 1e-6);
+
+    // A later sketch's driving dimension can also reference `diag`.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [150, 0]]}));
+    let d2 = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "diag"}));
+    assert!((d2["measured"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{d2}");
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch2_id = s.doc.find_feature("Sketch2").map(|f| f.id).unwrap_or_default();
+
+    // Editing upstream `w` updates `diag`, recomputes the extrude and updates `Sketch2`.
+    let ch = run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
+    assert_eq!(ch["errors"], json!([]), "{ch}");
+    let expected_diag = (60.0_f64.powi(2) + 40.0_f64.powi(2)).sqrt();
+    let updated = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert!((row(&updated, "diag")["value"].as_f64().unwrap_or_default() - expected_diag).abs() < 1e-3, "{updated}");
+    assert!(rel(volume(&mut s), 60.0 * 40.0 * (expected_diag / 2.0)) < 1e-6);
+    let state = s.model.state();
+    let ss2 = state.sketch(sketch2_id).unwrap();
+    let (a, b) = (ss2.sketch.points[1].pos, ss2.sketch.points[2].pos);
+    assert!(((a.x - b.x).hypot(a.y - b.y) - expected_diag).abs() < 1e-5);
+
+    // Renaming the driven parameter updates downstream references without breaking geometry.
+    let ren = run(&mut s, "parameters.rename", json!({"name": "diag", "new_name": "hyp"}));
+    assert!(ren["references_updated"].as_u64().unwrap_or_default() >= 2, "{ren}");
+    let users = run(&mut s, "parameters.users", json!({"name": "hyp"}));
+    assert!(!users["users"].as_array().unwrap_or(&Vec::new()).is_empty(), "{users}");
+    assert!(rel(volume(&mut s), 60.0 * 40.0 * (expected_diag / 2.0)) < 1e-6);
+}
+
+/// #14426: self-references, forward-references and attempts to overwrite or delete a read-only
+/// driven dimension parameter are cleanly rejected, and `sketch.toggle_driven` can name a driven
+/// dimension.
+#[test]
+fn driven_dimension_parameter_rejects_cycles_forward_refs_and_mutations() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "30 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 40]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "h"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true, "name": "diag"}));
+
+    // Direct self-reference in the same sketch is rejected.
+    let extra = run(&mut s, "sketch.line", json!({"points": [[80, 0], [100, 0]]}));
+    let extra_line = extra["curve"].as_str().unwrap_or("l5").to_string();
+    let self_err = err(&mut s, "sketch.dimension", json!({"entities": [extra_line], "value": "diag"}));
+    assert!(self_err.contains("circular reference"), "{self_err}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    // Indirect self-reference via an upstream driving parameter is rejected.
+    let cycle_err = err(&mut s, "parameters.change", json!({"name": "w", "expression": "diag"}));
+    assert!(cycle_err.contains("circular reference"), "{cycle_err}");
+
+    // Read-only driven parameter cannot be edited, overwritten, deleted or imported over.
+    assert!(err(&mut s, "parameters.change", json!({"name": "diag", "expression": "100"})).contains("read-only"));
+    assert!(err(&mut s, "parameters.change", json!({"changes": {"diag": "100"}})).contains("read-only"));
+    assert!(err(&mut s, "parameters.add", json!({"name": "diag", "expression": "100"})).contains("already a parameter"));
+    assert!(err(&mut s, "parameters.delete", json!({"name": "diag"})).contains("driven dimension"));
+    assert!(err(&mut s, "parameters.import", json!({"text": "name,expression\ndiag,100 mm\n"})).contains("read-only"));
+
+    // An unnamed driven dimension in a later sketch can be named via `sketch.toggle_driven`.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [25, 0]]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "driven": true}));
+    let sketch2_id = s.doc.find_feature("Sketch2").map(|f| f.id).unwrap_or_default();
+    let driven_cid = s.doc.sketch(sketch2_id).unwrap().constraints.iter().find(|c| c.driven).map(|c| c.id.clone()).unwrap();
+    let named = run(&mut s, "sketch.toggle_driven", json!({"constraint": driven_cid, "driven": true, "name": "late_dim"}));
+    assert_eq!(named["param"], "late_dim", "{named}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let list = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert_eq!(row(&list, "late_dim")["feature"], "Sketch2", "{list}");
+    assert!((row(&list, "late_dim")["value"].as_f64().unwrap_or_default() - 25.0).abs() < 1e-6, "{list}");
+
+    // Forward-reference from an earlier sketch's driving parameter to `late_dim` is rejected.
+    let fwd_err = err(&mut s, "parameters.change", json!({"name": "w", "expression": "late_dim"}));
+    assert!(fwd_err.contains("forward reference"), "{fwd_err}");
+}

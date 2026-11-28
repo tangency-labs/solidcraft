@@ -55,7 +55,7 @@ const PASTE_NEW_CONTRACT: TypedContract<PasteNewParams> = TypedContract::new();
 const REVERT_POSITION_CONTRACT: TypedContract<RevertPositionParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
-mod align;
+pub(crate) mod align;
 #[path = "component_drag.rs"]
 mod drag;
 #[path = "component_foreign.rs"]
@@ -576,7 +576,7 @@ fn replay_pending_move_records(s: &mut Session) -> bool {
     changed
 }
 
-pub(super) fn valid_position(m: &Mat) -> bool {
+pub(crate) fn valid_position(m: &Mat) -> bool {
     solidcraft_doc::is_placement(m)
 }
 

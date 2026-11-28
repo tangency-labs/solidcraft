@@ -2811,6 +2811,94 @@ fn rigid_group_preserves_two_instances_of_one_component() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
+/// #23189: Rigid Group counts a component picked whole (its Browser row, or selected when the
+/// window opens) as that component, as As-Built does: Outer, which holds sub-component Inner, is
+/// one component, and OK waits for a second. Inner's own row adds Inner on purpose, before or
+/// after Outer's; a body picked in the canvas counts as its own component.
+#[test]
+fn rigid_group_takes_a_component_with_a_sub_component_as_one() {
+    let group = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap());
+    let want = |occurrences: [u64; 2]| Ok(vec![("joint.rigid_group".to_string(), json!({ "occurrences": occurrences }))]);
+    let select = Err("Select two or more components.".to_string());
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = outer_inner_other();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "Outer's body and Inner's (preselected {preselected})");
+        assert_eq!(group(&h), select, "one component (preselected {preselected})");
+        click_row(&mut h, other);
+        assert_eq!(group(&h), want([outer, other]), "Outer and Other (preselected {preselected})");
+    }
+
+    // Outer by its row, then Inner by its own: Inner is a second component, not a click that takes
+    // its body out again. The other order too.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other();
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "both bodies (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "in the order clicked (Outer first {outer_first})");
+    }
+
+    // Outer by its row, then a body of Other picked in the canvas.
+    let (mut h, outer, _, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let body = h.app.session.occurrence_bodies(&[other], true).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: body });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(group(&h), want([outer, other]), "with a body picked in the canvas");
+
+    // Outer by its row, then Outer's own body taken out in the canvas: what is left is Inner's
+    // body, which counts as Inner again, not as the whole pick that no longer holds.
+    let (mut h, outer, inner, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let own = h.app.session.occurrence_bodies(&[outer], false).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: own });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([inner, other]), "Outer's body taken out");
+
+    // Outer with no body of its own: its row alone is one component, and its row and Inner's,
+    // which hold the same body, are two, in the order clicked.
+    let (mut h, outer, _, other) = outer_inner_other_with(false);
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    assert_eq!(group(&h), select, "Outer with no body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([outer, other]), "Outer with no body, then Other");
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other_with(false);
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's one body (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "Outer with no body and Inner (Outer first {outer_first})");
+    }
+}
+
 /// Two top faces mate face to face: B ends up upside down on A, not inside it;
 /// Flip turns it back over (into A).
 #[test]
@@ -4538,4 +4626,84 @@ fn a_mistyped_dynamics_value_is_refused_with_a_message() {
         }
         assert!(apply_commands(&app, &d).is_err(), "{typed}");
     }
+}
+
+/// #22615: Joint Origin dialog's Between Two Faces mode picks two planar faces and an optional
+/// snap reference, creating a persistent `Snap::BetweenFaces` with `snap: Some(_)`.
+#[test]
+fn joint_origin_dialog_between_two_faces_mode_with_snap() {
+    let mut app = two_boxes();
+    app.start("joint.origin");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::JointOrigin { between_faces, name, .. }) = &mut d.kind else {
+        panic!("not JointOrigin");
+    };
+    *between_faces = true;
+    *name = "MidA".into();
+    sync_joint_origin_inputs(&app, true, &mut d.inputs, &mut d.active);
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[1].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[2].accept, SNAPS);
+
+    // Pick left face (x = 0) and right face (x = 20) of A, plus top face (z = 10) as snap.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.origin");
+    assert!(cmds[0].1["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let made = app.session.doc.assembly.origins.iter().find(|o| o.name == "MidA").unwrap();
+    assert!(matches!(made.origin.snap, Snap::BetweenFaces { snap: Some(_), .. }), "{:?}", made.origin.snap);
+    let m = app.session.doc.origin_world(&app.session.model.state(), &made.origin).unwrap();
+    let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
+    assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// #22615: Joint dialog's Between Two Faces side mode creates a joint with `faces` + `snap`, and
+/// Edit Joint reloads both faces and the snap while preserving the origin on offset-only edits.
+#[test]
+fn joint_dialog_between_two_faces_create_and_edit_roundtrip() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        let was = f.between_faces;
+        f.between_faces[0] = true;
+        sync_joint_side_inputs(&app, was, f, &mut d.inputs, &mut d.active);
+        assert_eq!(f.alignment_base(), 4);
+    }
+    assert_eq!(d.inputs.len(), 6);
+    // Side 1 (A): x = 0 and x = 20 faces + top face snap; Side 2 (B): bottom face at z = 0.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.inputs[3].items.push(face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1["a"]["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["a"]["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut edit = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut edit.kind else { panic!("not Joint") };
+    assert_eq!(f.between_faces, [true, false]);
+    assert_eq!(edit.inputs.len(), 6);
+    assert_eq!(edit.inputs[0].items.len(), 1);
+    assert_eq!(edit.inputs[1].items.len(), 1);
+    assert_eq!(edit.inputs[2].items.len(), 1);
+    // Changing only offset does not resend `a`, preserving the saved BetweenFaces origin.
+    f.offset[2] = "5 mm".into();
+    let edit_cmds = apply_commands(&app, &edit).unwrap();
+    assert_eq!(edit_cmds[0].0, "joint.edit");
+    assert!(edit_cmds[0].1.get("a").is_none(), "{edit_cmds:?}");
+    assert_eq!(edit_cmds[0].1["offset"], json!("5 mm"));
 }

@@ -438,6 +438,26 @@ fn a_tools_shortcut_pressed_again_cycles_its_modes() {
     assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(1), "the placed corner is kept");
 }
 
+/// #22673: with a feature after the sketch, editing it rolls the timeline back. Starting
+/// Extrude finishes that edit and used to clear the selection, so the profile you had
+/// picked was gone and Extrude opened on nothing. The picked profile is what Extrude uses.
+#[test]
+fn extrude_keeps_the_profile_selected_while_the_sketch_was_edited() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"5 mm","operation":"new"})).unwrap();
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.session.selection = vec![Sel::Profile { sketch, index: 1 }];
+    h.app.start("solid.extrude");
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none(), "Extrude finishes the sketch");
+    let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+    assert_eq!(items, vec![Sel::Profile { sketch, index: 1 }]);
+}
+
 #[test]
 fn a_feature_started_in_a_sketch_finishes_the_sketch_and_takes_its_profile() {
     for cmd in ["solid.extrude", "solid.revolve"] {

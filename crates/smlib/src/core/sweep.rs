@@ -705,15 +705,31 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
     if let Some(b) = made {
         return Ok((Body::from_kernel(b), placed));
     }
+    let follows = frame == SweepFrame::Follow;
     let frame = match frame {
         SweepFrame::Follow => solidcore_ops::sweep::SweepFrame::Follow,
         SweepFrame::Translate => solidcore_ops::sweep::SweepFrame::Translate,
     };
     let (curves, along) = (ops_curves(profile), ops_curves(path));
     // the capi's contract: a closed manifold solid when capped, faces otherwise
-    let (body, motions) = super::call::ops_as("smlib_sweep", &[], sweep_error, || {
+    let swept = super::call::ops_as("smlib_sweep", &[], sweep_error, || {
         solidcore_ops::sweep::curve_sweep(&curves, &along, frame, cap, solidcore_ops::Contract::Closed)
-    })?;
+    });
+    let (body, motions) = match swept {
+        // Round a closed loop of lines and arcs that turns with the path, the curve sweep cannot
+        // close a wall that shrinks to an edge: a profile reaching a corner arc's centre. There
+        // solidcore-ops' exact sweep piece by piece builds it, the wall closing to that edge.
+        // Where the curve sweep builds, its result (and the names given to its faces) stays.
+        Err(e) if follows && path.iter().all(|c| matches!(c, Profile::Line { .. } | Profile::Arc { .. })) => {
+            match super::call::ops_as("smlib_sweep", &[], sweep_error, || solidcore_ops::sweep::sweep_round_closed_path(&curves, &along, cap)) {
+                Ok(Some(built)) => built,
+                // not a closed loop of lines and arcs: the curve sweep's refusal stands
+                Ok(None) => return Err(e),
+                Err(exact) => return Err(exact),
+            }
+        }
+        r => r?,
+    };
     Ok((body, motions.map(|a| Affine { m: a.m, t: a.t })))
 }
 

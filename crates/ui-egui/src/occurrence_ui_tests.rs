@@ -882,10 +882,21 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
     assert!(has(&h, "ui.newGroup"), "on every component's menu");
-    assert!(!has(&h, "ui.showAll"), "Show All Bodies only while something is hidden");
+    assert!(!has(&h, "ui.showAllBodies"), "Show All Bodies only while something is hidden");
     h.app.run("browser.visibility", json!({"items": ["Second"], "visible": false})).unwrap();
-    assert!(has(&h, "ui.showAll"), "a hidden body anywhere brings it back");
-    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": true})).unwrap();
+    assert!(has(&h, "ui.showAllBodies"), "a hidden body anywhere brings it back");
+    // #22707: it brings back bodies only; hidden sketches and the origin stay hidden.
+    h.app.run("browser.visibility", json!({"folder": "sketches", "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"folder": "origin", "visible": false})).unwrap();
+    let (sketches, origin) = (h.app.session.visibility.hidden_sketches.clone(), h.app.session.visibility.hidden_origin.clone());
+    assert!(!origin.is_empty());
+    let show = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.showAllBodies").unwrap();
+    assert_eq!(solidcraft_ui_text::tr_command(&show.id, &show.label), "Show All Bodies", "its own label, not Show All's");
+    context_menu::run_item(&mut h.app, &show, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.hidden_bodies.is_empty(), "the body is back");
+    assert_eq!((&h.app.session.visibility.hidden_sketches, &h.app.session.visibility.hidden_origin), (&sketches, &origin));
+    assert!(h.app.session.visibility.shown_sketches.is_empty());
+    h.app.run("browser.visibility", json!({"folder": "all", "visible": true})).unwrap();
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();

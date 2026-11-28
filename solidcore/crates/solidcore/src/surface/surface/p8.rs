@@ -21,6 +21,8 @@
 //! upstream makes them again for every check. The curves are a function of the surface
 //! value, the domain and the kernel's tolerances, so a hit gives what a fresh build
 //! gives; `Kernel::memoize_curve_caches` turns it off with the curve cache memo.
+//! [`SpGlobalSolver::local_solve_branch`] counts the leaves it solves or skips without
+//! an enclosure excluding them ([`SpGlobalSolver::leaves_solved`], #23057).
 //!
 //! Deviations: out-parameters become return values. The caller's object handles
 //! (`O`, the objects named in solutions) replace the `this` and `&crCurve` pointers
@@ -116,6 +118,7 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
@@ -3432,6 +3435,7 @@ fn remove_repeated_solutions<O: SolutionObject>(
                     }
                     (a, b) => a.merged(b),
                 };
+                kept.limit_root = si.limit_root || sj.limit_root;
                 kept.shared_contact = None;
                 // (a unique box is a crossing's, by the root it carries: a solution merged
                 // into anything else carries none)
@@ -3482,6 +3486,8 @@ fn join_across_coincidence<O: SolutionObject>(
     last_sol.unique = None;
     // (no point merged or absorbed is shown the seam point it was identified as)
     last_sol.shared_contact = None;
+    // (a limit root joined in, by a range or a point, leaves its mark on what holds it)
+    last_sol.limit_root |= curr_sol.limit_root;
 
     // if CurrSol is a range
     if curr_sol.solution_type == SolutionType::RangeOfValues {
@@ -3646,6 +3652,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             if are_same(uv_domain.max().x, uv_domain.min().x)
                 || are_same(uv_domain.max().y, uv_domain.min().y)
             {
+                // not upstream (#23057): a sliver of the patch is skipped unsolved,
+                // not excluded by its enclosure
+                self.leaves_solved += 1;
                 return Ok(false);
             }
         }
@@ -3697,6 +3706,10 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 solve_for_surface = false;
             }
         }
+
+        // not upstream (#23057): no enclosure excluded this leaf, and its solve may find
+        // nothing, so an empty answer no longer proves that there is no point
+        self.leaves_solved += 1;
 
         // solve
         let solutions = sp_local_solve::<O>(
@@ -4350,7 +4363,7 @@ fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
     }
     let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
     let exponent = i32::try_from(p).ok()?;
-    let grow = ratio.powi(exponent) * (1.0 + gamma(p.saturating_add(1)));
+    let grow = det::powi(ratio, exponent) * (1.0 + gamma(p.saturating_add(1)));
     grow.is_finite().then_some(grow)
 }
 
@@ -5150,6 +5163,31 @@ mod tests {
                 assert_eq!((kept.contact, kept.unique), (want, None), "{a:?} {b:?}");
             }
         }
+        // a limit root mark on either input is kept by the range two points make (the second
+        // past the shortest range), by a range extended by a range, and by a point that
+        // absorbs another; none on either leaves none
+        let range_from = |mut s: Solution<NoObject>, end: f64| {
+            s.solution_type = SolutionType::RangeOfValues;
+            s.end.parameters[0] = end;
+            s
+        };
+        for (on_last, on_curr) in [(false, true), (true, false), (true, true), (false, false)] {
+            let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);
+            last.limit_root = on_last;
+            let mut far = line_point(0.0, [0.6, 0.5, 0.1], Contact::Crossing);
+            far.limit_root = on_curr;
+            let mut near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], Contact::Crossing);
+            near.limit_root = on_curr;
+            let want = on_last || on_curr;
+            for curr in [far, range_from(far, 0.9), near] {
+                let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+                assert_eq!(joined.limit_root, want, "{on_last} {on_curr} {curr:?}");
+            }
+            let joined = join_across_coincidence(range_from(last, 0.3), &far, Some(&unit)).unwrap();
+            assert_eq!(joined.solution_type, SolutionType::RangeOfValues);
+            assert_eq!(joined.limit_root, want);
+        }
+
         // a shared contact id is lost by a range and by a point that absorbs another
         let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
         let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);

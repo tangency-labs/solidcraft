@@ -161,8 +161,11 @@ and is smoothed over. A taper steeper than the profile's details (a stroke, a cu
 narrower than it) is refused with that reason; a smaller taper or distance builds. A taper
 composes with a start offset (a drafted pocket that starts part way up a part): the offset moves
 the profile along the normal and the sides are drafted from there, so the profile is the section
-at the start whatever the offset. A taper with a two-sided or symmetric extent is not built yet
-and says so.
+at the start whatever the offset. On a symmetric extrude the taper drafts both halves from the
+start plane outward; on two sides it drafts the first side, and `taper2` (Taper Angle 2) the
+second, which takes the taper when `taper2` is left out. A taper of 6 deg with `taper2: "-6 deg"`
+makes one slope through the profile. A thin wall on two sides or symmetric, and a symmetric
+extrude with Symmetric Offset, are not tapered yet and say so.
 
 **Thin Extrude** (`thin: true` on `solid.extrude`, the Thin Extrude box in its dialog) builds a
 wall of constant thickness along sketch curves instead of filling profiles: open chains (a single
@@ -232,6 +235,18 @@ the offsets are not turned with them. On a cylinder wall an offset along the dir
 runs round the wall slides the profiles round it by that arc length, and one along the axis slides
 them along it. Each takes an expression, so a parameter can drive it; an empty field leaves the
 profiles where the sketch has them. The profiles must still lie wholly on the face once placed.
+
+With **Placement handles** on (Preferences › Tools, off by default), the profiles can also be
+placed in the view while the Emboss dialog is open. A dashed cross stands where the middle of the
+box round the picked profiles lands, on the Target Face or, with none picked, in the sketch: drag
+it across the face to set Offset X and Offset Y. Drag the grip of the ring round it to set Angle.
+The offsets take round steps of the view and the Angle steps of 5°; hold Alt or Ctrl to move or
+turn freely. While you drag, the box round the profiles is outlined where it lands, ahead of the
+preview. Nothing is built until OK. On a cylinder picked as the Target Face the cross stands on
+the wall, where the profiles are laid round it. A sketch that touches a cylinder is wrapped round
+it even with no Target Face, but the cross is then in the sketch: pick the wall as the Target
+Face, on the side the sketch touches, to bring the cross onto the wall. A Target Face that is
+neither flat nor a cylinder's has no handles; its Emboss is placed by the three fields.
 
 A **Hole** with **Single** placement can also sit at distances from up to two straight edges of
 its face. After picking the face, click **Reference 1** and pick an edge, then pick a second one
@@ -500,6 +515,13 @@ An explicit origin must contain three finite numeric coordinates in millimetres
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
 
+Linear, rectangular, and circular body patterns require the stored coordinates of
+each copy to be finite and at most 10¹² in absolute value. This includes surface
+origins and curve control points. A cylinder's cap plane origin can cross the
+limit while all of its vertices still fit. Reduce the spacing or the number of
+copies in a linear or rectangular pattern, or adjust the axis origin, angle, or
+number of copies in a circular pattern.
+
 ## Axes and points on round edges and faces
 
 Wherever a 3D command takes an axis (Revolve, Surface Revolve, Circular Pattern, Plane at
@@ -543,7 +565,7 @@ still be added through `set`. The fields of the common features:
 
 | Feature | Fields |
 |---|---|
-| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
+| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `taper2`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
 | Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
@@ -553,13 +575,14 @@ still be added through `set`. The fields of the common features:
 | Shell | `thickness`, `faces`, `direction`, `body`, `tangent_chain` |
 | Draft | `angle`, `faces`, `neutral`, `pull`, `body` |
 | Offset face | `distance`, `faces`, `body` |
+| Transform Face | `face`, `body`, `translate`, `rotate_axis`, `origin`, `angle` |
 | Pattern | `pattern` (its kind and counts/spacing), `features`, `bodies` |
 | Mirror | `plane`, `features`, `bodies`, `combine` |
 
 For any other feature, `timeline.inspect` shows the fields.
 
 Where a command takes a face as a point (`face.delete`, `solid.shell`, `solid.draft`,
-`solid.offset_face`, `solid.split_face`, the `faces` of `solid.replace_face`, and the `face` of
+`solid.offset_face`, `solid.transform_face`, `solid.split_face`, the `faces` of `solid.replace_face`, and the `face` of
 `sheet.convert`), a script can give the face's name instead, as `model.faces` lists it:
 `{"command": "face.delete", "params": {"faces": ["F2:side#1", "F2:side#2"], "body": "Plate"}}`.
 `model.faces` also lists a `point` on each face that picks it (the centroid of a face with a hole
@@ -567,6 +590,27 @@ in it is in the hole, that of a half cylinder inside the cylinder) and, for a cy
 its `cylinder`: `origin` and `axis` of its axis, and `radius`. A name that is more than one face
 (the pieces of a split face, or one face of several bodies) is refused; `body` says which body to
 look on.
+
+**Transform Face** rotates one face about a pivot, then translates it. The surrounding
+faces extend or trim to meet it. On a 10 mm cube, translating the top face up by 2 mm
+makes the cube 12 mm high; sliding the same face along its plane leaves the cube unchanged.
+The pivot defaults to the picked point. For example, to tilt the top of `Block` about
+its front edge and then raise it:
+
+```json
+{"command":"solid.transform_face","params":{"body":"Block","face":[5,5,10],"axis":[1,0,0],"origin":[0,0,10],"angle":"45 deg","translate":[0,0,2]}}
+```
+
+Select a face and choose **Transform Face** from its context menu or the command palette.
+To give Transform Face its own key, bind it in **Preferences → Shortcuts**.
+The **Move/Copy** shortcut still moves the whole body, even when a face is selected.
+
+Drag an arrow to translate along its axis, or drag a ring to rotate about that axis.
+To rotate around a different point, choose **Pivot → Pick on face**. On a flat
+face, click a marked corner, edge midpoint, or face center. The original face is shown
+while you pick. The handles move to the new pivot and the preview resumes. The point is
+saved as **Custom** coordinates, which you can also type or edit. **OK** applies the
+preview; **Esc** discards it.
 
 Press **Delete** on anything selected (bodies, faces, sketches, features, planes, components,
 canvases). It runs as one undoable step and lists the features that would go with it or fail.

@@ -187,6 +187,12 @@ pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis
 /// SMLib's loft to a point.
 pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft_to_point");
+    crate::smlib_sweeps::loft_to_point(plane, &loft_to_point_plan(plane, lp, apex)?, apex)
+}
+
+/// [`loft_to_point`]'s section, checked and wound so its normal points away from the apex, as
+/// the pieces it lofts: what another kernel lofts, and what names its faces after.
+pub(crate) fn loft_to_point_plan(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Vec<crate::smlib_sweeps::Piece>> {
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }
@@ -196,7 +202,7 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     // Wind the base so its normal points away from the apex.
     let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
-    crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
+    Ok(crate::smlib_sweeps::pieces([&base]))
 }
 
 /// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),

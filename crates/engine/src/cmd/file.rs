@@ -342,6 +342,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
             "format?: 3mf|stl|3mf-tagged|step (default 3mf, in millimetres; a 3MF that can't be written goes as STL; step: the bodies as exact B-rep with their colours, which the slicer meshes itself, for slicers that read STEP); ",
+            "name?: the file's name without extension, as the slicer shows it (default: the design's name and a code that tells designs and body selections apart; a given name is used as it is, so two sends under one name share one file; not used with copy_to, whose file is named after the design; refused when it is blank, over 240 bytes, starts or ends with a space or a dot, holds / \\ : * ? \" < > | or a control character, or is a name Windows keeps for a device, such as CON or NUL); ",
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
@@ -754,7 +755,9 @@ fn add_read_step(
     } else {
         (sf.body_names, import::Tree::Step(&sf.import))
     };
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, body_names, &sf.invisible, &cname, tree)?;
+    // The file's layers, by body, become folders.
+    let layers: Vec<Option<String>> = sf.import.bodies.iter().map(|b| b.layer.clone()).collect();
+    let (id, placed) = import::add_in_component(s, sf.kind, &fname, body_names, &sf.invisible, &layers, &cname, tree)?;
     let content_sha256 = unchanged
         .then(|| {
             s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
@@ -1028,7 +1031,7 @@ fn add_mesh(
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
         _ => import::Tree::Flat(prepared),
     };
-    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
+    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
     // The materials' looks, body by body (the bodies are built in the file's order).
     if looks.iter().any(Option::is_some) && bodies.len() == looks.len() {
@@ -1521,7 +1524,7 @@ fn add_kicad_with(
     let component_name = import::component_name(path, name);
     let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
     // A board hides none of its own bodies; its layers are all wanted.
-    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
+    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
     // coordinates KiCad stores, which put a board anywhere on the project sheet.
     if let Some(corner) = imported.corner {
@@ -1600,7 +1603,7 @@ pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<
         let feature = imported.feature;
         let feature_name = old_name.filter(|n| !n.trim().is_empty()).unwrap_or(feature.name);
         let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
-        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], tree)?;
+        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], &[], tree)?;
         if let Some(step) = imported.board_step {
             import::add_step_in_component(s, comp, "board.step", step, &feature_name)?;
         }
@@ -2347,11 +2350,15 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
         if snap.doc.name == from {
             let old = std::sync::Arc::as_ptr(&snap.doc);
-            std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
-            renamed.push((old, snap.doc.clone()));
+            if let Some((_, new)) = renamed.iter().find(|(known, _)| *known == old) {
+                snap.doc = new.clone();
+            } else {
+                std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
+                renamed.push((old, snap.doc.clone()));
+            }
         }
     }
-    if let Some(entry) = s.sketch_entry.as_mut() {
+    for entry in s.undo.iter_mut().chain(s.redo.iter_mut()).filter_map(|snap| snap.sketch_entry.as_mut()).chain(s.sketch_entry.as_mut()) {
         let follow = |doc: &mut std::sync::Arc<solidcraft_doc::Document>| match renamed.iter().find(|(old, _)| *old == std::sync::Arc::as_ptr(doc)) {
             Some((_, new)) => *doc = new.clone(),
             None if doc.name == from => std::sync::Arc::make_mut(doc).name = to.to_string(),
@@ -4384,6 +4391,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality,
                 dest: send::Dest::Path(path),
+                name: None,
                 copy: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
@@ -4422,6 +4430,15 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
+        // Anything but text is refused, not read as "no name": the caller asked for a name.
+        let name = match p.get("name") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(name)) => {
+                crate::slicer_files::check_name(name).map_err(|why| bad(cmd, format!("`name` can't be the file's name: {why}")))?;
+                Some(name.as_str())
+            }
+            Some(other) => return Err(bad(cmd, format!("`name` must be text, not {other}"))),
+        };
         // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
         // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
         let copy = match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
@@ -4444,6 +4461,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality: Default::default(),
                 dest: send::Dest::Folder,
+                name,
                 copy,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,
@@ -6028,6 +6046,7 @@ mod tests {
                 opacity: 1.0,
                 faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
                 name: None,
+                layer: None,
             },
         ));
         let model = solidcraft_doc::SavedModel {

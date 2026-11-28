@@ -116,6 +116,17 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         DxfFile::for_current_view_export(drawing.lines.len(), drawing.sketch.len(), sketch_points)?
     };
+    // Validate the original source counts before fitting: recognition must not bypass the
+    // combined source-entity cap. Keep only sparse recognized sketch shapes, not a copy of
+    // every ordinary line/path, and give short arcs their writer's actual extent budget.
+    let planned = if as_arcs {
+        let plan = PlannedViewArcs::sketch(&drawing.sketch, tolerance, &writing)?;
+        file =
+            DxfFile::for_current_view_arc_export_with_sketch_arcs(drawing.lines.len(), drawing.sketch.len(), sketch_points, &plan.arc_source_points)?;
+        plan
+    } else {
+        PlannedViewArcs::default()
+    };
     let visible_layer = file.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None)?;
     let hidden_layer = if dashed { Some(file.declare_layer("HIDDEN", 8, DxfLinetype::Hidden, None)?) } else { None };
     let sketch_layer =
@@ -145,7 +156,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         push_all(&mut file, Some(visible_layer), visible_lines.into_iter().map(|(a, b)| DxfShape::Line(a, b)).collect())?;
         push_all(&mut file, hidden_layer, hidden_paths)?;
     }
-    let sketch = sketch_entities(drawing.sketch, dashed, &mut file, hidden_layer, sketch_layer)?;
+    let sketch = sketch_entities(drawing.sketch, planned.sketch_shapes, dashed, &mut file, hidden_layer, sketch_layer)?;
     let text = solidcraft_io::write_dxf_file(&file)?;
     writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let stats = ViewDxfStats {
@@ -271,24 +282,63 @@ fn push_all(file: &mut DxfFile<DxfShape>, layer: Option<DxfLayerId>, shapes: Vec
     Ok(())
 }
 
+/// Sparse, per-visible-path recognition. A failed or mixed recognition keeps the original
+/// path unchanged; lines from separate curves are never joined into a new sketch entity.
+#[derive(Default)]
+struct PlannedViewArcs {
+    sketch_shapes: Vec<(usize, DxfShape)>,
+    arc_source_points: Vec<usize>,
+}
+
+impl PlannedViewArcs {
+    fn sketch(paths: &[mesh_lines::Path], tolerance: f64, writing: &Stage) -> Result<Self> {
+        let mut plan = Self::default();
+        for (index, path) in paths.iter().enumerate() {
+            writing.check().map_err(|e| bad(CMD, refused(e)))?;
+            // Two points are already exactly the line that the old producer writes.
+            if path.hidden || path.points.len() <= 2 {
+                continue;
+            }
+            let shape = arcs::fit(&path.points, path.closed, tolerance);
+            writing.check().map_err(|e| bad(CMD, refused(e)))?;
+            let Some(shape) = shape else { continue };
+            plan.sketch_shapes.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate recognized sketch shapes"))?;
+            if matches!(shape, DxfShape::Arc { .. }) {
+                plan.arc_source_points.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate sketch arc source counts"))?;
+                plan.arc_source_points.push(path.points.len());
+            }
+            plan.sketch_shapes.push((index, shape));
+        }
+        Ok(plan)
+    }
+}
+
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
 /// Returns the number of SKETCH entities.
 fn sketch_entities(
     paths: Vec<mesh_lines::Path>,
+    planned_shapes: Vec<(usize, DxfShape)>,
     dashed: bool,
     file: &mut DxfFile<DxfShape>,
     hidden_layer: Option<DxfLayerId>,
     sketch_layer: Option<DxfLayerId>,
 ) -> Result<usize> {
     let mut count = 0;
-    for path in paths.into_iter().filter(|p| dashed || !p.hidden) {
+    let mut planned = planned_shapes.into_iter().peekable();
+    for (index, path) in paths.into_iter().enumerate().filter(|(_, p)| dashed || !p.hidden) {
         let layer = (if path.hidden { hidden_layer } else { sketch_layer }).ok_or_else(|| bad(CMD, "missing sketch DXF layer"))?;
         count += usize::from(!path.hidden);
-        let shape = match <[Vec2; 2]>::try_from(path.points) {
-            Ok([a, b]) => DxfShape::Line(a, b),
-            Err(points) => DxfShape::Polyline { points },
+        let shape = match planned.next_if(|(planned_index, _)| *planned_index == index) {
+            Some((_, shape)) => shape,
+            None => match <[Vec2; 2]>::try_from(path.points) {
+                Ok([a, b]) => DxfShape::Line(a, b),
+                Err(points) => DxfShape::Polyline { points },
+            },
         };
         file.push(layer, shape, None)?;
+    }
+    if planned.next().is_some() {
+        return Err(bad(CMD, "unconsumed planned sketch geometry"));
     }
     Ok(count)
 }
@@ -326,7 +376,7 @@ fn connect(lines: Vec<(Vec2, Vec2)>) -> Vec<mesh_lines::Path> {
             }
             points.reverse();
         }
-        result.push(mesh_lines::Path { points, hidden: true });
+        result.push(mesh_lines::Path { points, closed: false, hidden: true });
     }
     result
 }

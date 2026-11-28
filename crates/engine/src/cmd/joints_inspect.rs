@@ -165,9 +165,12 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
             }
         }
-        Snap::BetweenFaces { a, b } => {
+        Snap::BetweenFaces { a, b, snap } => {
             face(ReferenceRole::Face, Some(&a.face));
             face(ReferenceRole::Face, Some(&b.face));
+            if let Some(inner) = snap {
+                out.extend(references(doc, inner));
+            }
         }
         Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
             if let Some(XRef::Face { face: n, .. }) = x {

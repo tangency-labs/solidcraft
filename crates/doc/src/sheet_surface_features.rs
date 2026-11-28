@@ -1132,7 +1132,7 @@ impl SurfaceSheet {
         from: HeightFrom,
         flip: bool,
     ) -> Result<(usize, Vec<SquareSides>)> {
-        let (made, square) = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, from)?;
+        let (made, square) = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, 0.0, from)?;
         let joint = made.first().copied().ok_or_else(|| DocError::Invalid("the flange has no bend".into()))?;
         Ok((joint, square))
     }
@@ -1154,17 +1154,24 @@ impl SurfaceSheet {
     /// corner is closed and no bend relief is cut there. Their corners elsewhere are not closed
     /// yet (see [`SurfaceSheet::close_flange_corners`]). The new bends' joints, in the order of
     /// `runs`, and the flanges among them laid on with square sides for now, which
-    /// [`SurfaceSheet::slant_open_sides`] settles once the corners are closed.
+    /// [`SurfaceSheet::slant_open_sides`] settles once the corners are closed. `offset` moves every
+    /// bend that far out past where `position` starts it (in where negative), the panel growing,
+    /// or shrinking, by the strip between.
+    #[allow(clippy::too_many_arguments)]
     pub fn flanges_on(
         &mut self,
         edge: FreeEdge,
         runs: &[(f64, f64, f64, f64, bool)],
         radius: f64,
         position: &str,
+        offset: f64,
         from: HeightFrom,
     ) -> Result<(Vec<usize>, Vec<SquareSides>)> {
         if runs.iter().any(|&(_, _, _, angle, _)| !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6)) {
             return err("the flange angle must be between 0 and 180°");
+        }
+        if !offset.is_finite() {
+            return err("the flange offset must be a finite length");
         }
         if radius == 0.0 {
             return err(crate::sheet::KNIFE_EDGE);
@@ -1207,7 +1214,7 @@ impl SurfaceSheet {
                 "tangent" if angle < std::f64::consts::FRAC_PI_2 => (radius + t) * angle.sin(),
                 "tangent" => radius + t,
                 other => return err(format!("unknown bend position `{other}` (inside, outside, middle, material_outside or tangent)")),
-            };
+            } - offset;
             // On the side of the face picked: toward the material from the face a thickness in.
             let toward = edge.far_face != flip;
             // The panels' surface is the bend's outside where it turns toward the material: the
@@ -1229,30 +1236,98 @@ impl SurfaceSheet {
             let (r0, r1) = self.round_ends(edge.panel, (a, b, d), start);
             let junction = (hi < WHOLE_EDGE.1, lo > WHOLE_EDGE.0);
             let (x0, x1) = (point(hi), point(lo));
-            plans.push(FlangeRun {
-                angle,
-                toward,
-                sharp,
-                leg,
-                by,
-                junction,
-                anchor: (if junction.0 { x0 + out * by } else { p }, if junction.1 { x1 + out * by } else { q }),
-                strip: (if junction.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if junction.1 { x1 } else { b + d * r1.unwrap_or(0.0) }),
-            });
+            let mut anchor = (if junction.0 { x0 + out * by } else { p }, if junction.1 { x1 + out * by } else { q });
+            let mut strip = (if junction.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if junction.1 { x1 } else { b + d * r1.unwrap_or(0.0) });
+            let mut square_end = junction;
+            // A flange turning away from an existing bend at an end of this edge cannot close a
+            // corner with it and must not run into its bend zone (#23366): stop this run at the
+            // existing bend's tangent line on the panel, clear of its zone across the whole width
+            // of this bend's own band, with a square end there.
+            let edge_len = a.dist(b);
+            let anchor_base = a + out * by;
+            let band_lines = [a, anchor_base, anchor_base + d.perp() * sharp];
+            for joint in &self.sheet.joints {
+                let JointKind::Bend(ob) = &joint.kind else { continue };
+                if ob.datum != Datum::Sharp || ob.toward_material == toward {
+                    continue;
+                }
+                let (on_q, side_q) = if joint.a.panel == edge.panel {
+                    (joint.a, 1.0)
+                } else if joint.b.panel == edge.panel {
+                    (joint.b, -1.0)
+                } else {
+                    continue;
+                };
+                let Some(c_edge) = cross_lines((a, d), (on_q.origin, on_q.dir)) else { continue };
+                let reach = (ob.radius + t) * (ob.angle / 2.0).tan() + (radius + t) * half + t;
+                let s_edge = (c_edge - a).dot(d);
+                let at_start = s_edge < edge_len / 2.0;
+                let e_edge = if at_start { 0.0 } else { edge_len };
+                if (s_edge - e_edge).abs() > reach {
+                    continue;
+                }
+                let in_q = on_q.dir.perp() * side_q;
+                let sharp_q = (on_q.origin, on_q.dir);
+                let tan_q = (on_q.origin + in_q * ob.setback(t), on_q.dir);
+                let (mut q_min, mut q_max) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &orig in &band_lines {
+                    for line_q in [sharp_q, tan_q] {
+                        if let Some(h) = cross_lines((orig, d), line_q) {
+                            let q = (h - on_q.origin).dot(on_q.dir);
+                            q_min = q_min.min(q);
+                            q_max = q_max.max(q);
+                        }
+                    }
+                }
+                if q_max <= -1e-6 || q_min >= ob.length + 1e-6 {
+                    continue;
+                }
+                let s_q = (c_edge - on_q.origin).dot(on_q.dir);
+                let e_q = if s_q < ob.length / 2.0 { 0.0 } else { ob.length };
+                let into_self = if at_start { d } else { -d };
+                let into_other = if e_q == 0.0 { on_q.dir } else { -on_q.dir };
+                if !(into_other.dot(d.perp()) > 1e-9 && into_self.dot(in_q) > 1e-9) {
+                    continue;
+                }
+                let hits = band_lines.iter().filter_map(|&orig| cross_lines((orig, d), tan_q).map(|h| (h - orig).dot(d)));
+                if at_start {
+                    let Some(s_cut) = hits.reduce(f64::max) else { continue };
+                    if s_cut > (anchor.0 - anchor_base).dot(d) + 1e-9 {
+                        anchor.0 = anchor_base + d * s_cut;
+                        square_end.0 = true;
+                    }
+                    if s_cut > (strip.0 - a).dot(d) + 1e-9 {
+                        strip.0 = a + d * s_cut;
+                    }
+                } else {
+                    let Some(s_cut) = hits.reduce(f64::min) else { continue };
+                    if s_cut < (anchor.1 - anchor_base).dot(d) - 1e-9 {
+                        anchor.1 = anchor_base + d * s_cut;
+                        square_end.1 = true;
+                    }
+                    if s_cut < (strip.1 - a).dot(d) - 1e-9 {
+                        strip.1 = a + d * s_cut;
+                    }
+                }
+            }
+            plans.push(FlangeRun { angle, toward, sharp, leg, by, junction: square_end, anchor, strip });
+        }
+        for run in &plans {
+            let (origin, to) = run.anchor;
+            if !((to - origin).dot(d) > 1e-9) {
+                return err("the edge's neighbours leave its flange no length at its bend");
+            }
         }
         let mut made = Vec::with_capacity(plans.len());
         let mut square = Vec::new();
         for run in plans {
             let (origin, to) = run.anchor;
+            let len = (to - origin).dot(d);
             // A sharp inside the edge by no more than the thickness needs no cut: the bend's band
             // runs a thickness past its anchor and takes that strip, leaving the panel's other
             // edges (and the rips along them) as they are.
-            if run.by > 0.0 || run.by < -t - 1e-9 {
+            if (run.by > 0.0 || run.by < -t - 1e-9) && (run.strip.1 - run.strip.0).dot(d) > 1e-9 {
                 self.move_stretch(edge.panel, run.strip, run.anchor, run.by)?;
-            }
-            let len = (to - origin).dot(d);
-            if !(len > 1e-9) {
-                return err("the edge's neighbours leave its flange no length at its bend");
             }
             let bend = Bend {
                 angle: run.angle,
@@ -5279,5 +5354,216 @@ mod tests {
         let region = Region2 { outer: Loop2 { segs }, holes: vec![] };
         let path = [Vec2::new(2.0, 0.0), Vec2::new(2.0, -3.0), Vec2::new(2.0, -3.0)];
         assert!(super::foot_moved(&region, pts[1], &path, (Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0)), 1e-9).is_none());
+    }
+
+    #[test]
+    fn opposite_side_flange_between_two_bends_stops_at_the_flat() {
+        // #23366: 100 x 150 base (t=2, r=2, K=0.44), two 60 mm upward walls on y=0 and y=150,
+        // then a 45 mm downward (flip=true) flange on x=100. Its bend must stop at y=4..146
+        // (length 142) without crossing the two upward bends, and the folded solid must be valid.
+        let rule = crate::ConvertRule {
+            thickness: 2.0,
+            k_factor: 0.44,
+            bend_radius: 2.0,
+            gap: 2.0,
+            corner_relief: crate::sheet::ReliefShape::Notch,
+            corner_relief_size: 8.0,
+            relief_width: 2.0,
+            relief_depth: 1.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
+        };
+        let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 150.0), Vec2::new(0.0, 150.0)];
+        let plate = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };
+        let (mut sheet, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
+        let e1 = sheet.free_edge_at(Vec3::new(80.0, 0.0, 2.0)).unwrap().unwrap();
+        let e2 = sheet.free_edge_at(Vec3::new(80.0, 150.0, 2.0)).unwrap().unwrap();
+        let (j1, sq1) = sheet.flange_on(e1, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        let (j2, sq2) = sheet.flange_on(e2, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        sheet.close_flange_corners(&[j1, j2]).unwrap();
+        sheet.slant_open_sides(&sq1).unwrap();
+        sheet.slant_open_sides(&sq2).unwrap();
+        sheet.clear_of_neighbours(&[j1, j2]).unwrap();
+        sheet.build().unwrap();
+
+        let e3 = sheet.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+        let (j3, sq3) = sheet.flange_on(e3, 45.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, true).unwrap();
+        sheet.close_flange_corners(&[j3]).unwrap();
+        sheet.slant_open_sides(&sq3).unwrap();
+        sheet.clear_of_neighbours(&[j3]).unwrap();
+        let solid = sheet.build().unwrap();
+        assert_eq!(solid.validity(), Vec::<String>::new(), "folded solid must be valid");
+        assert_eq!(solid.shell_count(), 1, "folded solid must have one shell");
+        let folded_vol = solidcraft_kernel::measure(&solid).unwrap().volume;
+        let flat_area: f64 = sheet.regions.iter().map(Region2::area).sum();
+        eprintln!("folded_vol={folded_vol:.3}, flat_area*t={:.3}", flat_area * 2.0);
+        assert!((folded_vol - flat_area * 2.0).abs() / (flat_area * 2.0) < 5e-3, "folded volume {folded_vol} vs flat*t {}", flat_area * 2.0);
+
+        assert_eq!(sheet.bends.len(), 3);
+        let b1 = &sheet.bends[0];
+        let b2 = &sheet.bends[1];
+        let b3 = &sheet.bends[2];
+        assert!((b1.start.dist(b1.end) - 100.0).abs() < 1e-6);
+        assert!((b2.start.dist(b2.end) - 100.0).abs() < 1e-6);
+        assert!((b3.start.dist(b3.end) - 142.0).abs() < 1e-6, "bend 3 length should be 142, got {}", b3.start.dist(b3.end));
+        // Bend 3's zone must not cross either existing bend's zone in the flat pattern.
+        let mut work = crate::sheet::FlatWork::new();
+        for (i, other) in [b1, b2].into_iter().enumerate() {
+            let hit = crate::sheet_surface::boolean_past_holes(
+                std::slice::from_ref(&b3.zone),
+                std::slice::from_ref(&other.zone),
+                BoolOp::Intersect,
+                &mut work,
+            )
+            .unwrap();
+            let overlap: f64 = hit.iter().map(Region2::area).sum();
+            assert!(overlap < 1e-6, "bend 3 zone overlaps bend {} zone by {overlap}", i + 1);
+        }
+        // Unfolding and refolding must both produce valid single-shell solids.
+        sheet.flat_matches_body().unwrap();
+        sheet.unfolded = true;
+        let flat_solid = sheet.build().unwrap();
+        assert_eq!(flat_solid.validity(), Vec::<String>::new(), "unfolded solid must be valid");
+        assert_eq!(flat_solid.shell_count(), 1);
+        sheet.unfolded = false;
+        let refolded = sheet.build().unwrap();
+        assert_eq!(refolded.validity(), Vec::<String>::new(), "refolded solid must be valid");
+        assert_eq!(refolded.shell_count(), 1);
+
+        // Same geometry built with `material_outside` and `outside` positions (where `by > 0`
+        // extends the panel edge via `move_stretch`): the flange must still stop at y=4..146
+        // without extending into or crossing the existing bends.
+        for pos in ["material_outside", "outside"] {
+            let (mut s, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
+            let e1 = s.free_edge_at(Vec3::new(80.0, 0.0, 2.0)).unwrap().unwrap();
+            let e2 = s.free_edge_at(Vec3::new(80.0, 150.0, 2.0)).unwrap().unwrap();
+            let (j1, sq1) = s.flange_on(e1, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+            let (j2, sq2) = s.flange_on(e2, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+            s.close_flange_corners(&[j1, j2]).unwrap();
+            s.slant_open_sides(&sq1).unwrap();
+            s.slant_open_sides(&sq2).unwrap();
+            s.clear_of_neighbours(&[j1, j2]).unwrap();
+            s.build().unwrap();
+
+            let e3 = s.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+            let (j3, sq3) = s.flange_on(e3, 45.0, std::f64::consts::FRAC_PI_2, 2.0, pos, super::HeightFrom::Outer, true).unwrap();
+            s.close_flange_corners(&[j3]).unwrap();
+            s.slant_open_sides(&sq3).unwrap();
+            s.clear_of_neighbours(&[j3]).unwrap();
+            let solid = s.build().unwrap();
+            assert_eq!(solid.validity(), Vec::<String>::new(), "{pos}: folded solid must be valid");
+            assert_eq!(solid.shell_count(), 1, "{pos}: single shell");
+            let b3 = &s.bends[2];
+            assert!((b3.start.dist(b3.end) - 142.0).abs() < 1e-6, "{pos}: bend 3 length should be 142, got {}", b3.start.dist(b3.end));
+            for (i, other) in [&s.bends[0], &s.bends[1]].into_iter().enumerate() {
+                let hit = crate::sheet_surface::boolean_past_holes(
+                    std::slice::from_ref(&b3.zone),
+                    std::slice::from_ref(&other.zone),
+                    BoolOp::Intersect,
+                    &mut work,
+                )
+                .unwrap();
+                let overlap: f64 = hit.iter().map(Region2::area).sum();
+                assert!(overlap < 1e-6, "{pos}: bend 3 overlaps bend {} by {overlap}", i + 1);
+            }
+        }
+
+        // Reverse order: downward flange on x=100 added first (full 150 mm), then upward walls on
+        // y=0 and y=150 added second; each upward wall must stop at x=96 (length 96), clear of
+        // the downward bend zone.
+        let (mut rev, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
+        let e3 = rev.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+        let (j3, sq3) = rev.flange_on(e3, 45.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, true).unwrap();
+        rev.close_flange_corners(&[j3]).unwrap();
+        rev.slant_open_sides(&sq3).unwrap();
+        rev.clear_of_neighbours(&[j3]).unwrap();
+        rev.build().unwrap();
+
+        let e1 = rev.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
+        let e2 = rev.free_edge_at(Vec3::new(50.0, 150.0, 2.0)).unwrap().unwrap();
+        let (j1, sq1) = rev.flange_on(e1, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        let (j2, sq2) = rev.flange_on(e2, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        rev.close_flange_corners(&[j1, j2]).unwrap();
+        rev.slant_open_sides(&sq1).unwrap();
+        rev.slant_open_sides(&sq2).unwrap();
+        rev.clear_of_neighbours(&[j1, j2]).unwrap();
+        let rev_solid = rev.build().unwrap();
+        assert_eq!(rev_solid.validity(), Vec::<String>::new(), "reverse order solid must be valid");
+        assert_eq!(rev_solid.shell_count(), 1);
+        assert!((rev.bends[0].start.dist(rev.bends[0].end) - 150.0).abs() < 1e-6);
+        assert!((rev.bends[1].start.dist(rev.bends[1].end) - 96.0).abs() < 1e-6, "rev bend 1 len={}", rev.bends[1].start.dist(rev.bends[1].end));
+        assert!((rev.bends[2].start.dist(rev.bends[2].end) - 96.0).abs() < 1e-6, "rev bend 2 len={}", rev.bends[2].start.dist(rev.bends[2].end));
+
+        // A partial opposite-side flange ending well clear of the corner (x=0..85 vs x=96..100)
+        // must not trim the flange on x=100.
+        let (mut partial, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
+        let e1 = partial.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
+        let (js, sqs) =
+            partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", 0.0, super::HeightFrom::Outer).unwrap();
+        partial.close_flange_corners(&js).unwrap();
+        partial.slant_open_sides(&sqs).unwrap();
+        partial.clear_of_neighbours(&js).unwrap();
+        partial.build().unwrap();
+        let e3 = partial.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+        let (j3, sq3) = partial.flange_on(e3, 45.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, true).unwrap();
+        partial.close_flange_corners(&[j3]).unwrap();
+        partial.slant_open_sides(&sq3).unwrap();
+        partial.clear_of_neighbours(&[j3]).unwrap();
+        let partial_solid = partial.build().unwrap();
+        assert_eq!(partial_solid.validity(), Vec::<String>::new());
+        assert!((partial.bends[1].start.dist(partial.bends[1].end) - 150.0).abs() < 1e-6);
+
+        // When two opposite-side bends consume the entire edge (y=0..4 and y=2..6 on a 6 mm strip),
+        // the flange fails cleanly without mutating the sheet.
+        let narrow_plate = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 6.0), Vec2::new(0.0, 6.0)]),
+            holes: Vec::new(),
+        };
+        let (mut narrow, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, narrow_plate, &[], 1).unwrap();
+        let ne1 = narrow.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
+        let ne2 = narrow.free_edge_at(Vec3::new(50.0, 6.0, 2.0)).unwrap().unwrap();
+        let (nj1, nsq1) = narrow.flange_on(ne1, 20.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        let (nj2, nsq2) = narrow.flange_on(ne2, 20.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        narrow.close_flange_corners(&[nj1, nj2]).unwrap();
+        narrow.slant_open_sides(&nsq1).unwrap();
+        narrow.slant_open_sides(&nsq2).unwrap();
+        narrow.clear_of_neighbours(&[nj1, nj2]).unwrap();
+        narrow.build().unwrap();
+        let before_joints = narrow.sheet.joints.len();
+        let before_panels = narrow.sheet.panels.len();
+        let ne3 = narrow.free_edge_at(Vec3::new(100.0, 3.0, 2.0)).unwrap().unwrap();
+        assert!(narrow.flange_on(ne3, 20.0, std::f64::consts::FRAC_PI_2, 2.0, "outside", super::HeightFrom::Outer, true).is_err());
+        assert_eq!(narrow.sheet.joints.len(), before_joints);
+        assert_eq!(narrow.sheet.panels.len(), before_panels);
+
+        // Multi-run atomicity: if a later run on the same edge is completely consumed by an
+        // existing opposite-side bend (0.98..1.0 is only 3 mm < 4 mm setback), the whole call
+        // fails without applying the earlier run.
+        let (mut multi, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate, &[], 1).unwrap();
+        let me1 = multi.free_edge_at(Vec3::new(80.0, 0.0, 2.0)).unwrap().unwrap();
+        let me2 = multi.free_edge_at(Vec3::new(80.0, 150.0, 2.0)).unwrap().unwrap();
+        let (mj1, msq1) = multi.flange_on(me1, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        let (mj2, msq2) = multi.flange_on(me2, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        multi.close_flange_corners(&[mj1, mj2]).unwrap();
+        multi.slant_open_sides(&msq1).unwrap();
+        multi.slant_open_sides(&msq2).unwrap();
+        multi.clear_of_neighbours(&[mj1, mj2]).unwrap();
+        multi.build().unwrap();
+        let m_before_joints = multi.sheet.joints.len();
+        let m_before_panels = multi.sheet.panels.len();
+        let me3 = multi.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+        assert!(
+            multi
+                .flanges_on(
+                    me3,
+                    &[(0.0, 0.98, 45.0, std::f64::consts::FRAC_PI_2, true), (0.98, 1.0, 45.0, std::f64::consts::FRAC_PI_2, true)],
+                    2.0,
+                    "inside",
+                    0.0,
+                    super::HeightFrom::Outer,
+                )
+                .is_err()
+        );
+        assert_eq!(multi.sheet.joints.len(), m_before_joints);
+        assert_eq!(multi.sheet.panels.len(), m_before_panels);
     }
 }

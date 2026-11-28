@@ -447,3 +447,120 @@ fn an_older_sweep_along_a_3d_spline_keeps_its_faces_for_what_refers_to_them() {
     run(&mut s, "surface.sweep", json!({"sketch": "Sketch2", "curves": ["l1"], "path_sketch": "Sketch1", "path": ["w1"], "body_name": "New"}));
     assert_eq!(s.model.state().body("New").unwrap().body.face_count(), 1);
 }
+
+/// A sweep along each edge of a coil (centre line radius 20, a round section 4 across, 3
+/// turns of pitch 8) builds the solid its closed form gives, or is refused with the reason. The
+/// coil's edges are its seam, a helix of radius R = 22 from (22, 0, 0) to (22, 0, 24), and its
+/// two end sections, circles of radius 2 in the XZ plane round (20, 0, 0) and (20, 0, 24).
+///
+/// A circle of radius r = 0.5 centred on the path, its plane at the angle g to the path's normal
+/// plane, sweeps A L cos g (the volume swept by a moving plane region is its area times the
+/// normal component of its centroid's velocity when the centroid stays on the path; the tube does
+/// not overlap itself: r is far under the helix's radius of curvature, about 22.07, and under
+/// half the pitch). The helix is L = n sqrt((2 pi R)^2 + p^2) long. Square to it the circle is a
+/// pipe, pi r^2 L. Drawn on XZ it leans by g = atan(p / 2 pi R) = 3.3 deg (about
+/// -0.16%), giving pi r^2 L cos g = pi r^2 n 2 pi R. The bound 1e-4 tells the two apart: they
+/// differ by 1 - cos g = 1.7e-3.
+///
+/// Round an end section, a circle across it makes a torus, 2 pi^2 (2) r^2. A circle drawn on XZ
+/// lies along that section all the way round and sweeps no volume: a refusal naming that.
+#[test]
+fn a_sweep_along_each_edge_of_a_coil_is_its_closed_form_or_refused() {
+    let (r, big_r, p, n) = (0.5, 22.0, 8.0, 3.0);
+    let length = n * ((2.0 * PI * big_r).powi(2) + p * p).sqrt();
+    let mut s = Session::default();
+    run(&mut s, "solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 3, "pitch": 8, "body_name": "Spring"}));
+    // A profile drawn on XZ.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "OnXZ"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [22, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Square to the helix where it starts: its direction there is (0, 2 pi R, p).
+    let t = (2.0 * PI * big_r).hypot(p);
+    run(
+        &mut s,
+        "sketch.create",
+        json!({"plane": {"origin": [22, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, p / t, -2.0 * PI * big_r / t]}, "name": "Square"}),
+    );
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Across the start section at (22, 0, 0), where it runs along Z.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [22, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Across"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    let along = |s: &mut Session, sketch: &str, pick: [f64; 3], body: &str| {
+        s.execute("solid.sweep", &json!({"sketch": sketch, "path_body": "Spring", "path_edges": [pick], "operation": "new", "body_name": body}))
+            .map_err(|e| e.to_string())
+    };
+    let close = |got: f64, want: f64, what: &str| assert!((got - want).abs() < want * 1e-4, "{what}: {got} vs {want}");
+    along(&mut s, "Square", [22.0, 0.0, 0.0], "Pipe").unwrap();
+    close(measure(&s, "Pipe").volume, PI * r * r * length, "pipe");
+    along(&mut s, "OnXZ", [22.0, 0.0, 0.0], "Leaning").unwrap();
+    close(measure(&s, "Leaning").volume, PI * r * r * n * 2.0 * PI * big_r, "leaning");
+    along(&mut s, "Across", [18.0, 0.0, 0.0], "Ring").unwrap();
+    close(measure(&s, "Ring").volume, 2.0 * PI * PI * 2.0 * r * r, "ring");
+    // [20, 0, 0] is as near the seam as the section; the section is taken.
+    let before = s.doc.features.len();
+    for pick in [[18.0, 0.0, 0.0], [20.0, 0.0, 0.0], [22.0, 0.0, 4.0], [18.0, 0.0, 4.0]] {
+        let e = along(&mut s, "OnXZ", pick, "Flat").unwrap_err();
+        assert!(e.contains("the profile lies along the path") && !e.contains("SMLib"), "{pick:?}: {e}");
+        assert_eq!(s.doc.features.len(), before, "{pick:?}");
+    }
+}
+
+/// The path: a 40 x 20 rounded rectangle about the origin on XY, corner radius 2, as lines
+/// `l1`..`l4` and corner arcs `a1`..`a4` from (-18, -10); and a profile `Prof` across its bottom
+/// line at x = 0, `2 w` wide (`w` each side of the path) and 1 high.
+fn rounded_rectangle_and_profile(s: &mut Session, w: f64) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(s, "sketch.line", json!({"points": [[-18.0, -10.0], [18.0, -10.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [18.0, -8.0], "start": [18.0, -10.0], "end": [20.0, -8.0]}));
+    run(s, "sketch.line", json!({"points": [[20.0, -8.0], [20.0, 8.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [18.0, 8.0], "start": [20.0, 8.0], "end": [18.0, 10.0]}));
+    run(s, "sketch.line", json!({"points": [[18.0, 10.0], [-18.0, 10.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [-18.0, 8.0], "start": [-18.0, 10.0], "end": [-20.0, 8.0]}));
+    run(s, "sketch.line", json!({"points": [[-20.0, 8.0], [-20.0, -8.0]], "infer": false}));
+    run(s, "sketch.arc.center_point", json!({"center": [-18.0, -8.0], "start": [-20.0, -8.0], "end": [-18.0, -10.0]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sketch.create", json!({"plane": {"origin": [0, -10.0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(s, "sketch.line", json!({"points": [[-w, 0], [w, 0], [w, 1], [-w, 1]], "closed": true, "infer": false}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn sweep_along(s: &mut Session, path: &[&str], name: &str) -> Result<Value, String> {
+    s.execute("solid.sweep", &json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "name": name}))
+        .map_err(|e| e.to_string())
+}
+
+/// The volume of the one body the session holds.
+fn only_volume(s: &Session) -> f64 {
+    let w = s.world_state().unwrap();
+    assert_eq!(w.bodies.len(), 1, "one body");
+    solidcraft_kernel::measure(&w.bodies[0].body).unwrap().volume
+}
+
+/// The 4 x 1 profile swept round the closed rounded rectangle with
+/// its inner edge on the corner arcs' centres, so each corner's inside wall closes to that edge.
+/// A solid of the profile's area times the path's length (its centroid on the path, Pappus):
+/// `4 (2 (40 - 4) + 2 (20 - 4) + 4 pi)` = 466.26548 mm³.
+#[test]
+fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_builds() {
+    let mut s = Session::default();
+    rounded_rectangle_and_profile(&mut s, 2.0);
+    sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"], "S").unwrap();
+    let want = 4.0 * (2.0 * (40.0 - 4.0) + 2.0 * (20.0 - 4.0) + 4.0 * PI);
+    assert!((want - 466.265_48).abs() < 1e-5);
+    let got = only_volume(&s);
+    assert!((got - want).abs() <= 1e-6 * want, "volume {got} vs {want}");
+}
+
+/// The same profile along the open run `l1`..`l3` (two corners, the inner edge on their centres
+/// too) is still the exact piecewise sweep: `4 (36 + 16 + 36 + 2 pi)`.
+#[test]
+fn an_open_sweep_whose_inner_edge_lies_on_the_corner_centres_builds() {
+    let mut s = Session::default();
+    rounded_rectangle_and_profile(&mut s, 2.0);
+    sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3"], "S").unwrap();
+    let want = 4.0 * (36.0 + 16.0 + 36.0 + 2.0 * PI);
+    let got = only_volume(&s);
+    assert!((got - want).abs() <= 1e-6 * want, "volume {got} vs {want}");
+}

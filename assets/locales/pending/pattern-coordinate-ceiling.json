@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "diagnostic.pattern_circular_coordinate_range": "ستقع إحدى نسخ النمط خارج نطاق الإحداثيات المدعوم. عدّل المحور أو الزاوية أو عدد النسخ.",
+    "diagnostic.pattern_spacing_coordinate_range": "ستقع إحدى نسخ النمط خارج نطاق الإحداثيات المدعوم. قلّل التباعد أو عدد النسخ."
+  },
+  "de": {
+    "diagnostic.pattern_circular_coordinate_range": "Eine Kopie der Anordnung läge außerhalb des unterstützten Koordinatenbereichs. Passen Sie die Achse, den Winkel oder die Anzahl an.",
+    "diagnostic.pattern_spacing_coordinate_range": "Eine Kopie der Anordnung läge außerhalb des unterstützten Koordinatenbereichs. Verringern Sie den Abstand oder die Anzahl."
+  },
+  "en": {
+    "diagnostic.pattern_circular_coordinate_range": "A pattern copy would lie beyond the supported coordinate range. Adjust the axis, angle, or count.",
+    "diagnostic.pattern_spacing_coordinate_range": "A pattern copy would lie beyond the supported coordinate range. Reduce the spacing or count."
+  },
+  "he": {
+    "diagnostic.pattern_circular_coordinate_range": "עותק של התבנית יימצא מחוץ לטווח הקואורדינטות הנתמך. יש לשנות את הציר, את הזווית או את מספר העותקים.",
+    "diagnostic.pattern_spacing_coordinate_range": "עותק של התבנית יימצא מחוץ לטווח הקואורדינטות הנתמך. יש להקטין את המרווח או את מספר העותקים."
+  },
+  "ja": {
+    "diagnostic.pattern_circular_coordinate_range": "パターンのコピーが対応する座標範囲を超えます。軸、角度、または個数を調整してください。",
+    "diagnostic.pattern_spacing_coordinate_range": "パターンのコピーが対応する座標範囲を超えます。間隔または個数を減らしてください。"
+  },
+  "ko": {
+    "diagnostic.pattern_circular_coordinate_range": "패턴 복사본 하나가 지원되는 좌표 범위를 벗어납니다. 축, 각도 또는 개수를 조정하세요.",
+    "diagnostic.pattern_spacing_coordinate_range": "패턴 복사본 하나가 지원되는 좌표 범위를 벗어납니다. 간격이나 개수를 줄이세요."
+  },
+  "vi": {
+    "diagnostic.pattern_circular_coordinate_range": "Một bản sao trong mẫu sẽ nằm ngoài phạm vi tọa độ được hỗ trợ. Hãy điều chỉnh trục, góc hoặc số lượng.",
+    "diagnostic.pattern_spacing_coordinate_range": "Một bản sao trong mẫu sẽ nằm ngoài phạm vi tọa độ được hỗ trợ. Hãy giảm khoảng cách hoặc số lượng."
+  },
+  "zh": {
+    "diagnostic.pattern_circular_coordinate_range": "阵列中的一个副本将超出受支持的坐标范围。请调整轴线、角度或数量。",
+    "diagnostic.pattern_spacing_coordinate_range": "阵列中的一个副本将超出受支持的坐标范围。请减小间距或减少数量。"
+  }
+}

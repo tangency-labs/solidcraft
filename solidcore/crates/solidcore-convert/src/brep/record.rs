@@ -8,7 +8,8 @@
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
 //!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
 //!   A blend face goes as its definition and its net ([`face_definition`]: a procedural blend, a
-//!   round of an exact class whose net has no analytic label); a use with no UV trim gets one the
+//!   round of an exact class whose net has no analytic label), and so does a screw-swept wall
+//!   ([`face_sweep`]); a use with no UV trim gets one the
 //!   kernel makes by fitting.
 //! - **Pcurves:** every use's pcurve is the kernel's own UV trim (made first where a use has
 //!   none, by the kernel's fit), its knots on the edge record's interval ([`record_trim`]). A face's parameters in
@@ -36,6 +37,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::surface::procedural_sweep::record::face_sweep;
 use solidcore::topology::brep::create_missing_uv_trim_curves;
 use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
@@ -50,10 +52,10 @@ use solidcore_record::brep as r;
 
 use super::{Order, Unsupported, R};
 
-/// A blend face's record: its definition as its label and its net as its NURBS form (the form the
-/// face was written with, or its surface when that is the net itself), when the kernel reads a
-/// definition off it ([`face_definition`]) and the net is a NURBS surface; otherwise the face as
-/// written.
+/// A blend or screw-swept face's record: its definition as its label and its net as its NURBS
+/// form (the form the face was written with, or its surface when that is the net itself), when
+/// the kernel reads a definition off it ([`face_definition`], [`face_sweep`]) and the net is a
+/// NURBS surface; otherwise the face as written.
 fn with_definition(
     k: &Kernel,
     surface: &solidcore::surface::surface::Surface,
@@ -67,12 +69,22 @@ fn with_definition(
     ) {
         return Ok((label, form));
     }
-    let Some(definition) = face_definition(k, surface)? else {
-        return Ok((label, form));
-    };
-    let net = form.unwrap_or(label);
-    let definition = Box::new(crate::blend::record_blend(definition));
-    Ok((r::Surface::Blend { definition }, Some(net)))
+    if let Some(definition) = face_definition(k, surface)? {
+        let net = form.unwrap_or(label);
+        let definition = Box::new(crate::blend::record_blend(definition));
+        return Ok((r::Surface::Blend { definition }, Some(net)));
+    }
+    // A screw-swept wall's net: its definition as its label.
+    if let Some(definition) = face_sweep(k, surface)
+        .ok()
+        .flatten()
+        .and_then(|d| crate::sweep::record_sweep(&d))
+    {
+        let net = form.unwrap_or(label);
+        let definition = Box::new(definition);
+        return Ok((r::Surface::Sweep { definition }, Some(net)));
+    }
+    Ok((label, form))
 }
 
 fn index(i: usize) -> R<u32> {

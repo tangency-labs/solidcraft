@@ -1,0 +1,82 @@
+{
+  "ar": {
+    "ui.crash_card.closed": "أُغلق SolidCraft بشكل غير متوقع",
+    "ui.crash_card.copy_details": "نسخ التفاصيل",
+    "ui.crash_card.nothing_lost": "لم يُفقد شيء",
+    "ui.crash_card.panic": "توقف {command} بشكل غير متوقع",
+    "ui.crash_card.report": "إبلاغ",
+    "ui.crash_card.restored": "فشل {command}، وتمت استعادة تصميمك",
+    "ui.crash_card.running": "أثناء تشغيل {command}",
+    "ui.crash_card.times": "حدث {count} مرات"
+  },
+  "de": {
+    "ui.crash_card.closed": "SolidCraft wurde unerwartet beendet",
+    "ui.crash_card.copy_details": "Details kopieren",
+    "ui.crash_card.nothing_lost": "nichts ging verloren",
+    "ui.crash_card.panic": "{command} wurde unerwartet beendet",
+    "ui.crash_card.report": "Melden",
+    "ui.crash_card.restored": "{command} ist fehlgeschlagen, Ihr Entwurf wurde wiederhergestellt",
+    "ui.crash_card.running": "beim Ausführen von {command}",
+    "ui.crash_card.times": "{count} Mal aufgetreten"
+  },
+  "en": {
+    "ui.crash_card.closed": "SolidCraft closed unexpectedly",
+    "ui.crash_card.copy_details": "Copy details",
+    "ui.crash_card.nothing_lost": "nothing was lost",
+    "ui.crash_card.panic": "{command} stopped unexpectedly",
+    "ui.crash_card.report": "Report",
+    "ui.crash_card.restored": "{command} failed, your design was restored",
+    "ui.crash_card.running": "while running {command}",
+    "ui.crash_card.times": "happened {count} times"
+  },
+  "he": {
+    "ui.crash_card.closed": "SolidCraft נסגר באופן בלתי צפוי",
+    "ui.crash_card.copy_details": "העתקת פרטים",
+    "ui.crash_card.nothing_lost": "דבר לא אבד",
+    "ui.crash_card.panic": "{command} נעצר באופן בלתי צפוי",
+    "ui.crash_card.report": "דיווח",
+    "ui.crash_card.restored": "{command} נכשל, התכנון שלך שוחזר",
+    "ui.crash_card.running": "בזמן הפעלת {command}",
+    "ui.crash_card.times": "אירע {count} פעמים"
+  },
+  "ja": {
+    "ui.crash_card.closed": "SolidCraft が予期せず終了しました",
+    "ui.crash_card.copy_details": "詳細をコピー",
+    "ui.crash_card.nothing_lost": "データは失われていません",
+    "ui.crash_card.panic": "{command} が予期せず停止しました",
+    "ui.crash_card.report": "報告",
+    "ui.crash_card.restored": "{command} が失敗しました。設計は復元されました",
+    "ui.crash_card.running": "{command} の実行中",
+    "ui.crash_card.times": "{count} 回発生"
+  },
+  "ko": {
+    "ui.crash_card.closed": "SolidCraft가 예기치 않게 종료되었습니다",
+    "ui.crash_card.copy_details": "세부 정보 복사",
+    "ui.crash_card.nothing_lost": "손실된 내용 없음",
+    "ui.crash_card.panic": "{command} 작업이 예기치 않게 중지되었습니다",
+    "ui.crash_card.report": "보고",
+    "ui.crash_card.restored": "{command} 작업이 실패하여 설계가 복원되었습니다",
+    "ui.crash_card.running": "{command} 실행 중",
+    "ui.crash_card.times": "{count}회 발생"
+  },
+  "vi": {
+    "ui.crash_card.closed": "SolidCraft đã đóng đột ngột",
+    "ui.crash_card.copy_details": "Sao chép chi tiết",
+    "ui.crash_card.nothing_lost": "không mất dữ liệu",
+    "ui.crash_card.panic": "{command} đã dừng đột ngột",
+    "ui.crash_card.report": "Báo cáo",
+    "ui.crash_card.restored": "{command} thất bại, thiết kế của bạn đã được khôi phục",
+    "ui.crash_card.running": "khi chạy {command}",
+    "ui.crash_card.times": "đã xảy ra {count} lần"
+  },
+  "zh": {
+    "ui.crash_card.closed": "SolidCraft 意外关闭",
+    "ui.crash_card.copy_details": "复制详情",
+    "ui.crash_card.nothing_lost": "没有丢失任何内容",
+    "ui.crash_card.panic": "{command} 意外停止",
+    "ui.crash_card.report": "报告",
+    "ui.crash_card.restored": "{command} 失败，您的设计已恢复",
+    "ui.crash_card.running": "运行 {command} 时",
+    "ui.crash_card.times": "发生了 {count} 次"
+  }
+}

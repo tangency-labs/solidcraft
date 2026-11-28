@@ -1,7 +1,10 @@
 //! The app's log on disk: what SolidCraft's crates log at info and above, and other crates'
 //! warnings, one line each, in `<data folder>/logs/solidcraft.log`. Each start moves the last
-//! run's log to `solidcraft.previous.log`, so a report sent after a crash still has the lines of
-//! the run that crashed. A problem report attaches the end of it ([`tail`]).
+//! run's log to `solidcraft.previous.log`, and that one's to `solidcraft.previous.2.log`, keeping
+//! [`KEEP`] earlier runs within [`MAX_KEPT_BYTES`]: a report sent after a crash still has the lines
+//! of the run that crashed, even after a few more starts that failed too. A problem report attaches
+//! the end of the log ([`tail`]); a crash report's, the end of the crashed run's own ([`run_tail_in`]),
+//! which each log names on its first line ([`run_header`]).
 //!
 //! Only the desktop app installs it ([`install`]); tests, the CLI and the web build never do,
 //! and [`tail`] then has nothing to read.
@@ -18,6 +21,12 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 pub const FILE: &str = "solidcraft.log";
 /// The run before's.
 pub const PREVIOUS: &str = "solidcraft.previous.log";
+/// Earlier runs' logs kept, [`PREVIOUS`] included (`solidcraft.previous.<n>.log` for n ≥ 2).
+pub const KEEP: usize = 5;
+/// Bytes the logs older than [`PREVIOUS`] may take together: the oldest go first.
+pub const MAX_KEPT_BYTES: u64 = 8 << 20;
+/// The first line of each run's log says which run it is ([`run_header`]).
+const RUN_HEADER: &str = "SolidCraft log of process ";
 /// A log stops growing at this size; the line that reaches it says so.
 const MAX_BYTES: u64 = 4 << 20;
 /// The longest line written.
@@ -80,17 +89,65 @@ impl Log for FileLog {
     }
 }
 
-/// Start the log in `dir`: last run's log becomes [`PREVIOUS`], and this run writes [`FILE`].
-/// Returns the file, or `None` when it could not be made or a logger was already installed.
+/// The log an earlier run wrote: `1` is [`PREVIOUS`], the run before this one.
+pub fn previous_name(n: usize) -> String {
+    if n <= 1 { PREVIOUS.to_string() } else { format!("solidcraft.previous.{n}.log") }
+}
+
+/// Move each earlier run's log one place older (the oldest of [`KEEP`] goes), this run's last
+/// one to [`PREVIOUS`], then drop the oldest until those older than [`PREVIOUS`] fit in
+/// [`MAX_KEPT_BYTES`]. Another window's process may still hold [`FILE`] (Windows then refuses the
+/// move): this run then adds to the same file, and the others stay as they are.
+pub fn rotate(dir: &Path) {
+    let path = dir.join(FILE);
+    if !path.is_file() {
+        return;
+    }
+    let _ = fs::remove_file(dir.join(previous_name(KEEP)));
+    for n in (1..KEEP).rev() {
+        let from = dir.join(previous_name(n));
+        if from.is_file() {
+            let _ = fs::rename(&from, dir.join(previous_name(n + 1)));
+        }
+    }
+    if fs::rename(&path, dir.join(PREVIOUS)).is_err() {
+        // Held by another window: the older logs go back where they were.
+        for n in 2..=KEEP {
+            let from = dir.join(previous_name(n));
+            if from.is_file() {
+                let _ = fs::rename(&from, dir.join(previous_name(n - 1)));
+            }
+        }
+        return;
+    }
+    let mut total = 0;
+    for n in 2..=KEEP {
+        let file = dir.join(previous_name(n));
+        let Ok(meta) = fs::metadata(&file) else { continue };
+        total += meta.len();
+        if total > MAX_KEPT_BYTES {
+            let _ = fs::remove_file(file);
+        }
+    }
+}
+
+/// The line each run's log starts with: its process and when it started, which a crash report
+/// records too (`run`), so a report finds the crashed run's own lines ([`run_tail_in`]).
+pub fn run_header(pid: u32, start: &str) -> String {
+    format!("{RUN_HEADER}{pid}, started {start}")
+}
+
+/// Start the log in `dir`: last run's log becomes [`PREVIOUS`] ([`rotate`]), and this run writes
+/// [`FILE`], starting with [`run_header`]. Returns the file, or `None` when it could not be made or
+/// a logger was already installed.
 pub fn install(dir: &Path) -> Option<PathBuf> {
     fs::create_dir_all(dir).ok()?;
     let path = dir.join(FILE);
-    // Another window's process may still hold it (Windows then refuses the move): this run then
-    // adds to the same file.
-    if path.is_file() {
-        let _ = fs::rename(&path, dir.join(PREVIOUS));
-    }
-    let file = OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    rotate(dir);
+    let mut file = OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    // The crash journal's start, to the second (`crash::install` runs just after this).
+    let secs = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let _ = writeln!(file, "{}", run_header(std::process::id(), &solidcraft_engine::crash::utc(secs)));
     let written = file.metadata().map_or(0, |m| m.len());
     let logger = FileLog { file: Mutex::new(Some(file)), written: AtomicU64::new(written) };
     log::set_boxed_logger(Box::new(logger)).ok()?;
@@ -145,6 +202,78 @@ pub fn tail_in(dir: &Path, max_lines: usize, max_bytes: u64) -> Vec<String> {
         }
     }
     lines
+}
+
+/// The last `max_lines` lines, at most `max_bytes`, that the run of process `pid` started at
+/// `start` (a crash report's `run`) wrote, from whichever of the kept logs holds them: this run's
+/// or one of the [`KEEP`] before. The run is found by its [`run_header`]; one started within a
+/// few minutes of `start` counts (the log starts a moment before the crash journal). None when no
+/// kept log has it.
+pub fn run_tail_in(dir: &Path, pid: u32, start: &str, max_lines: usize, max_bytes: u64) -> Option<Vec<String>> {
+    let want = parse_utc(start)?;
+    let head = format!("{RUN_HEADER}{pid}, started ");
+    let files = std::iter::once(FILE.to_string()).chain((1..=KEEP).map(previous_name));
+    for name in files {
+        let Ok(f) = File::open(dir.join(&name)) else { continue };
+        let mut text = String::new();
+        if f.take(MAX_BYTES + (64 << 10)).read_to_string(&mut text).is_err() {
+            continue;
+        }
+        let mut found = false;
+        let mut out: Vec<&str> = Vec::new();
+        for line in text.lines() {
+            if line.strip_prefix(&head).and_then(parse_utc).is_some_and(|at| at.abs_diff(want) <= 300) {
+                found = true;
+                out.clear();
+                continue;
+            }
+            if found {
+                if line.starts_with(RUN_HEADER) {
+                    break;
+                }
+                if !line.trim().is_empty() {
+                    out.push(line);
+                }
+            }
+        }
+        if !found {
+            continue;
+        }
+        let mut kept: Vec<String> = Vec::new();
+        let mut bytes = 0u64;
+        for line in out.iter().rev().take(max_lines) {
+            bytes += line.len() as u64 + 1;
+            if bytes > max_bytes {
+                break;
+            }
+            kept.push((*line).to_string());
+        }
+        kept.reverse();
+        return Some(kept);
+    }
+    None
+}
+
+/// Seconds since 1970 of a UTC time as `crash::utc` writes it (`2026-11-27T22:37:48Z`).
+fn parse_utc(s: &str) -> Option<u64> {
+    let s = s.trim().strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.splitn(3, '-').map(str::parse::<i64>);
+    let (y, m, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let mut t = time.splitn(3, ':').map(str::parse::<i64>);
+    let (h, min, sec) = (t.next()?.ok()?, t.next()?.ok()?, t.next()?.ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || h > 23 || min > 59 || sec > 60 {
+        return None;
+    }
+    // Days from 1970 (Howard Hinnant's days_from_civil).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + h * 3600 + min * 60 + sec).ok()
 }
 
 /// [`tail_in`] the installed log; nothing when there is none.

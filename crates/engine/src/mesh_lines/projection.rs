@@ -26,12 +26,16 @@ pub(crate) struct Drawing {
 #[derive(Clone, Debug)]
 pub(crate) struct Path {
     pub points: Vec<Vec2>,
+    /// The complete run of a closed source curve, rather than a clipped fragment.
+    pub closed: bool,
     pub hidden: bool,
 }
 
 /// One connected run of a sketch curve in world coordinates.
 pub(crate) struct Part {
     pub points: Vec<Vec3>,
+    /// Closed in the source sketch, independent of sampled endpoint rounding.
+    pub closed: bool,
     /// Drawn over the bodies (the sketch being edited) rather than hidden behind them.
     pub on_top: bool,
 }

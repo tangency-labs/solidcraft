@@ -85,6 +85,8 @@ pub struct PitchCircle {
     pub centre: [f64; 3],
     /// The angle at the centre between neighbours, in degrees, one for each gap.
     pub angles_deg: Vec<f64>,
+    /// Where the gaps are even: the angle between neighbouring items, in degrees.
+    pub angle_pitch_deg: Option<f64>,
 }
 
 /// The spacing of round items that share one axis direction ([`Points::hole_spacing`]).

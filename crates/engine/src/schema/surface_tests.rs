@@ -351,7 +351,7 @@ fn assert_sheet_keeps_todays_errors(id: &str, calls: &[Value]) {
 fn surface_extend_and_trim_contracts_and_replies() {
     assert_keys(
         input_schema_for::<SurfaceExtendParams>(),
-        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "stays_surface", "up_to"],
+        &["angle", "body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "stays_surface", "up_to"],
     );
     assert_keys(
         input_schema_for::<SurfaceTrimParams>(),
@@ -380,6 +380,8 @@ fn surface_extend_and_trim_contracts_and_replies() {
             json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "wavy"}),
             json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": {"body": 3}}),
             json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": "bounds", "mode": "tangent"}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "angle": "10 deg"}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "law", "angle": "5 mm"}),
         ],
     );
     assert_sheet_keeps_todays_errors(
@@ -406,6 +408,7 @@ fn surface_extend_and_trim_contracts_and_replies() {
         ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": "5 mm", "name": "Out"})),
         ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "tangent", "neighbours": false})),
         ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": {"origin": [15, 0, 0], "normal": [1, 0, 0]}})),
+        ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "law", "angle": "30 deg"})),
         ("surface.trim", json!({"body": "Sheet", "plane": cut, "keep": [8, 5, 0], "name": "Half"})),
         ("surface.trim", json!({"body": "Sheet", "plane": cut, "keep": [[8, 5, 0]]})),
     ];

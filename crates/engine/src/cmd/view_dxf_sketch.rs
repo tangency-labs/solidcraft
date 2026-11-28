@@ -5,7 +5,8 @@
 //! out. The active sketch is drawn on top, as the viewport draws it.
 use solidcore_record::{Plane, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{CurveKind, Sketch};
+use std::collections::BTreeSet;
 
 use crate::Session;
 use crate::mesh_lines::{Part, Refused, Stage};
@@ -29,7 +30,7 @@ pub fn exportable(s: &Session) -> bool {
     world.bodies.iter().any(|b| s.body_visible(&b.name)) || world.sketches.iter().any(|ss| sketch_shown(s, ss.feature) && has_profile(&ss.sketch))
 }
 
-/// A curve's boundary segments joined end to end, so a circle (two half arcs) is one run.
+/// A curve's boundary segments joined end to end, so a circle is one run.
 fn curve_parts(sk: &Sketch, i: usize, plane: &Plane, tolerance: f64) -> Vec<Vec<Vec3>> {
     let mut parts: Vec<Vec<Vec3>> = Vec::new();
     for seg in sk.segs(i) {
@@ -45,12 +46,27 @@ fn curve_parts(sk: &Sketch, i: usize, plane: &Plane, tolerance: f64) -> Vec<Vec<
 
 /// The shown sketches' profile curves, sampled at the export's chord `tolerance`.
 pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, Refused> {
+    let source = s.model.state();
     let world = s.world_state().map_err(|_| Refused::Invalid("the model cannot be placed"))?;
     let shown: Vec<_> = world.sketches.iter().filter(|ss| sketch_shown(s, ss.feature)).collect();
     let progress = Stage::new("dxf_projection", shown.len());
+    // Borrow source keys once: looking up every placed wire by scanning its sketch
+    // would make a drawing with many short wires take quadratic work.
+    let closed_wires: BTreeSet<_> = source
+        .sketches
+        .iter()
+        .flat_map(|sketch| {
+            sketch
+                .sketch
+                .wires
+                .iter()
+                .filter(|wire| wire.arc.is_none() && wire.fit.first().zip(wire.fit.last()).is_some_and(|(a, b)| a == b))
+                .map(move |wire| (sketch.feature, wire.id.as_str()))
+        })
+        .collect();
     let mut result = Vec::new();
     let mut total = 0usize;
-    let mut add = |points: Vec<Vec3>, on_top: bool, result: &mut Vec<Part>| -> Result<(), Refused> {
+    let mut add = |points: Vec<Vec3>, closed: bool, on_top: bool, result: &mut Vec<Part>| -> Result<(), Refused> {
         if points.len() < 2 {
             return Ok(());
         }
@@ -61,7 +77,7 @@ pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, Refused> {
         if total > MAX_POINTS {
             return Err(Refused::SketchPoints(MAX_POINTS));
         }
-        result.push(Part { points, on_top });
+        result.push(Part { points, closed, on_top });
         Ok(())
     };
     for ss in shown {
@@ -69,13 +85,25 @@ pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, Refused> {
         let on_top = s.active_sketch == Some(ss.feature);
         let sk = &ss.sketch;
         for i in (0..sk.curves.len()).filter(|i| profile_curve(sk, *i)) {
-            for points in curve_parts(sk, i, &ss.plane, tolerance) {
-                add(points, on_top, &mut result)?;
+            let parts = curve_parts(sk, i, &ss.plane, tolerance);
+            let closed = parts.len() == 1
+                && sk.curves.get(i).is_some_and(|curve| match &curve.kind {
+                    CurveKind::Circle { .. } | CurveKind::Ellipse { .. } | CurveKind::Spline { periodic: true, .. } => true,
+                    CurveKind::Spline { periodic: false, .. } => {
+                        curve.kind.ends().is_some_and(|(a, b)| a == b || matches!((sk.point(a), sk.point(b)), (Some(a), Some(b)) if a == b))
+                    }
+                    _ => false,
+                });
+            for points in parts {
+                add(points, closed, on_top, &mut result)?;
             }
         }
         // 3D-sketch curves are in world coordinates already; included references are not drawn.
         for w in sk.wires.iter().filter(|w| w.fit.len() > 1) {
-            add(w.pts.clone(), on_top, &mut result)?;
+            // An exact repeat of authored end points declares a closed drawn wire.
+            // Placing an open wire can round distinct ends together, so use the source.
+            let closed = closed_wires.contains(&(ss.feature, w.id.as_str()));
+            add(w.pts.clone(), closed, on_top, &mut result)?;
         }
         progress.advance(1)?;
     }

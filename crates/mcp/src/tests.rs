@@ -5946,7 +5946,7 @@ fn initialize_advertises_resources_prompts_and_completions_capabilities() {
         call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
     let caps = &init["result"]["capabilities"];
     assert_eq!(caps["tools"], json!({"listChanged": false}), "{caps}");
-    assert_eq!(caps["resources"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["resources"], json!({"subscribe": true, "listChanged": true}), "{caps}");
     assert_eq!(caps["prompts"], json!({"listChanged": false}), "{caps}");
     assert_eq!(caps["completions"], json!({}), "{caps}");
 }
@@ -6740,4 +6740,289 @@ fn structured_results_keep_notes_and_existing_keys() {
     let mut image = json!({"content": [{"type": "image", "data": "AA==", "mimeType": "image/png"}, {"type": "text", "text": "{\"width\": 4}"}]});
     crate::server::structure(&mut image);
     assert_eq!(image["structuredContent"], json!({"result": {"width": 4}}), "an image's text block is its reply");
+}
+
+#[test]
+fn initialize_advertises_resource_subscribe_and_list_changed_capabilities() {
+    let mut s = server();
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
+    assert_eq!(init["result"]["capabilities"]["resources"], json!({"subscribe": true, "listChanged": true}), "{init}");
+}
+
+#[test]
+fn resource_subscribe_and_unsubscribe_validate_uris_and_enforce_limit() {
+    assert_eq!(crate::MAX_RESOURCE_SUBSCRIPTIONS, 256);
+
+    // Direct check of the default 256-subscription session ceiling.
+    let mut bounded = crate::server::ResourceSubscriptions::new(crate::MAX_RESOURCE_SUBSCRIPTIONS);
+    for i in 0..crate::MAX_RESOURCE_SUBSCRIPTIONS {
+        assert!(bounded.subscribe(&format!("solidcraft://item/{i}")).is_ok());
+    }
+    assert_eq!(bounded.len(), 256);
+    // Re-subscribing an existing URI at capacity is idempotent.
+    assert!(bounded.subscribe("solidcraft://item/0").is_ok());
+    // A 257th distinct URI is refused with InvalidParams.
+    let err = bounded.subscribe("solidcraft://item/256").unwrap_err();
+    assert!(matches!(err, solidcraft_mcp_server::ResourceError::InvalidParams(_)), "{err:?}");
+    assert!(bounded.unsubscribe("solidcraft://item/0"));
+    assert!(bounded.subscribe("solidcraft://item/256").is_ok());
+
+    // End-to-end JSON-RPC validation and limit enforcement on Server.
+    let mut s = server();
+    s.set_max_subscriptions(1);
+
+    for (params, expected_code) in [
+        (json!({}), -32602),
+        (json!({"uri": ""}), -32602),
+        (json!({"uri": "   "}), -32602),
+        (json!({"uri": 42}), -32602),
+        (json!({"uri": "solidcraft://nope"}), -32002),
+        (json!({"uri": "https://example.com/design"}), -32002),
+    ] {
+        let sub = call(&mut s, 1, "resources/subscribe", params.clone());
+        assert_eq!(sub["error"]["code"], expected_code, "subscribe {params}: {sub}");
+        let unsub = call(&mut s, 2, "resources/unsubscribe", params.clone());
+        assert_eq!(unsub["error"]["code"], expected_code, "unsubscribe {params}: {unsub}");
+    }
+
+    // Valid subscribe succeeds and is idempotent even at capacity.
+    assert_eq!(call(&mut s, 3, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 4, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(s.subscribed_resources(), ["solidcraft://design"]);
+
+    // Exceeding the session limit refuses the second URI.
+    let over = call(&mut s, 5, "resources/subscribe", json!({"uri": "solidcraft://commands"}));
+    assert_eq!(over["error"]["code"], -32602, "{over}");
+    assert!(over["error"]["message"].as_str().unwrap().contains("limit"), "{over}");
+
+    // Unsubscribing frees the slot; repeated unsubscribe on a known URI is idempotent.
+    assert_eq!(call(&mut s, 6, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 7, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert!(s.subscribed_resources().is_empty());
+    assert_eq!(call(&mut s, 8, "resources/subscribe", json!({"uri": "solidcraft://commands"}))["result"], json!({}));
+    assert_eq!(s.subscribed_resources(), ["solidcraft://commands"]);
+}
+
+#[test]
+fn mutating_tools_emit_resource_list_changed_and_updated_notifications() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let seen: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let mut s = Server::new(Box::new(Headless::default())).with_notification_sink(move |note| sink.borrow_mut().push(note));
+    let take = |seen: &Rc<RefCell<Vec<Value>>>| std::mem::take(&mut *seen.borrow_mut());
+
+    // Subscribe to both design and static command catalog.
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 2, "resources/subscribe", json!({"uri": "solidcraft://commands"}))["result"], json!({}));
+    assert!(take(&seen).is_empty(), "subscribing must not emit notifications");
+
+    // Creating a body changes the resource list and updates solidcraft://design (not commands).
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Parameter edit changes design revision without changing the set of bodies/sketches/features:
+    // emits `updated` for solidcraft://design only (no unnecessary `list_changed`).
+    tool(&mut s, "set_parameter", json!({"name": "width", "value": 20}));
+    assert_eq!(take(&seen), vec![json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}})]);
+
+    // Batch adding a sketch and extruded body changes both list and design.
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [20, 0], "p1": [30, 10]}},
+            {"command": "sketch.finish", "params": {}},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Undo removes the extruded feature/body, redo restores it; both notify list_changed + updated.
+    tool(&mut s, "undo", json!({}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+    tool(&mut s, "redo", json!({}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Save + new_design + open: re-saving an already-named design emits nothing; new_design and open replace document_id.
+    let dir = tempfile::tempdir().unwrap();
+    let design = dir.path().join("part.sc");
+    tool(&mut s, "save", json!({"path": design.to_string_lossy()}));
+    let _ = take(&seen);
+    tool(&mut s, "save", json!({"path": design.to_string_lossy()}));
+    assert!(take(&seen).is_empty(), "re-saving an unchanged design must not emit notifications");
+
+    tool(&mut s, "new_design", json!({"name": "Fresh"}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    tool(&mut s, "open", json!({"path": design.to_string_lossy()}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Unsubscribing solidcraft://design stops `updated`, while `list_changed` still fires on structural edits.
+    assert_eq!(call(&mut s, 3, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"diameter": 8, "height": 12}}));
+    assert_eq!(take(&seen), vec![json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"})]);
+}
+
+#[test]
+fn read_only_and_rolled_back_calls_emit_zero_spurious_notifications() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let seen: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let mut s = Server::new(Box::new(Headless::default())).with_notification_sink(move |note| sink.borrow_mut().push(note));
+
+    assert!(s.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+
+    // Seed one parametric box so measure / body_topology / check_parameters have geometry to inspect.
+    tool(&mut s, "set_parameter", json!({"name": "L", "value": 20}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": "L", "width": 10, "height": 10, "body_name": "Box1"}}));
+    seen.borrow_mut().clear();
+    let _ = s.take_notifications();
+
+    // Every read-only tool and read-only command must emit zero notifications.
+    tool(&mut s, "version", json!({}));
+    tool(&mut s, "list_commands", json!({"filter": "fillet"}));
+    tool(&mut s, "describe_command", json!({"id": "solid.box"}));
+    tool(&mut s, "inspect_design", json!({}));
+    tool(&mut s, "measure", json!({}));
+    tool(&mut s, "body_topology", json!({"body": "Box1"}));
+    tool(&mut s, "skill_reference", json!({"skill": "solidcraft-modeling"}));
+    tool(&mut s, "crash_reports", json!({"limit": 1}));
+    tool(&mut s, "running", json!({}));
+    tool(&mut s, "pending", json!({}));
+    tool(&mut s, "execute", json!({"command": "document.inspect", "params": {"measure": false}}));
+    tool(&mut s, "execute", json!({"command": "document.revision", "params": {}}));
+    let _ = call(&mut s, 2, "resources/list", json!({}));
+    let _ = call(&mut s, 3, "resources/read", json!({"uri": "solidcraft://design"}));
+    let _ = call(&mut s, 4, "ping", json!({}));
+
+    // Failed edit, rolled-back batch, and check_parameters (which restores its checkpoint) also emit zero notifications.
+    let bad = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 0, "width": 10, "height": 10}}));
+    assert_eq!(bad["result"]["isError"], true, "{bad}");
+    let rolled = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}},
+            {"command": "solid.box", "params": {"length": 0, "width": 5, "height": 5}},
+        ]}),
+    );
+    assert_eq!(rolled["result"]["isError"], true, "{rolled}");
+    tool(&mut s, "check_parameters", json!({"set": {"L": 30}}));
+
+    assert!(seen.borrow().is_empty(), "expected zero spurious notifications, got: {:?}", seen.borrow());
+    assert!(s.take_notifications().is_empty());
+}
+
+#[test]
+fn remote_external_changes_emit_resource_notifications_via_poll_and_serve() {
+    use std::io::{BufRead, Write};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    let rev = std::sync::Arc::new(AtomicU64::new(1));
+    let app_rev = rev.clone();
+    let (addr, _seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("document.revision") => json!({"ok": true, "result": {"document_id": "live-doc-1", "revision": app_rev.load(Ordering::SeqCst)}}),
+        Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
+        Some("document.selection") => json!({"ok": true, "result": {"selection": null}}),
+        _ => json!({"ok": true, "result": {}}),
+    });
+
+    // 1) Direct poll_changes() with notification sink (no subprocesses).
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let sink = captured.clone();
+    let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let mut s = Server::new(Box::new(remote)).with_notification_sink(move |note| sink.lock().unwrap().push(note));
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(s.poll_changes(), 0, "unchanged revision emits nothing");
+
+    // Simulate the user or built-in Assistant editing the design directly in the desktop app.
+    rev.store(2, Ordering::SeqCst);
+    assert_eq!(s.poll_changes(), 2);
+    assert_eq!(
+        std::mem::take(&mut *captured.lock().unwrap()),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+    assert_eq!(s.poll_changes(), 0, "subsequent poll without new edits emits nothing");
+
+    // 2) Live serve() loop detects external remote changes while idle and writes notifications to stdout.
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let handle = std::thread::spawn(move || {
+        let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+        let mut s = Server::new(Box::new(remote)).with_poll_interval(Duration::from_millis(20));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{PROTOCOL_VERSION}"}}}}"#).unwrap();
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#).unwrap();
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","id":2,"method":"resources/subscribe","params":{{"uri":"solidcraft://design"}}}}"#).unwrap();
+
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read_msg = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let init = read_msg();
+    assert_eq!(init["id"], 1);
+    assert_eq!(init["result"]["capabilities"]["resources"], json!({"subscribe": true, "listChanged": true}));
+    let sub = read_msg();
+    assert_eq!(sub, json!({"jsonrpc": "2.0", "id": 2, "result": {}}));
+
+    // Trigger an external edit in the live app while the MCP client is idle.
+    rev.store(3, Ordering::SeqCst);
+    let note1 = read_msg();
+    let note2 = read_msg();
+    assert_eq!(note1, json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}));
+    assert_eq!(note2, json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}));
+
+    drop(to_server);
+    handle.join().unwrap();
 }

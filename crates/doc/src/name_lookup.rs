@@ -1631,6 +1631,13 @@ pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: V
     locate_face_on_body_with(st, body, name, p, false)
 }
 
+/// Look up a face strictly on its recorded owner. A missing or split face cannot be replaced
+/// by a face of a different body that inherited the same name.
+pub(crate) fn locate_owned_face(st: &ModelState, body: &str, name: &str, p: Vec3) -> Option<FaceHit> {
+    let owner = st.bodies.iter().enumerate().find(|(_, b)| b.name == body && !b.body.is_mesh())?;
+    locate_in(std::iter::once(owner), name, Some(p)).ok()
+}
+
 /// [`locate_face_on_body`] with the recovery of a thread's face: a round side (cylinder or cone) saved by
 /// 0.30.1 as a numbered piece (`F1:side#2`) or a round tool's wall under a later index
 /// (`F4:bore:side:1`) is found as the whole face it is now, when it is the only face of its stem

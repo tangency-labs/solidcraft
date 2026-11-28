@@ -448,6 +448,7 @@ pub(super) fn on_analytic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// The cone-frame allowance's lemma (module docs): for axes off orthonormal by a
     /// residual `r`, every unit direction `w` across `Z` is within `5 r` of some
@@ -480,17 +481,17 @@ mod tests {
             for j in 0..64 {
                 let th = f64::from(j) * core::f64::consts::TAU / 64.0;
                 let w = Vec3::new(
-                    th.cos() * a.x + th.sin() * b.x,
-                    th.cos() * a.y + th.sin() * b.y,
-                    th.cos() * a.z + th.sin() * b.z,
+                    det::cos(th) * a.x + det::sin(th) * b.x,
+                    det::cos(th) * a.y + det::sin(th) * b.y,
+                    det::cos(th) * a.z + det::sin(th) * b.z,
                 );
                 let mut best = f64::INFINITY;
                 for n in 0..20_000 {
                     let u = th - 0.01 + 0.02 * f64::from(n) / 20_000.0;
                     let c = Vec3::new(
-                        u.cos() * x.x + u.sin() * y.x,
-                        u.cos() * x.y + u.sin() * y.y,
-                        u.cos() * x.z + u.sin() * y.z,
+                        det::cos(u) * x.x + det::sin(u) * y.x,
+                        det::cos(u) * x.y + det::sin(u) * y.y,
+                        det::cos(u) * x.z + det::sin(u) * y.z,
                     );
                     let d = Vec3::new(c.x - w.x, c.y - w.y, c.z - w.z);
                     best = best.min((d.x * d.x + d.y * d.y + d.z * d.z).sqrt());

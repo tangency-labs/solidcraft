@@ -681,7 +681,7 @@ impl SolveApp {
             if let Some(level) = level {
                 copy.param_check = level;
             }
-            let quality = solidcraft_engine::doc::display_quality::current();
+            let quality = crate::prefs::drawn_quality(self);
             let (tx, prepared) = std::sync::mpsc::channel();
             #[cfg(test)]
             let gate = self.apply_gate.clone();

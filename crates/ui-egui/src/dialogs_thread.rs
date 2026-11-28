@@ -224,6 +224,7 @@ const FORMS: &[(&str, ThreadForm)] = &[
     ("thread.form_rp", ThreadForm::Rp),
     ("thread.form_bspt", ThreadForm::Bspt),
     ("thread.form_npt", ThreadForm::Npt),
+    ("thread.form_custom", ThreadForm::Custom),
 ];
 const HANDS: &[(&str, ThreadHand)] = &[("Right", ThreadHand::Right), ("Left", ThreadHand::Left), ("Both", ThreadHand::Both)];
 /// A tapped hole's and a pipe thread's hands: one groove, so never both.
@@ -293,6 +294,8 @@ pub struct Options {
     pub starts: u32,
     /// An index into the extents (full, length, up to).
     pub extent: usize,
+    /// How far in from the end it starts at the thread starts, as typed (empty: at that end).
+    pub offset: String,
     pub ease_out: Ease,
     /// A modelled internal thread runs down to a blind hole's bottom (#22616).
     pub to_bottom: bool,
@@ -309,6 +312,7 @@ impl Default for Options {
             hand: ThreadHand::default(),
             starts: 1,
             extent: FULL,
+            offset: String::new(),
             ease_out: Ease::default(),
             to_bottom: false,
             tip: ThreadTip::default(),
@@ -320,10 +324,18 @@ impl Default for Options {
 }
 
 impl Options {
-    /// Does the thread start at one end of the face (a length or an Up To extent, a runout or a
-    /// tip)? Then the end to start from can be picked.
-    pub fn starts_at_an_end(&self) -> bool {
-        self.extent != FULL || self.ease_out.fade || self.tip != ThreadTip::None
+    /// Does the thread start at one end of the face (a length or an Up To extent, an offset, a
+    /// runout or a tip)? Then the end to start from can be picked.
+    pub fn starts_at_an_end(&self, doc: &Document) -> bool {
+        self.extent != FULL || self.has_offset(doc) || self.ease_out.fade || self.tip != ThreadTip::None
+    }
+
+    /// Is an offset given? Then the thread starts inside the face, not at its end. A blank one, or
+    /// one that comes to 0, is none, as the command takes it; one that can't be worked out (or is
+    /// negative) counts as given, so the command says what is wrong with it.
+    pub fn has_offset(&self, doc: &Document) -> bool {
+        let typed = self.offset.trim();
+        !typed.is_empty() && !doc.eval(typed, solidcraft_engine::doc::expr::Kind::Length).is_ok_and(|v| v == 0.0)
     }
 }
 
@@ -371,6 +383,10 @@ fn pitches(form: ThreadForm, d: f64, current: f64) -> Vec<f64> {
 
 /// A typical designation of the form, for the field's hint.
 fn example(form: ThreadForm) -> String {
+    if form == ThreadForm::Custom {
+        // Its angle is in the designation alone: a 90° flank-to-flank thread.
+        return "C10x1.5x90".into();
+    }
     let sizes = form.sizes();
     match sizes.iter().min_by(|a, b| (a.0 - 20.0).abs().total_cmp(&(b.0 - 20.0).abs())) {
         Some((d, p)) => designation_of(form, *d, *p),
@@ -421,6 +437,7 @@ fn pick<T: Copy + PartialEq>(ui: &mut egui::Ui, label: &str, id: &str, value: &m
 /// caller's: [`sync_inputs`] adds or removes them by the options.
 pub(crate) fn rows(
     ui: &mut egui::Ui,
+    doc: &Document,
     designation: &mut String,
     suggested: &mut Option<String>,
     length: &mut String,
@@ -488,21 +505,38 @@ pub(crate) fn rows(
         }
         enter |= expr_row(ui, "Length", length);
     }
+    // How far in from the end it starts at the thread starts: a plain stretch at that end.
+    enter |= crate::ui_kit::expr_row_positive(ui, "Offset", &mut o.offset);
 
+    // A custom thread takes no chamfered tip (ISO 4753's is for ISO metric threads). Cleared
+    // here, outside the Ends section, so a tip chosen before Custom is cleared even while that
+    // section is collapsed (its chamfer rows are hidden for Custom, so it could not be undone).
+    if f == ThreadForm::Custom {
+        o.tip = ThreadTip::None;
+    }
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
         // The start, a free end: plain or chamfered; and with it chamfered, every other free end
         // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
-        choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+        if f != ThreadForm::Custom {
+            choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+        }
+        // An offset start lies inside the face, which no chamfer reaches: with an offset a
+        // chamfer is sent as the command's `tip: both` (`sent_tip`), which chamfers the free far
+        // end the thread reaches, and "Chamfer both ends" shows fixed on. The choice kept here is
+        // the user's own, so clearing the offset brings back what they chose.
+        let offset = o.has_offset(doc);
         o.tip = match (chamfered, o.tip) {
             (0, _) => ThreadTip::None,
             (_, ThreadTip::None) => ThreadTip::Start,
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
-            let mut both = o.tip == ThreadTip::Both;
-            crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2);
-            o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
+            let mut both = o.tip == ThreadTip::Both || offset;
+            ui.add_enabled_ui(!offset, |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2));
+            if !offset {
+                o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
+            }
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
@@ -628,15 +662,21 @@ fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggest
 
 /// Add the picks the options use, and take away the others: the end to start from (optional,
 /// so it does not take the next click), and the Up To place (which does).
-pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Options) {
+pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Options, doc: &Document) {
     let was = *active;
-    set_object_accepting(inputs, active, START_END, EDGES, o.starts_at_an_end());
+    set_object_accepting(inputs, active, START_END, EDGES, o.starts_at_an_end(doc));
     *active = was.min(inputs.len().saturating_sub(1));
     set_object_accepting(inputs, active, UP_TO, UP_TO_ACCEPT, o.extent == UP_TO_EXTENT);
 }
 
 /// Put the options into the command's parameters. Defaults are left out, so a thread without
 /// them means what it always did.
+/// The tip the command is sent: with an offset the start lies inside the face, so a chamfered
+/// start is the command's `tip: both`, the free far end (the refusal of `tip: start` advises it).
+pub(crate) fn sent_tip(o: &Options, doc: &Document) -> ThreadTip {
+    if o.tip == ThreadTip::Start && o.has_offset(doc) { ThreadTip::Both } else { o.tip }
+}
+
 pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[SelInput]) {
     if o.form != ThreadForm::Metric {
         p["form"] = json!(o.form.name());
@@ -660,6 +700,7 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
         }
         _ => {}
     }
+    put(p, &[("offset", o.offset.as_str())]);
     if let Some(from) = object_point(inputs, START_END) {
         p["from"] = from;
     }
@@ -725,6 +766,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         face,
         designation,
         length,
+        offset,
         modeled,
         continuous_flanks,
         from,
@@ -762,6 +804,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         } else {
             FULL
         },
+        offset: offset.as_ref().map(expr).unwrap_or_default(),
         ease_out: Ease::of(ease_out),
         to_bottom: *to_bottom,
         tip: *tip,
@@ -800,7 +843,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
             .filter_map(|(slot, pick)| refill(slot, pick.0))
             .collect();
     }
-    sync_inputs(&mut d.inputs, &mut d.active, &options);
+    sync_inputs(&mut d.inputs, &mut d.active, &options, &s.doc);
     // A place no pick finds again (the model changed) is still the place saved.
     let place = |sel: Option<Sel>, p| sel.unwrap_or(Sel::Vertex { body: String::new(), point: p });
     let set = |d: &mut Dialog, label: &str, sel: Sel| {

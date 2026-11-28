@@ -14,6 +14,7 @@ fn schemas_and_the_key_check_agree() {
             "entities",
             "half_axes",
             "if_redundant",
+            "name",
             "orientation",
             "previous_axis",
             "scale_about_origin",

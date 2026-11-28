@@ -348,6 +348,8 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
         BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
         BSurface::Blend { .. } => return Err("a blend's label (its face is written as its NURBS form)".into()),
+        // STEP has no helicoid: a screw sweep is written as its net, with its pcurves.
+        BSurface::Sweep { .. } => return Err("a sweep's label (its face is written as its NURBS form)".into()),
     })
 }
 
@@ -363,7 +365,9 @@ fn singular_torus(surface: &BSurface, tolerance: f64) -> bool {
 /// the same choice, as its own policy: CADIR's torus takes equal radii, but the face is kept on
 /// its NURBS form there too.
 pub fn as_form(face: &Face, tolerance: f64) -> bool {
-    face.nurbs.is_some() && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. }) || singular_torus(&face.surface, tolerance))
+    face.nurbs.is_some()
+        && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. } | BSurface::Sweep { .. })
+            || singular_torus(&face.surface, tolerance))
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (an affine

@@ -259,6 +259,7 @@ pub struct WorkCounters {
     split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
     same_parameter_bisections: Cell<u64>,
+    fitted_trim_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
     shells: Cell<u64>,
@@ -266,6 +267,7 @@ pub struct WorkCounters {
     apart_unions: Cell<u64>,
     volume_sign_decisions: Cell<u64>,
     move_trim_bisection_pieces: Cell<u64>,
+    edge_tight_box_solves: Cell<u64>,
     fit_gap_calcs: Cell<u64>,
 }
 
@@ -668,6 +670,15 @@ impl WorkCounters {
         self.same_parameter_bisections.get()
     }
 
+    /// Bounds on a trim's distance from its edge as sets
+    /// (`query::curve_surface_gap::trim_image_gap_bound_within`, which the stitch's and a
+    /// move's trim covers take) that the trim's structure did not answer at once, so that
+    /// their bisection ran: the costly ones. Not the fork's.
+    #[must_use]
+    pub fn fitted_trim_bisections(&self) -> u64 {
+        self.fitted_trim_bisections.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -723,6 +734,15 @@ impl WorkCounters {
     #[must_use]
     pub fn move_trim_bisection_pieces(&self) -> u64 {
         self.move_trim_bisection_pieces.get()
+    }
+
+    /// Tight boxes of edge curves solved
+    /// (`query::edge::calculate_tight_bounding_box`, for an edge whose curve's loose box
+    /// is not already inside its vertices' box), so a test can check that a B-rep's tight
+    /// box does not solve an edge again for each planar face on it. Not the fork's.
+    #[must_use]
+    pub fn edge_tight_box_solves(&self) -> u64 {
+        self.edge_tight_box_solves.get()
     }
 
     /// Uncached edge/face gap evaluations (`topology::edgeuse::p1::calc_max_edge_face_gap`)
@@ -782,6 +802,7 @@ impl WorkCounters {
         self.split_face_classifications.set(0);
         self.face_intersections.set(0);
         self.same_parameter_bisections.set(0);
+        self.fitted_trim_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
         self.shells.set(0);
@@ -789,7 +810,14 @@ impl WorkCounters {
         self.apart_unions.set(0);
         self.volume_sign_decisions.set(0);
         self.move_trim_bisection_pieces.set(0);
+        self.edge_tight_box_solves.set(0);
         self.fit_gap_calcs.set(0);
+    }
+
+    /// Counts one solve of an edge curve's tight box.
+    pub(crate) fn add_edge_tight_box_solve(&self) {
+        self.edge_tight_box_solves
+            .set(self.edge_tight_box_solves.get().saturating_add(1));
     }
 
     /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
@@ -866,6 +894,12 @@ impl WorkCounters {
     pub(crate) fn add_same_parameter_bisection(&self) {
         self.same_parameter_bisections
             .set(self.same_parameter_bisections.get().saturating_add(1));
+    }
+
+    /// Counts one trim bound as sets that runs its bisection.
+    pub(crate) fn add_fitted_trim_bisection(&self) {
+        self.fitted_trim_bisections
+            .set(self.fitted_trim_bisections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
@@ -1478,6 +1512,12 @@ pub struct Kernel {
     /// definition is evaluated through `&Kernel`; it is never borrowed across a solve, and
     /// a hit returns what a fresh solve from the same seeds gives.
     pub blend_station_memo: RefCell<crate::blend::fillet_section::definition::StationMemo>,
+    /// Not upstream: the NURBS data of the B-spline surfaces the station solves read last
+    /// ([`crate::blend::fillet_section::station::NurbsMemo`]), so that a support's knots and
+    /// net are gathered once, not at every Newton step of every station. A hit is the data the
+    /// surface's NURB holds now (each is kept with the NURB's own cell, which an edit never
+    /// changes in place while it is shared), so it changes no answer, only the work.
+    pub station_nurbs: RefCell<crate::blend::fillet_section::station::NurbsMemo>,
     /// Not upstream: the arena-identity record map of the last stitch glue or split
     /// (`heal::stitch::p1`) and the B-rep value it was kept for (its progress tag, held
     /// weakly), kept only to reuse its allocation. An edit of another B-rep value starts
@@ -1605,6 +1645,7 @@ impl Kernel {
             blend_station_memo: RefCell::new(
                 crate::blend::fillet_section::definition::StationMemo::default(),
             ),
+            station_nurbs: RefCell::default(),
             arena_notify_records: (
                 std::sync::Weak::new(),
                 crate::topology::topology::NotifyRecords::new(),

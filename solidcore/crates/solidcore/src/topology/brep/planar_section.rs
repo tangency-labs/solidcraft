@@ -914,6 +914,7 @@ fn status_free<T>(r: Result<T>, fallback: T) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn box_10(k: &mut Kernel) -> Brep {
         crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap()
@@ -1011,7 +1012,7 @@ mod tests {
                 } else {
                     (r * 2.0_f64.sqrt(), FRAC_1_SQRT_2)
                 };
-                let (sin, cos) = (i as f64 * FRAC_PI_4).sin_cos();
+                let (sin, cos) = det::sin_cos(i as f64 * FRAC_PI_4);
                 [0.0, h]
                     .map(|z| CPoint::new(w * radius * cos, w * radius * sin, w * z, w))
                     .to_vec()
@@ -1194,11 +1195,11 @@ mod tests {
         use crate::nurbs::crv_basic::Curve as NurbCurve;
         use crate::nurbs::math::CPoint;
         let half = angle / 2.0;
-        let w = half.cos();
+        let w = det::cos(half);
         let points = vec![
             CPoint::new(r, 0.0, 0.0, 1.0),
-            CPoint::new(w * r, w * r * half.tan(), 0.0, w),
-            CPoint::new(r * angle.cos(), r * angle.sin(), 0.0, 1.0),
+            CPoint::new(w * r, w * r * det::tan(half), 0.0, w),
+            CPoint::new(r * det::cos(angle), r * det::sin(angle), 0.0, 1.0),
         ];
         let nurb = NurbCurve::new(points, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
         Curve::from(BSplineCurve::from_nurb(nurb, 3, false))

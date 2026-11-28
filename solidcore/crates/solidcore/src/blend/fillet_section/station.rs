@@ -18,6 +18,7 @@
 //! fork's sum.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use super::series::{inv_sqrt_scalar, GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_K, MAX_S, V3};
 use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
@@ -25,7 +26,7 @@ use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::nurbs::b_spline_surface::p1::SurfParamType;
+use crate::nurbs::b_spline_surface::p1::{NurbCell, SurfParamType};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -211,6 +212,57 @@ pub struct Nurbs {
     pub v: Vec<f64>,
     /// The homogeneous control points `(x w, y w, z w, w)`, u-major.
     pub pw: Vec<f64>,
+}
+
+/// [`NurbsMemo`]'s count of surfaces kept: a station reads two supports, and a nested
+/// blend's stations theirs.
+const NURBS_MEMO: usize = 8;
+
+/// Not upstream: the [`Nurbs`] of the B-spline surfaces a kernel's station solves read last
+/// (`Kernel::station_nurbs`), each kept with its surface's NURB cell. [`Nurbs::of`] reads
+/// only the NURB, and a cell's NURB is set once and never changed in place while the memo
+/// holds the cell (an edit detaches a shared cell first), so a hit is what [`Nurbs::of`]
+/// gives now. A surface whose NURB is made afresh for each read (a plane's, from its
+/// placement) has a new cell each time and only misses.
+#[derive(Debug, Default)]
+pub struct NurbsMemo {
+    kept: Vec<(NurbCell, Arc<Nurbs>)>,
+    next: usize,
+}
+
+impl NurbsMemo {
+    /// [`Nurbs::of`] `s`, from `k`'s memo where it read `s`'s NURB before.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Nurbs::of`].
+    pub fn of(k: &Kernel, s: &BSplineSurface) -> Result<Arc<Nurbs>> {
+        let slot = &s.nurb;
+        if let Some(hit) = k
+            .station_nurbs
+            .borrow()
+            .kept
+            .iter()
+            .find(|(cell, _)| slot.is_cell(cell))
+            .map(|(_, n)| Arc::clone(n))
+        {
+            return Ok(hit);
+        }
+        let n = Arc::new(Nurbs::of(s)?);
+        // (only a NURB that is there: an empty cell can still be filled)
+        if slot.is_some() {
+            let mut memo = k.station_nurbs.borrow_mut();
+            let at = memo.next;
+            memo.next = (at + 1) % NURBS_MEMO;
+            let entry = (slot.cell(), Arc::clone(&n));
+            if let Some(e) = memo.kept.get_mut(at) {
+                *e = entry;
+            } else {
+                memo.kept.push(entry);
+            }
+        }
+        Ok(n)
+    }
 }
 
 /// The full knot vector of unique knots with multiplicities (`GetKnotsPointers`' storage).
@@ -614,7 +666,7 @@ pub fn surface_partials_pinned(
     let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
     let bs = if definition { None } else { as_b_spline(k, s)? };
     if let Some(bs) = bs {
-        let n = Nurbs::of(&bs)?;
+        let n = NurbsMemo::of(k, &bs)?;
         let at = |x: f64, p: f64, side: i32| if side == 0 { x } else { p };
         let ku = sided_span(&n.u, n.p, n.nu, at(uv.x, pin.x, sides[0]), sides[0]);
         let kv = sided_span(&n.v, n.q, n.nv, at(uv.y, pin.y, sides[1]), sides[1]);
@@ -2751,6 +2803,9 @@ pub fn feet_on_knots(
         let Some(bs) = as_b_spline(k, face)? else {
             continue;
         };
+        // (the full knot vectors and degrees [`Nurbs::of`] gathers, as the memo kept them
+        // for this face's NURB; read again where they cannot be gathered)
+        let memo = NurbsMemo::of(k, &bs).ok();
         for c in 0..2 {
             let param = if c == 0 {
                 SurfParamType::U
@@ -2758,9 +2813,14 @@ pub fn feet_on_knots(
                 SurfParamType::V
             };
             // GetKnotsPointers' full knot vector
-            let (knots, mult) = bs.knots(param, None)?;
-            let kv = full_knots(&knots, &mult);
-            let ord = bs.degree(param) + 1;
+            let (kv, ord): (Cow<'_, [f64]>, usize) = match &memo {
+                Some(n) if c == 0 => (Cow::Borrowed(n.u.as_slice()), n.p + 1),
+                Some(n) => (Cow::Borrowed(n.v.as_slice()), n.q + 1),
+                None => {
+                    let (knots, mult) = bs.knots(param, None)?;
+                    (Cow::Owned(full_knots(&knots, &mult)), bs.degree(param) + 1)
+                }
+            };
             let q = 2 * f + c;
             let xq = x.get(q).copied().unwrap_or(f64::NAN);
             let mut m = ord;
@@ -3992,5 +4052,48 @@ mod tests {
                 run(tm, s, e, n, r);
             }
         }
+    }
+
+    /// The memo gives what `Nurbs::of` gives, the second read of a surface from the memo,
+    /// and an edit of a copy that shares the NURB's cell leaves the original's data as it is.
+    #[test]
+    fn the_nurbs_memo_gives_the_surfaces_own_data_and_follows_an_edit() {
+        let k = Kernel::default();
+        let mut cyl = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            10.0,
+            0.0,
+            360.0,
+            20.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let s = Surface::from(cyl);
+        let bs = as_b_spline(&k, &s).unwrap().unwrap();
+        let fresh = Nurbs::of(&bs).unwrap();
+        let first = NurbsMemo::of(&k, &bs).unwrap();
+        let again = NurbsMemo::of(&k, &bs).unwrap();
+        assert_eq!(*first, fresh);
+        assert!(
+            Arc::ptr_eq(&first, &again),
+            "the second read was not the memo's"
+        );
+        // a copy sharing the cell, edited: the edit detaches, the original reads as before
+        let mut edited = bs.clone().into_owned();
+        edited.nurb.detach();
+        assert!(!edited.nurb.is_cell(&bs.nurb.cell()));
+        assert_eq!(*NurbsMemo::of(&k, &bs).unwrap(), fresh);
+        // a plane's NURB, made once and kept on it, is read from the memo too
+        let p = plane(Vec3::X, Vec3::Y);
+        let pb = as_b_spline(&k, &p).unwrap().unwrap();
+        let a = NurbsMemo::of(&k, &pb).unwrap();
+        let pb = as_b_spline(&k, &p).unwrap().unwrap();
+        let b = NurbsMemo::of(&k, &pb).unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(*a, Nurbs::of(&pb).unwrap());
     }
 }

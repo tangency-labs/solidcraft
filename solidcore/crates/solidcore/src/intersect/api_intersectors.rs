@@ -731,6 +731,60 @@ pub fn curve_plane_crossings(
     })
 }
 
+/// The curve parameters, in curve order, at which `curve` over `interval` meets the plane
+/// through `point` square to `normal`: its isolated crossings and the ends of the parts of
+/// it that lie in the plane, from the same solve as [`curve_plane_section`] (the kernel's
+/// curve/surface solve at the model's zone tolerance). A closed curve's seam is returned
+/// once at each end of `interval` it is met at.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a nonfinite or reversed interval, or a nonfinite point
+/// or a zero normal; those of the plane constructor and intersection solve.
+pub fn curve_plane_parameters(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    point: Point3,
+    normal: Vec3,
+) -> Result<Vec<f64>> {
+    if !interval.min().is_finite()
+        || !interval.max().is_finite()
+        || interval.min() > interval.max()
+        || ![point.x, point.y, point.z].iter().all(|x| x.is_finite())
+    {
+        return Err(SolidError::invalid_input(
+            OP_PLANE_SECTION,
+            "the interval or plane point is invalid",
+        ));
+    }
+    let normal = normal.unitize()?;
+    let placement = Axis2Placement::from_plane(normal, -normal.dot(point));
+    let surface = Surface::from(Plane::create_canonical(&placement)?);
+    let tolerance = zone_tol3d(k, USE_DEFAULT);
+    let solutions = surface.global_curve_intersect(
+        k,
+        [Operand::Curve(curve), Operand::Surface(&surface)],
+        &surface.natural_uv_domain_with_nurb(k)?,
+        curve,
+        interval,
+        tolerance,
+    )?;
+    let mut parameters = Vec::new();
+    for solution in solutions.as_slice() {
+        match solution.solution_type {
+            SolutionType::SingleValue => parameters.push(solution.start.param(0)?),
+            SolutionType::RangeOfValues => {
+                parameters.push(solution.start.param(0)?);
+                parameters.push(solution.end.param(0)?);
+            }
+            _ => {}
+        }
+    }
+    parameters.sort_by(f64::total_cmp);
+    parameters.dedup_by(|a, b| (*a - *b).abs() <= EFF_ZERO);
+    Ok(parameters)
+}
+
 /// Where a curve meets a plane ([`curve_plane_section`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlaneSection {

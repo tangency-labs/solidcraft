@@ -11,65 +11,55 @@ pub const MENU: Page = Page {
     id: "menu",
     title: "Menu",
     group: Group::Menus,
-    items: &["Menu", "MenuItem", "Item", "ItemIcon", "LIST_W", "menu_frame"],
-    what: "The kit's menu card and its rows: icon, label, shortcut, a check, a colour swatch, a submenu arrow, a danger row. Context menus, the File menu and every flyout are built from it.",
+    items: &["Menu", "Item", "ItemIcon", "MenuAnchor", "MenuOutput"],
+    what: "One recursive definition and renderer for context menus, button menus, File and every flyout. The shared component owns density, placement, keyboard navigation, scrolling and dismissal.",
     usage: r#"
-ui_kit::Menu::show(ui, 268.0, |ui| {
-    ui_kit::Menu::heading(ui, "Body");
-    if ui_kit::MenuItem::new("body:props", "Properties", "measure").show(ui).clicked() { /* … */ }
-    let mut hide = ui_kit::MenuItem::new("body:hide", "Hide", "eye");
-    hide.shortcut = "H";
-    hide.show(ui);
-    ui_kit::Menu::separator(ui);
-    let mut delete = ui_kit::MenuItem::new("body:delete", "Delete", "delete");
-    delete.danger = true;
-    delete.show(ui);
-});
+let items = [
+    ui_kit::Item::action("body:props", "Properties", "measure"),
+    ui_kit::Item::action("body:hide", "Hide", "eye").key("H"),
+    ui_kit::Item::submenu("export", "Export", "export", vec![
+        ui_kit::Item::action("export:step", "STEP...", "export"),
+        ui_kit::Item::action("export:stl", "STL...", "mesh_export"),
+    ]),
+    ui_kit::Item::sep(),
+    ui_kit::Item::action("body:delete", "Delete", "delete"),
+];
+if let Some(picked) = ui_kit::Menu::context_items(&response, &items) {
+    dispatch(&picked.id, picked.params);
+}
+// A button opens the exact same element:
+let picked = ui_kit::Menu::button_items(&button_response, &items);
 "#,
     dos: &[
-        "Show the shortcut beside the command.",
-        "Put destructive rows last, after a separator, with `danger`.",
-        "Keep a row that does not apply visible and disabled.",
+        "Define rows with Item and dispatch the returned action outside the component.",
+        "Use stable action IDs; labels can be translated independently.",
+        "Put destructive rows last, after a separator, and keep unavailable actions visible but disabled.",
     ],
     donts: &[
-        "Don't use `ui.menu_button` or `response.context_menu`: open the kit's `Menu` in a `Container` popup.",
-        "Don't nest submenus more than one level.",
+        "Don't build menu rows in a UI closure or own menu sizing, focus, hover or dismissal at the call site.",
+        "Don't create a second menu renderer for navigation, File, overflow or a particular workspace.",
     ],
     demo: |ui, d| {
-        state(ui, "Rows in every state (hover them)", |ui| {
-            ui_kit::Menu::show(ui, 268.0, |ui| {
-                ui_kit::Menu::heading(ui, "Body");
-                if ui_kit::MenuItem::new("gallery:props", "Properties", "measure").show(ui).clicked() {
-                    d.said("Properties");
-                }
-                let mut item = ui_kit::MenuItem::new("gallery:hide", "Hide", "eye");
-                item.shortcut = "H";
-                if item.show(ui).clicked() {
-                    d.said("Hide");
-                }
-                item = ui_kit::MenuItem::new("gallery:appearance", "Appearance", "appearance");
-                item.submenu = true;
-                item.show(ui);
-                item = ui_kit::MenuItem::new("gallery:paste", "Paste", "paste");
-                item.enabled = false;
-                item.shortcut = "Ctrl+V";
-                item.show(ui);
-                item = ui_kit::MenuItem::new("gallery:origin", "Show origin", "origin");
-                item.checked = Some(d.checked);
-                if item.show(ui).clicked() {
+        state(ui, "One definition, every menu state", |ui| {
+            let [r, g, b, _] = Tokens::get().control_border.to_array();
+            let mut swatch = ui_kit::Item::action("gallery:swatch", "Aluminium, satin", "appearance");
+            swatch.swatch = Some([r, g, b]);
+            let items = [
+                ui_kit::Item::heading("Body"),
+                ui_kit::Item::action("gallery:props", "Properties", "measure"),
+                ui_kit::Item::action("gallery:hide", "Hide", "eye").key("H"),
+                ui_kit::Item::submenu("gallery:appearance", "Appearance", "appearance", vec![swatch]),
+                ui_kit::Item::action("gallery:paste", "Paste", "paste").key("Ctrl+V").on_if(false),
+                ui_kit::Item::action("gallery:origin", "Show origin", "origin").checked(d.checked),
+                ui_kit::Item::sep(),
+                ui_kit::Item::action("gallery:delete", "Delete", "delete").key("Del"),
+            ];
+            if let Some(item) = ui_kit::Menu::items(ui, ui.scope_id().with("gallery_menu"), &items, false).picked {
+                if item.id == "gallery:origin" {
                     d.checked = !d.checked;
                 }
-                item = ui_kit::MenuItem::new("gallery:swatch", "Aluminium, satin", "appearance");
-                item.swatch = Some(Tokens::get().control_border);
-                item.show(ui);
-                ui_kit::Menu::separator(ui);
-                item = ui_kit::MenuItem::new("gallery:delete", "Delete", "delete");
-                item.danger = true;
-                item.shortcut = "Del";
-                if item.show(ui).clicked() {
-                    d.said("Delete");
-                }
-            });
+                d.said(item.label);
+            }
         });
     },
 };
@@ -78,35 +68,25 @@ pub const WORKSPACE_MENU: Page = Page {
     id: "workspace-menu",
     title: "Workspace menu",
     group: Group::Menus,
-    items: &["workspace_menu", "WorkspaceMenu", "WorkspaceStyle", "Item"],
-    what: "The workspace switcher's menu: each workspace with its accent, description and tabs, the current one marked and planned ones shown but unavailable.",
+    items: &["Menu", "Item"],
+    what: "The workspace switcher supplies the same Item definition as any other menu. Current and unavailable workspaces use the shared checked and disabled states.",
     usage: r#"
-let items = [ui_kit::Item::action("ws.design", "Design", "ws_design").key("current"), /* … */];
-let style = |item: &ui_kit::Item| Some(ui_kit::WorkspaceStyle { slug: "design", description: "…", tabs: Some("Solid · Surface"), ramp: None });
-let chosen = ui_kit::workspace_menu(ui, &ui_kit::WorkspaceMenu { items: &items, style: &style, footer: "…" }, None, 480.0);
+let items = [
+    ui_kit::Item::action("ws.design", "Design", "ws_design").checked(true),
+    ui_kit::Item::action("ws.render", "Render", "ws_render"),
+    ui_kit::Item::action("ws.drawing", "Drawing", "ws_drawing").on_if(false),
+];
+let chosen = ui_kit::Menu::button_items(&workspace_button, &items);
 "#,
-    dos: &["Mark the current workspace with `.key(\"current\")`."],
-    donts: &["Don't list a planned workspace as if it worked: `.on(false)`."],
+    dos: &["Mark the current workspace with checked state and keep its action ID stable."],
+    donts: &["Don't give workspace menus a separate card or grid renderer."],
     demo: |ui, d| {
         let items = [
-            ui_kit::Item::action("sample.design", "Design", "ws_design").key("current"),
+            ui_kit::Item::action("sample.design", "Design", "ws_design").checked(true),
             ui_kit::Item::action("sample.render", "Render", "ws_render"),
-            ui_kit::Item::action("sample.drawing", "Drawing", "ws_drawing").on(false),
+            ui_kit::Item::action("sample.drawing", "Drawing", "ws_drawing").on_if(false),
         ];
-        let style = |item: &ui_kit::Item| {
-            let (slug, description, tabs, ramp) = match item.label.as_str() {
-                "Design" => ("design", "Sketch, model and assemble", Some("Solid · Surface · Sheet metal"), None),
-                "Render" => ("render", "Lights, looks and pictures", Some("Scene · Shots"), Some(solidcraft_theme::AccentRamp::Render)),
-                _ => ("drawing", "Coming later", None, None),
-            };
-            Some(ui_kit::WorkspaceStyle { slug, description, tabs, ramp })
-        };
-        if let Some(item) = ui_kit::workspace_menu(
-            ui,
-            &ui_kit::WorkspaceMenu { items: &items, style: &style, footer: "Every workspace opens the same design." },
-            None,
-            460.0,
-        ) {
+        if let Some(item) = ui_kit::Menu::items(ui, ui.scope_id().with("workspace_menu"), &items, false).picked {
             d.said(item.label);
         }
     },

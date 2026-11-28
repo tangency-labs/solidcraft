@@ -1604,8 +1604,13 @@ thread_local! {
 /// it, so the first call waits about a second rather than the tens of seconds Cranelift takes for a
 /// large importer, and [`optimize_in_background`] later swaps in Cranelift's code and caches it.
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    compile_reporting(bytes, stack_bytes, || {})
+}
+
+fn compile_reporting(bytes: &[u8], stack_bytes: usize, preparing: impl FnOnce()) -> Result<(Engine, Component)> {
     #[cfg(test)]
     if let Some(tier) = FORCED_TIER.with(std::cell::Cell::get) {
+        preparing();
         return compile_with(bytes, stack_bytes, tier);
     }
     let cache = cache();
@@ -1616,7 +1621,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((cached.engine.clone(), cached.component.clone()));
     }
-    let (engine, component, tier) = compile_fresh(bytes, stack_bytes, cache.disk())?;
+    let (engine, component, tier) = compile_fresh_reporting(bytes, stack_bytes, cache.disk(), preparing)?;
     if let Ok(mut compiled) = cache.compiled.lock() {
         *compiled = Some(Compiled { bytes: Arc::from(bytes), stack_bytes, engine: engine.clone(), component: component.clone(), tier });
     }
@@ -1627,6 +1632,15 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
 /// Winch's; else, when Winch refuses the component (a WebAssembly feature it lacks on this
 /// processor) or anything else goes wrong, Cranelift's, as before Winch, and cached.
 fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>) -> Result<(Engine, Component, Tier)> {
+    compile_fresh_reporting(bytes, stack_bytes, disk, || {})
+}
+
+fn compile_fresh_reporting(
+    bytes: &[u8],
+    stack_bytes: usize,
+    disk: Option<wasmtime::Cache>,
+    preparing: impl FnOnce(),
+) -> Result<(Engine, Component, Tier)> {
     if let Some(disk) = &disk
         && let Ok(engine) = engine_for(stack_bytes, Tier::Optimized, true, Some(disk.clone()))
         && optimized_marker(disk, &engine, bytes).is_some_and(|marker| marker.is_file())
@@ -1636,6 +1650,7 @@ fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>
         let component = compile_component(&engine, bytes)?;
         return Ok((engine, component, Tier::Optimized));
     }
+    preparing();
     match compile_on(bytes, stack_bytes, Tier::Baseline, true, None) {
         Ok((engine, component)) => Ok((engine, component, Tier::Baseline)),
         Err(error) => {
@@ -1806,13 +1821,27 @@ fn engine_for(stack_bytes: usize, tier: Tier, parallel: bool, disk: Option<wasmt
 
 fn compile_component(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     check_outer_interfaces(bytes)?;
-    Component::from_binary(engine, bytes).map_err(|e| {
-        // Inspect the parser error itself, not plugin names in the compilation context.
-        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
-            return component_parse_error(error);
-        }
-        trap(format!("component compilation failed: {e:#}"))
-    })
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Component::from_binary(engine, bytes))) {
+        Ok(compiled) => compiled.map_err(|e| {
+            // Inspect the parser error itself, not plugin names in the compilation context.
+            if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+                return component_parse_error(error);
+            }
+            trap(format!("component compilation failed: {e:#}"))
+        }),
+        Err(panic) => refuse_multi_memory(panic),
+    }
+}
+
+/// Lowering between two inner instances that each have their own memory takes an adapter over
+/// both, which Wasmtime writes whatever the engine allows and then panics on, multi-memory being
+/// off (#23498). That one panic is the component's doing; any other goes on unwinding.
+fn refuse_multi_memory<T>(panic: Box<dyn std::any::Any + Send>) -> Result<T> {
+    let text = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied());
+    if text.is_some_and(|text| text.starts_with("invalid adapter module generated: multiple memories")) {
+        return Err(component_error("this component needs WebAssembly multi-memory, which SolidCraft does not enable"));
+    }
+    std::panic::resume_unwind(panic)
 }
 
 enum ImportOutput {
@@ -1907,7 +1936,14 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         }
         let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
-        let (engine, component) = compile(bytes, stack)?;
+        let (engine, component) = compile_reporting(bytes, stack, || {
+            if !dialog {
+                host.importer_stage(&manifest.name, true);
+            }
+        })?;
+        if !dialog {
+            host.importer_stage(&manifest.name, false);
+        }
         check_dialog_export(manifest, &engine, &component)?;
         // Compilation is cached and happens outside the execution budget. Every source I/O
         // operation and guest execution share one deadline, including open/stat on a slow mount.

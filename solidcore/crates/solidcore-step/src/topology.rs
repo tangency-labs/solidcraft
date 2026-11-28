@@ -737,7 +737,15 @@ impl<'b, 'a> Builder<'b, 'a> {
             self.asm.raise_vertex(v, gap, id)?;
         }
         let i = index(self.asm.edges.len())?;
-        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, pcurve_tolerance: self.asm.pcurve_tolerance(), form: None });
+        self.asm.edges.push(EdgeB {
+            curve,
+            interval,
+            vertices,
+            tolerance: self.asm.tol,
+            pcurve_tolerance: self.asm.pcurve_tolerance(),
+            form: None,
+            origin: Some(id),
+        });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -941,6 +949,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// roots of their vertices' joined sets ([`Builder::join_vertices`]).
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         self.join_vertices()?;
+        self.asm.source_bytes = self.ex.source_bytes as u64;
         self.asm.finish(item, name, shells, kind)
     }
 
@@ -1050,6 +1059,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 tolerance: self.asm.tol,
                 pcurve_tolerance: self.asm.pcurve_tolerance(),
                 form: None,
+                origin: None,
             });
             self.poly_edges.insert(key, e);
             uses.push((e, forward));

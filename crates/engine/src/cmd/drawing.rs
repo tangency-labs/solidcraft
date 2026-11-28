@@ -633,6 +633,7 @@ fn title_block_cells(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -
         Note::Fit(Warning::Chars { count, max }) => json!({"fit": "chars", "count": count, "max": max}),
         Note::Fit(Warning::Height) => json!({"fit": "height"}),
         Note::Fit(Warning::Width) => json!({"fit": "width"}),
+        Note::Fit(Warning::Clipped) => json!({"fit": "clipped"}),
         Note::Refused(why) => json!({"refused": why}),
     };
     let cell = |shown: &CellText| {

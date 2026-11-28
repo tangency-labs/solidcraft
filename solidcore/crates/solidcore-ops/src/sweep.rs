@@ -57,7 +57,8 @@ use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
 use solidcore::sweep::screw;
 use solidcore::sweep::segments::{
-    build_faces, line_placements, sweep_along_segments, turn_placements,
+    build_faces, line_placements, sweep_along_segments, sweep_round_closed_segments,
+    turn_placements,
 };
 use solidcore::sweep::skin_ends::SkinEnd;
 use solidcore::topology::brep::p1::ParallelProjectionOptions;
@@ -280,8 +281,8 @@ pub enum SweepRoute {
     Line,
     /// The rotational sweep along arcs proved about one axis: exact.
     Arc,
-    /// The sweep piece by piece along lines and arcs proved end to end and turning with it:
-    /// exact.
+    /// The sweep piece by piece along lines and arcs proved end to end (open, or closed
+    /// round a loop) and turning with it: exact.
     Segments,
     /// The kernel's curve sweep along the path joined into one curve, carried as the frame
     /// says. With [`SweepFrame::Translate`] it is exact for the joined curve; with
@@ -1056,6 +1057,113 @@ fn unplaced() -> [Affine; 3] {
     [Affine::of(&Transform::IDENTITY); 3]
 }
 
+/// `profile` swept round `path` turning with it ([`SweepFrame::Follow`]), when the path is one
+/// [`sweep_placed`] sweeps piece by piece round a closed loop: lines and arcs proved end to end
+/// round one closed loop, each joining the next (and the last the first) tangentially, and not
+/// arcs about one axis (those are the rotational sweep). Then the solid (with `cap`; else the
+/// sheet), as [`sweep_placed`] gives it along that path, with the motions that placed the profile
+/// at the start, half way round and back at the start; `None` for any other path or a curve list
+/// refused, which [`sweep_placed`] answers. For a caller with a sweep of its own along the other
+/// paths, so that round a closed path of lines and arcs both sweep the same way.
+///
+/// Round a closed path each closed loop of the profile sweeps a tube closing on itself, with no
+/// cap to join an outline to its holes: so for a solid each loop is swept on its own and the
+/// holes' tubes (the loops after the first, in the profile's order) are taken from the first's.
+///
+/// # Errors
+/// The kernel's status; [`Error::NotSolid`] for walls that do not close into a solid with `cap`;
+/// the boolean's errors taking a hole's tube away.
+pub fn sweep_round_closed_path(
+    profile: &[Curve],
+    path: &[Curve],
+    cap: bool,
+) -> Result<Option<(Body, [Affine; 3])>> {
+    let made = run("sweep_round_closed_path", |k| {
+        let (Ok(made), Ok(along)) = (parse(k, profile), parse(k, path)) else {
+            return Ok(None);
+        };
+        let lines: Vec<&KCurve> = along.curves.iter().collect();
+        if path::path_as_line(k, &lines, &PATH)? != PathShape::Not
+            || path::path_as_arc(k, &along.pieces, &PATH)? != PathShape::Not
+        {
+            return Ok(None);
+        }
+        let PathShape::Is(segs) = path::path_as_closed_segments(k, &along.pieces, &PATH)? else {
+            return Ok(None);
+        };
+        let groups = if cap {
+            loops_of(k, &made.curves)?
+        } else {
+            std::iter::once(0..made.curves.len()).collect()
+        };
+        let mut tubes = Vec::with_capacity(groups.len());
+        for g in groups {
+            let Some(curves) = made.curves.get(g) else {
+                return Ok(Some(Err(Error::Argument)));
+            };
+            match round_closed_segments(k, curves, &segs, cap)? {
+                Ok(t) => tubes.push(t),
+                Err(e) => return Ok(Some(Err(e))),
+            }
+        }
+        Ok(Some(Ok(tubes)))
+    })?;
+    let tubes = match made {
+        None => return Ok(None),
+        Some(r) => r?,
+    };
+    let mut tubes = tubes.into_iter();
+    let Some((first, placed)) = tubes.next() else {
+        return Err(Error::Argument);
+    };
+    let mut whole = Body::new(first);
+    for (hole, _) in tubes {
+        whole = match crate::boolean::boolean(whole, Body::new(hole), crate::BooleanOp::Subtract)? {
+            Some(b) => b,
+            None => return Err(Error::Empty),
+        };
+    }
+    Ok(Some((whole, placed)))
+}
+
+/// The runs of `curves` that each close a loop, in order: each run's curves proved end to end,
+/// the last's end proved to meet the first's start (to the path gap). One run of all of them
+/// when they do not split into closed loops.
+fn loops_of(k: &Kernel, curves: &[KCurve]) -> solidcore::Result<Vec<std::ops::Range<usize>>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (i, c) in curves.iter().enumerate() {
+        let Some(first) = curves.get(from) else {
+            break;
+        };
+        if arc::curves_meet(k, c, first, PATH.gap)?.is_yes() {
+            out.push(from..i + 1);
+            from = i + 1;
+        }
+    }
+    if from != curves.len() || out.is_empty() {
+        return Ok(std::iter::once(0..curves.len()).collect());
+    }
+    Ok(out)
+}
+
+/// The profile's `curves` swept round the closed `segments` ([`sweep_round_closed_segments`]),
+/// finished as a solid with `cap` (else a sheet), with its motions.
+fn round_closed_segments(
+    k: &mut Kernel,
+    curves: &[KCurve],
+    segs: &[path::Segment],
+    cap: bool,
+) -> solidcore::Result<Out<(Brep, [Affine; 3])>> {
+    let expect = if cap { Expect::SOLID } else { Expect::FACES };
+    match sweep_round_closed_segments(k, curves, segs, cap, &PATH) {
+        Ok((b, motions)) => {
+            Ok(finish_proved(k, b, expect)?.map(|(b, _)| (b, motions.map(|t| Affine::of(&t)))))
+        }
+        Err(e) => Ok(Err(status(e))),
+    }
+}
+
 /// `profile` swept along `path`, with the rigid motions that placed it at the start, half way
 /// and the end, and the route taken ([`SweepRoute`]). Along a path proved straight the sweep
 /// is the linear sweep; with [`SweepFrame::Follow`], along arcs proved about one axis the
@@ -1208,7 +1316,20 @@ pub fn sweep_placed(
                 Err(e) => Err(status(e)),
             },
         )
-    })?;
+    });
+    let body = match body {
+        Ok(b) => b,
+        // Round a closed path of lines and arcs the curve sweep cannot close (a wall shrinking
+        // to an edge): the same exact pieces, the walls closing on each other. Where the curve
+        // sweep builds, its result stays.
+        Err(e) if frame == SweepFrame::Follow => {
+            match sweep_round_closed_path(profile, path, cap) {
+                Ok(Some((b, placed))) => return Ok((b, placed, SweepRoute::Segments)),
+                Ok(None) | Err(_) => return Err(e),
+            }
+        }
+        Err(e) => return Err(e),
+    };
     Ok((body, placed, route))
 }
 

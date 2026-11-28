@@ -64,6 +64,11 @@
 //!   fail; the port releases it explicitly and reports a release failure (a mark
 //!   bookkeeping fault) as an error. An `OrientTrimmedSurfaces` that fails returns no
 //!   `rbMaybeNotClosedSolid` (upstream may have set it before the failure).
+//! - **Limit roots (not upstream).** A ray pair of `OrientTrimmedSurfaces` with a counted
+//!   face hit that is a limit root (one of two crossings of a leaf whose certified pass
+//!   stopped at its limit, the other perhaps unreported:
+//!   [`crate::geom::solution_array::Solution::limit_root`]) gives no vote, and the next test
+//!   point is tried, as `topology_traverser::is_inner_shell` abandons such a ray.
 //! - **Shell walk.** `DeleteFace` marks everything its shell joins to the first vertex
 //!   of the deleted face, then reads the marks of that face's vertices. With a table of
 //!   marks ([`delete_face`]) the port's walk ends when the last of those vertices is
@@ -3174,7 +3179,7 @@ fn delete_face_in(
     }
 
     // Check if face is in brep
-    if !p1::faces(b, None)?.contains(&f) {
+    if !b.face_list().contains(&f) {
         return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
     }
 
@@ -6314,7 +6319,9 @@ enum RayVotes {
 
 /// The ray firing of [`orient_trimmed_surfaces`] for `face`: up to two consistent
 /// ray pairs from points inside the face (on trimmed iso curves through test points
-/// of its edge uses), each voting whether the face normal points into the solid.
+/// of its edge uses), each voting whether the face normal points into the solid. (Not
+/// upstream) A pair with a face hit off its start that is a limit root gives no vote and
+/// counts as no ray, consistent or not: the next test point is tried.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn orient_ray_votes(
     k: &Kernel,
@@ -6462,6 +6469,7 @@ fn orient_ray_votes(
 
             // for two rays leaving the surface in either direction
             let mut inside = [false; 2];
+            let mut undecided = false;
             for (ll, slot) in inside.iter_mut().enumerate() {
                 let mut direction = if ll == 0 { 1.0 } else { -1.0 };
                 let new_ray_vec = if normal.dot(ray_vec) < 0.0 {
@@ -6481,24 +6489,23 @@ fn orient_ray_votes(
                 // get all ray/brep intersections (editing off while solving)
                 let solutions = brep_curve_solve(k, b, &line, tolerance)?;
 
-                // Count the solutions to determine if we are inside or outside
-                let mut points: Vec<Point3> = Vec::new();
-                for (num_variables, param) in solutions {
-                    // when the solution was a face/curve intersection
+                // Count the solutions to determine if we are inside or outside: the
+                // face/curve intersections
+                let mut hits: Vec<(Point3, bool)> = Vec::new();
+                for (num_variables, param, limit_root) in solutions {
                     if num_variables == 3 {
-                        let p = line.evaluate_point(k, param)?;
-                        if !points.iter().any(|q| p.distance(*q) < tolerance) {
-                            points.push(p);
-                        }
+                        hits.push((line.evaluate_point(k, param)?, limit_root));
                     }
                 }
-
-                // count number of face/curve intersections (ignoring the point on this
-                // face; an unsigned count upstream)
-                let n = points.len().wrapping_sub(1);
-
-                // point is inside if there were an odd number of intersections
-                *slot = n % 2 == 1;
+                match ray_inside(&hits, point_in_face, tolerance) {
+                    Some(is_inside) => *slot = is_inside,
+                    None => undecided = true,
+                }
+            }
+            // (not upstream) a pair with a limit root votes nothing, and is no bad ray:
+            // both rays were still solved, as before
+            if undecided {
+                continue;
             }
 
             // Make sure rays are consistent
@@ -6532,22 +6539,41 @@ fn orient_ray_votes(
     })
 }
 
+/// Whether one ray of [`orient_ray_votes`] leaving the face at `start` ends inside, from its
+/// face hits (each a point and whether it is a limit root): the hits within `tolerance` of
+/// one another are one, the one at the start is not counted (upstream counts the distinct
+/// points less one, unsigned), and an odd count is inside. (Not upstream) `None` where a hit
+/// farther than `tolerance` from the start is a limit root: the ray decides nothing.
+fn ray_inside(hits: &[(Point3, bool)], start: Point3, tolerance: f64) -> Option<bool> {
+    let mut points: Vec<Point3> = Vec::new();
+    for &(p, limit_root) in hits {
+        if limit_root && p.distance(start) >= tolerance {
+            return None;
+        }
+        if !points.iter().any(|q| p.distance(*q) < tolerance) {
+            points.push(p);
+        }
+    }
+    let n = points.len().wrapping_sub(1);
+    Some(n % 2 == 1)
+}
+
 /// `SmTopologySolver::BrepCurveSolve(this, line, its natural interval, SM_SO_INTERSECT,
 /// SM_SR_ALL, tolerance, SM_BIG_DOUBLE, NULL)` with `m_bEditingEnabled` off during the
-/// solve: the `(number of variables, curve parameter)` of every solution. The B-rep's
-/// spatial cache is built for the call (upstream's was dropped by the pre-edit
-/// notification).
+/// solve: the `(number of variables, curve parameter)` of every solution, with whether it is
+/// a limit root (not upstream). The B-rep's spatial cache is built for the call (upstream's was dropped
+/// by the pre-edit notification).
 fn brep_curve_solve(
     k: &Kernel,
     b: &mut Brep,
     line: &Curve,
     tolerance: f64,
-) -> Result<Vec<(usize, f64)>> {
+) -> Result<Vec<(usize, f64, bool)>> {
     use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
     use crate::intersect::topology_solver::p2::TopologySolveOptions;
     let editing = b.editing_enabled();
     b.set_editing_enabled(false);
-    let res = (|| -> Result<Vec<(usize, f64)>> {
+    let res = (|| -> Result<Vec<(usize, f64, bool)>> {
         let query = crate::query::brep::BrepQuery::of_brep(b);
         // (CacheMakeOrValidate: the cache with its vertex, curve and surface trees)
         let cache = query.cache(k, b)?;
@@ -6577,7 +6603,7 @@ fn brep_curve_solve(
         )?;
         let mut out = Vec::new();
         for s in sols.as_slice() {
-            out.push((s.num_variables, s.start.param(0)?));
+            out.push((s.num_variables, s.start.param(0)?, s.limit_root));
         }
         Ok(out)
     })();
@@ -6588,6 +6614,43 @@ fn brep_curve_solve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One ray of `orient_ray_votes`: its distinct face hits less the one at its start, odd
+    /// inside, as upstream counts them; a limit root at the start does not stop it, a limit
+    /// root off the start makes the ray decide nothing.
+    #[test]
+    fn a_limit_root_off_the_ray_start_votes_nothing() {
+        let (limit, plain) = (true, false);
+        let start = Point3::new(1.0, 2.0, 3.0);
+        let at = |x: f64| Point3::new(1.0 + x, 2.0, 3.0);
+        let tol = 1e-6;
+        assert_eq!(
+            ray_inside(&[(start, limit), (at(4.0), plain)], start, tol),
+            Some(true)
+        );
+        assert_eq!(
+            ray_inside(
+                &[
+                    (start, plain),
+                    (at(4.0), plain),
+                    (at(4.0 + 1e-7), plain),
+                    (at(6.0), plain)
+                ],
+                start,
+                tol
+            ),
+            Some(false)
+        );
+        assert_eq!(ray_inside(&[(at(4.0), plain)], start, tol), Some(false));
+        assert_eq!(
+            ray_inside(&[(start, plain), (at(4.0), limit)], start, tol),
+            None
+        );
+        assert_eq!(
+            ray_inside(&[(at(5e-7), limit), (at(2.0), plain)], start, tol),
+            Some(true)
+        );
+    }
 
     /// `TurnToNURBS`' copy of a B-spline kind surface (`new SmBSplineSurface(*pBSS)`)
     /// and its offset arm's `ApproximateOffsetSurface` read the NURB through

@@ -799,7 +799,7 @@ pub(super) fn fillet_3d(s: &mut Session, p: &Value, cmd: &str, radius: &str, cor
         // geometry of its last edit, from before a parameter changed.
         doc.apply_wire_values(&doc.param_values().0, sk)?;
         sk.solve_wires_with(None, false);
-        let param = doc.new_model_param(radius, "mm");
+        let param = doc.new_model_param(radius, "mm")?;
         let (mut arcs, mut constraints, mut corners, mut moved): (Vec<String>, Vec<String>, Vec<String>, Vec<String>) = Default::default();
         for (a, b) in &pairs {
             let made = sk.fillet_drawn_lines(a, b, r).map_err(said)?;
@@ -1042,6 +1042,7 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     let cur = sk.measure_wire_dimension(&kind).ok_or_else(|| bad(cmd, "that cannot be measured"))?;
     kind.set_value(cur);
     let driven = p.get("driven").and_then(Value::as_bool).unwrap_or(false);
+    let driven_name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
     let value = crate::params::expr(p, "value");
     let defines = match value.as_ref().and_then(|v| solidcraft_doc::expr::definition(v.as_str())) {
         Some((name, rhs)) => {
@@ -1057,10 +1058,29 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     };
     let start = s.doc.clone();
     let measured = |v: f64| if is_angle { (round6(v.to_degrees()), "deg") } else { (round6(v), "mm") };
+    let live_driven = (!s.model.results.is_empty()).then(|| s.model.state().driven_params());
     let ((cid, param), info) = edit(s, p, cmd, true, |sk, doc| {
         if driven {
+            let dname = if let Some(n) = driven_name.as_deref() {
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(n) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                if doc.param(n).is_some()
+                    || doc.text_param(n).is_some()
+                    || doc.is_driven_param(n)
+                    || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == n))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{n}`")));
+                }
+                Some(n.to_string())
+            } else {
+                None
+            };
             let cid = sk.add_wire_dimension(kind, None, true).map_err(|e| bad(cmd, e.to_string()))?;
-            return Ok((cid, None));
+            if let Some(c) = sk.wire_constraints.iter_mut().find(|c| c.id == cid) {
+                c.driven_param = dname.clone();
+            }
+            return Ok((cid, dname));
         }
         let unit_kind = if is_angle { solidcraft_doc::expr::Kind::Angle } else { solidcraft_doc::expr::Kind::Length };
         // At full precision: a rounded angle is off by more than an angle on long lines holds to.
@@ -1083,8 +1103,8 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             }
             None => value.as_ref().map(|e| doc.with_design_unit(e, unit_kind)).unwrap_or(default_expr),
         };
-        let pname = doc.new_model_param(&expression, &unit);
-        let (vals, errs) = doc.param_values();
+        let pname = doc.new_model_param(&expression, &unit)?;
+        let (vals, errs) = doc.param_values_with(live_driven.as_ref());
         if let Some(err) = errs.get(&pname) {
             return Err(bad(cmd, format!("value: {err}")));
         }
@@ -1098,6 +1118,11 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
         let cid = sk.add_wire_dimension(kind, Some(pname.clone()), false).map_err(|e| bad(cmd, e.to_string()))?;
         Ok((cid, Some(pname)))
     })?;
+    if !driven && let Err(err) = s.doc.check_driven_timeline() {
+        s.doc = start;
+        s.refresh();
+        return Err(bad(cmd, format!("value: {err}")));
+    }
     let sk = sketch_store::read(&s.doc, id)?;
     // A dimension the other 3D constraints already determine removes no freedom: refused, or
     // with `driven: true` placed as a reference dimension instead; with `if_redundant: "driven"`
@@ -1153,7 +1178,14 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
 /// `sketch.toggle_driven` on a 3D dimension: driven (a reference that measures) or driving
 /// again, with a parameter of the value it measures; one the other 3D constraints already
 /// determine stays driven. `None` when `cid` is not a 3D constraint, for the planar command.
-pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str, want: Option<bool>) -> Result<Option<Value>> {
+pub(super) fn toggle_driven_3d(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    cid: &str,
+    want: Option<bool>,
+    driven_name: Option<&str>,
+) -> Result<Option<Value>> {
     if s.sheet_sketching() {
         return Ok(None);
     }
@@ -1170,32 +1202,93 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
         without.solve_wires(None).dof
     };
     let start = s.doc.clone();
-    let (_, info) = edit(s, p, cmd, true, |sk, doc| {
+    let (param_out, info) = edit(s, p, cmd, true, |sk, doc| {
         let current = sk.wire_constraints.iter().find(|c| c.id == cid).ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
         let side = sk.wire_dimension_reversed(&current.kind).ok_or_else(|| bad(cmd, "that cannot be measured"))?;
         let v = sk.measure_wire_dimension(&current.kind).unwrap_or(v);
+        let was_driven = current.driven;
+        let old_driven_name = current.driven_param.clone();
+        let old_param_name = current.param.clone();
+        if driven == was_driven {
+            if driven && let Some(dname) = driven_name {
+                if old_driven_name.as_deref() == Some(dname) {
+                    return Ok(Some(dname.to_string()));
+                }
+                if let Some(old) = old_driven_name.as_deref() {
+                    doc.rename_param(old, dname)?;
+                    if let Some(slot) = sk.wire_constraints.iter_mut().find(|c| c.id == cid) {
+                        slot.driven_param = Some(dname.to_string());
+                    }
+                    return Ok(Some(dname.to_string()));
+                }
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(dname) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                if doc.param(dname).is_some()
+                    || doc.text_param(dname).is_some()
+                    || doc.is_driven_param(dname)
+                    || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == dname))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{dname}`")));
+                }
+                if let Some(slot) = sk.wire_constraints.iter_mut().find(|c| c.id == cid) {
+                    slot.driven_param = Some(dname.to_string());
+                }
+                return Ok(Some(dname.to_string()));
+            }
+            return Ok(None);
+        }
         let slot = sk.wire_constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
         // Only as it turns driving: a driving dimension keeps its stored side.
         if let (false, true, WireConstraintKind::PlaneAngle { reversed, .. }) = (driven, slot.driven, &mut slot.kind) {
             *reversed = side;
         }
-        if driven != slot.driven {
-            slot.driven = driven;
-            slot.param = if driven {
-                None
-            } else {
-                let (unit, e) = if slot.kind.is_angle() { ("deg".into(), format!("{} deg", v.to_degrees())) } else { doc.design_length(v) };
-                Some(doc.new_model_param(&e, &unit))
-            };
+        slot.driven = driven;
+        if driven {
+            slot.param = None;
+            if let Some(dname) = driven_name {
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(dname) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                let reusing_own = old_param_name.as_deref() == Some(dname) && doc.param(dname).is_some_and(|p| p.model);
+                if !reusing_own
+                    && (doc.param(dname).is_some()
+                        || doc.text_param(dname).is_some()
+                        || doc.is_driven_param(dname)
+                        || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == dname)))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{dname}`")));
+                }
+                if reusing_own {
+                    doc.params.retain(|p| p.name != dname);
+                }
+                slot.driven_param = Some(dname.to_string());
+                return Ok(Some(dname.to_string()));
+            }
+            slot.driven_param = None;
+            return Ok(None);
         }
-        Ok(())
+        let (unit, e) = if slot.kind.is_angle() { ("deg".into(), format!("{} deg", v.to_degrees())) } else { doc.design_length(v) };
+        let old_driven = slot.driven_param.take();
+        slot.param = Some(match old_driven {
+            Some(old_name) => {
+                doc.params.push(solidcraft_doc::Param { name: old_name.clone(), expr: e, unit, comment: String::new(), model: true });
+                old_name
+            }
+            None => doc.new_model_param(&e, &unit)?,
+        });
+        Ok(None)
     })?;
     if !driven && c.driven && sketch_store::read(&s.doc, id)?.clone().solve_wires(None).dof >= freed {
         s.doc = start;
         return Err(bad(cmd, "that dimension is already determined by the sketch's other 3D constraints; it stays driven"));
     }
     s.doc_mut().prune_model_params();
-    Ok(Some(json!({"constraint": cid, "driven": driven, "sketch": info})))
+    let mut out = json!({"constraint": cid, "driven": driven, "sketch": info});
+    if let Some(param) = param_out {
+        out["param"] = json!(param);
+    }
+    Ok(Some(out))
 }
 
 fn round6(v: f64) -> f64 {

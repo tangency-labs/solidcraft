@@ -45,7 +45,8 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
     let mut x = rect.left();
     if chord.is_empty() {
         let galley = ui.painter().layout_no_wrap(unassigned.to_owned(), FontId::proportional(t.font_label), t.form_dim);
-        ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
+        let rise = egui::galley_cap_ink_rise(ui.painter(), &galley);
+        ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0 - rise), galley, t.form_dim);
     } else {
         for part in chord_parts(chord) {
             let width = ui.painter().layout_no_wrap(part.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + t.space_10;

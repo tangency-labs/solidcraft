@@ -8,6 +8,7 @@
 //!
 //! Hostile input is refused with [`SolidError::InvalidInput`], never a panic.
 
+use crate::math::det;
 use std::f64::consts::FRAC_PI_3;
 
 use crate::error::{Result, SolidError};
@@ -93,7 +94,7 @@ pub fn weld_contour_mark(
             let center = middle - outward * (bulge * offset);
             // The arc starts 120 degrees from the face tangent, on the side the outward normal
             // turns to; the tangent's own angle carries any tilt of the face.
-            let start = sign * (bulge * 2.0 * FRAC_PI_3) + tangent.y.atan2(tangent.x);
+            let start = sign * (bulge * 2.0 * FRAC_PI_3) + det::atan2(tangent.y, tangent.x);
             Seg2::Arc {
                 center,
                 radius,

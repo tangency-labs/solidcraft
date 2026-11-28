@@ -1359,6 +1359,73 @@ fn flange_dialog_measures_the_height_from_the_chosen_datum() {
     }
 }
 
+/// The Flange dialog's Bend Offset: empty (the default) asks for nothing, a length reaches the
+/// feature, Edit Feature shows it again, and emptying it takes the offset away.
+#[test]
+fn flange_dialog_moves_the_bend_out_by_the_bend_offset() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edges: Vec<Sel> = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    assert_eq!(edges.len(), 1);
+    h.app.session.selection = edges;
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert!(c[0].1.get("offset").is_none(), "{}", c[0].1);
+    if let Some(Kind::Sheet(Sm::Flange { offset, position, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "3 mm".into();
+        *position = POSITIONS.iter().position(|p| *p == "outside").unwrap();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["offset"], json!("3 mm"), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let saved = |app: &SolveApp| match app.session.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { offset, .. }) => offset.clone(),
+        _ => None,
+    };
+    assert_eq!(saved(&h.app).as_deref(), Some("3 mm"));
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { offset, .. }) if offset == "3 mm"));
+    if let Kind::Sheet(Sm::Flange { offset, .. }) = &mut e.kind {
+        offset.clear();
+    }
+    let commands = apply_commands(&h.app, &e).unwrap();
+    run_all(&mut h.app, commands);
+    assert_eq!(saved(&h.app), None);
+}
+
+#[test]
+fn inch_flange_bend_offset_is_a_length_in_the_design_units() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    h.app.start("sheet.flange");
+    h.frames(3);
+    if let Some(Kind::Sheet(Sm::Flange { offset, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "0.125".into();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["offset"], json!("0.125 in"), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let e = edit_dialog(&h.app, id, None).unwrap();
+    let c = apply_commands(&h.app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["offset"], json!("0.125 in"), "{}", c[0].1);
+}
+
 /// The Flange dialog's Bend Position offers material outside and tangent, and Edit Feature shows them again.
 #[test]
 fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {

@@ -1301,7 +1301,27 @@ impl OffsetExecutive {
 
             // cpp:217–251: the helper's scope drops any separately retained
             // executive temporary before querying the result's manifold status.
-            let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
+            // (not upstream, solidcraft#22791) a face whose loop passes through one vertex twice
+            // (a pad's corner on its face's edge) is offset from a working copy where that loop
+            // is cut into two at the vertex and the vertex comes apart into one per fan of faces
+            // (`split_pinched_loops`): the offsets of the two fans meet in two points, which one
+            // vertex cannot stand for. The difference below takes the input as it is.
+            let mut unpinched = if crate::topology::brep::vertex_fans::has_pinched_loop(original)? {
+                let mut copy = original.clone_standing_for_self_keeping_definitions()?;
+                crate::topology::brep::vertex_fans::split_pinched_loops(
+                    kernel,
+                    &mut copy,
+                    options.offset.distance,
+                )?;
+                Some(copy)
+            } else {
+                None
+            };
+            let source = match unpinched.as_mut() {
+                Some(copy) => copy,
+                None => &mut *original,
+            };
+            let mut shell = run_shell_offset(kernel, source, options, faces, notifications)?;
             // Not upstream (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid
             // whose offset leaves nothing has no cavity to take away (the difference would
             // hand the input back unhollowed). Its non-empty non-manifold case is the shell
@@ -3688,7 +3708,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 /// the walls are the faces other than the sheet's own (`sheet_faces`, the sheet's copies)
 /// along an edge of the sheet; every topological edge between two walls goes (the others,
 /// and every topological vertex, are kept), each wall it bounds first going onto its plane
-/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
+/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile. Whether there is such
+/// an edge is asked on a trial copy (WR-792): no face of the shell is prepared for a merge
+/// that does not follow.
 ///
 /// Not upstream (WR-564, #1599; the fork's tangency-labs/smlib#62): every wall goes onto
 /// its plane first, in the shell's face order, and its old surface's seams are deleted;
@@ -3696,7 +3718,8 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 ///
 /// # Errors
 ///
-/// Those of the plane replacement and of `RemoveTopologicalEdgesAndVertices`.
+/// Those of the plane replacement, of `RemoveTopologicalEdgesAndVertices` and of the trial
+/// copy (a trimmed surface cache in use: not asked from inside a solve).
 fn merge_sheet_side_walls(
     kernel: &mut Kernel,
     shell: &mut Brep,
@@ -3718,24 +3741,38 @@ fn merge_sheet_side_walls(
         }
     }
 
-    // keep every topological edge but those between two walls, and every topological vertex
-    let topo_edges = bp1::topological_edges(kernel, shell)?;
-    let keep_vertices = bp1::topological_vertices(kernel, shell)?;
+    // With `merge`: keep every edge not between two walls, and every topological vertex.
+    // Whether any edge between two walls is topological (else there is nothing to merge) is
+    // asked on a trial copy of the shell, never on the shell (WR-792, #23077): the test
+    // prepares a merge, expanding the covering face's surface in place and dropping that
+    // face's UV trims, and only the merge sets the face's domain anew. An edge asked about
+    // and then kept left its face on the expanded surface under its old domain (the seam
+    // piece between two offset faces of a sphere patch cut across its seam: one face's
+    // surface turned the whole way round, on another parameterisation). The removal asks
+    // again, on the shell, after the walls go onto their planes, and merges what it accepts.
+    // Without `merge` nothing is asked.
     let mut keep_edges = Vec::new();
-    let mut merging: Vec<FaceId> = Vec::new();
-    for e in topo_edges {
-        let edge_faces = crate::topology::edge::faces(shell, e, None)?;
-        let between_walls = edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
-        if !between_walls {
-            keep_edges.push(e);
-            continue;
-        }
-        for f in edge_faces {
-            if !merging.contains(&f) {
-                merging.push(f);
+    let mut any_topological = false;
+    if merge {
+        let mut trial = shell.clone_for_trial_keeping_definitions()?;
+        for e in bp1::edges(shell, None)? {
+            let edge_faces = crate::topology::edge::faces(shell, e, None)?;
+            let between_walls =
+                edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
+            if !between_walls {
+                keep_edges.push(e);
+            } else if !any_topological {
+                any_topological =
+                    crate::topology::edge::is_topological(kernel, &mut trial, e, 1.0)?
+                        .is_topological;
             }
         }
     }
+    let keep_vertices = if any_topological {
+        bp1::topological_vertices(kernel, shell)?
+    } else {
+        Vec::new()
+    };
     // SmTemporaryChangeValue<SmBoolean> sEditing(pBrepShell->m_bEditingEnabled, TRUE)
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
@@ -3746,7 +3783,7 @@ fn merge_sheet_side_walls(
                 put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
             }
         }
-        if !merge || merging.is_empty() {
+        if !any_topological {
             return Ok(());
         }
         crate::topology::brep::p5::remove_topological_edges_and_vertices(

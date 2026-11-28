@@ -72,6 +72,7 @@ fn schemas_and_the_key_check_agree() {
             "plane",
             "point",
             "sketch",
+            "snap",
             "x",
             "z",
         ],
@@ -131,6 +132,49 @@ fn between_faces_schema_treats_null_axes_as_omitted() {
         assert_eq!(serde_json::from_value::<CreateJointParams>(planar).is_ok(), valid);
         assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
     }
+}
+
+#[test]
+fn between_faces_snap_schema_and_contract() {
+    let named = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let joint = serde_json::to_value(input_schema_for::<CreateJointParams>()).unwrap();
+    let edit = serde_json::to_value(input_schema_for::<EditJointParams>()).unwrap();
+    let constraint = serde_json::to_value(input_schema_for::<CreateConstraintParams>()).unwrap();
+    let faces = json!([[1, 2, 3], [4, 5, 6]]);
+    for (snap, valid) in [
+        (json!(null), true),
+        (json!({"circle": [2, 3, 4]}), true),
+        (json!({"face": [2, 3, 4]}), true),
+        (json!({"point": [2, 3, 4]}), true),
+        (json!({"sketch": "Sk1", "point": "c1.center"}), true),
+        (json!("HoleCenter"), true),
+        (json!(""), false),
+        (json!(42), false),
+        (json!({"faces": [[1, 2, 3], [4, 5, 6]]}), false),
+        (json!({"snap": {"point": [1, 2, 3]}}), false),
+    ] {
+        let origin = json!({"occurrence": "Slot:1", "faces": faces, "snap": snap});
+        let create = json!({"type": "revolute", "a": origin, "b": {"plane": "YZ"}});
+        let edit_p = json!({"joint": 1, "a": origin});
+        let center = json!({"type": "center", "a": origin, "b": {"plane": "YZ"}});
+        assert_eq!(conforms(&named, &named, &origin), valid, "{origin}");
+        assert_eq!(conforms(&joint, &joint, &create), valid, "{create}");
+        assert_eq!(conforms(&edit, &edit, &edit_p), valid, "{edit_p}");
+        assert_eq!(conforms(&constraint, &constraint, &center), valid, "{center}");
+        assert_eq!(serde_json::from_value::<MakeJointOriginParams>(origin).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateJointParams>(create).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<EditJointParams>(edit_p).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
+    }
+    // `snap` without `faces` is refused (except null, treated as omitted).
+    let no_faces = json!({"occurrence": "Slot:1", "face": [1, 2, 3], "snap": {"point": [1, 2, 3]}});
+    assert!(!conforms(&named, &named, &no_faces));
+    assert!(serde_json::from_value::<MakeJointOriginParams>(no_faces.clone()).is_err());
+    assert!(serde_json::from_value::<CreateJointParams>(json!({"type": "rigid", "a": no_faces, "b": {"plane": "XY"}})).is_err());
+    assert!(serde_json::from_value::<EditJointParams>(json!({"joint": 1, "a": no_faces})).is_err());
+    let null_snap = json!({"occurrence": "Slot:1", "face": [1, 2, 3], "snap": null});
+    assert!(conforms(&named, &named, &null_snap));
+    assert!(serde_json::from_value::<MakeJointOriginParams>(null_snap).is_ok());
 }
 
 #[test]

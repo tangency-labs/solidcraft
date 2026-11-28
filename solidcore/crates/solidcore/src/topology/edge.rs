@@ -138,6 +138,7 @@ use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{are_same_to_tol, scaled_zero2};
 use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -3235,7 +3236,7 @@ fn blend_edgeuse_unless(
     let (fu_normal, fu_normal2) = (ev0.face_normal, ev1.face_normal);
     let (bin_vec, bin_vec2) = (ev0.binormal, ev1.binormal);
 
-    let max_dot = (CREASE_ANGLE * PI / 180.0).cos();
+    let max_dot = det::cos(CREASE_ANGLE * PI / 180.0);
 
     // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
     // (WR-570, fork b7ec55b) only when their binormals point away from each other (the

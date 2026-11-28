@@ -4326,6 +4326,7 @@ pub fn is_topology_handle<O: ClassObject>(object: O) -> bool {
 mod tests {
     use super::*;
     use crate::curve::line::Line;
+    use crate::math::det;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H(usize, ClassObjectKind);
@@ -5352,7 +5353,7 @@ mod tests {
         };
         let larger = circle(r + 1.0e-6, None);
         let mut scaled = larger.b_spline_base().expect("a NURB").clone_exact();
-        let scale = 2.0_f64.powi(513);
+        let scale = det::powi(2.0_f64, 513);
         for p in scaled.get_or_create_gw_nurb().expect("nurb").cpts_mut() {
             assert!(
                 p.w != crate::nurbs::math::NOW,
@@ -5418,17 +5419,21 @@ mod tests {
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
             let t = (state >> 11) as f64 / (1_u64 << 53) as f64;
-            let (y, x) = ((t * 7.0).sin() * (1.0 + t), (t * 7.0).cos() * (2.0 - t));
+            let (y, x) = (det::sin(t * 7.0) * (1.0 + t), det::cos(t * 7.0) * (2.0 - t));
             let a = atan2_enclosed(y, x).expect("an angle");
             assert!(
-                (a - y.atan2(x)).abs() <= ATAN2_ERR + 8.0 * ROUNDOFF,
+                (a - det::atan2(y, x)).abs() <= ATAN2_ERR + 8.0 * ROUNDOFF,
                 "{y} {x}"
             );
             let g = t * FRAC_PI_2;
             let c = cos_lower(g).expect("a cosine");
-            assert!(c <= g.cos() + 4.0 * ROUNDOFF, "{g}: {c} above {}", g.cos());
+            assert!(
+                c <= det::cos(g) + 4.0 * ROUNDOFF,
+                "{g}: {c} above {}",
+                det::cos(g)
+            );
             let pad = ROUNDOFF * (8.0 + 48.0 * g * g);
-            assert!(c >= g.cos() - pad, "{g}: {c} far below {}", g.cos());
+            assert!(c >= det::cos(g) - pad, "{g}: {c} far below {}", det::cos(g));
         }
         assert_eq!(cos_lower(0.0), Some(1.0 - 3.0 * ROUNDOFF));
         assert_eq!(cos_lower(FRAC_PI_2), None);
@@ -5497,7 +5502,7 @@ mod tests {
         topo_edge::set_tolerance(&mut brep, edge_id, 2e-5, true, true).expect("edge tol");
 
         let radius = 4.5_f64;
-        let sweep_deg = ((radius - pad) / radius).acos().to_degrees();
+        let sweep_deg = det::acos((radius - pad) / radius).to_degrees();
         let arc = Curve::from(
             Ellipse::new_circle(
                 &k,

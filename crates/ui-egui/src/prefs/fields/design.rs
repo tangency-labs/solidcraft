@@ -104,6 +104,10 @@ macro_rules! design_preferences {
             remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
             /// Reopen an unchanged CAD import from the existing saved-design model cache.
             reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+            /// The name of the file Send to Slicer writes, which the slicer and the printer show
+            /// (`slicer_file_name`, #16440): a template with the placeholders of `export_name`. Empty: the
+            /// design's name followed by a code, as before.
+            slicer_file_name: String = String::new(), PAGE_DESIGN;
             /// How the offer is made for a file whose header names no program known to save Y up: a note
             /// over the view (the default), the dialog, or nothing (#7717).
             stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;

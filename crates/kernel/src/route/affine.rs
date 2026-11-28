@@ -10,6 +10,34 @@ pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, Matrix, Offs
 use super::{Which, which};
 use crate::backend::Solidcore;
 
+/// Signed volume scale of the linear part.
+pub fn linear_determinant(matrix: &Matrix) -> f64 {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.linear_determinant(matrix),
+    }
+}
+
+/// Unit direction with the input's sense.
+pub fn directed_unit(axis: [f64; 3]) -> Option<[f64; 3]> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.directed_unit(axis),
+    }
+}
+
+/// Point carried by a displacement in the same frame.
+pub fn translated_point(point: [f64; 3], by: [f64; 3]) -> [f64; 3] {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.translated_point(point, by),
+    }
+}
+
+/// Apply the first turn and then the world-space turn.
+pub fn compose_turn(first: [f64; 3], radians: f64, world: [f64; 3], turn: f64) -> Option<([f64; 3], f64)> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.compose_turn(first, radians, world, turn),
+    }
+}
+
 /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
 /// line through `point` along it.
 pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused> {
@@ -162,6 +190,17 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 pub fn rect_of_aspect(bl: [f64; 2], br: [f64; 2], top_left: Option<[f64; 2]>, aspect: f64) -> Option<[[f64; 2]; 4]> {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.rect_of_aspect(bl, br, top_left, aspect),
+    }
+}
+
+/// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+/// through `at` along the unit direction `dir`: tilted by the least turn that makes it parallel
+/// to the line, then moved along its normal until it holds the line; a plane that already holds
+/// it comes back unchanged. The new origin and axes; `None` for a number not finite or a line
+/// square to the plane.
+pub fn plane_onto_line(origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.plane_onto_line(origin, x, y, at, dir),
     }
 }
 

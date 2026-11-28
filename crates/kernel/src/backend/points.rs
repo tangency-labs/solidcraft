@@ -28,7 +28,12 @@ impl Points for Solidcore {
             even: s.even,
             pitch: s.pitch,
             odd_gaps: s.odd_gaps,
-            circle: s.circle.map(|c| PitchCircle { diameter: c.diameter, centre: c.centre, angles_deg: c.angles_deg }),
+            circle: s.circle.map(|c| PitchCircle {
+                diameter: c.diameter,
+                centre: c.centre,
+                angles_deg: c.angles_deg,
+                angle_pitch_deg: c.angle_pitch_deg,
+            }),
         })
     }
 

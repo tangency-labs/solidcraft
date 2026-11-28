@@ -2692,6 +2692,48 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
     })
 }
 
+/// Whether a constraint refers to the selected point or curve. Selecting a point also
+/// exposes constraints on curves that use that point, so clicking a tangent endpoint can
+/// reveal its line/circle constraint without turning on every other badge (#18817).
+fn constraint_matches_selection(
+    sk: &solidcraft_engine::sketch::Sketch,
+    kind: &solidcraft_engine::sketch::ConstraintKind,
+    selected: &[solidcraft_engine::Sel],
+) -> bool {
+    let (curves, points) = constraint_entities(kind);
+    selected.iter().any(|item| match item {
+        solidcraft_engine::Sel::SketchCurve { id, .. } => curves.iter().any(|&index| sk.curves.get(index).is_some_and(|curve| curve.id == *id)),
+        solidcraft_engine::Sel::SketchPoint { id } => {
+            points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
+                || curves.iter().any(|&index| {
+                    sk.curves
+                        .get(index)
+                        .is_some_and(|curve| curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id)))
+                })
+        }
+        _ => false,
+    })
+}
+
+/// A shared glyph is visible when any constraint represented by it qualifies. In
+/// particular, a failing or selected second Midpoint constraint must not disappear
+/// because glyph_constraints() chose the first as the displayed representative.
+fn glyph_group_visible_when_selected(
+    sk: &solidcraft_engine::sketch::Sketch,
+    id: &str,
+    selected: &[solidcraft_engine::Sel],
+    picked: Option<&str>,
+    is_failing: impl Fn(&String) -> bool,
+) -> bool {
+    let group = glyph_group(sk, id);
+    sk.constraints.iter().filter(|c| group.contains(&c.id)).any(|c| {
+        is_failing(&c.id)
+            || picked == Some(c.id.as_str())
+            || selected.iter().any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
+            || constraint_matches_selection(sk, &c.kind, selected)
+    })
+}
+
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
 fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
     let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
@@ -2741,6 +2783,11 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in glyph_constraints(&ss.sketch) {
+        if app.ui.constraint_glyphs_selected_only
+            && !glyph_group_visible_when_selected(&ss.sketch, &c.id, &app.session.selection, picked.as_deref(), |id| ss.report.failing.contains(id))
+        {
+            continue;
+        }
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -3201,6 +3248,71 @@ mod glyph_zoom_tests {
         assert_eq!(anchors.len(), 1);
         assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
         assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
+    }
+
+    /// Opt-in filtering ties visible glyphs to selected curves and points, including a
+    /// curve's endpoints. Without a selection the normal glyph list is untouched (#18817).
+    #[test]
+    fn selected_geometry_can_reveal_its_constraint_glyphs() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(20.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(0.0, 20.0), None).unwrap();
+        let line = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let horizontal = ConstraintKind::Horizontal { l: line };
+        let curve = Sel::SketchCurve { id: sk.curves[line].id.clone(), sketch: None };
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[curve]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[b].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &horizontal, &[]), "unselected geometry has no filtered glyph");
+        assert!(
+            !super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]),
+            "unrelated points do not reveal every constraint"
+        );
+        let point_constraint = ConstraintKind::Fix { p: other };
+        assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(!crate::UiState::default().constraint_glyphs_selected_only, "the old display remains the default");
+    }
+
+    /// A shared midpoint badge must remain visible if any represented constraint fails or
+    /// belongs to the selection, even when the first constraint is not the relevant one.
+    #[test]
+    fn grouped_midpoint_glyph_respects_all_members() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{Constraint, ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(10.0, 0.0), None).unwrap();
+        let c = sk.add_point(super::Vec2::new(5.0, -5.0), None).unwrap();
+        let d = sk.add_point(super::Vec2::new(5.0, 5.0), None).unwrap();
+        let mid = sk.add_point(super::Vec2::new(5.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(20.0, 20.0), None).unwrap();
+        let line1 = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let line2 = sk.add_curve(CurveKind::Line { a: c, b: d }, None).unwrap();
+        for (id, line) in [("first", line1), ("second", line2)] {
+            sk.constraints.push(Constraint {
+                id: id.into(),
+                kind: ConstraintKind::Midpoint { p: mid, l: line },
+                param: None,
+                driven: false,
+                driven_param: None,
+                text: None,
+            });
+        }
+        assert_eq!(super::glyph_constraints(&sk).count(), 1, "both constraints share a glyph");
+        assert_eq!(super::glyph_group(&sk, "first").len(), 2);
+        let show = |selected: &[Sel], picked: Option<&str>, failing: &str| {
+            super::glyph_group_visible_when_selected(&sk, "first", selected, picked, |id| id.as_str() == failing)
+        };
+        assert!(!show(&[], None, ""), "no matching selection hides the grouped badge");
+        assert!(show(&[], None, "second"), "a failure in the second constraint shows the shared error glyph");
+        assert!(show(&[], Some("second"), ""), "picking the second constraint reveals the group");
+        assert!(show(&[Sel::SketchConstraint { id: "second".into() }], None, ""), "explicitly selecting the second constraint reveals the group");
+        assert!(show(&[Sel::SketchCurve { id: sk.curves[line2].id.clone(), sketch: None }], None, ""), "selecting the second line reveals the group");
+        assert!(!show(&[Sel::SketchPoint { id: sk.points[other].id.clone() }], None, ""), "unrelated geometry does not reveal the group");
     }
 
     #[test]
