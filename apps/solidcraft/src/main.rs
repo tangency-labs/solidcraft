@@ -534,9 +534,6 @@ impl eframe::App for App {
             self.write_settings(ui.ctx(), storage, now);
         }
     }
-    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
-        Some(self)
-    }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let prefs = match self.prefs_for_storage(storage) {
             Ok(prefs) => prefs,
@@ -1886,7 +1883,7 @@ fn main() -> eframe::Result {
     #[cfg(not(all(unix, not(target_os = "macos"))))]
     let own_x11 = false;
     let own_wake = wake.clone();
-    let creator: eframe::AppCreator<'_> = Box::new(move |cc: &eframe::CreationContext<'_>| {
+    let make = move |cc: &eframe::CreationContext<'_>| -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         created_in_app.store(true, std::sync::atomic::Ordering::SeqCst);
         solidcraft_engine::crash::phase("app setup");
         mark("window and device ready");
@@ -2170,7 +2167,7 @@ fn main() -> eframe::Result {
                 mark("app created");
                 solidcraft_engine::crash::phase("first frame");
             });
-        Ok(Box::new(App {
+        Ok(App {
             // Before `app` moves: the settings as read, already on disk.
             prefs_writer: PrefsWriter::read(app.prefs()),
             clear_stored_background: cleared_background,
@@ -2200,9 +2197,13 @@ fn main() -> eframe::Result {
             window_move,
             #[cfg(target_os = "windows")]
             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::every_point_swipes(),
-        }))
-    });
-    let result = if own_runner { own_runner::run(options, creator, own_x11, &own_wake) } else { eframe::run_native("SolidCraft", options, creator) };
+        })
+    };
+    let result = if own_runner {
+        own_runner::run(options, make, own_x11, &own_wake)
+    } else {
+        eframe::run_native("SolidCraft", options, Box::new(move |cc| make(cc).map(|app| Box::new(app) as Box<dyn eframe::App>)))
+    };
     control_server::remove_token_file();
     single_instance::stop();
     match result {
