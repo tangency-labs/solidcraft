@@ -3379,11 +3379,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("stays_surface").or_insert_with(|| json!(stays));
     }
-    if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
+    if let FeatureKind::Thread { continuous_flanks, thread_class, .. } = &old.kind
         && cid == "solid.thread"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("continuous_flanks").or_insert_with(|| json!(continuous_flanks));
+        if let Some(class) = thread_class {
+            parameters.entry("thread_class").or_insert_with(|| json!(class));
+        }
     }
     // A thread saved before holes were sized by their nominal diameter keeps the size it had
     // when it is edited without naming one.

@@ -399,6 +399,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
             "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt|custom (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
+            "thread_class?: the tolerance class, saved as its own field and listed by model.threads (ISO 965-1 for a metric thread: 6g, 6h or 4g6g externally, 6H or 5H6H internally; ASME B1.1 for a Unified one: 2A externally, 2B internally); it changes no geometry, is refused on the wrong side, and wins over a class written in `designation`; ",
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1), optionally then an ISO 965-1 tolerance class after a hyphen, \"M8-6g\", \"M8x1-6H\", \"M10x1.25-5g6g\" (e, f, g or h on a shaft, G or H in a hole; kept in the callout, refused on the wrong side, changes no geometry); ",
             "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
@@ -6283,7 +6284,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
             target_bodies.push(body.name.clone().into());
         }
     }
-    use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
+    use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip, check_thread_class_text};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     // Resolve and store the form at creation or redefinition, including an inferred Unified
     // designation. Evaluation must not reinterpret an older Thread that saved no form.
@@ -6301,6 +6302,15 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(why) = form.refused() {
         return Err(bad(cmd, why));
     }
+    let thread_class = match p.get("thread_class") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(class)) => {
+            let class = class.trim();
+            check_thread_class_text(form, class).map_err(|why| bad(cmd, why))?;
+            Some(class.to_string())
+        }
+        Some(_) => return Err(bad(cmd, "`thread_class` must be a string")),
+    };
     let starts = match p.get("starts") {
         None | Some(Value::Null) => 1,
         Some(v) => v.as_u64().filter(|n| (1..=8).contains(n)).ok_or_else(|| bad(cmd, "`starts` must be a whole number from 1 to 8"))? as u32,
@@ -6436,6 +6446,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = FeatureKind::Thread {
         face: FacePick(*face),
         designation,
+        thread_class,
         length,
         offset,
         modeled,

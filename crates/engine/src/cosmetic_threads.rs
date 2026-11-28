@@ -12,18 +12,19 @@ pub const MAX_SCENE_SEGMENTS: usize = 65_536;
 
 /// Shared scene limits, including unsuccessful inspections. Camera-only frames reuse the
 /// viewport's existing scene cache; scene rebuilds cannot restart this budget for each body.
-pub struct Budget {
+pub struct Budget<'threads> {
     work: usize,
     strokes: usize,
+    bands: Option<(&'threads [ThreadInfo], f64)>,
 }
 
-impl Default for Budget {
+impl Default for Budget<'_> {
     fn default() -> Self {
-        Self { work: 500_000, strokes: MAX_SCENE_SEGMENTS }
+        Self { work: 500_000, strokes: MAX_SCENE_SEGMENTS, bands: None }
     }
 }
 
-impl Budget {
+impl<'threads> Budget<'threads> {
     pub fn available(&self) -> bool {
         self.work > 0 && self.strokes > 0
     }
@@ -35,13 +36,41 @@ impl Budget {
         self.work -= n;
         self.strokes > 0
     }
+    /// Spread the bands across the scene's cosmetic threads. The count is shared by bodies
+    /// that use the same thread list and visits no more entries than the scene budget allows.
+    fn bands(&mut self, threads: &'threads [ThreadInfo]) -> Option<f64> {
+        if let Some((input, bands)) = self.bands
+            && std::ptr::eq(input, threads)
+        {
+            return Some(bands);
+        }
+        const TOTAL: usize = 768;
+        const MIN: usize = 4;
+        const MAX: usize = 32;
+        let mut count = threads.len();
+        if count > TOTAL / MAX {
+            count = 0;
+            for t in threads {
+                if !self.spend(1) {
+                    return None;
+                }
+                count += usize::from(!t.modeled);
+                if count == TOTAL / MIN {
+                    break;
+                }
+            }
+        }
+        let bands = (TOTAL as f64 / count.max(1) as f64).clamp(MIN as f64, MAX as f64);
+        self.bands = Some((threads, bands));
+        Some(bands)
+    }
     /// Bounded preflight before requesting a body's potentially refined display mesh.
     pub fn has_thread(&mut self, name: &str, threads: &[ThreadInfo]) -> bool {
         for t in threads {
             if !self.spend(1) {
                 return false;
             }
-            if t.body == name {
+            if !t.modeled && t.body == name {
                 return true;
             }
         }
@@ -57,20 +86,22 @@ pub fn segments(body: &ModelBody, mesh: &Mesh, threads: &[ThreadInfo]) -> Vec<(V
 }
 
 /// Generate one body's strokes, charging all inspections and emitted segments to the scene.
-pub fn segments_with_budget(body: &ModelBody, mesh: &Mesh, threads: &[ThreadInfo], budget: &mut Budget) -> Vec<(Vec3, Vec3)> {
+pub fn segments_with_budget<'threads>(
+    body: &ModelBody,
+    mesh: &Mesh,
+    threads: &'threads [ThreadInfo],
+    budget: &mut Budget<'threads>,
+) -> Vec<(Vec3, Vec3)> {
     let mut out = Vec::new();
-    // Spread a readable schematic density across ordinary assemblies before hitting a hard
-    // scene cap. A large set of fine-pitch threads need not consume the budget on its first
-    // few occurrences. This is deliberately independent of camera motion and scene caching.
-    let bands = (768.0 / threads.len().max(1) as f64).clamp(4.0, 32.0);
     if body.body.is_mesh() {
         return out;
     }
+    let Some(bands) = budget.bands(threads) else { return out };
     for t in threads {
         if !budget.spend(1) {
             return out;
         }
-        if t.body != body.name {
+        if t.modeled || t.body != body.name {
             continue;
         }
         let length = t.end - t.start;
@@ -206,7 +237,8 @@ mod tests {
         let before = s.world_state().unwrap().bodies[0].mesh().triangles.len();
         run(&mut s, "solid.thread", json!({"face":[3,0,3],"designation":"M6","length":2,"modeled":true}));
         let st = s.world_state().unwrap();
-        assert!(st.threads.is_empty());
+        assert_eq!(st.threads.len(), 1);
+        assert!(st.threads[0].modeled);
         assert_ne!(st.bodies[0].mesh().triangles.len(), before);
         assert!(segments(&st.bodies[0], &st.bodies[0].mesh(), &st.threads).is_empty());
     }
@@ -254,7 +286,7 @@ mod tests {
         for t in &mut stale {
             t.radius *= 2.0;
         }
-        let mut budget = Budget { work: 10_000, strokes: MAX_SCENE_SEGMENTS };
+        let mut budget = Budget { work: 10_000, ..Budget::default() };
         let mut seen = 0;
         for b in st.bodies.iter().cycle().take(1000) {
             if !budget.available() {

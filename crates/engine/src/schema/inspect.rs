@@ -119,7 +119,7 @@ pub enum ClassifiedPoint {
     },
 }
 
-/// List the design's cosmetic threads.
+/// List the design's evaluated threads.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ModelThreadsParams {}
@@ -272,14 +272,14 @@ pub struct FaceCylinder {
 /// What `model.threads` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelThreads {
-    /// The cosmetic threads, in timeline order.
+    /// Cosmetic and modelled thread records, in timeline order.
     pub threads: Vec<ModelThread>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// A cosmetic thread: on which cylinder, its size, and the threaded part of the axis.
+/// An evaluated thread: on which cylinder, its size, and the threaded part of the axis.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelThread {
     /// The id of the thread feature.
@@ -288,6 +288,9 @@ pub struct ModelThread {
     pub body: String,
     /// Its size and any tolerance class, such as `M6x1`, `M8-6g` or `1/4-20 UNC-2A`.
     pub designation: String,
+    /// The authored tolerance class, when specified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_class: Option<String>,
     /// Its major diameter (mm).
     pub major_diameter: f64,
     /// The radius of the cylindrical face it is on (mm).
@@ -310,6 +313,8 @@ pub struct ModelThread {
     pub start: f64,
     /// Where it ends (mm).
     pub end: f64,
+    /// Its axial length (mm).
+    pub length: f64,
 }
 
 /// Which way a thread turns.
@@ -349,6 +354,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
             feature: t.feature,
             body: t.body.clone(),
             designation: t.designation.clone(),
+            thread_class: t.thread_class.clone(),
             major_diameter: t.major_diameter,
             radius: t.radius,
             pitch: t.pitch,
@@ -377,6 +383,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
             axis: solidcore_record::Vec3::from(t.axis).into(),
             start: t.start,
             end: t.end,
+            length: t.end - t.start,
         }
     }
 }

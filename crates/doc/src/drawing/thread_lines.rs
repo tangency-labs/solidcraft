@@ -67,7 +67,7 @@ impl Thread {
     /// cut to ([`crate::thread_forms::ThreadForm::groove_of`]), so the two draw alike. A taper thread
     /// draws none: its lines are not parallel to its axis. No limit lines: [`on_paper`] finds them.
     pub fn of(info: &ThreadInfo) -> Option<Thread> {
-        if info.form.is_taper() {
+        if info.modeled || info.form.is_taper() {
             return None;
         }
         let root_radius = if info.internal {

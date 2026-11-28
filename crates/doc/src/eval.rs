@@ -1283,7 +1283,7 @@ pub struct ModelState {
     frame_bodies: std::sync::Weak<std::sync::Mutex<FrameBodies>>,
     /// Joint origins already resolved against bodies of this model (see [`OriginFrames`]).
     pub(crate) origin_frames: OriginFrames,
-    /// Cosmetic threads (from Thread features and threaded holes).
+    /// Evaluated threads from Thread features, cosmetic tapped holes and linked designs.
     pub threads: Vec<ThreadInfo>,
     pub bodies: Vec<ModelBody>,
     /// Shared between states: a feature that does not change a sketch keeps it as it was.
@@ -3737,11 +3737,29 @@ fn whole_extrude_sketch_key(f: &Feature, st: &ModelState) -> Option<(u64, u64)> 
 }
 
 fn hash_thread_info(t: &crate::ThreadInfo, h: &mut impl Hasher) {
-    let crate::ThreadInfo { feature, body, designation, major_diameter, radius, pitch, internal, axis_point, axis, start, end, form, hand, starts } =
-        t;
+    let crate::ThreadInfo {
+        feature,
+        body,
+        designation,
+        thread_class,
+        modeled,
+        major_diameter,
+        radius,
+        pitch,
+        internal,
+        axis_point,
+        axis,
+        start,
+        end,
+        form,
+        hand,
+        starts,
+    } = t;
     feature.hash(h);
     body.hash(h);
     designation.hash(h);
+    thread_class.hash(h);
+    modeled.hash(h);
     major_diameter.to_bits().hash(h);
     radius.to_bits().hash(h);
     pitch.to_bits().hash(h);
@@ -18108,7 +18126,7 @@ fn hole_threads(
     reaches: &[f64],
     copy: bool,
 ) -> Result<usize> {
-    let FeatureKind::Hole { thread: Some(d), thread_depth, diameter, hand, modeled, ease_out, .. } = &src.kind else { return Ok(0) };
+    let FeatureKind::Hole { thread: Some(d), thread_depth, diameter, hand, thread_class, modeled, ease_out, .. } = &src.kind else { return Ok(0) };
     let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
     // Find the bore beyond any entry recess, including shallow and through holes.
     let r = val(vals, diameter, Kind::Length)? / 2.0;
@@ -18161,7 +18179,9 @@ fn hole_threads(
             if stop.is_some_and(|s| s <= *lo) {
                 break;
             }
-            threads.push(thread_on(st, id, *wall, &ask)?.info);
+            let mut info = thread_on(st, id, *wall, &ask)?.info;
+            info.thread_class.clone_from(thread_class);
+            threads.push(info);
         }
         if let Some(depth) = thread_depth {
             let useful = |t: &ThreadInfo| (t.axis_point + t.axis * t.start - p).dot(dir).max((t.axis_point + t.axis * t.end - p).dot(dir));
@@ -18196,7 +18216,13 @@ fn hole_threads(
             continue;
         }
         let done = plan(st, p, walls).and_then(|t| match t {
-            Tapped::Cut(on) => on.into_iter().try_for_each(|o| thread::cut(st, o, (crate::thread_forms::ThreadTip::None, None, None)).map(drop)),
+            Tapped::Cut(on) => on.into_iter().try_for_each(|o| {
+                let mut info = o.info.clone();
+                info.thread_class.clone_from(thread_class);
+                thread::cut(st, o, (crate::thread_forms::ThreadTip::None, None, None))?;
+                st.threads.push(info);
+                Ok(())
+            }),
             Tapped::Listed(threads) => {
                 st.threads.extend(threads);
                 Ok(())
@@ -21302,7 +21328,8 @@ fn eval_feature_kind(
                 let source = healed.map(|h| h.face_source.as_slice());
                 let b = crate::lineage::linked_tool_from(body.clone().with_import_certificate(&digest, f.id)?, f.id, carried, source);
                 for record in f.link_threads.get(k).into_iter().flatten() {
-                    if !record.axis_point.is_finite()
+                    if !record.class_is_valid()
+                        || !record.axis_point.is_finite()
                         || !record.start.is_finite()
                         || !record.end.is_finite()
                         || record.end <= record.start

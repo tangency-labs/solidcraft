@@ -725,6 +725,8 @@ mod tests {
                     feature: 0,
                     body: String::new(),
                     designation: "M6".into(),
+                    thread_class: None,
+                    modeled: false,
                     major_diameter: 6.0,
                     radius: 3.0,
                     pitch: 1.0,

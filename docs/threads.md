@@ -1,9 +1,9 @@
 # Threads
 
-`solid.thread` puts a thread on a cylindrical face: cosmetic (an annotation, `model.threads`
-lists it) or modelled (the groove between the teeth cut into the body along a helix, SMLib's exact
-screw sweep). This page gives the forms, the values each uses and where they come from, and how a
-thread's extent is decided. The code is `crates/doc/src/thread_forms.rs` (forms, sizes,
+`solid.thread` puts a thread on a cylindrical face: cosmetic (an annotation) or modelled
+(the groove between the teeth cut into the body by SMLib's exact screw sweep). `model.threads`
+lists both kinds and includes their tolerance class when specified. This page gives the forms,
+the values each uses and where they come from, and how a thread's extent is decided. The code is `crates/doc/src/thread_forms.rs` (forms, sizes,
 designations) and `crates/doc/src/eval_thread.rs` (the thread on its face, the cut).
 
 ## Forms

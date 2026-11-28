@@ -957,6 +957,8 @@ fn deleting_an_early_import_keeps_later_independent_imports() {
         feature: 0,
         body: String::new(),
         designation: "M8".into(),
+        thread_class: None,
+        modeled: false,
         major_diameter: 8.0,
         radius: 4.0,
         pitch: 1.25,
@@ -2383,6 +2385,8 @@ fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copie
                 feature,
                 body,
                 designation: "M6".into(),
+                thread_class: None,
+                modeled: false,
                 major_diameter: 6.0,
                 radius: 3.0,
                 pitch: 1.0,
@@ -2595,6 +2599,7 @@ fn marking(p: Vec3) -> FeatureKind {
     FeatureKind::Thread {
         face: FacePick(p),
         designation: Some("M6".into()),
+        thread_class: None,
         length: None,
         offset: None,
         modeled: false,
@@ -2816,7 +2821,8 @@ fn a_grouped_modelled_thread_cuts_every_selected_shaft() {
     let after = model.state();
     assert_eq!(after.bodies.len(), 1);
     assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
-    assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
+    assert_eq!(after.threads.len(), 4);
+    assert!(after.threads.iter().all(|thread| thread.modeled && thread.feature == id));
     let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
     let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
     assert!(base_volume - threaded_volume > 8.0, "all four grooves remove material");
@@ -7138,6 +7144,8 @@ fn eval_key_distinguishes_threads_components_and_body_names() {
         feature: 99,
         body: body.into(),
         designation: designation.into(),
+        thread_class: None,
+        modeled: false,
         major_diameter: 8.0,
         radius: 4.0,
         pitch: 1.25,

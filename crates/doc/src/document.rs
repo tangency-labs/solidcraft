@@ -1452,6 +1452,9 @@ pub enum FeatureKind {
         face: FacePick,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         designation: Option<String>,
+        /// ISO metric tolerance class, saved for callouts without changing the thread's shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_class: Option<String>,
         /// Thread length from the end it starts at; `None` = full length (or `up_to`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
@@ -4893,7 +4896,7 @@ pub struct Feature {
     /// its faces are named after them and references follow them through Update Links (#3330).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_faces: Vec<Vec<String>>,
-    /// Cosmetic threads carried with a linked Import, by the file's body index. Their
+    /// Thread records carried with a linked Import, by the file's body index. Their
     /// coordinates are in the imported geometry's frame; evaluation assigns local identities.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_threads: Vec<Vec<crate::ThreadInfo>>,

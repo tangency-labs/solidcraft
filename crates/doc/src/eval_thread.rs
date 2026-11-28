@@ -4,12 +4,16 @@
 use super::*;
 use crate::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 
-/// A cosmetic thread: on which cylinder, its size, and the threaded part of the axis.
+/// An evaluated thread: on which cylinder, its size, and the threaded part of the axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThreadInfo {
     pub feature: u64,
     pub body: String,
     pub designation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_class: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub modeled: bool,
     pub major_diameter: f64,
     /// Radius of the actual cylindrical face when the cosmetic thread is evaluated (0 in a
     /// state saved without it: the cosmetic display then leaves the thread out).
@@ -31,6 +35,16 @@ pub struct ThreadInfo {
 }
 
 impl ThreadInfo {
+    /// Whether the optional class of a record read from a saved design is one its thread takes:
+    /// ISO 965-1 for a metric thread, ASME B1.1 for a Unified one, on the side the record says. A
+    /// record without a class is always valid.
+    pub(crate) fn class_is_valid(&self) -> bool {
+        let Some(class) = self.thread_class.as_deref() else { return true };
+        matches!(class.len(), 2 | 4) && crate::thread_forms::check_thread_class(self.form, class, self.internal).is_ok()
+    }
+}
+
+impl ThreadInfo {
     /// This record carried by a rigid motion `m` of its body (a plain move): its axis moved with the
     /// body, everything else kept. None when `m` does not give a finite axis.
     pub(crate) fn moved(&self, m: &crate::Mat) -> Option<ThreadInfo> {
@@ -47,6 +61,8 @@ impl ThreadInfo {
                 feature: _,
                 body: _,
                 designation: _,
+                thread_class: _,
+                modeled: _,
                 major_diameter,
                 radius,
                 pitch,
@@ -64,6 +80,8 @@ impl ThreadInfo {
         self.feature == other.feature
             && self.body == other.body
             && self.designation == other.designation
+            && self.thread_class == other.thread_class
+            && self.modeled == other.modeled
             && self.internal == other.internal
             && self.form == other.form
             && self.hand == other.hand
@@ -550,6 +568,8 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         feature,
         body: mb.name.clone(),
         designation,
+        thread_class: None,
+        modeled: ask.modeled,
         major_diameter: major,
         radius: cyl.radius,
         pitch,
@@ -924,6 +944,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let FeatureKind::Thread {
         face,
         designation,
+        thread_class,
         length,
         offset,
         modeled,
@@ -1006,7 +1027,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         } else {
             &*st
         };
-        let on = thread_on_in(input, f.id, Some(f.component), face.0, &ask)?;
+        let mut on = thread_on_in(input, f.id, Some(f.component), face.0, &ask)?;
+        if let Some(class) = thread_class {
+            crate::thread_forms::check_thread_class(on.info.form, class, on.info.internal).map_err(DocError::Invalid)?;
+            on.info.thread_class = Some(class.clone());
+        }
         // Resolve against the starting model, before a modelled thread removes a picked surface.
         if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl) {
             selected.push(on);
@@ -1016,6 +1041,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         match cut_grouped(st, &selected, *continuous_flanks) {
             Ok(Some(next)) => {
                 *st = next;
+                st.threads.extend(selected.into_iter().map(|on| on.info));
                 return Ok(());
             }
             Ok(None) => {}
@@ -1043,12 +1069,14 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 None => note,
             });
         }
+        let info = on.info.clone();
         if let Some(note) = cut_with_flanks(st, on, (*tip, angle, depth), *continuous_flanks)? {
             *warning = Some(match warning.take() {
                 Some(w) => format!("{w}; {note}"),
                 None => note,
             });
         }
+        st.threads.push(info);
     }
     Ok(())
 }
