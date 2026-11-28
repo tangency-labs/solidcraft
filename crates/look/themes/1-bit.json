@@ -49,6 +49,7 @@
     "border": "#000000",
     "box_crossing": "#000000",
     "box_window": "#000000",
+    "card_fill": "#ffffff",
     "chip": "#000000",
     "construction_geom": "#000000",
     "construction_plane": "#ffffff",

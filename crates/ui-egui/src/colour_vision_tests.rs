@@ -622,6 +622,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("dialog_label", "dense dialog field label"),
     ("selected_ink", "foreground of selected elements"),
     ("selected_bg", "background of selected elements"),
+    ("card_fill", "neutral nested card ground"),
     ("render_accent", "the Render workspace's identity colour"),
     // The window's chrome: grounds, text and borders (measured as grounds where meaning sits on them).
     ("panel_header", "chrome"),
