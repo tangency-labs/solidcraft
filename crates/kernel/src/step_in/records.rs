@@ -724,17 +724,25 @@ fn unit(x: f32) -> f32 {
     if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 }
 }
 
+/// Validate a record body from a file before turning it into a [`Part`]: structural checks and
+/// geometric agreement run identically whether or not `native` is set.
+fn checked_record_brep(r: &RecordBody) -> std::result::Result<&Brep, String> {
+    let brep = r.brep.as_ref().ok_or("no record")?;
+    if r.face_origin.len() != brep.faces.len() {
+        return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
+    }
+    solidcore_ops::record_check::validate(brep).map_err(|e| format!("the record is invalid: {e}"))?;
+    solidcore_ops::record_check::agreement(brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+    Ok(brep)
+}
+
 /// A native SolidCraft record restored directly without an SMLib round-trip, keeping exact face
 /// numbering. Records from a file are still hostile input and pass structural and geometric checks.
 fn native_part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     if let (None, Some(mesh)) = (&r.brep, &r.mesh) {
         return mesh_part(mesh);
     }
-    let brep = r.brep.as_ref().ok_or("no record")?;
-    if r.face_origin.len() != brep.faces.len() {
-        return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
-    }
-    solidcore_ops::record_check::validate(brep).map_err(|e| format!("the record is invalid: {e}"))?;
+    let brep = checked_record_brep(r)?;
     let body = crate::Body::from_record(brep.clone()).map_err(|e| e.to_string())?;
     let sheet = r.sheet || brep.regions.len() <= 1 || body.is_surface();
     Ok(Part { body, closed: !sheet, file_faces: r.face_origin.len(), face_origin: r.face_origin.clone(), refused: None, split_edges: 0 })
@@ -745,12 +753,7 @@ fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     if let (None, Some(mesh)) = (&r.brep, &r.mesh) {
         return mesh_part(mesh);
     }
-    let brep = r.brep.as_ref().ok_or("no record")?;
-    if r.face_origin.len() != brep.faces.len() {
-        return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
-    }
-    solidcore_ops::record_check::validate(brep).map_err(|e| format!("the record is invalid: {e}"))?;
-    solidcore_ops::record_check::agreement(brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+    let brep = checked_record_brep(r)?;
     // A sheet is what its record is, whatever the file says: no bounded region but the
     // infinite one's.
     let sheet = r.sheet || brep.regions.len() <= 1;

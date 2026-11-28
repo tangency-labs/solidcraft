@@ -691,11 +691,28 @@ fn native_records_from_bodies_round_trip_exactly_without_smlib() {
     assert_eq!(imp_broken.bodies.len(), 1);
     assert!(imp_broken.warnings.iter().any(|w| w.contains("face origins")));
 
-    let mut bad_idx = decoded;
+    let mut bad_idx = decoded.clone();
     bad_idx.bodies[0].brep.as_mut().unwrap().edges[0].vertices[0] = 999;
     let imp_bad = records_import(&bad_idx).unwrap();
     assert_eq!(imp_bad.bodies.len(), 1);
     assert!(imp_bad.warnings.iter().any(|w| w.contains("invalid")));
+
+    // Structurally valid records whose geometry disagrees are refused identically with or without
+    // `native: true`; the intact sibling body still restores without SMLib when `native: true`.
+    let mut disagree_native = decoded;
+    let bad_brep = disagree_native.bodies[0].brep.as_mut().unwrap();
+    bad_brep.vertices[0].point[2] += 0.5;
+    solidcore_ops::record_check::validate(bad_brep).expect("mutated record must remain structurally valid");
+    let mut disagree_plain = disagree_native.clone();
+    disagree_plain.native = false;
+    let imp_disagree_native = records_import(&disagree_native).unwrap();
+    let imp_disagree_plain = records_import(&disagree_plain).unwrap();
+    assert_eq!(imp_disagree_native.bodies.len(), 1);
+    assert_eq!(imp_disagree_plain.bodies.len(), 1);
+    assert!(!imp_disagree_native.bodies[0].body.holds_kernel_form(), "good native sibling still restores without SMLib");
+    assert_eq!(imp_disagree_native.warnings, imp_disagree_plain.warnings);
+    assert_eq!(imp_disagree_native.report, imp_disagree_plain.report);
+    assert!(imp_disagree_native.warnings.iter().any(|w| w.contains("geometry disagrees")));
 }
 
 #[test]

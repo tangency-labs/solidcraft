@@ -206,6 +206,7 @@ impl Model {
     pub fn release_left(&self) {
         let _span = solidcraft_profile::span("doc", "release");
         let shown = self.state();
+        let shown_stale = self.results.iter().rev().find(|r| !r.skipped).is_some_and(|r| r.stale);
         let held_now = self.held_now(&shown);
         let held_addrs: HashSet<usize> = held_now.iter().copied().collect();
         let Ok(mut cache) = self.cache.lock() else { return };
@@ -235,13 +236,17 @@ impl Model {
             return;
         }
         let mut found_witnesses: Vec<(usize, Weak<ModelState>)> = Vec::new();
-        for state in std::iter::once(&shown).chain(self.rolled_results.values().map(|(_, _, r)| &r.state)) {
+        for (state, skip_witness) in std::iter::once((&shown, shown_stale)).chain(self.rolled_results.values().map(|(_, _, r)| (&r.state, false))) {
             #[cfg(test)]
             super::cost_tests::count(|c| c.release_states_scanned += 1);
             for b in &state.bodies {
                 let id = b.body.solid_id();
                 if unresolved.remove(&id).is_some() {
-                    found_witnesses.push((id, Arc::downgrade(state)));
+                    // Do not attach a `Weak` witness to a stale live-drag state, or `Arc::make_mut`
+                    // on the next live frame would reallocate instead of swapping in place.
+                    if !skip_witness {
+                        found_witnesses.push((id, Arc::downgrade(state)));
+                    }
                     if unresolved.is_empty() {
                         break;
                     }

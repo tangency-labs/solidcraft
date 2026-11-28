@@ -445,9 +445,6 @@ impl FaceIndex {
 }
 
 fn face_count(b: &ModelBody) -> usize {
-    if !b.body.is_mesh() {
-        return b.body.face_count();
-    }
     b.mesh().tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0)
 }
 
@@ -1618,6 +1615,9 @@ pub fn carried_face_names(part: &ModelState, imported: &[solidcraft_kernel::Impo
         // Exact B-rep match: when records were preserved directly without a STEP round-trip,
         // face indices agree 1:1 with no tessellation or spatial lookup needed.
         if let Some(exact) = solids.iter().filter(|b| b.body.record() == read.body.record()).max_by_key(|b| b.name == read.name) {
+            if exact.names.cached_names().is_none() && exact.names.origin.is_none() && exact.names.copy_of.is_none() {
+                return (0..exact.body.face_count()).map(|k| format!("{}:face:{k}", exact.name)).collect();
+            }
             return face_names(exact).as_ref().clone();
         }
         let probe = ModelBody::new(String::new(), read.body.clone(), 0);
@@ -2134,7 +2134,11 @@ mod tests {
     fn carried_face_names_matches_exact_brep_records_without_meshing() {
         let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
         let b = solidcraft_kernel::cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 4.0, 12.0).unwrap();
-        let st = ModelState::default().with_bodies(vec![ModelBody::new("Plate".into(), a.clone(), 1), ModelBody::new("Pin".into(), b.clone(), 2)]);
+        let mut plate = ModelBody::new("Plate".into(), a.clone(), 1);
+        plate.names = NameCell::known(Arc::new((0..a.face_count()).map(|k| format!("F1:face:{k}")).collect()));
+        let mut pin = ModelBody::new("Pin".into(), b.clone(), 2);
+        pin.names = NameCell::known(Arc::new((0..b.face_count()).map(|k| format!("F2:face:{k}")).collect()));
+        let st = ModelState::default().with_bodies(vec![plate, pin]);
         assert!(st.bodies.iter().all(|mb| mb.cached_mesh().is_none()));
         let inputs = [
             solidcraft_kernel::NativeRecordBody { name: "Plate".into(), body: &a },

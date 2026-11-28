@@ -7258,6 +7258,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Opening a `.sc` design whose stored import records set `native: true` on a structurally
+    /// valid B-rep with disagreeing geometry refuses the body the exact same way as without the
+    /// `native` flag: a file cannot bypass `record_check::agreement` by setting `native: true`.
+    #[test]
+    fn opening_sc_with_native_true_refuses_disagreeing_geometry_same_as_without_flag() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-native-agreement-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part_file = dir.join("part.sc");
+        let native_sc = dir.join("disagree_native.sc");
+        let plain_sc = dir.join("disagree_plain.sc");
+
+        save_box(&part_file, 10.0);
+        let mut asm = Session::default();
+        let inserted = run(&mut asm, "component.insert_design", json!({"path": &part_file}));
+        let feat_id = inserted["feature"].as_u64().unwrap();
+
+        let mut records = match &asm.doc.feature(feat_id).unwrap().kind {
+            FeatureKind::Import { records: Some(r), .. } => (**r).clone(),
+            other => panic!("expected Import with records, got {other:?}"),
+        };
+        // Move a vertex off its incident edge curves so the B-rep stays structurally valid
+        // (`record_check::validate`) while failing geometric agreement (`record_check::agreement`).
+        records.bodies[0].brep.as_mut().unwrap().vertices[0].point[2] += 0.5;
+
+        let mut doc_native = (*asm.doc).clone();
+        let mut native_records = records.clone();
+        native_records.native = true;
+        if let Some(FeatureKind::Import { records: slot, .. }) = doc_native.feature_mut(feat_id).map(|f| &mut f.kind) {
+            *slot = Some(solidcraft_kernel::SharedRecords::new(native_records));
+        }
+
+        let mut doc_plain = (*asm.doc).clone();
+        let mut plain_records = records;
+        plain_records.native = false;
+        if let Some(FeatureKind::Import { records: slot, .. }) = doc_plain.feature_mut(feat_id).map(|f| &mut f.kind) {
+            *slot = Some(solidcraft_kernel::SharedRecords::new(plain_records));
+        }
+
+        std::fs::write(&native_sc, solidcraft_io::write_design_container(&doc_native).unwrap()).unwrap();
+        std::fs::write(&plain_sc, solidcraft_io::write_design_container(&doc_plain).unwrap()).unwrap();
+
+        let mut opened_native = Session::default();
+        run(&mut opened_native, "doc.open", json!({"path": &native_sc}));
+        let mut opened_plain = Session::default();
+        run(&mut opened_plain, "doc.open", json!({"path": &plain_sc}));
+
+        assert!(
+            matches!(&opened_native.doc.feature(feat_id).unwrap().kind, FeatureKind::Import { records: Some(r), .. } if r.native),
+            "reopened .sc must carry native: true from disk"
+        );
+        assert!(
+            matches!(&opened_plain.doc.feature(feat_id).unwrap().kind, FeatureKind::Import { records: Some(r), .. } if !r.native),
+            "reopened .sc must carry native: false from disk"
+        );
+        assert!(opened_native.model.state().bodies.is_empty(), "native: true must refuse disagreeing geometry");
+        assert!(opened_plain.model.state().bodies.is_empty(), "native: false must refuse disagreeing geometry");
+
+        let res_native = opened_native.model.results.iter().find(|r| r.id == feat_id).unwrap();
+        let res_plain = opened_plain.model.results.iter().find(|r| r.id == feat_id).unwrap();
+        let warn_native = res_native.warning.as_deref().expect("warning on refused native record");
+        let warn_plain = res_plain.warning.as_deref().expect("warning on refused non-native record");
+        assert!(warn_native.contains("geometry disagrees"), "expected geometry disagreement warning, got: {warn_native}");
+        assert_eq!(warn_native, warn_plain, "native: true must refuse disagreeing geometry the same as native: false");
+        assert_eq!(res_native.import_report, res_plain.import_report);
+        let report = res_native.import_report.as_ref().expect("import report on refused record");
+        assert_eq!(report.solids, 0);
+        assert!(
+            report.issues.iter().any(|i| i.kind == solidcraft_kernel::IssueKind::NotImported && i.detail.contains("geometry disagrees")),
+            "{:?}",
+            report.issues
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// when an updated linked design removes the edge a chamfer in the assembly sits on,
     /// `component.update_links {}` still updates every link at that level, marks the chamfer
     /// failed with a reselect message, reports it in `warnings`, rebuilds the rest of the

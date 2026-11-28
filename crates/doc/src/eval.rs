@@ -7030,6 +7030,57 @@ impl Model {
                     checks.refuse(i, c.failure.clone());
                 }
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
+                // An active result hidden by the marker, or evaluated ahead on these same inputs
+                // (the same chain of definitions from the start). Checked before `self.cache` so
+                // rolling the history marker forward reuses this model's live `Arc<ModelState>`
+                // instead of a detached cache copy. Changed inputs never reuse it.
+                if checks.refused_at(i).is_none()
+                    && let Some(r) = rolled
+                        .as_ref()
+                        .filter(|_| moved.is_empty())
+                        .filter(|(comp, _)| *comp == Some(key.reached))
+                        .map(|(_, r)| r)
+                        .filter(current)
+                        .or_else(|| {
+                            primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
+                                // posed where that model evaluated it, not only here
+                                let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
+                                let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
+                                p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
+                            })
+                        })
+                        .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
+                {
+                    if let Some(k) = kept {
+                        k.put(
+                            key.whole,
+                            &CachedEval {
+                                error: r.error.clone(),
+                                error_code: r.error_code.clone(),
+                                warning: r.warning.clone(),
+                                import_report: r.import_report.clone(),
+                                repair: r.repair.clone(),
+                                lost_projections: r.lost_projections.clone(),
+                                ms: r.ms,
+                                state: r.state.clone(),
+                            },
+                        );
+                    }
+                    restored += 1;
+                    component_keys.insert(f.id, key.reached);
+                    let before_rolled = stepper.is_some().then(|| state.clone());
+                    if r.error.is_none() {
+                        state = r.state.clone();
+                    }
+                    reuse &= r.error.is_some() == unkept_error;
+                    let ok = r.error.is_none();
+                    let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
+                    out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
+                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
+                        s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
+                    }
+                    continue;
+                }
                 if !self.no_cache
                     && let Some(c) = self
                         .cache
@@ -7082,39 +7133,6 @@ impl Model {
                     });
                     if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
                         s.advance(&mut resolved_joints, &vals, f, before_cache, &state);
-                    }
-                    continue;
-                }
-                // An active result hidden by the marker, or evaluated ahead on these same inputs
-                // (the same chain of definitions from the start). Changed inputs never reuse it.
-                if let Some(r) = rolled
-                    .as_ref()
-                    .filter(|_| moved.is_empty())
-                    .filter(|(comp, _)| *comp == Some(key.reached))
-                    .map(|(_, r)| r)
-                    .filter(current)
-                    .or_else(|| {
-                        primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
-                            // posed where that model evaluated it, not only here
-                            let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
-                            let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
-                            p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
-                        })
-                    })
-                    .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
-                {
-                    restored += 1;
-                    component_keys.insert(f.id, key.reached);
-                    let before_rolled = stepper.is_some().then(|| state.clone());
-                    if r.error.is_none() {
-                        state = r.state.clone();
-                    }
-                    reuse &= r.error.is_some() == unkept_error;
-                    let ok = r.error.is_none();
-                    let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
-                    out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
-                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
-                        s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
                     }
                     continue;
                 }

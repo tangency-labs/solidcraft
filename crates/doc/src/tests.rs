@@ -6106,7 +6106,10 @@ fn painted_with_faces_matches_per_body_appearance_resolution() {
     assert_eq!(painted.bodies[1].body.paint().unwrap().name.as_deref(), Some("Aluminum - Satin"));
     assert!(painted.bodies[2].body.color().is_some());
     assert_eq!(painted.bodies[3].body.paint().unwrap().faces.iter().find(|f| f.face == 0).unwrap().color, Look::custom([250, 240, 10], 0.4).rgb());
-    assert_eq!(linked.bodies[3].body.paint().unwrap().faces.iter().find(|f| f.face == 0).unwrap().color, [0.1, 0.2, 0.3]);
+    assert_eq!(
+        linked.bodies[3].body.paint().unwrap().faces.iter().find(|f| f.face == 0).unwrap().color,
+        Look::imported([26, 51, 77], 0.9, Some("ImpFace0")).rgb()
+    );
 }
 
 /// #18815: a design with a failing feature still keeps a partial model cache for all valid
