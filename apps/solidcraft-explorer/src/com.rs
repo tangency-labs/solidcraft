@@ -12,7 +12,8 @@
 //! Exporting `DllGetClassObject` and `DllCanUnloadNow`, implementing COM interfaces (the vtables
 //! `#[implement]` writes), reading an `IStream` and filling a DIB section have no safe API, hence
 //! the `unsafe_code` allowance on this module (the crate denies it). Every entry point runs its
-//! body under `catch_unwind`, so a panic becomes `E_UNEXPECTED` and never unwinds into Windows.
+//! body under `catch_unwind`, so a panic becomes `E_UNEXPECTED` (`S_FALSE` from `DllCanUnloadNow`,
+//! which keeps the DLL loaded) and never unwinds into Windows.
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
