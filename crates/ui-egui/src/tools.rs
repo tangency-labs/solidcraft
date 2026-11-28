@@ -101,6 +101,9 @@ pub struct Tool {
     pub hover: Option<(Vec2, Option<String>)>,
     /// Picked entity ids.
     pub picks: Vec<String>,
+    /// Whether dropping the picks whose curve is gone (the Undo button) emptied the pick list and
+    /// nothing was picked since: a right-click on the view then keeps the tool on.
+    pub picks_dropped: bool,
     /// Horizontal/Vertical point references, or the Dimension tool's midpoint snaps.
     pub point_picks: Vec<Value>,
     /// Inline dimension boxes for the shape being drawn, the point count they were made for,
@@ -191,6 +194,7 @@ impl Tool {
             pts: Vec::new(),
             hover: None,
             picks: Vec::new(),
+            picks_dropped: false,
             point_picks: Vec::new(),
             dims: Vec::new(),
             dim_history: Vec::new(),

@@ -344,11 +344,15 @@ fn refuse_singular_or_folding_offset(
 /// the cap of the protrusion the two bound, both its edges with them convex (a floor between
 /// a recess and a cut below it has no such cap, and its shell builds). The
 /// cavity is [`crate::offset::wall_room::shell_wall_room`]'s certified witness. Each test
-/// is a witness: a pair or a cavity none shows leaves the inset to the offset.
+/// is a witness: a pair or a cavity none shows leaves the inset to the offset. A pair whose
+/// faces are both in `extinct`, the faces of branches whose offsets the exact empty-cell
+/// certificate removed (`extinct_branches`), is not refused: their offsets meeting on one
+/// plane bound no volume, and the branch stays solid.
 fn refuse_meeting_planar_insets(
     kernel: &mut Kernel,
     original: &mut Brep,
     open: &[FaceId],
+    extinct: &BTreeSet<FaceId>,
     wall: f64,
     operation: &'static str,
 ) -> Result<()> {
@@ -387,7 +391,7 @@ fn refuse_meeting_planar_insets(
             continue;
         }
         for (j, &(b, pb, mb, eb, _, offset_b)) in planar.iter().enumerate().skip(i + 1) {
-            if !offset_b {
+            if !offset_b || (extinct.contains(&a) && extinct.contains(&b)) {
                 continue;
             }
             // opposite to within the tolerance over both faces' extent
@@ -1672,17 +1676,6 @@ impl OffsetExecutive {
     ) -> Result<Brep> {
         let original = given(original, OP_EXTENDED, SM_ERR_NULL_POINTER)?;
         self.check_resolvable(OP_EXTENDED, original)?;
-        // Not upstream (#18239): an inset whose opposite planar walls meet (a square boss
-        // inset by half its width) is refused, as a round's collapse is below.
-        if self.inset()
-            && self.extend_convex_edges()
-            && self.local_faces.is_empty()
-            && self.operation() != OffsetOperation::LocalOperation
-        {
-            let wall = self.offset_distance();
-            let open = self.shell_faces().to_vec();
-            refuse_meeting_planar_insets(kernel, original, &open, wall, OP_EXTENDED)?;
-        }
         self.allocate_offset_brep(kernel, notifications)?;
         let faces = bp1::faces(original, None)?;
         for id in faces {
@@ -1695,7 +1688,20 @@ impl OffsetExecutive {
             }
         }
 
-        self.remove_extinct_branches(kernel, original, notifications)?;
+        let extinct = self.remove_extinct_branches(kernel, original, notifications)?;
+        // Not upstream (#18239): an inset whose opposite planar walls meet (a square boss
+        // inset by half its width) is refused, as a round's collapse is below, unless the
+        // walls are a branch just certified empty, whose offsets meet only on one plane and
+        // hold no cavity (#22783).
+        if self.inset()
+            && self.extend_convex_edges()
+            && self.local_faces.is_empty()
+            && self.operation() != OffsetOperation::LocalOperation
+        {
+            let wall = self.offset_distance();
+            let open = self.shell_faces().to_vec();
+            refuse_meeting_planar_insets(kernel, original, &open, &extinct, wall, OP_EXTENDED)?;
+        }
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;
@@ -2031,6 +2037,24 @@ impl OffsetExecutive {
 
             // (not upstream) each kept edge is the original edge on both its faces
             self.restore_kept_edges(kernel, original, notifications)?;
+
+            // Opposing inset patches contribute no cavity where they coincide.
+            // Preserve their non-overlapping regions before stitching the sheets.
+            // Only a merged result trims: the stitch-only path takes its sheets as given.
+            if self.inset()
+                && self.merge_results()
+                && self.operation() == OffsetOperation::SolidOffset
+            {
+                let mut temporary = present(self.take_offset_brep(), OP_EXTENDED, NO_OFFSET)?;
+                let status = super::cancel::coincident_opposites(
+                    self,
+                    kernel,
+                    &mut temporary,
+                    notifications,
+                );
+                self.set_offset_brep(temporary);
+                status?;
+            }
 
             // Not upstream (#21674): unmerged, an inset whose opposite planar walls' insets
             // crossed (a floor thinner than two walls) would keep the input's topology with
@@ -2652,11 +2676,11 @@ impl OffsetExecutive {
                     .domain;
                 let original_surface =
                     present(original_surface, OP_EXTENDED, OLD_SURFACE_NOT_KEPT)?;
-                choose_extended_domain(
+                let _ = self.choose_extended_domain_for_face(
+                    id,
                     &trim_domain,
                     &original_domain,
                     &extension_domain,
-                    crate::math::EFF_ZERO,
                     || {
                         let restored = crate::geom::context::Context::with_notification_context(
                             kernel,
@@ -2687,6 +2711,37 @@ impl OffsetExecutive {
         })();
         self.set_offset_brep(temporary);
         status
+    }
+
+    fn choose_extended_domain_for_face(
+        &mut self,
+        face: FaceId,
+        trim: &Extent2d,
+        original: &Extent2d,
+        extension: &Extent2d,
+        restore_original: impl FnOnce() -> Result<()>,
+    ) -> Result<ExtendedDomainChoice> {
+        match choose_extended_domain(
+            trim,
+            original,
+            extension,
+            crate::math::EFF_ZERO,
+            restore_original,
+        ) {
+            Ok(choice) => Ok(choice),
+            Err(err)
+                if matches!(err.offset_failure(), Some(OffsetFailure::TrimPastExtension))
+                    && self.is_kept_offset_face(face) =>
+            {
+                // (not upstream, #22806) `choose_extended_domain` already restored
+                // `original_surface` (without UV trims). Record the face so
+                // `resolve_crossing_loops_of_face` skips it until `restore_kept_edges`
+                // puts back every original kept edge and UV trim curve.
+                self.kept_extension_restored.insert(face);
+                Ok(ExtendedDomainChoice::Original)
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -3044,31 +3099,37 @@ pub fn local_operation_simple(
     result
 }
 
-/// Carries the selected face's own attributes onto a static local operation's
-/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+/// Carries the own attributes of each entity of `source` in `pairs` (the selected face, and
+/// its rims on the ends the sweep caps) onto its partner of a static local operation's swept
+/// tool (its wall, and the wall's rims on those ends), using the normal Copy handlers and
+/// disjoint source/result identities. The tool's attributes become the copies, all written
+/// back at once.
 pub(crate) fn copy_local_sweep_attributes(
     kernel: &mut Kernel,
     source: &Brep,
-    face: FaceId,
+    pairs: &[(EntityRef, EntityRef)],
     target: &mut Brep,
-    wall: FaceId,
 ) -> Result<()> {
     let mut store = AttributeStore::default();
     attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
-    let from = attributes::original_key(EntityRef::Face(face));
-    let to = attributes::result_key(EntityRef::Face(wall));
     let mut records = attributes::simple_records(source);
-    records.insert(to.key, Topology::new());
-    crate::topology::topology::notify(
-        &mut records,
-        &mut store,
-        Some(&mut kernel.context),
-        NotifyOperation::Copy,
-        from,
-        Some(to),
-        None,
-        None,
-    )?;
+    for &(entity, onto) in pairs {
+        let from = attributes::original_key(entity);
+        let to = attributes::result_key(onto);
+        if !records.contains_key(&to.key) {
+            records.insert(to.key, Topology::new());
+        }
+        crate::topology::topology::notify(
+            &mut records,
+            &mut store,
+            Some(&mut kernel.context),
+            NotifyOperation::Copy,
+            from,
+            Some(to),
+            None,
+            None,
+        )?;
+    }
     attributes::write_back_attributes(target, &attributes::result_key, &store)
 }
 
@@ -3225,7 +3286,7 @@ fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecut
     executive
 }
 
-fn configured_shell_executive(
+pub(super) fn configured_shell_executive(
     original: &Brep,
     options: ShellOptions,
     faces: &[FaceId],
@@ -3243,15 +3304,33 @@ fn run_shell_offset(
     faces: &[FaceId],
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
-    let mut executive = configured_shell_executive(original, options, faces);
-    executive.use_creator_tangency_tol(kernel);
-    // Unlike offset_brep, shelling must not collapse ordinary inner statuses.
-    executive.do_solid_offset(
-        kernel,
-        Some(original),
-        SolidOffsetOptions::default(),
-        notifications,
-    )
+    // A consumed protrusion contributes no inner cavity. Rebuild only the private
+    // offset source: shell_difference must still subtract from the original solid.
+    let regularized = if options.offset.distance < 0.0
+        && options.offset.extend_convex_edges
+        && brep_is_manifold_solid(original)?
+    {
+        let mut attributed = original.clone_standing_for_self()?;
+        attributes::write_back_attributes(
+            &mut attributed,
+            notifications.original_key_of,
+            notifications.attributes,
+        )?;
+        super::consumed::regularize(kernel, &attributed, faces, -options.offset.distance)?
+    } else {
+        None
+    };
+    let Some((mut source, open)) = regularized else {
+        let mut executive = configured_shell_executive(original, options, faces);
+        executive.use_creator_tangency_tol(kernel);
+        return executive.do_solid_offset(
+            kernel,
+            Some(original),
+            SolidOffsetOptions::default(),
+            notifications,
+        );
+    };
+    super::isolated::shell_offset(kernel, &mut source, options, &open, notifications)
 }
 
 fn shell_difference(
@@ -3609,7 +3688,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 /// the walls are the faces other than the sheet's own (`sheet_faces`, the sheet's copies)
 /// along an edge of the sheet; every topological edge between two walls goes (the others,
 /// and every topological vertex, are kept), each wall it bounds first going onto its plane
-/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
+/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile. Whether there is such
+/// an edge is asked on a trial copy (WR-792): no face of the shell is prepared for a merge
+/// that does not follow.
 ///
 /// Not upstream (WR-564, #1599; the fork's tangency-labs/smlib#62): every wall goes onto
 /// its plane first, in the shell's face order, and its old surface's seams are deleted;
@@ -3617,7 +3698,8 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 ///
 /// # Errors
 ///
-/// Those of the plane replacement and of `RemoveTopologicalEdgesAndVertices`.
+/// Those of the plane replacement, of `RemoveTopologicalEdgesAndVertices` and of the trial
+/// copy (a trimmed surface cache in use: not asked from inside a solve).
 fn merge_sheet_side_walls(
     kernel: &mut Kernel,
     shell: &mut Brep,
@@ -3639,24 +3721,38 @@ fn merge_sheet_side_walls(
         }
     }
 
-    // keep every topological edge but those between two walls, and every topological vertex
-    let topo_edges = bp1::topological_edges(kernel, shell)?;
-    let keep_vertices = bp1::topological_vertices(kernel, shell)?;
+    // With `merge`: keep every edge not between two walls, and every topological vertex.
+    // Whether any edge between two walls is topological (else there is nothing to merge) is
+    // asked on a trial copy of the shell, never on the shell (WR-792, #23077): the test
+    // prepares a merge, expanding the covering face's surface in place and dropping that
+    // face's UV trims, and only the merge sets the face's domain anew. An edge asked about
+    // and then kept left its face on the expanded surface under its old domain (the seam
+    // piece between two offset faces of a sphere patch cut across its seam: one face's
+    // surface turned the whole way round, on another parameterisation). The removal asks
+    // again, on the shell, after the walls go onto their planes, and merges what it accepts.
+    // Without `merge` nothing is asked.
     let mut keep_edges = Vec::new();
-    let mut merging: Vec<FaceId> = Vec::new();
-    for e in topo_edges {
-        let edge_faces = crate::topology::edge::faces(shell, e, None)?;
-        let between_walls = edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
-        if !between_walls {
-            keep_edges.push(e);
-            continue;
-        }
-        for f in edge_faces {
-            if !merging.contains(&f) {
-                merging.push(f);
+    let mut any_topological = false;
+    if merge {
+        let mut trial = shell.clone_for_trial_keeping_definitions()?;
+        for e in bp1::edges(shell, None)? {
+            let edge_faces = crate::topology::edge::faces(shell, e, None)?;
+            let between_walls =
+                edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
+            if !between_walls {
+                keep_edges.push(e);
+            } else if !any_topological {
+                any_topological =
+                    crate::topology::edge::is_topological(kernel, &mut trial, e, 1.0)?
+                        .is_topological;
             }
         }
     }
+    let keep_vertices = if any_topological {
+        bp1::topological_vertices(kernel, shell)?
+    } else {
+        Vec::new()
+    };
     // SmTemporaryChangeValue<SmBoolean> sEditing(pBrepShell->m_bEditingEnabled, TRUE)
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
@@ -3667,7 +3763,7 @@ fn merge_sheet_side_walls(
                 put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
             }
         }
-        if !merge || merging.is_empty() {
+        if !any_topological {
             return Ok(());
         }
         crate::topology::brep::p5::remove_topological_edges_and_vertices(
@@ -5750,6 +5846,109 @@ mod tests {
             .downcast_ref::<NotificationLog>()
             .unwrap();
         assert!(log.0.is_empty());
+    }
+
+    /// #22806: in a local operation, `extend_result_faces_prefix` runs the normal extension
+    /// path on kept offset faces (leaving faces whose extension succeeds unchanged from
+    /// `main`), and if `choose_extended_domain` restores the original surface and fails with
+    /// [`OffsetFailure::TrimPastExtension`], a kept offset face records that restoration and
+    /// succeeds while non-kept, non-local-operation, and inverted faces still fail with
+    /// [`OffsetFailure::TrimPastExtension`].
+    #[test]
+    fn kept_face_extension_runs_normally_and_recovers_from_trim_past_extension() {
+        let mut kernel = Kernel::default();
+        let (mut result, face_id) = one_face(true);
+        let key = result_key(EntityRef::Face(face_id));
+        result.set_key(result_key(EntityRef::Brep(BrepId::from_index(0))).key);
+        result.face_mut(face_id).unwrap().rectangular_trim = 1;
+        let mut fixture = NotificationFixture::new(&source_brep());
+        let mut exec = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        let source_fu = FaceuseId::from_index(0);
+        exec.relate_faceuse(source_fu, face_id);
+        exec.kept_faceuses.insert(source_fu);
+        exec.insert_extended_surface(
+            key.key.0,
+            Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)),
+        );
+        exec.set_offset_brep(result);
+
+        // When extension succeeds, kept local-op faces run the normal path and are not
+        // marked as restored.
+        assert_eq!(
+            exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
+            Ok(())
+        );
+        let after = exec.offset_brep().unwrap();
+        assert_eq!(
+            after.face(face_id).unwrap().rectangular_trim,
+            crate::topology::face::p2::UNSURE
+        );
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // When `choose_extended_domain` fails with `TrimPastExtension` on a kept local-op
+        // face, `restore_original` runs, the face is recorded in `kept_extension_restored`,
+        // and the step succeeds.
+        let original = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let extension = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+        let outside = Extent2d::from_bounds(-2.0, -2.0, 3.0, 3.0);
+        let mut restored = false;
+        assert_eq!(
+            exec.choose_extended_domain_for_face(face_id, &outside, &original, &extension, || {
+                restored = true;
+                Ok(())
+            })
+            .unwrap(),
+            ExtendedDomainChoice::Original
+        );
+        assert!(restored);
+        assert!(exec.is_kept_extension_restored(face_id));
+
+        // If restoring the original surface itself fails, that error is not swallowed.
+        exec.kept_extension_restored.clear();
+        let restore_error = SolidError::invalid_input(OP_EXTENDED, "restore failed");
+        assert!(matches!(
+            exec.choose_extended_domain_for_face(face_id, &outside, &original, &extension, || {
+                Err(restore_error.clone())
+            }),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // An inverted face is no longer kept and still fails with `TrimPastExtension`.
+        exec.inverted_faces.insert(face_id);
+        let err = exec
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // A non-kept face (outside `LocalOperation` or without kept source faceuses) still
+        // fails with `TrimPastExtension`.
+        let mut non_local = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.125, 1.0e-6);
+        non_local.relate_faceuse(source_fu, face_id);
+        non_local.kept_faceuses.insert(source_fu);
+        let err = non_local
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!non_local.is_kept_extension_restored(face_id));
+
+        let mut unkept_local = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        unkept_local.relate_faceuse(source_fu, face_id);
+        let err = unkept_local
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!unkept_local.is_kept_extension_restored(face_id));
     }
 
     #[test]

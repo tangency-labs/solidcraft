@@ -8513,6 +8513,84 @@ fn every_flat_face_of_a_sheet_takes_an_attached_sketch() {
     assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(1), "{f}");
 }
 
+/// #21300: a base flange from a circle of radius 40, folded 90° along a construction line 20 mm off
+/// its centre. Each flat face of both pieces takes an attached sketch, as every flat face of a
+/// sheet does: the round rim's pieces are named after the circle that made them (`side:c1`), as a
+/// straight rim is after its line, so they tell the panel's pieces apart.
+#[test]
+fn every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch() {
+    let mut s = Session::default();
+    let features = [
+        json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+            "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+            "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+            "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                       {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}}),
+        json!({"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"}),
+        json!({"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+               "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"}),
+    ];
+    for feature in features {
+        run(&mut s, "timeline.add", json!({ "feature": feature }));
+    }
+    let faces = flat_face_points(&s);
+    // Each piece's two caps; the bend's two ends.
+    assert!(faces.len() >= 4, "{faces:?}");
+    for (index, point, normal) in faces {
+        let made = run(&mut s, "sketch.create", json!({"plane": {"face": point, "body": "Body1", "index": index}}));
+        run(&mut s, "sketch.finish", json!({}));
+        assert_eq!(made["attachment"], "exact_face", "face {index} at {point:?}");
+        let id = made["sketch"].as_u64().unwrap();
+        let solidcraft_doc::FaceAttachmentStatus::Healthy { plane, .. } = s.placed_document().sketch_face_attachment(id, &s.model) else {
+            panic!("face {index} at {point:?}")
+        };
+        assert!(plane.normal().dot(normal) > 1.0 - 1e-9 && (point - plane.origin).dot(normal).abs() < 1e-6, "face {index}: {plane:?}");
+    }
+}
+
+/// #21300: a design saved before the pieces of a folded panel's cap were named by the fold's role
+/// of each held them by their numbers by place (`F2:top#1`, the piece Fold1 folded; `F2:top#2`, the
+/// piece it left). Reopened, a reference saved under such a number finds that very piece, as each
+/// piece keeps its number as its former name: by the name, even where the saved point now lies on
+/// the other piece of the cap.
+#[test]
+fn a_reference_saved_under_a_numbered_piece_of_a_folded_round_cap_finds_that_piece() {
+    let mut s = Session::default();
+    let features = [
+        json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+            "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+            "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+            "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                       {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}}),
+        json!({"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"}),
+        json!({"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+               "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"}),
+    ];
+    for feature in features {
+        run(&mut s, "timeline.add", json!({ "feature": feature }));
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let state = reopened.model.state();
+    let names = solidcraft_doc::naming::face_names(&state.bodies[0]);
+    // Each cap piece: the number earlier builds gave it, and a point on it.
+    let mut pieces = Vec::new();
+    for (index, point, _) in flat_face_points(&reopened) {
+        let Some((side, role)) = names[index].strip_suffix(']').and_then(|n| n.split_once("#[F30:fold:")) else { continue };
+        pieces.push((index, format!("{side}#{}", if role == "stay" { 2 } else { 1 }), point));
+    }
+    let mut formers: Vec<&str> = pieces.iter().map(|(_, former, _)| former.as_str()).collect();
+    formers.sort_unstable();
+    assert_eq!(formers, ["F2:bottom#1", "F2:bottom#2", "F2:top#1", "F2:top#2"], "{names:?}");
+    for (index, former, point) in &pieces {
+        let side = former.split('#').next().unwrap_or_default();
+        let other = pieces.iter().find(|(i, f, _)| i != index && f.starts_with(side)).map(|(_, _, p)| *p).unwrap();
+        for at in [*point, other] {
+            let hit = solidcraft_doc::naming::locate_face(&state, former, at).unwrap_or_else(|| panic!("{former} at {at:?}"));
+            assert_eq!(hit.face, *index, "{former} ({}) at {at:?}", names[*index]);
+        }
+    }
+}
+
 /// A 60 x 40 base with a 30 mm flange up its far long edge (y = 40); its thickness.
 fn l_bracket(s: &mut Session) -> f64 {
     base(s, 60.0, 40.0);
@@ -11579,5 +11657,40 @@ fn a_fold_carries_a_slot_lip_without_filling_its_root() {
             assert_eq!(flat_points(&after[key], 1.0), flat_points(&before[key], 1.0), "{key}: {after}");
         }
         assert!((flat_area(&after) - want).abs() < 1e-6);
+    }
+}
+
+/// #23209: a fold builds when the outline has a vertex, in line with its neighbours, a hair
+/// beside the bend zone's edge, as it does with the vertex on that edge or left out, and folds
+/// the same part. Blank 200 x 100, t 2, r 3, K 0.44, folded 90° at y 30 (centerline): the zone's
+/// lower edge is at y 26.952655126018.
+#[test]
+fn a_fold_builds_with_an_outline_vertex_a_hair_beside_the_zone_edge() {
+    let edge = 26.952655126018;
+    let folded = |vertex: Option<f64>| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "active": true, "thickness": "2 mm", "bend_radius": "3 mm", "k_factor": 0.44}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let mut points = vec![json!([0, 0]), json!([200, 0]), json!([200, 100]), json!([0, 100])];
+        if let Some(d) = vertex {
+            points.insert(2, json!([200, edge + d]));
+        }
+        let lines: Vec<String> = (1..=points.len()).map(|i| format!("l{i}")).collect();
+        run(&mut s, "sketch.line", json!({"closed": true, "points": points}));
+        run(&mut s, "sketch.constraint.fix", json!({"entities": lines}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "S", "rule": "Rule", "name": "Base"}));
+        run(
+            &mut s,
+            "sheet.fold",
+            json!({"points": [[0, 30, 0], [200, 30, 0]], "angle": "90 deg", "position": "centerline", "fixed": [100, 10, 0], "name": "Fold"}),
+        );
+        volume(&mut s)
+    };
+    let plain = folded(None);
+    assert!(plain > 40_000.0 + 1.0, "{plain}");
+    for d in [0.0, 2e-7, -2e-7, -1e-6, 1e-4] {
+        let v = folded(Some(d));
+        assert!(rel(v, plain) < 1e-9, "vertex {d:e} beside the zone's edge: volume {v}, {plain} without it");
     }
 }

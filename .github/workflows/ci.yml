@@ -177,6 +177,7 @@ jobs:
       # CLI that job builds on its warm disk; when the native checks don't run (a change to python/
       # alone), in Reference tests.
       python: ${{ steps.paths.outputs.python }}
+      typescript: ${{ steps.paths.outputs.typescript }}
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
       deps: ${{ steps.paths.outputs.deps }}
@@ -235,6 +236,7 @@ jobs:
           wasm=false
           solidcore=false
           python=false
+          typescript=false
           full=true
           packages=
           queue_tested=false
@@ -309,6 +311,12 @@ jobs:
           # share it; no other pull request runs the client's tests (the release job runs them too).
           python_paths() {
             if grep -qzE '^(python/|xtask/src/python\.rs$|packaging/python/|crates/mcp/|crates/engine/src/schema/)' "$1"; then python=true; fi
+          }
+          # Whether they reach the TypeScript client (typescript): the package and its tests, its
+          # generator (which shares the Python generator's CLI helpers), its CI script, and the
+          # command schemas its bindings are generated from.
+          typescript_paths() {
+            if grep -qzE '^(typescript/|xtask/src/(typescript|python)\.rs$|scripts/ci/typescript-client\.sh$|crates/engine/src/schema/)' "$1"; then typescript=true; fi
           }
           # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
           # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
@@ -422,6 +430,7 @@ jobs:
               deps_wasm_paths "$RUNNER_TEMP/ci-paths"
               solidcore_paths "$RUNNER_TEMP/ci-paths"
               python_paths "$RUNNER_TEMP/ci-paths"
+              typescript_paths "$RUNNER_TEMP/ci-paths"
               if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
                 gpu_paths=true
               fi
@@ -454,6 +463,7 @@ jobs:
             wasm=false
             solidcore_paths "$RUNNER_TEMP/ci-paths"
             python_paths "$RUNNER_TEMP/ci-paths"
+            typescript_paths "$RUNNER_TEMP/ci-paths"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -480,6 +490,7 @@ jobs:
             oracle=false
             solidcore=false
             python=false
+            typescript=false
           fi
           # A change that already passed (scripts/ci/main_merge.py): the same commit again (a label
           # added again, approved-for-ci after a pass, a reopen), a "Re-run all jobs" after a pass, a
@@ -498,6 +509,7 @@ jobs:
               native=false
               solidcore=false
               python=false
+              typescript=false
             fi
           fi
           # The build-variant checks guard the manifests and the feature-gated code. On a pull request
@@ -577,6 +589,7 @@ jobs:
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "python=$python"
+            echo "typescript=$typescript"
             echo "doctests=$doctests"
             echo "deps=$deps"
             echo "wasm=$wasm"
@@ -1045,6 +1058,19 @@ jobs:
           cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
           [ -x "$cli" ] || cargo build -p solidcraft-cli --profile ci --locked
           scripts/ci/python-client.sh "$cli"
+      # The TypeScript client's bindings, type check and tests (Select checks' `typescript`),
+      # against the same CLI: they build the examples into designs and reopen them.
+      - name: Set up bun for the TypeScript client
+        if: needs.changes.outputs.warm != 'true' && needs.changes.outputs.typescript == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: TypeScript client tests
+        if: needs.changes.outputs.warm != 'true' && needs.changes.outputs.typescript == 'true'
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          [ -x "$cli" ] || cargo build -p solidcraft-cli --profile ci --locked
+          scripts/ci/typescript-client.sh "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -1357,7 +1383,7 @@ jobs:
     # Also the Python client's tests (Select checks' `python`) when the native checks don't run
     # (a change to python/ alone): they need the CLI this job builds, so they reuse its build and
     # caches. With the native checks, Native Linux tests runs them against its own build instead.
-    if: needs.changes.outputs.oracle == 'true' || (needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true')
+    if: needs.changes.outputs.oracle == 'true' || ((needs.changes.outputs.python == 'true' || needs.changes.outputs.typescript == 'true') && needs.changes.outputs.native != 'true')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
@@ -1405,6 +1431,14 @@ jobs:
       - name: Python client tests
         if: needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true'
         run: scripts/ci/python-client.sh "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+      - name: Set up bun for the TypeScript client
+        if: needs.changes.outputs.typescript == 'true' && needs.changes.outputs.native != 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: TypeScript client tests
+        if: needs.changes.outputs.typescript == 'true' && needs.changes.outputs.native != 'true'
+        run: scripts/ci/typescript-client.sh "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
       - name: Upload the report
         if: always() && needs.changes.outputs.oracle == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1647,6 +1681,7 @@ jobs:
           WINDOWS: ${{ needs.changes.outputs.windows }}
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
           PYTHON_RUN: ${{ needs.changes.outputs.python }}
+          TYPESCRIPT_RUN: ${{ needs.changes.outputs.typescript }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
           # The build-variant checks: with the native flag, except on a pull request that does not
@@ -1712,7 +1747,7 @@ jobs:
             test "$DOCS" = success
           fi
           # The Python client's tests run in Reference tests only without the native checks.
-          if [ "$ORACLE_RUN" = true ] || { [ "$PYTHON_RUN" = true ] && [ "$NATIVE" != true ]; }; then
+          if [ "$ORACLE_RUN" = true ] || { { [ "$PYTHON_RUN" = true ] || [ "$TYPESCRIPT_RUN" = true ]; } && [ "$NATIVE" != true ]; }; then
             test "$ORACLE" = success
           fi
           if [ "$WINDOWS" = true ]; then
