@@ -167,6 +167,17 @@ mod weld_tests {
             let back: WeldSettings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
             assert_eq!(back, settings);
         }
+        let layered =
+            WeldSettings { weld_type: "butt".into(), size: [("h".into(), 1.)].into_iter().collect(), passes: vec![1, 2, 3], ..Default::default() };
+        layered.validate().unwrap();
+        let back: WeldSettings = serde_json::from_value(serde_json::to_value(&layered).unwrap()).unwrap();
+        assert_eq!(back, layered);
+        assert!(serde_json::to_value(WeldSettings::default()).unwrap().get("passes").is_none(), "no layout saves no passes");
+        for (weld_type, passes) in [("spot", vec![1]), ("butt", vec![0]), ("butt", vec![1; 21])] {
+            let size = if weld_type == "spot" { ("d".into(), 5.) } else { ("h".into(), 1.) };
+            let settings = WeldSettings { weld_type: weld_type.into(), size: [size].into_iter().collect(), passes, ..Default::default() };
+            assert!(settings.validate().is_err(), "{settings:?}");
+        }
         for n in [0., -1., 1.5, f64::NAN, f64::INFINITY] {
             let settings = WeldSettings {
                 weld_type: "tack".into(),

@@ -98,6 +98,10 @@ pub struct WeldSettings {
     pub field_weld: bool,
     pub all_around: bool,
     pub passes_shown: bool,
+    /// The pass layout shown when `passes_shown` is on: passes per layer, root first (none: one
+    /// pass). Fillet, butt, edge, plug and surfacing welds only ([`crate::weld_passes`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub passes: Vec<u32>,
     pub penetration_shown: bool,
     pub side: String,
     pub ends: String,
@@ -134,6 +138,7 @@ impl Default for WeldSettings {
             field_weld: false,
             all_around: false,
             passes_shown: false,
+            passes: Vec::new(),
             penetration_shown: false,
             side: "arrow".into(),
             ends: "square".into(),
@@ -259,6 +264,12 @@ impl WeldSettings {
             if !valid {
                 return Err("tack sizes must match its mode; n must be a positive integer".into());
             }
+        }
+        if !self.passes.is_empty() {
+            if !["fillet", "butt", "edge", "plug", "surfacing"].contains(&self.weld_type.as_str()) {
+                return Err("pass layouts are for fillet, butt, edge, plug and surfacing welds".into());
+            }
+            crate::weld_passes::check_layout(&self.passes).map_err(|e| e.to_string())?;
         }
         if self.root_gap.is_some_and(|v| !v.is_finite() || !(0.0..=MAX_DIMENSION_MM).contains(&v)) {
             return Err("root gap must be finite and between 0 and 100000 mm".into());
