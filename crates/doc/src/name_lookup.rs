@@ -453,8 +453,13 @@ fn recover_numbered_edge_of_split_face(b: &ModelBody, name: &str, near: Vec3) ->
     let [x, y] = parts.as_slice() else { return None };
     let faces = naming::names(b);
     let level = |f: u32, n: &str| crate::history_names::matches(&faces, f as usize, n).filter(|l| exactly(*l));
-    // Both faces answer exactly, and at least one is a piece of the saved face.
-    let between = |p: u32, q: u32| level(p, x).zip(level(q, y)).is_some_and(|(lp, lq)| lp == Match::Piece || lq == Match::Piece);
+    // A piece named after the faces around it. A numbered piece (`F4:top#2`) also answers to a
+    // saved sibling (`F4:top#1`) as a piece, but nothing split it: like-named faces told apart only
+    // by where they lie, whose edges the saved number still tells apart (#22418).
+    let split = |f: u32| faces.faces.get(f as usize).and_then(|n| crate::piece_names::piece_parts(n)).is_some_and(|(_, around)| !around.is_empty());
+    // Both faces answer exactly, and at least one is a piece of the saved face, split since.
+    let between =
+        |p: u32, q: u32| level(p, x).zip(level(q, y)).is_some_and(|(lp, lq)| (lp == Match::Piece && split(p)) || (lq == Match::Piece && split(q)));
     let reach = pick_reach(b);
     let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
         let [p, q] = e.uses.as_slice() else { return false };
