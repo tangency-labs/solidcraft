@@ -222,10 +222,15 @@ such numbers, and only while the body's box is still the one the edge was picked
 Align, or pattern or mirror of bodies comes before the fillet in the timeline: a pick is not updated
 when an edit moves the body, and could then lie on the other cap's edge (half a turn about the
 box's centre keeps the box). A pick on the
-named edge, or on an edge named otherwise, keeps the edge the name finds. Other references to such
+named edge, or on an edge named otherwise, keeps the edge the name finds. Where only one of the
+faces told apart by the number meets the edge's other face, the stored name finds no edge at all
+(#22418: 0.43.0 saved a round on a flange's `bottom#1|…~1` edge, the cap that is `bottom#2` now):
+the pick decides there too, under the same conditions, and without them the fillet asks for the
+edge again. Other references to such
 a face or edge (a sketch on a cap, a projection, a later feature on the round's faces) still follow
 the number. Test:
-`a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on`
+`a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on` and
+`a_round_saved_with_the_other_caps_number_finds_its_edge_at_its_pick`
 (`crates/engine/src/naming_history_tests.rs`).
 
 Round edge numbers (#14479): where a fillet or chamfer rounded one of several edges between the
