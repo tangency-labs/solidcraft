@@ -650,8 +650,8 @@ fn sync_joint_side_inputs(app: &SolveApp, was: [bool; 2], f: &JointForm, inputs:
     };
     let mut rebuilt = Vec::new();
     let mut cursor = 0;
-    for row in 0..2 {
-        let old_len = if was[row] { 3 } else { 1 };
+    for (row, &was_between) in was.iter().enumerate() {
+        let old_len = if was_between { 3 } else { 1 };
         let old_slice = inputs.get(cursor..cursor + old_len).unwrap_or(&[]);
         cursor += old_len;
         if f.between_faces[row] {
@@ -660,7 +660,7 @@ fn sync_joint_side_inputs(app: &SolveApp, was: [bool; 2], f: &JointForm, inputs:
             } else {
                 ("joint.side_2_face_1", "joint.side_2_face_2", "joint.side_2_snap")
             };
-            if was[row] && old_slice.len() == 3 {
+            if was_between && old_slice.len() == 3 {
                 rebuilt.extend_from_slice(old_slice);
             } else {
                 let mut f1 = SelInput::new(l1, PLANAR_FACES, false);
@@ -673,9 +673,7 @@ fn sync_joint_side_inputs(app: &SolveApp, was: [bool; 2], f: &JointForm, inputs:
             }
         } else {
             let label = if row == 0 { "Component 1" } else { "Component 2" };
-            if !was[row]
-                && let Some(old) = old_slice.first()
-            {
+            if !was_between && let Some(old) = old_slice.first() {
                 rebuilt.push(old.clone());
             } else {
                 let mut single = SelInput::new(label, SNAPS, false);
