@@ -3736,7 +3736,8 @@ fn add_copy_of_features(s: &mut Session, p: &Value, mut kind: FeatureKind, featu
     let owner = match owners.as_slice() {
         [] => s.active_component,
         [one] => *one,
-        _ => return Err(bad(cmd, "the features to copy belong to different components: copy each component's features separately")),
+        // Features of several components keep the replay's own mapping, as before.
+        _ => return add_feature(s, p, kind),
     };
     if !crate::frames::placed(s) {
         return add_feature(s, p, kind);
@@ -3745,6 +3746,12 @@ fn add_copy_of_features(s: &mut Session, p: &Value, mut kind: FeatureKind, featu
         // Authored in the active component's frame, where `frames` leaves a named plane as it is.
         let target = if crate::frames::mapped() { s.active_component_frame() } else { solidcraft_doc::IDENTITY };
         mirror_plane_into(s, &mut kind, &target);
+        return add_feature(s, p, kind);
+    }
+    // Only features that make bodies of their own are copied in their component's frame. A join,
+    // cut or round acts on bodies that may belong to other components, which replay maps itself.
+    let own_bodies = features.iter().all(|f| s.model.state().bodies.iter().any(|b| b.feature == f.0));
+    if !own_bodies {
         return add_feature(s, p, kind);
     }
     let owner_frame = s.placed_document().component_transform(owner);
