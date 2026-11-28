@@ -688,6 +688,12 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "browser_body_features",
                         value: |p| &mut p.browser_body_features,
                     },
+                    Check {
+                        label: "prefs.browser_component_colors",
+                        help: "prefs.browser_component_colors_note",
+                        key: "browser_component_colors",
+                        value: |p| &mut p.browser_component_colors,
+                    },
                 ],
             );
         });

@@ -1962,6 +1962,24 @@ fn component_name(app: &SolveApp, id: u64) -> String {
     crate::dialogs_part_size::browser_label(app, id, &name)
 }
 
+/// The identification colour a component's rows are marked with (#16677): the colour it was
+/// given, or, while Component Colors is on, the automatic colour the 3D view tints its bodies
+/// with. None for the design row, for a component left on its automatic colour while the switch
+/// is off, and while the Browser's component colours are turned off in Preferences
+/// (`browser_component_colors`, #16677). The Render workspace keeps the slot for the appearance
+/// swatch, which its rows draw in place of the icon.
+fn component_swatch(app: &SolveApp, component: u64) -> Option<Color32> {
+    if component == 0 || !app.preferences.browser_component_colors || crate::render_workspace::active(app) {
+        return None;
+    }
+    let own = app.session.doc.components.iter().any(|c| c.id == component && c.identification_color.is_some());
+    if !own && app.session.colored_components.is_none() {
+        return None;
+    }
+    let [r, g, b] = app.session.doc.component_identification_color(component);
+    Some(Color32::from_rgb(r, g, b))
+}
+
 fn component_rows(app: &mut SolveApp, rows: &mut Rows<'_>, id: u64, depth: usize, acts: &mut Actions, cache: &mut cache::Cache) {
     let mut root = std::mem::take(&mut cache.root);
     component_rows_inner(app, rows, id, depth, acts, cache, &mut root);
@@ -1998,6 +2016,7 @@ fn component_rows_inner(
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
     // A search never matches the design itself: it is the matches' parent, dimmed.
     let searching = app.tree.search.on();
+    let swatch = appearance.swatch.or_else(|| component_swatch(app, id));
     let row = Row {
         depth,
         fold: Some(open),
@@ -2011,7 +2030,7 @@ fn component_rows_inner(
         radio: Some(active),
         badges,
         icon_badge: link.as_ref().map(|link| link.icon_badge()),
-        swatch: appearance.swatch,
+        swatch,
         secondary: &appearance.name,
         count: &appearance.count,
         // The design holds everything the tree lists.
@@ -2187,13 +2206,14 @@ fn occurrence_rows_inner(
     } else {
         crate::render_workspace::scene::Decoration::default()
     };
+    let swatch = appearance.swatch.or_else(|| component_swatch(app, placement.component));
     let row = Row {
         depth,
         fold: folds.then_some(open),
         eye: Some(own_visible),
         icon: "component",
         label: &placement.label,
-        swatch: appearance.swatch,
+        swatch,
         secondary: &appearance.name,
         count: &appearance.count,
         name: true,

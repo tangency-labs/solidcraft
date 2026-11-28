@@ -5554,6 +5554,7 @@ mod tests {
             ("ribbon_menus_skip_pinned", "prefs.layout_page.pinned_menus"),
             ("ribbon_menus_follow_hover", "prefs.layout_page.hover_panel_menus"),
             ("pinned_constraints_in_grid", "prefs.pinned_constraints_in_grid"),
+            ("browser_component_colors", "prefs.browser_component_colors"),
         ];
         // A fractional display scale (#16542) as well as whole points.
         for (width, scale) in [(1600, 1.0), (1500, 1.75), (1100, 1.0), (960, 1.25), (800, 1.0), (640, 1.5)] {
