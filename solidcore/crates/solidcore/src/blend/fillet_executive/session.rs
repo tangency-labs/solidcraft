@@ -5885,10 +5885,12 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     return Ok(());
                 }
                 // The fork's (smlib 41a39ec): an End at a smooth vertex's patch is its cap
-                // (SmBlendCorner::CreateEndPatchOfEnd)
-                if corner.blend.is_some_and(|blend| {
-                    blend.is_end() && blend.end == crate::blend::blend_corner::BlendEnd::AtSmooth
-                }) {
+                // (SmBlendCorner::CreateEndPatchOfEnd); so is a capped End's whose rail never
+                // reaches its side edge
+                if corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::has_end_cap)
+                {
                     let mut no_note = |_: &FilletCorner| {};
                     let built = {
                         let mut env = CornerPatchEnv {

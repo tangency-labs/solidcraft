@@ -9448,3 +9448,263 @@ fn a_wing_through_its_cusps_rolls_over_alike_on_either_side() {
         }
     }
 }
+
+/// The 12-lobed disc's lobe `i`: the centre of its tip arc (radius [`LOBE_R`], 48 from the
+/// axis) and the arc's start and end angles about it (110 degrees).
+fn lobe(i: usize) -> ([f64; 2], f64, f64) {
+    let theta_mid = (i as f64 + 0.5) * std::f64::consts::TAU / 12.0;
+    let c = [48.0 * theta_mid.cos(), 48.0 * theta_mid.sin()];
+    let half = 55.0_f64.to_radians();
+    (c, theta_mid - half, theta_mid + half)
+}
+
+/// The lobe arcs' radius.
+const LOBE_R: f64 = 7.0;
+
+/// The cubic Bezier from valley `i` (40 from the axis) to lobe `i`'s start: its control points
+/// sit 43 and `bulge` from the axis, 4 and 7 degrees from the valley. (The spline after the
+/// lobe is its mirror image about the lobe's middle.)
+fn spline_before_lobe(i: usize, bulge: f64) -> [[f64; 2]; 4] {
+    let theta_i = i as f64 * std::f64::consts::TAU / 12.0;
+    let pt = |r: f64, a: f64| [r * a.cos(), r * a.sin()];
+    let (c, start, _) = lobe(i);
+    [
+        pt(40.0, theta_i),
+        pt(43.0, theta_i + 4.0_f64.to_radians()),
+        pt(bulge, theta_i + 7.0_f64.to_radians()),
+        [c[0] + LOBE_R * start.cos(), c[1] + LOBE_R * start.sin()],
+    ]
+}
+
+/// A 12-lobed disc, `height` thick: lobe tip arcs of radius 7 about centres 48 from the axis
+/// (110 degrees each), joined by cubic Bezier splines through the valleys 40 from the axis
+/// ([`spline_before_lobe`] and its mirror image). At `bulge` 47 the spline dips inside its
+/// lobe's circle by more than half a millimetre before the lobe, at 49 by less (0.37 at the
+/// nearest), at 51 it arrives from outside.
+fn lobed_disc(height: f64, bulge: f64) -> Body {
+    let mut profile = Vec::new();
+    let bezier = |p: [[f64; 2]; 4]| Curve::Nurbs {
+        degree: 3,
+        points: p.iter().map(|q| [q[0], q[1], 0.0, 1.0]).collect(),
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    };
+    for i in 0..12 {
+        let (c, start, end) = lobe(i);
+        profile.push(bezier(spline_before_lobe(i, bulge)));
+        profile.push(Curve::Arc {
+            center: [c[0], c[1], 0.0],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: LOBE_R,
+            start,
+            end,
+        });
+        // the spline after the lobe: the next valley's spline mirrored about the lobe's middle
+        let theta_mid = (i as f64 + 0.5) * std::f64::consts::TAU / 12.0;
+        let mirror = |p: [f64; 2]| {
+            let (cs, sn) = ((2.0 * theta_mid).cos(), (2.0 * theta_mid).sin());
+            [cs * p[0] + sn * p[1], sn * p[0] - cs * p[1]]
+        };
+        let before = spline_before_lobe(i, bulge);
+        profile.push(bezier([
+            mirror(before[3]),
+            mirror(before[2]),
+            mirror(before[1]),
+            mirror(before[0]),
+        ]));
+    }
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        height,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// The volume a round of radius `r` on lobe 0's arc (radius `R` = [`LOBE_R`]) takes off
+/// past one of its vertices, by Pappus about the lobe's axis: at each station past the vertex
+/// the round takes the section between its rail on the top face (`R - r` from the axis) and
+/// the spline's edge (`rho` from the axis), above the torus, whose first moment about the
+/// axis is `m(rho) = ∫_{R-r}^{rho} x (r - sqrt(r^2 - (x - R + r)^2)) dx` in closed form;
+/// integrated over the spline's angle from the vertex back to where the spline reaches the
+/// rail (the End on the end face: the rail crosses the spline's edge there) or, where it
+/// never does, to its nearest approach to the axis (the capped End: cut square to the rail
+/// there). Returns the volume and whether the spline reaches the rail.
+fn run_on_past_vertex(bulge: f64, r: f64) -> (f64, bool) {
+    let big_r = LOBE_R;
+    let a = big_r - r;
+    let moment = |rho: f64| {
+        let u = (rho - a).clamp(0.0, r);
+        let q = (r * r - u * u).max(0.0).sqrt();
+        r * (u * u / 2.0 + a * u) + q.powi(3) / 3.0
+            - r.powi(3) / 3.0
+            - a * ((u / 2.0) * q + (r * r / 2.0) * (u / r).clamp(-1.0, 1.0).asin())
+    };
+    let (c, _, _) = lobe(0);
+    let p = spline_before_lobe(0, bulge);
+    let at = |t: f64| {
+        let b = [
+            (1.0 - t).powi(3),
+            3.0 * t * (1.0 - t).powi(2),
+            3.0 * t * t * (1.0 - t),
+            t.powi(3),
+        ];
+        let x = (0..4).map(|k| b[k] * p[k][0]).sum::<f64>() - c[0];
+        let y = (0..4).map(|k| b[k] * p[k][1]).sum::<f64>() - c[1];
+        (x.hypot(y), y.atan2(x))
+    };
+    // from the vertex (t = 1) back along the spline, to the rail or to the nearest approach
+    let n: i32 = 200_000;
+    let mut volume = 0.0;
+    let mut prev = at(1.0);
+    let mut t_prev = 1.0;
+    for i in 1..=n {
+        let t = 1.0 - f64::from(i) / f64::from(n);
+        let (rho, phi) = at(t);
+        if rho < a {
+            // the crossing, by interpolation in the step
+            let f = (prev.0 - a) / (prev.0 - rho);
+            let phi_x = prev.1 + f * (phi - prev.1);
+            volume += 0.5 * (moment(prev.0) + moment(a)) * (phi_x - prev.1).abs();
+            return (volume, true);
+        }
+        if rho > prev.0 && i > 1 {
+            // past the nearest approach: refine it by the golden section on the step before
+            let (mut lo, mut hi) = (t, t_prev + (t_prev - t));
+            let gold = 0.5 * (5.0_f64.sqrt() - 1.0);
+            for _ in 0..200 {
+                let c1 = hi - gold * (hi - lo);
+                let c2 = lo + gold * (hi - lo);
+                if at(c1).0 < at(c2).0 {
+                    hi = c2;
+                } else {
+                    lo = c1;
+                }
+            }
+            let dip = at(0.5 * (lo + hi));
+            volume += 0.5 * (moment(prev.0) + moment(dip.0)) * (dip.1 - prev.1).abs();
+            return (volume, false);
+        }
+        volume += 0.5 * (moment(prev.0) + moment(rho)) * (phi - prev.1).abs();
+        prev = (rho, phi);
+        t_prev = t;
+    }
+    (volume, false)
+}
+
+/// The volume a round of radius `r` on a lobe arc takes off between its two vertices: the
+/// section between the rails less the quarter disc, swept over the arc's 110 degrees (Pappus).
+fn capped_round(r: f64) -> f64 {
+    let rho = LOBE_R;
+    (r * r * (rho - r / 2.0) - (PI * r * r / 4.0) * (rho - r + 4.0 * r / (3.0 * PI)))
+        * 110.0_f64.to_radians()
+}
+
+/// Rounds lobe 0's top arc edge of the disc at `bulge` with radius `r`: the volume taken off
+/// and the faces added, or the refusal.
+fn round_lobe(bulge: f64, r: f64) -> Result<(f64, usize), Error> {
+    let height = 10.0;
+    let theta_mid = 15.0_f64.to_radians();
+    let b = lobed_disc(height, bulge);
+    let before = volume(&b);
+    let faces = b.counts().unwrap()[0];
+    let e = edge_at(&b, [55.0 * theta_mid.cos(), 55.0 * theta_mid.sin(), height]);
+    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)?;
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "bulge {bulge} r {r}: {report}");
+    Ok((before - volume(&b), b.counts().unwrap()[0] - faces))
+}
+
+/// The round of one lobe arc's top edge, r 0.5, where the spline
+/// beside it dips inside the lobe's circle by less than the radius (`bulge` 49: by 0.37 at
+/// the nearest, 17.7 degrees off the arc at the vertex). The round's rail on the top face,
+/// the circle 6.5 from the lobe's centre, then never meets the spline's edge, which turns
+/// back at 6.63, and the ball meets the spline wall before its rail meets that wall's edge:
+/// the End on the end face found its rail nowhere on its side edge and the fillet was refused
+/// ("Corner Edge Computation Failure"). Now the round runs on past the vertex trimmed on the
+/// spline wall as far as the wall's edge comes nearest the rail, and is cut square to the
+/// rail there with a planar cap: the volume it takes off is the arc's round (Pappus) plus the
+/// run-on past each vertex ([`run_on_past_vertex`]), two caps and the round added. Where the
+/// spline dips deeper than the radius (`bulge` 47) the rail meets it, the round runs on to
+/// the crossing as before, with no cap: the same integral, to the crossing. Where the spline
+/// leaves the arc within the kernel's tangency tolerance (`bulge` 50, 8.9 degrees) the vertex
+/// is smooth and the End is the smooth End's cap at the vertex, the arc's round alone.
+#[test]
+fn a_round_whose_rail_never_reaches_the_dipping_side_edge_is_capped_past_the_vertex() {
+    all_fixes();
+    let r = 0.5;
+    for (bulge, caps) in [(47.0, false), (49.0, true)] {
+        let (removed, added) =
+            round_lobe(bulge, r).unwrap_or_else(|e| panic!("bulge {bulge}: {e:?}"));
+        let (run_on, crosses) = run_on_past_vertex(bulge, r);
+        assert_eq!(crosses, !caps, "bulge {bulge}");
+        assert_eq!(
+            added,
+            if caps { 3 } else { 1 },
+            "bulge {bulge}: the round, and the two caps"
+        );
+        let want = capped_round(r) + 2.0 * run_on;
+        assert!(
+            (removed - want).abs() <= 1e-6,
+            "bulge {bulge}: removed {removed} against the round and its run-on {want}"
+        );
+    }
+    let (removed, added) = round_lobe(50.0, r).unwrap();
+    assert_eq!(added, 3, "the smooth End's two caps");
+    assert!(
+        (removed - capped_round(r)).abs() <= 1e-7,
+        "smooth vertex: removed {removed} against the arc's round {}",
+        capped_round(r)
+    );
+}
+
+/// The volume the round takes off is continuous in the spline's
+/// position across the point where its edge stops reaching the rail (r 0.5: `bulge` 48.11
+/// reaches it, 48.2 does not), the End on the end face and the capped End being one
+/// construction: at every `bulge` the volume is the arc's round plus the run-on integral
+/// ([`run_on_past_vertex`]) to the crossing or to the nearest approach, within 1e-6. In the
+/// band where the edge misses the rail by less than the cap can be built from (the round
+/// dips under the edge by less than the kernel's tolerance at the crest: a gap below about
+/// sqrt(2 r 1e-5) = 3e-3, `bulge` 48.12 to 48.14) the End is refused naming the radius
+/// whose rail the edge reaches, just below 0.5 ([`Error::TooLarge`] with that size).
+#[test]
+fn the_volume_is_continuous_where_the_side_edge_stops_reaching_the_rail() {
+    all_fixes();
+    let r = 0.5;
+    let mut refused = Vec::new();
+    for bulge in [
+        48.0, 48.05, 48.1, 48.11, 48.13, 48.2, 48.3, 48.5, 49.0, 49.5,
+    ] {
+        match round_lobe(bulge, r) {
+            Ok((removed, _)) => {
+                let (run_on, _) = run_on_past_vertex(bulge, r);
+                let want = capped_round(r) + 2.0 * run_on;
+                assert!(
+                    (removed - want).abs() <= 1e-6,
+                    "bulge {bulge}: removed {removed} against the round and its run-on {want}"
+                );
+            }
+            Err(Error::TooLarge {
+                size,
+                kind: FitKind::Radius,
+                ..
+            }) => {
+                // the radius whose rail the edge reaches: the round's less the gap
+                assert!(
+                    size < r && size > r - 0.01,
+                    "bulge {bulge}: the fit {size} is not just below the radius"
+                );
+                refused.push(bulge);
+            }
+            Err(e) => panic!("bulge {bulge}: {e:?}"),
+        }
+    }
+    assert_eq!(
+        refused,
+        vec![48.13],
+        "the band where the cap would be thinner than the tolerance"
+    );
+}

@@ -1520,10 +1520,11 @@ impl FilletCorner {
         {
             return Ok(());
         }
-        // the fork's (41a39ec): an End at a smooth vertex's patch is its cap
+        // the fork's (41a39ec): an End at a smooth vertex's patch is its cap; so is a capped
+        // End's whose rail never reaches its side edge
         if self
             .blend
-            .is_some_and(|blend| blend.is_end() && blend.end == BlendEnd::AtSmooth)
+            .is_some_and(crate::blend::blend_corner::BlendCorner::has_end_cap)
         {
             let built = env.with_patch_env(|env| {
                 crate::blend::blend_corner::end::create_end_cap_patch(self, env)
