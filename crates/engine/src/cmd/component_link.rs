@@ -27,7 +27,7 @@ use crate::schema::component_link::{
     InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams,
     RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
-use crate::schema::{TypedContract, output_schema_for};
+use crate::schema::{Contract, TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
@@ -2480,6 +2480,15 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
+    // Refuse unsupported inputs even when optional session contract checking is off. Use the
+    // published keys so a future supported parameter needs no separate allowlist.
+    if let Some(params) = p.as_object() {
+        let allowed = INSERT_DESIGN_CONTRACT.allowed_keys();
+        if let Some(key) = params.keys().find(|key| !allowed.contains(*key)) {
+            let key: String = key.chars().take(64).collect();
+            return Err(bad(cmd, format!("unknown parameter `{key}`")));
+        }
+    }
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {

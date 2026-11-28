@@ -243,6 +243,35 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
 }
 
+#[test]
+fn insert_design_refuses_unknown_keys_in_every_check_mode() {
+    use crate::schema::{Contract, TypedContract};
+    let dir = folder("insert-unknown-keys");
+    let path = dir.join("plate.solidcraft");
+    save_box(&path, 10);
+    let allowed = TypedContract::<InsertDesignParams>::new().allowed_keys();
+    for mode in ParamCheck::ALL {
+        let mut s = Session { param_check: mode, ..Session::default() };
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        for (key, value) in [("bogus_key", json!(1)), ("parameters", json!({"L": "40 mm"})), ("parametres", json!({}))] {
+            // A later contract may implement parameters; only unsupported keys must be refused.
+            if allowed.contains(key) {
+                continue;
+            }
+            let mut p = json!({"path": path, "name": "Plate"});
+            p[key] = value;
+            let error = s.execute("component.insert_design", &p).unwrap_err().to_string();
+            assert!(error.contains(key), "{mode:?}: {error}");
+            assert_eq!(s.doc.to_json(), before);
+            assert_eq!(s.undo.len(), undo);
+        }
+        let inserted = s.execute("component.insert_design", &json!({"path": path, "name": "Plate"})).unwrap();
+        assert!(inserted["component"].is_number());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Insert (new, reused, in a parent, placed), list, update (with a design that can't be read
 /// named in `failed`), relink (one placement, then all) and break, in Warn: each real reply matches its output schema and
 /// carries no warning. A list the network or a device refuses has the other shapes of an entry.
