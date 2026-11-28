@@ -1157,6 +1157,71 @@ fn a_box_whose_posts_have_rounded_tops_shells() {
     }
 }
 
+/// #14370 as reported: the posts' body with the box's four corners above the posts chamfered
+/// 4, shelled t inward, open at the top. Each chamfer's foot ends where its post's round ends,
+/// so four faces meet there: the box's wall, the chamfer, the post's top and the round. The
+/// input has 22 faces (the chamfers 4 more), 52 edges and 32 vertices, 8 of them those
+/// four-face corners. The shell keeps the 21 faces left with their 52 edges and 32 vertices,
+/// adds their 21 offsets with the 44 edges and 24 vertices off the top, and the top's ring with
+/// its inner 8 edges and 8 vertices; each four-face corner's offset is two vertices joined by a
+/// new edge, the wall's offset along the post top's between the round's and the chamfer's:
+/// 43 faces, 112 edges, 72 vertices, one shell. Along the wall x = a - t (and likewise
+/// y = c - t) the round's end is at sqrt(16 - t^2) from the post's axis, as without the
+/// chamfers, and the chamfer's offset |x| + |y| = a + c - 4 - t sqrt 2 crosses it at
+/// c - 4 + t - t sqrt 2 from the box's middle.
+#[test]
+fn a_box_whose_rounded_posts_end_at_chamfered_corners_shells() {
+    use solidcore::query::api_queries::point_distance;
+    all_fixes();
+    let (a, c) = (41.0, 23.5);
+    // ops computes no square root: (t, sqrt(16 - t^2), t - t sqrt 2) written out
+    for (t, along, chamfer) in [
+        (0.5, 3.968_626_966_596_886, -0.207_106_781_186_547_57),
+        (1.0, 3.872_983_346_207_417, -0.414_213_562_373_095_15),
+    ] {
+        let b = posts_with_rounded_tops();
+        let corners: Vec<usize> = [(-a, -c), (a, -c), (a, c), (-a, c)]
+            .iter()
+            .map(|&(x, y)| edge_at(&b, [x, y, 15.0]))
+            .collect();
+        blend(&b, Blend::Chamfer, &corners, &[4.0], &[], Corners::Filled).unwrap();
+        assert_eq!(b.counts().unwrap(), [22, 52, 32]);
+        let o = order(&b);
+        let lid = through(&b, &o, [0.0, 0.0, 20.0]);
+        shell(&b, &o, &[lid], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        assert_eq!(b.counts().unwrap(), [43, 112, 72], "t {t}");
+        let record = b.to_record().unwrap().0;
+        assert_eq!(record.shells.len(), 1, "t {t}");
+        assert!(b.is_manifold_solid().unwrap(), "t {t}");
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        // the two vertices of each four-face corner's offset, on both walls of each corner,
+        // each the record's vertex nearest its closed form and within its own tolerance of it
+        for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            for [x, y] in [
+                [sx * (a - t), sy * (c - along)],
+                [sx * (a - t), sy * (c - 4.0 + chamfer)],
+                [sx * (a - along), sy * (c - t)],
+                [sx * (a - 4.0 + chamfer), sy * (c - t)],
+            ] {
+                let want = Point3::new(x, y, 10.0 - t);
+                let (near, tol) = record
+                    .vertices
+                    .iter()
+                    .map(|v| {
+                        let p = Point3::new(v.point[0], v.point[1], v.point[2]);
+                        (point_distance(p, want).unwrap().value, v.tolerance)
+                    })
+                    .fold((f64::INFINITY, 0.0), |m, x| if x.0 < m.0 { x } else { m });
+                assert!(
+                    near <= tol,
+                    "t {t}: no vertex at {want:?} ({near}, tolerance {tol})"
+                );
+            }
+        }
+    }
+}
+
 /// `body` with its face through `at` split by the plane `z = height`.
 fn split_at_height(body: &Body, at: [f64; 3], height: f64) -> Body {
     let plane = ([0.0, 0.0, height], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
