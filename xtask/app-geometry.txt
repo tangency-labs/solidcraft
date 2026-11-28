@@ -1150,7 +1150,6 @@ crates/kernel/src/surface_ruled.rs:end_directions normalized
 crates/kernel/src/surface_ruled.rs:far_curves solve
 crates/kernel/src/surface_ruled.rs:normal_at cross,normalized
 crates/kernel/src/surface_ruled.rs:planned dot,normalized
-crates/kernel/src/surface_ruled.rs:ruled_surface_with dot
 crates/kernel/src/surface_trim.rs:nearest_faces triangles
 crates/kernel/src/surfaces.rs:extend cross,dot,normalized
 crates/kernel/src/surfaces.rs:extrude_sheet normalized
