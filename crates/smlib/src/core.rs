@@ -56,7 +56,7 @@ pub(crate) use convert::from_arrays;
 pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
     area, bounds, check, check_local, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance,
-    is_manifold_solid, mass_properties, solid_count,
+    face_flat_corners, is_manifold_solid, mass_properties, solid_count,
 };
 
 /// A solidcore body: solidcore-ops' own, with its own lock (solidcore's operations take

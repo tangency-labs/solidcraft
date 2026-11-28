@@ -206,6 +206,27 @@ fn a_local_check_passes_where_the_body_does() {
     assert!(past(&[], &[order.edges.len()]));
 }
 
+/// A box's faces are planes whose u and v directions are square everywhere: none has a flat
+/// corner. A face past the record's is an argument error. (A surface with flat corners is
+/// SolidCraft's boundary surface over a loop of tangent arcs, tested where it is built.)
+#[test]
+fn a_box_has_no_flat_corners() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let order = b.to_record().unwrap().1;
+    for f in 0..order.faces.len() {
+        assert_eq!(
+            b.face_flat_corners(&order, f).unwrap(),
+            Vec::<[f64; 3]>::new(),
+            "face {f}"
+        );
+    }
+    assert!(matches!(
+        b.face_flat_corners(&order, order.faces.len()),
+        Err(Error::Argument)
+    ));
+}
+
 /// The local check runs the tolerance pass on the edges it is given. A box edge whose curve is
 /// moved 0.01 off its two faces (its tolerance is 5e-6) fails it there, with the pass's own
 /// reports (`SmBrep` list 2 about the edge's uses): its vertex/edge gaps (tests 0 and 2) and its

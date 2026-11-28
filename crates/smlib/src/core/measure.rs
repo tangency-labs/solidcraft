@@ -220,6 +220,13 @@ pub(crate) fn check_local(body: &Body, faces: &[usize], edges: &[usize], level: 
     Ok(CheckReport { failures: c.failures, text: c.text })
 }
 
+/// The flat corners of face `face`'s surface (the body's face order), as points:
+/// [`Body::face_flat_corners`]. A body others read: a read is never stopped part way.
+pub(crate) fn face_flat_corners(body: &Body, face: usize) -> Result<Vec<[f64; 3]>> {
+    let order = body.own_order();
+    crate::stop::unstoppable(|| ops_on("face_flat_corners", &[("brep", body)], || body.face_flat_corners(&order, face)))
+}
+
 /// The check's refusal as the capi words it: a test solidcore has not ported, or a body whose
 /// geometry owners' identities the check cannot know, is "not supported yet".
 fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {

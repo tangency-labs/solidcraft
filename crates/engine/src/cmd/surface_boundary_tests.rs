@@ -428,3 +428,37 @@ fn two_curves_meeting_at_a_corner_bound_their_distance_from_the_surface() {
         }
     }
 }
+
+/// #23407: a circle of radius 50 drawn as four quarter arcs, given as a network (`a1`, `a3` one
+/// way, `a2`, `a4` the other) or as a loop. Each arc runs on into the next tangent to it, so a
+/// four-sided patch has parallel directions at its corners, which Stitch's check refused (`Bad
+/// Surf FlatCorner`). The surface is the disc in the sketch's plane: one face of area 2500π, and a
+/// ruled strip 20 mm up from its rim stitches to it (one body, two faces).
+#[test]
+fn a_circle_of_four_arcs_is_a_flat_disc_that_stitches() {
+    use std::f64::consts::PI;
+    for params in
+        [json!({"sketch": "Sketch1", "u": ["a1", "a3"], "v": ["a2", "a4"]}), json!({"sketch": "Sketch1", "curves": ["a1", "a2", "a3", "a4"]})]
+    {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        for (start, end) in [([50, 0], [0, 50]), ([0, 50], [-50, 0]), ([-50, 0], [0, -50]), ([0, -50], [50, 0])] {
+            run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": start, "end": end}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        let disc = first(&run(&mut s, "surface.boundary", params.clone())["created_bodies"]);
+        let (face, _) = areas(&mut s, &disc);
+        let want = 2500.0 * PI;
+        assert!((face - want).abs() < 1e-6 * want, "{params}: {face} vs {want}");
+        let strip = first(
+            &run(
+                &mut s,
+                "surface.ruled",
+                json!({"body": disc, "edges": [[35.355339, 35.355339, 0]], "distance": 20, "mode": "direction", "direction": [0, 0, 1]}),
+            )["created_bodies"],
+        );
+        run(&mut s, "surface.stitch", json!({"bodies": [disc, strip]}));
+        let faces = run(&mut s, "model.faces", json!({"body": disc}));
+        assert_eq!(faces["faces"].as_array().map(Vec::len), Some(2), "{params}: {faces}");
+    }
+}
