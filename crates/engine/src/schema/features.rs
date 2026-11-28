@@ -195,6 +195,11 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
+    /// With `to` a face: carry the face's surface on past its edges (a plane without end; a
+    /// cylinder, cone, sphere or torus along its surface), so a profile wider than the face, or
+    /// over a bore in it, ends on it instead of being refused. Default: false.
+    #[serde(default)]
+    pub extend_to_face: Option<bool>,
     /// Start at this face or point (From Object), or at a plane or a construction point,
     /// followed when it moves. On a flat face or a plane at a slant the start follows its slope,
     /// and a distance moves it along the extrusion.
@@ -916,6 +921,11 @@ pub struct PlaneAtAngleParams {
     /// Omit to use the base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
+    /// Bring `base` onto the axis first (moved along its normal, tilted when the axis is not
+    /// parallel to it), so the plane goes through the whole axis even when it is off the base.
+    /// Not with `direction_only`. Default false: `base` turns about the axis where it is.
+    #[serde(default)]
+    pub through_axis: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }
@@ -1917,7 +1927,7 @@ fn thread_form<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
         Value::Null => Ok(None),
         Value::String(s) if ThreadForm::from_name(&s).is_some() => Ok(Some(s)),
         Value::String(s) => Err(D::Error::custom(whole(format!(
-            "unknown thread form `{s}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"
+            "unknown thread form `{s}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt, custom or square)"
         )))),
         _ => Err(D::Error::custom("must be a thread form's name")),
     }
@@ -1925,7 +1935,7 @@ fn thread_form<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
 
 fn thread_form_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "The thread's form: metric (ISO 68-1), unified (ASME B1.1), trapezoidal (ISO 2904), acme (ASME B1.5), buttress (DIN 513, 3°/30°), buttress_asme (ASME B1.9, 7°/45°), bspp (ISO 228-1, 55° parallel), rp (ISO 7-1's parallel internal thread), bspt (ISO 7-1, 55° taper) or npt (ASME B1.20.1, 60° taper). Matching ignores case and surrounding spaces. square is refused: no current standard defines it. Default: the form `designation` names, else metric.",
+        "description": "The thread's form: metric (ISO 68-1), unified (ASME B1.1), trapezoidal (ISO 2904), acme (ASME B1.5), buttress (DIN 513, 3°/30°), buttress_asme (ASME B1.9, 7°/45°), bspp (ISO 228-1, 55° parallel), rp (ISO 7-1's parallel internal thread), bspt (ISO 7-1, 55° taper), npt (ASME B1.20.1, 60° taper) or custom (not a standard: the ISO 68-1 basic profile at the included angle its designation gives, 20° to 90°). Matching ignores case and surrounding spaces. square is refused: no current standard defines it. Default: the form `designation` names, else metric.",
         "type": ["string", "null"]
     })
 }
@@ -2047,7 +2057,8 @@ pub struct ThreadParams {
     /// ISO 965-1 tolerance class kept in the callout ("M8-6g" on a shaft, "M8-6H" in a hole); unified
     /// "1/4-20 UNC-2A", "#10-32 UNF"; trapezoidal "Tr20x4", "Tr40x14(P7)"; buttress "S20x4"; acme
     /// "1/2-10 ACME"; buttress_asme "2.5-8 BUTT"; bspp "G 1/2"; rp "Rp 1/2"; bspt "R 1/2"
-    /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT". Blank text is the same as left out.
+    /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT"; custom "C10x1.5x90" (major diameter x
+    /// pitch x included angle, mm and degrees, 20° to 90°). Blank text is the same as left out.
     /// Default: the standard size that fits the face: a shaft by its major diameter, a hole by its
     /// nominal diameter (a 12 mm hole is M12), else the size whose tap drill it is.
     #[serde(default)]

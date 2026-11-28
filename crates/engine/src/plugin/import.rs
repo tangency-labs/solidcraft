@@ -304,6 +304,8 @@ fn run_importer<R>(
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })
         });
+        // The importer worker has ended, including on compilation errors or cancellation.
+        solidcraft_doc::progress::importer_stage(None);
         // Keep settings staged while the caller validates the output. Any early return drops the
         // private host and its pending settings without publishing them.
         let (mut host, imported) = result?;

@@ -165,6 +165,17 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
+For preference tables that must stay within their card, use `table_fitted` with flexible
+columns. It uses the same headers, cells and row rules, disables both scrolling axes, and
+lets column minimums yield when necessary. `table_custom` retains horizontal overflow for
+wide editable data such as configurations.
+
+Table headers are opt-in: call `Table::headers` once to add a header band, or omit it
+for a headerless table. The card, column layout, row padding and hairline rules
+remain the same. Headerless columns can use stable internal identifiers rather than
+translated headings. The Navigation mouse-mapping legend uses this mode beside its
+mouse picture, with input chips and action text in separate cells.
+
 ## Grid
 
 `Grid` is the one editable table: a cell cursor, ranges, editing, TSV copy and paste, fill down
@@ -420,6 +431,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `SelectionBar`, `SelectionAction`, `SelectionBarResponse` | Selection count, labelled actions and clear control inside the owning card. | `selected_bg`, `form_primary/ink`, `control_*`, `radius_lg`, `space_*` |
 | `Panel::feature_with_left` | Scrolling feature body and pinned bottom actions with a left footer slot, for forms that keep a live-apply control alongside Cancel/OK. | Shared feature and footer tokens |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
+| `icon_choices`, `IconChoice` | Left-aligned square icon buttons for a choice or toggles (plugin dialogs); the selected one has the accent fill and the artwork for its ink; `None` when the row does not fit | `control_height/radius`, `control_*`, `hover`, `TabAccent`, icon palette |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |

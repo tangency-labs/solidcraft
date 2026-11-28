@@ -283,7 +283,7 @@ impl SphereTile<'_> {
             let width = (galley.size().x + t.space_8).max(t.space_16);
             let badge = Rect::from_min_size(pos2(cell.right() - t.space_4 - width, cell.top() + t.space_2), vec2(width, t.space_16));
             ui.painter().rect_filled(badge, t.radius_lg, accent.ink);
-            ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+            ui.painter().galley(crate::text::centred_in(ui.painter(), &galley, badge.center()), galley, t.on_accent);
         }
         let label = Rect::from_min_max(pos2(rect.left() + t.space_3, preview.bottom() + t.space_6), rect.max - vec2(t.space_3, t.space_3));
         let font = if self.selected { crate::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };

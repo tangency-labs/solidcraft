@@ -297,6 +297,7 @@ fn the_forms_are_the_documents_and_square_is_not_offered() {
     assert_eq!(parse(ThreadForm::Trapezoidal, "M10x1"), None);
     assert_eq!(pitches(ThreadForm::Metric, 8.0, 1.25), [1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2]);
     assert_eq!(example(ThreadForm::ButtressAsme), "2.5-8 BUTT");
+    assert_eq!(example(ThreadForm::Custom), "C10x1.5x90");
     assert_eq!(example(ThreadForm::Trapezoidal), "Tr20x4");
 }
 
