@@ -2549,13 +2549,15 @@ fn window_dimension_create_variable_is_opt_in() {
 
 /// The status line after a dimension is applied reads in the interface language (#8863): a
 /// new parameter (`w = 40/2`), a plain value, a renamed parameter and a driven dimension, with
-/// the parameter name kept as typed.
+/// the parameter name kept as typed. The Dimension tool stays on, so each also asks for the next
+/// picks (#22915).
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
     crate::i18n::install();
     let pl = solidcraft_ui_text::Locale::for_language("pl");
     let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
+    let next = |applied: &str| pl.format("sketch.dimension_applied_next", &[("applied", applied)]);
     let polish = |mut h: Harness| {
         h.app.preferences.language = "pl".into();
         h.frames(2);
@@ -2567,20 +2569,20 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     type_value(&mut h, "w = 40/2");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.session.doc.param("w").is_some(), "{:?}", h.app.status);
-    assert_eq!(status(&h), Some(("Wymiar zastosowany; zdefiniowano parametr `w`".to_string(), false)));
+    assert_eq!(status(&h), Some((next("Wymiar zastosowany; zdefiniowano parametr `w`"), false)));
     // A plain value, then the same dimension renamed to `width = 30`.
     let mut h = polish(line([25., 0.]));
     place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
     type_value(&mut h, "25");
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(status(&h), Some((pl.text("sketch.dimension_applied").to_string(), false)));
+    assert_eq!(status(&h), Some((next(pl.text("sketch.dimension_applied")), false)));
     h.settle();
     crate::dim_view::edit_param(&h.app, "d1");
     h.settle();
     type_value(&mut h, "width = 30");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.session.doc.param("width").is_some(), "{:?}", h.app.status);
-    assert_eq!(status(&h), Some((pl.format("sketch.dimension_applied_renamed", &[("name", "width")]), false)));
+    assert_eq!(status(&h), Some((next(&pl.format("sketch.dimension_applied_renamed", &[("name", "width")])), false)));
     // A dimension the sketch already determines is added as a driven one.
     let mut h = polish(line([20., 0.]));
     h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
@@ -2592,7 +2594,13 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
     assert_eq!(status(&h), Some((pl.text("sketch.dimension_added_driven").to_string(), false)));
-    for id in ["sketch.dimension_applied", "sketch.dimension_applied_defined", "sketch.dimension_applied_renamed", "sketch.dimension_added_driven"] {
+    for id in [
+        "sketch.dimension_applied",
+        "sketch.dimension_applied_defined",
+        "sketch.dimension_applied_renamed",
+        "sketch.dimension_applied_next",
+        "sketch.dimension_added_driven",
+    ] {
         assert_ne!(pl.text(id), en.text(id), "{id}: the Polish catalog translates it");
     }
     crate::dim_view::cancel();
@@ -2848,6 +2856,32 @@ fn reference_pick_and_slight_drag_outside_work_on_dimension_editor() {
     assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()), "slight drag release must not pick in Dimension tool");
     let d2_val = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
     assert!((d2_val - 25.0).abs() < 1e-6, "expected accepted value 25, got {d2_val}");
+    crate::dim_view::cancel();
+}
+
+/// After D, a pick, a value and Enter, the Dimension tool is still on and the status says so: it
+/// confirms the dimension and asks for the next picks, as the tool's own hint. The confirmation
+/// alone read as the tool having ended, so D (which closes a running tool) seemed to do nothing
+/// (#22915). Esc then leaves the tool.
+#[test]
+fn after_a_dimension_is_applied_the_status_shows_the_tool_is_still_on() {
+    let mut h = line([25., 0.]);
+    h.step(&json!({"key":"D"})).unwrap();
+    h.step(&json!({"click":{"world":[12.5,0,0]}})).unwrap();
+    assert!(crate::dim_view::editing(), "a pick opens the value box");
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert!((h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 30.).abs() < 1e-6);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.dimension"), "the tool stays on for the next dimension");
+    let applied = solidcraft_ui_text::tr("sketch.dimension_applied").to_string();
+    let expected = solidcraft_ui_text::format("sketch.dimension_applied_next", &[("applied", &applied)]);
+    assert_eq!(h.app.status.as_ref().map(|s| (s.0.clone(), s.2)), Some((expected, false)));
+    assert!(h.app.status_is_tool_hint, "the status is the running tool's hint");
+    h.frames(2);
+    assert!(crate::scenario::rect_of("toast").is_some(), "the hint is shown while the tool takes picks");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Esc leaves the tool");
     crate::dim_view::cancel();
 }
 

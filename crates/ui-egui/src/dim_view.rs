@@ -1865,7 +1865,14 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                         (None, Some(name)) => solidcraft_ui_text::format("sketch.dimension_applied_renamed", &[("name", name)]),
                         (None, None) => solidcraft_ui_text::tr("sketch.dimension_applied").to_string(),
                     };
-                    app.set_status(status, false);
+                    // A tool that stays on asks for its next picks again, as the other sketch tools
+                    // do once they finish; the confirmation alone read as the tool having ended,
+                    // so its own shortcut (which closes a running tool) seemed to do nothing (#22915).
+                    if app.tool.as_ref().is_some_and(|t| t.kind == crate::tools::Kind::Dimension) {
+                        app.set_tool_hint(solidcraft_ui_text::format("sketch.dimension_applied_next", &[("applied", &status)]));
+                    } else {
+                        app.set_status(status, false);
+                    }
                 }
             }
         }

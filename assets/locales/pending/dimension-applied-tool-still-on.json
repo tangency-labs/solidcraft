@@ -1,0 +1,29 @@
+{
+  "en": {
+    "sketch.dimension_applied_next": "{applied}. Dimension is still on: pick the next one or two entities, or press Esc to leave it"
+  },
+  "ar": {
+    "sketch.dimension_applied_next": "{applied}. أداة البُعد ما زالت قيد التشغيل: اختر العنصر أو العنصرين التاليين، أو اضغط Esc للخروج منها"
+  },
+  "de": {
+    "sketch.dimension_applied_next": "{applied}. Das Werkzeug Maß ist noch aktiv: die nächsten ein oder zwei Elemente wählen oder mit Esc beenden"
+  },
+  "he": {
+    "sketch.dimension_applied_next": "{applied}. כלי המידה עדיין פעיל: בחרו את הישות או שתי הישויות הבאות, או הקישו Esc כדי לצאת ממנו"
+  },
+  "ja": {
+    "sketch.dimension_applied_next": "{applied}。寸法ツールは有効なままです: 次のエンティティを 1 つか 2 つ選択するか、Esc で終了します"
+  },
+  "ko": {
+    "sketch.dimension_applied_next": "{applied}. 치수 도구가 계속 켜져 있습니다: 다음 엔터티를 하나 또는 두 개 선택하거나 Esc를 눌러 종료하세요"
+  },
+  "pl": {
+    "sketch.dimension_applied_next": "{applied}. Narzędzie Wymiar jest nadal włączone: wybierz kolejny jeden lub dwa elementy albo naciśnij Esc, aby je zamknąć"
+  },
+  "vi": {
+    "sketch.dimension_applied_next": "{applied}. Công cụ kích thước vẫn đang bật: chọn một hoặc hai đối tượng tiếp theo, hoặc nhấn Esc để thoát"
+  },
+  "zh": {
+    "sketch.dimension_applied_next": "{applied}。尺寸工具仍处于开启状态：选择下一个或两个图元，或按 Esc 退出"
+  }
+}
