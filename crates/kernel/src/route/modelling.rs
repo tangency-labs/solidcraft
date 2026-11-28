@@ -1,7 +1,11 @@
 //! The router's body-making operations ([`solidcraft_kernel_api::Modelling`]).
 
 use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides, Taper};
+use solidcraft_kernel_api::{
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides, Taper, TrimKeep,
+};
+
+use crate::SplitTool;
 
 use super::{Which, which};
 use crate::Result;
@@ -231,5 +235,60 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     match which(OpKind::OffsetFaces) {
         Which::Solidcore => Solidcore.offset_faces(b, at, distance),
+    }
+}
+
+/// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
+/// lean in (positive angle) going along `pull`.
+pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    match which(OpKind::Draft) {
+        Which::Solidcore => Solidcore.draft(b, faces, neutral, pull, angle),
+    }
+}
+
+/// Split the given faces (indices in `body`'s face order) where the tool meets them, with the
+/// body face each face of the result came from (in face order). The solid is unchanged; the
+/// result's history is over `[body]`.
+pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
+    match which(OpKind::Split) {
+        Which::Solidcore => Solidcore.split_faces(body, faces, tool),
+    }
+}
+
+/// [`split_faces_with_map`] without the map.
+pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
+    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
+}
+
+/// Split a body into the closed parts on either side of a tool, those on its back first; a body
+/// the tool misses or only nicks comes back whole. Each part's history is over `[body]`.
+pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
+    match which(OpKind::Split) {
+        Which::Solidcore => Solidcore.split_body(body, tool),
+    }
+}
+
+/// Split a body with faces of another body exactly as they are, never extended: `faces` (in
+/// `sheet`'s face order) and `face` are the tool, `face` gives the sides. Refused unless they cut
+/// it into closed solids.
+pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
+    match which(OpKind::Split) {
+        Which::Solidcore => Solidcore.split_body_by_faces(body, sheet, face, faces),
+    }
+}
+
+/// Split a body with every face of the surface body `sheet` as it is, where that cuts it into
+/// closed solids (`None` where it doesn't); `face` gives the sides.
+pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize) -> Result<Option<Vec<Body>>> {
+    match which(OpKind::Split) {
+        Which::Solidcore => Solidcore.split_body_by_sheet_where_it_cuts(body, sheet, face),
+    }
+}
+
+/// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
+/// a piece of (its history is over `[body]`).
+pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
+    match which(OpKind::Split) {
+        Which::Solidcore => Solidcore.trim_keep(body, tool, keep),
     }
 }

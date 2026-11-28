@@ -429,7 +429,6 @@ pub use point_path::sweep_point_path_with;
 pub use polybool::faceted_boolean;
 pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
-pub use polyhedron::draft;
 pub use polyhedron::offset_solid;
 pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
@@ -472,6 +471,7 @@ pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::develop;
+pub use route::draft;
 pub use route::dxf;
 pub use route::extrude;
 pub use route::extrude_planar_regions;
@@ -559,6 +559,12 @@ pub use solidcraft_smlib::trace as smlib_trace;
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::write_kernel_profiles;
 
+pub use route::split_body;
+pub use route::split_body_by_faces;
+pub use route::split_body_by_sheet_where_it_cuts;
+pub use route::split_faces;
+pub use route::split_faces_with_map;
+pub use route::trim_keep;
 /// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
 /// (feature `solidcore-profile`).
 #[cfg(feature = "solidcore-profile")]
@@ -567,11 +573,6 @@ pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
-pub use splitface::split_body;
-pub use splitface::split_body_by_faces;
-pub use splitface::split_body_by_sheet_where_it_cuts;
-pub use splitface::split_faces;
-pub use splitface::split_faces_with_map;
 pub use splitface::{FieldKind, PieceSides, split_piece_sides};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
@@ -647,7 +648,6 @@ pub use surface_trim::split_sheet_where_it_cuts;
 pub use surface_trim::stop_at_bodies;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
-pub use surface_trim::trim_keep;
 pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;

@@ -125,7 +125,7 @@ impl Painter {
     /// device, or a surface the adapter doesn't support, neither of which configured it (#7007).
     /// Called only through [`Self::try_configure`], which says what follows.
     fn configure_surface(
-        viewport_id: ViewportId,
+        _viewport_id: ViewportId,
         surface_state: &SurfaceState,
         render_state: &RenderState,
         config: &SurfaceConfig,
@@ -156,17 +156,6 @@ impl Painter {
         else {
             return Err(crate::ConfigureError::Unsupported);
         };
-        // SolidCraft: a window other than the main one presents without waiting for the display
-        // where its surface can (`crate::viewport_present_mode`).
-        let supported = surface_state
-            .surface
-            .get_capabilities(&render_state.adapter)
-            .present_modes;
-        let present_mode = crate::viewport_present_mode(
-            viewport_id == ViewportId::ROOT,
-            present_mode,
-            &supported,
-        );
         let mut surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_state.target_format,
