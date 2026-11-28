@@ -94,8 +94,10 @@ fn parameter_columns_fit_controls_and_headers_share_cell_left_edges() {
 #[test]
 fn configuration_columns_align_values_status_and_remove_actions() {
     fn rounded_selection(shape: &egui::Shape, row: egui::Rect) -> bool {
+        let t = Tokens::get();
+        let fill = t.selected_bg.blend(t.form_primary.gamma_multiply(0.15));
         match shape {
-            egui::Shape::Rect(shape) => shape.rect == row && shape.fill == Tokens::get().selected_bg && shape.corner_radius.nw > 0,
+            egui::Shape::Rect(shape) => shape.rect == row && shape.fill == fill && shape.corner_radius.nw > 0,
             egui::Shape::Vec(shapes) => shapes.iter().any(|shape| rounded_selection(shape, row)),
             _ => false,
         }

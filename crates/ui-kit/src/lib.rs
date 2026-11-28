@@ -37,6 +37,7 @@ mod assistant_entry;
 mod attention;
 #[cfg(not(target_arch = "wasm32"))]
 mod blur_plan;
+mod card;
 mod checks;
 mod choice;
 mod color;
@@ -121,6 +122,7 @@ pub use actions::*;
 pub use assistant::*;
 pub use assistant_entry::*;
 pub use attention::*;
+pub use card::CardSurface;
 pub use checks::*;
 pub use choice::*;
 pub use color::*;

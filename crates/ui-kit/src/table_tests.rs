@@ -2,6 +2,13 @@ use super::*;
 use crate::test_support as harness;
 use solidcraft_ui_registry as registry;
 
+fn rects(output: &egui::FullOutput) -> impl Iterator<Item = &egui::epaint::RectShape> {
+    output.shapes.iter().filter_map(|s| match &s.shape {
+        egui::Shape::Rect(r) => Some(r),
+        _ => None,
+    })
+}
+
 fn cell_frame(ctx: &egui::Context, selection: &mut CellSelection, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> egui::FullOutput {
     registry::clear_handles();
     harness::raw_frame(
@@ -77,7 +84,7 @@ fn cell_range_is_one_snapped_fill_and_inside_outline_across_hairlines_and_bands(
             let tree = output.platform_output.accesskit_update.as_ref().unwrap();
             let selected_cells = tree.nodes.iter().filter(|(_, node)| node.role() == egui::Role::Cell && node.is_selected() == Some(true)).count();
             assert_eq!(selected_cells, 9);
-            let background = t.panel.blend(t.table_fill()).blend(t.form_primary.gamma_multiply(0.15));
+            let background = t.panel.blend(t.card_fill).blend(t.selected_bg).blend(t.form_primary.gamma_multiply(0.15));
             assert!(solidcraft_theme::contrast_ratio(t.form_ink, background) >= 4.5);
             let mut fills = Vec::new();
             let mut outlines = Vec::new();
@@ -165,7 +172,7 @@ fn hostile_cell_indices_are_clamped_after_shrinking_or_emptying_the_table() {
 }
 
 #[test]
-fn single_cell_mode_paints_one_field_ring_and_does_not_extend() {
+fn single_cell_mode_paints_one_selection_ring_and_does_not_extend() {
     let ctx = harness::context();
     let t = Tokens::get();
     let mut selection = CellSelection { anchor: Some((0, 0)), focus: Some((1, 1)) };
@@ -185,7 +192,15 @@ fn single_cell_mode_paints_one_field_ring_and_does_not_extend() {
     let block = registry::rect_of("dialog:table:single_cell:selection").unwrap();
     let cell = registry::rect_of("dialog:table:single_cell:1:cell:Value").unwrap();
     assert_eq!(block, cell.expand(t.space_4), "the ring has padding without moving the text");
-    assert_eq!(output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == block && r.fill == t.input_fill())).count(), 1);
+    let mut fills = 0;
+    for shape in &output.shapes {
+        harness::each_shape(&shape.shape, &mut |shape| {
+            if matches!(shape, egui::Shape::Rect(r) if r.rect == block && r.fill == t.selected_bg) {
+                fills += 1;
+            }
+        });
+    }
+    assert_eq!(fills, 1);
     assert_eq!(
         output
             .shapes
@@ -471,7 +486,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
                 let highlight = output
                     .shapes
                     .iter()
-                    .any(|shape| matches!(&shape.shape, egui::Shape::Rect(paint) if paint.rect == row && paint.fill == Tokens::get().text.gamma_multiply(0.06)));
+                    .any(|shape| matches!(&shape.shape, egui::Shape::Rect(paint) if paint.rect == row && paint.fill == Tokens::get().hover));
                 assert_eq!(highlight, enabled && !clipped, "pointer {at:?}, enabled {enabled}, clipped {clipped}");
             }
         }
@@ -818,13 +833,13 @@ fn card_and_header_are_translucent_in_both_themes_and_keep_the_token_geometry() 
             .shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.fill == t.table_fill() => Some(r),
+                egui::Shape::Rect(r) if r.fill == t.card_fill => Some(r),
                 _ => None,
             })
             .unwrap();
         assert!(card.fill.a() > 0 && card.fill.a() < 255);
         assert_eq!(card.corner_radius, egui::CornerRadius::same(t.radius_lg));
-        assert_eq!(card.stroke, t.container_border(t.border));
+        assert_eq!(card.stroke, t.container_border(t.dialog_border));
         assert_eq!(card.rect.left(), t.space_12);
         assert_eq!(card.rect.top(), t.space_12);
         let row = registry::rect_of("dialog:table:card:row").unwrap();
@@ -834,7 +849,7 @@ fn card_and_header_are_translucent_in_both_themes_and_keep_the_token_geometry() 
         let header = registry::rect_of("dialog:column:card:Name").unwrap();
         assert_eq!(header.height(), row_height() + t.space_6);
         assert_eq!(row.height(), crate::table_row_height());
-        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.08)
+        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == crate::CardSurface(t).band_fill()
             && r.rect.width() == viewport.width() && r.rect.height() == header.height())));
     }
     solidcraft_theme::set_dark(previous);
@@ -866,14 +881,7 @@ fn consecutive_selection_is_one_rounded_painted_block_without_internal_rules_or_
             );
         }
         let union = rows[0].union(rows[2]);
-        let fills: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.fill == t.selected_bg => Some(r),
-                _ => None,
-            })
-            .collect();
+        let fills: Vec<_> = rects(&output).filter(|r| r.fill == crate::CardSurface(t).selection_fill()).collect();
         assert_eq!(fills.len(), 1, "one fill means no overlapping alpha or rounded internal seams");
         assert_eq!(fills[0].rect, union);
         assert_eq!(fills[0].corner_radius, egui::CornerRadius::same(t.radius_md));
@@ -900,14 +908,7 @@ fn section_counts_are_filled_round_pills_in_both_themes() {
                 table.group(ui, "group", "Parameters", 12, &mut false);
             });
         });
-        let pills: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.rect.height() == t.space_16 && r.fill == t.text.gamma_multiply(0.13) => Some(r),
-                _ => None,
-            })
-            .collect();
+        let pills: Vec<_> = rects(&output).filter(|r| r.rect.height() == t.space_16 && r.fill == t.selected_bg).collect();
         assert_eq!(pills.len(), 1);
         assert_eq!(pills[0].stroke, egui::Stroke::NONE);
         assert_eq!(pills[0].corner_radius, egui::CornerRadius::same((t.space_16 / 2.0) as u8));
@@ -930,22 +931,17 @@ fn selected_hover_strengthens_the_same_block_and_focus_is_inside_and_rounded() {
     };
     let idle = painted_frame(&ctx, vec![], draw);
     let rect = registry::rect_of("dialog:table:states:selected").unwrap();
-    assert!(idle.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == t.selected_bg)));
+    assert!(
+        idle.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == crate::CardSurface(t).selection_fill()))
+    );
     let hovered = painted_frame(&ctx, vec![egui::Event::PointerMoved(rect.center())], draw);
     assert!(hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
-        if r.rect == rect && r.fill == t.selected_bg.lerp_to_gamma(t.form_primary, 0.08))));
-    assert!(!hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.06))));
+        if r.rect == rect && r.fill == crate::CardSurface(t).selection_fill().lerp_to_gamma(t.form_primary, 0.08))));
+    assert!(!hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.hover)));
     for (index, bounds) in [registry::rect_of("dialog:table:states:group:group").unwrap(), rect].into_iter().enumerate() {
         ctx.memory_mut(|m| m.request_focus(ids.get()[index]));
         let output = painted_frame(&ctx, vec![], draw);
-        let rings: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Rect(r) if r.stroke == egui::Stroke::new(1.5, t.form_primary) => Some(r),
-                _ => None,
-            })
-            .collect();
+        let rings: Vec<_> = rects(&output).filter(|r| r.stroke == egui::Stroke::new(1.5, t.form_primary)).collect();
         assert_eq!(rings.len(), 1);
         assert!(bounds.contains_rect(rings[0].rect));
         assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
@@ -967,7 +963,7 @@ fn first_and_last_selected_rows_stay_within_the_rounded_card() {
         .shapes
         .iter()
         .find_map(|s| match &s.shape {
-            egui::Shape::Rect(r) if r.fill == t.table_fill() && r.stroke.width > 0.0 => Some(r.rect),
+            egui::Shape::Rect(r) if r.fill == t.card_fill && r.stroke.width > 0.0 => Some(r.rect),
             _ => None,
         })
         .unwrap();
@@ -975,7 +971,7 @@ fn first_and_last_selected_rows_stay_within_the_rounded_card() {
         .shapes
         .iter()
         .find_map(|s| match &s.shape {
-            egui::Shape::Rect(r) if r.fill == t.selected_bg => Some(r),
+            egui::Shape::Rect(r) if r.fill == crate::CardSurface(t).selection_fill() => Some(r),
             _ => None,
         })
         .unwrap();
@@ -1142,7 +1138,7 @@ fn section_bands_break_selection_blocks_and_keep_header_and_cell_columns_aligned
         });
     });
     let t = Tokens::get();
-    let fills = output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)).count();
+    let fills = output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == crate::CardSurface(t).selection_fill())).count();
     assert_eq!(fills, 2);
     for key in ["first", "second"] {
         let band = registry::rect_of(&format!("dialog:table:sections:group:{key}")).unwrap();
@@ -1152,7 +1148,7 @@ fn section_bands_break_selection_blocks_and_keep_header_and_cell_columns_aligned
         assert_eq!(band.left() + t.space_4, row.left());
         assert_eq!(cell.x_range(), registry::rect_of("dialog:column:sections:Name").unwrap().x_range());
         assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { points, stroke }
-            if points[0].y == band.bottom() && points[1].y == band.bottom() && *stroke == t.tertiary_border(t.dialog_rule))));
+            if points[0].y == band.bottom() && points[1].y == band.bottom() && *stroke == crate::CardSurface(t).rule_stroke())));
     }
 }
 
@@ -1185,7 +1181,7 @@ fn virtual_rows_keep_selection_geometry_and_forced_cells_and_reveal_targets() {
         .shapes
         .iter()
         .filter_map(|s| match &s.shape {
-            egui::Shape::Rect(r) if r.fill == Tokens::get().selected_bg => Some((r.rect, s.clip_rect)),
+            egui::Shape::Rect(r) if r.fill == crate::CardSurface(Tokens::get()).selection_fill() => Some((r.rect, s.clip_rect)),
             _ => None,
         })
         .collect();

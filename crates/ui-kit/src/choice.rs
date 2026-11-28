@@ -119,7 +119,7 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TabList, ui.is_enabled(), label(ui)));
     }
     if page_switch {
-        ui.painter().rect(rect, t.radius_lg, t.pref_well, t.container_border(t.dialog_rule), egui::StrokeKind::Inside);
+        ui.painter().rect(rect, t.radius_lg, t.field, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     } else {
         ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
     }
@@ -203,7 +203,7 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         let ink = if !segment_enabled {
             t.form_dim
         } else if page_switch {
-            if on { t.form_ink } else { t.form_dim }
+            if on { t.form_primary } else { t.form_dim }
         } else if on && primary {
             t.on_accent
         } else if on && workspace_accent {
