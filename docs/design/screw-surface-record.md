@@ -44,6 +44,8 @@ pub struct SweepDefinition {
     pub half_angles: Vec<f64>,
     /// From the face's (u, v) to the definition's (w, t).
     pub map: SweepMap,
+    /// The net's distance from the definition as the kernel held it, mm.
+    pub bound: f64,
 }
 
 pub enum SweepMotion {
@@ -134,9 +136,11 @@ quadratic of their values at the span's ends and middle.
 
 The kernel certifies the net against S, `|B − S| ≤ ε` at every parameter, in rounded interval
 arithmetic (`ProceduralSweep::certify`; the derivation is in `procedural_sweep.rs`'s module
-docs). The record does not store ε: the kernel works it out again when it builds the face, as it
-re-certifies a blend's net before the face is an operand, so a file cannot hand the kernel a
-bound. A face's and its edges' tolerances are the record's, as for every kind, and are what the
+docs). The record stores ε as the kernel held it (`bound`: its certified bound plus the rounding
+of any motion of the net since, which the kernel adds when it moves a wall). A reader never takes
+it as proof: the kernel certifies ε again when it builds the face, as it re-certifies a blend's net
+before the face is an operand, and keeps the larger of the two, so a file cannot hand the kernel a
+tighter bound than it proves, and a reopened wall works to the very bound it had. A face's and its edges' tolerances are the record's, as for every kind, and are what the
 kernel had.
 
 A caller that asks for a tolerance at or above ε reads the net; a tighter one reads S
@@ -149,7 +153,7 @@ that ask for it and for other kernels.
 Structural, as for the rest of the record (`Brep::validate`): finite numbers within 10¹²; a
 profile that is a 3D spline or rational spline with valid knots and positive weights; a unit
 axis and a direction square to it within 10⁻⁹; a pitch that is finite and not zero; stations at
-least two, strictly ascending; one half angle per span in (0, π/8]; law angles strictly
+least two, strictly ascending; one half angle per span in (0, π/8]; a bound in [0, 10³]; law angles strictly
 ascending, one offset each, at most 1024; a map with finite terms and non-zero scales. A
 `sweep` face without `nurbs` is refused in stage 1 and taken in stage 2. Geometry (that the net
 lies within ε of S) is the kernel's check, never the record's.
