@@ -403,6 +403,8 @@ struct Prism {
     hi: f64,
     /// The fitted section loops, in `plane`'s coordinates.
     loops: Vec<Loop2>,
+    /// The same loops nested: each outline with its holes.
+    regions: Vec<Region2>,
 }
 
 /// Certify matching caps and straight walls before building an analytic prism with valid nesting and volume.
@@ -675,6 +677,7 @@ fn prism(
         lo,
         hi,
         loops,
+        regions,
     }))
 }
 

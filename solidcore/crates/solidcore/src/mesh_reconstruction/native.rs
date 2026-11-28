@@ -284,10 +284,9 @@ pub(super) fn union(k: &mut Kernel, a: Brep, b: Brep) -> Result<Brep> {
     Ok(body)
 }
 
-/// The material two reconstructed solids share, through the kernel's B-rep Boolean; `None`
-/// when they share none.
-pub(super) fn intersection(k: &mut Kernel, a: Brep, b: Brep) -> Result<Option<Brep>> {
-    let body = boolean(k, a, b, BooleanOperation::Intersection)?.result;
+/// `a` less `b`, through the kernel's B-rep Boolean; `None` when nothing is left.
+pub(super) fn difference(k: &mut Kernel, a: Brep, b: Brep) -> Result<Option<Brep>> {
+    let body = boolean(k, a, b, BooleanOperation::Difference)?.result;
     Ok((!body.face_list().is_empty()).then_some(body))
 }
 

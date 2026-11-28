@@ -4,20 +4,22 @@
 //! The extrusion of a solid's end caps holds the solid when every point of it projects into the
 //! caps' section, and the intersection of such extrusions is the solid's visual hull from those
 //! directions (A. Laurentini, "The visual hull concept for silhouette-based image understanding",
-//! IEEE PAMI 16(2), 1994). The hull is the solid when it holds no more material. So the
-//! intersection is taken only when every source vertex lies inside every extrusion, every
-//! source triangle lies whole on a cap or within the tolerance of a wall of one of them (the
-//! chord certificate of [`super::curves`]), and the volumes agree within the tolerance times the
-//! source's area.
+//! IEEE PAMI 16(2), 1994). The hull is the solid when it holds no more material. So a solid is
+//! taken only when every source vertex lies inside every extrusion, every source triangle lies
+//! whole on a cap or within the tolerance of a wall of one of them (the chord certificate of
+//! [`super::curves`]), and its volume is the source's within the tolerance times the source's
+//! area. The solid built is the first extrusion less the holes of the others' sections, which
+//! holds their intersection.
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
 use crate::kernel::Kernel;
 use crate::math::Vec3;
+use crate::prism::profile::Region2;
 use crate::{Brep, Result};
 
 use super::curves::certified;
-use super::geometry::distance_to_segment;
+use super::geometry::{distance_to_segment, MeshPlane};
 use super::{invalid, native, parts, prism, Prism, Sides, TriMesh};
 
 /// Point and triangle tests against section segments, the same work bound as the wall check of
@@ -80,16 +82,33 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
             return Ok(None);
         }
     }
+    // The first extrusion less each hole of the others' sections, swept past the solid at both
+    // ends: no face of a tool lies on a face of the first, as the faces of two extrusions of one
+    // block would. It holds their intersection, and is that when the volumes agree below.
     let mut prisms = prisms.into_iter();
     let Some(first) = prisms.next() else {
         return Ok(None);
     };
     let mut body = first.body;
     for prism in prisms {
-        let Some(shared) = native::intersection(k, body, prism.body)? else {
+        let normal = prism.plane.normal();
+        let Some(start) = MeshPlane::from_normal(normal * (prism.lo - size), normal) else {
             return Ok(None);
         };
-        body = shared;
+        for hole in prism.regions.iter().flat_map(|region| &region.holes) {
+            let tool = Region2 {
+                outer: hole.reversed(),
+                holes: Vec::new(),
+            };
+            let length = prism.hi - prism.lo + 2. * size;
+            let Some(tool) = native::extrude(k, &start.frame(), &[tool], length)? else {
+                return Ok(None);
+            };
+            let Some(rest) = native::difference(k, body, tool)? else {
+                return Ok(None);
+            };
+            body = rest;
+        }
     }
     if body.face_list().len() > MAX_FACES || !native::is_valid(k, &mut body)? {
         return Ok(None);
