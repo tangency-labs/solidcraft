@@ -143,7 +143,7 @@ pub enum UserEvent {
 ///
 /// # Errors
 /// The event loop, the main window or the graphics device could not be created.
-pub fn run(mut options: RunOptions, create: impl FnOnce(Created) -> Box<dyn App> + 'static) -> Result<(), RunError> {
+pub fn run<'a>(mut options: RunOptions, create: impl FnOnce(Created) -> Box<dyn App + 'a> + 'a) -> Result<(), RunError> {
     let mut builder = EventLoop::<UserEvent>::with_user_event();
     if let Some(change) = options.event_loop_builder.take() {
         change(&mut builder);
@@ -415,11 +415,11 @@ fn run_without_window(ctx: &egui::Context, immediate: ImmediateViewport<'_>) {
     drop(ctx.run_ui(raw, |ui| viewport_ui_cb(ui)));
 }
 
-struct Runner {
+struct Runner<'a> {
     shared: Rc<RefCell<Shared>>,
     /// Made once the main window is up.
-    app: Option<Box<dyn App>>,
-    create: Option<Box<dyn FnOnce(Created) -> Box<dyn App>>>,
+    app: Option<Box<dyn App + 'a>>,
+    create: Option<Box<dyn FnOnce(Created) -> Box<dyn App + 'a> + 'a>>,
     waker: Waker,
     /// When the app last saved.
     saved_at: Instant,
@@ -427,7 +427,7 @@ struct Runner {
     error: Option<RunError>,
 }
 
-impl Runner {
+impl Runner<'_> {
     fn open_pending(&mut self, event_loop: &ActiveEventLoop) {
         let opened = self.shared.borrow_mut().open_pending(event_loop);
         if let Err(error) = opened {
@@ -528,7 +528,7 @@ impl Runner {
     }
 }
 
-impl ApplicationHandler<UserEvent> for Runner {
+impl ApplicationHandler<UserEvent> for Runner<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.open_pending(event_loop);
     }

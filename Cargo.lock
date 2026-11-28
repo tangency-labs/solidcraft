@@ -6038,6 +6038,7 @@ dependencies = [
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "solidcraft-window-gpu",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
