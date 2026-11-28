@@ -6,7 +6,7 @@
 //! record's own [`observe`] call, so it is the golden's body bit for bit):
 //! - the record's status is a success and the body's vertex, edge and face counts are the
 //!   golden's;
-//! - `check_brep` Level 2 reports nothing (or, on the two rows of [`MAIN_LEVEL2`], exactly
+//! - `check_brep` Level 2 reports nothing (or, on the row of [`MAIN_LEVEL2`], exactly
 //!   the lines main's body of that row reports: this change adds none) and, for a closed
 //!   result, the body is one closed manifold solid;
 //! - every blend face that is a definition re-certifies its net within its bound;
@@ -108,17 +108,12 @@ fn every_moved_row_has_its_own_test() {
 /// The moved body reports exactly these, so the lines are main's, not this change's. They
 /// are kept as main's facts here, not excused: any other line, or a count that differs,
 /// fails.
+///
+/// `issue_2176_tabbed_plate_tab_side_r0_5` reported main's `SmBSplineCurve` test 11 ("Interior
+/// 1st Deriv too slow") once, on a UV trim that ran back just after a knot of its curve where the
+/// curve's first derivative jumps; the drop's curve-knot rule (tangency-labs/solidcraft#22201)
+/// starts that span with the speed ahead, the line is gone, and the row is held to the default.
 const MAIN_LEVEL2: &[(&str, &[(&str, usize)])] = &[
-    (
-        "issue_2176_tabbed_plate_tab_side_r0_5",
-        &[(
-            "SmBSplineCurve::Test #11 Bad SpeedPt: 2D BSplineCurve Warning: Interior 1st Deriv \
-             too slow, less than AvgSpeed/10000 (often an almost kink or almost singular point - \
-             never good practice) (offset=2.5724395e-12, tolerance=6.6664096e-05) [owner \
-             SmBSplineCurve]",
-            1,
-        )],
-    ),
     (
         "sweep5-nurb_box1-all-r0.5",
         &[

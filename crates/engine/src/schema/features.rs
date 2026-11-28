@@ -269,6 +269,11 @@ pub struct RevolveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "RevolveConventionParam")]
     pub convention: Option<RevolveConventionParam>,
+    /// Join pieces of the same circular profile. Default: true. Set false to keep the face and
+    /// edge layout of Revolve features saved before arc joining.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub join_profile_arcs: Option<bool>,
     /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
     /// and `direction`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
@@ -911,6 +916,11 @@ pub struct PlaneAtAngleParams {
     /// Omit to use the base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
+    /// Bring `base` onto the axis first (moved along its normal, tilted when the axis is not
+    /// parallel to it), so the plane goes through the whole axis even when it is off the base.
+    /// Not with `direction_only`. Default false: `base` turns about the axis where it is.
+    #[serde(default)]
+    pub through_axis: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }
@@ -2038,7 +2048,8 @@ pub struct ThreadParams {
     #[serde(default, deserialize_with = "thread_form")]
     #[schemars(schema_with = "thread_form_schema")]
     pub form: Option<String>,
-    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5"; unified
+    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5", with an optional
+    /// ISO 965-1 tolerance class kept in the callout ("M8-6g" on a shaft, "M8-6H" in a hole); unified
     /// "1/4-20 UNC-2A", "#10-32 UNF"; trapezoidal "Tr20x4", "Tr40x14(P7)"; buttress "S20x4"; acme
     /// "1/2-10 ACME"; buttress_asme "2.5-8 BUTT"; bspp "G 1/2"; rp "Rp 1/2"; bspt "R 1/2"
     /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT". Blank text is the same as left out.

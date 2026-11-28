@@ -24,6 +24,8 @@ mod bstuv_trim_rows;
 pub(crate) mod certify;
 pub mod compare;
 pub mod constructor;
+#[cfg(test)]
+mod copied_trim_rows;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;

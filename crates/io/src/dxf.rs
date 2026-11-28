@@ -2513,6 +2513,24 @@ mod tests {
     }
 
     #[test]
+    fn sketch_import_places_reversed_ocs_circles_in_world_xy() {
+        let dxf = concat!(
+            "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n5\n0\nENDSEC\n",
+            "0\nSECTION\n2\nENTITIES\n",
+            "0\nCIRCLE\n10\n-4\n20\n2\n40\n1\n210\n0\n220\n0\n230\n-1\n",
+            "0\nCIRCLE\n10\n-6\n20\n3\n40\n2\n230\n-1\n",
+            "0\nCIRCLE\n10\n-8\n20\n4\n40\n3\n230\n1\n",
+            "0\nCIRCLE\n10\n-9\n20\n5\n40\n4\n",
+            "0\nENDSEC\n0\nEOF\n",
+        );
+        let geometry = read_dxf(dxf).unwrap();
+        assert_eq!(geometry.len(), 4);
+        for (shape, (x, y, radius)) in geometry.iter().zip([(40.0, 20.0, 10.0), (60.0, 30.0, 20.0), (-80.0, 40.0, 30.0), (-90.0, 50.0, 40.0)]) {
+            assert!(matches!(shape, Geom2::Circle(c, r) if *c == Vec2::new(x, y) && *r == radius), "{shape:?}");
+        }
+    }
+
+    #[test]
     fn existing_input_byte_cap_is_inclusive_before_parsing() {
         let prefix = "0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n999\n";
         let mut text = format!("{prefix}{}\n", " ".repeat(MAX_DRAWING_BYTES - prefix.len() - 1));

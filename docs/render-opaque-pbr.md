@@ -57,10 +57,12 @@ In-design swatches retain and reuse the response.
 ## Inspect, replace and inherit a look
 
 `appearance.chain` is a read-only command. Supply exactly one target: a body,
-a face index from `model.faces` with its body, or a component name/ID:
+a face from `model.faces` (its index or its name) with its body, or a component
+name/ID:
 
 ```json
 {"command":"appearance.chain","params":{"target":{"body":"Specimen","face":0}}}
+{"command":"appearance.chain","params":{"target":{"body":"Specimen","face":"F2:top"}}}
 {"command":"appearance.chain","params":{"target":{"component":"Housing"}}}
 ```
 

@@ -23,8 +23,13 @@
 //! | [`OffsetFacesExecutive::reblend`]     | `OffsetFaces` step 5 (the sharp edges blended again) |
 //! | [`OffsetFacesExecutive::take_off`]    | `OffsetFaces` step 3 (the blends taken off)       |
 //! | [`OffsetFacesExecutive::offset_faces`] | `OffsetFaces`                                    |
+//! | [`OffsetFacesExecutive::move_onto`]   | (not in the fork) `OffsetFaces` with step 4 a move onto given surfaces |
 //!
 //! Deviations:
+//! - **Moves onto given surfaces** (not in the fork): a draft's faces go onto the surfaces it
+//!   gives them ([`OffsetFacesExecutive::move_onto`]), the blends on them following through
+//!   steps 1 to 6 as a face offset's do; each moved face carries a [`MARK_ONTO`] code naming
+//!   its surface, so a piece of it the removals leave goes onto the same one.
 //! - **Scope.** The marks, the collection of the followed blends, the
 //!   kept attributes and their restoring (steps 1, 2 and 6 of `OffsetFaces`), the move
 //!   (step 4), the re-blend (step 5), taking the blends off (step 3) and `OffsetFaces`.
@@ -34,6 +39,10 @@
 //!   `GetBaseWasApplied` is tested. The fork's taking the B-rep in afresh (its copy
 //!   constructor, `RemoveAllTopology`, `MergeBrep`) goes through the boolean merge's
 //!   arena-store wrappers, which carry the marks with the copy as `SM_AB_COPY` does.
+//!   Besides planes, a face round a group may lie on a whole sphere (#22811): the group's
+//!   edges then lie on that sphere's own surface, so the extension is never what the
+//!   result keeps. Blends of one group that come off onto the same sharp edge (the halves
+//!   of a round split where its rim was split) put back one blend on it.
 //! - **Cached topology.** After each removal and before [`OffsetFacesExecutive::offset_faces`]
 //!   returns, the port's cached topology fields are refreshed (upstream has none).
 //! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
@@ -100,6 +109,7 @@ use crate::offset::offset_executive::p2::local_operation_simple;
 use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation};
 use crate::surface::implicit::AnalyticSupport;
 use crate::surface::plane::Plane;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
@@ -146,6 +156,10 @@ const RAIL_WITHOUT_PRIMARY_EDGEUSE: &str = "a rail of a followed blend has no pr
 const MOVED_SURFACE_NOT_STORED: &str = "the face move's store does not hold the new surface the \
      face's offset returned, though the store only appends and the handle is the index it \
      appended at";
+/// Why a moved face names no surface ([`OffsetFacesExecutive::move_onto`]).
+const MOVED_FACE_WITHOUT_SURFACE: &str = "a face to move onto a given surface carries no \
+     mark naming the surface, though every face marked to move was marked with its surface and \
+     the marks are copied to every piece of a face";
 /// Why a removal names no sharp edge ([`OffsetFacesExecutive::take_off`]).
 const REMOVAL_WITHOUT_SHARP_EDGE: &str = "a blend's removal reported success without the sharp \
      edge it replaced the blend with, which every removal that succeeds makes";
@@ -170,6 +184,14 @@ pub const MARK_SUPPORT: i64 = 0;
 pub const MARK_SHARP: i64 = 2;
 /// `s_lEnd`: `+ k`, the face across the blend's `k`-th other edge (an end face).
 pub const MARK_END: i64 = 3;
+/// Not in the fork: `- i`, a moved face that goes onto the caller's surface `i`
+/// ([`OffsetFacesExecutive::move_onto`]).
+pub const MARK_ONTO: i64 = -16;
+
+/// The mark of a moved face that goes onto the caller's surface `index`.
+const fn onto_code(index: usize) -> i64 {
+    MARK_ONTO.saturating_sub(code_term(index))
+}
 
 /// Why [`OffsetFacesExecutive`] refused (`SmOffsetFacesRefusal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1104,11 +1126,28 @@ impl OffsetFacesExecutive {
                 {
                     continue;
                 }
+                found += 1;
+                // (not in the fork) the pieces of one round, taken off together, met at
+                // one sharp edge: it is blended once, as they were all one size (each
+                // piece's size measured on its own face, so to the B-rep's tolerance)
+                if let Some(at) = edges.iter().position(|&x| x == e) {
+                    let tol: f64 = b.tolerance();
+                    let same_size = sizes
+                        .get(at)
+                        .is_some_and(|&size: &f64| (size - rb.size).abs() <= tol);
+                    if !same_size || solvers.get(at) != Some(&rb.solver) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "blends of different sizes on a moved face came off onto one edge",
+                            None,
+                        ));
+                    }
+                    continue;
+                }
                 edges.push(e);
                 sections.push(FilletSurfaceGeneratorType::Circular);
                 solvers.push(rb.solver);
                 sizes.push(rb.size);
-                found += 1;
             }
             if found == 0 {
                 return Err(self.refuse(
@@ -1164,15 +1203,43 @@ impl OffsetFacesExecutive {
     }
 }
 
+/// Step 4 of a face move whose blends follow: along the normals
+/// ([`OffsetFacesExecutive::offset_faces`]) or onto given surfaces
+/// ([`OffsetFacesExecutive::move_onto`]).
+#[derive(Clone, Copy)]
+enum Move<'s> {
+    /// Each moved face onto its surface's offset by `distance`, `tol` the B-rep's tolerance.
+    By { distance: f64, tol: f64 },
+    /// Each moved face onto the surface its [`MARK_ONTO`] code names.
+    Onto(&'s [Surface]),
+}
+
 // ---- step 3 and OffsetFaces ------------------------------------------------------------
+
+/// Whether a face on `s` can grow to wherever a group of blends beside it comes off without
+/// its surface being continued inexactly: a plane (continued, the same plane), or a sphere
+/// whose definition is the whole sphere, all round and from pole to pole (#22811). Such a
+/// sphere's domain holds every point of the sphere, so the sharp edges the face gets, where
+/// the sphere meets the faces beside it, lie within it: the defeature's extension past its
+/// domain is never the part the result keeps. A partial sphere, a cylinder, a cone or a
+/// torus ends somewhere a sharp edge could lie past, so it is not taken.
+fn grows_exactly(s: &Surface) -> Result<bool> {
+    if s.is_kind_of(Plane::TYPE)? {
+        return Ok(true);
+    }
+    Ok(
+        matches!(s.kind(), SurfaceKind::Sphere(sphere) if sphere.is_closed_u() && sphere.is_closed_v()),
+    )
+}
 
 impl OffsetFacesExecutive {
     /// `OffsetFaces` step 3: each followed blend taken off, its faces met at the sharp
     /// edge it replaced (`SmRingFilletRemoval` for a ring, `SmFilletRemoval` exact only
     /// otherwise), in rounds while any comes off; the sharp edge marked [`MARK_SHARP`].
-    /// Blends that meet each other at their ends (mitred rounds) come off afterwards,
-    /// each connected group at once, through [`FeatureExecutive`] (the faces round the
-    /// group extended until they meet), where every face round the group is a plane; the
+    /// Blends that meet each other at their ends (mitred rounds, or the pieces of one
+    /// round) come off afterwards, each connected group at once, through
+    /// [`FeatureExecutive`] (the faces round the group extended until they meet), where
+    /// every face round the group is a plane or a whole sphere; the
     /// extended faces are joined again across the group's edges, and each blend's sharp
     /// edge is found where its two faces meet.
     ///
@@ -1256,10 +1323,11 @@ impl OffsetFacesExecutive {
         }
 
         // Blends that meet each other at their ends (mitred rounds along the edges of a
-        // face) cannot come off one by one exactly: each one's end lies on the next one's
-        // surface. Each connected group of them comes off at once (SmFeatureExecutive: the
-        // faces round the group extended until they meet), where every face round it is a
-        // plane, which continues exactly.
+        // face, or the pieces of one round split where its rim was) cannot come off one
+        // by one exactly: each one's end lies on the next one's surface. Each connected
+        // group of them comes off at once (SmFeatureExecutive: the faces round the group
+        // extended until they meet), where every face round it continues exactly: a
+        // plane, or a whole sphere (`grows_exactly`).
         let left: Vec<usize> = (0..blends.len())
             .filter(|&i| blends.get(i).is_some_and(|x| !x.taken_off))
             .collect();
@@ -1303,21 +1371,21 @@ impl OffsetFacesExecutive {
                 .iter()
                 .filter_map(|&i| blends.get(i).and_then(|x| x.blend))
                 .collect();
-            // every face round the group a plane
-            let mut planes = true;
+            // every face round the group one that grows exactly
+            let mut exact = true;
             'faces: for &f in &faces {
                 for e in face_edges(b, f)? {
                     match face_across(b, e, f)? {
                         None => {
-                            planes = false;
+                            exact = false;
                             break 'faces;
                         }
                         Some(across) if !faces.contains(&across) => {
                             let s = crate::topology::face::p2::surface(b, across)?.ok_or_else(
                                 || failed(OffsetFailure::FaceHasNoSurface { face: across }),
                             )?;
-                            if !s.is_kind_of(Plane::TYPE)? {
-                                planes = false;
+                            if !grows_exactly(s)? {
+                                exact = false;
                                 break 'faces;
                             }
                         }
@@ -1325,7 +1393,7 @@ impl OffsetFacesExecutive {
                     }
                 }
             }
-            if !planes {
+            if !exact {
                 not_exact = true;
                 continue;
             }
@@ -1512,6 +1580,89 @@ impl OffsetFacesExecutive {
         r
     }
 
+    /// Not in the fork: each face `faces[i]` moved onto `surfaces[i]` by the local operation
+    /// (`SmBrep::LocalOperation`, as a draft moves its faces), the tangent blends on the moved
+    /// faces following as they follow [`Self::offset_faces`]: the body is
+    /// `blend(move(unblend(body)))`, steps 1 to 6 with step 4 this move. A blend beside a
+    /// moved face cannot be extended to meet the face's new surface: rolled on the old
+    /// surface, it lies off the new one (a round of a cylinder's rim beside the cone the
+    /// cylinder is drafted to), so it comes off with its faces met at the sharp edge, the
+    /// faces move, and the new sharp edge is blended again at the blend's size. With no
+    /// blend to follow, the move is the local operation alone. Each surface is that of the
+    /// face as it stands, extended or trimmed by the local operation, so it is the same
+    /// surface for the face once its blends are off (their removal extends the face on its
+    /// own surface). On failure the B-rep is left in an unspecified state: work on a copy.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` for no faces, or not one surface for each; the refusals of
+    /// the steps ([`Self::refusal`], [`Self::reason`]); those of the steps and of the
+    /// local operation.
+    pub fn move_onto(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces: &[FaceId],
+        surfaces: Vec<Surface>,
+    ) -> Result<()> {
+        self.refusal = OffsetFacesRefusal::None;
+        self.reason.clear();
+        self.followed = 0;
+        if faces.is_empty() || faces.len() != surfaces.len() {
+            return Err(Failure::new(
+                OP,
+                OffsetFailure::FaceMoveSurfacesUnmatched {
+                    faces: faces.len(),
+                    surfaces: surfaces.len(),
+                },
+            )
+            .with_status(SM_ERR_INVALID_INPUT)
+            .into_error());
+        }
+        // 1. The blends that follow.
+        let blends = self.collect(k, b, faces, b.tolerance())?;
+        if blends.is_empty() {
+            return local_operation_simple(k, b, faces, surfaces);
+        }
+        for (i, &f) in faces.iter().enumerate() {
+            FollowedBlendMark::add(b, Some(EntityRef::Face(f)), MARK_MOVED)?;
+            FollowedBlendMark::add(b, Some(EntityRef::Face(f)), onto_code(i))?;
+        }
+        let editing = b.editing_enabled();
+        b.set_editing_enabled(true);
+        let r = self.follow(k, b, blends, Move::Onto(&surfaces));
+        b.set_editing_enabled(editing);
+        b.refresh_cached_topology();
+        r
+    }
+
+    /// Step 4 of [`Self::move_onto`]: each face marked [`MARK_MOVED`] (the moved faces, or
+    /// the pieces of them that taking the blends off left) moved onto the surface its
+    /// [`MARK_ONTO`] code names, by the local operation.
+    ///
+    /// # Errors
+    ///
+    /// A defect for a moved face that names no surface; those of the local operation.
+    fn move_marked_onto(k: &mut Kernel, b: &mut Brep, surfaces: &[Surface]) -> Result<()> {
+        let mut faces = Vec::new();
+        let mut onto = Vec::new();
+        for f in crate::topology::brep::p1::faces(b, None)? {
+            let e = Some(EntityRef::Face(f));
+            if !FollowedBlendMark::has(b, e, MARK_MOVED) {
+                continue;
+            }
+            let surface = surfaces
+                .iter()
+                .enumerate()
+                .find(|(i, _)| FollowedBlendMark::has(b, e, onto_code(*i)))
+                .map(|(_, s)| s.clone())
+                .ok_or_else(|| defect(MOVED_FACE_WITHOUT_SURFACE, SM_ERR))?;
+            faces.push(f);
+            onto.push(surface);
+        }
+        local_operation_simple(k, b, &faces, onto)
+    }
+
     fn offset_faces_editing(
         &mut self,
         k: &mut Kernel,
@@ -1528,13 +1679,28 @@ impl OffsetFacesExecutive {
         }
 
         // 1. The blends that follow.
-        let mut blends = self.collect(k, b, faces, tol)?;
+        let blends = self.collect(k, b, faces, tol)?;
+        self.follow(k, b, blends, Move::By { distance, tol })
+    }
+
+    /// Steps 2 to 6 for the blends `blends` that follow the faces marked [`MARK_MOVED`],
+    /// step 4 the move `how`; every mark removed at the end.
+    fn follow(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        mut blends: Vec<Followed>,
+        how: Move<'_>,
+    ) -> Result<()> {
         // 2. What each stands for, kept, and marks on the faces around it.
         self.keep_and_mark(b, &mut blends)?;
         // 3. Each taken off, its faces met at the sharp edge.
         self.take_off(k, b, &mut blends)?;
         // 4. The faces moved.
-        self.move_faces(k, b, distance, tol)?;
+        match how {
+            Move::By { distance, tol } => self.move_faces(k, b, distance, tol)?,
+            Move::Onto(surfaces) => Self::move_marked_onto(k, b, surfaces)?,
+        }
         if blends.is_empty() {
             return FollowedBlendMark::remove_from_topology(b);
         }

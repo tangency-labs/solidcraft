@@ -72,7 +72,10 @@ pub enum PlaneRef {
     /// `axis_origin` may hold length expressions the axis follows as the parameters change.
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
-    /// through `pivot`, or through the base origin when `pivot` is absent.
+    /// through `pivot`, or through the base origin when `pivot` is absent. With `through_axis`, the
+    /// base is first brought onto the axis (moved along its normal, and tilted when the axis is
+    /// not parallel to it) so the plane goes through the whole axis, at `angle` from where it
+    /// came onto it (#6180).
     AtAngle {
         base: Box<PlaneRef>,
         #[serde(with = "point_expr")]
@@ -87,6 +90,10 @@ pub enum PlaneRef {
         /// Pivot for `direction_only`; absent means the base plane's origin.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pivot: Option<Box<GeoRef>>,
+        /// Go through the axis even when it is off the base; absent in older designs, which keep
+        /// turning the base about the line where it is.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_axis: bool,
     },
     /// A construction plane feature (by id).
     Construction {
@@ -1061,6 +1068,10 @@ pub enum FeatureKind {
         /// Missing fields retain the angular placement of existing designs.
         #[serde(default)]
         convention: RevolveConvention,
+        /// Join pieces of a circular profile before turning it. Older designs retain their
+        /// separate faces and edges so their stored references still resolve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join_profile_arcs: bool,
         /// To Object: turn until the face, vertex or point here.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -4892,6 +4903,16 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+/// `base` brought onto the line through `at` along the unit direction `dir`, by the kernel
+/// ([`solidcraft_kernel::affine::plane_onto_line`]): tilted by the least turn that makes
+/// it parallel to the line, then moved along its normal until it holds the line. A base that
+/// already holds the line comes back unchanged (#6180). A line square to the base is refused.
+fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
+    let (origin, [x, y]) = solidcraft_kernel::affine::plane_onto_line(base.origin.into(), base.x.into(), base.y.into(), at.into(), dir.into())
+        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
+    Plane::new(origin.into(), x.into(), y.into()).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+}
+
 /// A standard part (fastener, pin, bearing) inserted as a component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StandardPart {
@@ -5162,6 +5183,9 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Weld graphics, independent of timeline features and bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::weld::deserialize_records")]
+    pub welds: Vec<crate::weld::WeldRecord>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -5452,6 +5476,7 @@ impl Document {
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
             .chain(self.notes.iter().map(|n| n.id))
+            .chain(self.welds.iter().map(|w| w.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -5516,6 +5541,7 @@ impl Document {
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
+            welds: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
             plugin_data: Default::default(),
@@ -5800,7 +5826,9 @@ impl Document {
             let opacity = self.model_body_opacity(b) as f32;
             // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
             let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
-            let paint = solidcraft_kernel::Paint { opacity, faces, name };
+            // The browser folder it sits in goes as its layer (a STEP layer), so it comes back as a folder.
+            let layer = self.model_body_folder(b);
+            let paint = solidcraft_kernel::Paint { opacity, faces, name, layer };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }
@@ -5809,10 +5837,10 @@ impl Document {
     }
 
     /// The copy-lineage source(s) of `body` from the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`).
     ///
-    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
-    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// A multi-seed `Pattern` with `join: true` (or `Mirror` with `combine: true`) splits
+    /// disconnected `lumps()` without a fixed per-seed slot layout in `body_names`; unmerged
     /// lumps resolve unanimously when every seed carries the same material.
     fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
         if body.is_empty() {
@@ -5841,8 +5869,14 @@ impl Document {
                         None
                     }
                 }
-                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
-                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                FeatureKind::Mirror { bodies, combine, .. } if !bodies.is_empty() => {
+                    if !*combine {
+                        bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                    } else if bodies.len() == 1 {
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
+                    }
                 }
                 FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
                     bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
@@ -5855,9 +5889,9 @@ impl Document {
     }
 
     /// The seed body `body` was copied from by the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
-    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
-    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`), when that lineage is unambiguous
+    /// from pinned `body_names`. Multi-seed joined patterns and combined mirrors emit unmerged
+    /// lumps without a single per-slot seed.
     pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
         match self.copy_material_sources(body) {
             CopyMaterialSources::Single(seed) => Some(seed),
@@ -6674,14 +6708,20 @@ impl Document {
     }
 
     /// Create the next free model parameter `dN` with the given expression and unit.
-    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> String {
+    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
-        name
+        Ok(name)
     }
 
     /// Create a model parameter with a name the caller chose (checked: valid and free).
     pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         if let Some(why) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(why));
         }
@@ -6751,7 +6791,7 @@ impl Document {
                 let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
-            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot, through_axis } => {
                 let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
@@ -6794,6 +6834,7 @@ impl Document {
                     let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
                     (axis_origin, d)
                 };
+                let b = if *through_axis && !*direction_only { onto_axis(b, axis_origin, d)? } else { b };
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))

@@ -1,0 +1,283 @@
+{
+ "area": "shell",
+ "bodies": {
+  "b4": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b5": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b8": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b1"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 25.0,
+    "draft": 0.0,
+    "profile": [
+     {
+      "line": {
+       "end": [
+        30.0,
+        -20.0,
+        0.0
+       ],
+       "start": [
+        -30.0,
+        -20.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        30.0,
+        20.0,
+        0.0
+       ],
+       "start": [
+        30.0,
+        -20.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -30.0,
+        20.0,
+        0.0
+       ],
+       "start": [
+        30.0,
+        20.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -30.0,
+        -20.0,
+        0.0
+       ],
+       "start": [
+        -30.0,
+        20.0,
+        0.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b3"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 4.800000000000001,
+    "draft": 0.0,
+    "profile": [
+     {
+      "line": {
+       "end": [
+        2.4,
+        -2.4,
+        25.0
+       ],
+       "start": [
+        -2.4,
+        -2.4,
+        25.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        2.4,
+        2.4,
+        25.0
+       ],
+       "start": [
+        2.4,
+        -2.4,
+        25.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -2.4,
+        2.4,
+        25.0
+       ],
+       "start": [
+        2.4,
+        2.4,
+        25.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -2.4,
+        -2.4,
+        25.0
+       ],
+       "start": [
+        -2.4,
+        2.4,
+        25.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b4",
+    "b5"
+   ],
+   "op": "boolean_tagged",
+   "outputs": [
+    "b6"
+   ],
+   "params": {
+    "op": "union"
+   }
+  },
+  {
+   "inputs": [
+    "b8"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b9"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b9"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b10"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b10"
+   ],
+   "op": "shell",
+   "outputs": [
+    "b11"
+   ],
+   "params": {
+    "open_faces": {
+     "kind": "face",
+     "picked": [],
+     "points": [],
+     "tolerance": 0.07802689313811154
+    },
+    "thickness": -2.4
+   }
+  }
+ ],
+ "case": "22783-shell-closed-square-pad-at-half-its-width",
+ "expected": {
+  "area_mm2": 17430.4,
+  "body_count": 1,
+  "faces": 17,
+  "method": "the pad's opposite sides are 4.8 apart, exactly two 2.4 mm walls, so their offsets land on one plane: what the pad would hold of the cavity is part of that plane, of zero volume, and the pad stays solid as at any thicker wall. Body = block 60*40*25 + pad 4.8*4.8*4.8 = 60110.592; cavity = the block's walls moved 2.4 in, 55.2*35.2*20.2 = 39249.408; shell 20861.184. A refusal, a void reaching into the pad or a sheet left at its mid-plane fails. Two shells (the outer and the void's). Faces: the block's 6 and the pad's 5 outside, the void's 6. Area: block 2(60*40 + 60*25 + 40*25) = 9800, plus the pad's four sides 2(4.8+4.8)*4.8 = 92.16 (its top replaces its footprint), plus the void's 7538.24: 17430.4",
+  "shells": 2,
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#22783"
+  ],
+  "volume_mm3": 20861.184,
+  "what": "a 60x40x25 block with a 4.8 mm cube pad joined on its top, shelled closed with a 2.4 mm wall (exactly half the pad)"
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "outcome": {
+  "ran": true,
+  "raw_counts": {
+   "edges": 36,
+   "faces": 17,
+   "vertices": 24
+  }
+ },
+ "result": [
+  {
+   "body": "Part",
+   "made": "b11"
+  }
+ ],
+ "rig": {
+  "error": null,
+  "known_failing": null,
+  "measured": {
+   "area_mm2": 17430.40000000001,
+   "body_count": 1,
+   "edges": 36,
+   "faces": 17,
+   "vertices": 24,
+   "volume_mm3": 20861.183999999997
+  },
+  "refused_with": null,
+  "status": "pass"
+ },
+ "sources": [
+  "tangency-labs/solidcraft#22783"
+ ],
+ "traced_ops": [
+  "extrude",
+  "extrude",
+  "boolean_tagged",
+  "copy",
+  "tagged",
+  "shell"
+ ],
+ "ungraded": [],
+ "what": "a 60x40x25 block with a 4.8 mm cube pad joined on its top, shelled closed with a 2.4 mm wall (exactly half the pad)",
+ "why_not": [],
+ "records": "22783-shell-closed-square-pad-at-half-its-width.bodies.json.gz"
+}

@@ -1692,6 +1692,7 @@ fn model_face_colours_become_one_mesh_each() {
         opacity: 1.0,
         faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [0.0, 0.0, 1.0], opacity: 1.0, name: None }],
         name: None,
+        layer: None,
     }));
     let meshes = model_body_meshes("part", &painted, Some([1.0, 0.0, 0.0])).expect("model meshes");
     assert_eq!(meshes.len(), 2, "{:?}", meshes.iter().map(|m| m.color).collect::<Vec<_>>());
@@ -2283,4 +2284,55 @@ fn a_plated_half_hole_paints_its_wall_and_a_hole_near_the_edge_only_its_own() {
         assert_eq!(painted.contains(&face), on_half || on_near, "face {face} {segment:?}");
     }
     assert!(half_walls > 0 && near_walls > 0, "both holes have walls: {half_walls} {near_walls}");
+}
+
+/// Four 1.2 mm vias with 0.6 mm drills: one through the board, a microvia from the front to the
+/// first inner layer, a blind via from there to the back and a buried one between inner layers.
+const VIA_SPANS: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (via (at 4 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+  (via micro (at 8 5) (size 1.2) (drill 0.6) (layers "F.Cu" "In1.Cu") (net 1))
+  (via blind (at 12 5) (size 1.2) (drill 0.6) (layers "In1.Cu" "B.Cu") (net 1))
+  (via blind (at 16 5) (size 1.2) (drill 0.6) (layers "In1.Cu" "In2.Cu") (net 1)))"#;
+
+#[test]
+fn a_via_shows_only_on_the_faces_its_layers_reach() {
+    // Only the through via is a hole in the board.
+    let board = parse_kicad_board(VIA_SPANS.as_bytes(), "spans.kicad_pcb").unwrap();
+    let centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+    assert_eq!(centres, vec![[4.0, -5.0]]);
+    // Each face has the vias that reach it: the through via a ring round its drill, one that stops
+    // inside the board a disc, as its drill does not come through. The buried via shows nowhere.
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(VIA_SPANS.as_bytes(), "spans.kicad_pcb", &options, &mut load).unwrap();
+    let (ring, disc) = (std::f64::consts::PI * (0.36 - 0.09), std::f64::consts::PI * 0.36);
+    for layer in ["Copper F.Cu", "Copper B.Cu"] {
+        let area = layer_area(&imported, layer, 0.035);
+        assert!((area - (ring + disc)).abs() < 0.02, "{layer}: {area} vs {}", ring + disc);
+    }
+}
+
+#[test]
+fn an_untented_via_is_bare_metal_on_that_side() {
+    // The board tents its vias on the back only; the second via overrides that, tented in front
+    // (`yes`) and bare behind (`no`), and the third follows the board (`none`).
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (setup (tenting (front no) (back yes)))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (via (at 4 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (tenting (front yes) (back no)) (net 1))
+      (via (at 16 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (tenting (front none) (back none)) (net 1)))"#;
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "tenting.kicad_pcb", &options, &mut load).unwrap();
+    let ring = std::f64::consts::PI * (0.36 - 0.09);
+    // Bare copper is the pads' plating and stands proud of the masked copper, as a pad does.
+    let bare = 0.035 + 0.005;
+    for (layer, thickness, rings) in
+        [("Copper F.Cu pads", bare, 2.0), ("Copper F.Cu", 0.035, 1.0), ("Copper B.Cu pads", bare, 1.0), ("Copper B.Cu", 0.035, 2.0)]
+    {
+        let area = layer_area(&imported, layer, thickness);
+        assert!((area - rings * ring).abs() < 0.02, "{layer}: {area} vs {} rings", rings);
+    }
 }

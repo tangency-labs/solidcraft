@@ -127,6 +127,7 @@ pub const DOCUMENTED: &[&str] = &[
     "material.properties.validate",
     "mesh.convert",
     "mesh.reduce",
+    "mesh.section_stack",
     "motion.study",
     "motion.trace",
     "occurrence.ground",
@@ -163,6 +164,7 @@ pub const DOCUMENTED: &[&str] = &[
     "plastic.snap_fit",
     "pointcloud.insert",
     "pulley.insert",
+    "scan.align",
     "shaft_spline.insert",
     "sheet.convert",
     "sheet.corner_join",
@@ -370,6 +372,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "weld.create",
 ];
 
 /// The example pictures, by command id (sorted): original SVGs on the icon grid in
