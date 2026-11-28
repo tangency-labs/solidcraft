@@ -53,7 +53,7 @@ use solidcraft_kernel::affine;
 use solidcraft_kernel::api::UnitNormal;
 use solidcraft_kernel::{
     Body, ChannelFill, FillFailure, FillNote, FillOptions, FillSide, KernelError, PlanarPiece, Straight, extrude_planar_regions, fill_channel,
-    profiles, straight_direction,
+    fill_margin, profiles, straight_direction,
 };
 
 /// Which of the two parts of a joint something is about.
@@ -155,7 +155,8 @@ pub enum GrooveRefusal {
     #[error("no groove is modelled between the parts: a seam and a mark, no fill")]
     NoGroove(Box<NoGroove>),
     /// The walls are apart, but nowhere by more than `gap` (mm), within the zone tolerance plus
-    /// the fill's depth margin: a sliver too thin to fill or to call no groove (brett19 on #18500).
+    /// the fill's depth margin ([`fill_margin`]): a sliver too thin to fill or to call no groove
+    /// (brett19 on #18500).
     #[error("the groove is a sliver {gap:.6} mm wide: too thin to fill")]
     Sliver { gap: f64 },
     /// The search for a direction the faces all run straight along was not decided (the kernel's
@@ -996,12 +997,9 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
                 let other = flat.then_some(under);
                 return Err(GrooveRefusal::NoGroove(Box::new(NoGroove { frame, along, arrow, other })));
             }
-        } else if gap <= zone + zone.max(1e-9 * size(left_wall.iter().chain(right_wall))) {
-            // within the zone tolerance plus the fill's depth margin (the larger of the
-            // section's allowance and the zone tolerance). shortcut: the fill's margin copied
-            // (brett19's point 5 on #22504): ops does not give it for given walls. The two agree
-            // below a section size of zone / 1e-9; past it the fill's scale (from 1, arcs'
-            // extremes included) can differ from `size` (from 0, ends only)
+        } else if gap <= zone + fill_margin(left_wall, right_wall)? {
+            // within the zone tolerance plus the fill's depth margin, as the kernel's fill keeps
+            // it ([`fill_margin`]; brett19's point 5 on #22504)
             return Err(GrooveRefusal::Sliver { gap });
         }
     }
@@ -1119,17 +1117,6 @@ fn apart(left: &[Seg2], right: &[Seg2]) -> Option<f64> {
         }
     }
     Some(gap)
-}
-
-/// The largest coordinate of the walls' ends: the section's size, as the fill takes it for its
-/// allowance.
-fn size<'s>(walls: impl Iterator<Item = &'s Seg2>) -> f64 {
-    walls
-        .flat_map(|s| {
-            let (a, b) = ends(s);
-            [a.x.abs(), a.y.abs(), b.x.abs(), b.y.abs()]
-        })
-        .fold(0.0, f64::max)
 }
 
 /// The first edge a groove face of `pick` (in the order of `faces`) shares with its outer face.

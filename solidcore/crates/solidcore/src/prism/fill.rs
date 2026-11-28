@@ -245,6 +245,15 @@ pub fn fill(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Fill
     build(k, section, options)
 }
 
+/// The depth margin a face of `section`'s fill keeps from what it touches (`delta` in [`fill`]):
+/// the larger of the section's conservative allowance (1e-9 of its size, [`scale`]) and the
+/// kernel's zone tolerance. The fill reads it here, and so does a caller that compares walls
+/// against it (one implementation; brett19's point 5 on #22504).
+#[must_use]
+pub fn margin(k: &Kernel, section: &Channel) -> f64 {
+    (1e-9 * scale(section.left.iter().chain(&section.right))).max(k.tolerances.zone_tol_3d)
+}
+
 /// The second face's contour: flat without one.
 fn second(options: &FillOptions) -> Contour {
     options.second_face.unwrap_or(Contour::Flat)
@@ -475,7 +484,7 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
     // to the half circle, which builds). Outside that, its fit is the nearest size that
     // builds: the floor below it, the deepest past it, the zone tolerance (built flat) where
     // the deepest is below the floor. Every fit builds when retried.
-    let delta = eps.max(zone);
+    let delta = margin(k, section);
     for &(side, depth, touch, contact, floor) in &limits {
         let (upper, slack) = if contact {
             (touch - delta, 0.0)
