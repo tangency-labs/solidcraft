@@ -1161,7 +1161,10 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         return Err(invalid(format!("{field}.file_first"), "only an importer chooses its file first"));
     }
     if !entry.submit_label.is_empty() && entry.kind != EntryKind::Command {
-        return Err(invalid(format!("{field}.submit_label"), "only a command names its dialog's button; an import confirms with Open and an export with Export"));
+        return Err(invalid(
+            format!("{field}.submit_label"),
+            "only a command names its dialog's button; an import confirms with Open and an export with Export",
+        ));
     }
     if !entry.submit_label.is_empty() && !plain(&entry.submit_label, 24) {
         return Err(invalid(format!("{field}.submit_label"), "a button's label is 1..24 printable characters"));

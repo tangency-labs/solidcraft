@@ -2168,9 +2168,8 @@ fn a_command_may_name_its_dialogs_confirm_button() {
     assert_eq!(saved["submit_label"], "Save");
     let again: Entry = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(serde_json::to_value(&again).unwrap(), saved, "it round-trips");
-    // Refused: blank, too long, a control character, not text, and on an import or export slot.
-    for hostile in [json!("x".repeat(25)), json!("Sa
-ve"), json!(1), json!(null)] {
+    // Refused: too long, a control character, not text, and on an import or export slot.
+    for hostile in [json!("x".repeat(25)), json!("Sa\nve"), json!(1), json!(null)] {
         let mut bad = manifest();
         bad["runtime"]["entries"] = json!([{"name": "make", "submit_label": hostile.clone()}]);
         assert!(matches!(parse(&bad), Err(HostError::InvalidManifest { .. })), "{hostile}");
