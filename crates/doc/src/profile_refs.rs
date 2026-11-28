@@ -108,6 +108,16 @@ fn same_ids(a: &[String], b: &[String]) -> bool {
     a == b
 }
 
+/// Whether `curves` names two curves or more and exactly one profile's outer loop is made of
+/// them and no others, however many pieces or spans each is in. A loop of one curve alone is
+/// never this: a free curve that bounds a region by itself is told from its other loops (the
+/// lobes of a curve that crosses itself) by its spans only.
+fn bounds_one_profile(ss: &SolvedSketch, curves: &[String]) -> bool {
+    let want: BTreeSet<&str> = curves.iter().map(String::as_str).collect();
+    want.len() > 1
+        && ss.profiles.iter().filter(|profile| profile.outer_curves.iter().map(String::as_str).collect::<BTreeSet<_>>() == want).count() == 1
+}
+
 /// A migrated whole projection names its source's entire single loop, independently of the
 /// number and kinds of curves used to represent it. Complete graph coverage certifies the
 /// regenerated region; a cut loop, holes or multiple loops cannot stand for the saved outline.
@@ -346,10 +356,17 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
                     // Repeated saved IDs of free curves identify exact graph spans. Their
                     // multiplicity must not silently turn into a whole-source certificate on
                     // resize. Lines, arcs and circles are exempt: how many pieces such a curve is
-                    // cut into changes with every line drawn across it (#9368).
+                    // cut into changes with every line drawn across it (#9368). So is a loop
+                    // of several curves that is the one profile they bound: how many spans a
+                    // free curve is flattened into follows its size, and a parameter that
+                    // resizes the sketch changes the count without changing which region the
+                    // curves bound between them. The count still decides between several
+                    // profiles bounded by the same curves, and for a loop of one curve alone;
+                    // without a profile of the saved count there the pick is lost.
                     if curves.iter().collect::<BTreeSet<_>>().len() != curves.len()
                         && !is_analytic_loop(&ss.sketch, curves)
                         && !ss.profiles.iter().any(|profile| same_ids(curves, &profile.outer_curves))
+                        && !bounds_one_profile(ss, curves)
                     {
                         return Err(crate::curve_pick_error(solidcraft_sketch::CurvePick::Missing, curves, &ss.name));
                     }
