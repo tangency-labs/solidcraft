@@ -94,7 +94,7 @@ fn a_lost_profile_is_an_error_not_another_pick() {
     // Delete the picked circle: the extrude fails with a message instead of taking the square.
     let sk = s.doc.find_feature("S").unwrap().id;
     let picked = match &s.doc.features.last().unwrap().kind {
-        solidcraft_doc::FeatureKind::Extrude { profiles: solidcraft_doc::ProfileSel::Curves { loops }, .. } => loops[0].clone(),
+        solidcraft_doc::FeatureKind::Extrude { profiles: solidcraft_doc::ProfileSel::Curves { loops, .. }, .. } => loops[0].clone(),
         k => panic!("{k:?}"),
     };
     run(&mut s, "sketch.edit", json!({"sketch": sk}));

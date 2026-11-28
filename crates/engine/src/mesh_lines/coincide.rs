@@ -29,6 +29,8 @@ pub(crate) fn sketch_off_lines(sketch: Vec<Path>, lines: &[Line], reach: f64) ->
     let mut stamp = 0usize;
     let mut result = Vec::new();
     for path in sketch {
+        let first = result.len();
+        let mut whole = path.closed;
         let mut run: Vec<Vec2> = Vec::new();
         for pair in path.points.windows(2) {
             let (p, q) = (pair[0], pair[1]);
@@ -51,6 +53,7 @@ pub(crate) fn sketch_off_lines(sketch: Vec<Path>, lines: &[Line], reach: f64) ->
             stamp += 1;
             let mut cursor = 0.;
             for (lo, hi) in union(drawn) {
+                whole = false;
                 keep(&mut run, &mut result, path.hidden, p, q, cursor, lo);
                 end(&mut run, &mut result, path.hidden);
                 cursor = hi;
@@ -58,6 +61,12 @@ pub(crate) fn sketch_off_lines(sketch: Vec<Path>, lines: &[Line], reach: f64) ->
             keep(&mut run, &mut result, path.hidden, p, q, cursor, 1.);
         }
         end(&mut run, &mut result, path.hidden);
+        if whole
+            && result.len() == first + 1
+            && let Some(path) = result.get_mut(first)
+        {
+            path.closed = true;
+        }
     }
     result
 }
@@ -80,7 +89,7 @@ fn keep(run: &mut Vec<Vec2>, result: &mut Vec<Path>, hidden: bool, p: Vec2, q: V
 fn end(run: &mut Vec<Vec2>, result: &mut Vec<Path>, hidden: bool) {
     let points = std::mem::take(run);
     if points.len() > 1 {
-        result.push(Path { points, hidden });
+        result.push(Path { points, closed: false, hidden });
     }
 }
 
@@ -246,7 +255,7 @@ mod tests {
     }
 
     fn path(points: &[(f64, f64)], hidden: bool) -> Path {
-        Path { points: points.iter().map(|p| Vec2::new(p.0, p.1)).collect(), hidden }
+        Path { points: points.iter().map(|p| Vec2::new(p.0, p.1)).collect(), closed: false, hidden }
     }
 
     fn length(paths: &[Path]) -> f64 {
@@ -317,5 +326,19 @@ mod tests {
         let lines: Vec<Line> = body.windows(2).map(|w| line(w[0], w[1], false)).collect();
         let kept = sketch_off_lines(vec![path(&arc(37, 5.), false)], &lines, 0.02);
         assert!(length(&kept) < 1e-6, "{kept:?}");
+    }
+    #[test]
+    fn only_an_untouched_closed_sketch_run_keeps_its_closure() {
+        let closed = || {
+            let mut p = path(&[(0., 0.), (10., 0.), (10., 10.), (0., 10.), (0., 0.)], false);
+            p.closed = true;
+            p
+        };
+        let untouched = sketch_off_lines(vec![closed()], &[line((20., 20.), (30., 20.), false)], 0.02);
+        assert_eq!(untouched.len(), 1);
+        assert!(untouched[0].closed);
+        let clipped = sketch_off_lines(vec![closed()], &[line((0., 0.), (2., 0.), false)], 0.02);
+        assert_eq!(clipped.len(), 1, "a seam cut can leave only one fragment");
+        assert!(!clipped[0].closed);
     }
 }

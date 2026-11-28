@@ -3751,3 +3751,96 @@ fn rolled_back_single_feature_reorder_refuses_dropping_a_pattern_copy_past_the_m
     let measured = run(&mut s, "inspect.measure", json!({}));
     assert_eq!(measured["body_count"], 4, "all copies stay intact after undo + roll forward: {measured}");
 }
+
+#[test]
+fn timeline_edit_refuses_blend_edge_picks_past_history_marker_and_succeeds_just_before_feature() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 5, 10], "length": 20, "width": 20, "height": 10, "operation": "join", "name": "Boss"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 5, 20]], "distance": 1, "name": "Bevel"}));
+
+    let bevel_id = s.doc.find_feature("Bevel").unwrap().id;
+    let initial_names = s.doc.feature(bevel_id).unwrap().edge_names.clone();
+    let initial_refs = s.doc.feature(bevel_id).unwrap().edge_refs.clone();
+    assert_eq!(initial_names.len(), 1);
+    assert!(!initial_names[0].is_empty(), "{initial_names:?}");
+
+    // Roll back before Boss so active geometry preceding Bevel is unbuilt.
+    run(&mut s, "timeline.rollback", json!({"feature": "Plate"}));
+    assert_eq!(s.doc.marker, Some(1));
+    let doc_at_plate = s.doc.clone();
+
+    // Editing edges (new or re-sent) must refuse rather than snapping to Plate's marker geometry.
+    for edges in [json!([[20, 25, 20]]), json!([[20, 5, 20]])] {
+        let err = s.execute("timeline.edit", &json!({"feature": "Bevel", "set": {"edges": edges}})).unwrap_err().to_string();
+        assert!(err.contains("Bevel") && err.contains("history marker"), "{err}");
+        assert_eq!(s.doc, doc_at_plate, "refused edit must leave the document untouched");
+    }
+
+    // Non-geometric edits on the rolled-back chamfer still work and preserve persistent names.
+    run(&mut s, "timeline.edit", json!({"feature": "Bevel", "set": {"distance": "2"}}));
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.doc.feature(bevel_id).unwrap().edge_names, initial_names);
+    assert_eq!(s.doc.feature(bevel_id).unwrap().edge_refs, initial_refs);
+
+    // Moving the marker to just before Bevel builds Boss so Bevel's edge picks resolve accurately.
+    run(&mut s, "timeline.rollback", json!({"feature": "Boss"}));
+    assert_eq!(s.doc.marker, Some(2));
+    run(&mut s, "timeline.edit", json!({"feature": "Bevel", "set": {"edges": [[20, 25, 20]]}}));
+    assert_eq!(s.doc.marker, Some(2));
+    let updated_names = s.doc.feature(bevel_id).unwrap().edge_names.clone();
+    assert_ne!(updated_names, initial_names, "the newly picked edge must replace the old name");
+
+    // Rolling to the end builds Bevel cleanly with the updated edge and distance.
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    let result = s.model.result(bevel_id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.is_none(), "{:?}", result.warning);
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let expected = 40.0 * 30.0 * 10.0 + 20.0 * 20.0 * 10.0 - 0.5 * 2.0 * 2.0 * 20.0;
+    assert!((volume - expected).abs() < 1e-4, "{volume} != {expected}");
+}
+
+#[test]
+fn timeline_edit_refuses_face_and_profile_picks_past_history_marker() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 5, 10], "length": 20, "width": 20, "height": 10, "operation": "join", "name": "Boss"}));
+    run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2, "name": "Hollow"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "SlotSketch", "distance": 5, "operation": "new", "name": "Pad"}));
+
+    let hollow_id = s.doc.find_feature("Hollow").unwrap().id;
+    let initial_faces = s.doc.feature(hollow_id).unwrap().face_names.clone();
+    assert!(!initial_faces.is_empty());
+
+    // Roll back to Plate so Boss, Hollow, SlotSketch, and Pad are all past the marker.
+    run(&mut s, "timeline.rollback", json!({"feature": "Plate"}));
+    assert_eq!(s.doc.marker, Some(1));
+    let doc_at_plate = s.doc.clone();
+
+    // Face pick edits on Hollow are refused while Boss is rolled back.
+    let err = s.execute("timeline.edit", &json!({"feature": "Hollow", "set": {"faces": [[20, 15, 0]]}})).unwrap_err().to_string();
+    assert!(err.contains("Hollow") && err.contains("history marker"), "{err}");
+    assert_eq!(s.doc, doc_at_plate);
+
+    // Profile pick edits on Pad are refused while SlotSketch is rolled back.
+    let err = s.execute("timeline.edit", &json!({"feature": "Pad", "set": {"profiles": [0]}})).unwrap_err().to_string();
+    assert!(err.contains("Pad") && err.contains("history marker"), "{err}");
+    assert_eq!(s.doc, doc_at_plate);
+
+    // Non-geometric edits on both rolled-back features still succeed.
+    run(&mut s, "timeline.edit", json!({"feature": "Hollow", "set": {"thickness": "1.5"}}));
+    run(&mut s, "timeline.edit", json!({"feature": "Pad", "set": {"extent.distance": "8"}}));
+    assert_eq!(s.doc.feature(hollow_id).unwrap().face_names, initial_faces);
+
+    // If the only feature between the marker and Hollow is suppressed, state_before(Hollow) is exact.
+    run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
+    run(&mut s, "timeline.edit", json!({"feature": "Hollow", "set": {"faces": [[20, 15, 10]]}}));
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    let result = s.model.result(hollow_id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.is_none(), "{:?}", result.warning);
+}

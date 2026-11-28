@@ -104,11 +104,12 @@ pub use thread_catalog::parse_tapped_thread;
 pub use thread_catalog::tapped_thread_sizes;
 pub use thread_catalog::untabulated_taper_tap;
 mod walk;
+pub mod weld;
 pub use profile_refs::WHOLE_PROFILE_TOO_MANY_CURVES;
-pub use profile_refs::capture_profile_selection;
 pub use profile_refs::profile_fallback_notes;
 pub use profile_refs::profile_selection_indices;
 pub use profile_refs::profile_selection_indices_lenient;
+pub use profile_refs::{capture_profile_selection, picked_sides};
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;
@@ -159,9 +160,12 @@ pub use sheet_surface_features::{CornerJoinKind, CornerJoinParams, SheetEdgeName
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_fusion;
+pub mod weld_groove;
 pub mod weld_projection;
 pub mod weld_seam;
 pub mod weld_spot;
+pub mod weld_stake;
 
 pub use assembly::BomType;
 pub use assembly::ExpressedAt;

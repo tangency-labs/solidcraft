@@ -151,6 +151,7 @@ pub mod render_ui;
 pub mod rotate_member;
 pub mod save;
 pub mod save_mesh;
+pub mod scan_align;
 pub mod section;
 pub mod select;
 pub mod selection;
@@ -194,6 +195,7 @@ pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
+pub mod weld;
 
 pub use check::Contract;
 pub use check::Issue;

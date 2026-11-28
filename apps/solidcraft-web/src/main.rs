@@ -271,6 +271,18 @@ fn prefs_key() -> String {
     channel::key(solidcraft_ui_egui::prefs::STORAGE_KEY)
 }
 
+/// Where the browser keeps each design's views for "Reopen a design's views next time it opens"
+/// (#23271): the desktop app keeps them in a file in the user's data folder, which a browser has
+/// not.
+#[cfg(target_arch = "wasm32")]
+const VIEW_MEMORY_KEY: &str = "solidcraft.view-memory";
+
+/// The remembered views' key of `channel` (see [`channel`]).
+#[cfg(target_arch = "wasm32")]
+fn view_memory_key() -> String {
+    channel::key(VIEW_MEMORY_KEY)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use std::rc::Rc;
@@ -377,13 +389,17 @@ mod web {
     /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
     /// to date when it is hidden or goes (`pagehide`, `visibilitychange`): the browser may not
     /// wait for that write, so the copies are written shortly after each change as well
-    /// (`Shell::keep_tick`, #10220).
+    /// (`Shell::keep_tick`, #10220). With "Reopen a design's views next time it opens" on, the
+    /// open designs' views are remembered then too: a page closed or reloaded never quits the app,
+    /// which is where the desktop app remembers them (#23271).
     fn keep_when_hidden(window: &web_sys::Window, runner: &eframe::WebRunner) {
         let keep_now = {
             let runner = runner.clone();
             move || {
                 if let Some(mut shell) = runner.app_mut::<Shell>() {
                     shell.keep_tick(None, true);
+                    solidcraft_ui_egui::documents::remember_all_views(&mut shell.app);
+                    shell.store_view_memory();
                 }
             }
         };
@@ -475,6 +491,8 @@ mod web {
         rename_focus: bool,
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
+        /// The recent designs last checked for one file on the computer listed twice.
+        recents_checked: Vec<String>,
         /// On-demand script fonts: fetched only when a CJK language is selected.
         font: solidcraft_ui_egui::ui_kit::type_face::CjkFontLoader,
         font_result: FontLoadResult,
@@ -568,6 +586,29 @@ mod web {
             }
         }
 
+        /// The designs' remembered views go to the browser's storage once they change: a design
+        /// closed, or the page going away ([`keep_when_hidden`], #23271). Other pages of the app
+        /// keep theirs in the same entry, so what is stored now is read first and this page's
+        /// changes go on top. Changes the storage refuses (full) stay, and go with the next one.
+        fn store_view_memory(&mut self) {
+            use solidcraft_ui_egui::documents::{view_memory_changed, view_memory_saved, view_memory_to_save};
+            if !view_memory_changed(&self.app) {
+                return;
+            }
+            let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
+                view_memory_saved(&mut self.app, false);
+                return;
+            };
+            let key = crate::view_memory_key();
+            let saved = storage.get_item(&key).ok().flatten();
+            let Some(text) = view_memory_to_save(&mut self.app, saved.as_deref()) else { return };
+            let taken = storage.set_item(&key, &text).is_ok();
+            view_memory_saved(&mut self.app, taken);
+            if !taken {
+                log::warn!("the browser's storage did not take the designs' remembered views; they are saved again with the next change");
+            }
+        }
+
         /// Files from the computer, writes to store, messages and the autosave.
         fn files_tick(&mut self, ctx: &egui::Context) {
             if !self.launch.persists() {
@@ -600,6 +641,23 @@ mod web {
             for path in self.files.gone.borrow_mut().drain(..) {
                 self.app.home.recent.retain(|r| *r != path);
                 self.app.home.opened_at.remove(&path);
+            }
+            // The same file picked again is listed once, under its newest entry (#23033). The list
+            // may have changed while the browser compared the files: drop only an entry still
+            // listed after the one that stays.
+            for (kept, repeat) in self.files.same_file.borrow_mut().drain(..) {
+                let recent = &mut self.app.home.recent;
+                if let (Some(k), Some(r)) = (recent.iter().position(|p| *p == kept), recent.iter().position(|p| *p == repeat))
+                    && k < r
+                {
+                    recent.remove(r);
+                    self.app.home.opened_at.remove(&repeat);
+                }
+            }
+            // Each change of the recent designs is checked for one file listed twice.
+            if self.recents_synced && self.app.home.recent != self.recents_checked {
+                self.recents_checked = self.app.home.recent.clone();
+                disk::find_same_files(&self.files, self.recents_checked.clone());
             }
             for (text, error) in self.files.messages.borrow_mut().drain(..) {
                 self.app.set_status(text, error);
@@ -1327,6 +1385,7 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
+            self.store_view_memory();
             self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
@@ -1431,13 +1490,15 @@ mod web {
     /// the browser's device draws it, else the supported default. WebGL draws 1x, as desktop
     /// OpenGL does. eframe's web painter has no stencil buffer.
     fn install_viewport(app: &mut SolveApp, rs: &eframe::egui_wgpu::RenderState) {
+        // The window device's lost flag, for the panels and pictures drawn on it; eframe's web
+        // painter draws egui 1x.
+        solidcraft_ui_egui::gpu::watch_window(rs, 1);
         let backend = rs.adapter.get_info().backend;
         let depth = eframe::egui_wgpu::depth_format_from_bits(DEPTH_BITS, 0);
-        let supported = eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
+        let supported = solidcraft_ui_egui::gpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
         let requested = solidcraft_ui_egui::gpu::scene_samples(backend, app.preferences.msaa, &supported);
         let drawn = app.set_wgpu_split(rs, DEPTH_BITS, 0, requested);
-        // After the install, which sets egui's own counts: those leave out the scene's depth
-        // buffer, and they include counts WebGL would draw at 1x.
+        // The scene's counts (with its depth buffer), less those WebGL would draw at 1x.
         app.msaa_supported = solidcraft_ui_egui::gpu::scene_sample_choices(backend, supported);
         log::info!("SolidCraft graphics: {backend:?}, MSAA {drawn}x (saved {}x)", app.preferences.msaa);
     }
@@ -1501,7 +1562,7 @@ mod web {
                         let files = Rc::new(Files::default());
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
-                        let services = if !launch.persists() { Services::default() } else { Services {
+                        let mut services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
@@ -1546,6 +1607,7 @@ mod web {
                             usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
+                        services.browser_safari = crate::install::safari();
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
                         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1560,6 +1622,11 @@ mod web {
                         }
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
+                        }
+                        // Before any design opens: it may get its remembered views back (#23271).
+                        if launch.persists() {
+                            let saved = window.local_storage().ok().flatten().and_then(|s| s.get_item(&crate::view_memory_key()).ok().flatten());
+                            solidcraft_ui_egui::documents::use_host_view_memory(&mut app, saved.as_deref());
                         }
                         if launch.persists() {
                             files::start(&files, crate::suppress_recovery_after_leave(&app.preferences));
@@ -1607,6 +1674,7 @@ mod web {
                             renaming: None,
                             rename_focus: false,
                             recents_synced: false,
+                            recents_checked: Vec::new(),
                             font: Default::default(),
                             font_result: Rc::new(std::cell::RefCell::new(None)),
                             cjk_bytes: None,

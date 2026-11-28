@@ -325,3 +325,203 @@ fn the_sheet_page_follows_the_drawings_fields() {
     assert_eq!(serde_json::to_string(&*after.scene).unwrap(), serde_json::to_string(&build(&s, &d, sheet).unwrap().scene).unwrap());
     find(&runs(&s, sheet), "Tangency Labs");
 }
+
+/// Synthetic box (`length` x `width` x `height` mm) with an optional material and an open drawing
+/// whose Sheet 1 documents the design.
+fn mass_drawing(length: f64, width: f64, height: f64, material: Option<&str>) -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": length, "width": width, "height": height, "body_name": "Part"}));
+    if let Some(material) = material {
+        run(&mut s, "material.assign", json!({"bodies": ["Part"], "material": material}));
+    }
+    run(&mut s, "drawing.create", json!({}));
+    let source = solidcraft_doc::ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": 0}}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    (s, sheet)
+}
+
+/// Built-in title block JSON with an optional `mass_unit` option on its `mass` text cell.
+fn block_with_mass_unit(mass_unit: Option<&str>) -> Value {
+    let mut block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    if let Some(unit) = mass_unit {
+        let cells = block["cells"].as_array_mut().unwrap();
+        let mass = cells.iter_mut().find(|c| c["name"] == "mass").unwrap();
+        mass["kind"]["text"]["mass_unit"] = json!(unit);
+    }
+    block
+}
+
+fn inspect_cell_on(s: &mut Session, sheet_idx: usize, name: &str) -> String {
+    let inspected = run(s, "drawing.inspect", json!({}));
+    let cells = inspected["sheets"][sheet_idx]["title_block_cells"].as_array().unwrap();
+    cells.iter().find(|c| c["name"] == name).unwrap()["text"].as_str().unwrap().to_string()
+}
+
+fn paper_cell_runs_on(s: &Session, sheet_idx: usize, name: &str) -> String {
+    let d = s.drawing("test").unwrap();
+    let sheet = &d.sheets[sheet_idx];
+    let layout = sheet.title_block_layout().unwrap().unwrap();
+    let (cell, cell_layout) = sheet.title_block.as_ref().unwrap().cells.iter().zip(layout.cells).find(|(c, _)| c.name == name).unwrap();
+    let value_box = cell_layout.value_box;
+    let solidcraft_geom::title_block::CellKind::Text(text) = &cell.kind else {
+        panic!("{name} is not a text cell");
+    };
+    let anchor = Vec2::new(value_box.center().x, value_box.center().y - text.cap_mm / 2.0);
+    runs(s, sheet.id)
+        .into_iter()
+        .filter(|r| match text.align {
+            // The run's own width: a value too wide for its box is set smaller, so its width isn't the cell's cap's.
+            solidcraft_geom::cell::HAlign::Centre => {
+                let own = r.glyphs.last().map_or(0.0, |g| g.x + g.advance);
+                (r.origin + Vec2::new(own / 2.0, 0.0)).dist(anchor) < 1e-9
+            }
+            _ => value_box.contains(r.origin),
+        })
+        .map(|r| r.text)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A 12.4 g PLA part (100 x 10 x 10 mm = 10 cm³ at 1.24 g/cm³) keeps "0.01 kg" with the old
+/// default (omitted option) and with explicit "kg", reads "12.4 g" with "g" or "auto", and leaves
+/// the material cell unchanged.
+#[test]
+fn mass_cell_formats_old_default_kg_g_and_auto_for_small_part() {
+    let (mut s, _sheet) = mass_drawing(100.0, 10.0, 10.0, Some("PLA"));
+    assert_eq!(inspect_cell_on(&mut s, 0, "mass"), "0.01 kg");
+    assert_eq!(paper_cell_runs_on(&s, 0, "mass"), "0.01 kg");
+    assert_eq!(inspect_cell_on(&mut s, 0, "material"), "PLA");
+
+    for (unit, expected) in [("kg", "0.01 kg"), ("g", "12.4 g"), ("auto", "12.4 g")] {
+        run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block_with_mass_unit(Some(unit))}));
+        assert_eq!(inspect_cell_on(&mut s, 0, "mass"), expected, "unit={unit}");
+        assert_eq!(paper_cell_runs_on(&s, 0, "mass"), expected, "unit={unit}");
+        assert_eq!(inspect_cell_on(&mut s, 0, "material"), "PLA", "unit={unit}");
+    }
+}
+
+/// "auto" picks g below 1 kg (24.3 g Aluminum: 90 x 10 x 10 mm at 2.70 g/cm³) and kg at or above
+/// 1 kg (1000.0 g Stainless Steel: 125 x 100 x 10 mm at 8.0 g/cm³; 1250.0 g Stainless Steel:
+/// 125 x 125 x 10 mm; 1570.0 g Steel: 200 x 100 x 10 mm at 7.85 g/cm³), leaving material text
+/// unchanged.
+#[test]
+fn mass_cell_auto_switches_at_one_kilogram() {
+    let cases = [
+        (90.0, 10.0, 10.0, "Aluminum", "24.3 g"),
+        (125.0, 100.0, 10.0, "Stainless Steel", "1.00 kg"),
+        (125.0, 125.0, 10.0, "Stainless Steel", "1.25 kg"),
+        (200.0, 100.0, 10.0, "Steel", "1.57 kg"),
+    ];
+    for (l, w, h, material, expected) in cases {
+        let (mut s, _sheet) = mass_drawing(l, w, h, Some(material));
+        run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block_with_mass_unit(Some("auto"))}));
+        assert_eq!(inspect_cell_on(&mut s, 0, "mass"), expected, "{material}");
+        assert_eq!(paper_cell_runs_on(&s, 0, "mass"), expected, "{material}");
+        assert_eq!(inspect_cell_on(&mut s, 0, "material"), material);
+    }
+}
+
+/// A mass cell asking for "both" on a 12.4 g PLA part reads "12.4 g (0.0124 kg)" in both
+/// `drawing.inspect` and drawn paper runs, while material remains "PLA".
+#[test]
+fn mass_cell_both_shows_grams_and_kilograms() {
+    let (mut s, _sheet) = mass_drawing(100.0, 10.0, 10.0, Some("PLA"));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block_with_mass_unit(Some("both"))}));
+    assert_eq!(inspect_cell_on(&mut s, 0, "mass"), "12.4 g (0.0124 kg)");
+    assert_eq!(paper_cell_runs_on(&s, 0, "mass"), "12.4 g (0.0124 kg)");
+    assert_eq!(inspect_cell_on(&mut s, 0, "material"), "PLA");
+}
+
+/// A 12.4 g body at the default density (100 x 10 x (12.4 / 1.29) mm at 1.29 g/cm³) formats
+/// starting with "12.4 g" (preserving any PR #75 default-density marker), and assigning "Steel"
+/// (75.5 g) updates material to "Steel" and clears any default-density warning.
+#[test]
+fn mass_cell_preserves_default_density_marker_until_material_assigned() {
+    let (mut s, _sheet) = mass_drawing(100.0, 10.0, 12.4 / 1.29, None);
+    assert_eq!(inspect_cell_on(&mut s, 0, "material"), "Default");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block_with_mass_unit(Some("g"))}));
+    let unassigned_inspect = inspect_cell_on(&mut s, 0, "mass");
+    let unassigned_paper = paper_cell_runs_on(&s, 0, "mass");
+    assert!(unassigned_inspect.starts_with("12.4 g"), "{unassigned_inspect}");
+    assert!(unassigned_paper.starts_with("12.4 g"), "{unassigned_paper}");
+    assert_eq!(inspect_cell_on(&mut s, 0, "material"), "Default");
+
+    let drawing_id = solidcraft_doc::ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "material.assign", json!({"bodies": ["Part"], "material": "Steel"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing_id}));
+
+    let steel_inspect = inspect_cell_on(&mut s, 0, "mass");
+    let steel_paper = paper_cell_runs_on(&s, 0, "mass");
+    assert_eq!(steel_inspect, "75.5 g");
+    assert_eq!(steel_paper, "75.5 g");
+    assert!(!steel_inspect.to_ascii_lowercase().contains("default"), "{steel_inspect}");
+    assert_eq!(inspect_cell_on(&mut s, 0, "material"), "Steel");
+}
+
+/// Saving and reopening a design preserves each sheet's mass-unit option and rendered mass text.
+#[test]
+fn mass_cell_unit_choice_survives_save_and_reopen() {
+    let folder = crate::tests::Folder::new("title-block-mass-unit");
+    let (mut s, _sheet) = mass_drawing(100.0, 10.0, 10.0, Some("PLA"));
+    let drawing_id = solidcraft_doc::ids::encode(s.drawing("test").unwrap().id);
+    let source = solidcraft_doc::ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block_with_mass_unit(Some("g"))}));
+    run(
+        &mut s,
+        "drawing.sheet.add",
+        json!({"name": "Sheet 2", "documents": {"source": source, "component": 0}, "title_block": block_with_mass_unit(Some("both"))}),
+    );
+    assert_eq!(inspect_cell_on(&mut s, 0, "mass"), "12.4 g");
+    assert_eq!(inspect_cell_on(&mut s, 1, "mass"), "12.4 g (0.0124 kg)");
+
+    run(&mut s, "file.save", json!({"path": folder.path("part.solidcraft")}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": folder.path("part.solidcraft")}));
+    run(&mut reopened, "drawing.open", json!({"drawing": drawing_id}));
+
+    assert_eq!(inspect_cell_on(&mut reopened, 0, "mass"), "12.4 g");
+    assert_eq!(paper_cell_runs_on(&reopened, 0, "mass"), "12.4 g");
+    assert_eq!(inspect_cell_on(&mut reopened, 0, "material"), "PLA");
+    assert_eq!(inspect_cell_on(&mut reopened, 1, "mass"), "12.4 g (0.0124 kg)");
+    assert_eq!(paper_cell_runs_on(&reopened, 1, "mass"), "12.4 g (0.0124 kg)");
+    assert_eq!(inspect_cell_on(&mut reopened, 1, "material"), "PLA");
+}
+
+/// A 128-character material name never reaches past its cell: a value too wide
+/// for its box is set smaller, and clipped with an ellipsis past the least size, with a note of each.
+#[test]
+fn a_128_character_material_designation_stays_inside_its_cell() {
+    let (mut s, sheet) = mass_drawing(100.0, 10.0, 10.0, None);
+    let long = "W".repeat(128);
+    run(&mut s, "material.create", json!({"name": long, "density_g_cm3": 2}));
+    run(&mut s, "material.assign", json!({"bodies": ["Part"], "material": long}));
+    let cell = placed(&s, "material").value_box;
+    let inside: Vec<TextRun> = runs(&s, sheet).into_iter().filter(|r| cell.contains(r.origin)).collect();
+    assert!(!inside.is_empty(), "the material is drawn in its cell");
+    for r in &inside {
+        let end = r.glyphs.last().map_or(r.origin.x, |g| r.origin.x + g.x + g.advance);
+        assert!(end <= cell.max.x + 1e-6, "`{}` ends at {end}, past its cell's {}", r.text, cell.max.x);
+    }
+    let said = notes(&mut s, "material");
+    assert!(said.as_array().unwrap().contains(&json!({"fit": "clipped"})), "{said}");
+}
+
+/// A value box narrower than the ellipsis at the least size draws nothing for the value, and the
+/// notes say it was too wide and clipped; the title block still builds (valid input is never refused).
+#[test]
+fn a_box_narrower_than_the_ellipsis_draws_nothing_and_notes_it() {
+    let (s, _) = mass_drawing(100.0, 10.0, 10.0, None);
+    let d = s.drawing("test").unwrap();
+    let fonts = solidcraft_sketch::PaperFonts::new("", "en", true);
+    let block = d.sheets[0].title_block.as_ref().unwrap();
+    let solidcraft_geom::title_block::CellKind::Text(text) = &block.cells.iter().find(|c| c.name == "material").unwrap().kind else {
+        panic!("material is a text cell");
+    };
+    let value_box = Aabb2 { min: Vec2::new(10.0, 10.0), max: Vec2::new(10.2, 14.0) };
+    let mut notes = Vec::new();
+    let (lines, _) = value_lines(text, value_box, &fonts, "WWWWW", &mut notes).unwrap();
+    assert!(lines.lines.iter().all(|(t, _)| t.is_empty()), "{:?}", lines.lines);
+    assert!(notes.contains(&Note::Fit(Warning::Width)) && notes.contains(&Note::Fit(Warning::Clipped)), "{notes:?}");
+}

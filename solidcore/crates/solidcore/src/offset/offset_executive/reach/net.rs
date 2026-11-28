@@ -103,6 +103,12 @@ fn dot(a: I3, b: I3) -> Ivl {
     x * p + y * q + z * r
 }
 
+fn cross(a: I3, b: I3) -> I3 {
+    let [x, y, z] = a;
+    let [p, q, r] = b;
+    [y * r - z * q, z * p - x * r, x * q - y * p]
+}
+
 fn point(v: Vec3) -> I3 {
     [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)]
 }
@@ -181,6 +187,18 @@ pub(super) struct Net {
     /// extension's parameters there follow (module docs); `None` where they are not proved
     /// positive.
     lines: [Option<Lines>; 2],
+    /// The signed distance the surface lies off the net along the net's unit normal, for an
+    /// offset surface of the net (`O = G + d n`, `n = G_u × G_v / |G_u × G_v|`, the side
+    /// `OffsetSurface` moves a positive distance to); `None` for the net itself. The
+    /// executive extends an offset surface as the offset of its extended base
+    /// (`surface/extend.rs`, `offset_extended`), so past a side `O` is the offset of the
+    /// extension above ([`Net::offset_jet`]).
+    offset: Option<f64>,
+    /// The points of the stations ([`Net::nearest_on_knots`]) the first time they are asked
+    /// for: the same for every point looked for, so enclosed once, not once per piece of an
+    /// edge (a thread's flank winds many turns: its stations are thousands, and on every
+    /// piece of every edge they were enclosed again).
+    stations: std::sync::OnceLock<Vec<((f64, f64), Vec3)>>,
 }
 
 /// The homogeneous lines `H + s (H_u + μ H)` the executive continues the rows by past a u
@@ -209,7 +227,8 @@ impl Net {
     /// `surface` as a bare net: a B-spline surface, an extrusion (its net is made from its
     /// generator's exact form) or a surface of revolution (its net is its generator turned
     /// and weighted, exactly), with no analytic label and no definition (a blend's or sweep's
-    /// net is only its approximation); `None` for any other. A revolution's sides round its
+    /// net is only its approximation); or an offset surface of such a net ([`Net::offset`]);
+    /// `None` for any other. A revolution's sides round its
     /// axis are not extended, as the executive leaves them (`SideExtension::AroundAxis`):
     /// past them the net's end span continued is enclosed only within `tolerance` of the side
     /// ([`Net::continues`]).
@@ -218,6 +237,46 @@ impl Net {
     ///
     /// Those of the net's form and of the closure and side queries; a cancel.
     pub(super) fn of(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<Self>> {
+        // an offset surface of a bare net: the net, moved along its normal (an offset of an
+        // offset, which upstream evaluates by adding the distances, is not taken)
+        if let SurfaceKind::OffsetSurface(o) = surface.kind() {
+            let d = o.offset_distance();
+            let base = o.base_surface();
+            if !d.is_finite() || matches!(base.kind(), SurfaceKind::OffsetSurface(_)) {
+                return Ok(None);
+            }
+            // (the net only bounds the reach; the offset surface is built by `create_offset_surface`)
+            let Some(net) = Self::of_bare(k, base, tolerance, true)? else {
+                return Ok(None);
+            };
+            // the offset is a surface only where the base's normal runs on across its knots
+            if !offset_is_continuous(&net.cn, d, tolerance) {
+                return Ok(None);
+            }
+            return Ok(Some(Self {
+                offset: Some(d),
+                ..net
+            }));
+        }
+        Self::of_bare(k, surface, tolerance, false)
+    }
+
+    /// [`Net::of`] for a surface that is no offset surface. A swept wall's definition
+    /// ([`Surface::procedural_sweep`]) rides on its net, which is only within the
+    /// definition's bound of the swept surface, so the net itself stands for a wall only
+    /// where the net is what is used: `as_offset_base`, for the base of an offset surface,
+    /// which the executive offsets and extends as that net (the offset keeps no definition)
+    /// whatever the definition beside it says.
+    ///
+    /// # Errors
+    ///
+    /// As [`Net::of`].
+    fn of_bare(
+        k: &Kernel,
+        surface: &Surface,
+        tolerance: f64,
+        as_offset_base: bool,
+    ) -> Result<Option<Self>> {
         if !matches!(
             surface.kind(),
             SurfaceKind::BSpline(_)
@@ -225,7 +284,7 @@ impl Net {
                 | SurfaceKind::SurfOfRevolution(_)
         ) || crate::surface::implicit::AnalyticSupport::of(surface).is_some()
             || surface.procedural_blend().is_some()
-            || surface.procedural_sweep().is_some()
+            || (!as_offset_base && surface.procedural_sweep().is_some())
         {
             return Ok(None);
         }
@@ -292,6 +351,8 @@ impl Net {
                 0.0
             },
             lines,
+            offset: None,
+            stations: std::sync::OnceLock::new(),
         }))
     }
 
@@ -368,6 +429,52 @@ impl Net {
         let (kappa, rate) = (with_zero(kappa), with_zero(rate));
         let finite = |x: Ivl| x.lo.is_finite() && x.hi.is_finite();
         Ok((finite(kappa) && finite(rate)).then_some((kappa, rate)))
+    }
+
+    /// `κ`, `κ_v` and `κ_vv` of the lines past the u side `side` over `v`, as
+    /// [`Net::kappa`] takes the first two: with `(C, W)` the lines' curve and `c` its scale,
+    /// `κ = c C / W`, `κ_v = c (C' W − C W') / W²` and
+    /// `κ_vv = c ((C'' W − C W'') / W² − 2 W' (C' W − C W') / W³)`, each hulled with 0 for
+    /// [`Form::Either`] (the product form's `κ` is 0 at every `v`, and so are its
+    /// derivatives).
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    fn kappa2(&self, side: usize, v: Ivl, form: Form) -> Result<Option<[Ivl; 3]>> {
+        let Some(lines) = self.lines.get(side).and_then(Option::as_ref) else {
+            return Ok(None);
+        };
+        let ders = match curve_derivs_over(&lines.curve, v, 2, None) {
+            Ok(d) => d,
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                return Err(e)
+            }
+            Err(_) => return Ok(None),
+        };
+        let (Some(d0), Some(d1), Some(d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+            return Ok(None);
+        };
+        let (c, w, cv, wv, cvv, wvv) = (d0.x, d0.y, d1.x, d1.y, d2.x, d2.y);
+        if w.lo.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+            return Ok(None);
+        }
+        let numerator = cv * w - c * wv;
+        let kappa = lines.scale * c / w;
+        let rate = lines.scale * numerator / (w * w);
+        let rate2 = lines.scale
+            * ((cvv * w - c * wvv) / (w * w) - Ivl::from(2.0) * wv * numerator / (w * w * w));
+        let with_zero = |x: Ivl| match form {
+            Form::Lines => x,
+            Form::Either => x.hull(Ivl::from(0.0)),
+            #[cfg(test)]
+            Form::Product => Ivl::from(0.0),
+        };
+        let out = [kappa, rate, rate2].map(with_zero);
+        Ok(out
+            .iter()
+            .all(|x| x.lo.is_finite() && x.hi.is_finite())
+            .then_some(out))
     }
 
     /// The parts of `[a, b]` in direction `d` (0 for u): on the knots, past each side the
@@ -623,6 +730,22 @@ impl Net {
     /// `E + Δv E_v` at that side (module docs), each with its partials, from the net's
     /// partials at the sides (`Δ` zero along a side the part is on).
     fn part_jet(&self, pu: Part, pv: Part, form: Form, about: Option<Vec3>) -> Result<Option<Jet>> {
+        self.part_jet_of(pu, pv, form, about, self.offset)
+    }
+
+    /// [`Net::part_jet`] of the net moved by `offset` ([`Net::offset`]; `None` for the net
+    /// itself, whatever its own offset).
+    fn part_jet_of(
+        &self,
+        pu: Part,
+        pv: Part,
+        form: Form,
+        about: Option<Vec3>,
+        offset: Option<f64>,
+    ) -> Result<Option<Jet>> {
+        if let Some(d) = offset {
+            return self.offset_jet(pu, pv, form, about, d);
+        }
         let at = |p: Part| match p {
             Part::On(a, b) | Part::Beyond { a, b, .. } => (a, b),
             Part::Past { at, .. } => (at, at),
@@ -691,6 +814,151 @@ impl Net {
             sv: ev_,
         };
         Ok(Some(jet))
+    }
+
+    /// The jet of the offset `O = E + d n` over one part of a box ([`Net::offset`]), `E` the
+    /// net or its extension there as [`Net::part_jet`] takes it and `n = N / |N|`,
+    /// `N = E_u × E_v`: `O_u = E_u + d n_u` with `n_u = (N_u − n (n·N_u)) / |N|` and
+    /// `N_u = E_uu × E_v + E_u × E_uv` (the same in v), so `E`'s second partials are enclosed
+    /// ([`Net::second_order`]). `None` where they are not, or where `|N|` is not proved
+    /// positive (a pole of the net, where the offset has no normal to move along).
+    fn offset_jet(
+        &self,
+        pu: Part,
+        pv: Part,
+        form: Form,
+        about: Option<Vec3>,
+        d: f64,
+    ) -> Result<Option<Jet>> {
+        let Some([x, xu, xv, xuu, xuv, xvv]) = self.second_order(pu, pv, form, about)? else {
+            return Ok(None);
+        };
+        let n = cross(xu, xv);
+        let length = dot(n, n).sqrt();
+        if !(length.lo > 0.0 && length.hi.is_finite()) {
+            return Ok(None);
+        }
+        let unit = scale(n, Ivl::from(1.0) / length);
+        let nu = add(cross(xuu, xv), cross(xu, xuv));
+        let nv = add(cross(xuv, xv), cross(xu, xvv));
+        // the unit normal's partials: the normal's, less their part along it, over its length
+        let along = |m: I3| scale(sub(m, scale(unit, dot(unit, m))), Ivl::from(1.0) / length);
+        let d = Ivl::from(d);
+        Ok(Some(Jet {
+            p: add(x, scale(unit, d)),
+            su: add(xu, scale(along(nu), d)),
+            sv: add(xv, scale(along(nv), d)),
+        }))
+    }
+
+    /// The point and the first and second partials `[E, E_u, E_v, E_uu, E_uv, E_vv]` of the
+    /// net and its extension over one part of a box ([`Net::part_jet`]'s `E`, the point
+    /// taken back from `E − about`). On the knots (or beyond a continued side) they are the
+    /// net's own. Past a u side, `E = G + σ G_u` from the net's partials `G` at the side, with
+    /// `σ = s / q`, `q = 1 + |s| κ(v)` (`s = Δu`, [`Net::kappa`] with its first two
+    /// derivatives), whose partials are, `ε` the sign of `s` (`|s| = ε s`):
+    ///
+    /// ```text
+    /// σ_s = 1 / q²,                    σ_ss = −2 ε κ / q³,
+    /// σ_v = −s |s| κ_v / q²,           σ_sv = −2 |s| κ_v / q³,
+    /// σ_vv = −s |s| κ_vv / q² + 2 s |s|² κ_v² / q³,
+    /// σ_ssv = −2 ε κ_v / q³ + 6 ε |s| κ κ_v / q⁴,
+    /// ```
+    ///
+    /// so `E_s = σ_s G_u`, `E_v = G_v + σ_v G_u + σ G_uv`, `E_ss = σ_ss G_u`,
+    /// `E_sv = σ_sv G_u + σ_s G_uv` and `E_vv = G_vv + σ_vv G_u + 2 σ_v G_uv + σ G_uvv`. Past
+    /// a v side, `F = E + t E_v` at that side (`t = Δv`): `F_u = E_u + t E_uv`, `F_t = E_v`,
+    /// `F_uu = E_uu + t E_uuv`, `F_ut = E_uv`, `F_tt = 0`, with `E_uuv` the net's own on the
+    /// u knots and `σ_ssv G_u + σ_ss G_uv` past a u side.
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    #[allow(clippy::many_single_char_names)] // the partials' names
+    fn second_order(
+        &self,
+        pu: Part,
+        pv: Part,
+        form: Form,
+        about: Option<Vec3>,
+    ) -> Result<Option<[I3; 6]>> {
+        let at = |p: Part| match p {
+            Part::On(a, b) | Part::Beyond { a, b, .. } => (a, b),
+            Part::Past { at, .. } => (at, at),
+        };
+        // how far past its side the part is, and that side's index (`BoxSide::ALL`)
+        let past = |p: Part, d: usize| match p {
+            Part::On(..) | Part::Beyond { .. } => None,
+            Part::Past { at, d: by } => {
+                let low = self.range.get(d).is_some_and(|&(r0, _)| at <= r0);
+                Some((by, if low { 2 * d } else { 2 * d + 1 }))
+            }
+        };
+        let (du, dv) = (past(pu, 0), past(pv, 1));
+        // the third partials `G_uvv` (past a u side) and `G_uuv` (past a v side) are asked
+        // only where a part is past a side
+        let lk = if du.is_none() && dv.is_none() { 2 } else { 3 };
+        let Some(g) = Self::partials(&self.cn, at(pu), at(pv), lk, about)? else {
+            return Ok(None);
+        };
+        let x = match about {
+            Some(o) => add(of_v3(g.at(0, 0)), point(o)),
+            None => of_v3(g.at(0, 0)),
+        };
+        let [xu, xv, xuu, xuv, xvv] =
+            [(1, 0), (0, 1), (2, 0), (1, 1), (0, 2)].map(|(a, b)| of_v3(g.at(a, b)));
+        let (xuuv, xuvv) = (of_v3(g.at(2, 1)), of_v3(g.at(1, 2)));
+        let (zero, one) = (Ivl::from(0.0), Ivl::from(1.0));
+        // `E` and its partials, with `E_uuv` for a part past a v side
+        let (e, eu, ev, euu, euv, evv, euuv) = match du {
+            None => (x, xu, xv, xuu, xuv, xvv, xuuv),
+            Some((s, side)) => {
+                let (v0, v1) = at(pv);
+                let Some([kappa, rate, rate2]) = self.kappa2(side, Ivl::new(v0, v1), form)? else {
+                    return Ok(None);
+                };
+                // `ε` and `|s|`: past the low side `s ≤ 0`
+                let sign = if side == 0 { Ivl::from(-1.0) } else { one };
+                let far = sign * s;
+                let q = one + far * kappa;
+                if q.lo.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                    return Ok(None);
+                }
+                let (q2, two) = (q * q, Ivl::from(2.0));
+                let q3 = q2 * q;
+                let sigma = s / q;
+                let sigma_s = one / q2;
+                let sigma_v = zero - s * far * rate / q2;
+                let sigma_ss = zero - two * sign * kappa / q3;
+                let sigma_sv = zero - two * far * rate / q3;
+                let sigma_vv = zero - s * far * rate2 / q2 + two * s * far * far * rate * rate / q3;
+                let sigma_ssv = zero - two * sign * rate / q3
+                    + Ivl::from(6.0) * sign * far * kappa * rate / (q3 * q);
+                (
+                    add(x, scale(xu, sigma)),
+                    scale(xu, sigma_s),
+                    add(add(xv, scale(xu, sigma_v)), scale(xuv, sigma)),
+                    scale(xu, sigma_ss),
+                    add(scale(xu, sigma_sv), scale(xuv, sigma_s)),
+                    add(
+                        add(add(xvv, scale(xu, sigma_vv)), scale(xuv, two * sigma_v)),
+                        scale(xuvv, sigma),
+                    ),
+                    add(scale(xu, sigma_ssv), scale(xuv, sigma_ss)),
+                )
+            }
+        };
+        Ok(Some(match dv {
+            None => [e, eu, ev, euu, euv, evv],
+            Some((t, _)) => [
+                add(e, scale(ev, t)),
+                add(eu, scale(euv, t)),
+                ev,
+                add(euu, scale(euuv, t)),
+                euv,
+                [zero; 3],
+            ],
+        }))
     }
 
     /// [`Net::jet`] over a box proved to hold a meeting, where that meeting must be on the
@@ -771,6 +1039,138 @@ impl Net {
             return Ok(None);
         };
         Ok(self.at(a, b)?.map(|(p, _, _)| [a, b, (p - x0).dot(u)]))
+    }
+
+    /// The net's data as bits, for an edge's bound to be taken again from its other face
+    /// ([`super::EdgeBounds`]): the offset, the degrees and counts, the knots, the
+    /// homogeneous control points, which sides are extended or continued, and the tolerance.
+    /// Two nets with the same bits are the same surface, extended alike.
+    pub(super) fn bits(&self) -> Vec<u64> {
+        let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+        let mut out = vec![3, self.offset.map_or(u64::MAX, f64::to_bits)];
+        out.extend([self.cn.p, self.cn.q, self.cn.nu, self.cn.nv].map(count));
+        for list in [&self.cn.u, &self.cn.v, &self.cn.pw] {
+            out.push(count(list.len()));
+            out.extend(list.iter().map(|x| x.to_bits()));
+        }
+        out.extend(
+            self.extends
+                .iter()
+                .chain(&self.continues)
+                .map(|&b| u64::from(b)),
+        );
+        out.push(self.tolerance.to_bits());
+        out
+    }
+
+    /// The parameters of the point of the net itself (not its offset, [`Net::offset`]) on
+    /// its knots nearest `x`: Gauss–Newton on `(G − x) · G_u = (G − x) · G_v = 0` from
+    /// `start`, kept where it ends within the net's tolerance of `x`, else from the point
+    /// nearest `x` among the net's knots and span middles ([`Net::nearest_on_knots`]).
+    /// Newton's start only, for a point of the edge, which lies on the net: an offset's
+    /// meeting there is the one near those parameters (an offset is parametrised as its
+    /// net), where a start from the knots alone may lie a turn away on a thread's flank.
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    fn foot(&self, x: Vec3, start: Option<[f64; 2]>) -> Result<Option<[f64; 2]>> {
+        let [(u0, u1), (v0, v1)] = self.range;
+        let on = |u: f64, v: f64| -> Result<Option<(Vec3, Vec3, Vec3)>> {
+            let (Some(us), Some(vs)) = (self.parts(0, u, u), self.parts(1, v, v)) else {
+                return Ok(None);
+            };
+            let (Some(&pu), Some(&pv)) = (us.first(), vs.first()) else {
+                return Ok(None);
+            };
+            Ok(self
+                .part_jet_of(pu, pv, Form::Lines, None, None)?
+                .map(|j| (middle(j.p), middle(j.su), middle(j.sv))))
+        };
+        let descend = |[mut u, mut v]: [f64; 2]| -> Result<Option<([f64; 2], f64)>> {
+            for _ in 0..NEWTON_STEPS {
+                let Some((g, gu, gv)) = on(u, v)? else {
+                    return Ok(None);
+                };
+                let r = g - x;
+                let (a, b, c) = (gu.dot(gu), gu.dot(gv), gv.dot(gv));
+                let det = a * c - b * b;
+                if !(det.is_finite() && det > 0.0) {
+                    break;
+                }
+                let (e, f) = (r.dot(gu), r.dot(gv));
+                let (nu, nv) = (
+                    (u - (c * e - b * f) / det).max(u0).min(u1),
+                    (v - (a * f - b * e) / det).max(v0).min(v1),
+                );
+                #[allow(clippy::float_cmp)] // a step that changes nothing
+                let still = nu == u && nv == v;
+                (u, v) = (nu, nv);
+                if still {
+                    break;
+                }
+            }
+            Ok(on(u, v)?.map(|(g, _, _)| ([u, v], (g - x).length())))
+        };
+        if let Some(s) = start {
+            if let Some((uv, d)) = descend(s)? {
+                if d <= self.tolerance {
+                    return Ok(Some(uv));
+                }
+            }
+        }
+        let Some((u, v)) = self.nearest_on_knots(x)? else {
+            return Ok(None);
+        };
+        Ok(descend([u, v])?.map(|(uv, _)| uv))
+    }
+
+    /// The parameters whose point is nearest `x` among the net's knots and the middles of
+    /// its spans, every pair of the two directions' (Newton's first guess only: a net that
+    /// winds several turns, a thread's flank, meets a section once a turn, and a start on
+    /// the grid's coarser cells may lead to another turn's meeting).
+    ///
+    /// # Errors
+    ///
+    /// A cancel.
+    fn nearest_on_knots(&self, x: Vec3) -> Result<Option<(f64, f64)>> {
+        let stations = |knots: &[f64], (r0, r1): (f64, f64)| {
+            let mut out: Vec<f64> = Vec::new();
+            for w in knots.windows(2) {
+                if let [a, b] = *w {
+                    if a < b && a >= r0 && b <= r1 {
+                        out.extend([a, 0.5 * (a + b), b]);
+                    }
+                }
+            }
+            out.dedup();
+            out
+        };
+        if self.stations.get().is_none() {
+            let [ru, rv] = self.range;
+            let (us, vs) = (stations(&self.cn.u, ru), stations(&self.cn.v, rv));
+            let mut points = Vec::new();
+            for &u in &us {
+                for &v in &vs {
+                    if let Some((p, _, _)) = self.at(u, v)? {
+                        points.push(((u, v), p));
+                    }
+                }
+            }
+            // (a thread that got here first stored the same points)
+            let _ = self.stations.set(points);
+        }
+        let Some(points) = self.stations.get() else {
+            return Ok(None);
+        };
+        let mut best: Option<(f64, (f64, f64))> = None;
+        for &(uv, p) in points {
+            let d = (p - x).length();
+            if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, uv));
+            }
+        }
+        Ok(best.map(|(_, uv)| uv))
     }
 
     /// The parameters on a grid over the knots where `distance` of the point is least.
@@ -884,8 +1284,13 @@ impl Net {
     }
 
     /// The sides (`BoxSide::ALL` order) whose boundary row lies on `plane` within
-    /// `tolerance` ([`Net::rows_through`]).
+    /// `tolerance` ([`Net::rows_through`]); none for an offset ([`Net::offset`]), whose rows
+    /// are not the net's control rows.
     fn rows_on(&self, plane: super::Tangent, tolerance: f64) -> Vec<usize> {
+        // an offset's rows are not the net's control rows
+        if self.offset.is_some() {
+            return Vec::new();
+        }
         let point = |i: usize, j: usize| {
             let at = i.checked_mul(self.cn.nv)?.checked_add(j)?.checked_mul(4)?;
             match *self.cn.pw.get(at..at.checked_add(4)?)? {
@@ -1001,6 +1406,101 @@ impl Net {
     }
 }
 
+/// Whether the offset of `cn` by `distance` has no jump across the base's inner knots of
+/// multiplicity `p`, where the base is only C0: there its normal, which the offset moves
+/// along, may turn, and the offset then jumps by `distance` times the turn, which the
+/// certificates' mean-value enclosures do not hold across. The base's tangent directions
+/// either side of such a knot line, at every control column, must agree within an angle
+/// whose offset moves a point by at most `tolerance` (and at most 1e-3 radian): a G1 join,
+/// such as one circle's arcs make, passes, a crease does not. A knot of lower multiplicity
+/// is C1 and its normal runs on.
+#[allow(clippy::float_cmp)] // a distance of exactly nought is no offset
+fn offset_is_continuous(cn: &Nurbs, distance: f64, tolerance: f64) -> bool {
+    if distance == 0.0 {
+        return true;
+    }
+    let limit = (tolerance / distance.abs()).min(1e-3);
+    // the homogeneous control point `(i, j)` (u-major)
+    let point = |i: usize, j: usize| -> Option<[f64; 4]> {
+        let at = i.checked_mul(cn.nv)?.checked_add(j)?.checked_mul(4)?;
+        match cn.pw.get(at..at.checked_add(4)?)? {
+            [x, y, z, w] => Some([*x, *y, *z, *w]),
+            _ => None,
+        }
+    };
+    joins_at_c0_knots(&cn.u, cn.p, cn.nv, &point, limit)
+        && joins_at_c0_knots(&cn.v, cn.q, cn.nu, &|k, c| point(c, k), limit)
+}
+
+/// [`offset_is_continuous`] along one direction: `at(k, c)` is the control point `k` along
+/// the direction in the column `c` of `across`. At a knot of multiplicity `p` the surface
+/// passes through control point `k` (the one before the knot's first position), and its
+/// one-sided derivative of the weighted points either side is along the step to the
+/// neighbour (the surface's, `D_xyz − S D_w` for the step `D` of the homogeneous points and
+/// the surface's point `S`, up to a positive factor).
+#[allow(clippy::float_cmp)] // knots repeated as stored
+fn joins_at_c0_knots(
+    knots: &[f64],
+    p: usize,
+    across: usize,
+    at: &dyn Fn(usize, usize) -> Option<[f64; 4]>,
+    limit: f64,
+) -> bool {
+    let end = knots.len().saturating_sub(p.saturating_add(1));
+    let mut first = p.saturating_add(1);
+    while first < end {
+        let Some(&knot) = knots.get(first) else {
+            return false;
+        };
+        let mut run = 1_usize;
+        while knots.get(first.saturating_add(run)) == Some(&knot) {
+            run = run.saturating_add(1);
+        }
+        if run == p {
+            let Some(k) = first.checked_sub(1) else {
+                return false;
+            };
+            for c in 0..across {
+                let (Some(before), Some(mid), Some(after)) = (
+                    k.checked_sub(1).and_then(|b| at(b, c)),
+                    at(k, c),
+                    at(k.saturating_add(1), c),
+                ) else {
+                    return false;
+                };
+                let step = |from: [f64; 4], to: [f64; 4]| -> Option<[f64; 3]> {
+                    if mid[3] <= 0.0 {
+                        return None;
+                    }
+                    let s = [mid[0] / mid[3], mid[1] / mid[3], mid[2] / mid[3]];
+                    let w = to[3] - from[3];
+                    Some([
+                        (to[0] - from[0]) - s[0] * w,
+                        (to[1] - from[1]) - s[1] * w,
+                        (to[2] - from[2]) - s[2] * w,
+                    ])
+                };
+                let (Some(a), Some(b)) = (step(before, mid), step(mid, after)) else {
+                    return false;
+                };
+                let len = |v: [f64; 3]| sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                let cross = [
+                    a[1] * b[2] - a[2] * b[1],
+                    a[2] * b[0] - a[0] * b[2],
+                    a[0] * b[1] - a[1] * b[0],
+                ];
+                let along = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+                let (la, lb) = (len(a), len(b));
+                if !(la > 0.0 && lb > 0.0 && along > 0.0 && len(cross) <= limit * la * lb) {
+                    return false;
+                }
+            }
+        }
+        first = first.saturating_add(run);
+    }
+    true
+}
+
 /// Whether the full knot vector `knots` of degree `p` is clamped at both ends (its first
 /// and last knots each exactly `p + 1` times: a longer run ends the surface on its last
 /// control row alone, at the end knot, where a net clamped `p + 1` times ends on the row
@@ -1084,16 +1584,26 @@ pub(super) fn line_meets(
             )
         }))
     };
+    // an offset's meeting from the line's foot's own parameters on the net ([`Net::foot`]),
+    // the grid's point nearest the line may lie a turn away on a thread's flank
+    let first = |net: &Net| -> Result<Option<[f64; 3]>> {
+        if net.offset.is_some() {
+            if let Some([u, v]) = net.foot(mx0, None)? {
+                return Ok(net.at(u, v)?.map(|(p, _, _)| [u, v, (p - mx0).dot(mu)]));
+            }
+        }
+        net.nearest_to_line(mx0, mu)
+    };
     let start = match guess.get() {
         Some(g) => g,
-        None => match net.nearest_to_line(mx0, mu)? {
+        None => match first(net)? {
             Some(g) => g,
             None => return Ok(None),
         },
     };
     let mut root = newton(start, &at, &inverse_of_columns3)?;
     if root.is_none() && guess.get().is_some() {
-        if let Some(g) = net.nearest_to_line(mx0, mu)? {
+        if let Some(g) = first(net)? {
             root = newton(g, &at, &inverse_of_columns3)?;
         }
     }
@@ -1237,7 +1747,14 @@ pub(super) fn plane_quadric_and_net_meet(
             [[normal.dot(su), g.dot(su)], [normal.dot(sv), g.dot(sv)]],
         )))
     };
-    let Some(guess) = net.nearest_on_grid(p)? else {
+    // an offset's meeting from the vertex's own parameters on the net (the grid's nearest
+    // point may lie a turn away on a thread's flank, [`Net::foot`])
+    let guess = if net.offset.is_some() {
+        net.foot(p, None)?.map(|[u, v]| (u, v))
+    } else {
+        net.nearest_on_grid(p)?
+    };
+    let Some(guess) = guess else {
         return Ok(None);
     };
     let Some(root) = newton([guess.0, guess.1], &at, &inverse_of_columns2)? else {
@@ -1272,14 +1789,274 @@ pub(super) fn plane_quadric_and_net_meet(
     let Some([u, v]) = krawczyk(root, c, &value, &jacobian)? else {
         return Ok(None);
     };
-    Ok(net
-        .jet_as_built(u, v, p)?
-        .map(|jet| length_bound(sub(jet.p, point(p)))))
+    let Some(jet) = net.jet_as_built(u, v, p)? else {
+        return Ok(None);
+    };
+    // the quadric's own nappe, as the meetings of two quadrics and a net: a cone's squared
+    // equation holds on both
+    Ok(super::quadric::on_nappe(q, jet.p).then(|| length_bound(sub(jet.p, point(p)))))
+}
+
+/// Where the quadrics `a` and `b` and the net meet, near the vertex `p`: an upper bound on
+/// the distance from `p` of a meeting proved by Krawczyk's test on `F_a(N(u, v)) = 0`,
+/// `F_b(N(u, v)) = 0` (each quadric's implicit function, [`quadric_value_and_gradient`];
+/// module docs), on both quadrics' own nappes ([`super::quadric::on_nappe`]) and on the
+/// surface as built, or `None`. Newton starts from the vertex's parameters on the net
+/// ([`Net::foot`]).
+///
+/// # Errors
+///
+/// A cancel.
+pub(super) fn quadrics_and_net_meet(
+    net: &Net,
+    a: &Implicit,
+    b: &Implicit,
+    p: Vec3,
+) -> Result<Option<f64>> {
+    let at = |y: [f64; 2]| -> Result<Linearised<2>> {
+        let [u, v] = y;
+        let Some((x, su, sv)) = net.at(u, v)? else {
+            return Ok(None);
+        };
+        let (Some((fa, ga)), Some((fb, gb))) = (
+            quadric_value_and_gradient(a, point(x)),
+            quadric_value_and_gradient(b, point(x)),
+        ) else {
+            return Ok(None);
+        };
+        let (ga, gb) = (middle(ga), middle(gb));
+        Ok(Some((
+            [fa.mid(), fb.mid()],
+            [[ga.dot(su), gb.dot(su)], [ga.dot(sv), gb.dot(sv)]],
+        )))
+    };
+    let Some(start) = net.foot(p, None)? else {
+        return Ok(None);
+    };
+    let Some(root) = newton(start, &at, &inverse_of_columns2)? else {
+        return Ok(None);
+    };
+    let Some((_, j)) = at(root)? else {
+        return Ok(None);
+    };
+    let Some(c) = inverse_of_columns2(&j) else {
+        return Ok(None);
+    };
+    let both = |x: I3| quadric_value_and_gradient(a, x).zip(quadric_value_and_gradient(b, x));
+    let value = |y: [Ivl; 2]| -> Result<Option<[Ivl; 2]>> {
+        let [u, v] = y;
+        let Some(jet) = net.jet_near(u, v, p)? else {
+            return Ok(None);
+        };
+        Ok(both(jet.p).map(|((fa, _), (fb, _))| [fa, fb]))
+    };
+    let jacobian = |y: [Ivl; 2]| -> Result<Option<[[Ivl; 2]; 2]>> {
+        let [u, v] = y;
+        let Some(jet) = net.jet_near(u, v, p)? else {
+            return Ok(None);
+        };
+        Ok(both(jet.p).map(|((_, ga), (_, gb))| {
+            [
+                [dot(ga, jet.su), dot(gb, jet.su)],
+                [dot(ga, jet.sv), dot(gb, jet.sv)],
+            ]
+        }))
+    };
+    let Some([u, v]) = krawczyk(root, c, &value, &jacobian)? else {
+        return Ok(None);
+    };
+    let Some(jet) = net.jet_as_built(u, v, p)? else {
+        return Ok(None);
+    };
+    let on = super::quadric::on_nappe(a, jet.p) && super::quadric::on_nappe(b, jet.p);
+    Ok(on.then(|| length_bound(sub(jet.p, point(p)))))
+}
+
+/// A piece of an edge, enclosed over its parameters `t`: the point `p` and its rate `p'`,
+/// the tangent `τ` (the normal section's normal) and its rate `τ'`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Moving {
+    pub(super) p: I3,
+    pub(super) p_rate: I3,
+    pub(super) t: I3,
+    pub(super) t_rate: I3,
+}
+
+/// Where the quadric `q` and the net meet in the normal sections of a piece of an edge, the
+/// planes through the edge point `p(t)` across its tangent `τ(t)` (`over` the piece, `mid`
+/// its middle `t_m` as point enclosures, `h` the range of `t − t_m`): certified upper and
+/// lower bounds on the distance from `p(t)` of a meeting proved in every section of the
+/// piece, or `None`.
+///
+/// The meeting solves `F(u, v; t) = (τ · (N − p), Q(N)) = 0` (`N` the net at `(u, v)`, `Q` the
+/// quadric's implicit function, [`quadric_value_and_gradient`]; module docs). Along an edge
+/// the root moves with `t`, while the net's parameter along the edge is barely tied by `Q`
+/// (the net runs along the quadric there), so a box over all the roots of a piece is long
+/// in that parameter, and its Jacobian, enclosed over it, too wide for Krawczyk's test. The
+/// root's first-order motion is taken out instead: with `ỹ` Newton's root at `t_m`, `C` the
+/// inverse of `F′` there and `s = −C ∂F/∂t` (`∂F/∂t = (τ' · (N − p) − τ · p', 0)` at fixed
+/// `(u, v)`), the unknown is `δ` in `(u, v) = ỹ + s (t − t_m) + δ`, and for every `t` of the
+/// piece a root `δ(t)` is proved in one small box by Krawczyk's operator: `F` at `δ = 0`
+/// enclosed by its mean-value form in `t`, `F(t_m) + (dF/dt) h` with
+/// `dF/dt = (τ' · (N − p) + τ · (N_u s_u + N_v s_v − p'), ∇Q · (N_u s_u + N_v s_v))` over
+/// the box `B = ỹ + s h`, and `F′` over `B + δ`. The meeting is on the quadric's own nappe
+/// ([`super::quadric::on_nappe`]) and on the surface as built ([`Net::jet_as_built`]). Its
+/// offset from the edge point is, by the mean-value form from `ỹ`,
+/// `N(ỹ) − p(t_m) + (N_u s_u + N_v s_v − p') h + N_u δ_u + N_v δ_v`, the partials over the
+/// hull of `ỹ` and the proved box; the upper bound is that vector's length, the lower its
+/// least length at `t_m` (the value that steers the halving).
+///
+/// Newton starts from the parameters of the edge point `p(t_m)` on the net ([`Net::foot`],
+/// `guess` carrying them from one piece to the next): the meeting nearest the edge, where a
+/// start from anywhere else may reach a meeting a turn away on a thread's flank. It only
+/// steers Newton, and what is proved is decided by the box alone.
+///
+/// # Errors
+///
+/// A cancel.
+#[allow(clippy::too_many_lines)] // the moving root's set-up, its proof and its distance
+pub(super) fn section_quadric_meets(
+    net: &Net,
+    q: &Implicit,
+    over: &Moving,
+    mid: &Moving,
+    h: Ivl,
+    guess: &Cell<Option<[f64; 2]>>,
+) -> Result<Option<(f64, f64)>> {
+    let (mp, mt) = (middle(mid.p), middle(mid.t));
+    let at = |y: [f64; 2]| -> Result<Linearised<2>> {
+        let [u, v] = y;
+        let Some((x, su, sv)) = net.at(u, v)? else {
+            return Ok(None);
+        };
+        let Some((f, g)) = quadric_value_and_gradient(q, point(x)) else {
+            return Ok(None);
+        };
+        let g = middle(g);
+        Ok(Some((
+            [(x - mp).dot(mt), f.mid()],
+            [[mt.dot(su), g.dot(su)], [mt.dot(sv), g.dot(sv)]],
+        )))
+    };
+    // Newton from the edge point's own parameters on the net (the meeting nearest it)
+    let Some(start) = net.foot(mp, guess.get())? else {
+        return Ok(None);
+    };
+    guess.set(Some(start));
+    let Some(root) = newton(start, &at, &inverse_of_columns2)? else {
+        return Ok(None);
+    };
+    let Some((x, _, _)) = net.at(root[0], root[1])? else {
+        return Ok(None);
+    };
+    let Some((_, j)) = at(root)? else {
+        return Ok(None);
+    };
+    let Some(c) = inverse_of_columns2(&j) else {
+        return Ok(None);
+    };
+    // the root's rate along the edge, `s = −C ∂F/∂t` (a choice of centre only: any `s`
+    // keeps the proof valid)
+    let f_t = (x - mp).dot(middle(mid.t_rate)) - mt.dot(middle(mid.p_rate));
+    let [[c00, _], [c10, _]] = c;
+    let rate = [-c00 * f_t, -c10 * f_t];
+    if !rate.iter().all(|r| r.is_finite()) {
+        return Ok(None);
+    }
+    let [ru, rv] = rate.map(Ivl::from);
+    let [u0, v0] = root.map(Ivl::from);
+    let (bu, bv) = (u0 + ru * h, v0 + rv * h);
+    // `F` at `t_m` from the root's own point, and its rate over the piece
+    let (Some(at_root), Some(over_b)) = (net.jet_near(u0, v0, mp)?, net.jet_near(bu, bv, mp)?)
+    else {
+        return Ok(None);
+    };
+    let (Some((q_root, _)), Some((_, g_b))) = (
+        quadric_value_and_gradient(q, at_root.p),
+        quadric_value_and_gradient(q, over_b.p),
+    ) else {
+        return Ok(None);
+    };
+    let moves = add(scale(over_b.su, ru), scale(over_b.sv, rv));
+    let f_mid = [dot(mid.t, sub(at_root.p, mid.p)), q_root];
+    let f_rate = [
+        dot(over.t_rate, sub(over_b.p, over.p)) + dot(over.t, sub(moves, over.p_rate)),
+        dot(g_b, moves),
+    ];
+    let [f0, f1] = f_mid;
+    let [d0, d1] = f_rate;
+    let at_zero = [f0 + d0 * h, f1 + d1 * h];
+    let value = |_: [Ivl; 2]| -> Result<Option<[Ivl; 2]>> { Ok(Some(at_zero)) };
+    let jacobian = |y: [Ivl; 2]| -> Result<Option<[[Ivl; 2]; 2]>> {
+        let [du, dv] = y;
+        let Some(jet) = net.jet_near(bu + du, bv + dv, mp)? else {
+            return Ok(None);
+        };
+        Ok(quadric_value_and_gradient(q, jet.p).map(|(_, g)| {
+            [
+                [dot(over.t, jet.su), dot(g, jet.su)],
+                [dot(over.t, jet.sv), dot(g, jet.sv)],
+            ]
+        }))
+    };
+    let Some([du, dv]) = krawczyk([0.0; 2], c, &value, &jacobian)? else {
+        return Ok(None);
+    };
+    let (fu, fv) = (bu + du, bv + dv);
+    let Some(met) = net.jet_as_built(fu, fv, mp)? else {
+        return Ok(None);
+    };
+    if !super::quadric::on_nappe(q, met.p) {
+        return Ok(None);
+    }
+    // the partials over the hull of the root and the proved box
+    let Some(hull) = net.jet_near(fu.hull(u0), fv.hull(v0), mp)? else {
+        return Ok(None);
+    };
+    let along = sub(add(scale(hull.su, ru), scale(hull.sv, rv)), over.p_rate);
+    let off = add(
+        add(sub(at_root.p, mid.p), scale(along, h)),
+        add(scale(hull.su, du), scale(hull.sv, dv)),
+    );
+    let upper = length_bound(off);
+    let least = sub(at_root.p, mid.p).map(Ivl::mig);
+    let lower = sqrt(least.iter().map(|x| x * x).sum::<f64>());
+    Ok(upper.is_finite().then_some((upper, lower)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bilinear net over three rows in u and two in v whose middle row is at height
+    /// `middle`: a plane at 0, a crease in u at its knot otherwise (degree 1: the knot of
+    /// multiplicity 1 is C0).
+    fn creased(middle: f64) -> Nurbs {
+        let mut pw = Vec::new();
+        for (x, z) in [(0.0, 0.0), (1.0, middle), (2.0, 0.0)] {
+            for y in [0.0, 1.0] {
+                pw.extend([x, y, z, 1.0]);
+            }
+        }
+        Nurbs {
+            p: 1,
+            q: 1,
+            nu: 3,
+            nv: 2,
+            u: vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            v: vec![0.0, 0.0, 1.0, 1.0],
+            pw,
+        }
+    }
+
+    /// An offset of a base whose normal turns across a C0 knot jumps there, and is not
+    /// taken as a net; a flat base, or a distance of nought, is.
+    #[test]
+    fn an_offset_is_continuous_only_across_joins_of_the_base_that_keep_its_normal() {
+        assert!(offset_is_continuous(&creased(0.0), 0.5, 1e-6));
+        assert!(!offset_is_continuous(&creased(0.75), 0.5, 1e-6));
+        assert!(offset_is_continuous(&creased(0.75), 0.0, 1e-6));
+    }
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::srf_basic::Surface as Patch;
@@ -1628,6 +2405,40 @@ mod tests {
                 jet.p
             );
         }
+    }
+
+    /// The net point nearest a point among the stations (the knots and span middles) is looked
+    /// for on every piece of an edge ([`Net::foot`]'s fallback), where a thread's flank has
+    /// thousands of stations: they are enclosed once, on the first look, and held, so a
+    /// reach over a many-turn thread does not enclose the whole grid again on each piece of
+    /// each edge (#15715: a one-face Offset Faces of a thread's root ran for hours).
+    #[test]
+    fn the_stations_nearest_a_point_are_enclosed_once_and_held() {
+        let k = Kernel::default();
+        let n = net(&k, &quarter_cylinder());
+        assert!(n.stations.get().is_none());
+        // the middle of the arc at the top, then its start at the bottom
+        let top = core::f64::consts::SQRT_2;
+        let first = n
+            .nearest_on_knots(Vec3::new(top, top, 3.0))
+            .unwrap()
+            .unwrap();
+        assert!(
+            (first.0 - 0.5).abs() < 1e-9 && (first.1 - 1.0).abs() < 1e-9,
+            "{first:?}"
+        );
+        let held = n.stations.get().map(|s| (s.len(), s.as_ptr()));
+        assert_eq!(
+            held.map(|h| h.0),
+            Some(9),
+            "3 stations along the arc, 3 up the axis"
+        );
+        let second = n
+            .nearest_on_knots(Vec3::new(2.0, 0.0, 0.0))
+            .unwrap()
+            .unwrap();
+        assert!(second.0.abs() < 1e-9 && second.1.abs() < 1e-9, "{second:?}");
+        assert_eq!(n.stations.get().map(|s| (s.len(), s.as_ptr())), held);
     }
 
     /// A line along the normal through the bump's corner (u, v) = (1, 0), from 0.5 below it,
