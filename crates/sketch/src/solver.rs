@@ -2956,6 +2956,121 @@ fn nudge_line_angles(sk: &Sketch, lay: &Layout, x: &mut [f64]) {
     }
 }
 
+/// How close to its chord an arc's centre must lie for the arc to count as an exact half circle:
+/// the radius of such an arc is at a turning point, where it does not change, to first order,
+/// when the centre moves off the chord.
+const CHORD_TOL: f64 = 1e-9;
+/// The fraction of its radius an arc's centre is moved off its chord to lift that turning point:
+/// big enough for the row a radius dimension adds to be clear of the rank analysis' tolerance,
+/// small enough that the pose it reads is the sketch's own.
+const ARC_LIFT: f64 = 1e-3;
+
+/// An arc whose centre lies on the chord of its ends: an exact half circle.
+struct ChordArc {
+    /// The arc's index.
+    arc: usize,
+    /// The centre's point.
+    centre: usize,
+    /// The centre's position.
+    at: Vec2,
+    /// The arc's radius.
+    radius: f64,
+    /// The unit vector off the chord, towards the side the arc's material is not on.
+    off: Vec2,
+}
+
+impl ChordArc {
+    /// Whether a driving radius or diameter dimension asks the arc for a radius other than the
+    /// one it measures now: the solver has to move the centre off the chord to reach it, and it
+    /// has no direction to do it where the centre lies on the chord.
+    fn wants_another_radius(&self, sk: &Sketch) -> bool {
+        sk.constraints.iter().filter(|k| !k.driven).any(|k| {
+            let want = match k.kind {
+                ConstraintKind::Radius { c, value } if c == self.arc => value,
+                ConstraintKind::Diameter { c, value } if c == self.arc => value / 2.0,
+                _ => return false,
+            };
+            // A dimension's value is rounded to six decimals: a difference under a millionth of
+            // the radius is the same radius, not another one.
+            (want - self.radius).abs() > 1e-6 * self.radius.max(1.0)
+        })
+    }
+}
+
+/// The arcs whose centre lies on the chord of their ends and that a driving radius or diameter
+/// sizes.
+///
+/// The radius of such an arc is at a turning point: it does not change, to first order, when the
+/// centre moves off the chord. A radius dimension on it adds no rank there, and the solver has
+/// no direction to move the centre in.
+///
+/// The way off the chord is towards the side the arc's material is not on, so that the arc
+/// stays a cap over its chord when its radius grows.
+fn chord_arcs(sk: &Sketch, lay: &Layout, x: &[f64]) -> Vec<ChordArc> {
+    let state = State { sk, lay, x };
+    let mut out = Vec::new();
+    for (arc, curve) in sk.curves.iter().enumerate() {
+        let CurveKind::Arc { c, a, b } = curve.kind else { continue };
+        let sized = sk
+            .constraints
+            .iter()
+            .any(|k| !k.driven && matches!(k.kind, ConstraintKind::Radius { c: cc, .. } | ConstraintKind::Diameter { c: cc, .. } if cc == arc));
+        if !sized {
+            continue;
+        }
+        let (centre, radius) = state.round(arc);
+        let (pa, pb) = (state.p(a), state.p(b));
+        let Some(chord) = (pb - pa).normalized() else { continue };
+        // The centre on the chord: between its ends, and no distance from its line.
+        let along = (centre - pa).dot(chord);
+        if !(along > 0.0 && along < (pb - pa).len()) || (centre - pa).cross(chord).abs() > radius * CHORD_TOL {
+            continue;
+        }
+        // The arc's material: the middle of its sweep.
+        let sweep = ((pb - centre).angle() - (pa - centre).angle()).rem_euclid(std::f64::consts::TAU);
+        let middle = centre + Vec2::from_angle((pa - centre).angle() + sweep / 2.0) * radius;
+        let side = if chord.cross(middle - pa) >= 0.0 { -chord.perp() } else { chord.perp() };
+        out.push(ChordArc { arc, centre: c, at: centre, radius, off: side });
+    }
+    out
+}
+
+/// Move the centres of the arcs a little off their chord: their radius is at a turning point
+/// there, and a radius dimension on them has no direction to work with.
+fn lift_arc_centres(lay: &Layout, x: &mut [f64], arcs: &[ChordArc]) {
+    for a in arcs {
+        let Some(v) = lay.pvar.get(a.centre).copied().flatten() else { continue };
+        set_point(x, v, a.at + a.off * (a.radius * ARC_LIFT));
+    }
+}
+
+/// The pose a little off the sketch's own, where the arcs that lie on their chord have their
+/// centres off them: `None` when the sketch has no such arc.
+///
+/// The radius of an arc that lies on its chord is at a turning point, so a dimension on it adds
+/// no rank there. The pose is the one the analysis reads; the geometry the sketch keeps is the
+/// one the solve left.
+fn lifted_pose(sk: &Sketch, lay: &Layout, x: &[f64]) -> Option<Vec<f64>> {
+    let arcs = chord_arcs(sk, lay, x);
+    if arcs.is_empty() {
+        return None;
+    }
+    let mut y = x.to_vec();
+    lift_arc_centres(lay, &mut y, &arcs);
+    Some(y)
+}
+
+/// The pose the solver starts from for the arcs a dimension asks for another radius: the centre
+/// of an arc that lies on its chord has no direction to move off it (the radius is at a turning
+/// point there), so it is moved a little off the chord before the iteration.
+fn nudge_arc_centres(sk: &Sketch, lay: &Layout, x: &mut [f64]) {
+    let arcs: Vec<ChordArc> = chord_arcs(sk, lay, x).into_iter().filter(|a| a.wants_another_radius(sk)).collect();
+    if arcs.is_empty() {
+        return;
+    }
+    lift_arc_centres(lay, x, &arcs);
+}
+
 /// Continuation steps an edit in sixty-fourths of it: the smallest sub-step is one of them.
 const SUBSTEPS: usize = 64;
 /// The dense LM work one value edit may spend over all its solves (#17905).
@@ -3831,10 +3946,12 @@ fn solve_inner(
         if x != x0 {
             let mut plain = x0.clone();
             nudge_line_angles(sk, &lay, &mut plain);
+            nudge_arc_centres(sk, &lay, &mut plain);
             unseeded = Some(plain);
         }
     }
     nudge_line_angles(sk, &lay, &mut x);
+    nudge_arc_centres(sk, &lay, &mut x);
 
     // The blocks, and per block whether it reads a constant point.
     let (blocks, reads_constant) = build_blocks(sk, &lay, &on_curve);
@@ -4045,6 +4162,11 @@ fn solve_inner(
             }
         }
     };
+    // The pose the analysis reads: the sketch's own, with the centres of the arcs that lie on
+    // their chord a little off them. The radius of such an arc is at a turning point, where it
+    // does not change, to first order, when the centre moves off the chord: a dimension on it
+    // adds no rank there.
+    let mut lifted = lifted_pose(sk, &lay, &x);
     for (_, vars, bis) in &comps {
         if oversized(vars) {
             continue;
@@ -4110,13 +4232,18 @@ fn solve_inner(
             Some(anchor) if floating => Pin::Floating(anchor),
             _ => Pin::Anchored,
         };
-        let pin_flags = pinned(sk, &lay, &sub, vars, &mut x, &|_| true, pin);
+        let pose: &mut [f64] = match lifted.as_mut() {
+            Some(v) => v,
+            None => &mut x,
+        };
+        let pin_flags = pinned(sk, &lay, &sub, vars, &mut *pose, &|_| true, pin);
         let rest = unpinned(vars, &pin_flags, pin.anchor());
         columns(&mut col, &rest, vars);
         let reading = blocks_reading(&sub, &rest);
-        let (_, j, _) = local_system(sk, &lay, &reading, &mut x, &col, rest.len());
+        let (_, j, _) = local_system(sk, &lay, &reading, &mut *pose, &col, rest.len());
         let (rest_det, rest_rank) = if j.rows > 0 { determined_vars(&j, 1e-7) } else { (vec![false; rest.len()], 0) };
-        let nearby = Nearby { blocks: &reading, rest: &rest, col: &col }.determined(sk, &lay, &x, &j, &rest_det, rest_rank);
+        let nearby =
+            Nearby { blocks: &reading, rest: &rest, col: &col }.determined(sk, &lay, lifted.as_deref().unwrap_or(&x), &j, &rest_det, rest_rank);
         let comp_rank = pin_flags.iter().filter(|p| **p).count() + rest_rank;
         rank += comp_rank;
         // More rows than rank: some constraint may be implied by the others.

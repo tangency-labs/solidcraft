@@ -262,6 +262,99 @@ fn an_explicit_redundant_constraint_keeps_the_dof_and_full_constraint() {
     assert!(report(&s).point_determined.iter().all(|d| *d));
 }
 
+/// The centre and the radius of the arc `id` in `sk`.
+fn arc_centre_radius(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, f64) {
+    let c = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, .. } = sk.curves[c].kind else { panic!("{id} is an arc") };
+    let centre = sk.points[c].pos;
+    (centre, centre.dist(sk.points[a].pos))
+}
+
+/// The ends of the arc `id` in `sk`.
+fn arc_ends(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, Vec2) {
+    let c = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { a, b, .. } = sk.curves[c].kind else { panic!("{id} is an arc") };
+    (sk.points[a].pos, sk.points[b].pos)
+}
+
+/// A line from (0, 0) to (20, 0), horizontal and dimensioned, with an arc over it whose third
+/// point is `through`: an exact half circle when it is (10, 10), a hair off its chord when it is
+/// (9, 10).
+fn half_circle(through: [f64; 2]) -> Session {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [20, 0], "end": [0, 0], "through": through}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1", "mode": "horizontal"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 20}));
+    s
+}
+
+/// #21119: a radius dimension on an arc drawn as an exact half circle. The arc's centre lies on
+/// the chord of its ends, so its radius is at a turning point: the dimension was called
+/// redundant and placed as a reference dimension while the sketch still had a degree of freedom,
+/// and a value typed for it was refused as over-constraining. It is a driving dimension: the
+/// sketch becomes fully constrained, the half circle does not move, and a value moves the centre
+/// off the chord.
+#[test]
+fn a_radius_dimension_on_an_exact_half_circle_is_driving_not_redundant() {
+    let mut s = half_circle([10.0, 10.0]);
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a1"], "type": "radius"}));
+    assert_ne!(r["redundant"], true, "{r}");
+    assert_ne!(r["driven"], true, "{r}");
+    let rep = report(&s);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0, "{rep:?}");
+    assert!(rep.redundant.is_empty(), "{rep:?}");
+    let g = glyphs(&mut s);
+    assert_eq!(g["fully_constrained"], true, "{g}");
+    // The half circle did not move: its radius is still 10 mm and its centre still on the chord.
+    let (centre, radius) = arc_centre_radius(&sketch(&s), "a1");
+    assert!((radius - 10.0).abs() < 1e-9, "the radius moved: {radius}");
+    assert!(centre.y.abs() < 1e-9, "the centre left the chord: {centre:?}");
+}
+
+/// The same arc a hair off its chord: the radius dimension was a driving one there already, and
+/// it stays one (#21119).
+#[test]
+fn a_radius_dimension_on_a_near_half_circle_stays_driving() {
+    let mut s = half_circle([9.0, 10.0]);
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a1"], "type": "radius"}));
+    assert_ne!(r["redundant"], true, "{r}");
+    assert_ne!(r["driven"], true, "{r}");
+    let rep = report(&s);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0, "{rep:?}");
+    assert!((r["measured"].as_f64().unwrap_or(0.0) - 10.000125).abs() < 1e-9, "{r}");
+}
+
+/// A value typed for the radius of an exact half circle is accepted: the centre moves off the
+/// chord and the arc keeps the line's two ends (#21119).
+#[test]
+fn a_radius_value_on_an_exact_half_circle_moves_the_centre_off_the_chord() {
+    let mut s = half_circle([10.0, 10.0]);
+    run(&mut s, "sketch.dimension", json!({"entities": ["a1"], "type": "radius", "value": 12}));
+    let rep = report(&s);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0, "{rep:?}");
+    let (centre, radius) = arc_centre_radius(&sketch(&s), "a1");
+    assert!((radius - 12.0).abs() < 1e-7, "the radius did not take: {radius}");
+    assert!(centre.y.abs() > 1e-6, "the centre stayed on the chord: {centre:?}");
+    let (start, end) = arc_ends(&sketch(&s), "a1");
+    assert!((start.x - 20.0).abs() < 1e-7 && (start.y).abs() < 1e-7, "the start left the line: {start:?}");
+    assert!(end.x.abs() < 1e-7 && end.y.abs() < 1e-7, "the end left the line: {end:?}");
+}
+
+/// A genuinely redundant constraint is still reported as redundant (#21119): a second vertical
+/// on a line that is vertical already.
+#[test]
+fn a_second_vertical_on_a_vertical_line_stays_redundant() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]], "infer": true}));
+    let r = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1", "mode": "vertical"}));
+    assert_eq!(r["redundant"], true, "{r}");
+    assert_eq!(report(&s).dof, 1);
+}
+
 /// An arc slot is drawn with nothing redundant, as a straight slot is: its caps are tangent to
 /// both sides, which already makes them equal (#8355). Its six degrees of freedom are the
 /// centre, radius, start, sweep and width, and the two caps stay equal when the width changes.

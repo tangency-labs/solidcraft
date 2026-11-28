@@ -83,6 +83,10 @@ impl Direction {
 /// Per block of `blocks` (in order, over the variables `vars`): whether every one of its rows
 /// is a combination of the rows before it. With `support`, also for the block at that index
 /// (when redundant) the earlier blocks its rows combine.
+///
+/// A block is dependent only where it is dependent at the pose the sketch is in AND at a pose
+/// a little off it (see [`super::lifted_pose`]): the radius of an arc that lies on its chord is
+/// at a turning point, so a dimension on it is dependent only there.
 pub(super) fn dependent_blocks(
     sk: &Sketch,
     lay: &Layout,
@@ -103,7 +107,14 @@ pub(super) fn dependent_blocks(
         let _timer = profiling::timer(Phase::RedundancyJacobian);
         local_system(sk, lay, blocks, x, &col, vars.len())
     };
-    classify_rows(&j, &owner, blocks.len(), support)
+    let (dependent, by) = classify_rows(&j, &owner, blocks.len(), support);
+    let Some(mut lifted) = super::lifted_pose(sk, lay, x) else { return (dependent, by) };
+    let (_, j, owner) = local_system(sk, lay, blocks, &mut lifted, &col, vars.len());
+    let (off, _) = classify_rows(&j, &owner, blocks.len(), None);
+    let dependent: Vec<bool> = dependent.iter().zip(&off).map(|(a, b)| *a && *b).collect();
+    // The support: what determines the block, read where the block is redundant at both poses.
+    let by = if support.is_some_and(|t| dependent.get(t).copied().unwrap_or(false)) { by } else { Vec::new() };
+    (dependent, by)
 }
 
 fn classify_rows(j: &Mat, owner: &[usize], block_count: usize, support: Option<usize>) -> (Vec<bool>, Vec<usize>) {

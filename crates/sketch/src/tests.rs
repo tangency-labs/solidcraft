@@ -3671,3 +3671,43 @@ fn a_thin_region_touching_an_outline_at_one_corner_stays_a_region() {
     assert!((areas[0] - thin).abs() < 1e-10, "{areas:?}");
     assert!((areas[1] - (100.0 - thin)).abs() < 1e-9, "{areas:?}");
 }
+
+/// #21119: the radius of an arc that lies on the chord of its ends is at a turning point: it
+/// does not change, to first order, when the centre moves off the chord. A radius dimension on
+/// such an arc drives the sketch all the same: it takes the centre's last freedom, and the
+/// sketch is fully constrained.
+#[test]
+fn a_radius_dimension_on_an_exact_half_circle_drives_the_sketch() {
+    use ConstraintKind::*;
+    let mut sk = Sketch::new();
+    let l = sk.add_line(v(0.0, 0.0), v(20.0, 0.0), None, None, None).unwrap();
+    let CurveKind::Line { a, b } = sk.curves[l].kind else { panic!("the line") };
+    let arc = sk.add_arc(v(10.0, 0.0), v(20.0, 0.0), v(0.0, 0.0), [None, None, None], None).unwrap();
+    let CurveKind::Arc { c, a: start, b: end } = sk.curves[arc].kind else { panic!("the arc") };
+    sk.add_constraint(Coincident { p: b, q: start }, None).unwrap();
+    sk.add_constraint(Coincident { p: a, q: end }, None).unwrap();
+    sk.add_constraint(Horizontal { l }, None).unwrap();
+    sk.add_constraint(Length { l, value: 20.0 }, None).unwrap();
+    // The half circle: the line's place and the centre's height are free.
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 3, "{rep:?}");
+    // A radius dimension on it drives: the centre cannot keep another radius on its chord.
+    sk.add_constraint(Radius { c: arc, value: 10.0 }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 2, "{rep:?}");
+    assert!(rep.redundant.is_empty(), "{rep:?}");
+    // The half circle did not move.
+    assert_eq!(sk.points[c].pos, v(10.0, 0.0), "the centre left the chord");
+    // Another radius moves the centre off the chord: the solver has a direction to move it in.
+    if let Some(k) = sk.constraints.last_mut() {
+        k.kind.set_value(12.0);
+    }
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 2, "{rep:?}");
+    let radius = sk.points[c].pos.dist(sk.points[start].pos);
+    assert!((radius - 12.0).abs() < 1e-7, "the radius did not take: {radius}");
+    assert!(sk.points[c].pos.y.abs() > 1e-6, "the centre stayed on the chord: {:?}", sk.points[c].pos);
+}
