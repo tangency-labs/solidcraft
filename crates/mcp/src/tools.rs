@@ -114,6 +114,38 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             Effect::ReadOnly,
         ),
         tool(
+            "search",
+            "Search SolidCraft",
+            "Unified ranked search across SolidCraft commands, the open design (features, bodies, sketches, construction geometry, components, occurrences, parameters, joints, named views), \
+             built-in standard parts, sample designs and installed plugins. Case- and accent-folded with deterministic ranking (exact > prefix > word start > \
+             substring > subsequence) and typo-tolerant near matches on non-digit words of 5+ letters when nothing else matches. Reports `sources_failed` for \
+             any source that errors or exceeds its time budget. Read-only.",
+            object(
+                json!({
+                    "query": {"type": "string", "maxLength": solidcraft_engine::search::MAX_QUERY_CHARS, "description": "Text to search for (e.g. \"extrude\", \"M5x12 SHCS\", \"Plate\", \"width\")"},
+                    "scopes": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["commands", "design", "features", "bodies", "sketches", "construction", "components", "parameters", "joints", "named_views", "parts", "samples", "plugins"]},
+                        "description": "Optional scopes to narrow which sources run (default: all sources for the surface)",
+                    },
+                    "kinds": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["command", "feature", "body", "sketch", "construction", "component", "occurrence", "parameter", "joint", "named_view", "standard_part", "sample", "plugin"]},
+                        "description": "Optional item kinds to keep (default: every kind returned by the selected scopes/surface)",
+                    },
+                    "surface": {
+                        "type": "string",
+                        "enum": ["global", "commands", "design", "parts", "preferences", "browser"],
+                        "description": "Search surface controlling which sources run when `scopes` is omitted (default: global)",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": solidcraft_engine::search::MAX_LIMIT, "description": "Maximum ranked hits to return (1..500; default 50). `total` still counts every match"},
+                    "include_disabled": {"type": "boolean", "description": "Include commands currently disabled in this session (default true)"},
+                }),
+                &["query"],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
             "execute",
             "Execute a command",
             "Run one command with JSON parameters, exactly as the toolbar, palette and scripts do. Never opens a dialog. \
@@ -1143,6 +1175,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             // hint must inspect the `id`, not the outer `engine.describe` command `exec` sees.
             exec(b, "engine.describe", json!({"command": id})).map_err(|e| describe_error(id, e))
         }
+        "search" => exec(b, "engine.search", pick(a, &["query", "scopes", "kinds", "surface", "limit", "include_disabled"])),
         "execute" => {
             let id = str_arg(a, "command").ok_or("`command` is required")?;
             let v = exec(b, id, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))?;
@@ -1464,6 +1497,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped("parameters.change", p)
         }
         "describe_command" => mapped("engine.describe", json!({"command": str_arg(a, "id").ok_or("a `describe_command` step needs params {id}")?})),
+        "search" => mapped("engine.search", pick(a, &["query", "scopes", "kinds", "surface", "limit", "include_disabled"])),
         "execute" => {
             let inner = str_arg(a, "command").ok_or("an `execute` step needs params {command, params}")?;
             if !inner.contains('.') && TOOL_STEPS.contains(&inner) {
@@ -1568,6 +1602,7 @@ const TOOL_STEPS: &[&str] = &[
     "running",
     "save",
     "screenshot",
+    "search",
     "set_parameter",
     "skill_reference",
     "undo",

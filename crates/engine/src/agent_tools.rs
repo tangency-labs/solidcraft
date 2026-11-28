@@ -13,6 +13,7 @@ pub const TOOL_COMMANDS: &[(&str, &str)] = &[
     ("open", "doc.open"),
     ("redo", "edit.redo"),
     ("save", "file.save"),
+    ("search", "engine.search"),
     ("set_parameter", "parameters.change"),
     ("undo", "edit.undo"),
 ];
