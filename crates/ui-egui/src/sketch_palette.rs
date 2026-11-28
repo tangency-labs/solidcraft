@@ -464,6 +464,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let selected_only = app.ui.constraint_glyphs_selected_only;
+    let mut toggle_selected_only = false;
     let open_view = app.ui.sketch_open_view;
     let mut chosen_open_view = None;
     let mut linetype = None;
@@ -600,6 +602,13 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
+            // Keep the normal palette height and canvas click area unchanged.
+            toggle_selected_only = crate::ui_kit::checkbox_row(
+                ui,
+                "constraint_glyphs_selected_only",
+                solidcraft_ui_text::tr("ui.palette_constraint_glyphs_selected_only"),
+                selected_only,
+            );
             for &(key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
@@ -670,6 +679,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if toggle_selected_only {
+        app.ui.constraint_glyphs_selected_only = !selected_only;
     }
     if let Some(choice) = chosen_open_view {
         app.ui.sketch_open_view = choice;
@@ -793,6 +805,24 @@ mod tests {
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn selected_constraint_glyphs_are_a_palette_option() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert!(!h.app.ui.constraint_glyphs_selected_only);
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:constraint_glyphs_selected_only").is_none());
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").expect("more sketch options");
+        h.call("ui.click", json!({"x":more.x,"y":more.y}));
+        let undo = h.app.session.undo.len();
+        for selected in [true, false] {
+            let at = crate::scenario::handle_at("sketch_palette:toggle:constraint_glyphs_selected_only").expect("palette option");
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_eq!(h.app.ui.constraint_glyphs_selected_only, selected);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
     }
 
     /// Whether a placed image follows a frame in the sketch is the Canvas and Decal tools' own

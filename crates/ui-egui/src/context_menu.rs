@@ -918,7 +918,17 @@ pub(crate) fn face_feature(app: &SolveApp, body: &ModelBody, index: usize) -> Op
     {
         return None;
     }
-    app.session.doc.feature(id).filter(|f| f.component == app.session.doc.model_body_component(body)).map(|f| f.id)
+    let doc = &app.session.doc;
+    doc.feature(id).filter(|f| f.component == doc.model_body_component(body) || moved_from(doc, body.definition_name(), f.component)).map(|f| f.id)
+}
+
+/// Whether a transfer moves `body` out of `component`: its faces keep the names the features
+/// there gave them (Create Components from Bodies moves a body, not its features). A transfer
+/// that did not run leaves the body in `component`, which the caller accepts anyway.
+fn moved_from(doc: &solidcraft_engine::doc::Document, body: &str, component: u64) -> bool {
+    doc.features
+        .iter()
+        .any(|f| matches!(&f.kind, FeatureKind::BodyTransfer { bodies, from, .. } if *from == component && bodies.iter().any(|b| b == body)))
 }
 
 /// A feature and its profile sketch, if it has one.
@@ -2981,6 +2991,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editPointCloud" => {
             if let Some(c) = id_of(&p, "cloud") {
                 app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(app, c));
+            }
+        }
+        "scan.align" if item.params.is_some() => {
+            if let Some(c) = id_of(&p, "cloud") {
+                app.dialog = Some(crate::dialogs_scan_align::start_for_cloud(&app.session, c));
+            } else {
+                app.start("scan.align");
             }
         }
         "ui.editCanvas" | "ui.calibrateCanvas" => {

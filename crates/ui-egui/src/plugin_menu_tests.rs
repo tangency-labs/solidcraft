@@ -924,6 +924,34 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
+fn a_list_of_options_sends_the_ticked_consts_in_option_order_within_its_counts() {
+    let options = json!([{"const":"front","title":"Front"},{"const":"back","title":"Back"},{"const":"left"}]);
+    let sides = |extra: Value| {
+        let mut p =
+            json!({"type":"array","uniqueItems":true,"minItems":1,"maxItems":2,"default":["back","front"],"items":{"type":"string","oneOf":options}});
+        p.as_object_mut().into_iter().for_each(|p| p.extend(extra.as_object().cloned().unwrap_or_default()));
+        json!({"type":"object","required":["sides"],"properties":{"sides":p}})
+    };
+    let mut fields = form(&sides(json!({}))).expect("drawn");
+    assert!(!fields[0].0.buttons, "checkboxes without the annotation");
+    assert_eq!(fields[0].1, Input::Choices(vec![0, 1]), "the default, in option order");
+    assert_eq!(params(&fields), Ok(json!({"sides":["front","back"]})));
+    let mut chosen = vec![0, 2];
+    toggle_option(&mut chosen, 1);
+    assert_eq!(chosen, [0, 1, 2], "a tick keeps the option order");
+    fields[0].1 = Input::Choices(chosen);
+    assert!(params(&fields).is_err(), "three ticks exceed maxItems");
+    fields[0].1 = Input::Choices(Vec::new());
+    assert!(params(&fields).is_err(), "none is under minItems");
+
+    let buttons = form(&sides(json!({"x-solidcraft-choice":{"version":1,"style":"buttons"}}))).expect("drawn");
+    assert!(buttons[0].0.buttons);
+    for extra in [json!({"uniqueItems":false}), json!({"default":["nope"]}), json!({"minItems":3,"maxItems":2})] {
+        assert_eq!(form(&sides(extra.clone())), None, "{extra}");
+    }
+}
+
+#[test]
 fn swatch_annotations_preserve_partial_choices_and_const_values() {
     let schema = json!({"type":"object","properties":{"finish":{"type":"string","oneOf":[
         {"const":"oak","title":"Oak","x-solidcraft-swatch":"oak.png"},
