@@ -1286,6 +1286,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `pan_reverse_y` (default false: vertical scrolling pans the other way)
 - `panel_shader` (string, default empty: none; `plugin-id/shader-id` draws that installed plugin's panel shader under every see-through panel, `shaders@0.2`).
 - `parameters_apply_live` (default true: the Parameters dialog applies an expression when its field is left; false: edits wait for Apply or OK, which set them together in one rebuild and one undo step)
+- `parts_library_row` (default true: when the parts library is more than 1.5 times wider than tall its parts sit in one horizontally scrolling row, and docked at the left or right it fills the column's height, its bottom edge dragging up to shorten it and Reset height restoring it; false: the grid always, at the content height, as before)
 - `pencil_mode` (web app, default false: a pen tap adds or removes a model or sketch item, a pen double-tap selects its whole body or sketch, and a pen tap in empty space clears the selection; finger touches that start in the view don't click there, and a finger double-tap on a planar face starts a sketch on it)
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
