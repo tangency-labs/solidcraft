@@ -743,6 +743,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("file.copy_with_links", &format!("{}…", app.tr("cmd.file_copy_with_links")), "", "copy", shown && app.session.path.is_some()));
     rows.push(row("revert", app.tr("ui.revert_to_saved"), "", "open", shown && app.session.path.is_some()));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
@@ -814,6 +815,7 @@ pub(crate) fn file_menu_row(id: &str) -> Option<&'static str> {
         "file.export_obj" => "file.export_obj",
         "file.export_urdf" => "file.export_urdf",
         "file.save_as" => "save_as",
+        "file.copy_with_links" => "file.copy_with_links",
         "doc.open" => "open",
         _ => return None,
     })
@@ -865,6 +867,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
+        "file.copy_with_links" => crate::copy_links_dialog::open(app),
         "revert" => FileAction::Revert.run(app),
         "save_json" => FileAction::SaveJson.run(app),
         "file.verify" => FileAction::VerifySignature.run(app),
@@ -6428,9 +6431,10 @@ mod app_bar_tests {
         // plugin's row at its foot is on screen without scrolling the menu.
         h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
-        // The plugin slot is the File menu's last row, and Revert to Saved made the menu one row taller:
-        // in the default 1600 x 1000 window it would sit below the fold, so give the window room.
-        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        // The plugin slot is the File menu's last row, and Revert to Saved and Copy Design with Links
+        // made the menu taller: in the default 1600 x 1000 window it would sit below the fold, so give
+        // the window room.
+        h.call("ui.resize", json!({"width":1600,"height":1300}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
