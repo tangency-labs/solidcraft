@@ -787,7 +787,9 @@ mod tests {
         for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
-            let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
+            // Test change: below the navigator the column is shorter and the last option sits
+            // under the pinned footer; scroll each option into view first, as a person would.
+            let at = scroll_into_options(&mut h, &format!("sketch_palette:toggle:{key}"));
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_ne!(h.app.session.doc.to_json(), before, "{key}");
             assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
@@ -796,15 +798,35 @@ mod tests {
             h.settle();
             assert_eq!(h.app.session.doc.to_json(), before, "{key}");
         }
-        let construction = crate::scenario::handle_at("sketch_palette:toggle:construction_mode").unwrap();
+        let construction = scroll_into_options(&mut h, "sketch_palette:toggle:construction_mode");
         h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
         assert_eq!(mode(&h.app), 1);
         h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
         assert_eq!(mode(&h.app), 0);
-        let infinite = crate::scenario::handle_at("dialog:Line Type:infinite").expect("the Infinite segment is drawn");
+        assert!(crate::scenario::handle_at("dialog:Line Type:infinite").is_some(), "the Infinite segment is drawn");
+        let infinite = scroll_into_options(&mut h, "dialog:Line Type:infinite");
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    /// Scrolls the palette's options area until the named handle is inside it, as a person
+    /// would, and returns where to click. Fails if the handle never comes into view.
+    fn scroll_into_options(h: &mut crate::scenario::Harness, handle: &str) -> egui::Pos2 {
+        for _ in 0..8 {
+            let at = crate::scenario::handle_at(handle).unwrap();
+            let options = crate::scenario::rect_of("sketch_palette:options").unwrap().shrink(8.0);
+            if options.contains(at) {
+                break;
+            }
+            let delta = if at.y > options.bottom() { -120 } else { 120 };
+            h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":delta}));
+            h.settle();
+        }
+        let at = crate::scenario::handle_at(handle).unwrap();
+        let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
+        assert!(options.contains(at), "{handle} scrolls into view: {at:?} outside {options:?}");
+        at
     }
 
     #[test]
