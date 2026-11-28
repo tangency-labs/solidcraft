@@ -102,7 +102,8 @@ pub struct Tool {
     /// Picked entity ids.
     pub picks: Vec<String>,
     /// Whether dropping the picks whose curve is gone (the Undo button) emptied the pick list and
-    /// nothing was picked since: a right-click on the view then keeps the tool on.
+    /// nothing was picked since: a right-click on the view then keeps the tool on. Set only for
+    /// the tools that apply on a right-click; the constraint tools end on one whatever they hold.
     pub picks_dropped: bool,
     /// Horizontal/Vertical point references, or the Dimension tool's midpoint snaps.
     pub point_picks: Vec<Value>,

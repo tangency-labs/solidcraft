@@ -1699,6 +1699,37 @@ fn a_constraint_tool_whose_pick_lost_its_line_to_undo_takes_the_next_two_picks()
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Horizontal keeps its first point until the second is picked. The Undo button took that point
+/// away: the point is dropped, so the next two point clicks make one Horizontal (#23602).
+#[test]
+fn a_horizontal_whose_first_point_was_undone_takes_the_next_two_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let point = |h: &mut crate::scenario::Harness, at: [i32; 2]| {
+        h.app.run("sketch.point", json!({"point": at})).unwrap()["point"].as_str().unwrap().to_string()
+    };
+    let a = point(&mut h, [5, 5]);
+    let b = point(&mut h, [40, 25]);
+    let gone = point(&mut h, [20, 40]);
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let horizontals = |h: &crate::scenario::Harness| {
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        sk.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::HorizontalPoints { .. })).count()
+    };
+    h.step(&json!({"start":"sketch.constraint.horizontal"})).unwrap();
+    h.step(&json!({"click":{"world":[20, 40, 0]}})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.point_picks.clone()), Some(vec![json!(gone)]), "the point is picked");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.resolve_point(&gone).is_none(), "Undo took the point");
+    h.step(&json!({"click":{"world":[5, 5, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 25, 0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(horizontals(&h), 1, "one Horizontal between {a} and {b}");
+}
+
 /// A right-click still ends the Parallel tool after the Undo button took its only pick away: the
 /// tool does not apply on a right-click, so nothing is kept on for one.
 #[test]

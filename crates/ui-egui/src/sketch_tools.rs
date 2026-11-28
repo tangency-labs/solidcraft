@@ -2229,22 +2229,33 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
 /// sketch, with their click places, so the user picks again instead of the command refusing the
 /// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
 /// (#23086). The constraint tools that pick entities (Parallel, Coincident, ...) drop theirs too,
-/// a preselected pick included (#23602). An origin axis pick (`x`, `y` or a JSON reference) is
-/// kept. Run on every frame before the value boxes are decided, so 2-Tangent Circle's Radius box
-/// goes with the pair. After a drop the boxes start over and true is returned, for the caller to
-/// show the hint.
+/// a preselected pick included, and Horizontal and Vertical their first point (#23602). An origin
+/// axis pick (`x`, `y` or a JSON reference) is kept. Run on every frame before the value boxes
+/// are decided, so 2-Tangent Circle's Radius box goes with the pair. After a drop the boxes start
+/// over and true is returned, for the caller to show the hint.
 pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
     let entities = matches!(mode(t.cmd), Some(Mode::Entities(_)));
-    if !(entities || matches!(t.kind, crate::tools::Kind::Pick(_))) || t.picks.is_empty() {
+    let aligns = t.kind == crate::tools::Kind::HorizontalVertical;
+    if !(entities || aligns || matches!(t.kind, crate::tools::Kind::Pick(_))) || (t.picks.is_empty() && t.point_picks.is_empty()) {
         return false;
     }
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return false };
     let stands =
         |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
+    // Horizontal and Vertical keep their first point, a point's id or a line's middle, until
+    // the second one is picked.
+    let points_dropped = aligns && {
+        let before = t.point_picks.len();
+        t.point_picks.retain(|point| match point {
+            Value::String(id) => stands(id),
+            other => other.get("midpoint").and_then(Value::as_str).is_none_or(stands),
+        });
+        t.point_picks.len() != before
+    };
     let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
     if keep.iter().all(|k| *k) {
-        return false;
+        return points_dropped;
     }
     // Each click adds its pick and its place together, after any preselected picks, which have
     // no place: the places belong to the last picks.
