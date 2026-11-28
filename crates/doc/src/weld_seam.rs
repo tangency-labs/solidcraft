@@ -555,7 +555,7 @@ pub(crate) fn scale(a: [f64; 3], k: f64) -> [f64; 3] {
 
 /// The length of `v`. shortcut: plain arithmetic in the app (as the spot's sums are), not a
 /// kernel call; move to solidcore if a reviewer asks.
-fn len(v: [f64; 3]) -> f64 {
+pub(crate) fn len(v: [f64; 3]) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
