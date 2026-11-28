@@ -35,6 +35,7 @@ can run it. People without administrator rights can install it just for themselv
 | AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. SolidCraft 0.46 or later. |
 | Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
 | Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
+| Allow crash reports | `AllowCrashReports` | `REG_DWORD` | `0`: SolidCraft writes no [crash report](https://github.com/tangency-labs/solidcraft/blob/main/docs/crash-reports.md), so it keeps no copy of a design for one. Reports written before stay until deleted. `1` or not set: it writes them. SolidCraft 0.51 or later. |
 | Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
 | Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
@@ -134,6 +135,9 @@ organization, and the policy that turns each off:
 | Problem reports, with what the person ticks | SolidCraft's ticket server, or GitHub | `AllowProblemReports` = `0` |
 | A model sent to Open with EasyPrint | Printables | `AllowEasyPrint` = `0` |
 
+Crash reports never leave the computer on their own, but a report often holds the design it
+crashed on. `AllowCrashReports` = `0` stops SolidCraft writing them.
+
 Linked designs and fonts on network locations are read from your own file servers
 (Preferences, General, Network locations).
 
@@ -154,7 +158,7 @@ unavailable too. A Donate or Discord button the policy shows has no way to hide 
 
 An agent or a script sees the same through the control channel: the reply of `ui.prefs` has a
 `policy` object that lists the locked settings, their values in force (`settings`), the
-features turned off (`off`: `easyprint`, `problem_reports`) and the organization's name. The settings themselves report each person's own stored choice, and a
+features turned off (`off`: `crash_reports`, `easyprint`, `problem_reports`) and the organization's name. The settings themselves report each person's own stored choice, and a
 request that changes a locked setting is refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
 
 ## A theme for everyone

@@ -1983,8 +1983,13 @@ fn main() -> eframe::Result {
             log::warn!("graphics: safe graphics record not saved: {reason}");
         }
     }
-    // Crashes leave a report in the crash folder (solidcraft_engine::crash, docs/crash-reports.md).
+    // The administrator's policy, read once here: it may turn crash capture off, and the app
+    // keeps it below.
+    let policy = solidcraft_ui_egui::policy::load();
+    // Crashes leave a report in the crash folder (solidcraft_engine::crash, docs/crash-reports.md),
+    // unless the policy turns them off: then nothing is captured, natively either.
     let crashed = solidcraft_engine::crash::default_dir()
+        .filter(|_| policy.allows("crash_reports"))
         .map(|dir| {
             let build = solidcraft_engine::crash::Build {
                 version: solidcraft_ui_egui::help::VERSION,
@@ -2148,7 +2153,7 @@ fn main() -> eframe::Result {
                 app.share_plugin_grants();
             }
             // The administrator's policy holds in safe mode too.
-            app.policy = solidcraft_ui_egui::policy::load();
+            app.policy = policy;
             solidcraft_ui_egui::policy::enforce(&mut app);
             #[cfg(feature = "usage-stats")]
             app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
