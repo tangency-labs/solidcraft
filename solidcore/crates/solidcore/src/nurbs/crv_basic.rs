@@ -152,8 +152,8 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an empty control point or knot array. Nothing
-    /// else is checked.
+    /// `InvalidInput` for an empty control point or knot array, or a control
+    /// point beyond the model coordinate ceiling.
     pub fn new(pw: Vec<CPoint>, p: usize, u: Vec<f64>) -> Result<Self> {
         let n = pw
             .len()
@@ -163,6 +163,15 @@ impl Curve {
             .len()
             .checked_sub(1)
             .ok_or_else(|| invalid("nurbs::crv_basic::Curve::new", "empty knot vector"))?;
+        if pw
+            .iter()
+            .any(|point| point.exceeds_model_coordinate_bound())
+        {
+            return Err(invalid(
+                "nurbs::crv_basic::Curve::new",
+                "control point coordinate above 1e150",
+            ));
+        }
         Ok(Self {
             pw: Arc::new(pw),
             n,
@@ -178,7 +187,8 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` when the storage does not hold the indices.
+    /// `InvalidInput` when the storage does not hold the indices or a control
+    /// point in use exceeds the model coordinate ceiling.
     pub fn with_indices(
         pw: Vec<CPoint>,
         n: usize,
@@ -190,6 +200,16 @@ impl Curve {
             return Err(invalid(
                 "nurbs::crv_basic::Curve::with_indices",
                 "storage smaller than (n, m)",
+            ));
+        }
+        if pw
+            .iter()
+            .take(n + 1)
+            .any(|point| point.exceeds_model_coordinate_bound())
+        {
+            return Err(invalid(
+                "nurbs::crv_basic::Curve::with_indices",
+                "control point coordinate above 1e150",
             ));
         }
         Ok(Self {
@@ -1393,6 +1413,34 @@ mod tests {
         assert!(!Arc::ptr_eq(&a.pw, &b.pw));
         assert_eq!(a, line2());
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn coordinate_bound_refuses_curve_control_points_in_use() {
+        let start = CPoint::new(0.0, 0.0, NOZ, NOW);
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        for x in [1e300, -1e300] {
+            let far = CPoint::new(x, 0.0, NOZ, NOW);
+            for result in [
+                Curve::new(vec![start, far], 1, knots.clone()),
+                Curve::with_indices(vec![start, far], 1, 1, knots.clone(), 3),
+            ] {
+                assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+            }
+        }
+        let near = CPoint::new(1e150, 0.0, NOZ, NOW);
+        assert!(Curve::new(vec![start, near], 1, knots.clone()).is_ok());
+        let far = CPoint::new(1e300, 0.0, NOZ, NOW);
+        assert!(Curve::with_indices(vec![start, near, far], 1, 1, knots.clone(), 3).is_ok());
+        // A large weighted coefficient may still represent an ordinary point.
+        let weighted_start = CPoint::new(0.0, 0.0, NOZ, 1e200);
+        let weighted_end = CPoint::new(1e200, 0.0, NOZ, 1e200);
+        assert!(Curve::new(vec![weighted_start, weighted_end], 1, knots.clone()).is_ok());
+        let far_cartesian = CPoint::new(1.0, 0.0, NOZ, 1e-200);
+        assert!(matches!(
+            Curve::new(vec![weighted_start, far_cartesian], 1, knots),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     fn line2() -> Curve {
