@@ -250,7 +250,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
         apply_commands(&h.app, d).unwrap(),
         vec![(
             "sketch.intersect".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":false,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"body":"Post","path":[]}],"projection_link":false,"construction":false})
         )]
     );
     // A model edge is cut with the plane too (#10484).
@@ -261,7 +261,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
         cmds,
         vec![(
             "sketch.intersect".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"edge":[0.0,0.0,10.0],"body":"Post","path":[]}],"projection_link":false,"construction":false})
         )]
     );
 }
@@ -292,7 +292,7 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
         cmds,
         vec![(
             "sketch.intersect".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"sketch":rectangle,"curve":id,"path":[]}],"projection_link":true,"construction":false})
         )]
     );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -365,7 +365,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
         apply_commands(&h.app, d).unwrap(),
         vec![(
             "sketch.project".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":false,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"body":"Plate","path":[]}],"projection_link":false,"construction":false})
         )]
     );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -405,7 +405,7 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
         cmds,
         vec![(
             "sketch.project".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"sketch":first,"point":"pt"}],"projection_link":true,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"sketch":first,"point":"pt","path":[]}],"projection_link":true,"construction":false})
         )]
     );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -439,7 +439,7 @@ fn project_dialog_takes_a_construction_point() {
         apply_commands(&h.app, d).unwrap(),
         vec![(
             "sketch.project".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"point":"Point1"}],"projection_link":true,"construction":false})
+            json!({"strict_occurrence_references":true,"refs":[{"point":"Point1"}],"projection_link":true,"construction":false})
         )]
     );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -1147,48 +1147,42 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
 }
 
 /// Dialog previews and deferred submissions carry the same explicit policy and displayed path.
-/// Execute their JSON directly on the engine to prove it does not need UI session state.
+/// The dialog's commands take the strict occurrence policy and the displayed copy's path;
+/// executing their JSON directly on the engine proves it does not need UI session state.
 #[test]
 fn projection_dialog_preview_and_apply_keep_explicit_policy_and_displayed_copy() {
-    for enhanced in [false, true] {
-        for command in ["sketch.project", "sketch.intersect"] {
-            let mut h = Harness::new();
-            h.app.ui.project_link_tools = enhanced;
-            let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
-            let source =
-                h.app.run("sketch.create", json!({"plane":if command == "sketch.intersect" {"XZ"} else {"XY"}})).unwrap()["sketch"].as_u64().unwrap();
-            h.app.run("sketch.line", json!({"points":[[2,-5],[2,5]],"ids":["source"]})).unwrap();
-            h.app.run("sketch.finish", json!({})).unwrap();
-            let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
-            h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
-            h.app.run("component.activate", json!({"component":0})).unwrap();
-            h.app.run("component.create", json!({"name":"B"})).unwrap();
-            let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
-            let mut d = Dialog::for_command(&h.app, command).unwrap();
-            d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: source, id: "source".into() }];
-            let commands = apply_commands(&h.app, &d).unwrap();
-            assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
-            assert_eq!(commands.len(), 1);
-            assert_eq!(commands[0].0, command);
-            assert_eq!(commands[0].1["strict_occurrence_references"], enhanced);
-            if enhanced {
-                assert_eq!(commands[0].1["refs"][0]["path"], json!([a1]));
-            } else {
-                assert!(commands[0].1["refs"][0].get("path").is_none());
-            }
-            let reply = h.app.session.execute(&commands[0].0, &commands[0].1).unwrap();
-            let link = reply["links"][0]["link"].as_str().unwrap();
-            let expected = enhanced.then_some(vec![a1]);
-            assert_eq!(h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap().placement.as_ref().map(|p| p.source.clone()), expected);
-            h.app.run("sketch.finish", json!({})).unwrap();
-            let mut reopened = solidcraft_engine::Session::default();
-            reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
-            reopened.refresh();
-            let st = reopened.model.state();
-            let stored = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
-            assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
-            assert!(!stored.lost);
-        }
+    for command in ["sketch.project", "sketch.intersect"] {
+        let mut h = Harness::new();
+        let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
+        let source =
+            h.app.run("sketch.create", json!({"plane":if command == "sketch.intersect" {"XZ"} else {"XY"}})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.line", json!({"points":[[2,-5],[2,5]],"ids":["source"]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("component.create", json!({"name":"B"})).unwrap();
+        let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: source, id: "source".into() }];
+        let commands = apply_commands(&h.app, &d).unwrap();
+        assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].0, command);
+        assert_eq!(commands[0].1["strict_occurrence_references"], true);
+        assert_eq!(commands[0].1["refs"][0]["path"], json!([a1]));
+        let reply = h.app.session.execute(&commands[0].0, &commands[0].1).unwrap();
+        let link = reply["links"][0]["link"].as_str().unwrap();
+        let expected = Some(vec![a1]);
+        assert_eq!(h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap().placement.as_ref().map(|p| p.source.clone()), expected);
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut reopened = solidcraft_engine::Session::default();
+        reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
+        reopened.refresh();
+        let st = reopened.model.state();
+        let stored = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
+        assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
+        assert!(!stored.lost);
     }
 }
 
@@ -1253,7 +1247,7 @@ fn project_dialog_has_construction_option_to_project_as_construction() {
         apply_commands(&h.app, d).unwrap(),
         vec![(
             "sketch.project".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":true,"construction":true})
+            json!({"strict_occurrence_references":true,"refs":[{"body":"Plate","path":[]}],"projection_link":true,"construction":true})
         )]
     );
 
@@ -1325,7 +1319,7 @@ fn intersect_dialog_has_construction_option() {
         apply_commands(&h.app, d).unwrap(),
         vec![(
             "sketch.intersect".into(),
-            json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":true,"construction":true})
+            json!({"strict_occurrence_references":true,"refs":[{"body":"Post","path":[]}],"projection_link":true,"construction":true})
         )]
     );
 

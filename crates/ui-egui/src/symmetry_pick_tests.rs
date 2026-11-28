@@ -216,36 +216,42 @@ fn coincident_onto_a_model_edge_projects_the_edge_first() {
     assert!(end.y.abs() < 1e-6, "{end:?}");
 }
 
+/// Both sketches contain c1: clicking the foreign circle must project it and constrain the
+/// projection, never the active sketch's same-id curve (#23472; the collision #12897 reports).
 #[test]
-fn another_sketchs_curve_uses_legacy_picks_or_the_enhanced_projection_workflow() {
-    for enhanced in [false, true] {
-        let mut h = Harness::new();
-        h.app.ui.project_link_tools = enhanced;
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":10})).unwrap();
-        h.app.finish_sketch();
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        // Both sketches contain c1. Enhanced picking projects the foreign curve; the default
-        // retains main's original ID routing and hit order.
-        h.app.run("sketch.circle.center", json!({"center":[35,-20],"radius":3})).unwrap();
-        let receiver_line = h.app.run("sketch.line", json!({"points":[[20,20],[30,25]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
-        h.app.cam.distance = 120.0;
-        h.settle();
-        h.app.start(if enhanced { "sketch.constraint.tangent" } else { "sketch.constraint.symmetry" });
-        let line = h.call("ui.at", json!({"sketch":[25,22.5]}))["result"].clone();
-        h.step(&json!({ "click": line })).unwrap();
-        let before = h.app.session.doc.to_json();
-        let circle = h.call("ui.at", json!({"sketch":[-10,0]}))["result"].clone();
-        h.step(&json!({ "click": circle })).unwrap();
-        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-        if !enhanced {
-            assert_eq!(h.app.session.doc.to_json(), before, "the default pick does not create a projection");
-            assert_eq!(h.app.tool.as_ref().unwrap().picks, [receiver_line, "c1".to_string()], "main's entity IDs remain in hit order");
-            continue;
-        }
-        assert_eq!(sk.links.len(), 1, "{:?}", h.app.status);
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { .. })), "{:?}", h.app.status);
-    }
+fn another_sketchs_curve_is_projected_even_when_ids_collide() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":10})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // Both sketches contain c1, at different places.
+    h.app.run("sketch.circle.center", json!({"center":[35,-20],"radius":3})).unwrap();
+    let receiver_line = h.app.run("sketch.line", json!({"points":[[20,20],[30,25]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.app.start("sketch.constraint.tangent");
+    let line = h.call("ui.at", json!({"sketch":[25,22.5]}))["result"].clone();
+    h.step(&json!({ "click": line })).unwrap();
+    let circle = h.call("ui.at", json!({"sketch":[-10,0]}))["result"].clone();
+    h.step(&json!({ "click": circle })).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.links.len(), 1, "the foreign circle is projected: {:?}", h.app.status);
+    let projected = sk.link_curves(&sk.links[0].id)[0];
+    let local = sk.curve_index("c1").unwrap();
+    assert_ne!(projected, local, "the projection has its own identity, not the local c1's");
+    let receiver = sk.curve_index(&receiver_line).unwrap();
+    // The tangent runs between the receiver's line and the projection of the clicked
+    // circle — never the active sketch's own same-id circle.
+    assert!(
+        sk.constraints.iter().any(|c| match c.kind {
+            solidcraft_engine::sketch::ConstraintKind::Tangent { a, b } => (a == receiver && b == projected) || (a == projected && b == receiver),
+            _ => false,
+        }),
+        "tangent to the projection: {:?}",
+        h.app.status
+    );
 }
 
 #[test]

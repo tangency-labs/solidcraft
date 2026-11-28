@@ -1,0 +1,22 @@
+[
+ {"note": "#23472: constraining to another sketch's curve projects it first. Sketch A's line and sketch B's line both have id l1; clicking A's line projects it and the constraint ties to the projection, never to B's own l1. One undo removes only the constraint (the projection stays, orphaned); a second undo removes the projection too."},
+ {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY","name":"A"}}},
+ {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[-10,-10],[-10,10]],"infer":false}}},
+ {"call":"engine.execute","params":{"command":"sketch.finish","params":{}}},
+ {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY","name":"B"}}},
+ {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[20,20],[60,40]],"infer":false}}},
+ {"call":"ui.view","params":{"view":"top"}},
+ {"call":"ui.camera","params":{"target":[25,20,0],"distance":200}},
+ {"frames": 30},
+ {"expect":{"sketch_curves":{"own":1,"linked":0}}},
+ {"start":"sketch.constraint.coincident"},
+ {"click":{"sketch":[60,40]}},
+ {"click":{"sketch":[-10,0]}},
+ {"expect":{"errors":0,"sketch_curves":{"own":1,"linked":1}}},
+ {"expect":{"query":{"command":"sketch.inspect","path":["curves",0,"end_at",0],"value":-10.0}}},
+ {"call":"engine.execute","params":{"command":"edit.undo","params":{}}},
+ {"expect":{"sketch_curves":{"own":1,"linked":1}}},
+ {"expect":{"query":{"command":"sketch.inspect","path":["curves",0,"end_at",0],"value":60.0}}},
+ {"call":"engine.execute","params":{"command":"edit.undo","params":{}}},
+ {"expect":{"sketch_curves":{"own":1,"linked":0},"errors":0}}
+]

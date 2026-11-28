@@ -179,103 +179,93 @@ mod tests {
     }
 
     #[test]
-    fn projection_compatibility_inputs_follow_the_project_option_and_explicit_inputs_win() {
-        for enhanced in [false, true] {
-            for policy in [None, Some(false), Some(true)] {
-                let mut h = Harness::new();
-                h.app.home.open = false;
-                h.app.ui.project_link_tools = enhanced;
-                let a = h.app.run("component.create", json!({"name":"A"})).unwrap();
-                let a1 = a["occurrence"].as_u64().unwrap();
-                let source = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
-                h.app.run("sketch.line", json!({"points":[[2,0],[8,0]],"ids":["source"]})).unwrap();
-                h.app.run("sketch.finish", json!({})).unwrap();
-                let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
-                h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
-                h.app.run("component.activate", json!({"component":0})).unwrap();
-                h.app.run("component.create", json!({"name":"B"})).unwrap();
-                let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
-                let mut params = json!({"refs":[{"sketch":source,"curve":"source"}]});
-                if let Some(policy) = policy {
-                    params["strict_occurrence_references"] = json!(policy);
-                }
-                if policy == Some(true) {
-                    // An explicit picked copy always wins over the default displayed placement.
-                    params["refs"][0]["path"] = json!([a2]);
-                }
-                let r = h.app.run("sketch.project", params).unwrap();
-                let link = r["links"][0]["link"].as_str().unwrap();
-                let expected = if policy == Some(true) {
-                    Some(vec![a2])
-                } else if policy.is_none() && enhanced {
-                    Some(vec![a1])
-                } else {
-                    None
-                };
-                let stored = h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap();
-                assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
-                h.app.run("sketch.finish", json!({})).unwrap();
-                let mut reopened = solidcraft_engine::Session::default();
-                reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
-                reopened.refresh();
-                let st = reopened.model.state();
-                let l = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
-                assert_eq!(l.placement.as_ref().map(|p| p.source.clone()), expected);
-                assert!(!l.lost);
+    fn projection_inputs_take_the_strict_default_and_explicit_inputs_win() {
+        for policy in [None, Some(false), Some(true)] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            let a = h.app.run("component.create", json!({"name":"A"})).unwrap();
+            let a1 = a["occurrence"].as_u64().unwrap();
+            let source = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+            h.app.run("sketch.line", json!({"points":[[2,0],[8,0]],"ids":["source"]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
+            h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
+            h.app.run("component.activate", json!({"component":0})).unwrap();
+            h.app.run("component.create", json!({"name":"B"})).unwrap();
+            let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+            let mut params = json!({"refs":[{"sketch":source,"curve":"source"}]});
+            if let Some(policy) = policy {
+                params["strict_occurrence_references"] = json!(policy);
             }
+            if policy == Some(true) {
+                // An explicit picked copy always wins over the default displayed placement.
+                params["refs"][0]["path"] = json!([a2]);
+            }
+            let r = h.app.run("sketch.project", params).unwrap();
+            let link = r["links"][0]["link"].as_str().unwrap();
+            let expected = match policy {
+                // The explicit picked copy wins.
+                Some(true) => Some(vec![a2]),
+                // The lenient policy keeps main's ordinary link, without a path.
+                Some(false) => None,
+                // The workflow's default: strict, reading the displayed copy.
+                None => Some(vec![a1]),
+            };
+            let stored = h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap();
+            assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let mut reopened = solidcraft_engine::Session::default();
+            reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
+            reopened.refresh();
+            let st = reopened.model.state();
+            let l = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
+            assert_eq!(l.placement.as_ref().map(|p| p.source.clone()), expected);
+            assert!(!l.lost);
         }
     }
 
     #[test]
-    fn partial_projection_delete_keeps_the_ui_choice_through_confirmation_and_reopen() {
-        for enhanced in [false, true] {
-            let (mut h, sketch, face, _, _) = harness(enhanced);
-            h.app.apply_off_thread = None;
-            // Extrusion needs the complete projected perimeter. Deleting a side makes the
-            // downstream extrusion fail, so the real dry-run must ask for confirmation.
-            h.app.run("solid.extrude", json!({"sketch":sketch,"distance":5,"operation":"new","body_name":"Receiver solid"})).unwrap();
+    fn partial_projection_delete_preserves_the_link_through_confirmation_and_reopen() {
+        let (mut h, sketch, face, _, _) = harness(true);
+        h.app.apply_off_thread = None;
+        // Extrusion needs the complete projected perimeter. Deleting a side makes the
+        // downstream extrusion fail, so the real dry-run must ask for confirmation.
+        h.app.run("solid.extrude", json!({"sketch":sketch,"distance":5,"operation":"new","body_name":"Receiver solid"})).unwrap();
+        h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+        let sk = h.app.session.doc.sketch(sketch).unwrap();
+        let victim =
+            sk.link_curves(&face).into_iter().find(|c| matches!(sk.curves[*c].kind, solidcraft_engine::sketch::CurveKind::Line { .. })).unwrap();
+        let victim = sk.curves[victim].id.clone();
+        let before = h.app.session.doc.to_json();
+        crate::delete::request(&mut h.app, json!({"items":[{"type":"sketch_curve","id":victim}]}));
+        let pending = h.app.menu.confirm.as_ref().expect("the extrusion depends on this closed boundary");
+        assert_eq!(pending.params["preserve_projection_link"], true, "Delete preserves the rest of the projection");
+        assert_eq!(h.app.session.doc.to_json(), before, "the dry-run changes nothing");
+        assert!(crate::delete::confirm(&mut h.app, true));
+        let sk = h.app.session.doc.sketch(sketch).unwrap();
+        assert!(sk.curve_index(&victim).is_none());
+        assert!(sk.link(&face).is_some(), "the remaining projection stays linked");
+        let mut reopened = solidcraft_engine::Session::default();
+        reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
+        reopened.refresh();
+        assert!(reopened.doc.sketch(sketch).unwrap().link(&face).is_some());
+        assert!(reopened.doc.sketch(sketch).unwrap().curve_index(&victim).is_none());
+    }
+
+    #[test]
+    fn direct_ui_delete_honours_explicit_preservation() {
+        for policy in [None, Some(false), Some(true)] {
+            let (mut h, sketch, face, _, _) = harness(true);
             h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
             let sk = h.app.session.doc.sketch(sketch).unwrap();
             let victim =
                 sk.link_curves(&face).into_iter().find(|c| matches!(sk.curves[*c].kind, solidcraft_engine::sketch::CurveKind::Line { .. })).unwrap();
-            let victim = sk.curves[victim].id.clone();
-            let before = h.app.session.doc.to_json();
-            crate::delete::request(&mut h.app, json!({"items":[{"type":"sketch_curve","id":victim}]}));
-            let pending = h.app.menu.confirm.as_ref().expect("the extrusion depends on this closed boundary");
-            assert_eq!(pending.params["preserve_projection_link"], enhanced);
-            assert_eq!(h.app.session.doc.to_json(), before, "the dry-run changes nothing");
-            h.app.ui.project_link_tools = !enhanced;
-            assert!(crate::delete::confirm(&mut h.app, true));
-            let sk = h.app.session.doc.sketch(sketch).unwrap();
-            assert!(sk.curve_index(&victim).is_none());
-            assert_eq!(sk.link(&face).is_some(), enhanced, "confirmation uses the choice at request time");
-            let mut reopened = solidcraft_engine::Session::default();
-            reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
-            reopened.refresh();
-            assert_eq!(reopened.doc.sketch(sketch).unwrap().link(&face).is_some(), enhanced);
-            assert!(reopened.doc.sketch(sketch).unwrap().curve_index(&victim).is_none());
-        }
-    }
-
-    #[test]
-    fn direct_ui_delete_honours_explicit_preservation_in_both_project_option_modes() {
-        for enhanced in [false, true] {
-            for policy in [None, Some(false), Some(true)] {
-                let (mut h, sketch, face, _, _) = harness(enhanced);
-                h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
-                let sk = h.app.session.doc.sketch(sketch).unwrap();
-                let victim = sk
-                    .link_curves(&face)
-                    .into_iter()
-                    .find(|c| matches!(sk.curves[*c].kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
-                    .unwrap();
-                let mut p = json!({"entities":[sk.curves[victim].id]});
-                if let Some(policy) = policy {
-                    p["preserve_projection_link"] = json!(policy);
-                }
-                h.app.run("sketch.delete", p).unwrap();
-                assert_eq!(h.app.session.doc.sketch(sketch).unwrap().link(&face).is_some(), policy.unwrap_or(enhanced));
+            let mut p = json!({"entities":[sk.curves[victim].id]});
+            if let Some(policy) = policy {
+                p["preserve_projection_link"] = json!(policy);
             }
+            h.app.run("sketch.delete", p).unwrap();
+            assert_eq!(h.app.session.doc.sketch(sketch).unwrap().link(&face).is_some(), policy.unwrap_or(true));
         }
     }
 

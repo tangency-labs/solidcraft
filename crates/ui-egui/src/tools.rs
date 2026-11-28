@@ -586,21 +586,16 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::Pick(n) => {
             let hits = curve_operands(tool.cmd, pick(app, proj, pos));
-            let entity = if app.ui.project_link_tools {
-                active_entity(app, &hits).map(|(id, _)| id).or_else(|| {
-                    hits.iter().find_map(|h| match h {
-                        Hit::Axis { name } => axis_pick(app, &tool, name),
-                        _ => None,
-                    })
-                })
-            } else {
-                // Keep main's hit order unless the enhanced projection workflow is enabled.
+            // The active sketch's own entity first, then an origin axis; anything else of
+            // the model is projected before the command uses it. A foreign sketch's curve
+            // never reaches the command as a bare id: ids repeat from one sketch to the
+            // next, so that id would name one of the active sketch's own curves.
+            let entity = active_entity(app, &hits).map(|(id, _)| id).or_else(|| {
                 hits.iter().find_map(|h| match h {
-                    Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
                     Hit::Axis { name } => axis_pick(app, &tool, name),
                     _ => None,
                 })
-            };
+            });
             // Fix never projects model or foreign-sketch geometry.
             let projects = tool.cmd != "sketch.constraint.fix";
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
@@ -618,9 +613,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     })
                     .map(|r| r.to_string())
             };
-            if let Some(id) = entity
-                .or_else(model)
-                .or_else(|| if projects && app.ui.project_link_tools { project_pick(app, &hits).map(|(id, _)| id) } else { None })
+            if let Some(id) = entity.or_else(model).or_else(|| if projects { project_pick(app, &hits).map(|(id, _)| id) } else { None })
                 && !tool.picks.contains(&id)
             {
                 tool.picks.push(id);
@@ -721,7 +714,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             let typed = crate::dim_view::live();
             // A model edge or vertex (or another sketch's curve) joins as its projection, but a
             // click that only places the text of a dimension being typed projects nothing.
-            let joins = app.ui.project_link_tools && typed.is_none_or(|typed| !typed) && tool.picks.len() < 2;
+            let joins = typed.is_none_or(|typed| !typed) && tool.picks.len() < 2;
             let hit = hit.or_else(|| {
                 let (id, curve) = if joins { project_pick(app, &hits)? } else { return None };
                 let sketch = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok());
@@ -1343,7 +1336,16 @@ fn project_pick(app: &mut SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
         Hit::SketchCurve { sketch, id, .. } if *sketch != active => Some((json!({"sketch": sketch, "curve": id}), "curve")),
         _ => None,
     })?;
-    let v = app.run("sketch.project", json!({"refs": [r]})).ok()?;
+    let v = match app.run("sketch.project", json!({"refs": [r]})) {
+        Ok(v) => v,
+        Err(error) => {
+            // A pick may refuse, but it must not silently do nothing: the reference is
+            // already projected, or its source cannot be projected. The dialog paths say
+            // why too (`already_linked`).
+            app.set_status(error, true);
+            return None;
+        }
+    };
     let link = v["links"].get(0)?;
     let first = |k: &str| link[k].get(0).and_then(Value::as_str).map(str::to_string);
     // A vertex projects to a point, and so does an edge seen end-on.
