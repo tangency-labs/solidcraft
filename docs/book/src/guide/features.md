@@ -236,6 +236,18 @@ runs round the wall slides the profiles round it by that arc length, and one alo
 them along it. Each takes an expression, so a parameter can drive it; an empty field leaves the
 profiles where the sketch has them. The profiles must still lie wholly on the face once placed.
 
+With **Placement handles** on (Preferences › Tools, off by default), the profiles can also be
+placed in the view while the Emboss dialog is open. A dashed cross stands where the middle of the
+box round the picked profiles lands, on the Target Face or, with none picked, in the sketch: drag
+it across the face to set Offset X and Offset Y. Drag the grip of the ring round it to set Angle.
+The offsets take round steps of the view and the Angle steps of 5°; hold Alt or Ctrl to move or
+turn freely. While you drag, the box round the profiles is outlined where it lands, ahead of the
+preview. Nothing is built until OK. On a cylinder picked as the Target Face the cross stands on
+the wall, where the profiles are laid round it. A sketch that touches a cylinder is wrapped round
+it even with no Target Face, but the cross is then in the sketch: pick the wall as the Target
+Face, on the side the sketch touches, to bring the cross onto the wall. A Target Face that is
+neither flat nor a cylinder's has no handles; its Emboss is placed by the three fields.
+
 A **Hole** with **Single** placement can also sit at distances from up to two straight edges of
 its face. After picking the face, click **Reference 1** and pick an edge, then pick a second one
 into **Reference 2**. Each edge gets a **Distance** row, measured from where you picked; the
