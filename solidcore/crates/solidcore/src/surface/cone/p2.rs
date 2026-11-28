@@ -344,7 +344,9 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 /// must be within `scaled_zero` of the plane square to it through the start of the first
 /// segment at least half as wide as the widest (#17462). A very
 /// short arc's legs and point angles amplify coordinate rounding past the tolerance; its
-/// chord, weight and plane distances do not. The other checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
+/// chord, weight and plane distances do not, nor does the middle point's offset from the
+/// chord's bisector, which is checked in place of equal legs. The other checks are
+/// [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
 /// cylinder, so a form that was recognised keeps its circles to the last bit.
 ///
 /// # Errors
@@ -385,17 +387,21 @@ fn iso_arc_from_chord(
         }
         let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
         let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
-        if (leg0.length() - leg1.length()).abs() > scaled_zero {
-            return Ok(None);
-        }
         // the legs made unit before their cross product: a short arc's legs are short, and
         // the product of their lengths would fall under the unit vector's absolute floor
-        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+        let (Ok(tangent), Ok(next), Ok(along)) = (leg0.unitize(), leg1.unitize(), chord.unitize())
+        else {
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
         let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        // The middle point's offset along the chord moves the curve off its circle by at most
+        // off sin α w / (1 + w); the legs' difference amplifies a far centre's rounding by 1 / sin α.
         let weight = b.w / (a.w * c.w).sqrt();
+        let off = (q1 - (q0 + chord * 0.5)).dot(along);
+        if off.abs() * half.sin() * weight / (1.0 + weight) > scaled_zero {
+            return Ok(None);
+        }
         if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
@@ -2699,6 +2705,83 @@ mod tests {
         assert!(Cone::is_nurb_surface_cylinder(&k, &wall, 1.0)
             .unwrap()
             .is_none());
+    }
+
+    /// An imported DXF's arc of radius 914 mm over 0.042 degrees, its middle point 2e-10 mm off
+    /// the chord's bisector (legs 4.1e-10 apart), extruded: a cylinder that lies on its form.
+    #[test]
+    fn a_nearly_straight_extruded_arc_is_a_cylinder_on_its_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.999_999_932_288_002_3;
+        let arc = [
+            (-0.726_592_329_545_042, -0.663_054_545_454_542_7, 1.0),
+            (-0.957_803_291_296_617_6, -0.418_702_097_341_421_05, w),
+            (-1.189_194_034_090_625_5, -0.174_519_886_363_658_4, 1.0),
+        ];
+        let net = arc
+            .into_iter()
+            .map(|(x, y, w)| {
+                vec![
+                    CPoint::new(x * w, y * w, 0.6 * w, w),
+                    CPoint::new(x * w, y * w, w, w),
+                ]
+            })
+            .collect();
+        let length = 2.0 * 3.68e-4 * 914.0;
+        let nurb = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, length, length, length],
+            vec![0.0, 0.0, 0.4, 0.4],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a cylinder");
+        let surface = crate::surface::surface::Surface::from(cone);
+        let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+        let (AnalyticSupport::Cylinder { placement, radius }
+        | AnalyticSupport::Cone {
+            placement,
+            base_radius: radius,
+            ..
+        }) = support
+        else {
+            panic!("{support:?}");
+        };
+        assert!((radius - 914.0).abs() < 1.0, "{radius}");
+        let axis = placement.z_axis();
+        assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
+    }
+
+    /// A rational quadratic of half sweep 78 degrees whose middle point is moved along the chord
+    /// by twice the point zero: within the chord test's bound, so the arc is recovered.
+    #[test]
+    fn a_wide_arc_with_its_middle_point_off_the_bisector_is_a_chord_arc() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        let k = kernel();
+        let (r, half) = (10.0_f64, 78.0_f64.to_radians());
+        let w = half.cos();
+        let (x, y) = (r * half.cos(), r * half.sin());
+        let zero = EFF_ZERO * 100.0 * (1.0 + 2.0 * y);
+        let arc = [(x, -y, 1.0), (r / w, 2.0 * zero, w), (x, y, 1.0)];
+        let points = arc
+            .into_iter()
+            .map(|(x, y, w)| CPoint::new(x * w, y * w, 0.0, w))
+            .collect();
+        let nurb = NurbCurve::new(points, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        let curve = BSplineCurve::from_nurb(nurb, 3, false);
+        let arc = iso_arc_from_chord(&k, &curve, zero, Some(Vec3::new(0.0, 0.0, 1.0)))
+            .unwrap()
+            .expect("an arc");
+        assert!((arc.radius - r).abs() < 1e-9, "{}", arc.radius);
     }
 
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about
