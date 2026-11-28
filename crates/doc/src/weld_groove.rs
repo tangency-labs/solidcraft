@@ -989,33 +989,23 @@ fn slab_gap(piece: &Piece<'_>) -> f64 {
     piece.zone * ALLOWANCE
 }
 
-/// The quadrilateral `corners` (in the frame's plane) swept along the whole of `piece`, end to end
-/// (CodeRabbit on #22504: a slab short of the ends would not see what lies within that of them).
+/// The quadrilateral `corners` (in the frame's plane) swept along `piece`, [`slab_gap`] in from
+/// each of its ends, as its side along a face is [`slab_gap`] off it: so it shares no face with a
+/// part, and a boolean with one is empty unless something reaches into it by more than the zone
+/// allowance, however small (CodeRabbit on #22504: a volume allowed for shared end faces also let
+/// a rib that small through).
 fn slab(corners: [Vec2; 4], piece: &Piece<'_>) -> Result<Body> {
     let region = Region2 { outer: Loop2::polygon(&corners), holes: Vec::new() };
-    let [lo, hi] = piece.along;
-    Ok(extrude_planar_regions(piece.frame, &[region], lo, hi)?)
-}
-
-/// The volume a slab `width` wide (and [`MARK_HEIGHT`] less [`slab_gap`] deep) may leave from a
-/// boolean and still count as nothing: a skin [`ALLOWANCE`] zone tolerances thick over its two end
-/// faces, the only faces it may share with a part (a plate that ends where the piece does).
-fn skin(width: f64, piece: &Piece<'_>) -> f64 {
-    2.0 * piece.zone * ALLOWANCE * width * (MARK_HEIGHT - slab_gap(piece))
-}
-
-/// The volume of a boolean's result `got`, none for an empty one; `None` where the kernel
-/// measures none.
-fn volume_of(got: Option<Body>) -> Option<f64> {
-    got.map_or(Some(0.0), |b| b.volume_at(1e-9))
+    let ([lo, hi], gap) = (piece.along, slab_gap(piece));
+    Ok(extrude_planar_regions(piece.frame, &[region], lo + gap, hi - gap)?)
 }
 
 /// Whether face `face` of `pick`'s part, a plane, is whole under the strip from `a` to `b`
 /// (points of the face in the frame's plane) all along `piece`: a slab under the strip, from
-/// [`slab_gap`] to [`MARK_HEIGHT`] inside the part, lies in its material (cut by the part, at most
-/// a [`skin`] is left; [`boolean`]). A hole, a notch, or an edge of the face that crosses the strip,
-/// straight or curved, leaves more (CodeRabbit on #22504). `true` for a face that is not a plane.
-/// A gap no deeper than [`slab_gap`] is the face's own tolerance.
+/// [`slab_gap`] to [`MARK_HEIGHT`] inside the part, lies in its material: cut by the part, nothing
+/// is left ([`boolean`]). A hole, a notch, or an edge of the face that crosses the strip, straight
+/// or curved, leaves something (CodeRabbit on #22504). `true` for a face that is not a plane. A gap
+/// within [`slab_gap`] of the face or of the piece's ends is the zone allowance's.
 fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Piece<'_>) -> Result<bool> {
     let Some(n) = pick.part.face_plane_normal(face)? else {
         return Ok(true);
@@ -1025,32 +1015,29 @@ fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Pie
         let [x, y, _] = affine::parallelogram_point([p.x, p.y, 0.0], [out.x, out.y, 0.0], [0.0; 3], -depth, 0.0);
         Vec2::new(x, y)
     };
-    let Some(width) = span(a, b) else {
-        return Ok(false);
-    };
     let gap = slab_gap(piece);
     let under = slab([below(a, gap), below(b, gap), below(b, MARK_HEIGHT), below(a, MARK_HEIGHT)], piece)?;
-    Ok(volume_of(boolean(&under, pick.part, BoolOp::Cut)?).is_some_and(|v| v <= skin(width, piece)))
+    Ok(boolean(&under, pick.part, BoolOp::Cut)?.is_none())
 }
 
 /// Whether the space of the default mark on `seam` (the other side's seam of a joint with no
 /// groove) is clear of `pick`'s part all along `piece`: a slab from [`slab_gap`] to
-/// [`MARK_HEIGHT`] off the surface, as wide as the mark, meets at most a [`skin`] of the part
-/// ([`boolean`]): a rib or anything else below the root within the mark is seen, across its
-/// whole width, length and height (CodeRabbit on #22504). A part reaching no further than
-/// [`slab_gap`] into the mark is within the surface's own tolerance.
+/// [`MARK_HEIGHT`] off the surface, as wide as the mark, meets nothing of the part ([`boolean`]): a
+/// rib or anything else below the root within the mark is seen, across its whole width, length and
+/// height, however small (CodeRabbit on #22504). A part reaching no further than [`slab_gap`] into
+/// the mark, or lying within it of the joint's ends, is within the zone allowance.
 fn clear_under(pick: &GroovePick<'_>, seam: &Seam, piece: &Piece<'_>) -> Result<bool> {
     let (half, x, y) = (seam.mark_width() / 2.0, seam.at.x, seam.at.y);
     let gap = slab_gap(piece);
     let (near, far) = if seam.normal.y > 0.0 { (y + gap, y + MARK_HEIGHT) } else { (y - gap, y - MARK_HEIGHT) };
     let probe = slab([Vec2::new(x - half, near), Vec2::new(x + half, near), Vec2::new(x + half, far), Vec2::new(x - half, far)], piece)?;
-    Ok(volume_of(boolean(&probe, pick.part, BoolOp::Intersect)?).is_some_and(|v| v <= skin(2.0 * half, piece)))
+    Ok(boolean(&probe, pick.part, BoolOp::Intersect)?.is_none())
 }
 
 /// Whether the point `p` of the frame's plane lies on record face `face` of `pick`'s part at both
 /// ends of `piece` and in its middle, within [`ALLOWANCE`] zone tolerances: a line along the joint
-/// that leaves the face only near an end, by less than [`whole_under`]'s skin, is seen there
-/// (CodeRabbit on #22504).
+/// that leaves the face only within [`slab_gap`] of an end, where [`whole_under`]'s slab does not
+/// reach, is seen there (CodeRabbit on #22504).
 fn on_face_along(pick: &GroovePick<'_>, face: usize, p: Vec2, piece: &Piece<'_>) -> Result<bool> {
     let ([lo, hi], tol) = (piece.along, piece.zone * ALLOWANCE);
     for along in [lo, (lo + hi) / 2.0, hi] {

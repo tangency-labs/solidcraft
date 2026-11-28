@@ -982,3 +982,25 @@ fn a_shallow_rib_inside_the_mark_leaves_no_seam_under_the_root() {
         assert_eq!(no.other, None);
     }
 }
+
+/// CodeRabbit on #22504: the shallow rib of [`a_shallow_rib_inside_the_mark_leaves_no_seam_under_the_root`]
+/// (1 wide, 0.04 deep) only over the joint's last 0.005, joined to the left plate: a rib that small
+/// inside the mark still leaves no seam under the root.
+#[test]
+fn a_tiny_rib_inside_the_mark_at_the_joint_s_end_leaves_no_seam_under_the_root() {
+    let plain = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let end = Plane { origin: Vec3::new(0.0, 0.0, 119.995), ..Plane::XY };
+    let rib = swept_by(&end, &[(-2.0, -6.0), (-1.5, -6.04), (-1.0, -6.0)], 0.005);
+    let left = solidcraft_kernel::boolean(&plain, &rib, solidcraft_kernel::BoolOp::Union).unwrap().unwrap();
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}

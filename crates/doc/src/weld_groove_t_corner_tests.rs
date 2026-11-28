@@ -237,12 +237,14 @@ fn hole(x: f64, z: f64) -> [(f64, f64); 4] {
 /// The beveled T of [`t_joint`] on a through plate with holes: one under the weld but past the
 /// stem's end (z = -20), one beside the stem away from the weld (x = -30): both filled as without
 /// them; one under the weld beside the stem (x from 2 to 4, z = 50), and one past the stem's end
-/// that reaches 0.04 under it (z from -3.96 to 0.04, CodeRabbit on #22504): refused as interrupted,
+/// that reaches 0.04 or 0.005 under it (z from -3.96 or -3.995, CodeRabbit on #22504): refused as interrupted,
 /// naming the through part whichever part is first.
 #[test]
 fn a_hole_in_the_through_plate_matters_only_under_the_weld() {
     let (_, stem, bevel) = t_joint(0.0);
-    for (holes, builds) in [(hole(2.0, -20.0), true), (hole(-30.0, 50.0), true), (hole(2.0, 50.0), false), (hole(2.0, -3.96), false)] {
+    for (holes, builds) in
+        [(hole(2.0, -20.0), true), (hole(-30.0, 50.0), true), (hole(2.0, 50.0), false), (hole(2.0, -3.96), false), (hole(2.0, -3.995), false)]
+    {
         let through = through_plate(&THROUGH, &[&holes]);
         let top = facing(&through, UP);
         assert_eq!(top.len(), 1, "{holes:?}");
