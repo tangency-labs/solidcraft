@@ -31,16 +31,20 @@
 //! curves they make, as upstream's `const` queries leave them. `IsInnerShell` keeps each target face surface's solve cache for the whole call
 //! (upstream's surface keeps its cache across the rays); the port otherwise builds one
 //! per intersection, and a failed build is kept too instead of being retried on every
-//! ray (the build is deterministic, so a retry fails the same way).
+//! ray (the build is deterministic, so a retry fails the same way). (Not upstream)
+//! `IsInnerShell` abandons a ray with a counted hit that is a limit root (one crossing of a
+//! leaf whose certified pass stopped at its limit, `Solution::limit_root`) and goes to the
+//! next sample (its counts reach no check).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
 //! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
 //! `ClosureTraversal` (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -153,8 +157,41 @@ impl Marks {
     }
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::topology_missing(OP, "a link of the topology"))
+// Why each link the traversals follow is the kernel's to keep: a missing one is a defect of
+// the B-rep's own bookkeeping, not a fact of the geometry.
+const NO_PRIMARY: &str = "the edge has no primary edge use; the kernel gives an edge its edge \
+    uses when it makes the edge and keeps one of them as the primary while any remain";
+const NO_START: &str = "the edge use has no vertex use; the kernel makes every edge use with the \
+    vertex use at its start";
+const NO_EDGEUSE_MATE: &str =
+    "the edge use has no mate; the kernel makes edge uses in mated pairs and deletes them in pairs";
+const NO_VERTEX: &str = "the vertex use names no vertex; the kernel makes a vertex use on its \
+    vertex and deletes it when it leaves the vertex";
+const NO_RADIAL: &str = "an edge use of a face's loop has no radial neighbour; the kernel links \
+    the edge uses round an edge into a closed radial ring";
+const NO_RADIAL_FACEUSE: &str = "the radial neighbour of an edge use in a face's loop lies on no \
+    face use; the radial ring the kernel builds round an edge of faces holds only edge uses of \
+    faces' loops";
+const NO_FACE: &str = "the face use names no face; the kernel makes a face's two face uses with \
+    the face and never unlinks one from it";
+const NO_FACEUSE_MATE: &str =
+    "the face use has no mate; the kernel makes a face's two face uses as a mated pair";
+const NO_EDGEUSE: &str = "the vertex use is of the edge kind but names no edge use; the kernel \
+    sets the kind and the edge use together when it puts a vertex use at an edge use's start";
+const NO_LOOP_VERTEXUSE: &str = "a loop use of the face lists a missing vertex use; the kernel \
+    makes every edge use of a loop with the vertex use at its start, and a vertex loop with its \
+    one vertex use";
+
+/// The link `value` that the traversal follows, or the reviewed defect `why` (one of the
+/// reasons above) with upstream's `SM_ERR_NULL_POINTER` (`NER`) when the B-rep lacks it.
+#[track_caller]
+fn link<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    match value {
+        Some(value) => Ok(value),
+        None => Err(Failure::new(OP, TopologyFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()),
+    }
 }
 
 fn check_mark(mark: MarkType) -> Result<()> {
@@ -178,13 +215,13 @@ pub fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 }
 
 fn edge_vertices(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
-    let primary = required(eu::primary_edgeuse(b, e)?)?;
-    let first = required(b.edgeuse(primary)?.vertexuse)?;
-    let mate = required(eu::mate(b, primary)?)?;
-    let second = required(b.edgeuse(mate)?.vertexuse)?;
+    let primary = link(eu::primary_edgeuse(b, e)?, NO_PRIMARY)?;
+    let first = link(b.edgeuse(primary)?.vertexuse, NO_START)?;
+    let mate = link(eu::mate(b, primary)?, NO_EDGEUSE_MATE)?;
+    let second = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
     Ok((
-        required(b.vertexuse(first)?.vertex)?,
-        required(b.vertexuse(second)?.vertex)?,
+        link(b.vertexuse(first)?.vertex, NO_VERTEX)?,
+        link(b.vertexuse(second)?.vertex, NO_VERTEX)?,
     ))
 }
 
@@ -336,8 +373,8 @@ pub fn faceuse_traversal(
         marks.mark(k, Entity::Faceuse(fu), mark);
         for &lu in &b.faceuse(fu)?.loopuses {
             for edgeuse in eu::loopuse_edgeuses(b, lu)? {
-                let radial = required(eu::radial(b, edgeuse)?)?;
-                let neighbor = required(eu::faceuse(b, radial)?)?;
+                let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                 if !marks.is_marked(k, Entity::Faceuse(neighbor), mark) {
                     stack.push(neighbor);
                 }
@@ -376,7 +413,7 @@ pub fn closure_traversal(
     if let Some(out) = &mut faceuses {
         out.clear();
     }
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
@@ -400,11 +437,11 @@ pub fn closure_traversal(
 /// expanded edge use, dangling ids, or those of the lamina test.
 pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<bool> {
     // A face with any lamina edges is not closed (as ClosureTraversal).
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
-    let mate = required(b.faceuse(start)?.mate)?;
+    let mate = link(b.faceuse(start)?.mate, NO_FACEUSE_MATE)?;
 
     // the side (0 = from the face use, 1 = from its mate) each visited face use was
     // reached from, by arena slot
@@ -441,8 +478,8 @@ pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<b
             for &lu in &b.faceuse(fu)?.loopuses {
                 for edgeuse in eu::loopuse_edgeuses(b, lu)? {
                     // a missing link fails, as in faceuse_traversal (the fork skips it)
-                    let radial = required(eu::radial(b, edgeuse)?)?;
-                    let neighbor = required(eu::faceuse(b, radial)?)?;
+                    let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                    let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                     match side.get(neighbor.index() as usize).copied().flatten() {
                         None => {
                             set_side(&mut side, neighbor, k);
@@ -483,11 +520,7 @@ pub fn faceuse_shell_replacement(
 ) -> Result<()> {
     lock.new_mark(std::slice::from_mut(&mut k.context))?;
     faceuse_traversal(k, b, marks, start, lock.mark_type(), Some(replaced))?;
-    for &fu in replaced.iter() {
-        if b.faceuse(fu)?.shell != Some(new_shell) {
-            shell::move_faceuse(b, fu, new_shell)?;
-        }
-    }
+    shell::move_faceuses_to_shell(b, replaced, new_shell)?;
     Ok(())
 }
 
@@ -495,6 +528,14 @@ pub fn faceuse_shell_replacement(
 /// face that `shell` joins to `start`. Not upstream: each vertex of `asked` is taken
 /// out as it is marked, and the walk ends when that takes out the last of them. With
 /// none asked it covers everything joined to `start`.
+///
+/// Not upstream: with vertices asked, the walk goes breadth first, so the vertices near
+/// `start` are marked before the far side of the shell. Which of `asked` the walk
+/// reaches does not depend on the order, and nothing else is read from such a walk, but
+/// depth first it often crossed most of a large shell to reach a vertex one face away:
+/// deleting the faces inside a union of a body of 10,000 faces walked it again for each
+/// face. With none asked the order is upstream's, which the lists of edge and face
+/// uses it fills keep.
 fn shell_connectivity(
     k: &Kernel,
     b: &Brep,
@@ -507,20 +548,25 @@ fn shell_connectivity(
     asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     marks.mark(k, Entity::Vertexuse(start), mark);
-    let mut stack = vec![start];
-    while let Some(vu) = stack.pop() {
+    let breadth_first = !asked.is_empty();
+    let mut stack = VecDeque::from([start]);
+    while let Some(vu) = if breadth_first {
+        stack.pop_front()
+    } else {
+        stack.pop_back()
+    } {
         let mut propagate = Vec::new();
         let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
-            let e = required(vertexuse::edgeuse(b, vu)?)?;
+            let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
             if let Some(out) = edgeuses {
                 out.push(e);
             }
-            let mate = required(eu::mate(b, e)?)?;
+            let mate = link(eu::mate(b, e)?, NO_EDGEUSE_MATE)?;
             if eu::shell(b, mate)? == Some(shell) {
-                let mate_vu = required(b.edgeuse(mate)?.vertexuse)?;
+                let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
                 if !marks.is_marked(k, Entity::Vertexuse(mate_vu), mark) {
                     marks.mark(k, Entity::Vertexuse(mate_vu), mark);
-                    stack.push(mate_vu);
+                    stack.push_back(mate_vu);
                 }
             }
             if eu::is_loop_edgeuse(b, e)? {
@@ -540,14 +586,14 @@ fn shell_connectivity(
                     out.push(fu);
                 }
             }
-            let f = required(b.faceuse(fu)?.face)?;
+            let f = link(b.faceuse(fu)?.face, NO_FACE)?;
             if !marks.is_marked(k, Entity::Face(f), mark) {
                 marks.mark(k, Entity::Face(f), mark);
                 k.work_counters.add_shell_traversal_face();
                 propagate.push(fu);
             }
         }
-        let v = required(b.vertexuse(vu)?.vertex)?;
+        let v = link(b.vertexuse(vu)?.vertex, NO_VERTEX)?;
         if !marks.is_marked(k, Entity::Vertex(v), mark) {
             marks.mark(k, Entity::Vertex(v), mark);
             if asked.remove(&v) && asked.is_empty() {
@@ -558,25 +604,182 @@ fn shell_connectivity(
                     && vertexuse::shell(b, next)? == Some(shell)
                 {
                     marks.mark(k, Entity::Vertexuse(next), mark);
-                    stack.push(next);
+                    stack.push_back(next);
                 }
             }
         }
         for fu in propagate {
             for &lu in &b.faceuse(fu)?.loopuses {
                 for next in face::loopuse_vertexuses(b, lu)? {
-                    let next = required(next)?;
+                    let next = link(next, NO_LOOP_VERTEXUSE)?;
                     if !marks.is_marked(k, Entity::Vertexuse(next), mark)
                         && vertexuse::shell(b, next)? == Some(shell)
                     {
                         marks.mark(k, Entity::Vertexuse(next), mark);
-                        stack.push(next);
+                        stack.push_back(next);
                     }
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Outcome of bidirectional connectivity check between two vertices in a shell after
+/// removing a wire edge between them (not upstream; indexed-mark deletion path only).
+pub(crate) enum WireSplitCheck {
+    /// `v1` and `v2` remain connected in `shell`.
+    Connected,
+    /// `v1` and `v2` are disconnected in `shell`.
+    Split {
+        /// Whether `v1`'s component was completely traversed (as opposed to `v2`'s finishing first).
+        v1_exhausted: bool,
+        /// Whether `v1`'s explored portion visited any face use.
+        v1_has_faceuse: bool,
+        /// First edge use encountered on `v1`'s side, if any.
+        v1_first_edgeuse: Option<EdgeuseId>,
+    },
+    /// Either `v1` or `v2` has no vertex use in `shell`; caller runs the standard walk.
+    Fallback,
+}
+
+/// Bidirectional BFS connectivity test for [`crate::topology::brep::p4::delete_edge`]'s
+/// wire branch (not upstream). Alternates steps from `v1` and `v2` inside `shell`, stopping
+/// immediately when the two frontiers meet (`Connected`) or when either side exhausts its
+/// connected component (`Split`), avoiding whole-shell traversals on large shells.
+///
+/// # Errors
+/// Those of [`shell_traversal`].
+pub(crate) fn shell_wire_split_check(
+    k: &mut Kernel,
+    b: &Brep,
+    v1: VertexId,
+    v2: VertexId,
+    shell: ShellId,
+    lock: &MarkLock,
+) -> Result<WireSplitCheck> {
+    lock.new_mark(std::slice::from_mut(&mut k.context))?;
+    check_mark(lock.mark_type())?;
+
+    let mut start1 = None;
+    for &vu in &b.vertex(v1)?.vertexuses {
+        if vertexuse::shell(b, vu)? == Some(shell) {
+            start1 = Some(vu);
+            break;
+        }
+    }
+    let mut start2 = None;
+    for &vu in &b.vertex(v2)?.vertexuses {
+        if vertexuse::shell(b, vu)? == Some(shell) {
+            start2 = Some(vu);
+            break;
+        }
+    }
+    let (Some(start1), Some(start2)) = (start1, start2) else {
+        return Ok(WireSplitCheck::Fallback);
+    };
+    if start1 == start2 {
+        return Ok(WireSplitCheck::Connected);
+    }
+
+    let mut queues = [VecDeque::from([start1]), VecDeque::from([start2])];
+    let mut seen_vu = [BTreeSet::from([start1]), BTreeSet::from([start2])];
+    let mut seen_v: [BTreeSet<VertexId>; 2] = [BTreeSet::new(), BTreeSet::new()];
+    let mut seen_f: [BTreeSet<FaceId>; 2] = [BTreeSet::new(), BTreeSet::new()];
+    let mut v1_has_faceuse = false;
+    let mut v1_first_edgeuse: Option<EdgeuseId> = None;
+
+    let mut side = 0usize;
+    loop {
+        let Some(vu) = queues.get_mut(side).and_then(VecDeque::pop_front) else {
+            return Ok(WireSplitCheck::Split {
+                v1_exhausted: side == 0,
+                v1_has_faceuse,
+                v1_first_edgeuse,
+            });
+        };
+        let other = 1 - side;
+        let mut propagate = Vec::new();
+        let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
+            let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
+            if side == 0 && v1_first_edgeuse.is_none() {
+                v1_first_edgeuse = Some(e);
+            }
+            let mate = link(eu::mate(b, e)?, NO_EDGEUSE_MATE)?;
+            if eu::shell(b, mate)? == Some(shell) {
+                let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
+                if seen_vu.get(other).is_some_and(|s| s.contains(&mate_vu)) {
+                    return Ok(WireSplitCheck::Connected);
+                }
+                if seen_vu.get_mut(side).is_some_and(|s| s.insert(mate_vu)) {
+                    if let Some(q) = queues.get_mut(side) {
+                        q.push_back(mate_vu);
+                    }
+                }
+            }
+            if eu::is_loop_edgeuse(b, e)? {
+                vertexuse::faceuse(b, vu)?
+            } else {
+                None
+            }
+        } else if vertexuse::is_loop_vertexuse(b, vu)? {
+            vertexuse::faceuse(b, vu)?
+        } else {
+            None
+        };
+        if let Some(fu) = fu {
+            if side == 0 {
+                v1_has_faceuse = true;
+            }
+            let f = link(b.faceuse(fu)?.face, NO_FACE)?;
+            if seen_f.get_mut(side).is_some_and(|s| s.insert(f)) {
+                k.work_counters.add_shell_traversal_face();
+                propagate.push(fu);
+            }
+        }
+        let v = link(b.vertexuse(vu)?.vertex, NO_VERTEX)?;
+        if seen_v.get(other).is_some_and(|s| s.contains(&v)) {
+            return Ok(WireSplitCheck::Connected);
+        }
+        if seen_v.get_mut(side).is_some_and(|s| s.insert(v)) {
+            for &next in &b.vertex(v)?.vertexuses {
+                if seen_vu.get(other).is_some_and(|s| s.contains(&next)) {
+                    return Ok(WireSplitCheck::Connected);
+                }
+                if !seen_vu.get(side).is_some_and(|s| s.contains(&next))
+                    && vertexuse::shell(b, next)? == Some(shell)
+                {
+                    if let Some(s) = seen_vu.get_mut(side) {
+                        s.insert(next);
+                    }
+                    if let Some(q) = queues.get_mut(side) {
+                        q.push_back(next);
+                    }
+                }
+            }
+        }
+        for fu in propagate {
+            for &lu in &b.faceuse(fu)?.loopuses {
+                for next in face::loopuse_vertexuses(b, lu)? {
+                    let next = link(next, NO_LOOP_VERTEXUSE)?;
+                    if seen_vu.get(other).is_some_and(|s| s.contains(&next)) {
+                        return Ok(WireSplitCheck::Connected);
+                    }
+                    if !seen_vu.get(side).is_some_and(|s| s.contains(&next))
+                        && vertexuse::shell(b, next)? == Some(shell)
+                    {
+                        if let Some(s) = seen_vu.get_mut(side) {
+                            s.insert(next);
+                        }
+                        if let Some(q) = queues.get_mut(side) {
+                            q.push_back(next);
+                        }
+                    }
+                }
+            }
+        }
+        side = other;
+    }
 }
 
 /// Advance the mark and traverse shell connectivity through the first vertex use
@@ -691,8 +894,10 @@ impl crate::geom::solution_array::SolutionObject for RaySurface {
 }
 
 /// `pTargetFace->GlobalLineIntersect(GetUVDomain(), origin, direction, NULL, FALSE,
-/// GetTolerance(), sols)`: the line parameter of each solution. `held` is the face
-/// surface's cache, kept across the rays as upstream keeps it on the surface.
+/// GetTolerance(), sols)`: the line parameter of each solution, with whether it is a limit
+/// root (not upstream: [`crate::geom::solution_array::Solution::limit_root`]).
+/// `held` is the face surface's cache, kept across the rays as upstream keeps it on the
+/// surface.
 fn line_parameters(
     k: &Kernel,
     b: &mut Brep,
@@ -700,7 +905,7 @@ fn line_parameters(
     held: &mut HeldSolveCache<RaySurface>,
     origin: Vec3,
     direction: Vec3,
-) -> Result<Vec<f64>> {
+) -> Result<Vec<(f64, bool)>> {
     let face = b.face(f)?;
     let (uv_domain, tol) = (face.uv_domain, face.tolerance);
     let surface = RaySurface(
@@ -715,7 +920,7 @@ fn line_parameters(
     Ok(solutions
         .as_slice()
         .iter()
-        .map(|s| s.start.parameters[0])
+        .map(|s| (s.start.parameters[0], s.limit_root))
         .collect())
 }
 
@@ -724,11 +929,21 @@ fn line_parameters(
 /// failures skip the face, as upstream).
 /// An empty or inconclusive set returns the upstream `SM_ERR`.
 ///
+/// (Not upstream) A ray with a counted hit that is a limit root
+/// ([`crate::geom::solution_array::Solution::limit_root`]: a crossing of a leaf whose
+/// certified pass stopped at its limit, whose partner may be unreported, which would turn
+/// the ray's parity) is abandoned: its counts decide nothing, and the next sample's ray is
+/// fired. The abandoned ray's hits are still solved, so the B-rep's trims are made as
+/// before. Every other hit is counted as before, whatever its contact.
+///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
+/// The samples' dithers come from one generator the call makes from the kernel's seed
+/// ([`Kernel::seeded_rng`]), drawn in the order of `faceuses`, so the answer is a function
+/// of the B-rep, the face uses and the seed.
 pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
-        return Err(SolidError::topology_failed(OP, "there are no face uses"));
+        return Err(SolidError::topology(OP, TopologyFailure::NoFaceUses));
     }
     let mut samples = 3;
     if faceuses.len() < 6 {
@@ -737,15 +952,17 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     if faceuses.len() < 3 {
         samples *= 2;
     }
-    let mut forward = 0_u64;
-    let mut backward = 0_u64;
+    let mut rays = ShellRays::default();
     // each target face surface's cache, built on its first ray (upstream's
     // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
+    // this call's own draws, from the start of the seed's sequence: each face use's sample
+    // dithers take the next draws, in the order of `faceuses`
+    let mut rng = k.seeded_rng();
     for &source in faceuses {
         let source = b.faceuse(source)?;
-        let (f, orientation) = (required(source.face)?, source.orientation);
-        let mut points = face::points_in_face(k, b, f, samples)?.pv;
+        let (f, orientation) = (link(source.face, NO_FACE)?, source.orientation);
+        let mut points = face::points_in_face_drawing(k, b, f, samples, &mut rng)?.pv;
         if orientation == OrientType::Opposite {
             for pair in points.chunks_exact_mut(2) {
                 if let Some(normal) = pair.get_mut(1) {
@@ -757,55 +974,196 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
             let (Some(&origin), Some(&direction)) = (pair.first(), pair.get(1)) else {
                 continue;
             };
-            forward = 0;
-            backward = 0;
+            // each target face's hits, with its tolerance
+            let mut faces: Vec<(f64, Vec<(f64, bool)>)> = Vec::new();
             for &target in faceuses {
-                let f = required(b.faceuse(target)?.face)?;
+                let f = link(b.faceuse(target)?.face, NO_FACE)?;
                 let tol = b.face(f)?.tolerance;
                 let held = caches.entry(f).or_default();
                 match line_parameters(k, b, f, held, origin, direction) {
-                    Ok(parameters) => {
-                        for t in parameters {
-                            if t < -tol {
-                                backward += 1;
-                            } else if t > tol {
-                                forward += 1;
-                            }
-                        }
-                    }
+                    Ok(parameters) => faces.push((tol, parameters)),
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => (),
                 }
             }
-            if forward == 1 && backward == 0 {
-                return Ok(true);
-            }
-            if forward == 0 && backward == 1 {
-                return Ok(false);
-            }
-            if forward % 2 != 0 && backward % 2 == 0 {
-                return Ok(true);
-            }
-            if forward % 2 == 0 && backward % 2 != 0 {
-                return Ok(false);
+            if let Some(inner) = rays.ray(ray_count(&faces)) {
+                return Ok(inner);
             }
         }
     }
-    if forward > backward && backward == 0 && forward % 2 != 0 {
-        return Ok(true);
+    rays.after_samples()
+}
+
+/// What one ray of [`is_inner_shell`] counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RayCount {
+    /// The hits beyond each face's tolerance ahead of the ray's start and behind it.
+    Counts { forward: u64, backward: u64 },
+    /// (Not upstream) A counted hit is a limit root: the ray decides nothing.
+    Abandoned,
+}
+
+/// The count of one ray of [`is_inner_shell`] from each target face's `(tolerance, hits)`
+/// (each hit its line parameter and whether it is a limit root): a hit within its face's
+/// tolerance of the start is not counted, and a counted limit root abandons the ray.
+fn ray_count(faces: &[(f64, Vec<(f64, bool)>)]) -> RayCount {
+    let (mut forward, mut backward) = (0_u64, 0_u64);
+    let mut limit = false;
+    for (tol, hits) in faces {
+        for &(t, limit_root) in hits {
+            if t < -tol {
+                backward += 1;
+            } else if t > *tol {
+                forward += 1;
+            } else {
+                continue;
+            }
+            limit |= limit_root;
+        }
     }
-    if backward > forward && forward == 0 && backward % 2 != 0 {
-        return Ok(false);
+    if limit {
+        RayCount::Abandoned
+    } else {
+        RayCount::Counts { forward, backward }
     }
-    Err(SolidError::topology_failed(
-        OP,
-        "the rays do not decide whether the shell is inner",
-    ))
+}
+
+/// The rays of [`is_inner_shell`] in the order fired: the counts of the last one.
+#[derive(Debug, Default)]
+struct ShellRays {
+    forward: u64,
+    backward: u64,
+}
+
+impl ShellRays {
+    /// Takes the next ray: whether the shell is inner when the ray decides it. An
+    /// abandoned ray leaves no counts (no partial count reaches [`Self::after_samples`]).
+    fn ray(&mut self, count: RayCount) -> Option<bool> {
+        let (forward, backward) = match count {
+            RayCount::Counts { forward, backward } => (forward, backward),
+            RayCount::Abandoned => (0, 0),
+        };
+        self.forward = forward;
+        self.backward = backward;
+        if count == RayCount::Abandoned {
+            return None;
+        }
+        if forward == 1 && backward == 0 {
+            return Some(true);
+        }
+        if forward == 0 && backward == 1 {
+            return Some(false);
+        }
+        if forward % 2 != 0 && backward % 2 == 0 {
+            return Some(true);
+        }
+        if forward % 2 == 0 && backward % 2 != 0 {
+            return Some(false);
+        }
+        None
+    }
+
+    /// The answer when no ray decided, from the last ray's counts (upstream's checks after
+    /// the samples); the error when they do not decide either.
+    fn after_samples(&self) -> Result<bool> {
+        let (forward, backward) = (self.forward, self.backward);
+        if forward > backward && backward == 0 && forward % 2 != 0 {
+            return Ok(true);
+        }
+        if backward > forward && forward == 0 && backward % 2 != 0 {
+            return Ok(false);
+        }
+        Err(SolidError::topology(
+            OP,
+            TopologyFailure::ShellSideUndecided { forward, backward },
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One ray of `is_inner_shell`: hits within a face's tolerance of the start are not
+    /// counted, limit root or not; every other hit that is no limit root is counted as
+    /// upstream counts it (whatever its contact); a counted limit root abandons the ray.
+    #[test]
+    fn a_counted_limit_root_abandons_the_ray_and_a_start_hit_does_not() {
+        let (limit, plain) = (true, false);
+        let counts = |forward, backward| RayCount::Counts { forward, backward };
+        assert_eq!(
+            ray_count(&[
+                (1e-3, vec![(5.0, plain), (-2.0, plain)]),
+                (1e-2, vec![(7.0, plain)])
+            ]),
+            counts(2, 1)
+        );
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(5e-4, limit), (3.0, plain)])]),
+            counts(1, 0)
+        );
+        assert_eq!(ray_count(&[(1e-3, vec![(-5e-4, limit)])]), counts(0, 0));
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(3.0, plain)]), (1e-3, vec![(4.0, limit)])]),
+            RayCount::Abandoned
+        );
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(-4.0, limit)])]),
+            RayCount::Abandoned
+        );
+    }
+
+    /// The rays of `is_inner_shell` in order: a ray with an odd count ahead and an even one
+    /// behind (or one hit) decides; an abandoned ray decides nothing and leaves no counts, so
+    /// samples that are all abandoned end in the shell's undecided side with no counts (the
+    /// error `is_inner_shell` returns), and an abandoned last ray hides the counts of the ray
+    /// before it from the checks after the samples, which read the last ray's.
+    #[test]
+    fn abandoned_rays_decide_nothing_and_reach_no_check() {
+        let undecided = |r: Result<bool>| match r {
+            Err(e) => format!("{e:?}"),
+            Ok(v) => panic!("decided {v}"),
+        };
+        let mut rays = ShellRays::default();
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        let none = undecided(rays.after_samples());
+        assert!(none.contains("forward: 0, backward: 0"), "{none}");
+        let mut rays = ShellRays::default();
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 2,
+                backward: 2
+            }),
+            None
+        );
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        let none = undecided(rays.after_samples());
+        assert!(none.contains("forward: 0, backward: 0"), "{none}");
+        let mut rays = ShellRays::default();
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 3,
+                backward: 0
+            }),
+            Some(true)
+        );
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 0,
+                backward: 1
+            }),
+            Some(false)
+        );
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 1,
+                backward: 1
+            }),
+            None
+        );
+    }
     use crate::geom::context::MarkType;
     use crate::topology::{Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
 
@@ -959,6 +1317,116 @@ mod tests {
         // a vertex the shell does not join is left, after the whole walk
         let stray = VertexId::from_index(u32::MAX);
         assert_eq!(walk(&[start, stray]), (6, 8, BTreeSet::from([stray])));
+    }
+
+    #[test]
+    fn wire_split_check_detects_connected_and_split_wire_components() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let region = b.infinite_region();
+        // Build two disconnected 2-edge wire chains in the same shell (simulating the state
+        // right after removing a bridging wire edge between two vertices of a shell).
+        let shell = b.add_shell().unwrap();
+        if let Some(r) = region {
+            b.shell_mut(shell).unwrap().region = Some(r);
+            b.region_mut(r).unwrap().shells.push(shell);
+        }
+        let add_wire = |b: &mut Brep, v1: VertexId, v2: VertexId| -> EdgeId {
+            let e = b.add_edge(v1, v2).unwrap();
+            for (v, orientation) in [(v1, OrientType::Same), (v2, OrientType::Opposite)] {
+                let eu = b
+                    .add_edgeuse_record(Edgeuse {
+                        edge: Some(e),
+                        owner: EdgeuseOwner::Shell(Some(shell)),
+                        orientation,
+                        ..Edgeuse::default()
+                    })
+                    .unwrap();
+                let vu = b
+                    .add_vertexuse_record(Vertexuse {
+                        vertex: Some(v),
+                        owner: VertexuseOwner::Edgeuse(Some(eu)),
+                        ..Vertexuse::default()
+                    })
+                    .unwrap();
+                b.edgeuse_mut(eu).unwrap().vertexuse = Some(vu);
+                b.vertex_mut(v).unwrap().vertexuses.push(vu);
+                b.edge_mut(e).unwrap().edgeuses.push(eu);
+            }
+            e
+        };
+        let v0 = b.add_vertex(Vec3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let v2 = b.add_vertex(Vec3::new(2.0, 0.0, 0.0)).unwrap();
+        let v3 = b.add_vertex(Vec3::new(10.0, 0.0, 0.0)).unwrap();
+        let v4 = b.add_vertex(Vec3::new(11.0, 0.0, 0.0)).unwrap();
+        let _ = add_wire(&mut b, v0, v1);
+        let _ = add_wire(&mut b, v1, v2);
+        let _ = add_wire(&mut b, v3, v4);
+
+        let mut lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            crate::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        // v0 and v2 are connected through v1.
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v2, shell, &lock).unwrap(),
+            WireSplitCheck::Connected
+        ));
+        // v0 and v3 are in separate components of the same shell.
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v3, shell, &lock).unwrap(),
+            WireSplitCheck::Split {
+                v1_has_faceuse: false,
+                v1_first_edgeuse: Some(_),
+                ..
+            }
+        ));
+        // Add a longer chain on v0's side ending in a face use so v2's tiny wire component
+        // (v3-v4) exhausts before v1's search reaches the face (`v1_exhausted == false`,
+        // `v1_has_faceuse == false`).
+        let v5 = b.add_vertex(Vec3::new(3.0, 0.0, 0.0)).unwrap();
+        let v6 = b.add_vertex(Vec3::new(4.0, 0.0, 0.0)).unwrap();
+        let _ = add_wire(&mut b, v2, v5);
+        let _ = add_wire(&mut b, v5, v6);
+        let f_id = b
+            .add_face_record(crate::topology::Face::new(shell))
+            .unwrap();
+        let fu_id = b
+            .add_faceuse_record(crate::topology::Faceuse {
+                face: Some(f_id),
+                shell: Some(shell),
+                ..crate::topology::Faceuse::default()
+            })
+            .unwrap();
+        let lu_id = b
+            .add_loopuse_record(crate::topology::Loopuse {
+                faceuse: Some(fu_id),
+                ..crate::topology::Loopuse::default()
+            })
+            .unwrap();
+        let vu_face = b
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(v6),
+                owner: VertexuseOwner::Loopuse(Some(lu_id)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        b.vertex_mut(v6).unwrap().vertexuses.push(vu_face);
+        b.loopuse_mut(lu_id).unwrap().start =
+            crate::topology::LoopuseStart::Vertexuse(Some(vu_face));
+        b.faceuse_mut(fu_id).unwrap().loopuses.push(lu_id);
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v3, shell, &lock).unwrap(),
+            WireSplitCheck::Split {
+                v1_exhausted: false,
+                v1_has_faceuse: false,
+                v1_first_edgeuse: Some(_),
+            }
+        ));
+        lock.release(std::slice::from_mut(&mut k.context)).unwrap();
     }
 
     #[test]

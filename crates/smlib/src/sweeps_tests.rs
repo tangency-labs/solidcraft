@@ -48,6 +48,32 @@ fn revolutions_whole_and_partial() {
     assert_close(solid_volume(&b, "quarter ring"), PI / 2.0 * 7.0 * 4.0, 1e-6, "quarter ring");
 }
 
+#[test]
+fn a_stopped_revolve_refuses_before_parsing_its_profile() {
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    let r = stop.within(|| Brep::revolve_joining_arcs(&[], [0.0; 3], [0.0, 0.0, 1.0], TAU, true));
+    assert_eq!(r.err(), Some(Error::Cancelled("smlib_revolve")));
+}
+
+#[test]
+fn a_revolved_arc_split_into_pieces_keeps_one_spherical_wall() {
+    // The open path in issue #18537 splits one circular sketch arc. Its pieces still
+    // define one sphere; the extra face boundary used to block the handle's fillet.
+    let arc = |start, end| Curve::Arc { center: [0.0; 3], axis: [0.0, -1.0, 0.0], reference: [0.0, 0.0, 1.0], radius: 5.0, start, end };
+    let profile = vec![arc(0.0, PI / 3.0), arc(PI / 3.0, PI), Curve::Line { start: [0.0, 0.0, -5.0], end: [0.0, 0.0, 5.0] }];
+    for angle in [TAU, PI / 2.0] {
+        for offset in 0..profile.len() {
+            let mut pieces = profile.clone();
+            pieces.rotate_left(offset);
+            let b = Brep::revolve_joining_arcs(&pieces, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap();
+            let record = b.to_native().unwrap();
+            assert_eq!(record.faces.len(), if angle == TAU { 1 } else { 3 }, "angle {angle}, offset {offset}");
+            assert_close(solid_volume(&b, "split sphere"), angle / TAU * 4.0 / 3.0 * PI * 125.0, 1e-5, "split sphere");
+        }
+    }
+}
+
 /// A half disc of radius 14 centred 14 off the axis, its rim outward, three quarters of a turn
 /// (rig sweeps/4007): a horn torus, which SMLib gives a major radius a rounding below its minor.
 /// The record's torus is a ring torus, so the face comes out as its NURBS form, unlabelled, and
@@ -173,8 +199,34 @@ fn hostile_curve_lists_are_refused() {
     assert_eq!(Brep::extrude(&nan, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
     let bad = [Curve::Nurbs { degree: 3, points: vec![[0.0, 0.0, 0.0, 1.0]; 2], knots: vec![0.0; 6] }];
     assert_eq!(Brep::extrude(&bad, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
+    for profile in [&nan[..], &bad[..], &[]] {
+        assert_eq!(Brep::revolve_joining_arcs(profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).err(), Some(Error::Argument));
+    }
     assert_eq!(Brep::loft(&[vec![circle([0.0; 3], 1.0)]], 1, true).err(), Some(Error::Argument));
     let sq = polygon(&[[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]);
-    assert_eq!(Brep::revolve(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
+    assert_eq!(Brep::revolve_joining_arcs(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
     assert_eq!(Brep::screw_sweep(&sq, [0.0; 3], [0.0, 0.0, 1.0], 0.0, 1.0, 1e-4).err(), Some(Error::Argument));
+}
+
+/// #21092: a circle of radius 2 in the XZ plane, swept round a circle of radius 30 in the same
+/// plane, turning with it, moves within its own plane, so its walls lie on top of each other.
+/// Fitting a trim curve to them, the drop of an edge onto the folded wall reached a span one
+/// parameter step long across the wall's seam, whose midpoint rounds onto its start: split there,
+/// its empty half passed, and the span came back unchanged for ever. The sweep must return, and
+/// not with a valid sheet. Run on a thread so that a hang fails the test instead of stalling it.
+#[test]
+fn a_circle_swept_round_a_circle_in_its_own_plane_returns() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ring = [Curve::Arc { center: [30.0, 0.0, 0.0], axis: [0.0, -1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: 2.0, start: 0.0, end: TAU }];
+        let path = [
+            Curve::Arc { center: [0.0; 3], axis: [0.0, 1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: 30.0, start: 0.0, end: PI },
+            Curve::Arc { center: [0.0; 3], axis: [0.0, 1.0, 0.0], reference: [-1.0, 0.0, 0.0], radius: 30.0, start: 0.0, end: PI },
+        ];
+        let valid =
+            Brep::sweep(&ring, &path, SweepFrame::Follow, false).ok().and_then(|b| b.check(CheckLevel::All).ok()).is_some_and(|r| r.is_valid());
+        let _ = tx.send(valid);
+    });
+    let valid = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the sweep did not return within 60 s");
+    assert!(!valid, "a circle swept within its own plane is no valid sheet");
 }

@@ -562,9 +562,16 @@ pub fn bottom_resize_height(layout: &Layout, registry: &PanelRegistry, env: &All
     if !requested.is_finite() {
         return Err(error(Rule::Bounds, "nonfinite Bottom thickness"));
     }
-    let (registered_min, registered_max) = bottom_height_bounds(layout, registry)?;
+    let (registered_min, registered_max) = bottom_height_bounds_of(layout, registry, |section| presented(section, env).is_some())?;
     let expanded_min = f32::from_bits(env.inline_max_height.to_bits().saturating_add(1));
-    let regions = [(registered_min, registered_max.min(env.inline_max_height)), (registered_min.max(expanded_min), registered_max)];
+    // Each admitted height range splits into its inline and expanded part; a gap between ranges is a deadzone.
+    let regions: Vec<(f32, f32)> = bottom_height_ranges(layout, registry, |section| presented(section, env).is_some())?
+        .into_iter()
+        .flat_map(|(lo, hi)| {
+            let (lo, hi) = (lo.max(registered_min), hi.min(registered_max));
+            [(lo, hi.min(env.inline_max_height)), (lo.max(expanded_min), hi)]
+        })
+        .collect();
     let mut proposed = layout.clone();
     let mut best: Option<f32> = None;
     for (mut low, mut high) in regions {
@@ -728,8 +735,18 @@ pub fn allocate_layout(layout: &Layout, registry: &PanelRegistry, env: &Allocati
             let height = section.size.height.min(env.capacity.size.height).clamp(height_limit.min, height_limit.max);
             let x = origin.x.clamp(env.capacity.origin.x, (env.capacity.origin.x + env.capacity.size.width - width).max(env.capacity.origin.x))
                 - scroll.x;
-            let y = origin.y.clamp(env.capacity.origin.y, (env.capacity.origin.y + env.capacity.size.height - height).max(env.capacity.origin.y))
-                - scroll.y;
+            let top = |height: f32| {
+                origin.y.clamp(env.capacity.origin.y, (env.capacity.origin.y + env.capacity.size.height - height).max(env.capacity.origin.y))
+            };
+            let y = if section.collapsed && registry.get(&layout.instance(instance)?.kind)?.features.collapse_keeps_bottom {
+                let expanded = Section { collapsed: false, ..section.clone() };
+                let limit = section_height_limit(layout, registry, &expanded, env)?;
+                let full = section.size.height.min(env.capacity.size.height).clamp(limit.min, limit.max);
+                (top(full) + full - height)
+                    .clamp(env.capacity.origin.y, (env.capacity.origin.y + env.capacity.size.height - height).max(env.capacity.origin.y))
+            } else {
+                top(height)
+            } - scroll.y;
             push_allocation(&mut result, section, instance, x, y, width, height)?;
         }
     }

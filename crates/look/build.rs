@@ -1,5 +1,7 @@
 //! Compiles SolidCraft's look into tables: the icon masters, colour roles, accents and aliases
 //! (`icons/design`) and the built-in theme files (`themes`). Every path is inside this crate.
+// A build script reports to cargo on stderr; nothing else reads it (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");

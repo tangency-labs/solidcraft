@@ -18,7 +18,7 @@ Fill in the template's `Changes a default:` line (`pr-checks.yml` fails a PR des
 - `Changes a default: no`
 - `Changes a default: yes - <what changes>, old behaviour kept behind setting <name>`, where `<name>` is the tool option or the legacy value in the format. The check reads this exact form.
 
-A `yes` waits for a maintainer's decision.
+A `yes` waits for a maintainer's decision. It is only for a deliberate change to intentional behaviour users rely on (sketch endpoints merging instead of a coincident constraint); a jank fix is `no`.
 
 ## Adding a preference (rarely)
 Settings live in the `preference_settings!` table in `crates/ui-egui/src/prefs.rs`: the field, its default, the page whose reset restores it, an optional accepted range for the control channel, and the form control. Add one row there.
@@ -28,4 +28,4 @@ Settings live in the `preference_settings!` table in `crates/ui-egui/src/prefs.r
 - Test it in a UI scenario or a `*_tests.rs` file next to the setting (`.agents/skills/solidcraft-tests/SKILL.md`).
 
 ## What counts as a default
-Anything a user sees or does differently on first launch after the update: a changed shortcut, camera or navigation behaviour, unit, naming, theme or autosave behaviour, or a tool that appears unasked. A changed default is when something people already rely on in the UI changes for everyone: an existing control, interaction or setting value. Not defaults: bug fixes and more correct results, kernel or geometry result changes (write `Changes a default: no`), new behaviour on an input that did nothing before, new options that are off by default, and CI or tooling config. A fix that makes the app do what it already claimed is not a default change; say so on the line.
+Anything a user sees or does differently on first launch after the update: a changed shortcut, camera or navigation behaviour, unit, naming, theme or autosave behaviour, or a tool that appears unasked. A changed default is when something people already rely on in the UI changes for everyone: an existing control, interaction or setting value. Not defaults: bug fixes and more correct results, kernel or geometry result changes (write `Changes a default: no`), new behaviour on an input that did nothing before, new options that are off by default, and CI or tooling config. A fix that makes the app do what it already claimed, or removes janky or unintended behaviour, is not a default change (a drag that cancelled now floats); say so on the line. Don't add a setting to keep old behaviour nobody would choose.

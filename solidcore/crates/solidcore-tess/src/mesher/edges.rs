@@ -11,7 +11,8 @@ use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
 
 /// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
-/// another before it is that node ([`insert_at`]).
+/// another shaping request before it is that node ([`insert_at`]). Crossing events are
+/// merged by identity instead and never use this spacing cutoff.
 const NEAR: f64 = 1e-6;
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
@@ -244,17 +245,29 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
 /// so every face of it takes the node. Two faces splitting one side in a round give its
 /// fraction each in its own metric, apart by their rounding: a parameter within [`NEAR`] of
 /// its segment's length from a node, or from one put in before it, is the same node and left
-/// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
-/// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
-pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+/// out. Returns false, leaving the edge unchanged, if the optional shaping would exceed the
+/// node limit. A curve which cannot be evaluated is still an error.
+pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<bool> {
+    insert(b, ei, nodes, ts, true)
+}
+
+/// Insert identity-deduplicated crossing requests, with no minimum spacing. Only parameters
+/// strictly inside a segment whose evaluated points differ from its ends can add a node.
+pub(crate) fn insert_crossings(
+    b: &brep::Brep,
+    ei: usize,
+    nodes: &mut Nodes,
+    ts: &[f64],
+) -> Result<()> {
+    insert(b, ei, nodes, ts, false).map(|_| ())
+}
+
+fn insert(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64], shaping: bool) -> Result<bool> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
     ts.sort_by(f64::total_cmp);
     ts.dedup();
-    if nodes.points.len() + ts.len() > MAX_EDGE_NODES {
-        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
-    }
     let curve = match edge.curve {
         Curve::Line { .. } => None,
         _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
@@ -262,6 +275,7 @@ pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]
     let n = nodes.points.len().min(nodes.params.len());
     let (mut points, mut params) = (Vec::new(), Vec::new());
     let mut next = ts.into_iter().peekable();
+    let mut added = 0;
     for k in 0..n {
         let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
         points.push(p);
@@ -270,22 +284,31 @@ pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]
         // The last node of the segment so far: the one at `t`, then each put in.
         let mut last = t;
         while let Some(m) = next.next_if(|m| *m < u) {
-            let near = NEAR * (u - t);
+            let near = if shaping { NEAR * (u - t) } else { 0.0 };
             if !(m - last > near && u - m > near) {
                 continue;
             }
-            last = m;
             let pm = match &curve {
                 None => p + (q - p) * ((m - t) / (u - t)),
                 Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
             };
+            // Exact equality protects against a parameter step that evaluates to an existing
+            // endpoint or the preceding inserted point: neither can form a new mesh side.
+            if pm == p || pm == q || points.last() == Some(&pm) {
+                continue;
+            }
+            last = m;
+            if n + added >= MAX_EDGE_NODES {
+                return if shaping { Ok(false) } else { Err(fail(format!("more than {MAX_EDGE_NODES} nodes"))) };
+            }
+            added += 1;
             points.push(pm);
             params.push(m);
         }
     }
     nodes.points = points;
     nodes.params = params;
-    Ok(())
+    Ok(true)
 }
 
 /// Edge `ei`'s nodes with `add` (each a parameter strictly inside a segment and the point there)

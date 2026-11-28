@@ -1263,10 +1263,227 @@ fn a_mitered_rip_keeps_both_panels_off_the_plane_between_them() {
     assert!(close(Lap::Cut(1.0, 2.0).cuts(0.3, T), (1.0, 2.0)));
 }
 
+/// A lapped rip cuts each panel square to the edge on its own surface: the covering panel to
+/// `amount` past the other's near face, the covered one to `gap` short of the covering one's. At
+/// a square corner toward the material those are T - amount and T + gap; away from it the
+/// covering panel runs on `amount` past the edge (a cut below 0) and the covered one stops `gap`
+/// short. At an obtuse turn the offset to the facing plane is divided by the sine, with the
+/// thickness leaning over the edge by its cosine. Either panel may be the one that covers.
+#[test]
+fn a_lapped_rip_covers_one_panel_with_the_other() {
+    let (amount, gap) = (1.0, 0.5);
+    let angle = 72.0_f64.to_radians();
+    let (sin, cos) = angle.sin_cos();
+    for (turn, covering, covered) in [
+        (FRAC_PI_2, T - amount, T + gap),
+        (-FRAC_PI_2, -amount, gap),
+        (
+            PI - angle,
+            (T * (1.0 + cos) - amount) / sin,
+            (T * (1.0 + cos) + gap) / sin,
+        ),
+        (angle - PI, -amount / sin, gap / sin),
+    ] {
+        for covering_a in [true, false] {
+            let lap = Lap::Overlap {
+                covering_a,
+                amount: Some(amount),
+                gap,
+            };
+            let got = lap.cuts(turn, T);
+            let want = if covering_a {
+                (covering, covered)
+            } else {
+                (covered, covering)
+            };
+            assert!(
+                (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                "{turn}: {got:?}, not {want:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_acute_overlap_keeps_the_requested_gap_between_the_cut_walls() {
+    fn point_to_wall(point: Vec2, base: Vec2, normal: Vec2) -> f64 {
+        let depth = (point - base).dot(normal).clamp(0.0, 1.0);
+        point.dist(base + normal * depth)
+    }
+
+    let gap = 0.5;
+    for angle in [10.0_f64, 41.4, 60.0, 75.5, 89.99] {
+        for turn in [angle.to_radians(), -angle.to_radians()] {
+            let (sin, cos) = turn.sin_cos();
+            let normal_a = Vec2::new(1.0, 0.0);
+            let normal_b = Vec2::new(cos, -sin);
+            for amount in [None, Some(0.5), Some(0.1)] {
+                for covering_a in [true, false] {
+                    let (cut_a, cut_b) = Lap::Overlap {
+                        covering_a,
+                        amount,
+                        gap,
+                    }
+                    .cuts(turn, 1.0);
+                    let base_a = Vec2::new(0.0, -cut_a);
+                    let base_b = Vec2::new(sin, cos) * cut_b;
+                    let distance = point_to_wall(base_a, base_b, normal_b)
+                        .min(point_to_wall(base_a + normal_a, base_b, normal_b))
+                        .min(point_to_wall(base_b, base_a, normal_a))
+                        .min(point_to_wall(base_b + normal_b, base_a, normal_a));
+                    assert!(
+                        (distance - gap).abs() < 1e-9,
+                        "{turn}, {amount:?}, {covering_a}: {distance}"
+                    );
+                    let expected_cover =
+                        (if turn > 0.0 { 1.0 } else { cos } - amount.unwrap_or(1.0)) / sin.abs();
+                    let actual_cover = if covering_a { cut_a } else { cut_b };
+                    assert!((actual_cover - expected_cover).abs() < 1e-9);
+                }
+            }
+        }
+    }
+}
+
+/// A lap with no amount covers the other panel's whole thickness, whatever the sheet's is: at a
+/// square corner toward the material the covering panel is cut nothing and the covered one
+/// T + gap; away from it the covering panel runs on T past the edge.
+#[test]
+fn a_full_lap_follows_the_sheets_thickness() {
+    let gap = 0.5;
+    for thickness in [1.0, 2.0, 4.0] {
+        for (turn, covering, covered) in [
+            (FRAC_PI_2, 0.0, thickness + gap),
+            (-FRAC_PI_2, -thickness, gap),
+        ] {
+            for covering_a in [true, false] {
+                let lap = Lap::Overlap {
+                    covering_a,
+                    amount: None,
+                    gap,
+                };
+                let got = lap.cuts(turn, thickness);
+                let want = if covering_a {
+                    (covering, covered)
+                } else {
+                    (covered, covering)
+                };
+                assert!(
+                    (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                    "{thickness} at {turn}: {got:?}, not {want:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A lapped rip moves each panel's own edge in the flat: the 100 x 60 base and the 100 x 20
+/// flange of the bracket each lose their cut along the rip, and a cut below 0 adds that much.
+#[test]
+fn a_lapped_rip_moves_each_panels_own_edge() {
+    for turn in [FRAC_PI_2, -FRAC_PI_2] {
+        for amount in [Some(1.0), None] {
+            for covering_a in [true, false] {
+                let lap = Lap::Overlap {
+                    covering_a,
+                    amount,
+                    gap: 0.5,
+                };
+                let mut sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
+                if let Some(j) = sheet.joints.get_mut(0) {
+                    j.kind = rip_along(j, 100.0, turn, lap);
+                    if let JointKind::Rip(rip) = &mut j.kind {
+                        let line = |edge: &[Vec2]| match edge {
+                            [a, b] => vec![Seg2::Line { a: *a, b: *b }],
+                            _ => Vec::new(),
+                        };
+                        rip.curves = (line(&rip.edges.0), line(&rip.edges.1));
+                    }
+                }
+                let dev = match develop(&sheet, &[(0, Rigid2::IDENTITY)]) {
+                    Ok(dev) => dev,
+                    Err(why) => panic!("{lap:?} at {turn}: {why}"),
+                };
+                let (Some(Some(base)), Some(Some(flange))) =
+                    (dev.panels.first(), dev.panels.get(1))
+                else {
+                    panic!("both panels are laid out: {dev:?}")
+                };
+                let (a, b) = lap.cuts(turn, T);
+                assert!(
+                    (area(&base.region) - 100.0 * (60.0 - a)).abs() < 1e-9,
+                    "{lap:?} at {turn}: the base is {}",
+                    area(&base.region)
+                );
+                assert!(
+                    (area(&flange.region) - 100.0 * (20.0 - b)).abs() < 1e-9,
+                    "{lap:?} at {turn}: the flange is {}",
+                    area(&flange.region)
+                );
+                assert!(
+                    (bounds(&base.region).min.y - a).abs() < 1e-9,
+                    "{lap:?} at {turn}: {:?}",
+                    bounds(&base.region)
+                );
+            }
+        }
+    }
+}
+
+/// A lap is refused, saying which, where its gap is not more than 0, where it covers nothing or
+/// more than the sheet's thickness, and where the sheet runs straight on or turns a half turn
+/// and so has no corner to lap.
+#[test]
+fn a_lapped_rip_out_of_range_is_refused() {
+    let lapped = |amount: f64, gap: f64| Lap::Overlap {
+        covering_a: true,
+        amount: Some(amount),
+        gap,
+    };
+    let laid = |turn: f64, lap: Lap| {
+        let mut sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
+        if let Some(j) = sheet.joints.get_mut(0) {
+            j.kind = rip_along(j, 100.0, turn, lap);
+        }
+        develop(&sheet, &[(0, Rigid2::IDENTITY)])
+    };
+    let refused = |why: JointRefusal| Err(Refusal::Joint { joint: 0, why });
+    for lap in [
+        lapped(0.0, 0.5),
+        lapped(-1.0, 0.5),
+        lapped(T + 1.0, 0.5),
+        lapped(f64::INFINITY, 0.5),
+        lapped(f64::NAN, 0.5),
+        lapped(1.0, 0.0),
+        lapped(1.0, -0.5),
+        lapped(1.0, f64::NAN),
+    ] {
+        assert_eq!(
+            laid(FRAC_PI_2, lap),
+            refused(JointRefusal::OverlapRange),
+            "{lap:?}"
+        );
+    }
+    for turn in [0.0, PI, -PI] {
+        assert_eq!(
+            laid(turn, lapped(1.0, 0.5)),
+            refused(JointRefusal::OverlapTurn),
+            "{turn}"
+        );
+    }
+    for turn in [f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            laid(turn, lapped(1.0, 0.5)),
+            refused(JointRefusal::RipNotFinite),
+            "{turn}"
+        );
+    }
+}
+
 /// A plate whose top is a half round of radius 27.5 about (0, 23), ripped from a roll along
 /// that arc and cut back 3, its edge given at 33 points and, where `exact`, as the arc itself:
 /// the plate's flat outline, each edge with what it is.
-fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
+fn half_round_sheet(exact: bool, lap: Lap) -> Sheet {
     let (r, c) = (27.5, Vec2::new(0.0, 23.0));
     let arc = Seg2::Arc {
         center: c,
@@ -1302,7 +1519,7 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
         .map(|k| Vec2::new(0.0, PI * k as f64 / (n - 1) as f64))
         .collect();
     let curves = (if exact { vec![arc] } else { Vec::new() }, Vec::new());
-    let sheet = Sheet {
+    Sheet {
         thickness: T,
         k_factor: K,
         panels: vec![
@@ -1328,12 +1545,16 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
                 edges: (along, round),
                 curves,
                 turns: vec![-FRAC_PI_2; n],
-                lap: Lap::Cut(3.0, 0.0),
+                lap,
             }),
         }],
         corners: Vec::new(),
         cuts: Vec::new(),
-    };
+    }
+}
+
+fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
+    let sheet = half_round_sheet(exact, Lap::Cut(3.0, 0.0));
     let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert!(dev.trims.is_empty(), "{:?}", dev.trims);
     let Some(Some(plate)) = dev.panels.first() else {
@@ -1341,6 +1562,34 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
     };
     let from = plate.origins.first().cloned().unwrap_or_default();
     plate.region.outer.segs.iter().copied().zip(from).collect()
+}
+
+#[test]
+fn full_overlap_rejects_a_collapsed_exact_arc_and_mixed_turns() {
+    let lap = Lap::Overlap {
+        covering_a: false,
+        amount: None,
+        gap: 30.0,
+    };
+    let mut sheet = half_round_sheet(true, lap);
+    assert!(matches!(
+        develop(&sheet, &[(0, Rigid2::IDENTITY)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OverlapArcRadius
+        })
+    ));
+    let JointKind::Rip(rip) = &mut sheet.joints[0].kind else {
+        panic!("expected rip")
+    };
+    rip.turns[1] = FRAC_PI_2;
+    assert_eq!(
+        develop(&sheet, &[(0, Rigid2::IDENTITY)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OverlapTurn
+        })
+    );
 }
 
 /// A rip follows its edge wherever it runs: given only as points along the half round, the
@@ -1618,4 +1867,257 @@ fn a_torn_end_no_spline_follows_within_its_tolerance_is_refused() {
             "offset {offset}: {dev:?}"
         );
     }
+}
+
+/// A plate whose side runs at a slant to its bend, the flange's side carrying the plate's on
+/// straight across the sharp (the two surfaces unfolded about it): 0.75 along the bend for every
+/// mm toward the flange. T 2, R 2, K 0.44, a right angle toward the material, so the surfaces lie
+/// `r = R + T = 4` from the bend's axis and each tangent line lies `4 tan 45° = 4` from the sharp.
+/// The plate is the `a` panel, its sharp along x from (0, 0) and its material above, its side
+/// through (0, 0) and (−45, 60); the flange is drawn in a chart of its own, its side through its
+/// anchor's origin and (15, −20) there. The side crosses the plate's tangent line at −3 along the
+/// bend and the flange's at +3.
+fn slanted_bracket(relief: Relief) -> Sheet {
+    let chart = Rigid2::onto(Vec2::ZERO, X, Vec2::new(7.0, -3.0), from_angle(1.1))
+        .unwrap_or(Rigid2::IDENTITY);
+    let poly = |pts: &[(f64, f64)]| Region2 {
+        outer: ccw(polygon(
+            &pts.iter()
+                .map(|&(x, y)| Vec2::new(x, y))
+                .collect::<Vec<_>>(),
+        )),
+        holes: Vec::new(),
+    };
+    let mut b = bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0));
+    b.ends = ZoneEnds {
+        near: (-3.0, 100.0),
+        far: (3.0, 100.0),
+    };
+    b.tails = (Tail::Keep, Tail::Keep);
+    b.relief = (relief, Relief::Notch);
+    Sheet {
+        thickness: T,
+        k_factor: 0.44,
+        panels: vec![
+            Panel {
+                name: "plate".into(),
+                region: poly(&[(0.0, 0.0), (100.0, 0.0), (100.0, 60.0), (-45.0, 60.0)]),
+                ..Panel::default()
+            },
+            Panel {
+                name: "flange".into(),
+                region: chart.region(&poly(&[
+                    (0.0, 0.0),
+                    (15.0, -20.0),
+                    (100.0, -20.0),
+                    (100.0, 0.0),
+                ])),
+                ..Panel::default()
+            },
+        ],
+        joints: vec![Joint {
+            a: Anchor {
+                panel: 0,
+                origin: Vec2::ZERO,
+                dir: X,
+            },
+            b: Anchor {
+                panel: 1,
+                origin: chart.point(Vec2::ZERO),
+                dir: chart.vector(X),
+            },
+            kind: JointKind::Bend(b),
+        }],
+        corners: Vec::new(),
+        cuts: Vec::new(),
+    }
+}
+
+/// The points of a zone's outline at its start (x below 50), strictly between its tangent lines.
+fn zone_start_points(zone: &super::Zone, near_y: f64, far_y: f64) -> Vec<Vec2> {
+    zone.region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|s| (0..=40).map(move |k| s.point_at(k as f64 / 40.0)))
+        .filter(|p| p.x < 50.0 && p.y < near_y - 1e-6 && p.y > far_y + 1e-6)
+        .collect()
+}
+
+/// The zone's free end follows both sides through the bend, square through the sheet: a point of
+/// the plate's side `q` past its tangent line toward the sharp lies on the ray `φ = atan(q / 4)`
+/// round the bend, which the neutral arc puts `(R + K T) φ = 2.88 φ` past the tangent line in the
+/// flat. So the end runs from (−3, 4) on the plate's tangent line through (0, 4 − BA/2) where the
+/// sharp lands, mid-zone, to (3, 4 − BA) on the flange's: it rises 6 along the bend across the
+/// BA = 1.44π = 4.524 wide zone, where a straight line from end to end would keep the side's
+/// slant. It leaves the plate's side turned by atan(0.75 · 4 / 2.88) − atan(0.75) = 9.30°.
+#[test]
+fn a_free_end_follows_both_panels_outlines_through_the_bend() {
+    let (r, rn) = (R + T, R + 0.44 * T);
+    let ba = FRAC_PI_2 * rn;
+    let dev = develop(&slanted_bracket(Relief::Outline), &[(0, Rigid2::IDENTITY)]);
+    let dev = match dev {
+        Ok(d) => d,
+        Err(e) => panic!("the bracket lays out: {e:?}"),
+    };
+    let [zone] = dev.zones.as_slice() else {
+        panic!("one zone: {dev:?}")
+    };
+    // The flat frame's y runs into the plate: across the joint toward the flange is −y.
+    let (near_y, far_y) = (4.0, 4.0 - ba);
+    let pts = zone_start_points(zone, near_y, far_y);
+    assert!(pts.len() > 40, "the end is drawn: {pts:?}");
+    for p in &pts {
+        let across = -p.y;
+        // On the plate's half, `q` past its tangent line; on the flange's, past the flange's.
+        let along = if across <= ba / 2.0 - 4.0 {
+            -3.0 + 0.75 * r * ((across + 4.0) / rn).tan()
+        } else {
+            3.0 - 0.75 * r * (((ba - 4.0) - across) / rn).tan()
+        };
+        assert!(
+            (p.x - along).abs() < 2e-3,
+            "({}, {}) is {} along the bend, not {along}",
+            p.x,
+            p.y,
+            p.x
+        );
+    }
+    let has = |q: Vec2| pts.iter().any(|p| p.dist(q) < 2e-3);
+    assert!(
+        has(Vec2::new(0.0, 4.0 - ba / 2.0)),
+        "through the sharp's place"
+    );
+    let ends = zone
+        .near
+        .iter()
+        .chain(&zone.far)
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        ends.iter().any(|p| p.dist(Vec2::new(-3.0, 4.0)) < 1e-9)
+            && ends.iter().any(|p| p.dist(Vec2::new(3.0, 4.0 - ba)) < 1e-9),
+        "{ends:?}"
+    );
+    // Leaving the plate's tangent line the end turns 9.30° off the side's slant.
+    let turn = (0.75 * r / rn).atan() - 0.75f64.atan();
+    assert!(
+        (turn.to_degrees() - 9.2992).abs() < 1e-3,
+        "{}",
+        turn.to_degrees()
+    );
+}
+
+/// A free end square to its bend follows both sides straight across: the zone is the one a notch
+/// gives, a rectangle of the zone's width.
+#[test]
+fn a_square_free_end_follows_its_outlines_straight_across() {
+    let dev = |relief: Relief| {
+        let mut b = bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0));
+        b.relief = (relief, relief);
+        develop(&bracket(b), &[(0, Rigid2::IDENTITY)]).unwrap_or_default()
+    };
+    let (outline, notch) = (dev(Relief::Outline), dev(Relief::Notch));
+    let ([a], [b]) = (outline.zones.as_slice(), notch.zones.as_slice()) else {
+        panic!("one zone each: {outline:?} {notch:?}")
+    };
+    assert_eq!(a.region, b.region);
+    assert!(a
+        .region
+        .outer
+        .segs
+        .iter()
+        .all(|s| matches!(s, Seg2::Line { .. })));
+}
+
+/// A free end where the plate's side, from its tangent line, turns back out of the band under the
+/// bend before it reaches the sharp (a V cut into the plate's side there: in 1 mm past the tangent
+/// line, back out 1 mm before it) can't follow it, and is refused, naming the joint.
+#[test]
+fn an_outline_that_turns_back_before_the_sharp_is_refused() {
+    let mut sheet = slanted_bracket(Relief::Outline);
+    if let Some(p) = sheet.panels.first_mut() {
+        let pts = [
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 60.0),
+            (-45.0, 60.0),
+            (-3.0, 4.0),
+            (-2.0, 3.0),
+            (-1.0, 5.0),
+        ];
+        p.region = Region2 {
+            outer: ccw(polygon(
+                &pts.iter()
+                    .map(|&(x, y)| Vec2::new(x, y))
+                    .collect::<Vec<_>>(),
+            )),
+            holes: Vec::new(),
+        };
+    }
+    assert!(matches!(
+        develop(&sheet, &[(0, Rigid2::IDENTITY)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OutlineEnd
+        })
+    ));
+}
+
+/// Laid out 1e12 mm from the flat frame's origin, the slanted bracket's free end can't be carried
+/// within its tolerance: its points are taken off and put back on a frame that far away, whose
+/// rounding (64 units in the last place of 1e12, about 1.4e-2 mm) is over the quarter of the
+/// tolerance the carry leaves for it. It is refused, naming the joint, rather than built from
+/// rounded numbers. Near the origin the same bracket lays out.
+#[test]
+fn a_free_end_laid_out_too_far_to_carry_within_its_tolerance_is_refused() {
+    let sheet = slanted_bracket(Relief::Outline);
+    let far = Rigid2::onto(Vec2::ZERO, X, Vec2::new(1e12, 0.0), X).unwrap_or(Rigid2::IDENTITY);
+    assert!(matches!(
+        develop(&sheet, &[(0, far)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OutlineFit
+        })
+    ));
+    assert!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).is_ok());
+}
+
+/// Two circles are one hole when their centres and radii are each less than the tolerance apart; a
+/// tolerance of nothing, or a number that is none, makes no circle the same as any.
+#[test]
+fn circles_are_one_hole_within_a_tolerance_of_centre_and_radius() {
+    use super::{same_circle, Circle};
+    let hole: Circle = (Vec2::new(30.0, 40.0), 2.125);
+    assert!(same_circle(hole, hole, 1e-6));
+    assert!(same_circle(
+        hole,
+        (Vec2::new(30.0 + 5e-7, 40.0 - 5e-7), 2.125 + 5e-7),
+        1e-6
+    ));
+    assert!(
+        !same_circle(hole, (Vec2::new(30.0 + 2e-6, 40.0), 2.125), 1e-6),
+        "centres apart"
+    );
+    assert!(
+        !same_circle(hole, (Vec2::new(30.0, 40.0), 2.125 + 2e-6), 1e-6),
+        "radii apart"
+    );
+    assert!(
+        !same_circle(hole, hole, 0.0),
+        "less than nothing apart is no hole"
+    );
+    assert!(!same_circle(hole, hole, f64::NAN));
+    assert!(!same_circle(hole, (Vec2::new(f64::NAN, 40.0), 2.125), 1e-6));
+}
+
+/// A note beside a hole stands level with its centre, a half height clear of its rim on the right:
+/// its lower left corner is half a height below the centre's level, so its middle is on it.
+#[test]
+fn a_note_beside_a_hole_stands_level_with_its_centre_clear_of_its_rim() {
+    use super::note_beside;
+    let at = note_beside((Vec2::new(30.0, 40.0), 2.125), 3.0);
+    assert_eq!((at.x, at.y), (30.0 + 2.125 + 1.5, 40.0 - 1.5));
+    let at = note_beside((Vec2::new(-5.0, 0.0), 1.0), 5.0);
+    assert_eq!((at.x, at.y), (-5.0 + 1.0 + 2.5, -2.5));
 }

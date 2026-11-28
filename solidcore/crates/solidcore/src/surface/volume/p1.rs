@@ -113,6 +113,7 @@
 use crate::curve::crv_in_volume::CrvInVolume;
 use crate::curve::curve::p2::Curve;
 use crate::curve::line::Line;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::AttributeStore;
@@ -425,9 +426,9 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn copy(&self, simple_map_only: bool) -> Result<Self> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::surface_failed(
+            VolumeKind::Base => Err(SolidError::surface(
                 "surface::volume::p1::Volume::copy",
-                "a plain volume cannot be copied",
+                SurfaceFailure::PlainVolume,
             )),
             VolumeKind::Transform(_)
             | VolumeKind::BSpline(_)
@@ -924,9 +925,9 @@ impl Volume {
         }
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL,
-                "a derivative order above the volume's maximum was asked",
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV },
             ));
         }
         let next_map = if opts.with_compounding {
@@ -971,9 +972,9 @@ impl Volume {
     pub fn map(&self, in_point: Point3, n: usize, opts: &EvalOptions) -> Result<Vec<Vec3>> {
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_MAP,
-                "a derivative order above the volume's maximum was asked",
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV },
             ));
         }
         let next_map = if opts.with_compounding {
@@ -1139,9 +1140,9 @@ impl Volume {
     ) -> Result<Vec<Vec3>> {
         // check state
         if n > MAX_DERIV {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 "surface::volume::p1::Volume::orient_directional_derivs",
-                "a derivative order above the volume's maximum was asked",
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV },
             ));
         }
         // make the evaluation: exact tangent values, zero sampling
@@ -1264,9 +1265,9 @@ impl Volume {
         opts: &EvalOptions,
     ) -> Result<Vec<Vec3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::surface_failed(
+            VolumeKind::Base => Err(SolidError::surface(
                 "surface::volume::p1::Volume::evaluate_simple",
-                "a plain volume has no evaluation",
+                SurfaceFailure::PlainVolume,
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
@@ -1323,9 +1324,9 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn inv_evaluate_guess_point_simple(&self, proj_point: Point3) -> Result<Vec<Point3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::surface_failed(
+            VolumeKind::Base => Err(SolidError::surface(
                 "surface::volume::p1::Volume::inv_evaluate_guess_point_simple",
-                "a plain volume has no inversion guess",
+                SurfaceFailure::PlainVolume,
             )),
             VolumeKind::Transform(t) => t.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::BSpline(b) => b.inv_evaluate_guess_point_simple(proj_point),
@@ -1334,9 +1335,9 @@ impl Volume {
             VolumeKind::Bend(b) => match b.inv_evaluate_guess_point_simple(proj_point) {
                 (points, true) => Ok(points),
                 // the guesses written with SM_ERR are dropped (callers propagate it)
-                (_, false) => Err(SolidError::surface_failed(
+                (_, false) => Err(SolidError::surface(
                     "surface::bend_volume::BendVolume::inv_evaluate_guess_point_simple",
-                    "the bend volume's inversion guess failed",
+                    SurfaceFailure::PointInBendSingularity,
                 )),
             },
         }
@@ -1663,9 +1664,14 @@ impl EvalNFunctions for FindPvIntersect<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || dw.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_PV,
-                "a volume tangent has zero length",
+                SurfaceFailure::ZeroVolumeTangent {
+                    length_squared: du
+                        .length_squared()
+                        .min(dv.length_squared())
+                        .min(dw.length_squared()),
+                },
             ));
         }
 

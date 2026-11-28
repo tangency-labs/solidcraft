@@ -35,14 +35,23 @@ fn noted() -> (Drawing, [u64; 3]) {
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
-    let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge, along: None }];
     let mut added = [0; 3];
     for (anchor, id) in anchors.into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.notes.add([Arc::new(Note { id: *id, anchor, at: [40.0, 25.0], content: text("Break all edges"), cap_mm: None, branches: Vec::new() })]);
+        d.notes.add([Arc::new(Note {
+            id: *id,
+            anchor,
+            at: [40.0, 25.0],
+            content: text("Break all edges"),
+            cap_mm: None,
+            align: None,
+            branches: Vec::new(),
+        })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -223,7 +232,7 @@ fn an_anchor_moves_to_a_view() {
     let edge = ModelEdge { body: "B".into(), origin_feature: 4, name: "e".into(), path: vec![] };
     assert_eq!(Anchor::Sheet(1).on_view(9), Anchor::Sheet(1));
     assert_eq!(Anchor::View(1).on_view(9), Anchor::View(9));
-    assert_eq!(Anchor::Edge { view: 1, edge: edge.clone() }.on_view(9), Anchor::Edge { view: 9, edge });
+    assert_eq!(Anchor::Edge { view: 1, edge: edge.clone(), along: None }.on_view(9), Anchor::Edge { view: 9, edge, along: None });
     assert_eq!(Anchor::Sheet(1).view(), None);
     assert_eq!(Anchor::View(2).view(), Some(2));
 }
@@ -237,7 +246,7 @@ fn a_note_is_on_its_sheet_or_its_views() {
     let second = d.allocate_id(&mut id_source).unwrap();
     d.sheets.insert(0, Arc::new(crate::drawing::Sheet { id: second, name: "Sheet 0".into(), ..(*d.sheets[0]).clone() }));
     let edge = ModelEdge { body: "B".into(), origin_feature: 4, name: "e".into(), path: vec![] };
-    let anchors = [Anchor::Sheet(second), Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    let anchors = [Anchor::Sheet(second), Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge, along: None }];
     assert_eq!(anchors.map(|anchor| d.sheet_of(&anchor)), [Some(0), Some(1), Some(1), Some(1)]);
     assert_eq!([Anchor::Sheet(99), Anchor::View(99)].map(|anchor| d.sheet_of(&anchor)), [None, None]);
 }
@@ -261,4 +270,27 @@ fn mutated_note_files_read_or_are_refused() {
             assert_eq!(Drawing::from_json(&read.to_json().unwrap()).unwrap(), read, "seed {seed}");
         }
     }
+}
+
+/// A note's alignment saves as `left`, `centre` or `right` and reads back; a note with none saves none,
+/// and a note saved without one has none, as before alignments, so an older drawing is the same bytes again.
+#[test]
+fn a_notes_alignment_saves_and_an_older_note_has_none() {
+    let (mut d, [on_sheet, on_view, on_edge]) = noted();
+    for (id, align) in [(on_sheet, Some(HAlign::Left)), (on_view, Some(HAlign::Right))] {
+        let at = d.notes.index_of(id).unwrap();
+        Arc::make_mut(d.notes.get_mut(at).unwrap()).align = align;
+    }
+    let mut v = file(&d);
+    assert_eq!(note(&mut v, &ids::encode(on_sheet))["align"], json!("left"));
+    assert_eq!(note(&mut v, &ids::encode(on_view))["align"], json!("right"));
+    assert_eq!(note(&mut v, &ids::encode(on_edge)).get("align"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.notes.by_id(on_edge).unwrap().align, None);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+    note(&mut v, &ids::encode(on_sheet))["align"] = json!("centre");
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap().notes.by_id(on_sheet).unwrap().align, Some(HAlign::Centre));
+    note(&mut v, &ids::encode(on_sheet))["align"] = json!("middle");
+    assert!(Drawing::from_json(&v.to_string()).is_err());
 }

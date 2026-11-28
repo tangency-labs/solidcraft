@@ -5,8 +5,8 @@
 //!
 //! Supported: planes, and cylinders, cones, spheres and tori whether stored as analytic records,
 //! rigidly placed revolutions of lines and circles or spline patches (recognised to 1e-9 relative
-//! and then trimmed and intersected in their own chart). Other spline and rigidly placed revolution
-//! faces are freeform:
+//! and then trimmed and intersected in their own chart; a ball corner is its patch on its label's
+//! sphere). Other spline and rigidly placed revolution faces are freeform:
 //! unless [`Options::freeform`] is set they are listed in [`Drawing::unsupported`], their
 //! silhouettes are not drawn and anything they could hide is reported uncertain.
 //!
@@ -335,11 +335,16 @@ pub fn prepare_cancellable(
             return Err(HlrError::Cancelled);
         }
         let mut surface = S3::of_face(f)?;
-        // A flat spline patch is a plane: trimmed and intersected as one.
-        if let Some(plane) = surface.flat(1e-9) {
-            surface = plane;
-        }
-        let analytic = surface.analytic(1e-9);
+        let analytic = match surface::ball_sphere(f)? {
+            Some(sphere) => sphere,
+            None => {
+                // A flat spline patch is a plane: trimmed and intersected as one.
+                if let Some(plane) = surface.flat(1e-9) {
+                    surface = plane;
+                }
+                surface.analytic(1e-9)
+            }
+        };
         // Trim and intersect recognised spline surfaces in their own analytic chart.
         if matches!(surface, S3::Nurbs(_)) {
             let axis = match analytic {
@@ -821,6 +826,9 @@ struct Ctx<'a> {
     scale: f64,
     /// World boxes of placements, screen min/max and depth min.
     boxes: Vec<([f64; 2], [f64; 2], f64)>,
+    /// Screen-space uniform grid over `boxes` for large scenes, so visibility rays test only
+    /// overlapping placements instead of linearly scanning the entire scene (#20484).
+    placement_index: Option<PlacementIndex>,
     // Totals over all workers. Each worker adds its share as it goes, so a budget holds for
     // the whole call and the sums do not depend on which thread did what.
     rays: AtomicUsize,
@@ -994,6 +1002,8 @@ fn context<'a>(
     } else {
         (whi - wlo).len().max(1e-6)
     };
+    let eps_other = 1e-12 * scale;
+    let placement_index = PlacementIndex::new(&boxes, eps_other);
     Ok(Ctx {
         defs,
         scene,
@@ -1002,9 +1012,10 @@ fn context<'a>(
         // Hits on other bodies closer than rounding are ignored, the rest up to eps_own are
         // uncertain: the work is done in a frame at the scene's centre, so rounding is about
         // 1e-16 of the coordinates, far below 1e-12 of the scene.
-        eps_other: 1e-12 * scale,
+        eps_other,
         scale,
         boxes,
+        placement_index,
         rays: AtomicUsize::new(0),
         surface_tests: AtomicUsize::new(0),
         transitions: AtomicUsize::new(0),
@@ -1730,6 +1741,70 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
     let p = scene
         .get(t.placement)
         .ok_or(HlrError::Invalid("placement"))?;
+    // Two screen places closer than the coverage tolerance are already one place (`cover`).
+    // A cut just short of a silhouette turn stays above the parameter and 3D merge, because
+    // the screen gap is only the square of that parameter gap. Consecutive pieces that small
+    // are one run. A run whose own screen box is still within the tolerance joins a neighbour
+    // of the same visibility, or, when that would flip visibility, the piece before it (else the
+    // piece after it) runs on over it, so the pieces still meet end to end and no end moves by
+    // more than that box, not by one tolerance per piece. A
+    // run that is larger than the tolerance is kept, and so is a track of only such pieces:
+    // that is a short edge.
+    let tol = 1e-7 + 1e-9 * scale;
+    // The box includes an arc's extremes, so a fold whose ends meet is not small. A non-finite
+    // box is not small.
+    let screen_span = |range: [f64; 2]| {
+        let (lo, hi) = screen_box(c, range, p, view);
+        let d = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+        d.is_finite().then_some(d)
+    };
+    let tiny = |range: [f64; 2]| screen_span(range).is_some_and(|d| d <= tol);
+    if !pieces.is_empty() && !pieces.iter().all(|piece| tiny(piece.t)) {
+        let mut merged: Vec<Piece> = Vec::new();
+        let mut pending: Option<f64> = None;
+        let mut rest = pieces.into_iter().peekable();
+        while let Some(mut piece) = rest.next() {
+            if let Some(t0) = pending.take() {
+                piece.t[0] = t0.min(piece.t[0]);
+            }
+            if !tiny(piece.t) {
+                merged.push(piece);
+                continue;
+            }
+            let mut run = Vec::new();
+            run.push(piece);
+            while rest.peek().is_some_and(|next| tiny(next.t)) {
+                if let Some(next) = rest.next() {
+                    run.push(next);
+                }
+            }
+            let (Some(first), Some(last)) = (run.first(), run.last()) else {
+                continue;
+            };
+            let span = [first.t[0], last.t[1]];
+            let vis = first.visibility;
+            let one_vis = run.iter().all(|item| item.visibility == vis);
+            if !tiny(span) {
+                merged.extend(run);
+                continue;
+            }
+            if one_vis && merged.last().is_some_and(|prev| prev.visibility == vis) {
+                if let Some(prev) = merged.last_mut() {
+                    prev.t[0] = prev.t[0].min(span[0]);
+                    prev.t[1] = prev.t[1].max(span[1]);
+                }
+            } else if one_vis && rest.peek().is_some_and(|next| next.visibility == vis) {
+                pending = Some(span[0]);
+            } else if let Some(prev) = merged.last_mut() {
+                // Left out: the neighbour before it runs on over it, so the pieces still meet end
+                // to end, with at most the run's own box (inside the tolerance) painted by it.
+                prev.t[1] = prev.t[1].max(span[1]);
+            } else {
+                pending = Some(span[0]);
+            }
+        }
+        pieces = merged;
+    }
     for piece in &mut pieces {
         let mut pts = vec![view.screen(p.apply(c.at(piece.t[0])))];
         pts.extend(
@@ -2945,6 +3020,91 @@ fn classify_point(
     state
 }
 
+/// Placed bodies' screen boxes on a uniform grid, so each visibility ray tests only the placements
+/// whose screen box reaches it (plus any large placement spanning many cells).
+struct PlacementIndex {
+    lo: [f64; 2],
+    hi: [f64; 2],
+    cell: [f64; 2],
+    n: usize,
+    buckets: Vec<Vec<usize>>,
+    large: Vec<usize>,
+}
+
+impl PlacementIndex {
+    /// Builds a screen-space grid when there are enough placements to beat a linear scan.
+    fn new(boxes: &[([f64; 2], [f64; 2], f64)], pad: f64) -> Option<PlacementIndex> {
+        if boxes.len() <= 16 {
+            return None;
+        }
+        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+        for (slo, shi, _) in boxes {
+            lo = [lo[0].min(slo[0]), lo[1].min(slo[1])];
+            hi = [hi[0].max(shi[0]), hi[1].max(shi[1])];
+        }
+        if !(lo[0].is_finite() && lo[1].is_finite() && hi[0].is_finite() && hi[1].is_finite()) {
+            return None;
+        }
+        let n = ((boxes.len() as f64).sqrt().ceil() as usize).clamp(1, 256);
+        let cell = [
+            ((hi[0] - lo[0]) / n as f64).max(1e-12),
+            ((hi[1] - lo[1]) / n as f64).max(1e-12),
+        ];
+        let mut index = PlacementIndex {
+            lo,
+            hi,
+            cell,
+            n,
+            buckets: vec![Vec::new(); n * n],
+            large: Vec::new(),
+        };
+        // Twice the ray's AABB pad guards against cell-boundary rounding; each candidate is still
+        // checked against its exact box.
+        let grow = 2. * pad;
+        let mut entries = 0usize;
+        for (qi, (slo, shi, _)) in boxes.iter().enumerate() {
+            let a = index.cell_of([slo[0] - grow, slo[1] - grow]);
+            let b = index.cell_of([shi[0] + grow, shi[1] + grow]);
+            let span =
+                (b[0].saturating_sub(a[0]) + 1).saturating_mul(b[1].saturating_sub(a[1]) + 1);
+            if span > 64 || entries.saturating_add(span) > 2_000_000 {
+                index.large.push(qi);
+                continue;
+            }
+            entries = entries.saturating_add(span);
+            for y in a[1]..=b[1] {
+                for x in a[0]..=b[0] {
+                    if let Some(bucket) = index.buckets.get_mut(y * n + x) {
+                        bucket.push(qi);
+                    }
+                }
+            }
+        }
+        Some(index)
+    }
+
+    fn cell_of(&self, p: [f64; 2]) -> [usize; 2] {
+        let f = |k: usize| {
+            vec::clamp_to(
+                ((vec::at(p, k) - vec::at(self.lo, k)) / vec::at(self.cell, k)).floor(),
+                0.,
+                (self.n - 1) as f64,
+            ) as usize
+        };
+        [f(0), f(1)]
+    }
+
+    /// Candidate placement indices whose screen box may contain `screen` (each at most once).
+    fn candidates(&self, screen: [f64; 2]) -> (&[usize], &[usize]) {
+        let c = self.cell_of(screen);
+        let bucket: &[usize] = self
+            .buckets
+            .get(c[1] * self.n + c[0])
+            .map_or(&[], Vec::as_slice);
+        (bucket, self.large.as_slice())
+    }
+}
+
 /// [`classify_point`], counting the surface ray tests in `tests`.
 fn classify_point_counted(
     ctx: &Ctx,
@@ -2959,62 +3119,86 @@ fn classify_point_counted(
     let toward = -ctx.view.d;
     let mut uncertain = false;
     let mut hits: Vec<Hit> = Vec::new();
-    for (qi, q) in ctx.scene.iter().enumerate() {
-        let Some((slo, shi, dmin)) = ctx.boxes.get(qi) else {
-            continue;
-        };
-        let pad = ctx.eps_other;
-        if screen[0] < slo[0] - pad
-            || screen[0] > shi[0] + pad
-            || screen[1] < slo[1] - pad
-            || screen[1] > shi[1] + pad
-            || *dmin > depth
-        {
-            continue;
-        }
-        let Some(def) = ctx.defs.get(q.body) else {
-            continue;
-        };
-        let (p0, dl) = (q.local(world), q.local_dir(toward));
-        for (fi, f) in def.faces.iter().enumerate() {
-            let is_own = qi == placement && own.contains(&fi);
-            let Some([l0, l1]) = slab(p0, dl, f.lo, f.hi) else {
-                continue;
+    let hidden = {
+        let mut check = |qi: usize| -> bool {
+            let Some(q) = ctx.scene.get(qi) else {
+                return false;
             };
-            let eps = if is_own { own_eps } else { ctx.eps_other };
-            let range = [l0.max(eps), l1];
-            if !(range[1] >= range[0]) {
-                continue;
+            let Some((slo, shi, dmin)) = ctx.boxes.get(qi) else {
+                return false;
+            };
+            let pad = ctx.eps_other;
+            if screen[0] < slo[0] - pad
+                || screen[0] > shi[0] + pad
+                || screen[1] < slo[1] - pad
+                || screen[1] > shi[1] + pad
+                || *dmin > depth
+            {
+                return false;
             }
-            *tests += 1;
-            hits.clear();
-            f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
-            for h in &hits {
-                let p = f.surface.point(h.uv);
-                let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
-                // A hit on the boundary is uncertain on either side of it, so the parity test is
-                // left out there: its cost grows with the boundary around the hit, all of a
-                // circle when bodies in line along the view meet each other on their circles.
-                if f.trim.near(p, tol) {
-                    uncertain = true;
+            let Some(def) = ctx.defs.get(q.body) else {
+                return false;
+            };
+            let (p0, dl) = (q.local(world), q.local_dir(toward));
+            for (fi, f) in def.faces.iter().enumerate() {
+                let is_own = qi == placement && own.contains(&fi);
+                let Some([l0, l1]) = slab(p0, dl, f.lo, f.hi) else {
+                    continue;
+                };
+                let eps = if is_own { own_eps } else { ctx.eps_other };
+                let range = [l0.max(eps), l1];
+                if !(range[1] >= range[0]) {
                     continue;
                 }
-                match f.trim.contains(h.uv) {
-                    None => uncertain = true,
-                    Some(inside) => {
-                        // An unsupported freeform face never hides anything for certain.
-                        let unsure = f.freeform && !ctx.freeform;
-                        if inside && (unsure || h.grazing || (!is_own && h.lam < ctx.eps_own)) {
-                            uncertain = true;
-                        } else if inside {
-                            return Visibility::Hidden;
+                *tests += 1;
+                hits.clear();
+                f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
+                for h in &hits {
+                    let p = f.surface.point(h.uv);
+                    let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
+                    // A hit on the boundary is uncertain on either side of it, so the parity test
+                    // is left out there: its cost grows with the boundary around the hit, all of a
+                    // circle when bodies in line along the view meet each other on their circles.
+                    if f.trim.near(p, tol) {
+                        uncertain = true;
+                        continue;
+                    }
+                    match f.trim.contains(h.uv) {
+                        None => uncertain = true,
+                        Some(inside) => {
+                            // An unsupported freeform face never hides anything for certain.
+                            let unsure = f.freeform && !ctx.freeform;
+                            if inside && (unsure || h.grazing || (!is_own && h.lam < ctx.eps_own)) {
+                                uncertain = true;
+                            } else if inside {
+                                return true;
+                            }
                         }
                     }
                 }
             }
+            false
+        };
+        match &ctx.placement_index {
+            Some(index) if screen[0].is_finite() && screen[1].is_finite() => {
+                let pad = ctx.eps_other;
+                if screen[0] >= index.lo[0] - pad
+                    && screen[0] <= index.hi[0] + pad
+                    && screen[1] >= index.lo[1] - pad
+                    && screen[1] <= index.hi[1] + pad
+                {
+                    let (bucket, large) = index.candidates(screen);
+                    bucket.iter().chain(large.iter()).any(|&qi| check(qi))
+                } else {
+                    false
+                }
+            }
+            _ => (0..ctx.scene.len()).any(check),
         }
-    }
-    if uncertain {
+    };
+    if hidden {
+        Visibility::Hidden
+    } else if uncertain {
         Visibility::Uncertain
     } else {
         Visibility::Visible

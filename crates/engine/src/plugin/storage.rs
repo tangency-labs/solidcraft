@@ -3,11 +3,10 @@
 //! from inside its own run; anyone reads it. Data whose plugin is missing, off or older is kept and
 //! saved back byte for byte.
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::Document;
-use solidcraft_doc::canvas::{base64_decode, base64_encode};
+use solidcraft_doc::blob::Blob;
 use solidcraft_doc::plugin_data::{self, BLOBS, CACHE, DATA, META, Meta};
 
 use crate::schema::plugin_storage::{BlobInfo, DataStatus, StorageData, StoredPlugin};
@@ -20,8 +19,8 @@ pub const MAX_DOCUMENT_BYTES: usize = 16 << 20;
 pub const MAX_BLOB_BYTES: u64 = 256 << 20;
 /// The most bytes of plugin data, all plugins together, in one design: the design file's own limit.
 pub const MAX_TOTAL_BYTES: u64 = 256 << 20;
-/// The most bytes one `storage.get_blob` returns, so its reply stays inside a plugin's 1 MiB.
-pub const MAX_READ_BYTES: u32 = 512 * 1024;
+/// The most bytes one read of a file or of the main document returns (`get-blob`, `get-document`).
+pub const MAX_READ_BYTES: u32 = 1 << 20;
 
 /// The plugin whose run is under way, set by the host for that run alone (never from a design or a
 /// caller's parameters). Only it changes data, and only its own.
@@ -39,12 +38,6 @@ fn denied(permission: impl Into<String>) -> EngineError {
 }
 fn limit(what: impl Into<String>) -> EngineError {
     HostError::LimitExceeded { limit: what.into() }.into()
-}
-
-/// The decoded size of a base64 text, without decoding it.
-fn decoded_len(text: &str) -> u64 {
-    let padding = text.bytes().rev().take_while(|&b| b == b'=').count();
-    ((text.len() / 4) * 3).saturating_sub(padding) as u64
 }
 
 /// The plugin a read is for: the caller's own inside a plugin's run, else the one named.
@@ -78,26 +71,26 @@ pub(crate) fn writer(s: &Session) -> Result<StorageCaller> {
 }
 
 /// A plugin's files, by name, with whether each is a cache file and its size.
-fn blobs(data: &BTreeMap<String, Arc<str>>, id: &str) -> Vec<BlobInfo> {
+fn blobs(data: &BTreeMap<String, Blob>, id: &str) -> Vec<BlobInfo> {
     let prefix = format!("{id}/");
     data.iter()
         .filter(|(key, _)| key.starts_with(&prefix))
-        .filter_map(|(key, text)| {
+        .filter_map(|(key, bytes)| {
             let path = &key[prefix.len()..];
             let (name, cache) = match (path.strip_prefix(BLOBS), path.strip_prefix(CACHE)) {
                 (Some(name), _) => (name, false),
                 (_, Some(name)) => (name, true),
                 _ => return None,
             };
-            Some(BlobInfo { name: name.to_string(), cache, bytes: decoded_len(text) })
+            Some(BlobInfo { name: name.to_string(), cache, bytes: bytes.len() as u64 })
         })
         .collect()
 }
 
 /// Every byte a plugin keeps in the design.
-fn plugin_bytes(data: &BTreeMap<String, Arc<str>>, id: &str) -> u64 {
+fn plugin_bytes(data: &BTreeMap<String, Blob>, id: &str) -> u64 {
     let prefix = format!("{id}/");
-    data.iter().filter(|(key, _)| key.starts_with(&prefix)).map(|(_, text)| decoded_len(text)).sum()
+    data.iter().filter(|(key, _)| key.starts_with(&prefix)).map(|(_, bytes)| bytes.len() as u64).sum()
 }
 
 /// A plugin's data in `doc`, for a reader. `caller` is the running plugin, when there is one.
@@ -106,7 +99,7 @@ pub fn read(doc: &Document, id: &str, caller: Option<&StorageCaller>) -> Storage
     let data = &doc.plugin_data;
     let stored = data.contains_key(&format!("{id}/{META}")) || data.contains_key(&format!("{id}/{DATA}")) || !blobs(data, id).is_empty();
     let meta = plugin_data::meta(data, id);
-    let document = plugin_data::file(data, id, DATA).and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or(Value::Null);
+    let document = plugin_data::file(data, id, DATA).and_then(|bytes| serde_json::from_slice(bytes).ok()).unwrap_or(Value::Null);
     let plugin_format = caller.filter(|caller| caller.id == id).map(|caller| caller.data_format);
     StorageData {
         plugin: id.to_string(),
@@ -142,17 +135,17 @@ pub(crate) fn put_replacing(s: &mut Session, caller: &StorageCaller, path: &str,
     }
     match bytes {
         Some(bytes) => {
-            data.insert(key, base64_encode(bytes).into());
+            data.insert(key, bytes.into());
         }
         None => {
             data.remove(&key);
         }
     }
-    data.insert(meta_key, base64_encode(&meta).into());
+    data.insert(meta_key, meta.into());
     if data.len() > plugin_data::MAX_FILES {
         return Err(limit(format!("a design keeps at most {} files of plugin data", plugin_data::MAX_FILES)));
     }
-    let total: u64 = data.values().map(|text| decoded_len(text)).sum();
+    let total: u64 = data.values().map(|bytes| bytes.len() as u64).sum();
     if total > MAX_TOTAL_BYTES {
         return Err(limit("plugin data in one design is at most 256 MiB, all plugins together"));
     }
@@ -202,9 +195,66 @@ pub fn blob_path(doc: &Document, id: &str, name: &str) -> Option<(String, bool)>
         .find(|(path, _)| doc.plugin_data.contains_key(&format!("{id}/{path}")))
 }
 
+/// Part of a plugin's file: the bytes read, whether it is a cache file, and the whole file's size.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BlobBytes {
+    pub data: Vec<u8>,
+    pub cache: bool,
+    pub bytes: u64,
+}
+
+/// `len` bytes of `bytes` from `offset`; none past the end.
+fn part_of(bytes: &[u8], offset: u64, len: u32) -> Vec<u8> {
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(bytes.len());
+    let end = start.saturating_add(len as usize).min(bytes.len());
+    bytes.get(start..end).unwrap_or_default().to_vec()
+}
+
+fn check_len(cmd: &str, len: u32) -> Result<()> {
+    if (1..=MAX_READ_BYTES).contains(&len) { Ok(()) } else { Err(crate::params::bad(cmd, format!("`len` must be 1 to {MAX_READ_BYTES}"))) }
+}
+
+/// Writes the running plugin's file `name` from its bytes, as they are (the `storage` interface's
+/// `put-blob`): a cache file when `cache`; `append` adds them to its end. One name is one file, so
+/// writing it as the other kind moves it, checked with every limit before anything changes. The
+/// file's size.
+pub(crate) fn write_blob(s: &mut Session, name: &str, data: &[u8], cache: bool, append: bool) -> Result<u64> {
+    let caller = writer(s)?;
+    let path = format!("{}{name}", if cache { CACHE } else { BLOBS });
+    let mut bytes = if append {
+        blob_path(&s.doc, &caller.id, name).and_then(|(path, _)| blob(&s.doc, &caller.id, &path)).map(<[u8]>::to_vec).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    bytes.extend_from_slice(data);
+    let other = format!("{}{name}", if cache { BLOBS } else { CACHE });
+    put_replacing(s, &caller, &path, Some(&bytes), Some(&other))?;
+    Ok(bytes.len() as u64)
+}
+
+/// Up to `len` bytes of a plugin's file `name` from `offset` (`get-blob`).
+pub(crate) fn read_blob(s: &Session, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> Result<BlobBytes> {
+    const CMD: &str = "storage.get-blob";
+    let id = reader(s, CMD, plugin)?;
+    check_len(CMD, len)?;
+    let (path, cache) = blob_path(&s.doc, &id, name).ok_or_else(|| crate::params::bad(CMD, format!("{id} keeps no file named {name}")))?;
+    let bytes = blob(&s.doc, &id, &path).unwrap_or_default();
+    Ok(BlobBytes { data: part_of(bytes, offset, len), cache, bytes: bytes.len() as u64 })
+}
+
+/// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset`, and its whole
+/// size; none when it has none (`get-document`).
+pub(crate) fn read_document(s: &Session, plugin: Option<&str>, offset: u64, len: u32) -> Result<(Vec<u8>, u64)> {
+    const CMD: &str = "storage.get-document";
+    let id = reader(s, CMD, plugin)?;
+    check_len(CMD, len)?;
+    let bytes = blob(&s.doc, &id, DATA).unwrap_or_default();
+    Ok((part_of(bytes, offset, len), bytes.len() as u64))
+}
+
 /// The bytes of one of a plugin's files, by its full name (`blobs/<name>` or `cache/<name>`).
-pub fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
-    doc.plugin_data.get(&format!("{id}/{path}")).and_then(|text| base64_decode(text))
+pub fn blob<'a>(doc: &'a Document, id: &str, path: &str) -> Option<&'a [u8]> {
+    plugin_data::file(&doc.plugin_data, id, path)
 }
 
 /// The installed plugin with this id, when there is one: its manifest alone (not its component, so

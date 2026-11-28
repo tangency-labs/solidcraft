@@ -18,11 +18,12 @@ use solidcore_record::Vec2;
 use solidcraft_doc::Document;
 use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::fields::{Component, Documented, Values};
+use solidcraft_doc::drawing::fields::{Component, Documented, SHEET_METAL, SheetBody, SheetMetal, Values};
 use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
+use solidcraft_geom::drawing_sheet::{LabelAlign, SheetLayout};
 use solidcraft_geom::paper::text::{Font, TextRun};
-use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
-use solidcraft_geom::{Aabb2, EPS};
+use solidcraft_geom::title_block::{CellKind, MassUnit, TextCell, TitleBlock, TitleBlockLayout};
+use solidcraft_geom::{Aabb2, EPS, Seg2Geom};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, SketchError, TextAlign, TextStyle};
 
 use crate::Session;
@@ -58,6 +59,9 @@ pub struct Laid {
 #[derive(Clone, Debug, Default)]
 pub struct Set {
     pub runs: Vec<TextRun>,
+    /// The frame's text, set apart from the block's ([`lay_frame`]): it belongs to the border, which
+    /// a sheet has with no title block.
+    pub frame: Vec<TextRun>,
     pub fonts: Vec<Font>,
 }
 
@@ -84,24 +88,25 @@ pub fn shown(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<Ce
 pub fn shown_with(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
     let Some(sheet) = d.sheets.get(at) else { return };
     let Some(block) = &sheet.title_block else { return };
-    let texts: Vec<(&String, &Content)> = block
+    let texts: Vec<(&String, &Content, MassUnit)> = block
         .cells
         .iter()
         .filter_map(|cell| match &cell.kind {
-            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content)),
+            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content, text.mass_unit())),
             _ => None,
         })
         .collect();
-    with_values(s, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
-        for &(name, content) in &texts {
+    let resolved = SheetValues::new(s, tree, d, at, texts.iter().map(|(_, content, _)| *content));
+    for &(name, content, mass_unit) in &texts {
+        resolved.with(mass_unit, |values| {
             let value = values.text(content);
             let cell = match sheet.title_block_overrides.get(name) {
                 Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
                 None => CellText { name: name.clone(), text: value, replaced: None },
             };
             each(cell, content, values);
-        }
-    });
+        });
+    }
 }
 
 /// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
@@ -114,50 +119,132 @@ pub fn read<'c>(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, conten
 /// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
 /// component the sheet documents, in the design its source names ([`Session::drawn`]; one that
 /// can't be read has nothing to show), weighed in `tree`, the tree of `s`'s design, only when one of
-/// them reads its material or mass. [`read`] and a note's inspect read through this one rule.
+/// them reads its material or mass, and its sheet metal bodies read ([`sheet_metal`]) only when one
+/// reads a sheet metal field. [`read`] and a note's inspect read through this one rule.
 pub fn with_values<'c, R>(
     s: &Session,
     tree: &mut Tree<'_>,
     d: &Drawing,
     at: usize,
-    mut contents: impl Iterator<Item = &'c Content>,
+    contents: impl Iterator<Item = &'c Content>,
     answer: impl FnOnce(&Values) -> R,
 ) -> R {
-    let weighs = contents.any(|content| {
-        content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"))
-    });
-    // What the model says of the component it documents: a component since deleted, or of a design
-    // that can't be read, has nothing.
-    let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
-    let design = documents.map(|documents| s.drawn(d, documents.source).ok());
-    let id = documents.map(|documents| documents.component);
-    let weighed = id.filter(|_| weighs && matches!(design, Some(Some(design)) if std::ptr::eq(design, s)));
-    let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
-    let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
-    let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let component = match (design, id) {
-        (Some(Some(design)), Some(id)) => {
-            documented(&design.doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present)
-        }
-        (Some(None), _) => Documented::Gone,
-        _ => Documented::Nothing,
-    };
-    answer(&Values { drawing: d, sheet: at, component })
+    SheetValues::new(s, tree, d, at, contents).with(MassUnit::default(), answer)
+}
+
+/// The documented component of sheet `at` weighed and measured at most once across all cells on the
+/// sheet, so each cell formats `component.mass` in its own [`MassUnit`] without re-evaluating the
+/// tree or sheet metal bodies.
+struct SheetValues<'a> {
+    drawing: &'a Drawing,
+    at: usize,
+    design: Option<Option<&'a Session>>,
+    id: Option<u64>,
+    grams: Option<f64>,
+    material: Option<String>,
+    sheet: Option<SheetMetal>,
+}
+
+impl<'a> SheetValues<'a> {
+    fn new<'c>(s: &'a Session, tree: &mut Tree<'_>, d: &'a Drawing, at: usize, contents: impl Iterator<Item = &'c Content>) -> Self {
+        let component_keys: Vec<&str> = contents
+            .flat_map(|content| &content.0)
+            .filter_map(|part| match part {
+                Part::Field { source: Source::Component, key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        let weighs = component_keys.iter().any(|key| *key == "material" || *key == "mass");
+        let sheets = component_keys.iter().any(|key| SHEET_METAL.contains(key));
+        // What the model says of the component it documents: a component since deleted, or of a design
+        // that can't be read, has nothing.
+        let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
+        let design = documents.map(|documents| s.drawn(d, documents.source).ok());
+        let id = documents.map(|documents| documents.component);
+        let weighed = id.filter(|_| weighs && matches!(design, Some(Some(design)) if std::ptr::eq(design, s)));
+        let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
+        let grams = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(grams) } else { None });
+        let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
+        let sheet = match (design, id) {
+            (Some(Some(design)), Some(id)) if sheets => Some(sheet_metal(design, d, id)),
+            _ => None,
+        };
+        Self { drawing: d, at, design, id, grams, material, sheet }
+    }
+
+    fn with<R>(&self, unit: MassUnit, answer: impl FnOnce(&Values) -> R) -> R {
+        let mass = self.grams.map(|grams| format_mass(grams, unit));
+        let component = match (self.design, self.id) {
+            (Some(Some(design)), Some(id)) => documented(&design.doc, id, self.material.as_deref(), mass.as_deref(), self.sheet.as_ref())
+                .map_or(Documented::Gone, Documented::Present),
+            (Some(None), _) => Documented::Gone,
+            _ => Documented::Nothing,
+        };
+        answer(&Values { drawing: self.drawing, sheet: self.at, component })
+    }
 }
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with
 /// what the model says of it; none when the design has no such component.
-fn documented<'a>(doc: &'a Document, id: u64, material: Option<&'a str>, mass: Option<&'a str>) -> Option<Component<'a>> {
+fn documented<'a>(
+    doc: &'a Document,
+    id: u64,
+    material: Option<&'a str>,
+    mass: Option<&'a str>,
+    sheet_metal: Option<&'a SheetMetal>,
+) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, name_split: None, material, mass, sheet_metal });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass })
+    Some(Component {
+        name: &c.name,
+        metadata: &c.metadata,
+        properties: Some(&c.properties),
+        name_split: c.name_split.as_ref(),
+        material,
+        mass,
+        sheet_metal,
+    })
 }
 
-/// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.
-fn format_mass(grams: f64) -> String {
-    format!("{:.2} kg", grams / 1000.0)
+/// What the sheet metal bodies component `id` (0: the design) of `design` owns agree on, as
+/// drawing `d` writes it ([`SheetMetal::of`], in the drawing's units). Its own bodies only, not
+/// those of the components it places; its bodies that aren't sheet metal don't count.
+fn sheet_metal(design: &Session, d: &Drawing, id: u64) -> SheetMetal {
+    let state = design.model.state();
+    let owners = design.doc.model_body_components(&state);
+    let own: std::collections::HashSet<&str> =
+        state.bodies.iter().zip(owners).filter(|(_, owner)| *owner == id).map(|(body, _)| body.name.as_str()).collect();
+    let bodies: Vec<SheetBody> = state.surface_sheets.iter().filter(|sheet| own.contains(sheet.body.as_str())).map(sheet_body).collect();
+    SheetMetal::of(&bodies, design.doc.drawing_units(d))
+}
+
+/// A sheet metal body as a component's fields read it: its rule, thickness and K-factor; the
+/// radius its bend table's bends share; and its flat's exact extent. The bends and the flat only
+/// while the flat describes the body (`sheet.flat_pattern` refuses it otherwise).
+fn sheet_body(sheet: &solidcraft_doc::SurfaceSheet) -> SheetBody<'_> {
+    let described = sheet.flat_matches_body().is_ok();
+    let radii: Vec<f64> = if described { sheet.bend_infos().iter().map(|bend| bend.radius).collect() } else { Vec::new() };
+    let bend_radius = radii.first().copied().filter(|first| radii.iter().all(|r| (r - first).abs() <= EPS));
+    let flat = described.then(|| {
+        let outline = sheet.regions.iter().flat_map(|region| &region.outer.segs);
+        let size = outline.fold(Aabb2::EMPTY, |b, seg| b.union(&seg.bounds())).size();
+        [size.x, size.y]
+    });
+    SheetBody { rule: &sheet.rule, thickness: sheet.thickness, k_factor: sheet.k_factor, bend_radius, flat }
+}
+
+/// A mass in grams as a cell shows it in `unit` .
+fn format_mass(grams: f64, unit: MassUnit) -> String {
+    let grams = if grams.is_finite() && grams > 0.0 { grams } else { 0.0 };
+    match unit {
+        MassUnit::Kg => format!("{:.2} kg", grams / 1000.0),
+        MassUnit::G => format!("{grams:.1} g"),
+        MassUnit::Auto if grams < 999.95 => format!("{grams:.1} g"),
+        MassUnit::Auto => format!("{:.2} kg", grams / 1000.0),
+        MassUnit::Both => format!("{grams:.1} g ({:.4} kg)", grams / 1000.0),
+    }
 }
 
 /// `block`'s labels, and its text cells' values as `shown` gives them, measured in the drawing's
@@ -184,8 +271,17 @@ pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, fonts: &PaperFonts, sh
     out
 }
 
+/// The least a value is shrunk to fit its box's width, as a part of its cap height.
+const MIN_SHRINK: f64 = 0.4;
+
+/// What stands for the characters a clipped value leaves off.
+const ELLIPSIS: &str = "...";
+
 /// `value`'s lines in `value_box`, as `fonts` sets them, by the cell text rule, and where the
-/// first starts; what doesn't fit is added to `notes`.
+/// first starts. A line wider than the box is set smaller, down to [`MIN_SHRINK`] of the cell's cap
+/// height, and past that its value is clipped to the box with [`ELLIPSIS`], so no ink reaches past
+/// the box (its first baseline stays where the cell's own size puts it); either is added to `notes` as [`Warning::Width`], and a clipped one as
+/// [`Warning::Clipped`] too. What else doesn't fit is added to `notes`.
 fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &str, notes: &mut Vec<Note>) -> Result<(PaperLines, Vec2), SketchError> {
     let width = value_box.size().x;
     let align = match text.align {
@@ -194,15 +290,69 @@ fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &st
         HAlign::Right => TextAlign::Right,
     };
     let style = TextStyle { align, ..TextStyle::default() };
-    let lines = fonts.lines(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
+    let wrap = text.fit.wrap.then_some(width);
+    let widest = |lines: &PaperLines| lines.lines.iter().map(|(_, w)| *w).fold(0.0, f64::max);
+    let mut cap = text.cap_mm;
+    let mut lines = fonts.lines(value, cap, wrap, &style)?;
     notes.extend(text.fit.warn_chars(value).map(Note::Fit));
-    if lines.lines.iter().any(|(_, w)| *w > width + EPS) {
+    if widest(&lines) > width + EPS {
         notes.push(Note::Fit(Warning::Width));
+        cap = (cap * width / widest(&lines) * (1.0 - 1e-9)).max(cap * MIN_SHRINK);
+        lines = fonts.lines(value, cap, wrap, &style)?;
+        if widest(&lines) > width + EPS {
+            // Still too wide at the least size: keep the most characters that fit, with an ellipsis.
+            let chars: Vec<char> = value.chars().collect();
+            let with = |kept: usize| chars.iter().take(kept).chain(ELLIPSIS.chars().collect::<Vec<_>>().iter()).collect::<String>();
+            let (mut fits, mut over) = (None, chars.len());
+            let mut low = 0;
+            while low < over {
+                let mid = low + (over - low).div_ceil(2);
+                let tried = fonts.lines(&with(mid), cap, wrap, &style)?;
+                if widest(&tried) > width + EPS {
+                    over = mid - 1;
+                } else {
+                    low = mid;
+                    fits = Some(tried);
+                }
+            }
+            lines = match fits {
+                Some(lines) => lines,
+                None => fonts.lines(&with(0), cap, wrap, &style)?,
+            };
+            if widest(&lines) > width + EPS {
+                // Not even the ellipsis fits: the value draws nothing, and the notes say so.
+                lines = fonts.lines("", cap, wrap, &style)?;
+            }
+            notes.push(Note::Fit(Warning::Clipped));
+        }
     }
     let (at, height) = place_lines(value_box, lines.lines.len(), text.cap_mm, lines.pitch, text.align, text.fit.wrap)
         .map_err(|e| SketchError::Invalid(e.to_string()))?;
     notes.extend(height.map(Note::Fit));
     Ok((lines, at))
+}
+
+/// The frame's labels on `sheet` ([`SheetLayout::frame_labels`]: the zone letters and numbers and the
+/// sheet's size), each as one line in the drawing's lettering (`fonts`), centred or left on its place.
+/// A label no font can set is left off and goes unnoted: the frame's text is never a reason to refuse
+/// a sheet.
+pub fn lay_frame(sheet: &SheetLayout, fonts: &PaperFonts) -> Laid {
+    let mut out = Laid::default();
+    for label in sheet.frame_labels() {
+        let align = match label.align {
+            LabelAlign::Centre => TextAlign::Center,
+            LabelAlign::Left => TextAlign::Left,
+        };
+        let style = TextStyle { align, ..TextStyle::default() };
+        // The anchor is the first baseline's start: the capitals are centred on the label's place.
+        let at = Vec2::new(label.at.x, label.at.y - label.cap_mm / 2.0);
+        match Outcome::from(fonts.lines(&label.text, label.cap_mm, None, &style).map(|lines| (lines, at))) {
+            Outcome::Set(text) => out.texts.push(text),
+            Outcome::Pending => out.pending = true,
+            Outcome::Refused(_) => {}
+        }
+    }
+    out
 }
 
 impl Laid {

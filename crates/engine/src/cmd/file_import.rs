@@ -7,7 +7,7 @@
 //! together by one rigid group (`RigidGroup`), so the import moves as one; `component.unlock`
 //! releases them.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
@@ -32,6 +32,8 @@ struct Place {
     slot: usize,
     parent: Option<usize>,
     transform: Mat,
+    /// The occurrence's own name, from the file (`None`: the component's name and a number).
+    name: Option<String>,
 }
 
 /// How a STEP file's tree becomes components.
@@ -49,6 +51,46 @@ struct Plan {
 /// A placement STEP assemblies can carry over as an occurrence: finite, rigid, not mirrored.
 fn rigid(m: &Mat) -> bool {
     crate::cmd::component::valid_position(m)
+}
+
+/// The occurrence names in use while one import names its placements. A file can give thousands
+/// of placements one name, so a name is looked up in a set, and each name remembers the next
+/// ` (k)` to try instead of counting up from ` (2)` again.
+struct PlacementNames {
+    used: HashSet<String>,
+    next: HashMap<String, usize>,
+}
+
+impl PlacementNames {
+    fn new(occurrences: &[solidcraft_doc::Occurrence]) -> Self {
+        Self { used: occurrences.iter().map(|o| o.name.clone()).collect(), next: HashMap::new() }
+    }
+
+    /// An occurrence made during the import: its name is taken too.
+    fn note(&mut self, name: &str) {
+        self.used.insert(name.to_string());
+    }
+
+    /// The name an occurrence the file names (a KiCad footprint's reference) is given: the file's
+    /// name, cut to the 128 characters a rename allows, with ` (2)`, ` (3)`… when another
+    /// occurrence has it. `None` keeps the usual `Component:N`: for an empty name, and for one of
+    /// digits only, which a command would read as an occurrence id.
+    fn take(&mut self, wanted: &str) -> Option<String> {
+        let wanted: String = wanted.trim().chars().take(128).collect();
+        if wanted.is_empty() || wanted.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let name = if self.used.contains(&wanted) {
+            let start = self.next.get(&wanted).copied().unwrap_or(2);
+            let (k, name) = (start..).map(|k| (k, format!("{wanted} ({k})"))).find(|(_, name)| !self.used.contains(name))?;
+            self.next.insert(wanted, k.saturating_add(1));
+            name
+        } else {
+            wanted
+        };
+        self.used.insert(name.clone());
+        Some(name)
+    }
 }
 
 /// What an import's file says about its structure.
@@ -107,7 +149,7 @@ impl Plan {
             if p.slot == made {
                 made += 1;
             }
-            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform });
+            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform, name: p.name.clone() });
         }
         if plan.bodies.iter().flatten().any(|s| *s >= made) {
             return None;
@@ -151,14 +193,14 @@ impl Plan {
         if let Some(&slot) = seen.get(&key) {
             // Another placement of a part already made: an occurrence of its component, and the
             // file's copy of its bodies is not built.
-            self.places.push(Place { slot, parent, transform: node.transform });
+            self.places.push(Place { slot, parent, transform: node.transform, name: None });
             collect_bodies(node, &mut self.skip, 0);
             return;
         }
         let slot = self.slots.len();
         self.slots.push(Slot { name: node.name.trim().to_string() });
         seen.insert(key, slot);
-        self.places.push(Place { slot, parent, transform: node.transform });
+        self.places.push(Place { slot, parent, transform: node.transform, name: None });
         for b in &node.bodies {
             self.bodies.push((*b, slot, inverse));
         }
@@ -423,12 +465,77 @@ fn by_new_index<T: Clone + Default>(matched: &[Option<usize>], stored: &[T]) -> 
 /// reader that will build it. The reads are returned so the caller can hold them while it
 /// evaluates `doc`: the evaluation then finds each file read already instead of reading it again.
 pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sync::Arc<StepImport>> {
-    let mut reads = Vec::new();
-    for f in doc.features.iter_mut().filter(|f| !f.suppressed) {
-        let FeatureKind::Import { step, components, .. } = &f.kind else { continue };
-        if step.is_empty() || components.is_empty() {
-            continue;
+    let targets: Vec<usize> = doc
+        .features
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match &f.kind {
+            FeatureKind::Import { step, components, .. } if !f.suppressed && !step.is_empty() && !components.is_empty() => Some(i),
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let cores = std::thread::available_parallelism().map(usize::from).unwrap_or(1);
+    #[cfg(target_arch = "wasm32")]
+    let cores = 1usize;
+    if targets.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
+        // Deduplicate identical STEP payloads so shared imports decode once across worker threads.
+        let mut unique_steps: Vec<std::sync::Arc<str>> = Vec::new();
+        let mut by_key: HashMap<(u64, usize), Vec<usize>> = HashMap::new();
+        let mut target_job: Vec<usize> = Vec::with_capacity(targets.len());
+        for &idx in &targets {
+            let FeatureKind::Import { step, .. } = &doc.features[idx].kind else { continue };
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            step.hash(&mut h);
+            let key = (h.finish(), step.len());
+            let found = by_key.get(&key).and_then(|jobs| {
+                jobs.iter().copied().find(|&j| std::sync::Arc::ptr_eq(&unique_steps[j], step) || unique_steps[j].as_ref() == step.as_ref())
+            });
+            let job = match found {
+                Some(j) => j,
+                None => {
+                    let j = unique_steps.len();
+                    unique_steps.push(step.clone());
+                    by_key.entry(key).or_default().push(j);
+                    j
+                }
+            };
+            target_job.push(job);
         }
+        let decoded: Vec<Option<std::sync::Arc<StepImport>>> = if unique_steps.len() > 1 {
+            let outer = cores.min(16).min(unique_steps.len());
+            let inner = (cores / outer.max(1)).clamp(1, 8);
+            solidcraft_kernel::map_on_threads(&unique_steps, outer, |step| {
+                if solidcraft_kernel::watch::cancelled() {
+                    return None;
+                }
+                solidcraft_doc::kernel::step_import_shared_with_workers(step, inner).ok()
+            })
+            .into_iter()
+            .map(Option::flatten)
+            .collect()
+        } else {
+            unique_steps.iter().map(|step| solidcraft_doc::kernel::step_import_shared(step).ok()).collect()
+        };
+        let mut reads = Vec::with_capacity(targets.len());
+        for (&idx, job) in targets.iter().zip(target_job) {
+            // A file that doesn't read fails the feature when it is evaluated, which reports it.
+            let Some(imp) = decoded.get(job).and_then(Option::as_ref).cloned() else { continue };
+            let f = &mut doc.features[idx];
+            if realign_import(f, &imp) {
+                log::info!("{}: the stored body names follow this version's numbering of the file's bodies", f.name);
+            }
+            reads.push(imp);
+        }
+        return reads;
+    }
+    let mut reads = Vec::with_capacity(targets.len());
+    for idx in targets {
+        let f = &mut doc.features[idx];
+        let FeatureKind::Import { step, .. } = &f.kind else { continue };
         // A file that doesn't read fails the feature when it is evaluated, which reports it.
         let Ok(imp) = solidcraft_doc::kernel::step_import_shared(step) else { continue };
         if realign_import(f, &imp) {
@@ -474,17 +581,37 @@ pub(crate) fn component_name(path: &str, name: Option<&str>) -> String {
 
 /// Add an import feature `kind` (named `feature_name`, with the file's `body_names`) inside a
 /// new component named `name`, and for a STEP assembly (`imp`) the components of its tree.
-/// Evaluates the design. Returns the feature and the component.
+/// By body, `hidden` says which start hidden and `layers` which folder of the Bodies folder each
+/// goes into (the file's layer). Evaluates the design. Returns the feature and the component.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_in_component(
     s: &mut Session,
-    mut kind: FeatureKind,
+    kind: FeatureKind,
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
+    layers: &[Option<String>],
     name: &str,
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, layers, tree)
+}
+
+/// [`add_in_component`] into the component `top` that already exists (placed by `top_occ`), empty
+/// of the file's contents: a linked board read again fills the component it had.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_into_component(
+    s: &mut Session,
+    top: u64,
+    top_occ: Option<u64>,
+    mut kind: FeatureKind,
+    feature_name: &str,
+    body_names: Vec<String>,
+    hidden: &[bool],
+    layers: &[Option<String>],
+    tree: Tree<'_>,
+) -> Result<(u64, Placed)> {
     let (plan, imp, prepared) = match tree {
         Tree::Flat(prepared) => (Plan::default(), None, prepared),
         Tree::Step(imp) => (Plan::of(imp), Some(imp), None),
@@ -497,10 +624,11 @@ pub(crate) fn add_in_component(
     let mut comps: Vec<u64> = Vec::with_capacity(plan.slots.len());
     // The occurrences made: what the import's rigid group holds.
     let mut made: Vec<u64> = Vec::with_capacity(plan.places.len());
+    let mut names = PlacementNames::new(&s.doc.occurrences);
     for place in &plan.places {
         let parent_comp = place.parent.and_then(|p| comps.get(p).copied()).unwrap_or(top);
-        if let Some(&comp) = comps.get(place.slot) {
-            made.push(s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?);
+        let occ = if let Some(&comp) = comps.get(place.slot) {
+            s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?
         } else {
             let slot = plan.slots.get(place.slot).ok_or_else(|| EngineError::Other("import: component plan".into()))?;
             let label = if slot.name.is_empty() { None } else { Some(slot.name.as_str()) };
@@ -510,8 +638,16 @@ pub(crate) fn add_in_component(
             if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
                 o.transform = place.transform;
             }
-            made.push(occ);
+            occ
+        };
+        // The occurrence was just made, so it is at the end of the list.
+        if let Some(o) = s.doc_mut().occurrences.iter_mut().rev().find(|o| o.id == occ) {
+            names.note(&o.name);
+            if let Some(name) = place.name.as_deref().and_then(|wanted| names.take(wanted)) {
+                o.name = name;
+            }
         }
+        made.push(occ);
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
         // Bodies the reader already leaves out (a FreeCAD body's hidden intermediate shapes),
@@ -531,6 +667,7 @@ pub(crate) fn add_in_component(
         names.iter().enumerate().filter(|(k, _)| hidden.get(*k).copied().unwrap_or(false)).filter_map(|(_, name)| name.clone()).collect()
     };
     let mut hidden_names = names_to_hide(&names);
+    let mut built_names = names.clone();
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = top;
@@ -544,6 +681,7 @@ pub(crate) fn add_in_component(
     if let Some(prepared) = prepared {
         s.model.prime_mesh_import(id, prepared);
     }
+    s.sketching_view = None;
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
@@ -563,6 +701,7 @@ pub(crate) fn add_in_component(
             put_bodies(s, &actual, &moves);
             s.refresh();
             hidden_names = names_to_hide(&actual);
+            built_names = actual;
         }
     }
     // The file's invisible bodies start hidden; they are still in the model, so Show brings
@@ -576,8 +715,63 @@ pub(crate) fn add_in_component(
         }
         s.refresh_display();
     }
+    let layered: Vec<(&str, &str)> = built_names.iter().zip(layers).filter_map(|(name, layer)| Some((name.as_deref()?, layer.as_deref()?))).collect();
+    put_in_folders(s, id, &layered)?;
     let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
     Ok((id, Placed { component: top, occurrence: top_occ, name, components: comps.len(), rigid_group }))
+}
+
+/// Put each of the feature's bodies named in `layered` into the group its layer names in its
+/// component's Bodies folder, so a file's layers come in as folders; `/` in a layer's name nests
+/// groups (`Frame/Rails`), as a nested folder is exported. A group of that name already there,
+/// under the same parent, is used; others are made.
+fn put_in_folders(s: &mut Session, feature: u64, layered: &[(&str, &str)]) -> Result<()> {
+    if layered.is_empty() {
+        return Ok(());
+    }
+    let state = s.model.state();
+    let placed: Vec<(&str, u64, &str)> = layered
+        .iter()
+        .filter_map(|(name, layer)| {
+            let body = state.bodies.iter().find(|b| b.feature == feature && b.name == *name)?;
+            Some((*name, s.doc.model_body_component(body), *layer))
+        })
+        .collect();
+    for (name, component, layer) in placed {
+        let mut parent = None;
+        for part in layer.split('/').map(str::trim).filter(|p| !p.is_empty()).take(solidcraft_doc::MAX_GROUP_NESTING) {
+            let part: String = part.chars().take(128).collect();
+            let found = s
+                .doc
+                .browser_groups
+                .iter()
+                .find(|g| g.component == component && g.folder == "bodies" && g.parent == parent && g.name == part)
+                .map(|g| g.id);
+            let id = match found {
+                Some(id) => id,
+                None => {
+                    let d = s.doc_mut();
+                    let id = d.allocate_id()?;
+                    d.browser_groups.push(solidcraft_doc::BrowserGroup {
+                        id,
+                        name: part,
+                        component,
+                        folder: "bodies".into(),
+                        parent,
+                        items: Vec::new(),
+                    });
+                    id
+                }
+            };
+            parent = Some(id);
+        }
+        if let Some(g) = parent.and_then(|id| s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id))
+            && !g.has_item(name)
+        {
+            g.items.push(solidcraft_doc::BrowserEntry::item(name));
+        }
+    }
+    Ok(())
 }
 
 /// Move an import to the origin of the component it was inserted into (#12543): the box around
@@ -643,6 +837,14 @@ pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<
 /// Evaluates the design. Returns the features made and the component.
 pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, name: &str) -> Result<(Vec<u64>, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    let made = add_design_in(s, design, top)?;
+    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+}
+
+/// Add a design rebuilt from a file (as [`add_design`] does) inside component `top`, which
+/// already exists. Evaluates the design. Returns the features made.
+pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesign, top: u64) -> Result<Vec<u64>> {
     let source = &design.doc;
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -660,7 +862,7 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
                         .param(&pn)
                         .map(|x| (x.expr.clone(), x.unit.clone()))
                         .ok_or_else(|| EngineError::Other(format!("import: no parameter {pn}")))?;
-                    c.param = Some(s.doc_mut().new_model_param(&e, &u));
+                    c.param = Some(s.doc_mut().new_model_param(&e, &u)?);
                 }
             }
         }
@@ -705,12 +907,12 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
         made.push(id);
     }
     s.active_sketch = None;
+    s.sketching_view = None;
     s.refresh();
     if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
-    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
-    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+    Ok(made)
 }
 
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.
@@ -793,4 +995,9 @@ impl Session {
     pub fn contents_held(&self, component: u64) -> bool {
         self.doc.rigid_group_of(component).is_some() || !self.contents_joints(component).is_empty()
     }
+}
+
+/// Repeated STEP assembly placements omitted by the Import feature.
+pub(crate) fn step_skip(import: &StepImport) -> Vec<u64> {
+    Plan::of(import).skip
 }

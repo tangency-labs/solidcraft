@@ -23,7 +23,7 @@ use crate::boolean::topology_intersector::p1::IntersectorBrep;
 use crate::boolean::topology_intersector::p2::IntersectorBrepP2;
 use crate::boolean::topology_intersector::p3::IntersectorBrepP3;
 use crate::curve::curve::Curve as SmCurve;
-use crate::error::boolean::BooleanStage;
+use crate::error::boolean::BooleanFailure;
 use crate::geom::a_object::BREP_TYPE;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -202,6 +202,9 @@ pub(super) struct ArenaPair<'a> {
     /// use of a B-rep other than a face intersection or a classification query
     /// ([`ClassGeometryMut::topology_entity_for_query`]) empties them.
     face_caches: [FaceIntersectCaches; 2],
+    /// Retained traversal mark tables for `brep_delete_face`, reused across face deletions
+    /// so repeated `DeleteFace` calls do not reallocate and zero-fill mark arrays each time.
+    delete_marks: [crate::topology::topology_traverser::Marks; 2],
 }
 
 /// The identity callbacks of each operand's edits that a [`MergeContext`] borrows for as
@@ -286,6 +289,10 @@ impl ArenaPair<'_> {
             cache_kernels,
             caches: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
             face_caches: [FaceIntersectCaches::new(), FaceIntersectCaches::new()],
+            delete_marks: [
+                crate::topology::topology_traverser::Marks::default(),
+                crate::topology::topology_traverser::Marks::default(),
+            ],
         }
     }
 
@@ -1328,10 +1335,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             identity,
         )?;
         if !out.split {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 "boolean::merge::p4::arena_pair::split",
-                BooleanStage::Split,
-                "the edge was not split",
+                BooleanFailure::EdgeNotSplit,
             ));
         }
         let [a, z] = out
@@ -1742,10 +1748,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             return Err(invalid("not a face handle"));
         }
         let b = face.b;
-        let surface = self
-            .face_surface_h(face)
-            .flatten()
-            .ok_or_else(|| SolidError::entity_missing(OP_FACE_CACHE, "the face has no surface"))?;
+        let surface = self.face_surface_h(face).flatten().ok_or_else(|| {
+            SolidError::boolean(OP_FACE_CACHE, BooleanFailure::FaceWithoutSurface)
+        })?;
         Ok(ti::FaceCacheTarget {
             brep: self.brep_m(face)?,
             face: fid(face),
@@ -1834,18 +1839,38 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         if brep.kind != K_BREP || face.kind != K_FACE || face.b != brep.b {
             return Err(invalid("face is not in the B-rep"));
         }
-        self.with_edit_env(brep, |b, env| {
-            let mut marks = crate::topology::topology_traverser::Marks::default();
-            crate::topology::brep::p3::delete_face(
-                k,
-                b,
-                env,
-                &mut marks,
-                fid(face),
-                crate::topology::brep::p3::DeleteFaceOptions::default(),
-            )
-            .map(drop)
-        })
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
+        let b = self
+            .breps
+            .get_mut(slot)
+            .and_then(Option::as_deref_mut)
+            .ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        let marks = self
+            .delete_marks
+            .get_mut(slot)
+            .ok_or_else(|| invalid("bad B-rep"))?;
+        let mut env = ed::NotifyEnv {
+            records: self.records,
+            attributes: self.attributes,
+            context: Some(if brep.b == 1 {
+                self.other_context
+                    .as_deref_mut()
+                    .unwrap_or(self.primary_context)
+            } else {
+                self.primary_context
+            }),
+            key_of: &|e| self.keys.object(brep.b == 1, e),
+        };
+        crate::topology::brep::p3::delete_face(
+            k,
+            b,
+            &mut env,
+            marks,
+            fid(face),
+            crate::topology::brep::p3::DeleteFaceOptions::default(),
+        )
+        .map(drop)
     }
 
     /// `SmBrep::DeleteEdge(pEdge)` (`pOptSurfaceToKeep = NULL`):
@@ -1870,6 +1895,58 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             let mut delete = crate::topology::brep::p4::DeleteEnv::from_notify(env);
             crate::topology::brep::p4::delete_vertex(k, b, &mut delete, vid(vertex))
         })
+    }
+
+    fn brep_delete_faces_batch(
+        &mut self,
+        k: &mut Kernel,
+        faces: &[H],
+        keep_wires: Option<&[H]>,
+    ) -> crate::Result<Option<(Vec<H>, Vec<H>)>> {
+        let Some(&first) = faces.first() else {
+            return Ok(Some((Vec::new(), Vec::new())));
+        };
+        let mut face_ids = Vec::new();
+        for &f in faces {
+            if f.kind != K_FACE {
+                return Err(invalid("face is not in the B-rep"));
+            }
+            if f.b != first.b {
+                return Ok(None);
+            }
+            face_ids.push(fid(f));
+        }
+        let brep = hd(first.b, K_BREP, 0);
+        // Bare faces with no owning face use / B-rep fall back to the per-face loop so
+        // `TopologyIntersector::delete_faces` reports `"face without B-rep"`.
+        let Some(b) = self.brep(brep) else {
+            return Ok(None);
+        };
+        for &f in &face_ids {
+            if b.faces().get(f).and_then(|rec| rec.faceuse).is_none() {
+                return Ok(None);
+            }
+        }
+        let keep_ids: Option<Vec<EdgeId>> = keep_wires.map(|ws| {
+            ws.iter()
+                .filter(|e| e.kind == K_EDGE && e.b == brep.b)
+                .map(|&e| eid(e))
+                .collect()
+        });
+        let (edges, verts) = self.with_edit_env(brep, |b, env| {
+            crate::topology::brep::p3::delete_faces_batch(k, b, env, &face_ids, keep_ids.as_deref())
+        })?;
+        let is_other = brep.b == 1;
+        Ok(Some((
+            edges
+                .into_iter()
+                .map(|e| encode(EntityRef::Edge(e), is_other))
+                .collect(),
+            verts
+                .into_iter()
+                .map(|v| encode(EntityRef::Vertex(v), is_other))
+                .collect(),
+        )))
     }
 }
 
@@ -2010,9 +2087,9 @@ impl TopologyObjects<H> for ArenaPair<'_> {
     }
     fn face_surface(&self, face: H) -> crate::Result<H> {
         self.face_surface_h(face).flatten().ok_or_else(|| {
-            SolidError::entity_missing(
+            SolidError::boolean(
                 "boolean::merge::p4::arena_pair::face_surface",
-                "the face has no surface",
+                BooleanFailure::FaceWithoutSurface,
             )
         })
     }

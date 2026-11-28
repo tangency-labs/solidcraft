@@ -13,6 +13,9 @@
 //!   knots, the bound at most the tolerance asked and no looser than the wall's true
 //!   distance; read through `NetScope` as a blend is, and carried through the net's edits.
 //!   Every wall face is a definition or of a kind `data/sweep_definition_ledger/` lists.
+//! - A joined flank's trims, one along each half turn beside a cylinder piece, are proved
+//!   within their edges' tolerance by their control points, with no bisection (stress
+//!   corpus S0252).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,14 +30,19 @@ use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::query::curve_surface_gap::{
+    trim_image_gap_bound_within, trim_same_parameter_gap_bound_within,
+};
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::sweep::screw::MAX_STATIONS;
 use solidcore::sweep::screw::{
-    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body,
+    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, screw_sweep_with,
+    Walls,
 };
 use solidcore::topology::brep::{p1, p2};
-use solidcore::topology::face;
+use solidcore::topology::{edgeuse, face};
 use solidcore::SolidError;
 use solidcore::{Brep, Kernel};
 
@@ -315,6 +323,83 @@ fn out_of_range_inputs_are_refused() {
     assert!(screw_sweep_radial(&mut k, &c, O, Z, 1.0, 3.0, &late, 1e-4).is_err());
 }
 
+/// #22577: a thread along a whole rod, 202 turns of pitch 1.25 (the fork stopped at 200).
+/// Its section is a V 1 wide at radius 8.5 with its point at 7.2; the top line runs along
+/// the axis, so every wall comes in half turns.
+fn rod_thread() -> Meridian {
+    Meridian::Polygon(vec![(7.2, 0.5), (8.5, 0.0), (8.5, 1.0)])
+}
+
+#[test]
+fn issue_22577_a_thread_of_202_turns_builds() {
+    let mut k = Kernel::default();
+    let (p, turns) = (1.25, 202.0);
+    // SolidCraft's tolerance: a ten-thousandth of the pitch
+    let tol = p * 1e-4;
+    let m = rod_thread();
+    let mut b = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    // 404 half turns of three walls and two caps; a section of three vertices and three
+    // edges at each of the 405 breaks and ends, three edges along each half turn
+    let halves = 2 * turns as usize;
+    assert_eq!(p1::faces(&b, None).unwrap().len(), 3 * halves + 2);
+    assert_eq!(
+        p1::edges(&b, None).unwrap().len(),
+        3 * (halves + 1) + 3 * halves
+    );
+    assert_eq!(p1::vertices(&b, None).unwrap().len(), 3 * (halves + 1));
+    // one closed boundary: the solid's region and the infinite one, a shell each
+    assert_eq!(p1::regions(&b, None).unwrap().len(), 2);
+    assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 2);
+    // Pappus: the section's area times 2 pi times its centroid's radius, per turn. Each
+    // wall lies within `tol` of its screw surface, so the volume is off by at most `tol`
+    // times the walls' area; a wall of a line of length l is at most l times the helix at
+    // its outer end, turn for turn.
+    let (area, centroid) = (0.5 * 1.0 * 1.3, (7.2 + 8.5 + 8.5) / 3.0);
+    let expected = area * 2.0 * PI * centroid * turns;
+    let flank = 0.5f64.hypot(1.3);
+    let helix = (2.0 * PI * 8.5).hypot(p) * turns;
+    let bound = tol * (1.0 + 2.0 * flank) * helix;
+    let v = volume(&k, &mut b);
+    assert!(
+        (v - expected).abs() <= bound,
+        "volume {v}, expected {expected} within {bound}"
+    );
+}
+
+#[test]
+fn issue_22577_more_turns_than_the_spans_hold_are_refused_by_the_spans() {
+    // At this tolerance a half turn takes eight spans: 1000 turns take 16000, more than
+    // `MAX_STATIONS`, and the refusal says so.
+    let mut k = Kernel::default();
+    let tol = 1.25e-4;
+    let refusal = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, 1000.0, tol);
+    assert!(
+        matches!(
+            refusal,
+            Err(SolidError::InvalidInput {
+                reason: "too many turns for the tolerance: more spans than a screw sweep takes",
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+    // past what the span bound can ever hold (a span turns at most an eighth of a turn), the
+    // turns themselves are refused, before any span is counted
+    let past = MAX_STATIONS / 8.0 + 1.0;
+    let early = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, past, 1.0);
+    assert!(
+        matches!(
+            early,
+            Err(SolidError::InvalidInput {
+                reason: "origin, pitch, turns or tolerance out of range",
+                ..
+            })
+        ),
+        "{early:?}"
+    );
+}
+
 #[test]
 fn body_variants_stop_before_the_solid_check() {
     // The `_body` variants give the same body as the checked entry points where it is a
@@ -410,6 +495,7 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     assert_eq!(d.screw().unwrap().origin(), O);
     assert_eq!(d.screw().unwrap().law().is_some(), !law.is_empty());
     assert!(d.half_angle() > 0.0 && d.half_angle() <= MAX_HALF_ANGLE);
+    assert_eq!(d.half_angles().len() + 1, d.stations().len());
     let ([_, a1], [_, b1], swapped) = d.definition_map();
     // the definition's stations are the net's knots across the turns, through the map
     let can = net.canonical().unwrap();
@@ -428,10 +514,10 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     let profile = d.profile().natural_interval();
     let r = 1.0 / 3f64.sqrt();
     let mut farthest: f64 = 0.0;
-    for span in d.stations().windows(2) {
+    for (span, &half) in d.stations().windows(2).zip(d.half_angles()) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            let theta = arc_angle(span[0], span[1], d.half_angle(), t);
+            let theta = arc_angle(span[0], span[1], half, t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
                 let w = profile.min() + a * (profile.max() - profile.min());
@@ -485,6 +571,175 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
         bounds.push(c.bound);
     }
     println!("M10x1.5 groove walls: bounds {bounds:?}");
+}
+
+/// Joined walls: each flank of an M10 groove is one face across its half turns (the
+/// cylinders keep theirs), its net the pieces' spans joined, so spans of the last, shorter
+/// piece keep their own half angle; every wall is still its definition within the
+/// tolerance, and the solid is the pieces' (the same volume, the same cylinders).
+#[test]
+fn joined_walls_run_on_across_the_half_turns() {
+    let mut k = Kernel::default();
+    // 2.7 turns: five half turns, then a shorter piece of 0.2 turns
+    let (p, turns) = (1.5, 2.7);
+    let tol = p * 1e-4;
+    let m = m10_groove(p);
+    let mut pieces = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    let mut joined = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&joined).unwrap());
+    let flanks = walls(&joined);
+    assert_eq!(flanks.len(), 2, "one face per flank");
+    for wall in &flanks {
+        let c = check_wall(wall, p, &[]);
+        assert!(c.bound <= tol, "bound {} past the tolerance {tol}", c.bound);
+        let d = wall.procedural_sweep().unwrap();
+        let mut halves = d.definition().half_angles().to_vec();
+        halves.dedup();
+        assert_eq!(
+            halves.len(),
+            2,
+            "the half turns' spans and the last piece's: {halves:?}"
+        );
+        let (first, last) = (
+            d.definition().stations()[0],
+            *d.definition().stations().last().unwrap(),
+        );
+        assert!(first == 0.0 && (last - turns * 2.0 * PI).abs() <= 1e-12);
+    }
+    let (dev, cylinders) = screw_deviation(&k, &joined, &m, p, turns, &[]);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
+    let (_, piece_cylinders) = screw_deviation(&k, &pieces, &m, p, turns, &[]);
+    assert_eq!(cylinders.len(), piece_cylinders.len());
+    let (vj, vp) = (volume(&k, &mut joined), volume(&k, &mut pieces));
+    assert!((vj - vp).abs() <= 1e-9 * vp, "joined {vj}, pieces {vp}");
+    // a law's angle still ends a face: over the first turn, where the offset changes, the
+    // axial lines sweep B-spline walls too (four), then the two flanks run on (two)
+    let law = [(0.0, -0.3), (1.0, 0.0)];
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        Some(&law),
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    assert_eq!(walls(&b).len(), 6);
+    let (dev, _) = screw_deviation(&k, &b, &m, p, turns, &law);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
+}
+
+/// Stress corpus S0252 (a modelled M100x6 thread on a 100 mm stud): a joined flank runs on
+/// across the half turns, and each cylinder piece beside it meets it along half a turn of its
+/// row, so the flank holds a trim along each such piece of its row, under the edge the stitch
+/// keeps, the piece's path. The stitch's cover proves every joined edge's trims within its
+/// tolerance, and a move's cover proves them again before and after it (a boolean moves its
+/// operands near the origin and back when their box is far from it). Each flank trim is proved
+/// from the control points of its piece of the row at once, as sets as well as at equal
+/// parameters: no bisection runs (before, each was bisected down to just under its tolerance,
+/// and at radius 50 the thread's 22 turns took most of the minutes its cut ran). Here 4 turns
+/// of the M100x6 groove: 8 half turns, 2 flanks, each beside the root's and the crest's
+/// cylinder pieces, so 32 such trims, and the bounds within `1e-9` (the piece's data is the
+/// row's, up to the rounding of the stitched trims' ends).
+#[test]
+fn a_joined_flanks_trims_along_its_half_turns_are_proved_without_bisecting() {
+    use solidcore::query::curve_surface_gap::trim_image_gap_bound_within;
+    use solidcore::topology::edgeuse;
+
+    let mut k = Kernel::default();
+    let (p, turns) = (6.0, 4.0);
+    let tol = p * 1e-4;
+    // (the M100x6 groove as `m10_groove` takes ISO 68-1's, at radius 50)
+    let h = p * 3f64.sqrt() / 2.0;
+    let slope = (PI / 6.0).tan();
+    let r0 = 50.0 - 5.0 * h / 8.0;
+    let w0 = p / 8.0;
+    let r1 = 50.0 + 0.05 * p;
+    let w1 = (p / 4.0 + 2.0 * (r1 - r0) * slope) / 2.0;
+    let m = Meridian::Polygon(vec![
+        (r0, -p - w0),
+        (r1, -p - w1),
+        (r1, -p + w1),
+        (r0, -p + w0),
+    ]);
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert_eq!(walls(&b).len(), 2, "one face per flank");
+    // (each trim once: an edge use without its own reads its mate's)
+    let mut held_by = Vec::new();
+    for e in p1::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let (edge_tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let curve = rec.curve.as_ref().unwrap();
+        for &eu in &rec.edgeuses {
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(&b, eu).unwrap() else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            let f = edgeuse::p1::face(&b, holder).unwrap().unwrap();
+            let held = b.face(f).unwrap().surface.as_ref().unwrap();
+            // (a flank's trim of an edge along half a turn, not of a cap's profile line, whose
+            // parameters run over [0, 1])
+            if held.procedural_sweep().is_none() || range[1] - range[0] <= 3.0 {
+                continue;
+            }
+            // (each as the kernel's covers read them: copies for evaluation)
+            let surface = held.clone_for_evaluation().unwrap();
+            let (curve, trim) = (
+                curve.clone_for_evaluation().unwrap(),
+                trim.clone_for_evaluation().unwrap(),
+            );
+            held_by.push(holder);
+            let before = k.work_counters.fitted_trim_bisections();
+            let g = trim_image_gap_bound_within(
+                &k,
+                &surface,
+                &curve,
+                &trim,
+                range,
+                1e-3 * edge_tol,
+                [edge_tol, f64::INFINITY],
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                k.work_counters.fitted_trim_bisections(),
+                before,
+                "edge {e:?}: the flank's trim over {range:?} was bisected"
+            );
+            assert!(g <= 1e-9, "edge {e:?}: {g:e}");
+        }
+    }
+    assert_eq!(held_by.len(), 32, "the flanks' trims along the half turns");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the
@@ -796,4 +1051,74 @@ fn issue_2572_every_wall_is_a_definition_or_in_the_ledger() {
         fixed.is_empty(),
         "listed kinds no case makes bare any more (fixed? delete their ledger files): {fixed:?}"
     );
+}
+
+/// #22930: a cylinder piece's path is a chain of rational quadratic arcs, and its trim the
+/// path taken back through the cylinder's net exactly, on the same breakpoints. Each such
+/// trim is proved within the tolerance at once, by the net composed with the trim (some
+/// 1e-10, the roundings and the move of the trim's ends into their patches), both as a set
+/// and at equal parameters, where the bisection cut each into thousands of pieces and
+/// stopped just under the tolerance.
+#[test]
+fn issue_22930_a_cylinder_pieces_path_trims_are_proved_at_once() {
+    let mut k = Kernel::default();
+    let (p, turns) = (1.5, 3.0);
+    let tol = p * 1e-4;
+    let m = m10_groove(p);
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    let mut proved = 0;
+    for e in p1::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        if !matches!(curve.kind(), solidcore::curve::curve::CurveKind::BSpline(_)) {
+            continue;
+        }
+        let range = [rec.interval.min(), rec.interval.max()];
+        for &eu in &rec.edgeuses {
+            let Some(f) = edgeuse::p1::face(&b, eu).unwrap() else {
+                continue;
+            };
+            let s = face::p2::surface(&b, f).unwrap().unwrap();
+            if !matches!(s.kind(), SurfaceKind::Cone(_)) {
+                continue;
+            }
+            let (Some(trim), _) = edgeuse::p1::uv_trim_curve(&b, eu).unwrap() else {
+                continue;
+            };
+            let limits = [tol, f64::INFINITY];
+            let floor = 1e-3 * tol;
+            let set = trim_image_gap_bound_within(&k, s, curve, trim, range, floor, limits, None)
+                .unwrap();
+            // (at once: the same-parameter query does not bisect)
+            let before = k.work_counters.same_parameter_bisections();
+            let same = trim_same_parameter_gap_bound_within(
+                &k, s, curve, trim, range, floor, limits, None,
+            )
+            .unwrap();
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "edge {e:?}: its same-parameter bound bisected"
+            );
+            for g in [set, same] {
+                assert!(g.is_some_and(|g| g <= 1e-9), "edge {e:?}: {g:?}");
+            }
+            proved += 1;
+        }
+    }
+    // (two cylinders, an edge along each side of each of their six half-turn pieces)
+    assert!(proved >= 24, "{proved} cylinder piece trims");
 }

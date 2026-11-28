@@ -2,13 +2,13 @@
 //! @b298cc2, #1986), from SolidCraft's tabbed-plate recipe: a disc of radius 25 with a
 //! tab (two R2 corners) on top, extruded 2, its six top edges rounded r 0.5. The mitred
 //! concave corners at (±4, y), where the tab's sides meet the R25 wall, trace onto the
-//! wall's continuation past its arc, which `offset_extension_as_itself` carries on as the
+//! wall's continuation past its arc, which the offset carries on as the
 //! cylinder itself (WR-633), in arc spans that stop at the closed turn (WR-650).
 //!
 //! SolidCraft runs it with its whole preset of fixes on; the round of the mitred corners
 //! needs the WR-644 gap patch and the WR-642 mitre (without them
 //! the level 2 check reports `SmSurfOfRevolution` test 7, and 3.8e-4 of the volume is
-//! missing), and with `offset_extension_as_itself` off the fillet fails (status 8).
+//! missing), and with the offset's tangent extension (before #18921) the fillet failed (status 8).
 //!
 //! The body must be sound, the plate's volume twice its outline's area, and the removed
 //! volume within 1e-6 relative of the round's closed form, integrated over the quarter
@@ -155,30 +155,11 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 /// SolidCraft's preset of fixes (all 182 of `solidcraft-flags/612ac9a36`) on.
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
-    k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.classify_edge_interval = true;
-    k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_point_step_per_point = true;
-    k.fixes.fillet_refuse_face_consuming_blends = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_variable_span_follows_fillet = true;
-    k.fixes.join_touching_loops = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.offset_extension_as_itself = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let edges = top_edges(&k, &b);

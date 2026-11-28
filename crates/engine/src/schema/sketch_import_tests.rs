@@ -32,7 +32,24 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let insert = ["align", "angle", "at", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
+    let insert = [
+        "align",
+        "angle",
+        "at",
+        "dpi",
+        "fixed",
+        "height",
+        "name",
+        "path",
+        "plane",
+        "scale",
+        "simplify",
+        "size_from",
+        "sketch",
+        "text",
+        "tolerance",
+        "width",
+    ];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
     assert_keys(
@@ -40,7 +57,7 @@ fn schemas_and_the_key_check_agree() {
         &["angle", "at", "chord", "flip", "format", "name", "path", "pivot", "plane", "sketch", "text", "tolerance"],
     );
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
-    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
+    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["dpi", "fit", "format", "path", "text"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `path` and
@@ -329,7 +346,7 @@ fn drawing_bounds_replies_as_its_output_schema_says() {
 
     // A DXF, named as one: the box around its lines, and no sheet.
     let r = bounds(&mut s, json!({"text": DXF, "format": "dxf"}));
-    assert_eq!(r, json!({"min": [0.0, 0.0], "max": [30.0, 20.0], "width": 30.0, "height": 20.0}), "{r}");
+    assert_eq!(r, json!({"min": [0.0, 0.0], "max": [30.0, 20.0], "width": 30.0, "height": 20.0, "edges": 4}), "{r}");
     // An SVG with a viewBox: the box around its geometry, and the sheet the viewBox names. The
     // file's y axis points down, so both boxes come back in SolidCraft's y-up ones.
     let r = bounds(&mut s, json!({"text": SVG}));

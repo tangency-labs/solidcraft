@@ -88,9 +88,11 @@ fn transfer(s: &mut Session, name: &str, to: u64, frames: &UniqueFrames, cmd: &s
     drop(doc);
     for (id, transform) in captures {
         if let Some(occurrence) = s.doc_mut().occurrences.iter_mut().find(|occurrence| occurrence.id == id) {
+            let prev = occurrence.transform;
             occurrence.transform = transform;
+            occurrence.adjust_base_for_direct_move(&prev, &transform);
         }
-        s.pending_moves.remove(&id);
+        s.clear_pending_move(id);
     }
     if let Some(look) = inherited {
         s.doc_mut().appearances.bodies.insert(name.to_string(), look);
@@ -109,7 +111,7 @@ fn finish(s: &mut Session, scratch: &mut Session, features: &[u64], cmd: &str) -
             return Err(bad(cmd, error));
         }
     }
-    s.accept_computed(std::mem::take(scratch));
+    s.accept_computed(std::mem::take(scratch))?;
     Ok(())
 }
 

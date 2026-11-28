@@ -8,7 +8,14 @@ use super::*;
 const LINE_MM: f64 = 0.25;
 
 fn balloon(at: [f64; 2]) -> Balloon {
-    Balloon { id: 7, view: 8, edge: ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: vec![1] }, at, parts_list: None }
+    Balloon {
+        id: 7,
+        view: 8,
+        edge: ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: vec![1] },
+        at,
+        parts_list: None,
+        along: None,
+    }
 }
 
 /// `balloon` showing `item`, in the built-in font, in English.
@@ -77,7 +84,7 @@ fn a_balloon_is_a_circle_round_its_number_with_a_leader_to_its_arrow() {
 fn a_wide_number_gets_a_wider_circle() {
     let on = drawn(&balloon([0.0, 0.0]), Some("12.34.56"), None);
     let run = parts(&on.group).3.unwrap();
-    let text = Text::set(Some("12.34.56"), TEXT_MM, &PaperFonts::new("", "en", true));
+    let text = Text::set(Some("12.34.56"), TEXT_MM, &PaperFonts::new("", "en", true), &TextStyle::default());
     assert!((text.half.x * 2.0 - run.reach()).abs() < 1e-9);
     let radius = text.half.len() + GAP_MM;
     assert!(radius > RADIUS_MM, "{radius}");

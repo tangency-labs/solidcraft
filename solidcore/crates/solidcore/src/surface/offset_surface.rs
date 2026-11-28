@@ -76,6 +76,14 @@
 //!   (`Clone`, [`OffsetSurface::copy`]) takes the current extension.
 //!   [`OffsetSurface::trim_with_domain`] uses the storing evaluator. The `SM_NO_PRE_EDIT`,
 //!   `SM_NO_COPY` and `SM_NO_SPLIT` notifications are the object layer's.
+//! - **Extension from the base.** `sm_ExtendSurface` always extends the base, never the
+//!   current extension, on every side that can grow at once, by the base domain's size
+//!   times the least power of two that reaches the point and never less than the current
+//!   extension (`extend_from_base`, WR-458): one point gives one extension whatever was
+//!   evaluated first. Upstream extends the surface in use by G1R to one domain size past
+//!   the point. A cylinder, cone, sphere, torus or surface of revolution of a circle's arc
+//!   continues as itself (`extend_as_itself`, WR-633), round its axis no further than
+//!   closing the turn (WR-650), where upstream's G1R extension leaves the surface at once.
 //! - **Evaluation output.** `Evaluate` / `EvaluateSimple` return `D[i][j]` (`i` times in
 //!   `u`, `j` in `v`) built from upstream's flat array, whose untouched entries hold
 //!   [`Vec3::UNDEF`] (the default `SmVector3d`). With `bOnlyUpperHalf` and different `u`
@@ -122,7 +130,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -819,9 +828,9 @@ impl OffsetSurface {
         hi: Point2,
     ) -> Result<Surface> {
         if !Self::continues_as_itself(surface) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EXTEND,
-                "the surface does not continue as itself",
+                SurfaceFailure::DoesNotContinueAsItself,
             ));
         }
         let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -847,7 +856,9 @@ impl OffsetSurface {
             *rot_lo = turn.lo;
             *rot_hi = turn.hi;
         }
-        let extended = extend_as_itself(k, surface, lo, hi, close)?;
+        // a distance to the continuation needs no orientation: its generator carries on
+        // past the axis (`oriented` false)
+        let extended = extend_as_itself(k, surface, lo, hi, close, false)?;
         extended.copy_and_add_analytics(k)
     }
 
@@ -1283,10 +1294,51 @@ impl OffsetSurface {
         let domain = self.surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(uv, 0.0) {
             self.surface.evaluate_normal(k, uv, u_side, v_side)
+        } else if let Some(n) =
+            self.with_extension(|ext| self.as_itself_normal(k, ext, uv, u_side, v_side))?
+        {
+            Ok(n)
         } else {
             // pass the call along to base virtual function which calls Evaluate
             let eval = OffsetEval::new(self);
             base_evaluate_normal(k, &eval, uv, u_side, v_side)
+        }
+    }
+
+    /// Not the fork's: past the base's domain, the normal of a base that extends as
+    /// itself ([`extends_as_itself`]) is its extension's, as inside the domain it is the
+    /// base's: the extension is the same surface carried on. The generic body
+    /// differentiates the offset, which fails where the base's normal turns fast: at
+    /// the pole an extension stops at ([`extend_as_itself`], `oriented`), where every
+    /// point past it is evaluated, it gave the reversed normal. `None` where the base
+    /// does not extend as itself or the point is not on an extension, and where the offset
+    /// grows no extension or nests offsets deeper than [`Self::nested_base`] takes (no base
+    /// that extends as itself: the generic body answers there, as it did).
+    fn as_itself_normal(
+        &self,
+        k: &Kernel,
+        ext: &mut Extension<'_>,
+        uv: Point2,
+        u_side: Side,
+        v_side: Side,
+    ) -> Result<Option<Vec3>> {
+        if !self.allow_extension {
+            return Ok(None);
+        }
+        // an offset of an offset of an offset has no base to extend: the generic body answers it
+        if let SurfaceKind::OffsetSurface(off) = self.surface.kind() {
+            if matches!(off.surface.kind(), SurfaceKind::OffsetSurface(_)) {
+                return Ok(None);
+            }
+        }
+        let (base, _) = self.nested_base(OP_EVAL)?;
+        if !extends_as_itself(k, base) {
+            return Ok(None);
+        }
+        let (use_ext, uv, _) = self.select_surface(k, ext, base, uv)?;
+        match ext.current() {
+            Some(e) if use_ext => e.evaluate_normal(k, uv, u_side, v_side).map(Some),
+            _ => Ok(None),
         }
     }
 
@@ -1305,6 +1357,11 @@ impl OffsetSurface {
         let domain = self.surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(uv, 0.0) {
             return self.surface.evaluate_normal(k, uv, u_side, v_side);
+        }
+        let own = self.with_extension(|ext| self.as_itself_normal(k, ext, uv, u_side, v_side));
+        self.fold_pending_extension();
+        if let Some(n) = own? {
+            return Ok(n);
         }
         self.with_evaluator(|eval| base_evaluate_normal(k, eval, uv, u_side, v_side))
     }
@@ -1332,9 +1389,9 @@ impl OffsetSurface {
             surface = &off.surface;
             if matches!(surface.kind(), SurfaceKind::OffsetSurface(_)) {
                 // Should not be nesting offset surfaces
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     operation,
-                    "the base of the offset surface is itself an offset surface",
+                    SurfaceFailure::OffsetNestedTooDeep,
                 ));
             }
             offset_distance += off.offset_distance.get();
@@ -1371,28 +1428,20 @@ impl OffsetSurface {
         // when evalPoint is still outside of BaseSurface domain - extend or clamp
         if !domain.contains_point(uv, 0.0) {
             if self.allow_extension {
-                // extend original base surface so that it contains given sUV
-                // (`fixes.offset_extension_from_base`: always the base, however the
-                // extension was made before; the extension only sets a lower bound.)
-                let from_base = k.fixes.offset_extension_from_base;
-                let original = if use_ext && !from_base {
-                    ext.current()
-                } else {
-                    Some(base)
-                };
-                let original = original.ok_or_else(|| {
-                    SolidError::surface_missing(OP_EXTEND, "the extended base surface")
-                })?;
+                // extend the base surface so that it contains given sUV. Not upstream
+                // (WR-458): always the base, however the extension was made before; the
+                // current extension only sets a lower bound, so one point gives one
+                // extension whatever was evaluated first. Upstream extends the current
+                // extension when there is one.
                 // (kernel-free: an extension is a B-spline made from its NURB, never lazy)
                 let current = ext.current().map(Surface::natural_uv_domain_if_built);
                 let extended = extend_surface(
                     k,
-                    original,
+                    base,
                     &mut uv,
                     self.is_periodic_on_u != 0,
                     self.is_periodic_on_v != 0,
                     self.singularities,
-                    from_base,
                     current,
                 )?;
 
@@ -1414,8 +1463,16 @@ impl OffsetSurface {
         let (base, offset_distance) = self.nested_base(OP_POINT)?;
         let (use_ext, uv, _domain) = self.select_surface(k, ext, base, uv)?;
         let surface = if use_ext {
-            ext.current()
-                .ok_or_else(|| SolidError::surface_missing(OP_POINT, "the extended base surface"))?
+            ext.current().ok_or_else(|| {
+                Failure::new(
+                    OP_POINT,
+                    SurfaceFailure::Defect {
+                        why: "the extended surface in use is missing, though select_surface says it is in use only when there is one or it has just made one",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?
         } else {
             base
         };
@@ -1450,21 +1507,22 @@ impl OffsetSurface {
         flags: EvaluateFlags,
         base_sides: [Side; 2],
     ) -> Result<Vec<Vec<Vec3>>> {
-        // (checked before the array is sized)
-        match highest_offset_deriv(hu, hv, flags.only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => {}
+        // (checked before the array is sized, once: the step-off recursion passes it on)
+        let hod = match highest_offset_deriv(hu, hv, flags.only_upper_half) {
+            Some(d) if d <= MAX_DERIVS => d,
             _ => {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_EVAL,
-                    "the derivative order is past the most the offset surface evaluates",
+                    SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
                 ))
             }
-        }
+        };
         let mut out = vec![Vec3::UNDEF; (hu + 1) * (hv + 1)];
         self.plain_or_simple(
             k,
             ext,
             0,
+            hod,
             do_eval_simple,
             uv,
             [hu, hv],
@@ -1477,12 +1535,15 @@ impl OffsetSurface {
     }
 
     /// `EvaluatePlainOrSimple`: writes upstream's flat derivative array
-    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion.
+    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion; `hod` is the
+    /// highest derivative order of `[hu, hv]`, which `evaluate_with` checked is at most
+    /// [`MAX_DERIVS`].
     fn plain_or_simple(
         &self,
         k: &Kernel,
         ext: &mut Extension<'_>,
         depth: usize,
+        hod: usize,
         do_eval_simple: bool,
         cr_uv: Point2,
         [hu, hv]: [usize; 2],
@@ -1492,23 +1553,22 @@ impl OffsetSurface {
         out: &mut [Vec3],
     ) -> Result<()> {
         // locals
-        let hod = match highest_offset_deriv(hu, hv, only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => d,
-            _ => {
-                return Err(SolidError::surface_failed(
-                    OP_EVAL,
-                    "the derivative order is past the most the offset surface evaluates",
-                ))
-            }
-        };
         let hb = hod + 1;
 
         // when base surface is also an offset surface
         let (base, offset_distance) = self.nested_base(OP_EVAL)?;
         let (use_ext, uv, domain) = self.select_surface(k, ext, base, cr_uv)?;
         let surface = if use_ext {
-            ext.current()
-                .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the extended base surface"))?
+            ext.current().ok_or_else(|| {
+                Failure::new(
+                    OP_EVAL,
+                    SurfaceFailure::Defect {
+                        why: "the extended surface in use is missing, though select_surface says it is in use only when there is one or it has just made one",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?
         } else {
             base
         };
@@ -1553,10 +1613,14 @@ impl OffsetSurface {
         // the base derivative `i` times in u and `j` times in v (NULL upstream above hb)
         let d = |i: usize, j: usize| -> Result<Vec3> {
             if i + j > hb {
-                return Err(SolidError::surface_missing(
+                return Err(Failure::new(
                     OP_EVAL,
-                    "the base derivative past the order evaluated",
-                ));
+                    SurfaceFailure::Defect {
+                        why: "a base derivative past the order evaluated was asked for, though each is asked only under the condition on hu, hv that puts its order within hod + 1",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             }
             at(&m, i, j)
         };
@@ -1593,6 +1657,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1606,6 +1671,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1712,10 +1778,7 @@ impl OffsetSurface {
 
         // Leave this tol at SM_EFF_ZERO: that's where output becomes invalid.
         if l < EFF_ZERO {
-            return Err(SolidError::surface_failed(
-                OP_EVAL,
-                "the base surface's normal is degenerate",
-            ));
+            return Err(SolidError::surface(OP_EVAL, SurfaceFailure::NoNormal));
         }
 
         // never-assigned upstream locals are default SmVector3d values (UNDEF)
@@ -1919,9 +1982,9 @@ impl OffsetSurface {
         let (uv, location) = result?;
         let pt = self.point_with(k, ext, uv)?;
         if pt.distance(point_on_surf) > tol_3d {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INV,
-                "the inverted point is farther from the offset surface than the tolerance",
+                SurfaceFailure::InvertedPointOffOffset,
             ));
         }
         Ok((uv, location))
@@ -1983,9 +2046,9 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot swap its UV",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2028,9 +2091,9 @@ impl OffsetSurface {
                 self.offset_distance.set(self.offset_distance.get() * s.x);
             } else {
                 // OffsetSurface NonUniform scaling not supported
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_EDIT,
-                    "an offset surface cannot be scaled non-uniformly",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
         }
@@ -2042,9 +2105,9 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot transform it",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2078,9 +2141,9 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot trim it",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2278,7 +2341,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
 /// ([`Surface::kind_with_nurb`], as its evaluations make it); a make that leaves none
 /// (a failing `MakeNurb`, whose status upstream ignores) is `SM_ERR_NULL_POINTER`.
 fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
-    let missing = || SolidError::surface_missing(OP_EXTEND, "the surface's NURB");
+    let missing = || SolidError::surface(OP_EXTEND, SurfaceFailure::NoNurb);
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned().ok_or_else(missing),
@@ -2296,16 +2359,29 @@ fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Sur
 }
 
 /// One NLib G1R extension of `surface` reaching `uv` (the fork's `sm_ExtendToward`).
+///
+/// A first evaluation that fails once it has stored the copy to extend is evaluated
+/// again on that copy, as upstream's `sm_ExtendSurface` does with its second
+/// `N_SrfEvalPtDerivsUnbounded` call: the closedness test of a base with a degenerate
+/// side (a cone's apex row) fails its derivative angle there after storing the closed
+/// directions, and the second call extends the stored copy (#18921).
 fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     let sur = nurb_of(k, surface)?;
     let mut esur: Option<UnboundedExtension> = None;
-    match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
+    let mut made = eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
+    if let Err(e) = &made {
+        if !e.is_unported_or_cancelled() && esur.is_some() {
+            made = eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
+        }
+    }
+    match made {
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            return Err(SolidError::surface_failed(
-                OP_EXTEND,
-                "the G1R extension toward the point failed",
-            ))
+        Err(e) => {
+            return Err(
+                Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
+                    .caused_by(e)
+                    .into_error(),
+            )
         }
         Ok(_) => {}
     }
@@ -2408,6 +2484,24 @@ struct RotTurn {
     lo: f64,
     /// See [`RotTurn::lo`].
     hi: f64,
+    /// The base domain's parameters round the axis, from which the extension's spans count.
+    min: f64,
+    /// See [`RotTurn::min`].
+    max: f64,
+}
+
+impl RotTurn {
+    /// Whether the extension that reaches `lo` and `hi` round the axis, in whole spans
+    /// ([`as_itself_spans`]) from the base's ends, reaches round the turn: as many spans as
+    /// close it on both sides together, an extension as wide as the turn or wider. Counted
+    /// on the spans themselves, not on `lo` and `hi`: a partial turn's spans past one end
+    /// overshoot it, and spans that together go round the turn would otherwise build an
+    /// extension that covers part of it twice (an 80 deg arc asked for 180 deg: 430 deg).
+    fn closed_by(&self, lo: f64, hi: f64) -> bool {
+        let below = spans_past(self.span, self.min, lo, -1.0);
+        let above = spans_past(self.span, self.max, hi, 1.0);
+        below.saturating_add(above) >= self.close.saturating_mul(2)
+    }
 }
 
 /// How the generator of a surface [`extend_as_itself`] continues is carried on.
@@ -2433,6 +2527,15 @@ enum Generator {
     },
 }
 
+/// The defect of [`revolution_of`] on a surface that is not one it reads: every caller asks
+/// it only of a surface that continues as itself ([`OffsetSurface::continues_as_itself`]
+/// or [`extends_as_itself`]), each of which it reads.
+const fn not_as_itself() -> SurfaceFailure {
+    SurfaceFailure::Defect {
+        why: "the surface is not a cylinder, cone, sphere or torus, nor a surface of revolution whose generator is a circle, though every caller checked it continues as itself, which only those do",
+    }
+}
+
 /// The surface of revolution of a cylinder, cone, sphere or torus (its NURB made), or of a
 /// surface of revolution whose generator is a circle ([`generator_is_circle`]), and how
 /// its generator continues.
@@ -2451,15 +2554,9 @@ fn revolution_of<'a>(
         )),
         SurfaceKind::SurfOfRevolution(r) => match generator_is_circle(r) {
             Some((centre, angle)) => Ok((r, Generator::Circle { centre, angle })),
-            None => Err(SolidError::surface_failed(
-                OP_EXTEND,
-                "the generator of the surface of revolution is not a circle",
-            )),
+            None => Err(SolidError::surface(OP_EXTEND, not_as_itself())),
         },
-        _ => Err(SolidError::surface_failed(
-            OP_EXTEND,
-            "the surface is not a kind of surface of revolution",
-        )),
+        _ => Err(SolidError::surface(OP_EXTEND, not_as_itself())),
     }
 }
 
@@ -2477,20 +2574,10 @@ pub(crate) fn extends_as_itself(k: &Kernel, surface: &Surface) -> bool {
     }
 }
 
-/// Whether the offset of `surface` continues as itself: `fixes.offset_extension_from_base` and
-/// `fixes.offset_extension_as_itself` on, and [`extends_as_itself`]. The one place that decides
-/// it: the extension ([`extend_from_base`]), the face a round rolls on and the drop that seeds a
-/// rail end all ask this.
-pub(crate) fn offset_continues_as_itself(k: &Kernel, surface: &Surface) -> bool {
-    k.fixes.offset_extension_from_base
-        && k.fixes.offset_extension_as_itself
-        && extends_as_itself(k, surface)
-}
-
 /// One parameter direction of [`closed_turn`]: its interval, and whether it wraps there.
 pub(crate) type ClosedDirection = (Extent1d, bool);
 
-/// The parameters a surface whose offset continues as itself ([`offset_continues_as_itself`])
+/// The parameters a surface whose offset continues as itself ([`extends_as_itself`])
 /// holds each of its points at once, in `(u, v)`: each direction's interval and whether it
 /// wraps there.
 /// - Round the axis, the closed turn ([`RotTurn`]): past it the extension wraps like a
@@ -2512,7 +2599,7 @@ pub(crate) fn closed_turn(
     k: &Kernel,
     surface: &Surface,
 ) -> Result<Option<[Option<ClosedDirection>; 2]>> {
-    if !offset_continues_as_itself(k, surface) {
+    if !extends_as_itself(k, surface) {
         return Ok(None);
     }
     let (rev, generator) = revolution_of(k, surface)?;
@@ -2666,9 +2753,9 @@ fn rot_turn(rev: &SurfOfRevolution) -> Result<RotTurn> {
     let arc = (rev.end_angle_deg() - rev.start_angle_deg()) * (PI / 180.0);
     let length = ivl.max() - ivl.min();
     if !gt(arc, 0.0) || !le(arc, 2.0 * PI) || !gt(length, 0.0) {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the arc or the parameter length of the revolution is out of range",
+            SurfaceFailure::RevolutionArcOutOfRange,
         ));
     }
     let half_gap = PI - 0.5 * arc;
@@ -2686,6 +2773,8 @@ fn rot_turn(rev: &SurfOfRevolution) -> Result<RotTurn> {
         close,
         lo: ivl.min() + -(close as f64 * span),
         hi: ivl.max() + (close as f64 * span),
+        min: ivl.min(),
+        max: ivl.max(),
     })
 }
 
@@ -2754,17 +2843,16 @@ const AS_ITSELF_MAX_SPANS: usize = 4096;
 /// (the fork's `Spans`).
 fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f64>) -> Result<()> {
     if !gt(span, 0.0) {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the span length is not positive",
+            SurfaceFailure::ExtensionSpanNotPositive,
         ));
     }
-    // (ULONG)ceil(...): saturating, so a reach past the bound fails below
-    let n = ((goal - from) * sign / span).ceil() as usize;
+    let n = spans_past(span, from, goal, sign);
     if n > AS_ITSELF_MAX_SPANS {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the extension needs more spans than its bound",
+            SurfaceFailure::ExtensionSpansPastBound,
         ));
     }
     for k in 1..=n {
@@ -2773,14 +2861,67 @@ fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f
     Ok(())
 }
 
+/// How many spans of parameter length `span` [`as_itself_spans`] takes from `from` to past
+/// `goal` (outward, `sign`): `(ULONG)ceil(...)`, saturating (none for a goal that is not
+/// past `from`, `usize::MAX` far out, so a reach past the bound fails there).
+fn spans_past(span: f64, from: f64, goal: f64, sign: f64) -> usize {
+    ((goal - from) * sign / span).ceil() as usize
+}
+
 /// The point `i` of row `r` of the net `g` (`SM_ERR` past its end; never reached).
 fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint> {
     g.get(r).and_then(|row| row.get(i)).copied().ok_or_else(|| {
-        SolidError::surface_failed(OP_EXTEND, "the net point is past the end of the net")
+        SolidError::surface(
+            OP_EXTEND,
+            SurfaceFailure::Defect {
+                why: "a net point past the end of the net was asked for, though every row and column read is below the counts the net was checked or grown to",
+            },
+        )
     })
 }
 
-/// The fork's `sm_ExtendAsItself` (`fixes.offset_extension_as_itself`, WR-633 and WR-650;
+/// Not the fork's: the angle (radians) from `end` along its generator circle (about
+/// `centre`, turning about unit `axis` outward) to where the circle first meets the
+/// revolution's axis (through `o` along unit `z`), the meridian half-plane being the one
+/// unit `m` (radial, square to `z`) points into: `None` where it never does (a torus's
+/// tube clear of the axis), `0` for an end on the axis already. The circle's distance into
+/// the half-plane `s(t) = A + B cos t + C sin t` is zero at `t = phi +- acos(-A / R)`.
+fn angle_to_axis(end: Point3, centre: Point3, axis: Vec3, o: Point3, m: Vec3) -> Option<f64> {
+    let e0 = end - centre;
+    let a = (centre - o).dot(m);
+    let b = e0.dot(m);
+    let c = axis.cross(e0).dot(m);
+    if !gt(a + b, 0.0) {
+        return Some(0.0);
+    }
+    let r = (b * b + c * c).sqrt();
+    // a touch (`-A / R` at -1, a double root) is no crossing: the circle stays on its side
+    if !gt(r, 0.0) || -a / r <= -1.0 || -a / r > 1.0 {
+        return None;
+    }
+    let phi = c.atan2(b);
+    let alpha = (-a / r).acos();
+    let turn = 2.0 * PI;
+    let first = (phi + alpha)
+        .rem_euclid(turn)
+        .min((phi - alpha).rem_euclid(turn));
+    Some(first)
+}
+
+/// Not the fork's: where the extension of a circular generator stops, `t` (radians,
+/// [`angle_to_axis`]) from its end: the quarter-turn spans that end short of the axis,
+/// then one span to the axis itself; the spans' count and the stop's angle (`0`, no span,
+/// for an axis within a hair of the end).
+fn axis_stop(t: f64) -> (usize, f64) {
+    let n = (t / (0.5 * PI) - 1.0e-9).ceil();
+    if n >= 1.0 {
+        (n as usize, t)
+    } else {
+        (0, 0.0)
+    }
+}
+
+/// The fork's `sm_ExtendAsItself` (WR-633 and WR-650;
 /// tangency-labs/smlib@de0a6b8 as rebuilt by @93db777 and @b298cc2): the NURB of a
 /// cylinder, cone, sphere or torus extended as itself so that its domain reaches `lo` and
 /// `hi`, built directly from the surface it is tagged as. Its spans are kept, and new
@@ -2794,7 +2935,9 @@ fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint>
 /// centre, the sphere's centre), carried on in quarter turns in the rotation's first
 /// column and taken to every other column by that column's turn and scale about the axis;
 /// a cone's or cylinder's generator (degree 1) carries its last span's homogeneous control
-/// points on, the same line.
+/// points on, the same line. `oriented` (not the fork's; an offset's extension, which
+/// needs its normal) stops a generator circle where it meets the axis, a sphere's pole
+/// ([`angle_to_axis`]): past it the surface folds back over itself.
 ///
 /// # Errors
 ///
@@ -2809,13 +2952,15 @@ fn extend_as_itself(
     lo: Point2,
     hi: Point2,
     close_turn: bool,
+    oriented: bool,
 ) -> Result<Surface> {
-    let err = || {
-        SolidError::surface_failed(
-            OP_EXTEND,
-            "the surface of revolution cannot extend as itself",
-        )
+    let fail = |cause: SurfaceFailure| SolidError::surface(OP_EXTEND, cause);
+    // a named cause that keeps the refusing routine's error as its cause
+    let fail_from = |cause: SurfaceFailure, e: SolidError| {
+        Failure::new(OP_EXTEND, cause).caused_by(e).into_error()
     };
+    let shape = || fail(SurfaceFailure::AsItselfNetUnexpected);
+    let defect = |why: &'static str| fail(SurfaceFailure::Defect { why });
     let (rev, generator) = revolution_of(k, surface)?;
     let gen_circle = !matches!(generator, Generator::Line);
     let turn = rot_turn(rev)?;
@@ -2830,7 +2975,7 @@ fn extend_as_itself(
         || net.points.len() != num_u * num_v
         || (!net.weights.is_empty() && net.weights.len() != net.points.len())
     {
-        return Err(err());
+        return Err(shape());
     }
     let (num_rot, num_gen) = if l_rot == 0 {
         (num_u, num_v)
@@ -2846,11 +2991,15 @@ fn extend_as_itself(
             } else {
                 i * num_v + r
             };
-            let p = net.points.get(at).copied().ok_or_else(err)?;
+            let p = net.points.get(at).copied().ok_or_else(|| {
+                defect("a control point index is past the net's points, though it is below num_u * num_v, which the net's points were checked to number")
+            })?;
             let w = if net.weights.is_empty() {
                 1.0
             } else {
-                net.weights.get(at).copied().ok_or_else(err)?
+                net.weights.get(at).copied().ok_or_else(|| {
+                    defect("a control point index is past the net's weights, though the net was checked to hold a weight per point")
+                })?
             };
             row.push(WeightedPoint { p, w });
         }
@@ -2873,7 +3022,7 @@ fn extend_as_itself(
             || d.mults.first() != Some(&(d.deg + 1))
             || d.mults.last() != Some(&(d.deg + 1))
         {
-            return Err(err());
+            return Err(shape());
         }
     }
     let (rot, gen) = if l_rot == 0 {
@@ -2883,11 +3032,15 @@ fn extend_as_itself(
     };
     // Circles are rational quadratics; a cone's generator is a line.
     if rot.deg != 2 || gen.deg != if gen_circle { 2 } else { 1 } {
-        return Err(err());
+        return Err(shape());
     }
 
     let o = rev.position().origin();
-    let z = rev.position().z_axis().unitize().map_err(|_| err())?;
+    let z = rev
+        .position()
+        .z_axis()
+        .unitize()
+        .map_err(|e| fail_from(SurfaceFailure::RevolutionAxisDegenerate, e))?;
     let deg_to_rad = PI / 180.0;
     // the fork's tangency-labs/smlib@43fd6b6: a revolved circle's arc is its generator's
     let gen_angle = match generator {
@@ -2901,6 +3054,21 @@ fn extend_as_itself(
     };
     // the base domain's
     let gen_length = gen.back() - gen.front();
+    // an oriented extension's meridian half-plane: that of the first column's point
+    // farthest from the axis (none for a column on the axis)
+    let far = g
+        .first()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .fold(Vec3::ZERO, |a, c| {
+            let r = radial(c.p, o, z);
+            if r.length() > a.length() {
+                r
+            } else {
+                a
+            }
+        });
+    let meridian = far.unitize().ok().filter(|_| oriented);
 
     // The generator first, in the rotation's first column, then carried to every column.
     for high in [false, true] {
@@ -2920,7 +3088,7 @@ fn extend_as_itself(
         let mut new: Vec<Vec<WeightedPoint>> = Vec::new(); // per column, outward
         if gen_circle {
             if !gt(gen_angle, 0.0) {
-                return Err(err());
+                return Err(fail(SurfaceFailure::RevolutionArcOutOfRange));
             }
             as_itself_spans(
                 gen_length / gen_angle * (0.5 * PI),
@@ -2936,7 +3104,9 @@ fn extend_as_itself(
             let out = radial(end.p, o, z);
             match generator {
                 Generator::Torus { major } => {
-                    let out = out.unitize().map_err(|_| err())?;
+                    let out = out
+                        .unitize()
+                        .map_err(|e| fail_from(SurfaceFailure::PointOnAxis, e))?;
                     centre = o + out * major;
                 }
                 // the fork's tangency-labs/smlib@43fd6b6: about the revolved circle's centre
@@ -2948,8 +3118,33 @@ fn extend_as_itself(
             let axis = (end.p - centre)
                 .cross(end.p - inner.p)
                 .unitize()
-                .map_err(|_| err())?;
-            let first = arc_spans(end, centre, axis, new_knots.len(), 0.5 * PI);
+                .map_err(|e| fail_from(SurfaceFailure::GeneratorCircleUndefined, e))?;
+            let mut first = arc_spans(end, centre, axis, new_knots.len(), 0.5 * PI);
+            // Not the fork's: an oriented extension stops where the circle meets the axis
+            // (a sphere's pole). Carried on past it the circle comes back down the far
+            // meridian, the surface folded back over itself with its normal reversed, so
+            // an offset there lies on the wrong side (r 5 offset 2 past the pole: r 3).
+            // Its quarter turns short of the axis are kept, the span that reaches the axis
+            // ends there, and the side ends there as a pole of a whole sphere does.
+            let stop = meridian.and_then(|m| angle_to_axis(end.p, centre, axis, o, m));
+            if let Some(t) = stop {
+                let (n_axis, t_axis) = axis_stop(t);
+                if new_knots.len() >= n_axis {
+                    new_knots.truncate(n_axis);
+                    first = arc_spans(end, centre, axis, n_axis.saturating_sub(1), 0.5 * PI);
+                    if n_axis > 0 {
+                        let last = first.last().copied().unwrap_or(end);
+                        let rest = t_axis - (n_axis - 1) as f64 * (0.5 * PI);
+                        first.extend(arc_spans(last, centre, axis, 1, rest));
+                        if let Some(knot) = new_knots.last_mut() {
+                            *knot = from + sign * (t_axis * (gen_length / gen_angle));
+                        }
+                    }
+                }
+            }
+            if new_knots.is_empty() {
+                continue;
+            }
             // Every other column is the first turned about the axis and scaled from it:
             // read off the generator point farthest from the axis.
             let (mut i_ref, mut d_ref) = (0, -1.0);
@@ -2961,8 +3156,11 @@ fn extend_as_itself(
                 }
             }
             let ref0 = net_at(&g, 0, i_ref)?;
-            if !gt(d_ref, 0.0) || !gt(ref0.w, 0.0) {
-                return Err(err());
+            if !gt(d_ref, 0.0) {
+                return Err(fail(SurfaceFailure::PointOnAxis));
+            }
+            if !gt(ref0.w, 0.0) {
+                return Err(fail(SurfaceFailure::AsItselfWeightNotPositive));
             }
             let rho0 = radial(ref0.p, o, z);
             new.push(first);
@@ -2974,7 +3172,9 @@ fn extend_as_itself(
                 let dw = at.w / ref0.w;
                 let column = new
                     .first()
-                    .ok_or_else(err)?
+                    .ok_or_else(|| {
+                        defect("the first column's extension is missing, though it was pushed just before the other columns are made from it")
+                    })?
                     .iter()
                     .map(|c| {
                         let sr = radial(c.p, o, z);
@@ -2995,7 +3195,7 @@ fn extend_as_itself(
                 gen.at(1) - gen.front()
             };
             if !gt(last, 0.0) {
-                return Err(err());
+                return Err(shape());
             }
             let f = (goal - from) * sign / last;
             new_knots.push(goal);
@@ -3003,7 +3203,7 @@ fn extend_as_itself(
                 let (a, b) = (net_at(&g, r, i_end)?, net_at(&g, r, i_in)?);
                 let w = a.w + (a.w - b.w) * f;
                 if !gt(w, 0.0) {
-                    return Err(err());
+                    return Err(fail(SurfaceFailure::AsItselfWeightNotPositive));
                 }
                 new.push(vec![WeightedPoint {
                     p: (a.p * a.w + (a.p * a.w - b.p * b.w) * f) * (1.0 / w),
@@ -3047,7 +3247,9 @@ fn extend_as_itself(
         } else {
             (0, 1)
         };
-        let end_row = g.get(r_end).cloned().ok_or_else(err)?;
+        let end_row = g.get(r_end).cloned().ok_or_else(|| {
+            defect("the net's end row is missing, though the net was checked to have at least two rows round the axis and only grows")
+        })?;
         // turning outward, read off the row farthest from the axis
         let (mut i_ref, mut d_ref) = (0, -1.0);
         for (i, c) in end_row.iter().enumerate() {
@@ -3060,8 +3262,11 @@ fn extend_as_itself(
         let at_end = net_at(&g, r_end, i_ref)?.p;
         let at_in = net_at(&g, r_in, i_ref)?.p;
         let sense = (at_end - o).cross(at_end - at_in).dot(z);
-        if !gt(d_ref, 0.0) || sense == 0.0 {
-            return Err(err());
+        if !gt(d_ref, 0.0) {
+            return Err(fail(SurfaceFailure::PointOnAxis));
+        }
+        if sense == 0.0 {
+            return Err(fail(SurfaceFailure::RotationSenseUndefined));
         }
         let axis = if sense > 0.0 { z } else { -z };
         let mut new: Vec<Vec<WeightedPoint>> = vec![Vec::new(); 2 * new_knots.len()];
@@ -3114,16 +3319,18 @@ fn extend_as_itself(
     Ok(Surface::from(extended))
 }
 
-/// The extension of `fixes.offset_extension_from_base` (WR-458, #419; the fork's
+/// Not upstream: the extension of an offset's base (WR-458, #419; the fork's
 /// tangency-labs/smlib@2d7c7ed): `base` is extended on every side that can grow at once,
 /// each by the base domain's size times the least power of two that reaches `uv`, and
 /// never less than the `current` extension's domain, so one point always gives one
 /// extension whatever was evaluated first. `Ok(None)` when `have` already contains `uv`.
 ///
-/// With `fixes.offset_extension_as_itself` (WR-650; the fork's tangency-labs/smlib@b298cc2)
-/// a cylinder's, cone's, sphere's or torus's extension reaches round its axis no further
+/// A surface that continues as itself ([`extends_as_itself`]; WR-633 and WR-650, the
+/// fork's tangency-labs/smlib@b298cc2): a cylinder's, cone's, sphere's or torus's extension reaches round its axis no further
 /// than closing the turn ([`RotTurn`]); once the extension reaches it, that direction is
-/// periodic and `uv` is wrapped to the closed turn, as a periodic surface's.
+/// periodic and `uv` is wrapped to the closed turn, as a periodic surface's. Along a
+/// generator circle that meets the axis (a sphere's) it stops there, and `uv` is clamped
+/// to it as to a singular side.
 fn extend_from_base(
     k: &Kernel,
     base: &Surface,
@@ -3135,14 +3342,13 @@ fn extend_from_base(
     let domain = base.natural_uv_domain_with_nurb(k)?;
     let size = domain.size();
 
-    // Opt-in (`fixes.offset_extension_as_itself`, WR-633; the fork's
-    // tangency-labs/smlib@de0a6b8): a cylinder, cone, sphere or torus continues as itself
+    // Not upstream (WR-633; the fork's tangency-labs/smlib@de0a6b8): a cylinder, cone, sphere or torus continues as itself
     // (`sm_ExtendAsItself`): its NURB spans are rational arcs and straight lines, whose
     // polynomials carried on stay on the surface. A tangent extension (G1R) leaves it at once.
     // So does (the fork's tangency-labs/smlib@43fd6b6) a surface of revolution whose
     // generator is a circle (a round's cross section revolved, as SMLib's concave round of an
     // arc is): its generator carried on as its own circle.
-    let as_itself = offset_continues_as_itself(k, base);
+    let as_itself = extends_as_itself(k, base);
     // WR-650 (the fork's tangency-labs/smlib@b298cc2): round the axis such a surface is a
     // circle, and its extension reaches no further than closing the turn (half the gap past
     // either end, `sm_RotTurn`); from there on that direction is periodic, its parameters
@@ -3208,14 +3414,25 @@ fn extend_from_base(
         hi.y = hi.y.max(reach(dmax.y, size.y, uv.y, 1.0));
     }
     if as_itself {
-        // reaching round the turn: to its closure, and the point wrapped to it
-        let close = closes(rot_of(&lo), rot_of(&hi));
+        // reaching round the turn: to its closure, and the point wrapped to it (counted on
+        // the spans the extension would take, `RotTurn::closed_by`)
+        let close = can_close && turn.closed_by(rot_of(&lo), rot_of(&hi));
         if close {
             set_rot(&mut lo, turn.lo);
             set_rot(&mut hi, turn.hi);
             set_rot(uv_out, turn_ivl.periodic_wrap(rot_of(&uv)));
         }
-        return Ok(Some(extend_as_itself(k, base, lo, hi, close)?));
+        let extended = extend_as_itself(k, base, lo, hi, close, true)?;
+        // Not the fork's: along a generator circle that meets the axis (a sphere's pole)
+        // the extension stops there (`extend_as_itself`, `oriented`), and the point is
+        // clamped to its domain as to a singular side: its end knot, bit for bit
+        let ext = extended.natural_uv_domain_with_nurb(k)?;
+        if turn.rot == 0 {
+            uv_out.y = uv_out.y.max(ext.min().y).min(ext.max().y);
+        } else {
+            uv_out.x = uv_out.x.max(ext.min().x).min(ext.max().x);
+        }
+        return Ok(Some(extended));
     }
     // toward the low corner from the base, then the result toward the high corner (a side
     // that does not grow keeps its middle coordinate)
@@ -3245,16 +3462,13 @@ fn extend_from_base(
 
 /// `sm_ExtendSurface`: makes `uv` lie in the domain of `surface` by wrapping it in
 /// periodic directions and clamping it at singular sides; if it is still outside,
-/// returns the B-spline surface extended (G1, ruled) to contain a point one domain
-/// size farther out (or `uv` itself when that fails), `None` otherwise. `uv` is updated
-/// in place. With `fixed` (`fixes.offset_extension_from_base`; `current` is the current
-/// extension's domain) the extension is made by [`extend_from_base`] instead.
+/// returns the extension of [`extend_from_base`] (never less than `current`, the current
+/// extension's domain), `None` otherwise. `uv` is updated in place.
 ///
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER` for a surface that is not a B-spline kind (upstream's `NER`
-/// in the caller); `SM_ERR` when both extensions fail; `InvalidInput` when the
-/// extension leaves no surface (upstream builds a surface from an empty NURB).
+/// in the caller); those of [`extend_from_base`].
 fn extend_surface(
     k: &Kernel,
     surface: &Surface,
@@ -3262,14 +3476,13 @@ fn extend_surface(
     is_periodic_on_u: bool,
     is_periodic_on_v: bool,
     singularities: u32,
-    fixed: bool,
     current: Option<Extent2d>,
 ) -> Result<Option<Surface>> {
     // SM_CAST_PTR(SmBSplineSurface, pSurface); NER(pOriginal) (in the caller)
     if !is_b_spline_kind(surface) {
-        return Err(SolidError::surface_missing(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the B-spline kind surface",
+            SurfaceFailure::SurfaceNotBSplineKind,
         ));
     }
 
@@ -3277,7 +3490,6 @@ fn extend_surface(
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let ivl_u = domain.u_interval();
     let ivl_v = domain.v_interval();
-    let size: Vec2 = domain.size();
 
     // when periodic - wrap UV coordinates into the domain
     if is_periodic_on_u {
@@ -3306,62 +3518,20 @@ fn extend_surface(
         return Ok(None);
     }
     if !surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the surface is not a B-spline surface",
+            SurfaceFailure::Defect {
+                why: "the surface is not a B-spline surface, though it is of a B-spline kind, each of which is one (is_kind_of reaches its B-spline base)",
+            },
         ));
     }
 
-    // `fixes.offset_extension_from_base`: `fixed` holds the current extension's domain
-    if fixed {
-        let periodic = [is_periodic_on_u, is_periodic_on_v];
-        return extend_from_base(k, surface, uv, current, periodic, singularities);
-    }
-
-    // extend a domain size farther out than needed
-    let mut s_uv = *uv;
-    if s_uv.x < domain.min().x {
-        s_uv.x -= size.x;
-    } else if s_uv.x > domain.max().x {
-        s_uv.x += size.x;
-    }
-    if s_uv.y < domain.min().y {
-        s_uv.y -= size.y;
-    } else if s_uv.y > domain.max().y {
-        s_uv.y += size.y;
-    }
-
-    // extend the NURB (the extension is kept between the two tries, as upstream's esur)
-    let sur = nurb_of(k, surface)?;
-    let mut esur: Option<UnboundedExtension> = None;
-    let first = eval_pt_derivs_unbounded(&sur, s_uv.x, s_uv.y, 0, ExtendContinuity::G1R, &mut esur);
-    if let Err(e) = first {
-        if e.is_unported_or_cancelled() {
-            return Err(e);
-        }
-        let second =
-            eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
-        match second {
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    OP_EXTEND,
-                    "the G1R extension toward the point failed",
-                ))
-            }
-            Ok(_) => {}
-        }
-    }
-    let ext = esur.ok_or_else(|| {
-        SolidError::invalid_input(
-            OP_EXTEND,
-            "no extension made (upstream reads an empty NURB)",
-        )
-    })?;
-    // (upstream warns when the new domain is more than 20 times the old size)
-    Ok(Some(Surface::from(BSplineSurface::from_gw_nurb(
-        &ext.surface,
-    ))))
+    // Not upstream (WR-458): the base extended by `extend_from_base`, never less than the
+    // current extension's domain. Upstream extends the surface it is given (the current
+    // extension when there is one) by G1R to a point one domain size past `uv`, so the
+    // extension depended on which points were evaluated first.
+    let periodic = [is_periodic_on_u, is_periodic_on_v];
+    extend_from_base(k, surface, uv, current, periodic, singularities)
 }
 
 /// `sm_FindNonsingularStepoff`: at a pole of `surface` (a first derivative shorter than
@@ -3428,9 +3598,9 @@ fn find_nonsingular_stepoff(
     }
 
     // Neither direction worked.  We can't get an offset direction.
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_STEPOFF,
-        "neither direction gives a nonsingular stepoff",
+        SurfaceFailure::NoNonsingularStepoff,
     ))
 }
 
@@ -3861,13 +4031,12 @@ mod tests {
 
     /// Two copies of one offset of a half cylinder (r 5, offset 4) evaluated beyond both
     /// ends of its arc, one straight at the farther points, the other after two nearer
-    /// ones first (tangency-labs/solidcore#419, WR-458): upstream's extension reaches
-    /// one domain size past the first point, so the copies disagree; with
-    /// `fixes.offset_extension_from_base` the same points give the same extension.
-    fn offset_extension_gap(from_base: bool) -> f64 {
+    /// ones first (tangency-labs/solidcore#419, WR-458): upstream's extension reached
+    /// one domain size past the first point, so the copies disagreed; extended from the
+    /// base, the same points give the same extension.
+    fn offset_extension_gap() -> f64 {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = from_base;
+        let k = Kernel::default();
         let mut half = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -3910,10 +4079,118 @@ mod tests {
 
     #[test]
     fn issue_419_offset_extension_does_not_depend_on_evaluation_order() {
-        let upstream = offset_extension_gap(false);
-        assert!(upstream > 1e-6, "upstream copies agree: {upstream}");
-        let fixed = offset_extension_gap(true);
+        let fixed = offset_extension_gap();
         assert!(fixed < 1e-9, "fixed copies disagree by {fixed}");
+    }
+
+    /// The farthest two copies of an offset (4) of `base` disagree at points 0.3 and 0.9
+    /// domains past each end of `u`, one copy first extended 1.5 domains out (two domains
+    /// each side), the other only as far as the point asked (one domain): whether the
+    /// extension's parameters depend on how far it reaches.
+    fn extent_gap(base: &Surface) -> f64 {
+        let k = Kernel::default();
+        let d = base.natural_uv_domain_with_nurb(&k).unwrap();
+        let len = d.max().x - d.min().x;
+        let v = 0.5 * (d.min().y + d.max().y);
+        let make = || {
+            let mut o =
+                OffsetSurface::new(&k, 4.0, base.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap();
+            o.set_allow_extension(true);
+            o
+        };
+        let mut far = make();
+        for u in [d.max().x + 1.5 * len, d.min().x - 1.5 * len] {
+            far.evaluate_point_extending(&k, Point2::new(u, v)).unwrap();
+        }
+        let mut gap: f64 = 0.0;
+        for f in [0.3, 0.9] {
+            for u in [d.max().x + f * len, d.min().x - f * len] {
+                let uv = Point2::new(u, v);
+                let mut near = make();
+                let b = near.evaluate_point_extending(&k, uv).unwrap();
+                let a = far.evaluate_point_extending(&k, uv).unwrap();
+                let apart = (a - b).length();
+                assert!(apart.is_finite(), "{a:?} and {b:?} at {uv:?}");
+                gap = gap.max(apart);
+            }
+        }
+        gap
+    }
+
+    /// #18921, #21274: an extension evaluates the same at a point however far it was
+    /// extended before, on both paths (a cylinder continuing as itself, a B-spline by G1R):
+    /// a copy first extended 1.5 domains each way against a fresh one at 0.3 and 0.9.
+    #[test]
+    fn offset_extension_parameters_do_not_depend_on_its_extent() {
+        use crate::surface::cone::Cone;
+        let k = Kernel::default();
+        let mut quarter = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            0.0,
+            90.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        quarter.make_nurb(&k).unwrap();
+        let cyl = extent_gap(&Surface::from(quarter));
+        let bspline = extent_gap(&biquadratic_base());
+        assert!(
+            cyl < 1e-9 && bspline < 1e-9,
+            "cylinder {cyl}, B-spline {bspline}"
+        );
+    }
+
+    /// #18921: the offset of a B-spline cone whose `u = 0` row is its apex extends past
+    /// its domain. The closedness test of the extension fails its derivative angle at
+    /// the apex once it has stored the copy to extend; as upstream's second call, the
+    /// extension carries on with that copy rather than refusing the point.
+    #[test]
+    fn offset_of_a_cone_with_an_apex_row_extends() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let rows = [
+            [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+            [
+                [0.5, 0.0, 0.5],
+                [0.353_553_390_593_273_8, 0.353_553_390_593_273_73, 0.5],
+                [3.061_616_997_868_383e-17, 0.5, 0.5],
+            ],
+            [
+                [1.0, 0.0, 0.0],
+                [
+                    core::f64::consts::FRAC_1_SQRT_2,
+                    0.707_106_781_186_547_5,
+                    0.0,
+                ],
+                [6.123_233_995_736_766e-17, 1.0, 0.0],
+            ],
+        ];
+        let net: Vec<Vec<CPoint>> = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|p| CPoint::new(p[0], p[1], p[2], NOW))
+                    .collect()
+            })
+            .collect();
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let base = Surface::from(
+            BSplineSurface::from_data(2, 2, 2, 2, 5, 5, &net, &knots, &knots).unwrap(),
+        );
+        for d in [0.1, -0.1] {
+            for (u, v) in [(1.3, -0.2), (0.5, -0.3), (1.2, 0.5), (0.5, 1.4)] {
+                let mut o = OffsetSurface::new(&k, d, base.clone(), true, SS_UNKNOWN).unwrap();
+                o.set_allow_extension(true);
+                let p = o.evaluate_point_extending(&k, Point2::new(u, v));
+                assert!(p.is_ok(), "d {d} at ({u}, {v}): {p:?}");
+            }
+        }
     }
 
     // ---- WR-160 / WR-161: corrected third-derivative terms --------------------------------
@@ -4420,9 +4697,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             err.surface_failure(),
-            Some(&crate::error::surface::SurfaceFailure::Failed(
-                "the offset surface does not own its base, so cannot swap its UV"
-            ))
+            Some(&SurfaceFailure::BaseSurfaceNotOwned)
         );
         assert_eq!(off.offset_distance(), -0.4);
         assert!(off.extended_base_surface().is_some());
@@ -4474,11 +4749,9 @@ mod tests {
     /// The farthest an offset (4) of a half cylinder (r 5, its axis the z axis) evaluated
     /// from 0.07 to 3 domains of turn past both ends of its arc lies from 9 off its axis
     /// (WR-633, the fork's tangency-labs/smlib@de0a6b8).
-    fn as_itself_off_circle(as_itself: bool) -> f64 {
+    fn as_itself_off_circle() -> f64 {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let mut half = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -4513,12 +4786,7 @@ mod tests {
 
     #[test]
     fn wr633_offset_of_a_cylinder_continues_as_itself_past_its_domain() {
-        let upstream = as_itself_off_circle(false);
-        assert!(
-            upstream > 1e-3,
-            "the tangent extension stays on the circle: {upstream}"
-        );
-        let fixed = as_itself_off_circle(true);
+        let fixed = as_itself_off_circle();
         assert!(
             fixed < 1e-9,
             "the continuation leaves the circle by {fixed}"
@@ -4526,12 +4794,10 @@ mod tests {
     }
 
     /// A partial cylinder (r 5, its axis the z axis, from 0 degrees to `end_deg`), its NURB
-    /// made, and an offset 4 of it that may extend, with both extension flags as given.
-    fn wr650_offset(as_itself: bool, end_deg: f64) -> (Kernel, Surface, OffsetSurface) {
+    /// made, and an offset 4 of it that may extend.
+    fn wr650_offset(end_deg: f64) -> (Kernel, Surface, OffsetSurface) {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let mut arc = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -4561,8 +4827,8 @@ mod tests {
     /// its extension keeps the base's spans and joins quarter-turn spans of half a domain
     /// each, so half a domain past its end lies at 270 degrees and a domain past it at 360;
     /// inside its arc the points are the same before and after it is extended.
-    fn wr650_half_cylinder(as_itself: bool) -> (f64, f64, f64) {
-        let (k, arc, mut o) = wr650_offset(as_itself, 180.0);
+    fn wr650_half_cylinder() -> (f64, f64, f64) {
+        let (k, arc, mut o) = wr650_offset(180.0);
         let d = arc.natural_uv_domain_with_nurb(&k).unwrap();
         let len = d.max().x - d.min().x;
         let v = 0.5 * (d.min().y + d.max().y);
@@ -4594,7 +4860,7 @@ mod tests {
 
     #[test]
     fn wr650_half_cylinder_extension_continues_in_quarter_turns() {
-        let (half, whole, moved) = wr650_half_cylinder(true);
+        let (half, whole, moved) = wr650_half_cylinder();
         assert!(
             half < 1e-9,
             "half a domain past the end is {half} deg off 270"
@@ -4604,9 +4870,6 @@ mod tests {
             moved < 1e-12,
             "inside the arc the extension moved a point {moved}"
         );
-        // without the flag: upstream's tangent extension
-        let (half, whole, _) = wr650_half_cylinder(false);
-        assert!(half > 1.0 && whole > 1.0, "{half} {whole}");
     }
 
     /// The 294 deg partial cylinder r 5 offset 4 of the fork's tangency-labs/smlib@b298cc2
@@ -4615,8 +4878,8 @@ mod tests {
     /// extension's reach round the axis less the turn's, the farthest the closure (the
     /// extension's ends) lies from -33 degrees, and the farthest a point inside the arc
     /// moved once extended.
-    fn wr650_partial_cylinder(as_itself: bool) -> [f64; 5] {
-        let (k, arc, mut o) = wr650_offset(as_itself, 294.0);
+    fn wr650_partial_cylinder() -> [f64; 5] {
+        let (k, arc, mut o) = wr650_offset(294.0);
         let d = arc.natural_uv_domain_with_nurb(&k).unwrap();
         let len = d.max().x - d.min().x;
         let per_deg = len / 294.0;
@@ -4661,7 +4924,7 @@ mod tests {
 
     #[test]
     fn wr650_partial_cylinder_extension_closes_its_turn() {
-        let [off_radius, off_turn, reach, closure, moved] = wr650_partial_cylinder(true);
+        let [off_radius, off_turn, reach, closure, moved] = wr650_partial_cylinder();
         assert!(off_radius < 1e-9, "{off_radius} off radius 9");
         assert!(off_turn < 1e-9, "{off_turn} off the point a turn back");
         assert!(
@@ -4673,28 +4936,13 @@ mod tests {
             moved < 1e-12,
             "inside the arc the extension moved a point {moved}"
         );
-        // without the flag: upstream's tangent extension, a domain or more each way
-        let [off_radius, _, reach, _, _] = wr650_partial_cylinder(false);
-        assert!(off_radius > 1e-3 && reach > 1.0, "{off_radius} {reach}");
     }
 
     /// The farthest an offset `d` of `base` evaluated 0.3 and 0.6 domains past each side
-    /// (and past both sides at once) lies off the surface `off` measures, with both
-    /// extension flags on (WR-650: a sphere's or torus's generator continues as a circle).
+    /// (and past both sides at once) lies off the surface `off` measures (WR-650: a
+    /// sphere's or torus's generator continues as a circle).
     fn wr650_off_surface(base: Surface, d: f64, off: impl Fn(Point3) -> f64) -> f64 {
-        wr650_off_surface_with(base, d, true, off)
-    }
-
-    /// [`wr650_off_surface`] with `offset_extension_as_itself` as given.
-    fn wr650_off_surface_with(
-        base: Surface,
-        d: f64,
-        as_itself: bool,
-        off: impl Fn(Point3) -> f64,
-    ) -> f64 {
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let dom = base.natural_uv_domain_with_nurb(&k).unwrap();
         let (lo, hi, size) = (dom.min(), dom.max(), dom.size());
         let mut o = OffsetSurface::new(&k, d, base, true, crate::geom::extent2d::SS_NONE).unwrap();
@@ -4712,6 +4960,7 @@ mod tests {
                 Point2::new(lo.x - du, lo.y - dv),
             ] {
                 let p = o.evaluate_point_extending(&k, uv).unwrap();
+                assert!(off(p).is_finite(), "{p:?} at {uv:?}");
                 worst = worst.max(off(p).abs());
             }
         }
@@ -4783,10 +5032,182 @@ mod tests {
         Surface::from(rev)
     }
 
-    /// The fork's tangency-labs/smlib@43fd6b6 (`offset_extension_as_itself`, WR-633): a
-    /// surface of revolution whose generator is a circle continues it as its own circle, so
-    /// the offset 0.5 of the revolved semicircle r 2 stays on its tube r 2.5 past every end;
-    /// the tangent extension leaves it.
+    /// #21288 (review): a horn torus's tube only touches its axis, so its offset's
+    /// extension does not stop there (a stop is where the generator circle crosses the
+    /// axis); the offset 1 of the torus R 4 r 4 past it is its point 1 out along the
+    /// tube's radius, as for a tube a hair clear of the axis.
+    #[test]
+    fn horn_torus_offset_extension_carries_on_past_its_touch() {
+        use crate::surface::torus::{Torus, TorusOptions};
+        let k = Kernel::default();
+        let torus = Torus::new(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, -60.0, 200.0, 60.0),
+            4.0,
+            4.0,
+            TorusOptions::default(),
+        )
+        .unwrap();
+        let base = Surface::from(torus);
+        let dom = base.natural_uv_domain_with_nurb(&k).unwrap();
+        for f in [0.3, 0.6, 0.8, 1.0, 1.5] {
+            let mut o =
+                OffsetSurface::new(&k, 1.0, base.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap();
+            o.set_allow_extension(true);
+            let uv = Point2::new(dom.mid().x, dom.max().y + f * dom.size().y);
+            let p = o.evaluate_point_extending(&k, uv).unwrap();
+            // the base point on its tube, and the offset 1 along the tube's outward
+            // radius there (past the axis, near the touch)
+            let q = o
+                .extended_base_surface()
+                .unwrap()
+                .evaluate_point(&k, uv)
+                .unwrap();
+            let m = Vec3::new(q.x, q.y, 0.0);
+            let radius = q - (Point3::new(0.0, 0.0, 0.0) + m * (4.0 / m.length()));
+            assert!(
+                (radius.length() - 4.0).abs() < 1e-9 * 4.0,
+                "f {f}: {q:?} off the tube"
+            );
+            let want = q + radius * (1.0 / radius.length());
+            assert!(p.distance(want) < 1e-9 * 5.0, "f {f}: {p:?}, not {want:?}");
+            let ed = o
+                .extended_base_surface()
+                .unwrap()
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap();
+            assert!(
+                ed.max().y >= uv.y,
+                "f {f}: the extension stops at {} short of {}",
+                ed.max().y,
+                uv.y
+            );
+        }
+    }
+
+    /// #21288 (review): the offset 2 of the sphere r 5 between latitudes -30 and 40 is the
+    /// sphere r 7 however far past its generator's ends it is evaluated. Its extension
+    /// stops at the poles (and the points past them are taken at the pole): carried on
+    /// through a pole the generator circle comes back down the far meridian, the surface's
+    /// normal reversed, and the offset there lay inside at r 3 (0.9 domains and more past
+    /// latitude 40, the pole 50 deg on).
+    #[test]
+    fn sphere_offset_extension_stops_at_its_poles() {
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        let k = Kernel::default();
+        let sphere = Sphere::new(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, -30.0, 120.0, 40.0),
+            5.0,
+            SphereOptions::default(),
+        )
+        .unwrap();
+        let base = Surface::from(sphere);
+        let dom = base.natural_uv_domain_with_nurb(&k).unwrap();
+        for high in [false, true] {
+            for f in [0.3, 0.6, 0.9, 1.0, 1.2, 1.5, 4.0] {
+                let mut o =
+                    OffsetSurface::new(&k, 2.0, base.clone(), true, crate::geom::extent2d::SS_NONE)
+                        .unwrap();
+                o.set_allow_extension(true);
+                let v = if high {
+                    dom.max().y + f * dom.size().y
+                } else {
+                    dom.min().y - f * dom.size().y
+                };
+                let p = o
+                    .evaluate_point_extending(&k, Point2::new(dom.mid().x, v))
+                    .unwrap();
+                assert!(
+                    (p.length() - 7.0).abs() < 1e-9 * 7.0,
+                    "high {high} f {f}: the offset point {p:?} lies at r {}",
+                    p.length()
+                );
+                // and its normal points out of the sphere, there and just short of it
+                let out = p * (1.0 / p.length());
+                for side in [Side::Left, Side::Right] {
+                    let n = o
+                        .evaluate_normal_extending(&k, Point2::new(dom.mid().x, v), side, side)
+                        .unwrap();
+                    assert!(
+                        (n - out).length() < 1e-9,
+                        "high {high} f {f} {side:?}: the normal {n:?} at {p:?}"
+                    );
+                }
+                // the extension ends at the pole: its end is on the axis, r 5
+                let ext = o.extended_base_surface().unwrap();
+                let ed = ext.natural_uv_domain_with_nurb(&k).unwrap();
+                let end = if high { ed.max().y } else { ed.min().y };
+                let q = ext
+                    .evaluate_point(&k, Point2::new(dom.mid().x, end))
+                    .unwrap();
+                if f >= 0.9 {
+                    let pole = if high { 5.0 } else { -5.0 };
+                    assert!(
+                        q.distance(Point3::new(0.0, 0.0, pole)) < 1e-9 * 5.0,
+                        "high {high} f {f}: the extension ends at {q:?}, not the pole"
+                    );
+                    let inward = if high { -1.0 } else { 1.0 };
+                    for dv in [0.0, 1e-9, 1e-6] {
+                        let uv = Point2::new(dom.mid().x, end + inward * dv);
+                        let n = o.evaluate_normal(&k, uv, Side::Left, Side::Left).unwrap();
+                        let p = o.evaluate_point(&k, uv).unwrap();
+                        assert!(
+                            (n - p * (1.0 / p.length())).length() < 1e-6,
+                            "high {high} f {f} dv {dv}: the normal {n:?} at {p:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// #21288 (review): an 80 deg partial cylinder evaluated 180 deg on closes its turn
+    /// exactly (360 deg, the turn's closure), the point on its offset. Its
+    /// spans (70 deg, two closing either side) reach 2 below and 3 above for the asked
+    /// -80 to 240 deg, which is short of a turn: decided on the asked interval the
+    /// extension did not close and covered -140 to 290 deg, 430 deg, part of it twice.
+    #[test]
+    fn partial_turn_closes_on_the_spans_it_takes() {
+        let (k, arc, mut o) = wr650_offset(80.0);
+        let d = arc.natural_uv_domain_with_nurb(&k).unwrap();
+        let per_deg = (d.max().x - d.min().x) / 80.0;
+        let v = 0.5 * (d.min().y + d.max().y);
+        let p = o
+            .evaluate_point_extending(&k, Point2::new(d.min().x + 180.0 * per_deg, v))
+            .unwrap();
+        let ed = o
+            .extended_base_surface()
+            .unwrap()
+            .natural_uv_domain_with_nurb(&k)
+            .unwrap();
+        let width = (ed.max().x - ed.min().x) / per_deg;
+        assert!(
+            (width - 360.0).abs() < 1e-9 * 360.0,
+            "the extension is {width} deg wide"
+        );
+        let lo = (ed.min().x - d.min().x) / per_deg;
+        assert!(
+            (lo + 140.0).abs() < 1e-9 * 140.0,
+            "the closure starts at {lo} deg"
+        );
+        // in the closure's last span above, 150 to 220 deg (its rational arc is not
+        // uniform in angle, so the parameter of 180 deg lies near, not at, 180 deg)
+        let deg = wr650_deg(p).rem_euclid(360.0);
+        assert!(150.0 < deg && deg < 220.0, "the point lies at {deg} deg");
+        assert!((p.x.hypot(p.y) - 9.0).abs() < 1e-9 * 9.0, "{p:?} off r 9");
+    }
+
+    /// The fork's tangency-labs/smlib@43fd6b6 (WR-633): a surface of revolution whose
+    /// generator is a circle continues it as its own circle, so the offset 0.5 of the
+    /// revolved semicircle r 2 stays on its tube r 2.5 past every end.
     #[test]
     fn wr633_43fd6b6_revolved_circle_continues_as_its_circle() {
         let tube = |p: Point3| {
@@ -4795,58 +5216,70 @@ mod tests {
             // the offset's side of the tube: r 2.5 outward, 1.5 inward
             (d - 2.5).abs().min((d - 1.5).abs())
         };
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let base = revolved_semicircle();
         assert!(matches!(base.kind(), SurfaceKind::SurfOfRevolution(_)));
         assert!(extends_as_itself(&k, &base));
-        k.fixes.offset_extension_as_itself = true;
-        let fixed = wr650_off_surface_with(base.clone(), 0.5, true, tube);
+        let fixed = wr650_off_surface(base, 0.5, tube);
         assert!(fixed < 1e-9, "the continuation is {fixed} off the tube");
-        let upstream = wr650_off_surface_with(base, 0.5, false, tube);
-        assert!(
-            upstream > 1e-3,
-            "the tangent extension stays on the tube: {upstream}"
-        );
     }
 
-    /// The offset surface's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The offset surface's named causes, met through its routines: each keeps the operation
+    /// and the status of the phrase cause it replaced, with the kind its condition is (the
+    /// caller's surface or derivative order: `InvalidInput`).
     #[test]
-    fn typed_surface_failures_keep_their_upstream_answers() {
+    fn the_offset_surface_causes_keep_their_operation_and_status() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
-            (
-                OP_EXTEND,
-                SurfaceFailure::Failed("the surface does not continue as itself"),
-                crate::error::SM_ERR,
-            ),
-            (
-                OP_EVAL,
-                SurfaceFailure::Missing("the extended base surface"),
-                crate::error::SM_ERR_NULL_POINTER,
-            ),
-            (
-                OP_STEPOFF,
-                SurfaceFailure::Failed("neither direction gives a nonsingular stepoff"),
-                crate::error::SM_ERR,
-            ),
-        ];
-        for (operation, failure, code) in samples {
-            let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
-            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
-            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
-            assert_eq!(typed.entity(), None, "{typed:?}");
-            assert_eq!(typed.is_port_failure(), before.is_port_failure());
-            assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert_eq!(typed.surface_failure(), Some(&failure));
-        }
+        use crate::error::{ErrorKind, SM_ERR};
+        let k = Kernel::default();
+        let check = |e: SolidError, op: &str, failure: SurfaceFailure, kind: ErrorKind| {
+            assert_eq!(e.operation(), op, "{e:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+            assert_eq!(e.kind(), kind, "{e:?}");
+            assert!(!e.is_defect(), "{e:?}");
+            assert_eq!(e.surface_failure(), Some(&failure), "{e:?}");
+        };
+        // a B-spline does not continue as itself
+        let e = OffsetSurface::continue_as_itself(
+            &k,
+            &wr_164_base(),
+            Point2::new(-1.0, -1.0),
+            Point2::new(2.0, 2.0),
+        )
+        .unwrap_err();
+        check(
+            e,
+            OP_EXTEND,
+            SurfaceFailure::DoesNotContinueAsItself,
+            ErrorKind::InvalidInput,
+        );
+        let off = OffsetSurface::new(&k, 0.4, wr_164_base(), true, SS_UNKNOWN).unwrap();
+        // past the third derivative the offset does not evaluate
+        let e = off
+            .evaluate(&k, Point2::new(0.5, 0.5), 4, 0, EvaluateFlags::default())
+            .unwrap_err();
+        check(
+            e,
+            OP_EVAL,
+            SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
+            ErrorKind::InvalidInput,
+        );
+        // a non-uniform scale
+        let mut off = off;
+        let e = off
+            .transform(
+                &k,
+                &Axis2Placement::default(),
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
+            .unwrap_err();
+        check(
+            e,
+            OP_EDIT,
+            SurfaceFailure::ScaleNotUniform,
+            ErrorKind::InvalidInput,
+        );
     }
 
     /// [`OffsetSurface::evaluate_on_sides`] evaluates the base on the sides asked for.

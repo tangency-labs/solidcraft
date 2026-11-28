@@ -48,7 +48,8 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
     // With the Dimension tool in hand a placed dimension or note still drags, as in a sketch; a
     // view does not.
     let tool = drawing_workspace::placing_dimension(app);
-    !drawing_workspace::placing_view(app)
+    !matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom))
+        && !drawing_workspace::placing_view(app)
         && !drawing_workspace::placing_note(app)
         && ((!tool && app.drawing_workspace.page.view_tools.drag.is_some())
             || dragging_dimension()
@@ -217,6 +218,7 @@ pub(super) fn box_select(
 }
 
 pub(super) struct Canvas<'a> {
+    pub interactive: bool,
     pub at: OnScreen,
     pub painter: &'a egui::Painter,
     pub response: &'a egui::Response,
@@ -228,15 +230,27 @@ pub(super) struct Canvas<'a> {
 
 impl Canvas<'_> {
     pub(super) fn show(self, app: &mut SolveApp, ui: &mut egui::Ui, placing: bool) {
+        if !self.interactive {
+            app.drawing_workspace.page.view_tools.drag = None;
+            return;
+        }
         let mut state = std::mem::take(&mut app.drawing_workspace.page.view_tools);
         let mods = ui.input(|input| input.modifiers);
         let (add, toggle) =
             crate::tool_modifiers::selection_click(crate::tool_modifiers::Held::from_modifiers(mods), app.preferences.selection_shift_add_only);
         // The Dimension tool leaves a placed dimension or note draggable, as the sketch's does.
         let tool = placing && drawing_workspace::placing_dimension(app);
+        let navigating = matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom));
+        if navigating {
+            state.drag = None;
+            if dragging_dimension() {
+                crate::dim_view::drag_end();
+            }
+        }
         if placing && !tool {
             state.drag = None;
-        } else if !tool
+        } else if !navigating
+            && !tool
             && self.response.drag_started_by(PointerButton::Primary)
             && let Some((_, pointer)) = selected_origin(app, self.response, self.at, self.objects)
             && let Some(items) = Some(self.group(app)).filter(|items| items.len() > 1)
@@ -244,7 +258,8 @@ impl Canvas<'_> {
             // A drag from one of several selected things moves them all together by the pointer's
             // way, as a sketch drags its selected geometry: one undo step.
             crate::dim_view::begin_group_drag(app, items, pointer);
-        } else if self.response.drag_started_by(PointerButton::Primary)
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
             && let Some((dimension, pointer)) = dimension_origin(app, self.response, self.at, self.objects)
             // With the tool in hand only its text is the dimension's: the rest is the tool's to pick.
             && (!tool || self.drawing.notes.by_id(dimension).is_some() || over_text(app, dimension, pointer, HOVER_BAND / self.at.scale))
@@ -263,7 +278,8 @@ impl Canvas<'_> {
         } else if tool {
             // Nothing else of the sheet's own with the tool in hand: its clicks are picks.
             state.drag = None;
-        } else if self.response.drag_started_by(PointerButton::Primary)
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
             && let Some((view, pointer)) = origin(app, self.response, self.at, self.objects)
             && let Ok(from) = self.drawing.view_centre(view)
         {
@@ -379,7 +395,7 @@ impl Canvas<'_> {
         let t = Tokens::get();
         let line = Stroke::new(1.0, t.accent);
         // Each moving view's own lines where it goes, in the accent colour, as a sketch shows what a
-        // drag moves: no box round it.
+        // drag moves: no box round it. A detail's callout on its parent stays where the parent is.
         let page = &app.drawing_workspace.page;
         let ppp = self.painter.ctx().pixels_per_point();
         for object in self.objects.iter().filter(|object| object.kind == ObjectKind::View && moved.contains(&object.object)) {
@@ -387,7 +403,15 @@ impl Canvas<'_> {
             let offset = after - before;
             let shifted = OnScreen { target: self.at.target - offset, ..self.at };
             if let Some(marks) = &page.marks {
-                marks.paint_lit(self.painter, &shifted, shifted.visible(self.painter.clip_rect()), ppp, &page.pictures, &[object.object], t.accent);
+                marks.paint_moving(
+                    self.painter,
+                    &shifted,
+                    shifted.visible(self.painter.clip_rect()),
+                    ppp,
+                    &page.pictures,
+                    &[object.object],
+                    t.accent,
+                );
             }
         }
         let Ok(after) = draft.view_centre(drag.view) else { return };

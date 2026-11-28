@@ -653,6 +653,223 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     }
 }
 
+/// A crossing near an end is an event, not a request to bisect the whole segment. Sixteen
+/// midpoint splits can still miss it. Keep its fraction on both chords (and on a reversed
+/// use), so the edge sampler can evaluate a new point on each real curve there.
+#[test]
+fn crossing_refinement_keeps_the_crossing_parameter_near_an_end() {
+    let s = poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    );
+    let f = 2.0_f64.powi(-20);
+    let loop_at = |uv: Vec<[f64; 2]>| seam::Loop {
+        pts: uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect(),
+        uv,
+    };
+    for reversed in [false, true] {
+        let mut a = vec![[0.0, 0.0], [1.0, 0.0], [1.0, -2.0], [0.0, -2.0]];
+        if reversed {
+            a.reverse();
+            a.rotate_left(2);
+        }
+        let b = vec![[f, -1.0], [f, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
+        let events = tangle::splits(&s, 0.0, &[loop_at(a), loop_at(b)]);
+        let fraction = events
+            .iter()
+            .find(|(l, k, _)| (*l, *k) == (0, 0))
+            .expect("the first chord crosses")
+            .2;
+        assert_eq!(fraction, if reversed { 1.0 - f } else { f });
+        assert!(events.contains(&(1, 0, 0.5)), "{events:?}");
+    }
+}
+
+/// Rebuild two four-edge loops from shared nodes, optionally traversing both backwards.
+fn crossing_test_boundary(nodes: &[edges::Nodes], reversed: bool, scale: [f64; 2]) -> Boundary {
+    let mut out = Boundary::default();
+    for group in 0..2 {
+        let mut lp = seam::Loop {
+            pts: Vec::new(),
+            uv: Vec::new(),
+        };
+        let mut segments = Vec::new();
+        let ids: Vec<usize> = (group * 4..group * 4 + 4).collect();
+        for e in if reversed {
+            ids.into_iter().rev().collect::<Vec<_>>()
+        } else {
+            ids
+        } {
+            let n = &nodes[e];
+            let js: Vec<usize> = (0..n.points.len() - 1).collect();
+            for j in if reversed {
+                js.into_iter().rev().collect::<Vec<_>>()
+            } else {
+                js
+            } {
+                let p = n.points[if reversed { j + 1 } else { j }];
+                lp.pts.push(p);
+                lp.uv.push([p.x * scale[0], p.y * scale[1]]);
+                segments.push((e as u32, j as u32));
+            }
+        }
+        out.loops.push(lp);
+        out.segments.push(segments);
+    }
+    out
+}
+
+fn crossing_test_nodes(f: f64) -> Vec<edges::Nodes> {
+    let loops = [
+        [[0.0, 0.0], [1.0, 0.0], [1.0, -2.0], [0.0, -2.0]],
+        [[f, -1.0], [f, 1.0], [-1.0, 1.0], [-1.0, -1.0]],
+    ];
+    loops
+        .into_iter()
+        .flat_map(|lp| {
+            (0..4).map(move |k| edges::Nodes {
+                points: [lp[k], lp[(k + 1) % 4]]
+                    .map(|q| Vec3::new(q[0], q[1], 0.0))
+                    .to_vec(),
+                params: vec![0.0, 1.0],
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
+    let b = crate::fixtures::fixture("box_10x6x4");
+    let evals = [poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    )];
+    let f = 2.0_f64.powi(-20);
+    for reversed in [false, true] {
+        let mut nodes = crossing_test_nodes(f);
+        let boundaries = [crossing_test_boundary(&nodes, reversed, [1.0; 2])];
+        let split = crossing_parameters(&[0], &boundaries, &evals, &nodes);
+        assert_eq!(split[&0], vec![f]);
+        for (e, ts) in split {
+            edges::insert_crossings(&b, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
+        }
+        assert_eq!(nodes[0].params, vec![0.0, f, 1.0]);
+        let after = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
+        assert!(
+            tangle::crossing(&evals[0], 0.0, &after.loops).is_empty(),
+            "one round parts every crossing"
+        );
+    }
+}
+
+#[test]
+fn two_faces_report_one_crossing_event_despite_metric_rounding() {
+    let b = crate::fixtures::fixture("box_10x6x4");
+    let mut nodes = crossing_test_nodes(0.3);
+    let evals: Vec<_> = (0..2)
+        .map(|_| {
+            poles::Face::new(
+                EvalSurface::Plane {
+                    origin: Vec3::ZERO,
+                    du: Vec3::X,
+                    dv: Vec3::Y,
+                },
+                0.0,
+            )
+        })
+        .collect();
+    let boundaries = [
+        crossing_test_boundary(&nodes, false, [1.0; 2]),
+        crossing_test_boundary(&nodes, true, [7.3, 0.9]),
+    ];
+    let first = crossing_parameters(&[0], &boundaries, &evals, &nodes);
+    let second = crossing_parameters(&[1], &boundaries, &evals, &nodes);
+    assert_ne!(first[&0][0], second[&0][0], "the metrics round differently");
+    let split = crossing_parameters(&[1, 0], &boundaries, &evals, &nodes);
+    assert_eq!(
+        split[&0], first[&0],
+        "one canonical parameter for both faces"
+    );
+    edges::insert_crossings(&b, 0, &mut nodes[0], &split[&0]).expect("inserted");
+    assert_eq!(nodes[0].points.len(), 3, "one node for the event");
+}
+
+#[test]
+fn terminal_touch_keeps_a_strictly_interior_near_end_node() {
+    let f = 2.0_f64.powi(-20);
+    let mut nodes = crossing_test_nodes(f);
+    nodes[4].points[0] = Vec3::new(f, 0.0, 0.0);
+    nodes[7].points[1] = nodes[4].points[0];
+    for reversed in [false, true] {
+        let fb = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
+        let at = fb.segments[0]
+            .iter()
+            .position(|&seg| seg == (0, 0))
+            .expect("first edge");
+        assert_eq!(
+            touch(&fb, &nodes, (0, at), (0, 0), 0.0),
+            Some((f, nodes[4].points[0]))
+        );
+        let s = poles::Face::new(
+            EvalSurface::Plane {
+                origin: Vec3::ZERO,
+                du: Vec3::X,
+                dv: Vec3::Y,
+            },
+            0.0,
+        );
+        assert!(
+            tangle::events(&s, 0.0, &fb.loops)
+                .iter()
+                .any(|event| event.at == (0, at) && event.end.is_some())
+        );
+    }
+}
+
+/// Two chords that end on one vertex (the same point in space) meet only there, even where
+/// their (u, v) ends differ by a rounding, as a seam's two copies do: no crossing and no node on
+/// the other chord, which would split a segment a rounding from the vertex round after round
+/// (the bowl rim cut by a cylinder, #1753, welded those nodes into over-shared mesh edges).
+#[test]
+fn chords_ending_on_one_vertex_never_cross() {
+    let s = poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    );
+    let a = seam::Loop {
+        uv: vec![[0.0, 0.0], [1.0, 0.0], [1.0, -1.0], [0.0, -1.0]],
+        pts: vec![
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+        ],
+    };
+    let b = seam::Loop {
+        uv: vec![[1e-13, 0.0], [0.0, 1.0], [-1.0, 1.0], [-1.0, 0.0]],
+        pts: vec![
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(-1.0, 0.0, 0.0),
+        ],
+    };
+    assert!(tangle::events(&s, 0.0, &[a, b]).is_empty());
+}
+
 
 /// A ring 1000 mm across with a 1 mm tube, cut in half at z = 0, with a 0.12 mm cube joined to its
 /// flat face (the stress corpus's S0437): every vertex lies within about a millimetre of the cube.
@@ -695,5 +912,102 @@ fn a_thin_half_torus_is_sized_by_its_edges_not_its_vertices() {
         for (len, segments) in circles {
             assert!(segments as f64 <= 2.0 * (len / chord).ceil(), "{t:?}: {segments} segments over {len} mm at a chord of {chord} mm");
         }
+    }
+}
+
+/// A dense periodic wavy B-spline face (361 x 12 control points, 24 circumferential ripples)
+/// trimmed by 12 interior holes plans cleanly at display tolerance with exact boundary coverage
+/// and zero refused faces, and `Curve2::evaluator` agrees with `Curve2::eval` on dense pcurves.
+#[test]
+fn dense_trimmed_periodic_bspline_face_plans_at_display_tolerance() {
+    let clamped = |p: usize, n: usize| {
+        let mut k = vec![0.0; p + 1];
+        let inner = n - p - 1;
+        k.extend((1..=inner).map(|i| i as f64 / (inner + 1) as f64));
+        k.extend(vec![1.0; p + 1]);
+        k
+    };
+    let (nu, nv) = (361, 12);
+    let ku = clamped(3, nu);
+    let kv = clamped(3, nv);
+    let mut ctrl = Vec::with_capacity(nu * nv);
+    for j in 0..nv {
+        let s = j as f64 / (nv - 1) as f64;
+        for i in 0..nu {
+            let t = std::f64::consts::TAU * (i as f64 / (nu - 1) as f64);
+            let r = 10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
+            ctrl.push([r * t.cos(), r * t.sin(), 30.0 * s, 1.0]);
+        }
+    }
+    let eval = EvalSurface::nurbs([3, 3], [ku.clone(), kv], [nu, nv], ctrl);
+    let face = poles::Face::new(eval, 1e-6);
+    let size = 40.0;
+    let tol = crate::MeshTolerance::display_of(size);
+    let (chord, turn) = tol.rules(size);
+    let rules = size::Rules::new(chord, size, turn);
+    let face_size = size::face_size(&face, &uv::domain(&face), &rules);
+    let sample_uv = |uvs: Vec<[f64; 2]>| {
+        let pts = uvs.iter().map(|&[u, v]| face.derivs(u, v).expect("evaluates").0).collect();
+        seam::Loop { uv: uvs, pts }
+    };
+    // Outer loop along the parameter box [0, 1] x [0, 1].
+    let (bu, bv) = (360usize, 24usize);
+    let mut outer = Vec::with_capacity(2 * (bu + bv));
+    for i in 0..bu {
+        outer.push([i as f64 / bu as f64, 0.0]);
+    }
+    for j in 0..bv {
+        outer.push([1.0, j as f64 / bv as f64]);
+    }
+    for i in (1..=bu).rev() {
+        outer.push([i as f64 / bu as f64, 1.0]);
+    }
+    for j in (1..=bv).rev() {
+        outer.push([0.0, j as f64 / bv as f64]);
+    }
+    let mut loops = vec![sample_uv(outer)];
+    // 12 radial holes evenly spaced around u, clockwise in (u, v).
+    for h in 0..12 {
+        let cu = (h as f64 + 0.5) / 12.0;
+        let cv = if h % 2 == 0 { 0.35 } else { 0.65 };
+        let (ru, rv) = (0.022, 0.05);
+        let hole: Vec<[f64; 2]> = (0..24)
+            .map(|k| {
+                let a = -std::f64::consts::TAU * (k as f64 / 24.0);
+                [cu + ru * a.cos(), cv + rv * a.sin()]
+            })
+            .collect();
+        loops.push(sample_uv(hole));
+    }
+    let (planned, stats) = plan_or_fill(0, "spline", &face, &loops, &rules, face_size, 0.0, None, Purpose::Display).expect("plans");
+    assert!(stats.lenient.is_empty(), "lenient: {:?}", stats.lenient);
+    let Planned::Face(fp) = planned else { panic!("display plan") };
+    assert!(!fp.triangles.is_empty());
+    let plan = TessPlan { surfaces: vec![face.into_eval()], faces: vec![FacePlan { surface: Some(0), ..fp }], edges: Vec::new(), edge_faces: Vec::new() };
+    let (mesh, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "refused: {refused:?}");
+    assert!(!mesh.triangles.is_empty());
+
+    // Reusable Curve2Eval agrees with Curve2::eval and independent closed-form coordinates on a
+    // dense 361-point cubic pcurve (by Marsden's identity, u(t) = t and v(t) = 0.25 + 0.5 * t^2).
+    let pts: Vec<[f64; 2]> = (0..nu)
+        .map(|i| {
+            let (k1, k2, k3) = (ku[i + 1], ku[i + 2], ku[i + 3]);
+            let greville = (k1 + k2 + k3) / 3.0;
+            let quad = (k1 * k2 + k1 * k3 + k2 * k3) / 3.0;
+            [greville, 0.25 + 0.5 * quad]
+        })
+        .collect();
+    let pc = solidcore::eval::Curve2::Spline { knots: ku, points: pts };
+    let ev = pc.evaluator().expect("evaluator");
+    for k in 0..=20 {
+        let t = k as f64 / 20.0;
+        let p = ev.eval(t).expect("evaluates");
+        assert_eq!(Some(p), pc.eval(t), "t = {t}");
+        let expected = [t, 0.25 + 0.5 * t * t];
+        assert!(
+            (p[0] - expected[0]).abs() < 1e-12 && (p[1] - expected[1]).abs() < 1e-12,
+            "t = {t}: got {p:?}, expected {expected:?}"
+        );
     }
 }

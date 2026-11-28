@@ -1,5 +1,5 @@
-//! STEP (ISO 10303-21) export of SolidCraft bodies: AP242 product structure, assemblies, names
-//! and colours, written by solidcore-step ([`solidcore_step::write::product`]) from each body's
+//! STEP (ISO 10303-21) export of SolidCraft bodies: AP242 product structure, assemblies, names,
+//! colours and layers, written by solidcore-step ([`solidcore_step::write::product`]) from each body's
 //! record and paint.
 
 use solidcore_step::write::product::{self, Colour, ExportError};
@@ -69,6 +69,7 @@ fn export_body<'a>(b: &ExportBody<'a>) -> product::ExportBody<'a> {
         record: b.body.record(),
         color: b.color.map(|c| colour(c, paint.map_or(1.0, |p| p.opacity), paint.and_then(|p| p.name.as_deref()))),
         faces: paint.map(|p| p.faces.iter().map(|f| (f.face, colour(f.color, f.opacity, f.name.as_deref()))).collect()).unwrap_or_default(),
+        layer: paint.and_then(|p| p.layer.clone()).unwrap_or_default(),
     }
 }
 
@@ -141,6 +142,20 @@ mod tests {
             assert_eq!(matches.len(), 1, "one imported face for each box face");
             assert!(read.body.point_lies_on_face(matches[0].0, center, 1e-8).unwrap().is_some(), "{source:?} at {center:?}");
         }
+    }
+
+    /// A body's paint layer is written as the layer it is assigned to, and read back as it.
+    #[test]
+    fn a_paint_layer_is_written_and_read_back() {
+        let paint = crate::Paint { opacity: 1.0, faces: Vec::new(), name: None, layer: Some("Frame/Rails".into()) };
+        let on = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap().with_paint(Some(paint));
+        let off = crate::box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)).unwrap();
+        let bodies = [ExportBody { name: "On".into(), body: &on, color: None }, ExportBody { name: "Off".into(), body: &off, color: None }];
+        let text = step_export_bodies(&bodies, &StepHeader::default()).unwrap();
+        assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails','',(").count(), 1, "{text}");
+        let read = crate::step_import(&text).unwrap();
+        let layers: Vec<(&str, Option<&str>)> = read.bodies.iter().map(|b| (b.name.as_str(), b.layer.as_deref())).collect();
+        assert_eq!(layers, [("On", Some("Frame/Rails")), ("Off", None)], "{text}");
     }
 
     #[test]
@@ -277,5 +292,87 @@ mod tests {
             ExportProduct { name: "B".into(), bodies: vec![ExportBody { name: "B".into(), body: &bx, color: None }], children: vec![] },
         ];
         assert!(step_export_products(&bad, 0, &StepHeader::default()).is_err());
+    }
+
+    /// Two equal-diameter perpendicular holes with intersecting axes (#22220): the intersection
+    /// curves are analytic ellipses whose minor axis equals the hole radius, so exported `ELLIPSE`
+    /// entities must satisfy `semi_axis_1 >= semi_axis_2`, keep vertices on-curve and loops
+    /// closed, validate, and round-trip cleanly.
+    #[test]
+    fn equal_diameter_perpendicular_intersecting_holes_step_export() {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+        use std::f64::consts::PI;
+
+        let r = 5.0_f64;
+        let side = 40.0_f64;
+        let expected = side.powi(3) - 2.0 * PI * r * r * side + 16.0 * r.powi(3) / 3.0;
+
+        // Case 1: primitive cylinders along Z and X through the block centre.
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(side, side, side)).unwrap();
+        let hole_z = crate::cylinder(Vec3::new(20.0, 20.0, -5.0), Vec3::Z, r, 50.0).unwrap();
+        let hole_x = crate::cylinder(Vec3::new(-5.0, 20.0, 20.0), Vec3::X, r, 50.0).unwrap();
+        let one = crate::boolean(&block, &hole_z, crate::BoolOp::Cut).unwrap().unwrap();
+        let prim_body = crate::boolean(&one, &hole_x, crate::BoolOp::Cut).unwrap().unwrap();
+
+        // Case 2: extruded circular sketches on XY and XZ through the centred block.
+        let centered = crate::box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let circle = || Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: vec![] };
+        let sk_z = crate::extrude_planar_regions(&Plane::XY, &[circle()], -25.0, 25.0).unwrap();
+        let sk_y = crate::extrude_planar_regions(&Plane::XZ, &[circle()], -25.0, 25.0).unwrap();
+        let one = crate::boolean(&centered, &sk_z, crate::BoolOp::Cut).unwrap().unwrap();
+        let sketch_body = crate::boolean(&one, &sk_y, crate::BoolOp::Cut).unwrap().unwrap();
+
+        for (label, body) in [("primitives", prim_body), ("sketched", sketch_body)] {
+            let text = crate::step_export(&[&body], label).unwrap();
+            crate::step_validate(&text).unwrap();
+            let ex = p21::parse(&text).unwrap();
+
+            // Every ELLIPSE entity must have semi_axis_1 >= semi_axis_2 > 0 (OpenCascade requirement).
+            let mut ellipse_count = 0usize;
+            for ent in ex.entities.values().filter(|e| e.name() == "ELLIPSE") {
+                let a = ent.params()[2].as_f64().unwrap();
+                let b = ent.params()[3].as_f64().unwrap();
+                assert!(a >= b && b > 0.0, "{label}: ELLIPSE has semi_axis_1 ({a}) < semi_axis_2 ({b})");
+                ellipse_count += 1;
+            }
+            assert!(ellipse_count >= 4, "{label}: expected at least 4 ELLIPSE entities, found {ellipse_count}");
+
+            // Every ADVANCED_FACE must have closed EDGE_LOOPs and a FACE_OUTER_BOUND.
+            for face in ex.entities.values().filter(|e| e.name() == "ADVANCED_FACE") {
+                let bounds = face.params()[1].as_list().unwrap();
+                let outer_count = bounds.iter().filter(|b| ex.get(b.as_ref_id().unwrap()).unwrap().name() == "FACE_OUTER_BOUND").count();
+                assert_eq!(outer_count, 1, "{label}: face without single FACE_OUTER_BOUND");
+                for b in bounds {
+                    let bound = ex.get(b.as_ref_id().unwrap()).unwrap();
+                    let lp = ex.get(bound.params()[1].as_ref_id().unwrap()).unwrap();
+                    if lp.name() != "EDGE_LOOP" {
+                        continue;
+                    }
+                    let oes = lp.params()[1].as_list().unwrap();
+                    assert!(!oes.is_empty(), "{label}: empty EDGE_LOOP");
+                    let ends: Vec<(u64, u64)> = oes
+                        .iter()
+                        .map(|oe| {
+                            let oe = ex.get(oe.as_ref_id().unwrap()).unwrap();
+                            let ec = ex.get(oe.params()[3].as_ref_id().unwrap()).unwrap();
+                            let (s, e) = (ec.params()[1].as_ref_id().unwrap(), ec.params()[2].as_ref_id().unwrap());
+                            if oe.params()[4].as_bool().unwrap() { (s, e) } else { (e, s) }
+                        })
+                        .collect();
+                    for i in 0..ends.len() {
+                        let next = (i + 1) % ends.len();
+                        assert_eq!(ends[i].1, ends[next].0, "{label}: EDGE_LOOP not closed at edge {i}");
+                    }
+                }
+            }
+
+            // Round-trip import: no warnings, valid body, matching face count and Steinmetz volume.
+            let imp = crate::step_import(&text).unwrap();
+            assert!(imp.warnings.is_empty(), "{label}: {:?}", imp.warnings);
+            assert_eq!(imp.bodies.len(), 1, "{label}");
+            assert_eq!(imp.bodies[0].body.face_count(), body.face_count(), "{label}");
+            let vol = crate::measure(&imp.bodies[0].body).unwrap().volume;
+            assert!((vol - expected).abs() < 1e-3, "{label}: got volume {vol}, expected {expected}");
+        }
     }
 }
