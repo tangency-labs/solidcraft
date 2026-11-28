@@ -372,6 +372,7 @@ pub(super) fn placement_local_feature(doc: &Document, f: &Feature, before: &Mode
                 through_all: _,
                 second_follows_first: _,
                 taper: _,
+                taper2: _,
                 corner: _,
                 to,
                 to_offset: _,
