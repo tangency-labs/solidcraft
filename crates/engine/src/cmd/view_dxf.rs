@@ -8,16 +8,19 @@ mod arcs;
 pub(super) mod sketch;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::Value;
-use solidcore_record::Vec2;
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_doc::{ModelBody, ModelState};
+use solidcraft_geom::PlaneGeom;
 use solidcraft_io::{DxfFile, DxfLayerId, DxfLinetype, DxfShape};
 use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
 use crate::mesh_lines::{self, Refused, Stage, View};
 use crate::params::{bad, str_};
-use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
+use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfSectionPlane, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -28,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current Vi
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<ViewDxfResult>)
-    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); curves?: lines|arcs (lines, default, writes the short lines the view is built from; arcs writes visible circles and arcs as CIRCLE and ARC); zero?: target|origin (where the drawing's 0,0 is: the camera target, default, or the model origin as seen from the camera); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
+    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); curves?: lines|arcs (lines, default, writes the short lines the view is built from; arcs writes visible circles and arcs as CIRCLE and ARC); zero?: target|origin (where the drawing's 0,0 is: the camera target, default, or the model origin as seen from the camera); section?: [{origin, normal}] (up to 6 planes the view is cut with, the normal side left out, the cut faces' outlines drawn; default the session's Section Analysis, [] draws bodies whole); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cam: Camera =
@@ -73,9 +76,11 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
+    let planes = section_planes(s, p)?;
     let started = web_time::Instant::now();
     Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, refused(e)))?;
-    let meshes = mesh_lines::prepare(s, &*s.world_state()?, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
+    let (world, uncut_meshes) = sectioned(s.world_state()?, &planes, |b| s.body_visible(&b.name))?;
+    let meshes = mesh_lines::prepare(s, &world, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
     let view = View::from_camera(&cam);
@@ -111,6 +116,17 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         DxfFile::for_current_view_export(drawing.lines.len(), drawing.sketch.len(), sketch_points)?
     };
+    // Validate the original source counts before fitting: recognition must not bypass the
+    // combined source-entity cap. Keep only sparse recognized sketch shapes, not a copy of
+    // every ordinary line/path, and give short arcs their writer's actual extent budget.
+    let planned = if as_arcs {
+        let plan = PlannedViewArcs::sketch(&drawing.sketch, tolerance, &writing)?;
+        file =
+            DxfFile::for_current_view_arc_export_with_sketch_arcs(drawing.lines.len(), drawing.sketch.len(), sketch_points, &plan.arc_source_points)?;
+        plan
+    } else {
+        PlannedViewArcs::default()
+    };
     let visible_layer = file.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None)?;
     let hidden_layer = if dashed { Some(file.declare_layer("HIDDEN", 8, DxfLinetype::Hidden, None)?) } else { None };
     let sketch_layer =
@@ -140,7 +156,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         push_all(&mut file, Some(visible_layer), visible_lines.into_iter().map(|(a, b)| DxfShape::Line(a, b)).collect())?;
         push_all(&mut file, hidden_layer, hidden_paths)?;
     }
-    let sketch = sketch_entities(drawing.sketch, dashed, &mut file, hidden_layer, sketch_layer)?;
+    let sketch = sketch_entities(drawing.sketch, planned.sketch_shapes, dashed, &mut file, hidden_layer, sketch_layer)?;
     let text = solidcraft_io::write_dxf_file(&file)?;
     writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let stats = ViewDxfStats {
@@ -171,9 +187,75 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         projection: if cam.fov > 0.0 { DxfProjection::Perspective } else { DxfProjection::Orthographic },
         stats,
         output,
-        param_warnings: Vec::new(),
+        param_warnings: match uncut_meshes {
+            0 => Vec::new(),
+            1 => vec!["1 mesh body is drawn uncut: a mesh has no faces to cut".into()],
+            n => vec![format!("{n} mesh bodies are drawn uncut: a mesh has no faces to cut")],
+        },
     };
     serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
+}
+
+/// The planes the view is cut with (#22913): `section`'s, else the session's Section Analysis.
+/// Each is turned to face the side that stays, which [`ModelBody::section`] keeps: what lies on a
+/// section plane's normal side is hidden, as in the viewport.
+fn section_planes(s: &Session, p: &Value) -> Result<Vec<Plane>> {
+    let given: Vec<(Vec3, Vec3)> = match p.get("section") {
+        None => s.section.iter().map(|plane| (plane.origin, plane.normal)).collect(),
+        Some(v) => {
+            let planes: Vec<DxfSectionPlane> =
+                serde_json::from_value(v.clone()).map_err(|_| bad(CMD, "section must be a list of planes, each with an origin and a normal"))?;
+            if planes.len() > solidcraft_viewport::MAX_SECTION_PLANES {
+                return Err(bad(CMD, format!("a section cuts with at most {} planes", solidcraft_viewport::MAX_SECTION_PLANES)));
+            }
+            planes.into_iter().map(|plane| (Vec3::from(plane.origin), Vec3::from(plane.normal))).collect()
+        }
+    };
+    given
+        .into_iter()
+        .map(|(origin, normal)| {
+            let usable = origin.is_finite() && normal.is_finite() && [normal.x, normal.y, normal.z].iter().any(|c| c.abs() > 1e-12);
+            usable
+                .then(|| Plane::from_normal(origin, -normal))
+                .flatten()
+                .ok_or_else(|| bad(CMD, "a section plane needs a finite origin and a normal that isn't zero"))
+        })
+        .collect()
+}
+
+/// `world` with each body `shown` picks cut by every one of `planes`, the side each faces kept
+/// ([`ModelBody::section`], which remembers the cut), and a body with nothing left left out; and how
+/// many shown mesh bodies are drawn whole, having no faces to cut. Without planes, `world` as it is.
+fn sectioned(world: Arc<ModelState>, planes: &[Plane], shown: impl Fn(&ModelBody) -> bool) -> Result<(Arc<ModelState>, usize)> {
+    if planes.is_empty() {
+        return Ok((world, 0));
+    }
+    let mut state = ModelState::clone(&world);
+    let (mut keep, mut meshes, mut cut, mut left) = (Vec::with_capacity(state.bodies.len()), 0, 0, 0);
+    for body in &mut state.bodies {
+        if !shown(body) || body.body.is_mesh() {
+            meshes += usize::from(shown(body));
+            keep.push(true);
+            continue;
+        }
+        cut += 1;
+        let mut kept = Some(body.clone());
+        for plane in planes {
+            let Some(whole) = kept else { break };
+            kept = whole.section(plane).map_err(|e| bad(CMD, format!("the section can't cut {}: {e}", body.name)))?;
+        }
+        keep.push(kept.is_some());
+        if let Some(kept) = kept {
+            left += 1;
+            *body = kept;
+        }
+    }
+    if cut > 0 && left == 0 && meshes == 0 {
+        return Err(bad(CMD, "the section cuts away every visible body: move or flip its planes"));
+    }
+    let mut kept = keep.into_iter();
+    state.bodies.retain(|_| kept.next().unwrap_or(true));
+    Ok((Arc::new(state), meshes))
 }
 
 /// What a refusal of the view's lines says here, with what to do about it in a DXF's terms.
@@ -200,24 +282,63 @@ fn push_all(file: &mut DxfFile<DxfShape>, layer: Option<DxfLayerId>, shapes: Vec
     Ok(())
 }
 
+/// Sparse, per-visible-path recognition. A failed or mixed recognition keeps the original
+/// path unchanged; lines from separate curves are never joined into a new sketch entity.
+#[derive(Default)]
+struct PlannedViewArcs {
+    sketch_shapes: Vec<(usize, DxfShape)>,
+    arc_source_points: Vec<usize>,
+}
+
+impl PlannedViewArcs {
+    fn sketch(paths: &[mesh_lines::Path], tolerance: f64, writing: &Stage) -> Result<Self> {
+        let mut plan = Self::default();
+        for (index, path) in paths.iter().enumerate() {
+            writing.check().map_err(|e| bad(CMD, refused(e)))?;
+            // Two points are already exactly the line that the old producer writes.
+            if path.hidden || path.points.len() <= 2 {
+                continue;
+            }
+            let shape = arcs::fit(&path.points, path.closed, tolerance);
+            writing.check().map_err(|e| bad(CMD, refused(e)))?;
+            let Some(shape) = shape else { continue };
+            plan.sketch_shapes.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate recognized sketch shapes"))?;
+            if matches!(shape, DxfShape::Arc { .. }) {
+                plan.arc_source_points.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate sketch arc source counts"))?;
+                plan.arc_source_points.push(path.points.len());
+            }
+            plan.sketch_shapes.push((index, shape));
+        }
+        Ok(plan)
+    }
+}
+
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
 /// Returns the number of SKETCH entities.
 fn sketch_entities(
     paths: Vec<mesh_lines::Path>,
+    planned_shapes: Vec<(usize, DxfShape)>,
     dashed: bool,
     file: &mut DxfFile<DxfShape>,
     hidden_layer: Option<DxfLayerId>,
     sketch_layer: Option<DxfLayerId>,
 ) -> Result<usize> {
     let mut count = 0;
-    for path in paths.into_iter().filter(|p| dashed || !p.hidden) {
+    let mut planned = planned_shapes.into_iter().peekable();
+    for (index, path) in paths.into_iter().enumerate().filter(|(_, p)| dashed || !p.hidden) {
         let layer = (if path.hidden { hidden_layer } else { sketch_layer }).ok_or_else(|| bad(CMD, "missing sketch DXF layer"))?;
         count += usize::from(!path.hidden);
-        let shape = match <[Vec2; 2]>::try_from(path.points) {
-            Ok([a, b]) => DxfShape::Line(a, b),
-            Err(points) => DxfShape::Polyline { points },
+        let shape = match planned.next_if(|(planned_index, _)| *planned_index == index) {
+            Some((_, shape)) => shape,
+            None => match <[Vec2; 2]>::try_from(path.points) {
+                Ok([a, b]) => DxfShape::Line(a, b),
+                Err(points) => DxfShape::Polyline { points },
+            },
         };
         file.push(layer, shape, None)?;
+    }
+    if planned.next().is_some() {
+        return Err(bad(CMD, "unconsumed planned sketch geometry"));
     }
     Ok(count)
 }
@@ -255,7 +376,7 @@ fn connect(lines: Vec<(Vec2, Vec2)>) -> Vec<mesh_lines::Path> {
             }
             points.reverse();
         }
-        result.push(mesh_lines::Path { points, hidden: true });
+        result.push(mesh_lines::Path { points, closed: false, hidden: true });
     }
     result
 }

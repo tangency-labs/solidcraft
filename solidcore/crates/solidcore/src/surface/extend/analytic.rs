@@ -39,6 +39,12 @@
 //! tube must be rational quadratic arcs (every analytic form is), refused as unsupported
 //! otherwise.
 //!
+//! A surface of revolution whose generator is an arc of one circle is a torus but for its
+//! label (the offset of a round about a circle is one, and the offset extends it as itself).
+//! Its sides round the axis are extended here as a torus's, on the torus its arc reads,
+//! proved on its form first ([`revolution_turned_on`]); its sides along the generator are
+//! left to [`Surface::extended_sides`], as any revolution's.
+//!
 //! A plane follows the same rule for a caller keeping its trims (owner, 2026-11-04;
 //! [`Surface::extended_sides_keeping_parameters`]): its bilinear net continued, a B-spline
 //! whose parameters over the source's box are the plane's own bit for bit, where widening the
@@ -89,6 +95,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::math::CPoint;
@@ -96,7 +103,7 @@ use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::{Direction, Surface as Net};
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
-use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
+use crate::surface::offset_surface::{generator_is_circle, OffsetSurface, SS_UNKNOWN};
 use crate::surface::side::{Across, BoxSide, Bracket};
 use crate::surface::surface::{Surface, SurfaceKind};
 use std::f64::consts::PI;
@@ -257,12 +264,133 @@ pub(super) fn analytic_extended_sides(
             Iso::Ruling,
         ),
     };
+    extended_on(
+        k,
+        s,
+        (carrier, &offsets),
+        form,
+        (implicit, frame, Some(along)),
+        open,
+        (asked, distance),
+    )
+    .map(Some)
+}
+
+/// `s`, a surface of revolution whose generator is an arc of one circle, or an offset surface
+/// of one, with its sides round the axis among `asked` extended `distance` as a torus's are
+/// (module docs: up to a quarter of the turn it leaves open); its other sides are left
+/// [`SideExtension::NotAsked`], for the caller to extend as any revolution's. Such a
+/// revolution is a torus but for its label (the offset of a round about a circle is one),
+/// which the offset extends as itself (`extends_as_itself`). The torus is the one its
+/// generator's circle reads off its NURB form (`generator_is_circle`, a reading, whatever curve
+/// the generator was made from), proved on that form by [`lies_on`] before it is taken. `None`
+/// for any other surface, and for a form off the torus read.
+///
+/// # Errors
+///
+/// `InvalidInput` for a distance not finite and positive; those of reading the arc, making
+/// the form, proving it on the torus and of the extension.
+pub(super) fn revolution_turned_on(
+    k: &Kernel,
+    s: &Surface,
+    asked: &[BoxSide],
+    distance: f64,
+) -> Result<Option<ExtendedSides>> {
+    let mut offsets = Vec::new();
+    let mut carrier = s;
+    while let SurfaceKind::OffsetSurface(o) = carrier.kind() {
+        offsets.push(o.offset_distance());
+        carrier = o.base_surface();
+    }
+    if !matches!(carrier.kind(), SurfaceKind::SurfOfRevolution(_)) {
+        return Ok(None);
+    }
+    // its generator read off its NURB form, whatever curve it was made from (a B-spline arc
+    // or a circle), as the offset reads it; a NURB that cannot be made is not one
+    let Ok(SurfaceKind::SurfOfRevolution(rev)) = carrier.kind_with_nurb(k) else {
+        return Ok(None);
+    };
+    let Some((circle, _)) = generator_is_circle(rev) else {
+        return Ok(None);
+    };
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the distance is not finite and positive",
+        ));
+    }
+    let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, carrier)? else {
+        return Ok(None);
+    };
+    let form = form.into_owned();
+    // the torus: about the axis through the circle's foot on it, of the circle's distance from
+    // the axis and its radius (to the net's first point, an end of the generator's arc)
+    let position = rev.position();
+    let axis = position.x_axis().cross(position.y_axis());
+    let from = circle - position.origin();
+    let height = axis.dot(from);
+    let centre = position.origin() + axis * height;
+    let major = (from - axis * height).length();
+    let Some(first) = form
+        .gw_nurb()
+        .and_then(|n| n.cpts().first().and_then(|r| r.first()).copied())
+    else {
+        return Ok(None);
+    };
+    let w = if first.w == NOW { 1.0 } else { first.w };
+    let minor = (Vec3::new(first.x / w, first.y / w, first.z / w) - circle).length();
+    let implicit = Implicit::Torus {
+        centre,
+        axis,
+        major,
+        minor,
+    };
+    if !lies_on(&form, &implicit)? {
+        return Ok(None);
+    }
+    let open = TURN
+        - (rev.end_angle_deg() - rev.start_angle_deg())
+            .abs()
+            .to_radians();
+    let frame = Frame {
+        origin: centre,
+        axis,
+        apex: None,
+        size: major + minor,
+        quarter: 0.25 * open,
+        tube_left: 0.0,
+    };
+    extended_on(
+        k,
+        s,
+        (carrier, &offsets),
+        form,
+        (implicit, frame, None),
+        open,
+        (asked, distance),
+    )
+    .map(Some)
+}
+
+/// `s` with its carrier's `form` (the carrier `s` is under its `offsets`, outermost first)
+/// extended past the sides `asked` by `distance` on `implicit` in `frame`, the turn `open`
+/// left round the axis, along its generator as `along` says; with no `along`, only the sides
+/// round the axis, the others left [`SideExtension::NotAsked`].
+fn extended_on(
+    k: &Kernel,
+    s: &Surface,
+    (carrier, offsets): (&Surface, &[f64]),
+    form: BSplineSurface,
+    (implicit, frame, along): (Implicit, Frame, Option<Iso>),
+    open: f64,
+    (asked, distance): (&[BoxSide], f64),
+) -> Result<ExtendedSides> {
     // the size of the net's points from the origin, for the rounding of the closed forms
     let net0 = form.gw_nurb().ok_or_else(|| {
         SolidError::surface(
             OP,
             SurfaceFailure::Defect {
-                why: "the carrier's form has no NURB, though `AnalyticSupport::check` proved the same form on its kind by reading its NURB",
+                why: "the carrier's form has no NURB, though it was proved on its implicit surface (`AnalyticSupport::check`, or `lies_on` for a revolution) by reading its NURB",
             },
         )
     })?;
@@ -281,7 +409,8 @@ pub(super) fn analytic_extended_sides(
     let mut sides = [SideExtension::NotAsked; 4];
     let mut extension = 0.0_f64;
     for (&side, done) in BoxSide::ALL.iter().zip(sides.iter_mut()) {
-        if !asked.contains(&side) {
+        let round = round_the_axis(carrier, side) == Some(true);
+        if !asked.contains(&side) || along.is_none() && !round {
             continue;
         }
         let param = if side.is_u() {
@@ -303,14 +432,17 @@ pub(super) fn analytic_extended_sides(
             *done = SideExtension::Unbounded;
             continue;
         }
-        let iso = if round_the_axis(carrier, side) == Some(true) {
-            if open <= 0.0 {
-                *done = SideExtension::Closed;
-                continue;
+        let iso = match along {
+            _ if round => {
+                // (a turn not proved open, NaN too, is closed)
+                if open.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                    *done = SideExtension::Closed;
+                    continue;
+                }
+                Iso::Parallel
             }
-            Iso::Parallel
-        } else {
-            along
+            Some(along) => along,
+            None => continue,
         };
         let Some((grown, across, capped, bound)) =
             extend_side(&cur, side, &frame, iso, &implicit, distance)?
@@ -337,12 +469,12 @@ pub(super) fn analytic_extended_sides(
             SideExtension::Extended(_) | SideExtension::UpToLimit(_) | SideExtension::Unchanged
         )
     }) {
-        return Ok(Some(ExtendedSides {
+        return Ok(ExtendedSides {
             surface: s.copy(k)?,
             sides,
             source: 0.0,
             extension,
-        }));
+        });
     }
     if !lies_on(&cur, &implicit)? {
         return Err(refused(ExtendRefusal::NotExact, None));
@@ -351,12 +483,12 @@ pub(super) fn analytic_extended_sides(
     for &d in offsets.iter().rev() {
         surface = Surface::from(OffsetSurface::new(k, d, surface, true, SS_UNKNOWN)?);
     }
-    Ok(Some(ExtendedSides {
+    Ok(ExtendedSides {
         surface,
         sides,
         source: 0.0,
         extension,
-    }))
+    })
 }
 
 /// The unit vector along `v`; `None` where it has no direction (each caller says why).
@@ -381,7 +513,7 @@ fn radial(f: &Frame, x: Vec3) -> Vec3 {
 
 /// The angle between `a` and `b`, in radians.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The circle an iso runs (its centre, its plane's normal and its radius) through `x0`;
@@ -421,7 +553,7 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
         n
     };
     let (u0, u1) = (x0 - centre, x1 - centre);
-    let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+    let mut phi = det::atan2(u0.cross(u1).dot(n), u0.dot(u1));
     if phi < 0.0 {
         phi += TURN;
     }
@@ -494,11 +626,11 @@ pub(super) fn widened_across(
         Implicit::Sphere { radius, .. } => {
             if parallel {
                 let latitude = a.y.to_radians();
-                let r = radius * latitude.cos();
+                let r = radius * det::cos(latitude);
                 (
                     r,
                     gamma(8) * radius * (1.0 + latitude.abs())
-                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                        + radius * det::sin(latitude).abs() * conv_y.to_radians(),
                     b.x - a.x,
                     conv_x,
                 )
@@ -509,11 +641,11 @@ pub(super) fn widened_across(
         Implicit::Torus { major, minor, .. } => {
             if parallel {
                 let latitude = a.y.to_radians();
-                let term = minor * latitude.cos();
+                let term = minor * det::cos(latitude);
                 (
                     major + term,
                     gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
-                        + minor * latitude.sin().abs() * conv_y.to_radians(),
+                        + minor * det::sin(latitude).abs() * conv_y.to_radians(),
                     b.x - a.x,
                     conv_x,
                 )
@@ -1142,7 +1274,7 @@ fn on_definition(
                 if r0.length() > far.0 {
                     far = (
                         r0.length(),
-                        axis.dot(r0.cross(r1)).atan2(r0.dot(r1)),
+                        det::atan2(axis.dot(r0.cross(r1)), r0.dot(r1)),
                         wn / wj,
                     );
                 }
@@ -1153,18 +1285,18 @@ fn on_definition(
             }
             let delta = far.1;
             let half = 0.5 * delta;
-            if half.cos().is_nan() || half.cos() <= 0.0 {
+            if det::cos(half).is_nan() || det::cos(half) <= 0.0 {
                 return Ok(None);
             }
             for &(j, wj) in &joint {
                 let wn = wj * far.2;
                 let centre = origin + axis * axis.dot(j - origin);
                 let r0 = j - centre;
-                let turn = |phi: f64| r0 * phi.cos() + axis.cross(r0) * phi.sin();
+                let turn = |phi: f64| r0 * det::cos(phi) + axis.cross(r0) * det::sin(phi);
                 rebuilt.push(vec![
                     (
-                        centre + turn(half) * (1.0 / half.cos()),
-                        half.cos() * (wj * wn).sqrt(),
+                        centre + turn(half) * (1.0 / det::cos(half)),
+                        det::cos(half) * (wj * wn).sqrt(),
                     ),
                     (centre + turn(delta), wn),
                 ]);
@@ -1225,19 +1357,19 @@ fn on_definition(
             };
             let (a0, b0) = plane(j);
             let (a1, b1) = plane(end);
-            let delta = (a0 * b1 - b0 * a1).atan2(a0 * a1 + b0 * b1);
+            let delta = det::atan2(a0 * b1 - b0 * a1, a0 * a1 + b0 * b1);
             let turn = |phi: f64, s: f64| {
-                let (c, sn) = (phi.cos(), phi.sin());
+                let (c, sn) = (det::cos(phi), det::sin(phi));
                 ((a0 * c - b0 * sn) * s + major, (a0 * sn + b0 * c) * s)
             };
             let half = 0.5 * delta;
-            if half.cos().is_nan() || half.cos() <= 0.0 {
+            if det::cos(half).is_nan() || det::cos(half) <= 0.0 {
                 return Ok(None);
             }
             let profile = [
                 (
-                    turn(half, 1.0 / half.cos()),
-                    half.cos() * (wj * wn).sqrt() / wj,
+                    turn(half, 1.0 / det::cos(half)),
+                    det::cos(half) * (wj * wn).sqrt() / wj,
                 ),
                 (turn(delta, 1.0), wn / wj),
             ];

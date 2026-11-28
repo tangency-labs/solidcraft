@@ -2916,6 +2916,40 @@ fn component_names_count_characters_not_bytes() {
     let error = s.execute("component.rename", &json!({"component": component, "name": "ł".repeat(129)})).unwrap_err().to_string();
     assert!(error.contains("1…128 characters"), "{error}");
 }
+
+/// Activate Parent goes up one level a call, through the placement the active part sits in, to
+/// the design at the top; there it is refused and nothing changes (#18516).
+#[test]
+fn activate_parent_goes_up_one_level_through_the_active_placement() {
+    let mut s = Session::default();
+    let (assembly, first) = created(&mut s, "Assembly");
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let active = |s: &Session| (s.active_component, s.active_occurrence_path.clone());
+    // The part inside the second placement of the assembly, as a double-click on its face activates it.
+    let path = s.doc.placements().into_iter().map(|(_, path, _)| path).find(|p| p.len() == 2 && p[0] == second).unwrap();
+    run(&mut s, "component.activate", json!({"component": part, "occurrence": path[1], "path": path}));
+    assert_eq!(run(&mut s, "component.activate.parent", json!({}))["active"], json!(assembly));
+    assert_eq!(active(&s), (assembly, Some(vec![second])), "the assembly the part sits in, not its first placement");
+    assert_eq!(s.active_component_frame()[3][0], 50.0);
+    run(&mut s, "component.activate.parent", json!({}));
+    assert_eq!(active(&s), (0, None));
+    // At the top: refused, and the design stays active.
+    let error = s.execute("component.activate.parent", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("no parent"), "{error}");
+    assert_eq!(active(&s), (0, None));
+    // Activated with no placement (the Browser's radio button): up through its first placement.
+    run(&mut s, "component.activate", json!({"component": part}));
+    run(&mut s, "component.activate.parent", json!({}));
+    assert_eq!(active(&s), (assembly, Some(vec![first])));
+    // A placement that no longer leads to the active component (deleted since) counts as none.
+    s.active_component = part;
+    s.active_occurrence_path = Some(vec![999]);
+    run(&mut s, "component.activate.parent", json!({}));
+    assert_eq!(active(&s), (assembly, Some(vec![first])));
+}
+
 /// The Browser's index of placed bodies (their path, by world name) makes the design's name
 /// index once for the whole walk, not once at every placement: naming each placement on its own
 /// built the index for every placement, and on a 100-printer assembly that was 14 s inside one
@@ -3598,4 +3632,54 @@ fn capture_position_session_new_syncs_unsynced_document_moves_and_joints() {
     let joint = synced.doc.assembly.joints.iter().find(|j| j.id == jid).unwrap();
     assert_eq!(joint.captured, Some(vec![20.0]));
     assert_eq!(joint.values, vec![20.0]);
+}
+
+/// A mesh body has one face, the whole body. A look given to that face (a pick on the mesh in
+/// the view selects its face) hid every body look from then on: a mesh in a component painted
+/// red from the top of the design stayed in the face's grey, and its opacity stayed at the
+/// face's 0.41 (#22573). A body look on a mesh now replaces its face look; a solid keeps its own.
+#[test]
+fn a_body_look_on_a_mesh_in_a_component_replaces_the_look_on_its_one_face() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-22573-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Chip.stl");
+    // A tetrahedron with 10 mm legs; its slanted side is x + y + z = 10.
+    let facet = |[a, b, c]: [[i32; 3]; 3]| {
+        let v = |p: [i32; 3]| format!("vertex {} {} {}\n", p[0], p[1], p[2]);
+        format!("facet normal 0 0 0\nouter loop\n{}{}{}endloop\nendfacet\n", v(a), v(b), v(c))
+    };
+    let corners = [
+        [[0, 0, 0], [0, 10, 0], [10, 0, 0]],
+        [[0, 0, 0], [10, 0, 0], [0, 0, 10]],
+        [[0, 0, 0], [0, 0, 10], [0, 10, 0]],
+        [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+    ];
+    std::fs::write(&stl, format!("solid t\n{}endsolid t\n", corners.into_iter().map(facet).collect::<String>())).unwrap();
+    let mut s = Session::default();
+    created(&mut s, "Door");
+    // Insert Mesh puts the mesh in a component of its own, here inside Door.
+    run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let world = s.world_state().unwrap();
+    let mesh = world.bodies.iter().find(|b| b.body.is_mesh()).unwrap().name.clone();
+    assert_eq!(world.body(&mesh).unwrap().body.face_count(), 1);
+    // The grey and opacity the reporter's mesh face kept, then the face of the solid.
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":mesh,"point":[3,3,4]}],"color":"#c4c7cc","opacity":0.41}));
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":"Block","point":[35,5,10]}],"color":"#00ff00"}));
+    let look = |s: &Session, name: &str| {
+        let world = s.world_state().unwrap();
+        let b = world.body(name).unwrap();
+        (s.doc.model_face_look(b, 0).map(|l| (l.color, l.opacity)), s.doc.face_colors(b).len())
+    };
+    assert_eq!(look(&s, &mesh), (Some(([196, 199, 204], 0.41)), 1));
+    for opacity in [1.0, 0.5, 1.0] {
+        run(&mut s, "appearance.assign", json!({"bodies":[mesh],"color":"#ff0000","opacity":opacity}));
+        assert_eq!(look(&s, &mesh), (Some(([255, 0, 0], opacity)), 0), "the mesh shows its body look at opacity {opacity}");
+    }
+    run(&mut s, "appearance.assign", json!({"bodies":["Block"],"color":"#0000ff"}));
+    let world = s.world_state().unwrap();
+    let block = world.body("Block").unwrap();
+    assert_eq!(s.doc.face_colors(block).iter().map(|(_, l)| l.color).collect::<Vec<_>>(), [[0, 255, 0]], "a solid keeps its face look");
+    let _ = std::fs::remove_dir_all(dir);
 }

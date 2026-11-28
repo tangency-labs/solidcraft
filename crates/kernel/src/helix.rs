@@ -7,9 +7,50 @@ use solidcraft_geom::prelude::*;
 use crate::body::Body;
 use crate::{KernelError, Result};
 
+/// The most turns a helical sweep takes: the kernel's, as many as its spans hold.
+pub const MAX_HELIX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
+
 /// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
 fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
     v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
+}
+
+/// Whether a screw motion sweeps `region` on `plane` without folding over itself: about `axis`
+/// through `axis_origin`, rising `pitch` per turn. Per radian of turn a point `r` from the axis
+/// origin moves `k × r + (pitch / 2π) k`, so its speed across the plane, along the plane's unit
+/// normal `n`, is `n · (k × r) + (pitch / 2π) (n · k)`: affine over the plane. While it keeps one
+/// sign over the whole profile, every point of the profile leaves the plane on the same side and
+/// the sweep is a solid (a plane across the axis: a twisted extrusion, each slice square to the axis
+/// the profile turned, volume area × height; a plane parallel to the axis off it: volume
+/// 2π · turns · area · the centroid's distance from the line in the plane nearest the axis).
+/// Where it changes sign or reaches zero inside the profile, the profile sweeps back over
+/// itself. A plane through the axis (the incidence test a revolve axis has in its sketch plane,
+/// measured by solidcore's `line_plane_deviation`) is not tested here: there the speed is the
+/// distance from the axis, and the section's own checks keep it clear of the axis.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for a profile that would sweep over itself, or a plane or axis that
+/// is not finite. The speeds are solidcore's `screw_speed_range`.
+pub fn require_unfolded_screw_section(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64) -> Result<()> {
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let (tilt, offset) =
+        solidcore_ops::axial_section::line_plane_deviation(arr(plane.origin), arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis))
+            .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
+    if tilt <= 1e-9 && offset <= 1e-6 {
+        return Ok(());
+    }
+    let points: Vec<[f64; 3]> =
+        region.outer.segs.iter().flat_map(|s| (0..32).map(move |i| s.point_at(i as f64 / 32.0))).map(|q| arr(plane.to_world(q))).collect();
+    let (lo, hi) = solidcore_ops::axial_section::screw_speed_range(arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis), pitch, &points)
+        .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
+    let scale = hi.abs().max(lo.abs()).max(f64::MIN_POSITIVE);
+    if !(lo.is_finite() && hi.is_finite()) || !(lo > 1e-9 * scale || hi < -1e-9 * scale) {
+        return Err(KernelError::Invalid(
+            "the coil's profile would sweep over itself: as the coil turns, part of it moves off its plane on one side and part on the other (it reaches the line in its plane where the motion runs along the plane); keep the profile to one side of that line, or sketch it on a plane through the axis"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`:
@@ -58,8 +99,8 @@ fn helix_profile(
     turns: f64,
 ) -> Result<(Vec3, crate::numbered::NumberedLoop)> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
-        return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
+    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= MAX_HELIX_TURNS && pitch.abs() < 1e7 && axis_origin.is_finite()) {
+        return Err(KernelError::Invalid(format!("helix: turns must be in (0, {MAX_HELIX_TURNS}] and the pitch finite")));
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
@@ -146,6 +187,12 @@ pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis
 /// SMLib's loft to a point.
 pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft_to_point");
+    crate::smlib_sweeps::loft_to_point(plane, &loft_to_point_plan(plane, lp, apex)?, apex)
+}
+
+/// [`loft_to_point`]'s section, checked and wound so its normal points away from the apex, as
+/// the pieces it lofts: what another kernel lofts, and what names its faces after.
+pub(crate) fn loft_to_point_plan(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Vec<crate::smlib_sweeps::Piece>> {
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }
@@ -155,7 +202,7 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     // Wind the base so its normal points away from the apex.
     let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
-    crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
+    Ok(crate::smlib_sweeps::pieces([&base]))
 }
 
 /// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
@@ -182,6 +229,32 @@ mod tests {
     use super::*;
     use solidcore_record::Seg2;
 
+    /// A plane across the axis (a circle on XY, axis Z): the speed across the plane is the rise
+    /// alone, pitch / 2π, one sign everywhere, so it sweeps (a twisted extrusion). The axial plane
+    /// moved 5 mm off the axis, with the circle 20 mm along it: the speed is the distance along the
+    /// plane from the line nearest the axis, 18..22, one sign. The same plane with the circle
+    /// centred on that line spans −2..2 and folds; so does a plane tilted 45° whose speed
+    /// passes zero inside the profile.
+    #[test]
+    fn a_screw_section_is_refused_only_where_it_folds() {
+        let circle = |x: f64| Region2 { outer: Loop2::circle(Vec2::new(x, 0.0), 2.0), holes: vec![] };
+        assert!(require_unfolded_screw_section(&Plane::XY, &circle(20.0), Vec3::ZERO, Vec3::Z, 8.0).is_ok());
+        let off = Plane { origin: Vec3::new(0.0, 5.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        assert!(require_unfolded_screw_section(&off, &circle(20.0), Vec3::ZERO, Vec3::Z, 8.0).is_ok());
+        assert!(require_unfolded_screw_section(&off, &circle(-20.0), Vec3::ZERO, Vec3::Z, 8.0).is_ok());
+        let err = require_unfolded_screw_section(&off, &circle(0.0), Vec3::ZERO, Vec3::Z, 8.0).unwrap_err().to_string();
+        assert!(err.contains("would sweep over itself"), "{err}");
+        let axial = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        assert!(require_unfolded_screw_section(&axial, &circle(20.0), Vec3::ZERO, Vec3::Z, 8.0).is_ok());
+        // Tilted 45° about X through the origin: n = (0, −s, s), s = 1/√2; a point (x, y') on the
+        // plane is (x, s y', s y'); n·(k×r) = −s·x, the rise s·8/2π ≈ 0.90. Zero at x ≈ 1.27, inside
+        // a circle of radius 2 at x = 0.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let tilted = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::new(0.0, s, s) };
+        let err = require_unfolded_screw_section(&tilted, &circle(0.0), Vec3::ZERO, Vec3::Z, 8.0).unwrap_err().to_string();
+        assert!(err.contains("would sweep over itself"), "{err}");
+    }
+
     #[test]
     fn coil_volume_is_section_times_helix_length() {
         // A 2 mm circle in a plane through the Z axis, 20 mm out, 3 turns, pitch 8: a screw
@@ -196,6 +269,27 @@ mod tests {
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
+    }
+
+    /// #22577: the issue's thread along a whole rod, a V 1 wide at radius 8.5 with its point at
+    /// 7.2, on the XZ plane about the X axis from x = -1, 202 turns of pitch 1.25 (the bound was
+    /// 200). Its top line runs along the axis, so its three walls come in 404 half turns, between
+    /// two caps. Pappus gives the volume, off by at most the tolerance (a ten-thousandth of the
+    /// pitch) times the walls' area, each wall at most its line's length times the helix at its
+    /// outer end.
+    #[test]
+    fn a_coil_of_more_than_200_turns_builds() {
+        use std::f64::consts::TAU;
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let v = Loop2::polygon(&[Vec2::new(-1.5, 8.5), Vec2::new(-0.5, 8.5), Vec2::new(-1.0, 7.2)]);
+        let region = Region2 { outer: v, holes: vec![] };
+        let (pitch, turns) = (1.25, 202.0);
+        let b = sweep_helix(&pl, &region, Vec3::new(-1.0, 0.0, 0.0), Vec3::X, pitch, turns).unwrap();
+        assert_eq!(b.face_count(), 3 * 404 + 2, "three walls in 404 half turns, two caps");
+        let want = 0.5 * 1.3 * TAU * (7.2 + 8.5 + 8.5) / 3.0 * turns;
+        let bound = pitch * 1e-4 * (1.0 + 2.0 * 0.5f64.hypot(1.3)) * (TAU * 8.5).hypot(pitch) * turns;
+        let got = crate::measure(&b).unwrap().volume;
+        assert!((got - want).abs() <= bound, "{got} vs {want} within {bound}");
     }
 
     #[test]

@@ -7,8 +7,9 @@
 //!   (SVG's `Z`, PDF's `h`).
 //! - A piece ending within [`SLIVER_STEPS`] of where the path is merges into the next, and is
 //!   counted. A path's last piece has no next, so it is kept unless it has no length.
-//! - A width, dash or gap under half a step is one step, and is counted. A dash pattern's phase is
-//!   taken within the pattern's length on the grid.
+//! - A width or gap under half a step is one step, and is counted. A dash pattern is the one its
+//!   round caps need ([`crate::paper::Dashes::under_round_caps`]), where a dash may be 0 long, a
+//!   dot; its phase is taken within the pattern's length on the grid.
 //! - Circular arcs come in pieces of at most a quarter turn ([`arc_pieces`]). Ellipses, hyperbolas
 //!   and Béziers above degree 3 come as cubics within [`CURVE_ERROR_MM`] ([`cubic_pieces`]), at most
 //!   [`MAX_CURVE_CUBICS`] in a scene, and are counted.
@@ -158,8 +159,9 @@ pub enum FillRule {
     NonZero,
 }
 
-/// A dash pattern on the grid: dash and gap lengths in turn, each at least one step, and the
-/// phase, from 0 up to the pattern's length.
+/// A dash pattern on the grid, to stroke with round caps: dash and gap lengths in turn, each gap
+/// at least one step and a dash 0 or more (0 is a dot), and the phase, from 0 up to the pattern's
+/// length. It is the scene's pattern under its caps ([`crate::paper::Dashes::under_round_caps`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GridDashes {
     pub lengths: Vec<i64>,
@@ -181,7 +183,7 @@ pub struct GridReport {
     pub widths_snapped: usize,
     /// Pieces too short for the grid, merged into the next.
     pub pieces_merged: usize,
-    /// Dashes and gaps under half a step, made one step.
+    /// Gaps under half a step, made one step.
     pub dashes_snapped: usize,
     /// Cubics made from ellipses, hyperbolas and Béziers above degree 3.
     pub curve_cubics: usize,
@@ -211,9 +213,13 @@ impl Prepared<'_> {
                         let width = at_least_one(grid.steps(*width_mm)?, &mut report.widths_snapped);
                         let dashes = match pattern {
                             Some(d) => {
+                                // Round caps add half the width at each end of a dash.
+                                let d = d.under_round_caps(*width_mm);
                                 let mut lengths = Vec::with_capacity(d.lengths_mm.len());
-                                for l in &d.lengths_mm {
-                                    lengths.push(at_least_one(grid.steps(*l)?, &mut report.dashes_snapped));
+                                for (i, l) in d.lengths_mm.iter().enumerate() {
+                                    // A dash may be 0 long, a dot; a gap is at least a step.
+                                    let steps = grid.steps(*l)?;
+                                    lengths.push(if i.is_multiple_of(2) { steps.max(0) } else { at_least_one(steps, &mut report.dashes_snapped) });
                                 }
                                 // Rounded on its own, the phase can reach the rounded pattern's length.
                                 let phase = grid.steps(d.phase_mm)? % lengths.iter().sum::<i64>();

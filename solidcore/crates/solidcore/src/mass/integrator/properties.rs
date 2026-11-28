@@ -76,6 +76,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::are_same;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -258,7 +259,7 @@ pub fn curve_properties(
     }
     for (group, power) in POWERS.iter().enumerate() {
         let measure = if group < 4 { area_scale } else { volume_scale };
-        let moment_scale = measure * reach.powi(*power);
+        let moment_scale = measure * det::powi(reach, *power);
         for s in slots.by_ref().take(3) {
             *s = moment_scale;
         }
@@ -1343,7 +1344,7 @@ pub fn boundary_properties(
         if index == 0 {
             continue;
         }
-        let moment_scale = area_scale * length.powf(f64::from(power));
+        let moment_scale = area_scale * det::powf(length, f64::from(power));
         for cc in 0..3 {
             if let Some(s) = scale.get_mut(index - 1 + cc) {
                 *s = moment_scale;
@@ -2111,7 +2112,7 @@ fn gap_closure(
     let area_scale = estimated_area / 10.0;
     let mut scale = [area_scale * length; 13];
     for (i, s) in scale.iter_mut().enumerate().skip(1) {
-        *s = area_scale * length.powi(if i <= 3 { 2 } else { 3 });
+        *s = area_scale * det::powi(length, if i <= 3 { 2 } else { 3 });
     }
     let accuracy = if accuracy < EFF_ZERO {
         EFF_ZERO_SQ
@@ -2517,7 +2518,7 @@ fn properties_in_box(
         if mass.x < EFF_ZERO {
             mass.x = 1.0;
         }
-        let volume = 4.0 * PI * mass.y.powf(3.0) / 3.0;
+        let volume = 4.0 * PI * det::powf(mass.y, 3.0) / 3.0;
         let area = 4.0 * PI * mass.y * mass.y;
         total.volume += volume;
         total.area += area;
@@ -3406,7 +3407,7 @@ mod tests {
                     if x == 0.0 {
                         w * if n == 0 { 1.0 } else { 0.0 }
                     } else {
-                        w * (x.powi(n) + (-x).powi(n))
+                        w * (det::powi(x, n) + det::powi(-x, n))
                     }
                 })
                 .sum()

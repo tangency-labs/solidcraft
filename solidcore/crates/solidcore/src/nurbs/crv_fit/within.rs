@@ -49,6 +49,7 @@
 //!
 //! Deviations: none (no upstream counterpart).
 
+use crate::math::det;
 use std::f64::consts::PI;
 
 use crate::error::query::QueryFailure;
@@ -357,7 +358,7 @@ fn leg_turn(from: Option<&CPoint>, to: Option<&CPoint>, t: Vec3) -> f64 {
         return PI;
     };
     match Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z).length_and_unit() {
-        Some((_, leg)) => leg.cross(t).length().atan2(leg.dot(t)),
+        Some((_, leg)) => det::atan2(leg.cross(t).length(), leg.dot(t)),
         None => PI,
     }
 }
@@ -471,14 +472,14 @@ mod tests {
     fn involute(t: f64) -> Vec3 {
         let r = 10.0;
         v(
-            r * (t.cos() + t * t.sin()),
-            r * (t.sin() - t * t.cos()),
+            r * (det::cos(t) + t * det::sin(t)),
+            r * (det::sin(t) - t * det::cos(t)),
             0.0,
         )
     }
 
     fn arc(t: f64) -> Vec3 {
-        v(10.0 * t.cos(), 10.0 * t.sin(), 0.0)
+        v(10.0 * det::cos(t), 10.0 * det::sin(t), 0.0)
     }
 
     fn parabola(t: f64) -> Vec3 {
@@ -640,7 +641,7 @@ mod tests {
         let join = std::f64::consts::FRAC_PI_4;
         let first = through(arc, 0.0, join, 8);
         let second = through(arc, join, 2.0 * join, 8);
-        let tangent = v(-join.sin(), join.cos(), 0.0);
+        let tangent = v(-det::sin(join), det::cos(join), 0.0);
         let tolerance = 1e-4;
         let a = refit_within(&first, 3, tolerance, None, Some(tangent), 4096).unwrap();
         let b = refit_within(&second, 3, tolerance, Some(tangent), None, 4096).unwrap();
@@ -778,15 +779,15 @@ mod tests {
     #[test]
     fn a_leg_a_few_roundings_long_is_not_called_along_its_direction() {
         use std::f64::consts::TAU;
-        let g = 2.0_f64.powi(-23);
-        let base = 2.0_f64.powi(29);
+        let g = det::powi(2.0_f64, -23);
+        let base = det::powi(2.0_f64, 29);
         let steps = [(0.0, 0.0), (14.0, 3.0), (28.0, 12.0), (40.0, 40.0)];
         let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
         let d = v(1.0, 2.0_f64.sqrt() - 1.2, 0.0);
-        let along = d.y.atan2(d.x);
+        let along = det::atan2(d.y, d.x);
         // the angle between a step of the grid and the direction
         let off = |i: f64, j: f64| {
-            let a = (j.atan2(i) - along).abs();
+            let a = (det::atan2(j, i) - along).abs();
             a.min(TAU - a)
         };
         let mut nearest = f64::INFINITY;

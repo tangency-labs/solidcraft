@@ -923,6 +923,7 @@ fn elevate_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::knots::Side;
     use crate::nurbs::math::NOW;
 
@@ -933,7 +934,7 @@ mod tests {
                 (0..4)
                     .map(|j| {
                         let (x, y) = (f64::from(i), f64::from(j));
-                        CPoint::new(x, y, (x * 0.7 - y * 0.3).sin(), NOW)
+                        CPoint::new(x, y, det::sin(x * 0.7 - y * 0.3), NOW)
                     })
                     .collect()
             })

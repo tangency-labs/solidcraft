@@ -4,6 +4,7 @@
 //! competing candidate. Sorting both axes bounds the candidate search for sparse data;
 //! dense or ambiguous data is refused when its work budget is exhausted.
 
+use crate::math::det;
 use crate::math::Vec2;
 use crate::{Result, SolidError};
 
@@ -39,8 +40,8 @@ pub fn ordered_nearby_points(
     xs.sort_by(|a, b| a.1.x.total_cmp(&b.1.x).then(a.0.cmp(&b.0)));
     ys.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.0.cmp(&b.0)));
     for (i, (p, q)) in old.iter().zip(new).enumerate() {
-        let distance = (p.x - q.x).hypot(p.y - q.y);
-        let scale = 1.0 + p.x.hypot(p.y).max(q.x.hypot(q.y));
+        let distance = det::hypot(p.x - q.x, p.y - q.y);
+        let scale = 1.0 + det::hypot(p.x, p.y).max(det::hypot(q.x, q.y));
         let allowance = within * scale;
         let radius = 2.0 * distance;
         let (xlo, xhi) = (p.x - radius, p.x + radius);
@@ -75,7 +76,7 @@ pub fn ordered_nearby_points(
             if i == *j {
                 continue;
             }
-            let other = (p.x - candidate.x).hypot(p.y - candidate.y);
+            let other = det::hypot(p.x - candidate.x, p.y - candidate.y);
             if !other.is_finite() || distance >= 0.75 * other {
                 return Ok(false);
             }

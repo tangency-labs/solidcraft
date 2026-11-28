@@ -95,6 +95,33 @@ pub enum BlendRefusal {
         /// Which test refused it.
         why: SetbackTooLongWhy,
     },
+    /// At a Setback corner whose setbacks grow during fill construction (beside a curved
+    /// face, or unequal planar G1 rounds on real rails), growth along an edge was stopped by
+    /// where a far corner cuts one of its round's rails (less the fit margin and ease), and
+    /// no fill up to the rails' reach certifies. `reach` is the least such bound among the
+    /// stopped edges, less the ease, and never below the setback that edge grows from:
+    /// unlike [`Self::SetbackTooLong`], no setback up to `reach` is certified to build.
+    SetbackUncertifiedWithinRails {
+        /// The corner's vertex.
+        vertex: VertexId,
+        /// The certified rail-reach bound, less the ease, that stopped the growth.
+        reach: f64,
+    },
+    /// A Swept turn at `vertex` that no radius of its rounds builds: its side edge is sharp
+    /// and of the rounds' convexity, so their ball cannot circle it
+    /// ([`crate::blend::blend_corner::swept::classify_swept`]). The ball passes a side edge
+    /// rounded first at a radius of at least `least_radius`, the rounds' radius (the larger
+    /// where they differ within the tolerance; `docs/generic-blend.md`, Turn: R >= r). The
+    /// side edge's other tests for a Swept turn (not tangent, straight and square to both
+    /// rounded edges on a plane) are not made before this refusal.
+    SweptTurnPastSharpEdge {
+        /// The corner's vertex.
+        vertex: VertexId,
+        /// The sharp side edge between the rounds.
+        side_edge: EdgeId,
+        /// The least radius `side_edge` is rounded at for the ball to pass it.
+        least_radius: f64,
+    },
     /// A chamfer's angle to its first face that runs out past the other face instead of
     /// meeting it: the chamfer's line and the other face meet only at an angle less than
     /// pi less the wedge between the faces. Radians, at the wedge the edge's chamfer is
@@ -124,7 +151,9 @@ pub enum SetbackTooShortWhy {
     ConvexFill,
     /// At a Setback corner beside a curved face, its fill is not certified no more concave
     /// than its faces at it. `least` is the setback at the least scale of it, on a grid of
-    /// thousandths, at which it is; with its ease it lies within the corner's rooms.
+    /// thousandths, at which it is (or the rails' reach less the ease where that certifies
+    /// and the largest grid step below it does not); with its ease it lies within the
+    /// corner's rooms and the rounds' rail reaches.
     ConcaveFill,
 }
 
@@ -181,9 +210,10 @@ impl BlendRefusal {
             | Self::ContinuesInto { edge, .. }
             | Self::RoundTooSmall { edge, .. }
             | Self::ChamferAngleTooLarge { edge, .. } => EntityRef::Edge(edge),
-            Self::SetbackTooShort { vertex, .. } | Self::SetbackTooLong { vertex, .. } => {
-                EntityRef::Vertex(vertex)
-            }
+            Self::SetbackTooShort { vertex, .. }
+            | Self::SetbackTooLong { vertex, .. }
+            | Self::SetbackUncertifiedWithinRails { vertex, .. }
+            | Self::SweptTurnPastSharpEdge { vertex, .. } => EntityRef::Vertex(vertex),
         }
     }
 }

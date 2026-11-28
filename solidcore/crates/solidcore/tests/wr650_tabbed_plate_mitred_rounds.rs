@@ -2,13 +2,13 @@
 //! @b298cc2, #1986), from SolidCraft's tabbed-plate recipe: a disc of radius 25 with a
 //! tab (two R2 corners) on top, extruded 2, its six top edges rounded r 0.5. The mitred
 //! concave corners at (±4, y), where the tab's sides meet the R25 wall, trace onto the
-//! wall's continuation past its arc, which `offset_extension_as_itself` carries on as the
+//! wall's continuation past its arc, which the offset carries on as the
 //! cylinder itself (WR-633), in arc spans that stop at the closed turn (WR-650).
 //!
 //! SolidCraft runs it with its whole preset of fixes on; the round of the mitred corners
 //! needs the WR-644 gap patch and the WR-642 mitre (without them
 //! the level 2 check reports `SmSurfOfRevolution` test 7, and 3.8e-4 of the volume is
-//! missing), and with `offset_extension_as_itself` off the fillet fails (status 8).
+//! missing), and with the offset's tangent extension (before #18921) the fillet failed (status 8).
 //!
 //! The body must be sound, the plate's volume twice its outline's area, and the removed
 //! volume within 1e-6 relative of the round's closed form, integrated over the quarter
@@ -160,8 +160,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.offset_extension_as_itself = true;
-    k.fixes.offset_extension_from_base = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let edges = top_edges(&k, &b);

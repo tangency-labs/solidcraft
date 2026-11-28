@@ -11,6 +11,12 @@ frame_member_turn
   inputs:
     Angle = turn.angle (Angle)
   expressions: turn.angle
+dogbone
+  inputs:
+    Bit Diameter = dogbone.diameter (Length)
+    Gap = dogbone.gap (Length)
+    Largest Angle = dogbone.max_angle (Angle)
+  expressions: dogbone.diameter, dogbone.gap, dogbone.max_angle
 frame_gusset
   inputs:
     Angle = gusset1.angle (Angle)
@@ -122,6 +128,11 @@ cone
     Height = cone.height (Length)
   expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z, 0, 0, 1
 combine
+finger_joint
+  inputs:
+    Clearance = joint.clearance (Length)
+    Edge offset = joint.edge_offset (Length)
+  expressions: joint.clearance, joint.edge_offset
 pattern_rectangular
   inputs:
     Quantity = rect.count1 (Unitless)
@@ -386,6 +397,24 @@ sheet_flange
     Edge height = flange.e2_height (Length)
     Corner relief = flange.relief (Length)
   expressions: flange.height, flange.angle, flange.radius, flange.e1_angle, flange.e1_height, flange.e2_height, flange.relief
+sheet_flange_with_corners
+  inputs:
+    Height = flange.height (Length)
+    Angle = flange.angle (Angle)
+    Bend radius = flange.radius (Length)
+    Edge angle = flange.e1_angle (Angle)
+    Edge height = flange.e1_height (Length)
+    Edge height = flange.e2_height (Length)
+    Corner relief = flange.relief (Length)
+    Overlap = flange.corner_overlap (Length)
+    Corner Gap = flange.corner_gap (Length)
+    Corner Gap = flange.second_corner_gap (Length)
+  expressions: flange.height, flange.angle, flange.radius, flange.e1_angle, flange.e1_height, flange.e2_height, flange.relief, flange.corner_overlap, flange.corner_gap, flange.second_corner_gap
+sheet_corner_join
+  inputs:
+    Overlap = corner.overlap (Length)
+    Corner Gap = corner.gap (Length)
+  expressions: corner.overlap, corner.gap
 sheet_hem
   inputs:
     Length = hem.length (Length)
@@ -508,6 +537,11 @@ surface_fair
   inputs:
     Tolerance = sfair.tolerance (Length)
   expressions: sfair.tolerance
+surface_morph
+  inputs:
+    Scale factor = smorph.scale (Unitless)
+    Tolerance = smorph.tolerance (Length)
+  expressions: smorph.scale, smorph.tolerance
 unstitch
 reverse_normal
 surface_untrim
@@ -525,6 +559,11 @@ surface_extend_to_face
   inputs:
     Distance = extend.distance (Length)
   expressions: extend.distance
+surface_extend_law
+  inputs:
+    Distance = extend.distance (Length)
+    Angle = extend.law_angle (Angle)
+  expressions: extend.distance, extend.law_angle
 surface_ruled
   inputs:
     Distance = ruled.distance (Length)

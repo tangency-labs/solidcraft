@@ -9,7 +9,8 @@
 //! within it of the first arc's circle where the run has turned to; so the sweep that
 //! follows the reading ends where the path does.
 //!
-//! Not upstream: SolidCraft's sweep dispatch (`straight`, `circular`, `segmented`).
+//! Not upstream: SolidCraft's sweep dispatch (`straight`, `circular`, `segmented`), and how
+//! its curve sweep reads a closed path and a profile's loops ([`ends_meet`], [`loop_runs`]).
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use std::f64::consts::TAU;
@@ -547,20 +548,11 @@ pub fn segments_join(segments: &[Segment], tol: &PathTolerances) -> PathShape<()
     reading.give(())
 }
 
-/// Whether `path` is two or more lines and arcs end to end, each leaving in the
-/// direction the one before arrives in ([`segments_join`]), and open (its ends more
-/// than `tol.closed` apart): then its segments, from the pieces' start points.
-///
-/// # Errors
-///
-/// Those of [`Curve::ends`].
-pub fn path_as_segments(
-    k: &Kernel,
-    path: &[PathPiece],
-    tol: &PathTolerances,
-) -> Result<PathShape<Vec<Segment>>> {
+/// The segments of `path`, each piece a line or an arc, from the pieces' start points;
+/// `None` for fewer than two pieces or a piece of another kind.
+fn segments_of(k: &Kernel, path: &[PathPiece]) -> Result<Option<Vec<Segment>>> {
     if path.len() < 2 {
-        return Ok(PathShape::Not);
+        return Ok(None);
     }
     let mut out = Vec::new();
     for piece in path {
@@ -576,9 +568,27 @@ pub fn path_as_segments(
                 axis: arc.axis,
                 angle: arc.sweep(),
             },
-            None => return Ok(PathShape::Not),
+            None => return Ok(None),
         });
     }
+    Ok(Some(out))
+}
+
+/// Whether `path` is two or more lines and arcs end to end, each leaving in the
+/// direction the one before arrives in ([`segments_join`]), and open (its ends more
+/// than `tol.closed` apart): then its segments, from the pieces' start points.
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn path_as_segments(
+    k: &Kernel,
+    path: &[PathPiece],
+    tol: &PathTolerances,
+) -> Result<PathShape<Vec<Segment>>> {
+    let Some(out) = segments_of(k, path)? else {
+        return Ok(PathShape::Not);
+    };
     let mut reading = Reading::NEW;
     match segments_join(&out, tol) {
         PathShape::Is(()) => {}
@@ -599,6 +609,58 @@ pub fn path_as_segments(
         return Ok(PathShape::Not);
     }
     Ok(reading.give(out))
+}
+
+/// Whether `segments` make one closed path: they make one path ([`segments_join`]) and
+/// the first carries on from the last as each carries on from the one before (starting
+/// within `tol.gap` of where it ends, leaving in the direction it arrives in). The
+/// undecided check names the closing join by the last segment's index.
+#[must_use]
+pub fn segments_close(segments: &[Segment], tol: &PathTolerances) -> PathShape<()> {
+    let mut reading = Reading::NEW;
+    match segments_join(segments, tol) {
+        PathShape::Is(()) => {}
+        PathShape::Not => return PathShape::Not,
+        PathShape::Undecided(d) => reading.doubt = Some(d),
+    }
+    let (Some(&first), Some(&last)) = (segments.first(), segments.last()) else {
+        return PathShape::Not;
+    };
+    match segments_join(&[last, first], tol) {
+        PathShape::Is(()) => {}
+        PathShape::Not => return PathShape::Not,
+        PathShape::Undecided(d) => {
+            let piece = segments.len().saturating_sub(1);
+            reading.doubt.get_or_insert(PathDoubt {
+                piece,
+                check: d.check,
+            });
+        }
+    }
+    reading.give(())
+}
+
+/// Whether `path` is two or more lines and arcs end to end round one closed loop, each
+/// leaving in the direction the one before arrives in and the first in the direction
+/// the last arrives in ([`segments_close`]): then its segments, from the pieces' start
+/// points. The closed counterpart of [`path_as_segments`].
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn path_as_closed_segments(
+    k: &Kernel,
+    path: &[PathPiece],
+    tol: &PathTolerances,
+) -> Result<PathShape<Vec<Segment>>> {
+    let Some(out) = segments_of(k, path)? else {
+        return Ok(PathShape::Not);
+    };
+    Ok(match segments_close(&out, tol) {
+        PathShape::Is(()) => PathShape::Is(out),
+        PathShape::Not => PathShape::Not,
+        PathShape::Undecided(d) => PathShape::Undecided(d),
+    })
 }
 
 /// Whether `curves`, in order, run end to end round one closed loop: each curve's end
@@ -626,6 +688,47 @@ pub fn closed_loop(k: &Kernel, curves: &[Curve], gap: f64) -> Result<Verdict> {
         v = v.and(distance(next.start, e.end).at_most(gap));
     }
     Ok(v)
+}
+
+/// Whether `curves`, end to end in order, come back to where they start: the last one's end
+/// within `tol` of the first one's start, by the plain distance between the two points (not
+/// certified; [`closed_loop`] proves every join). No curves do not.
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn ends_meet(k: &Kernel, curves: &[Curve], tol: f64) -> Result<bool> {
+    let (Some(head), Some(tail)) = (curves.first(), curves.last()) else {
+        return Ok(false);
+    };
+    Ok((head.ends(k)?.start - tail.ends(k)?.end).length() <= tol)
+}
+
+/// The runs of `curves`, in order, that each close a loop: a run's curves taken as end to end,
+/// its last ending within `tol` of where its first starts (the plain distance, not
+/// certified). One run of them all when they do not split into closed loops that way (no
+/// curves, or curves left over after the last loop closes).
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn loop_runs(k: &Kernel, curves: &[Curve], tol: f64) -> Result<Vec<std::ops::Range<usize>>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    let mut first = None;
+    for (i, c) in curves.iter().enumerate() {
+        let e = c.ends(k)?;
+        let start = *first.get_or_insert(e.start);
+        if (e.end - start).length() <= tol {
+            out.push(from..i + 1);
+            from = i + 1;
+            first = None;
+        }
+    }
+    if from != curves.len() || out.is_empty() {
+        return Ok(std::iter::once(0..curves.len()).collect());
+    }
+    Ok(out)
 }
 
 /// The Euclidean control points of the profile's curves (lines, circles and B-splines),
@@ -748,6 +851,7 @@ pub fn point_off_plane_of(
 
 #[cfg(test)]
 mod tests {
+    use crate::math::det;
     use std::f64::consts::PI;
 
     use super::*;
@@ -774,6 +878,40 @@ mod tests {
             end,
         };
         PathPiece::of_arc(k, &d).unwrap()
+    }
+
+    #[test]
+    fn a_profile_splits_into_the_loops_it_closes() {
+        let k = Kernel::default();
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let square = |x: f64, s: f64| {
+            vec![
+                line(p(x, 0.0), p(x + s, 0.0)),
+                line(p(x + s, 0.0), p(x + s, s)),
+                line(p(x + s, s), p(x, s)),
+                line(p(x, s), p(x, 0.0)),
+            ]
+        };
+        // one run of the first n curves
+        let one = |n: usize| std::iter::once(0..n).collect::<Vec<_>>();
+        let two = [square(0.0, 4.0), square(1.0, 1.0)].concat();
+        assert_eq!(loop_runs(&k, &two, 1e-6).unwrap(), vec![0..4, 4..8]);
+        assert!(ends_meet(&k, &square(0.0, 4.0), 1e-6).unwrap());
+        // the second loop ends at its own start, not the first one's
+        assert!(!ends_meet(&k, &two, 1e-6).unwrap());
+        // a loop and a curve left over: one run of all of them
+        let mut open = square(0.0, 4.0);
+        open.push(line(p(10.0, 0.0), p(11.0, 0.0)));
+        assert_eq!(loop_runs(&k, &open, 1e-6).unwrap(), one(5));
+        assert!(!ends_meet(&k, &open, 1e-6).unwrap());
+        assert_eq!(loop_runs(&k, &[], 1e-6).unwrap(), one(0));
+        assert!(!ends_meet(&k, &[], 1e-6).unwrap());
+        // the last end 1e-7 short of the start still closes within 1e-6, not within 1e-8
+        let mut near = square(0.0, 4.0);
+        near[3] = line(p(0.0, 4.0), p(0.0, 1e-7));
+        assert_eq!(loop_runs(&k, &near, 1e-6).unwrap(), one(4));
+        assert!(ends_meet(&k, &near, 1e-6).unwrap());
+        assert!(!ends_meet(&k, &near, 1e-8).unwrap());
     }
 
     #[test]
@@ -826,7 +964,7 @@ mod tests {
         let mut curves = Vec::new();
         for i in 0..10 {
             let a = if i % 2 == 0 { 0.0 } else { 1.3e-6_f64 };
-            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 10.0;
+            let q = p + Vec3::new(det::cos(a), det::sin(a), 0.0) * 10.0;
             curves.push(line(p, q));
             p = q;
         }
@@ -1000,5 +1138,48 @@ mod tests {
             arc_about_z(&k, Point3::ZERO, 1.0, PI, TAU),
         ];
         assert_eq!(path_as_segments(&k, &path, &TOL).unwrap(), PathShape::Not);
+    }
+
+    #[test]
+    fn a_closed_path_of_arcs_is_closed_segments_and_an_open_one_is_not() {
+        let k = Kernel::default();
+        let path = [
+            arc_about_z(&k, Point3::ZERO, 1.0, 0.0, PI),
+            arc_about_z(&k, Point3::ZERO, 1.0, PI, TAU),
+        ];
+        let PathShape::Is(segs) = path_as_closed_segments(&k, &path, &TOL).unwrap() else {
+            panic!()
+        };
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segments_close(&segs, &TOL), PathShape::Is(()));
+        // Three quarters round: the ends apart.
+        let open = [
+            arc_about_z(&k, Point3::ZERO, 1.0, 0.0, PI),
+            arc_about_z(&k, Point3::ZERO, 1.0, PI, 1.5 * PI),
+        ];
+        assert_eq!(
+            path_as_closed_segments(&k, &open, &TOL).unwrap(),
+            PathShape::Not
+        );
+        // A loop whose closing join kinks: from (2, 0) along x, three quarters of a turn
+        // about (4, 2) to (2, 2), down to the start, arriving along -y where it left along x.
+        let kinked = [
+            Segment::Line {
+                start: Point3::new(2.0, 0.0, 0.0),
+                end: Point3::new(4.0, 0.0, 0.0),
+            },
+            Segment::Arc {
+                start: Point3::new(4.0, 0.0, 0.0),
+                centre: Point3::new(4.0, 2.0, 0.0),
+                axis: Vec3::Z,
+                angle: 1.5 * PI,
+            },
+            Segment::Line {
+                start: Point3::new(2.0, 2.0, 0.0),
+                end: Point3::new(2.0, 0.0, 0.0),
+            },
+        ];
+        assert_eq!(segments_join(&kinked, &TOL), PathShape::Is(()));
+        assert_eq!(segments_close(&kinked, &TOL), PathShape::Not);
     }
 }

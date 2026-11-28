@@ -401,6 +401,139 @@ pub fn check_brep_full(
     out
 }
 
+/// (not upstream) The tests [`check_brep`] runs of some of a B-rep's entities, and of no other:
+/// the tolerance pass on each of `edges`' uses (its vertex/edge and vertex/face gaps at both ends
+/// and its edge/face gap, list 2 tests 0-4, validating only), then each of `faces`' own tests
+/// (`SmFace`, its loops' disjointness in UV space among them, test 38) and its loops' (`SmLoop`);
+/// each of `edges`' (`SmEdge`) and those of the vertices at their ends (`SmVertex`). Each entity
+/// is tested once, at `level` with the walk, and reported as [`check_brep`] reports it. None of
+/// the other body-wide passes runs (the pointer check, the tolerance pass on the other edges, the
+/// B-rep, region and shell tests), so its time is that of the entities named and not of the body.
+///
+/// For an edit of a body that passed [`check_brep`], with `faces` the faces it changed (and those
+/// beside an edge it changed) and `edges` the edges it changed, it runs every test of the whole
+/// check that reads what the edit made, apart from the body-wide ones above: the pointer check
+/// (whether a vertex's or an edge's tolerance zone reaches topology it does not bound) and the
+/// region and shell tests. It proves nothing of the rest, and a caller that needs the body's
+/// verdict runs [`check_brep`]. [`BrepCheck::pointers`] reads passed and
+/// [`BrepCheck::pointer_reports`] is empty: the pointer check is not run. As [`check_brep`], where one of `faces` lacks its UV trim
+/// curves the tests run on a copy standing for `b`, so the trims they build stay off it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face or edge `b` does not have, or a B-rep naming no scheme
+/// (as [`check_brep`]); those of the tests.
+pub fn check_brep_local(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    faces: &[crate::topology::FaceId],
+    edges: &[crate::topology::EdgeId],
+) -> Result<BrepCheck> {
+    const OP: &str = "topology::brep::validation::check_brep_local";
+    let naming = b.naming();
+    if naming == NamingScheme::Unknown {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the B-rep records no naming scheme, so its geometry owners cannot be checked; \
+             set one (Brep::set_naming, Brep::use_arena_naming)",
+        ));
+    }
+    if faces.iter().any(|f| !b.face_list().contains(f)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a face to check is not a face of the B-rep",
+        ));
+    }
+    if edges.iter().any(|e| !b.edge_list().contains(e)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an edge to check is not an edge of the B-rep",
+        ));
+    }
+    let recorded = b.geometry_owner_keys().clone();
+    let keys =
+        |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+    let lacking = faces.iter().any(|&f| {
+        !matches!(
+            crate::topology::trimming_tools::face_uv_curves_present(b, f),
+            Ok(true)
+        )
+    });
+    let mut standing = if lacking {
+        Some(b.clone_standing_for_self_keeping_definitions()?)
+    } else {
+        None
+    };
+    let b = standing.as_mut().unwrap_or(b);
+    // each entity once, in the order given
+    let mut face_list = Vec::new();
+    let mut loop_list = Vec::new();
+    for &f in faces {
+        if face_list.contains(&f) {
+            continue;
+        }
+        face_list.push(f);
+        for l in crate::topology::face::p2::loops(b, f, false, None)? {
+            if !loop_list.contains(&l) {
+                loop_list.push(l);
+            }
+        }
+    }
+    let mut edge_list = Vec::new();
+    let mut vertex_list = Vec::new();
+    for &e in edges {
+        if edge_list.contains(&e) {
+            continue;
+        }
+        edge_list.push(e);
+        for v in crate::topology::edge::vertices(b, e, None)?
+            .into_iter()
+            .flatten()
+        {
+            if !vertex_list.contains(&v) {
+                vertex_list.push(v);
+            }
+        }
+    }
+    let mut reports = AssertArray::new();
+    let index = base::Index::new(b);
+    let mut cx = Cx {
+        rep: Rep {
+            array: Some(&mut reports),
+            level: level.code(),
+            stitched: false,
+        },
+        keys: &keys,
+        index,
+        edge_sets: edge::EdgeSets::default(),
+    };
+    // the tolerance pass on the edges' uses, where the whole check runs it: before the walk
+    let mut ok = brep::edge_tolerances(k, b, &mut cx, &edge_list)?;
+    for f in face_list {
+        k.check_cancelled(OP)?;
+        ok &= face::face(k, b, &mut cx, f)?;
+    }
+    for l in loop_list {
+        k.check_cancelled(OP)?;
+        ok &= loops::loop_(k, b, &mut cx, l)?;
+    }
+    for e in edge_list {
+        k.check_cancelled(OP)?;
+        ok &= edge::edge(k, b, &mut cx, e)?;
+    }
+    for v in vertex_list {
+        k.check_cancelled(OP)?;
+        ok &= vertex::vertex(k, b, &mut cx, v)?;
+    }
+    Ok(BrepCheck {
+        pointers: PointerCheck::Passed,
+        pointer_reports: AssertArray::new(),
+        assert_valid: Some(ok),
+        reports,
+    })
+}
+
 /// [`check_brep_scoped`], also saying how many `ValidatePointers` passes its `AssertValid` ran
 /// (0 when [`check_brep_with_keys`] skipped it, or when `AssertValid` did not run).
 fn check_brep_counted(
@@ -964,6 +1097,7 @@ mod tests {
     use crate::geom::assert_array::labels::BREP_TYPE;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::vector3d::Vec3;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
 
     /// An edge use end without vertex makes the tolerance update an `SM_ERR` that says
@@ -1581,7 +1715,7 @@ mod tests {
             1e-4, 5e-4, 1e-3, 1.3e-3, 1.4e-3, 1.4897e-3, 2e-3, 2.5e-3, 2.889e-3, 4e-3, 1e-2,
         ];
         // and 200 tolerances spaced evenly in log from 1e-5 to 2e-2
-        let sweep = (0..200).map(|i| 1e-5 * 2000.0_f64.powf(f64::from(i) / 199.0));
+        let sweep = (0..200).map(|i| 1e-5 * det::powf(2000.0_f64, f64::from(i) / 199.0));
         for t in issue.into_iter().chain(sweep) {
             let found = face::partially_coincident(&k, &c21, &i21, &c24, &i24, t).unwrap();
             assert!(!found, "tol {t:e}");

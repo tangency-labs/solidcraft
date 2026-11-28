@@ -728,6 +728,7 @@ fn on_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::p1::BSplineSurface;
 
     /// The plane z = `z` over `[0, 10]^2` as a bilinear B-spline in `[0, 1]^2`.
@@ -785,7 +786,7 @@ mod tests {
         assert_eq!(nodes[1], (b, Point2::new(l, wb.y)));
         assert!(in_one_patch(&lines, nodes[0].1, nodes[1].1));
         // the mirror case at the start
-        let (a, b) = (1.0, 1.0 + 2f64.powi(-40));
+        let (a, b) = (1.0, 1.0 + det::powi(2f64, -40));
         let (wa, wb) = (Point2::new(0.5, 0.2), Point2::new(0.508, 0.2));
         let lam = (l - wa.x) / (wb.x - wa.x);
         assert!(lam > 0.0 && a + lam * (b - a) == a, "the case: lam {lam}");
@@ -1012,6 +1013,7 @@ mod tests {
         use crate::curve::ellipse::{Ellipse, EllipseOptions};
         use crate::curve::line::Line;
         use crate::geom::vector2d::Vec2;
+        use crate::math::det;
         use crate::math::Vec3;
         use crate::surface::cone::Cone;
         use crate::surface::plane::Plane;
@@ -1123,7 +1125,7 @@ mod tests {
             let k = Kernel::default();
             let c30 = cone(&k, 2.0, 30.0);
             let top = plane(Point3::new(0.0, 0.0, 4.0), X, Y);
-            let r = 2.0 + 4.0 * (30.0f64).to_radians().tan();
+            let r = 2.0 + 4.0 * det::tan((30.0f64).to_radians());
             let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 4.0), r);
             assert!(curve_on_surfaces(&k, &c, ivl, [&c30, &top], 1e-9).expect("check"));
             let (c, ivl) = circle(&k, Point3::new(0.0, 0.0, 4.0), r + 1e-3);

@@ -994,7 +994,8 @@ fn actual_host_document_switch_and_lost_pointer_cancel_pending_drag() {
         } else {
             h.frame_with(vec![egui::Event::PointerGone]);
         }
-        panel_host_pointer(&mut h, drop, false);
+        // Let go outside the window: empty canvas inside it floats the panel.
+        panel_host_pointer(&mut h, egui::pos2(-20.0, -20.0), false);
         h.frames(2);
         assert!(h.app.universal_panel_frame().unwrap().preview.is_none());
         assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
@@ -1066,7 +1067,34 @@ fn universal_host_scenarios_drive_real_shared_actions_and_leave_the_fixture_disa
         for (index, step) in steps.as_array().unwrap().iter().enumerate() {
             let action_before =
                 (step["params"]["command"] == "panel.action").then(|| crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap());
-            h.step(step).unwrap_or_else(|reason| panic!("{name}: step {index}: {reason}"));
+            // The shared-actions scenario moves specimen-0 through all four zones. Its
+            // action labels are shared by other panels: select the actual fixture controls
+            // by instance rather than the first accessible widget with the same label.
+            use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostSharedAction};
+            use solidcraft_engine::panels::{InstanceId, Zone};
+            let instance = InstanceId::new("specimen-0").unwrap();
+            let widget = step["widget"].as_str();
+            let zone = match widget {
+                Some("Floating") => Some(Zone::Floating),
+                Some("Right") => Some(Zone::Right),
+                Some("Bottom") => Some(Zone::Bottom),
+                Some("Left") => Some(Zone::Left),
+                _ => None,
+            };
+            if name == "shared actions" && widget == Some("Panel actions") {
+                panel_host_semantic_click(&mut h, HostControlTarget::Pointer(HostPointerTarget::Menu { instance }));
+            } else if name == "shared actions"
+                && let Some(zone) = zone
+            {
+                panel_host_semantic_click(&mut h, HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Move(zone) });
+                assert_eq!(
+                    h.app.panel_runtime().unwrap().layout().layout().containing(&instance).unwrap().location.zone(),
+                    zone,
+                    "{name}: step {index}: the move must land the fixture in the selected zone"
+                );
+            } else {
+                h.step(step).unwrap_or_else(|reason| panic!("{name}: step {index}: {reason}"));
+            }
             if let Some(action_before) = action_before {
                 let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
                 let applies = |value: &serde_json::Value| {
@@ -1891,7 +1919,7 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
     assert_eq!(labels, crate::prefs::UNITS);
     // The list opens above the bar, inside the window.
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    let list = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
     h.call("ui.menuPick", json!({"item":"in"}));
@@ -2069,7 +2097,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
     assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    let list = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
     for preset in crate::prefs::NAV_PRESETS {

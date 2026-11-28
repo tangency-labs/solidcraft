@@ -31,8 +31,96 @@ pub struct PointSetSummary {
 #[error("{0}")]
 pub struct PointsRefused(pub String);
 
+/// A unit normal with its proved bound: the exact unit normal is within `bound` of `value`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitNormal {
+    /// The unit normal.
+    pub value: [f64; 3],
+    /// The proved bound on its distance from the exact one.
+    pub bound: f64,
+}
+
+/// The face a point classification reads the normal of, when one is picked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PointNormalFace {
+    /// A record face index.
+    Index(usize),
+    /// A point on the face; the first containing face in record order is chosen.
+    Point([f64; 3]),
+}
+
+/// A point's material class and, on the boundary, its face (by record index) and normal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClassifiedPoint {
+    /// Inside a material region.
+    Inside,
+    /// Outside material, including holes and cavities.
+    Outside,
+    /// On a trimmed face within the body's modelling tolerance.
+    On {
+        /// Face index in the record's order.
+        face: usize,
+        /// Unit normal facing out of material.
+        normal: UnitNormal,
+    },
+}
+
+/// What the centres of round items lie on, seen along their shared axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpacingPattern {
+    /// One straight line: a row.
+    Line,
+    /// One circle and not one line: a bolt circle.
+    Circle,
+    /// Neither.
+    None,
+}
+
+/// The circle a bolt circle's centres lie on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PitchCircle {
+    /// The pitch-circle diameter.
+    pub diameter: f64,
+    /// Its centre, in the plane of the first item's centre.
+    pub centre: [f64; 3],
+    /// The angle at the centre between neighbours, in degrees, one for each gap.
+    pub angles_deg: Vec<f64>,
+    /// Where the gaps are even: the angle between neighbouring items, in degrees.
+    pub angle_pitch_deg: Option<f64>,
+}
+
+/// The spacing of round items that share one axis direction ([`Points::hole_spacing`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoleSpacing {
+    /// What the centres lie on.
+    pub pattern: SpacingPattern,
+    /// The items' indices in order along the row or round the circle; the given order where
+    /// they lie on neither.
+    pub order: Vec<usize>,
+    /// The centre-to-centre distance of each neighbouring pair in `order`. A circle has one
+    /// more, from the last item back to the first.
+    pub gaps: Vec<f64>,
+    /// The two centres each gap lies between, in the plane of the first item's centre.
+    pub gap_points: Vec<[[f64; 3]; 2]>,
+    /// The distance from the first centre in `order` to the last.
+    pub span: f64,
+    /// Whether every gap is the same.
+    pub even: bool,
+    /// The gaps' mean where they are even; otherwise the gap most of the others equal, and
+    /// none where no two gaps are the same.
+    pub pitch: Option<f64>,
+    /// The gaps (indices into `gaps`) that differ from `pitch`.
+    pub odd_gaps: Vec<usize>,
+    /// The circle of a bolt circle.
+    pub circle: Option<PitchCircle>,
+}
+
 /// The points and picks of one kernel ([`crate::OpKind::Points`]).
 pub trait Points: Backend {
+    /// The spacing of round items, each its centre and its axis direction: holes along a row or
+    /// round a bolt circle, measured centre to centre in the plane square to the axis. Refused
+    /// for fewer than two items, axes that are not parallel and two items on one centre.
+    fn hole_spacing(&self, items: &[([f64; 3], [f64; 3])]) -> Result<HoleSpacing, PointsRefused>;
     /// The distance from `a` to `b`, with its proved rounding bound.
     fn point_distance(&self, a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused>;
     /// Whether `a` and `b` meet: their rounded distance is not more than `tol`.
@@ -53,4 +141,7 @@ pub trait Points: Backend {
     /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`; `None`
     /// where either record doesn't convert or the kernel fails.
     fn flush_contact_points(&self, target: &Brep, tool: &Brep) -> Option<Vec<[f64; 3]>>;
+    /// `direction` made unit, however short it is: only a direction that is exactly zero or not
+    /// finite has none.
+    fn unit_direction(&self, direction: [f64; 3]) -> Option<[f64; 3]>;
 }

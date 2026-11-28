@@ -75,7 +75,7 @@ pub struct LocalScope {
 }
 impl LocalScope {
     pub fn validate(&self) -> PanelResult<()> {
-        valid_id(&self.workspace.0)?;
+        valid_workspace_id(&self.workspace.0)?;
         valid_id(&self.viewport.0)?;
         if let Some(id) = &self.document {
             valid_id(&id.0)?;
