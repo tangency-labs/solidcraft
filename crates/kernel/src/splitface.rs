@@ -814,7 +814,13 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, near: Vec3
 /// as [`split_body`] does.
 pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, travel: Vec3) -> Result<Vec<Body>> {
     let whole = SplitTool::Face { body: sheet, face };
-    let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::face_surface(sheet, face) else {
+    let surface = crate::face_surface(sheet, face);
+    if let Some(crate::FaceSurface::Sphere { center, radius }) = surface
+        && let Some(cup) = facing_cup(tool, center, radius, near, travel)?
+    {
+        return split_body(tool, &SplitTool::Face { body: &cup.0, face: cup.1 });
+    }
+    let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = surface else {
         return split_body(tool, &whole);
     };
     let b = tool.exact_bounds()?;
@@ -837,6 +843,41 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
         .find(|&f| matches!(crate::face_surface(&trough, f), Some(crate::FaceSurface::Cylinder { .. })))
         .ok_or_else(|| invalid("the sheet across the round has no round face"))?;
     split_body(tool, &SplitTool::Face { body: &trough, face: round })
+}
+
+/// The sheet a sphere ends a tool with along `travel`, on the half the pick `near` lies on: the
+/// hemisphere that faces the travel at the pick (it faces back along it where the tool goes in,
+/// on ahead where it leaves), its rim carried on as a cylinder of the sphere's radius, away from
+/// the sphere the way the tool comes (where it goes in) or on ahead (where it leaves). A line
+/// along the travel meets that sheet once at most, where the whole sphere's surface meets it
+/// twice, so a tool that starts inside the sphere is not ended by the sphere's far side, which
+/// the pick is not on (#1305). The sheet and its sphere face; `None` when the pick lies on the
+/// sphere's rim as seen along the travel (the sphere then splits whole).
+fn facing_cup(tool: &Body, center: Vec3, radius: f64, near: Vec3, travel: Vec3) -> Result<Option<(Body, usize)>> {
+    let Some(t) = travel.normalized() else { return Ok(None) };
+    let facing = (near - center).dot(t);
+    if facing.abs() <= 1e-6 * radius || !radius.is_finite() || radius <= 0.0 {
+        return Ok(None);
+    }
+    // Any frame holding the axis through the centre along the travel.
+    let helper = if t.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let Some(y) = t.cross(helper).normalized() else { return Ok(None) };
+    let plane = Plane { origin: center, x: t, y };
+    let b = tool.exact_bounds()?;
+    let reach = [b.min, b.max].iter().map(|q| (*q - center).len()).fold(0.0f64, f64::max) * 2.0 + 2.0 * radius + 1.0;
+    let half = std::f64::consts::FRAC_PI_2;
+    // The profile runs from the pole the pick faces to the rim, then out along the cylinder.
+    let (arc, skirt) = if facing < 0.0 {
+        (Seg2::Arc { center: Vec2::new(0.0, 0.0), radius, start: 2.0 * half, sweep: -half }, reach)
+    } else {
+        (Seg2::Arc { center: Vec2::new(0.0, 0.0), radius, start: 0.0, sweep: half }, -reach)
+    };
+    let line = Seg2::Line { a: Vec2::new(0.0, radius), b: Vec2::new(skirt, radius) };
+    let cup = crate::revolve_sheet(&plane, &[vec![arc, line]], Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), 0.0, TAU)?;
+    let round = (0..cup.face_count())
+        .find(|&f| matches!(crate::face_surface(&cup, f), Some(crate::FaceSurface::Sphere { .. })))
+        .ok_or_else(|| invalid("the sheet across the sphere has no spherical face"))?;
+    Ok(Some((cup, round)))
 }
 
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's

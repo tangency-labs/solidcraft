@@ -1196,3 +1196,42 @@ fn two_sides_to_a_slanted_construction_plane_are_refused() {
     let e = s.execute("solid.extrude", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(e.contains("two sides with a plane at a slant"), "{e}");
 }
+
+/// #1305: a cut To a sphere, from a profile on the plane tangent to it, ends on the sphere
+/// offset by To offset (radius R - d for an offset d past the face, R + |d| short of it), or is
+/// refused with its reason where that end cannot be reached: it never runs through the ball.
+/// With the profile a circle of radius a on x = R, the ball loses what lies in the cylinder
+/// between the two spheres for a positive offset (2 pi / 3 [R^3 - (R^2-a^2)^1.5 - r^3 +
+/// (r^2-a^2)^1.5]); a negative offset ends in the air outside the ball, which no cut removes.
+#[test]
+fn a_cut_to_a_sphere_with_a_to_offset_ends_on_the_offset_sphere() {
+    let (big, a) = (2.5f64, 1.25f64);
+    let cap = |r: f64| (2.0 * PI / 3.0) * (r.powi(3) - (r * r - a * a).powf(1.5));
+    let ball = 4.0 / 3.0 * PI * big.powi(3);
+    for t in [0.0f64, 1e-9, 1e-3, 0.1, 0.5] {
+        for offset in [-0.5f64, -0.01, 0.01, 0.5, 1.0] {
+            let mut s = Session::default();
+            run(&mut s, "solid.sphere", json!({"radius": big, "center": [0, 0, 0], "body_name": "Ball"}));
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [big, 0, 0], "x_dir": [0, 0, -1], "y_dir": [0, 1, 0]}, "name": "cs"}));
+            run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": a}));
+            run(&mut s, "sketch.finish", json!({}));
+            let to = [big * t.cos(), big * t.sin(), 0.0];
+            let res =
+                s.execute("solid.extrude", &json!({"sketch": "cs", "operation": "cut", "direction": "negative", "to": to, "to_offset": offset}));
+            let left = body(&mut s, "Ball")["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+            let removed = ball - left;
+            let ctx = format!("t {t} offset {offset}: {res:?} removed {removed}");
+            if offset > 0.0 {
+                let r = big - offset;
+                if r <= a {
+                    assert!(res.is_err() || removed < ball, "{ctx}");
+                    continue;
+                }
+                let want = cap(big) - cap(r);
+                assert!(res.is_ok() && (removed - want).abs() < want * 1e-4, "{ctx}, want {want}");
+            } else {
+                assert!(removed.abs() < 1e-6, "{ctx}: nothing may be removed");
+            }
+        }
+    }
+}
