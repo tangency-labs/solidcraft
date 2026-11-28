@@ -80,7 +80,7 @@ use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 
 use crate::body::{finish, finish_under, Body, Contract, Expect, Proof};
 use crate::error::status;
-use crate::session::{answer, measure_body, with_body};
+use crate::session::{answer, measure_body, read_body, with_body};
 use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
@@ -3165,13 +3165,50 @@ fn cut_running_out(
 /// `prism` that hold the run-out `p`'s inside point added, the air counted only where one of
 /// the edge's two faces stands behind it: within the part as it is with that face (the one
 /// holding the plan's point on it) moved the section's reach out along its normal, the faces
-/// around it extended or trimmed to meet it ([`offset_face_at`]). The fill so ends where the
-/// faces beside the edge's ends, carried on, close it. `None` where there is no such piece,
-/// neither face could be moved, or a boolean gives nothing.
+/// around it extended or trimmed to meet it ([`offset_face_at`]). Where that gives nothing or
+/// fails and the faces at the edge's ends are extrusions along one of the faces' normals, the
+/// part with them carried on along it backs the fill instead ([`section_fill`]). The fill so
+/// ends where the faces beside the edge's ends, carried on, close it. `None` where there is no
+/// such piece, neither backing is found, or a boolean gives nothing.
 ///
 /// # Errors
 /// The kernel's errors from the prism, the booleans and the classification.
 fn fill_running_out(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    // each face moved out; where that gives nothing or fails, the faces at the edge's ends
+    // carried on along one face's normal (tangency-labs/solidcraft#22821)
+    let fill = match moved_faces_fill(out, prism, p) {
+        Ok(Some(fill)) => Some(fill),
+        Err(e) if matches!(e, Error::Cancelled | Error::OutOfFuel { .. }) => return Err(e),
+        Ok(None) | Err(_) => section_fill(out, prism, p)?,
+    };
+    let Some(fill) = fill else {
+        return Ok(None);
+    };
+    let pieces = blend_pieces(&fill, p)?;
+    if pieces.is_empty() {
+        return Ok(None);
+    }
+    let mut result = out.copy()?;
+    for piece in pieces {
+        let Some(joined) = crate::boolean::boolean(result, piece, crate::BooleanOp::Union)? else {
+            return Ok(None);
+        };
+        result = joined;
+    }
+    Ok(Some(result))
+}
+
+/// [`fill_running_out`]'s air within `prism` backed by each of the edge's faces moved out
+/// ([`offset_face_at`]), united: `None` where neither face could be moved or a boolean gives
+/// nothing.
+///
+/// # Errors
+/// The kernel's errors from the moves, the prism and the booleans.
+fn moved_faces_fill(
     out: &Body,
     prism: &Prism,
     p: &solidcore::blend::run_out::RunOut,
@@ -3190,21 +3227,85 @@ fn fill_running_out(
             Some(f) => crate::boolean::boolean(f, within, crate::BooleanOp::Union)?,
         };
     }
-    let Some(fill) = fill else {
-        return Ok(None);
-    };
-    let pieces = blend_pieces(&fill, p)?;
-    if pieces.is_empty() {
-        return Ok(None);
-    }
-    let mut result = out.copy()?;
-    for piece in pieces {
-        let Some(joined) = crate::boolean::boolean(result, piece, crate::BooleanOp::Union)? else {
-            return Ok(None);
+    Ok(fill)
+}
+
+/// Not upstream (tangency-labs/solidcraft#22821): [`fill_running_out`]'s air within `prism`,
+/// backed by the part with the faces at the edge's ends carried on exactly. For each of the
+/// concave edge's two faces, along its outward normal `d` (square to the edge): the part within
+/// a slab twice the section's reach deep, just behind the face and square to `d`, is taken.
+/// Where every face of that slab runs straight along `d` (the kernel's bound on how far it
+/// strays across `d`, [`solidcore::prism::measure::face_straying`], within a thousand times
+/// the plan's tolerance) or lies at one of the slab's two levels, the slab is a uniform prism
+/// along `d`: the faces it meets (those at the edge's ends, and those they run on into) are
+/// extrusions along `d`. The slab moved along `d` by its own depth is then the part with those
+/// faces carried on past the face, as far as the blend reaches, and the air of `prism` within it
+/// is the fill, ended exactly where those faces close it. That holds also where the faces at an
+/// end are a cove split between the two faces' sides, the round's end faces being the
+/// cove and the faces it runs on into tangentially, where moving the face itself
+/// ([`offset_face_at`]) gives a body the booleans fail on: tried after it. `None` where neither
+/// face's slab is such a prism or a boolean gives nothing.
+///
+/// # Errors
+/// The kernel's errors from the slab's copy and its section's prism; [`Error::Cancelled`] and
+/// [`Error::OutOfFuel`] from any step.
+fn section_fill(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    use solidcore::blend::run_out::slab_is_prism;
+    use solidcore_record::{Loop2, Region2, Vec2};
+    // a step that fails is a slab that is not such a prism, unless the work was stopped
+    let stops = |e: &Error| matches!(e, Error::Cancelled | Error::OutOfFuel { .. });
+    let r = |v: Vec3| solidcore_record::Vec3::new(v.x, v.y, v.z);
+    for s in p.backing_slabs() {
+        let plane = solidcore_record::Plane {
+            origin: r(s.origin),
+            x: r(s.x),
+            y: r(s.y),
         };
-        result = joined;
+        let rect = Region2 {
+            outer: Loop2::polygon(&s.rect.map(|[a, b]| Vec2::new(a, b))),
+            holes: Vec::new(),
+        };
+        let [lo, hi] = s.levels;
+        let slab = match crate::prism::extrude_planar_regions(&plane, &[rect], lo, hi) {
+            Ok(slab) => slab,
+            Err(e) if stops(&e) => return Err(e),
+            Err(_) => continue,
+        };
+        // the part within the slab, just behind the face
+        let behind = match crate::boolean::boolean(out.copy()?, slab, crate::BooleanOp::Intersect) {
+            Ok(Some(b)) => b,
+            Err(e) if stops(&e) => return Err(e),
+            Ok(None) | Err(_) => continue,
+        };
+        match read_body("section_fill", &behind, |k, b| slab_is_prism(k, b, &s)) {
+            Ok(true) => {}
+            Err(e) if stops(&e) => return Err(e),
+            Ok(false) | Err(_) => continue,
+        }
+        // moved past the face: the part with the faces at the edge's ends carried on
+        let t = s.shift;
+        let moved = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [t.x, t.y, t.z, 1.0],
+        ];
+        match behind.transform(&moved) {
+            Ok(()) => {}
+            Err(e) if stops(&e) => return Err(e),
+            Err(_) => continue,
+        }
+        match crate::boolean::boolean(prism.body()?, behind, crate::BooleanOp::Intersect) {
+            Ok(Some(within)) => return Ok(Some(within)),
+            Err(e) if stops(&e) => return Err(e),
+            Ok(None) | Err(_) => {}
+        }
     }
-    Ok(Some(result))
+    Ok(None)
 }
 
 /// A copy of `body` with its face through `at` (within `tol`) moved `distance` out along its

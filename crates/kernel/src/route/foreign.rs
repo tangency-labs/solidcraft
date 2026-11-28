@@ -183,17 +183,43 @@ pub(crate) fn run_each<B: Backend>(
     run: impl FnOnce(&B) -> std::result::Result<Vec<B::Form>, B::Error>,
     finish: impl FnOnce(Vec<Body>) -> Result<Vec<Body>>,
 ) -> Option<Result<Vec<Body>>> {
+    run_parts(
+        backend,
+        op,
+        &[],
+        |k, _| run(k),
+        |bodies| finish(bodies).map_err(|e| BackendError::Exchange(format!("its faces don't name as solidcore's do ({e})"))),
+    )
+}
+
+/// `run` on `backend` with `operands` taken there as their records, for an operation that makes
+/// several bodies (a split's pieces), each brought back as a body and handed with the rest to
+/// `finish`, which puts them in solidcore's order or says why it can't: `None` when the
+/// operation stays on solidcore (another kernel chosen, an operation or an operand the backend
+/// doesn't take, or `finish`'s refusal, each logged with the reason), else the backend's answer.
+pub(crate) fn run_parts<B: Backend>(
+    backend: &B,
+    op: OpKind,
+    operands: &[&Body],
+    run: impl FnOnce(&B, &[B::Form]) -> std::result::Result<Vec<B::Form>, B::Error>,
+    finish: impl FnOnce(Vec<Body>) -> std::result::Result<Vec<Body>, BackendError>,
+) -> Option<Result<Vec<Body>>> {
     if kernel() != Kernel::Occt {
         return None;
     }
-    if backend.supports(op) == Support::No {
-        log::info!("{}: {} doesn't take it (not in its support list); solidcore runs it", op.name(), B::ID);
+    if backend.supports(op) == Support::No || operands.iter().any(|b| b.is_mesh()) {
+        // Throwaway OCCT test build only: the smoke step reads these lines per feature.
+        log::info!("{}: {} doesn't take it ({}); solidcore runs it", op.name(), B::ID, if backend.supports(op) == Support::No { "not in its support list" } else { "a mesh operand" });
         FELL_BACK.fetch_add(1, Ordering::Relaxed);
         return None;
     }
     let what = op.name();
     let answer = crate::guard(what, || {
-        let made = match run(backend) {
+        let forms = match operands.iter().map(|b| backend.import(b.record())).collect::<std::result::Result<Vec<_>, _>>() {
+            Ok(forms) => forms,
+            Err(e) => return Ok(Err(e.into())),
+        };
+        let made = match run(backend, &forms) {
             Ok(made) => made,
             Err(e) => return Ok(Err(e.into())),
         };
@@ -205,10 +231,7 @@ pub(crate) fn run_each<B: Backend>(
             };
             bodies.push(Body::from_record(out.record)?);
         }
-        Ok(match finish(bodies) {
-            Ok(named) => Ok(named),
-            Err(e) => Err(BackendError::Exchange(format!("its faces don't name as solidcore's do ({e})"))),
-        })
+        Ok(finish(bodies))
     });
     match answer {
         Ok(Ok(bodies)) => {

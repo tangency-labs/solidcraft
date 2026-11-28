@@ -2366,6 +2366,21 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
         .unwrap()
     };
     let c: [f64; 2] = [0.496_405_514_95, 0.059_846_175_546_1];
+    let removed = notch_in_the_seam_cones_rim(c);
+    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
+    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
+}
+
+/// What a round notch, r 0.06 about `c` and from z = 999.5 to the top, takes from the frustum
+/// of radius 3 at z = 0 to 0.5 at z = 1000 about +z: the integral over z of the area the disc
+/// shares with the frustum's circle there (two circles' lens, in closed form), by Simpson's
+/// rule.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn notch_in_the_seam_cones_rim(c: [f64; 2]) -> f64 {
+    let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
     let d = c[0].hypot(c[1]);
     // the area the disc of radius `r` about `c` shares with the disc of radius `big` about the
     // axis, `big` - r < d < `big` + r
@@ -2378,7 +2393,7 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
     let radius_at = |z: f64| r_top + (r_base - r_top) * (height - z) / height;
     let n = 2000;
     let h = depth / f64::from(n);
-    let removed = (0..=n)
+    (0..=n)
         .map(|i| {
             let w = if i == 0 || i == n {
                 1.0
@@ -2391,12 +2406,55 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
         })
         .sum::<f64>()
         * h
-        / 3.0;
-    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
-    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
-        .unwrap()
-        .unwrap();
-    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
+        / 3.0
+}
+
+/// SolidCraft's cone and notch of #22813, as its `solid.cone` and `solid.cylinder` build them
+/// (the operands its boolean was handed, `data/issue_22813_*.smb`): the frustum of
+/// [`a_round_notch_overlapping_a_cones_seam_backwards_is_cut`], revolved so that its side is
+/// parametrised from the top rim down and clockwise, and the r 0.06 notch whose circle reaches
+/// d = 1e-5 past the seam (centre at the angle (0.06 + d) / 0.5 on the rim), then turned
+/// 1e-5 rad about +z (d = 5e-6). The wall's curve crosses the seam at a slant of about 2e-4
+/// rad and comes out of the surface intersection in two pieces, one each side of the seam,
+/// that overlap along it within tolerance. The top one was cut at its crossing, and its rest
+/// ran on along the seam to its end, back along the floor's piece from the proto vertex at the
+/// crossing, which the floor's piece ends at once the two pieces' overlap above it is
+/// combined. Proto edges that meet at a proto vertex were never looked at for an overlap, so
+/// the floor's piece kept its own run beside the seam's, the wall's loop stayed open between
+/// the crossing and where the floor's piece meets the seam, the side face and the notch's
+/// piece of it were one, and the cut came out empty. Each is one valid solid of the five
+/// faces, ten edges and seven vertices of that test, V = the frustum less
+/// [`notch_in_the_seam_cones_rim`].
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_round_notch_a_tolerance_over_a_revolved_cones_seam_is_cut() {
+    all_fixes();
+    let read = |smb: &[u8]| Body::from_smb(smb.to_vec(), false).unwrap();
+    let cone = include_bytes!("data/issue_22813_cone.smb");
+    let frustum = PI * 1000.0 / 3.0 * (9.0 + 1.5 + 0.25);
+    let c = [0.496_405_514_949_725_07, 0.059_846_175_546_130_59];
+    for turn in [0.0, 1e-5_f64] {
+        let notch = read(include_bytes!("data/issue_22813_notch.smb"));
+        let (s, co) = turn.sin_cos();
+        notch
+            .transform(&[
+                [co, s, 0.0, 0.0],
+                [-s, co, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ])
+            .unwrap();
+        let at = [c[0] * co - c[1] * s, c[0] * s + c[1] * co];
+        let cut = boolean(read(cone), notch, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(
+            &cut,
+            [5, 10, 7],
+            frustum - notch_in_the_seam_cones_rim(at),
+            1e-9,
+        );
+    }
 }
 
 /// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:

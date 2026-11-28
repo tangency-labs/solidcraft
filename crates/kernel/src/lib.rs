@@ -354,7 +354,7 @@ pub use fill::patch_edges_crowned;
 pub use fill::patch_edges_report;
 pub use fill::patch_edges_with;
 pub use helix::MAX_HELIX_TURNS;
-pub use helix::require_plane_through_axis;
+pub use helix::require_unfolded_screw_section;
 pub use helix::sweep_helix_mesh;
 pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;

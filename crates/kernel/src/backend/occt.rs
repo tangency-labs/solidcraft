@@ -151,7 +151,7 @@ impl Backend for Occt {
         match op {
             OpKind::Box | OpKind::Cylinder | OpKind::Sphere | OpKind::Torus | OpKind::Boolean => Support::Yes,
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
-            OpKind::Revolve => Support::Some("arcs not joined first".into()),
+            OpKind::Revolve => Support::Yes,
             OpKind::Fillet => Support::Some("constant radius with mitred turns".into()),
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
@@ -159,6 +159,7 @@ impl Backend for Occt {
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
             OpKind::Loft => Support::Some("two sections, no rails".into()),
+            OpKind::Split => Support::Some("a body split by a plane into one piece on each side; a sheet trimmed by a plane".into()),
             _ => Support::No,
         }
     }
@@ -242,11 +243,10 @@ impl Modelling for Occt {
         _whole: bool,
         sides: RevolveSides<'_>,
     ) -> Result<Vec<Shape>, BackendError> {
-        let one_curve = match sides {
-            RevolveSides::AsDrawn => None,
-            RevolveSides::JoinFreeForm(f) => Some(f),
-            // solidcore's revolution certifies and joins pieces of one circle as it turns them.
-            RevolveSides::JoinArcs => return unsupported("a revolution that joins arcs"),
+        let (one_curve, join_arcs) = match sides {
+            RevolveSides::AsDrawn => (None, false),
+            RevolveSides::JoinFreeForm(f) => (Some(f), false),
+            RevolveSides::JoinArcs => (None, true),
         };
         let plans = crate::build::revolution_plans_of(plane, regions, axis.origin, axis.dir, angle, one_curve).map_err(refused)?;
         plans
@@ -254,6 +254,13 @@ impl Modelling for Occt {
             .map(|x| {
                 let (curves, origin, k, turn) =
                     crate::smlib_sweeps::revolution_curves(plane, &x.pieces, x.origin, x.axis, x.angle).map_err(refused)?;
+                // Pieces of one circle joined as solidcore joins them before it turns them.
+                let curves = if join_arcs {
+                    solidcore_ops::sweep::join_profile_arcs(&curves)
+                        .map_err(|e| BackendError::Unsupported(format!("input solidcore refuses ({e})")))?
+                } else {
+                    curves
+                };
                 Shape::revolve_profile(&encode_profile(&curves)?, origin, k, turn).map_err(failed)
             })
             .collect()
@@ -280,8 +287,10 @@ impl Modelling for Occt {
         body.fillet_nearest(&points, radius).map_err(failed)
     }
 
-    fn fillet_removing(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
-        unsupported("a fillet that removes overflowing picks")
+    fn fillet_removing(&self, body: &Shape, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
+        // Every pick rounded, none removed: where rounds overflow their faces OCCT fails, and
+        // solidcore runs it and says which picks went.
+        self.fillet(body, edges, radius, turn).map(|s| (s, Vec::new()))
     }
 
     fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
@@ -357,8 +366,14 @@ impl Modelling for Occt {
         unsupported("a face split")
     }
 
-    fn split_body(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
-        unsupported("a body split")
+    fn split_body(&self, body: &Shape, tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
+        // A plane only: a face's surface extended, and sketch curves swept, are solidcore's.
+        let SplitTool::Plane(plane) = tool else { return unsupported("a split by a face or by sketch curves") };
+        let n = solidcraft_geom::PlaneGeom::normal(plane);
+        if !finite(&xyz(plane.origin)) || !finite(&xyz(n)) || n == Vec3::ZERO {
+            return unsupported("a split plane solidcore refuses");
+        }
+        body.split_plane(xyz(plane.origin), xyz(n)).and_then(|pieces| pieces.solids()).map_err(failed)
     }
 
     fn split_body_by_faces(&self, _body: &Shape, _sheet: &Shape, _face: usize, _faces: &[usize]) -> Result<Vec<Shape>, BackendError> {
@@ -369,8 +384,17 @@ impl Modelling for Occt {
         unsupported("a body split")
     }
 
-    fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
-        unsupported("a trim")
+    fn trim_keep(&self, body: &Shape, tool: &SplitTool<'_, Shape>, keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
+        // A plane, keeping the side a point is on: other tools, and regions picked, are solidcore's.
+        let (SplitTool::Plane(plane), TrimKeep::Side(at)) = (tool, keep) else {
+            return unsupported("a trim by a face or by sketch curves, or keeping picked regions");
+        };
+        let n = solidcraft_geom::PlaneGeom::normal(plane);
+        let side = solidcraft_geom::PlaneGeom::height(plane, at);
+        if !finite(&xyz(plane.origin)) || !finite(&xyz(n)) || n == Vec3::ZERO || !side.is_finite() || side == 0.0 {
+            return unsupported("a trim plane solidcore refuses, or a point on it");
+        }
+        body.trim_plane(xyz(plane.origin), xyz(n), side > 0.0).map_err(failed)
     }
 
     fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
@@ -456,6 +480,7 @@ mod tests {
                     | OpKind::OffsetFaces
                     | OpKind::Draft
                     | OpKind::Loft
+                    | OpKind::Split
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
@@ -641,17 +666,26 @@ mod tests {
     }
 
     #[test]
-    fn a_revolution_that_joins_arcs_runs_on_solidcore() {
-        use crate::route::foreign::{Kernel, fell_back, set_kernel};
-        use solidcore_record::Vec2;
+    fn revolutions_that_join_arcs_match_solidcore_with_the_same_names() {
+        use solidcore_record::{Loop2, Seg2, Vec2};
+        use std::f64::consts::{PI, TAU};
+        let pl = Plane::XZ;
+        let y = Vec2::new(0.0, 1.0);
+        // x 2..4, z 0..3 turned 1 radian: area 6 about a centroid at radius 3 (Pappus).
         let rect = region(poly(&[(2.0, 0.0), (4.0, 0.0), (4.0, 3.0), (2.0, 3.0)]), vec![]);
-        let _chosen = crate::route::foreign::choosing();
-        set_kernel(Kernel::Occt);
-        let before = fell_back();
-        let b = crate::route::revolve_joining_arcs(&Plane::XZ, std::slice::from_ref(&rect), Vec2::ZERO, Vec2::new(0.0, 1.0), 1.0).unwrap();
-        set_kernel(Kernel::Solidcore);
-        assert!(fell_back() > before);
-        assert!(b[0].history().is_some());
+        parity("a rectangle, nothing to join", Some(18.0), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&rect), Vec2::ZERO, y, 1.0)
+        });
+        // A disc of r 1 at radius 6 drawn as two half circles, joined into one: a ring torus,
+        // 2π · 6 · π.
+        let half = |start: f64| Seg2::Arc { center: Vec2::new(6.0, 0.0), radius: 1.0, start, sweep: PI };
+        let disc = region(Loop2 { segs: vec![half(0.0), half(PI)] }, vec![]);
+        parity("two half circles joined", Some(12.0 * PI * PI), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&disc), Vec2::ZERO, y, TAU)
+        });
+        parity("two half circles joined, a quarter turn", Some(3.0 * PI * PI), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&disc), Vec2::ZERO, y, PI / 2.0)
+        });
     }
 
     /// `build` on both kernels: Open CASCADE ran it, the shared check passes both, and their
@@ -740,5 +774,142 @@ mod tests {
         crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))]).unwrap();
         set_kernel(Kernel::Solidcore);
         assert!(fell_back() > before);
+    }
+
+    /// `build` (a split) on both kernels: Open CASCADE ran it, and piece by piece, in order, the
+    /// shared check passes both and their volume (each within 1e-9 of `volumes`), area, face and
+    /// edge counts and centroid agree. Open CASCADE's pieces carry no history yet.
+    fn same_pieces(what: &str, volumes: &[f64], build: impl Fn() -> crate::Result<Vec<Body>>) {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let grade = |b: &Body| {
+            assert!(matches!(crate::failing_check(b), Ok(None)), "{what}: the shared check fails");
+            let m = crate::measure(b).unwrap();
+            (m.volume, m.area, b.record().faces.len(), b.record().edges.len(), m.centroid)
+        };
+        let _chosen = crate::route::foreign::choosing();
+        set_kernel(Kernel::Solidcore);
+        let ours: Vec<_> = build().unwrap().iter().map(grade).collect();
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        let theirs: Vec<_> = build().unwrap().iter().map(grade).collect();
+        set_kernel(Kernel::Solidcore);
+        assert_eq!(fell_back(), before, "{what}: solidcore ran it");
+        assert_eq!(ours.len(), volumes.len(), "{what}: solidcore's pieces");
+        assert_eq!(theirs.len(), volumes.len(), "{what}: Open CASCADE's pieces");
+        for ((o, t), &v) in ours.iter().zip(&theirs).zip(volumes) {
+            assert!((t.0 - v).abs() <= 1e-9 * v, "{what}: volume {} against {v}", t.0);
+            assert!((o.1 - t.1).abs() <= 1e-9 * o.1, "{what}: area {} against {}", t.1, o.1);
+            assert_eq!((o.2, o.3), (t.2, t.3), "{what}: faces and edges");
+            let apart = ((o.4.x - t.4.x).powi(2) + (o.4.y - t.4.y).powi(2) + (o.4.z - t.4.z).powi(2)).sqrt();
+            assert!(apart <= 1e-9 * v.cbrt(), "{what}: centroid {:?} against {:?}", t.4, o.4);
+        }
+    }
+
+    #[test]
+    fn splits_by_a_plane_match_solidcore_piece_by_piece() {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        use solidcraft_geom::PlaneGeom as _;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let at = |o: Vec3, n: Vec3| Plane::from_normal(o, n).unwrap();
+        let split = |plane: Plane| move || crate::route::split_body(&cube()?, &crate::SplitTool::Plane(plane));
+        // The back (below the plane) first: 3 of the 10 high, then 7.
+        same_pieces("a box cut across", &[300.0, 700.0], split(at(v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0))));
+        // The plane turned over: its back is now above.
+        same_pieces("a box cut across, plane turned over", &[700.0, 300.0], split(at(v(0.0, 0.0, 3.0), v(0.0, 0.0, -1.0))));
+        // Corner to corner: two prisms of half the box.
+        same_pieces("a box cut on its diagonal", &[500.0, 500.0], split(at(v(0.0, 0.0, 0.0), v(1.0, -1.0, 0.0))));
+        // A cylinder cut along its axis: two half cylinders of r 2, 5 long.
+        let half = std::f64::consts::PI * 4.0 * 5.0 / 2.0;
+        same_pieces("a cylinder halved along its axis", &[half, half], || {
+            crate::route::split_body(
+                &crate::route::cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 2.0, 5.0)?,
+                &crate::SplitTool::Plane(at(v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0))),
+            )
+        });
+        // A plane that misses the box: solidcore's whole body.
+        let _chosen = crate::route::foreign::choosing();
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        let whole = split(at(v(0.0, 0.0, 20.0), v(0.0, 0.0, 1.0)))().unwrap();
+        set_kernel(Kernel::Solidcore);
+        assert!(fell_back() > before, "a miss runs on solidcore");
+        assert_eq!(whole.len(), 1);
+        assert!((volume(&whole[0]) - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sheets_trimmed_by_a_plane_match_solidcore() {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        use solidcraft_geom::PlaneGeom as _;
+        let square = Region2 { outer: poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), holes: vec![] };
+        let holed = Region2 { outer: square.outer.clone(), holes: vec![solidcore_record::Loop2::circle(solidcore_record::Vec2::new(5.0, 5.0), 2.0)] };
+        let grade = |b: &Body| {
+            let m = crate::measure(b).unwrap();
+            (m.area, b.record().faces.len(), b.record().edges.len(), b.is_surface())
+        };
+        let at = |o: Vec3, n: Vec3| Plane::from_normal(o, n).unwrap();
+        let cases = [
+            ("a square, the right 7 kept", &square, at(v(3.0, 0.0, 0.0), v(1.0, 0.0, 0.0)), v(9.0, 5.0, 0.0), 70.0),
+            ("a square, the left 3 kept", &square, at(v(3.0, 0.0, 0.0), v(1.0, 0.0, 0.0)), v(1.0, 5.0, 0.0), 30.0),
+            ("a square cut on its diagonal", &square, at(v(0.0, 0.0, 0.0), v(1.0, -1.0, 0.0)), v(9.0, 1.0, 0.0), 50.0),
+            (
+                "a square with a hole, halved through it",
+                &holed,
+                at(v(5.0, 0.0, 0.0), v(1.0, 0.0, 0.0)),
+                v(9.0, 5.0, 0.0),
+                50.0 - 2.0 * std::f64::consts::PI,
+            ),
+        ];
+        let _chosen = crate::route::foreign::choosing();
+        for (what, region, plane, keep, area) in cases {
+            let trim = || {
+                crate::route::trim_keep(&crate::surfaces::patch_region(&Plane::XY, region)?, &crate::SplitTool::Plane(plane), TrimKeep::Side(keep))
+            };
+            set_kernel(Kernel::Solidcore);
+            let ours = grade(&trim().unwrap());
+            set_kernel(Kernel::Occt);
+            let before = fell_back();
+            let theirs = grade(&trim().unwrap());
+            set_kernel(Kernel::Solidcore);
+            assert_eq!(fell_back(), before, "{what}: solidcore ran it");
+            assert!((theirs.0 - area).abs() <= 1e-9 * area, "{what}: area {} against {area}", theirs.0);
+            assert!((ours.0 - theirs.0).abs() <= 1e-9 * area, "{what}: area {} against {}", theirs.0, ours.0);
+            assert_eq!((ours.1, ours.2, ours.3), (theirs.1, theirs.2, theirs.3), "{what}: faces, edges, a sheet");
+        }
+    }
+
+    #[test]
+    fn the_fillet_feature_s_rounds_match_solidcore() {
+        use std::f64::consts::PI;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let removing = |edges: Vec<Vec3>, r: f64| {
+            move || {
+                let (b, gone) = crate::route::fillet_removing(&cube()?, &edges, r, FilletTurn::Mitre)?;
+                assert!(gone.is_empty(), "no pick removed");
+                Ok(b)
+            }
+        };
+        // One edge, r 1: the section r² − πr²/4 along 10.
+        same_solid("one edge rounded", 1000.0 - 10.0 * (1.0 - PI / 4.0), removing(vec![v(5.0, 0.0, 10.0)], 1.0));
+        // The four top edges, mitred (the matrix's closed form).
+        let top = vec![v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0), v(5.0, 10.0, 10.0), v(0.0, 5.0, 10.0)];
+        same_solid("the top edges rounded, mitred", 1000.0 - 4.0 * (10.0 * (1.0 - PI / 4.0) - 2.0 * (5.0 / 6.0 - PI / 4.0)), removing(top, 1.0));
+    }
+
+    #[test]
+    fn a_round_too_large_reads_as_solidcore_s() {
+        use crate::route::foreign::{Kernel, set_kernel};
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0)).unwrap();
+        let _chosen = crate::route::foreign::choosing();
+        let edges = [v(5.0, 0.0, 10.0)];
+        set_kernel(Kernel::Solidcore);
+        let ours = crate::route::fillet_removing(&cube(), &edges, 12.0, FilletTurn::Mitre).map(|(b, g)| (volume(&b), g.len()));
+        set_kernel(Kernel::Occt);
+        let theirs = crate::route::fillet_removing(&cube(), &edges, 12.0, FilletTurn::Mitre).map(|(b, g)| (volume(&b), g.len()));
+        set_kernel(Kernel::Solidcore);
+        match (ours, theirs) {
+            (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+            (a, b) => assert!(a.is_ok() && b.is_ok(), "{a:?} against {b:?}"),
+        }
     }
 }

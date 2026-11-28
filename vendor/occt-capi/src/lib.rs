@@ -59,6 +59,9 @@ mod raw {
         pub fn occt_volume(h: u32) -> f64;
         pub fn occt_area(h: u32) -> f64;
         pub fn occt_solid_count(h: u32) -> i32;
+        pub fn occt_solid_at(h: u32, index: i32) -> u32;
+        pub fn occt_split_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64) -> u32;
+        pub fn occt_trim_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64, side: i32) -> u32;
 
         pub fn occt_step_write(h: u32) -> u32;
         pub fn occt_step_read(data: *const u8, len: usize) -> u32;
@@ -66,7 +69,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -268,6 +271,26 @@ impl Shape {
     pub fn loft_ruled(sections: &[f64]) -> Result<Shape> {
         // SAFETY: `sections.len()` readable doubles.
         shape(unsafe { raw::occt_loft_ruled(sections.as_ptr(), sections.len()) })
+    }
+
+    /// The shape cut by the plane through `origin` square to `normal`: a compound of its pieces.
+    pub fn split_plane(&self, origin: [f64; 3], normal: [f64; 3]) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_split_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2]) })
+    }
+
+    /// A sheet cut by the plane through `origin` square to `normal`, keeping as one shell the
+    /// faces on the normal's side (`above`) or its back.
+    pub fn trim_plane(&self, origin: [f64; 3], normal: [f64; 3], above: bool) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_trim_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2], if above { 1 } else { -1 }) })
+    }
+
+    /// The shape's solids, in OCCT's order.
+    pub fn solids(&self) -> Result<Vec<Shape>> {
+        let n = i32::try_from(self.solid_count()?).map_err(|_| Error("too many solids".into()))?;
+        // SAFETY: a live handle and an index below its solid count.
+        (0..n).map(|i| shape(unsafe { raw::occt_solid_at(self.0, i) })).collect()
     }
 
     /// Whether OCCT's own checker passes the shape.

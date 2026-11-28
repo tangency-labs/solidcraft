@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #include "internal.hpp"
 
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Shell.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -360,5 +363,73 @@ API uint32_t occt_loft_ruled(const void* data, size_t count) {
     maker.Build();
     if (!maker.IsDone()) throw std::runtime_error("the loft could not be built");
     return put_shape(maker.Shape());
+  });
+}
+
+namespace {
+
+// `shape` cut by the plane through `origin` square to `normal`, bounded well past the shape.
+TopoDS_Shape split_by_plane(const TopoDS_Shape& shape, const gp_Pnt& origin, const gp_Dir& normal) {
+  Bnd_Box box;
+  BRepBndLib::Add(shape, box);
+  if (box.IsVoid()) throw std::invalid_argument("an empty shape");
+  double reach = 1.0;
+  for (const gp_Pnt& corner : {box.CornerMin(), box.CornerMax()}) reach = std::max(reach, 2.0 * origin.Distance(corner));
+  BRepBuilderAPI_MakeFace face(gp_Pln(origin, normal), -reach, reach, -reach, reach);
+  if (!face.IsDone()) throw std::runtime_error("the split plane could not be made");
+  TopTools_ListOfShape arguments, tools;
+  arguments.Append(shape);
+  tools.Append(face.Face());
+  BRepAlgoAPI_Splitter maker;
+  maker.SetArguments(arguments);
+  maker.SetTools(tools);
+  maker.Build();
+  if (!maker.IsDone() || maker.HasErrors()) throw std::runtime_error("the split failed");
+  return maker.Shape();
+}
+
+}  // namespace
+
+// The shape cut by the plane through (ox, oy, oz) square to (nx, ny, nz): a compound of its
+// pieces.
+API uint32_t occt_split_plane(uint32_t h, double ox, double oy, double oz, double nx, double ny, double nz) {
+  return guard_handle([&]() -> uint32_t { return put_shape(split_by_plane(get_shape(h), gp_Pnt(ox, oy, oz), gp_Dir(nx, ny, nz))); });
+}
+
+// A sheet cut by the plane through (ox, oy, oz) square to (nx, ny, nz), keeping as one shell the
+// faces on the side `side` says (above 0: the normal's side; below: the back).
+API uint32_t occt_trim_plane(uint32_t h, double ox, double oy, double oz, double nx, double ny, double nz, int32_t side) {
+  return guard_handle([&]() -> uint32_t {
+    if (side == 0) throw std::invalid_argument("no side to keep");
+    const gp_Pnt origin(ox, oy, oz);
+    const gp_Dir normal(nx, ny, nz);
+    const TopoDS_Shape cut = split_by_plane(get_shape(h), origin, normal);
+    BRep_Builder builder;
+    TopoDS_Shell shell;
+    builder.MakeShell(shell);
+    int kept = 0;
+    ShapeMap faces;
+    TopExp::MapShapes(cut, TopAbs_FACE, faces);
+    for (int f = 1; f <= faces.Extent(); ++f) {
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(faces(f), props);
+      const double height = gp_Vec(origin, props.CentreOfMass()).Dot(gp_Vec(normal));
+      if ((side > 0) ? height > 0.0 : height < 0.0) {
+        builder.Add(shell, faces(f));
+        ++kept;
+      }
+    }
+    if (kept == 0) throw std::runtime_error("nothing is left on that side of the plane");
+    return put_shape(shell);
+  });
+}
+
+// The shape's solid `index` (from 0, in TopExp order).
+API uint32_t occt_solid_at(uint32_t h, int32_t index) {
+  return guard_handle([&]() -> uint32_t {
+    ShapeMap solids;
+    TopExp::MapShapes(get_shape(h), TopAbs_SOLID, solids);
+    if (index < 0 || index >= solids.Extent()) throw std::out_of_range("the shape has no such solid");
+    return put_shape(solids(index + 1));
   });
 }
