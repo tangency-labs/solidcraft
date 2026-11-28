@@ -61,6 +61,21 @@ pub fn fill_channel(
     })
 }
 
+/// The depth margin the fill of the channel between `left` and `right` keeps from what a face
+/// touches, solidcore's ([`solidcore_ops::prism::fill_margin`]): for a caller that compares walls
+/// against the fill's own margin rather than computing it again.
+///
+/// # Errors
+/// [`KernelError::Internal`] for a kernel defect, [`KernelError::Failed`] for its other failures.
+pub fn fill_margin(left: &[Seg2], right: &[Seg2]) -> Result<f64> {
+    crate::guard("fill margin", || {
+        solidcore_ops::prism::fill_margin(left, right).map_err(|e| match e {
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("fill margin: {message}")),
+            e => KernelError::Failed(format!("fill margin: {e}")),
+        })
+    })
+}
+
 pub use solidcore_ops::prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
 
 /// Each loop closed within ten times `tol` and within the segment budget, each segment finite

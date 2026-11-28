@@ -4,18 +4,20 @@
 //! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
 //! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
 //! parts only read, and a plate not straight along the joint (naming its wall), an outer face that
-//! is no plane, a right outer face off the arrow side, square to the left one or turned 45° or more
+//! is no plane, a right outer face off the arrow side or turned back over the groove by 45° or more
 //! (on and off the world axes), a round groove whose walls are no cylinders and faces past the
-//! direction search's budget refused; the weld filling a Y groove and a round groove flat (their
-//! volumes in closed form), a fill the groove cannot take refused with the size that builds; parts
-//! of different length, a gap that steps along the joint and a plate whose ends lean (both, or one
-//! with the other square) refused with the stretches that keep one section, each of which builds on
-//! its own; a wall whose runs never overlap refused as never whole; a wall with a hole or a notch
-//! refused as interrupted; a square end read in two pieces and a stretch asked a hair past its ends
-//! still built as they should; two halves of one circle not taken for one section; a pick off the
-//! chain refused naming it; the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a
-//! warning on the weld face, no. 515 on the root side, full penetration). Ported from the second groove PR's first slice (solidcore `weld::groove::joint`,
-//! never pushed) onto ops reads, now through the kernel interface (#18500).
+//! direction search's budget refused, and a right outer face square to the left one read as a
+//! corner and filled (on and off the world axes); the weld filling a Y groove and a round groove
+//! flat (their volumes in closed form), a fill the groove cannot take refused with the size that
+//! builds; parts of different length, a gap that steps along the joint and a plate whose ends lean
+//! (both, or one with the other square) refused with the stretches that keep one section, each of
+//! which builds on its own; a wall whose runs never overlap refused as never whole; a wall with a
+//! hole or a notch refused as interrupted; a square end read in two pieces and a stretch asked a
+//! hair past its ends still built as they should; two halves of one circle not taken for one
+//! section; a pick off the chain refused naming it; the fill's notes and refusals in weld words
+//! (ISO 6520-1 no. 511 as a warning on the weld face, no. 515 on the root side, full penetration).
+//! Ported from the second groove PR's first slice (solidcore `weld::groove::joint`, never pushed)
+//! onto ops reads, now through the kernel interface (#18500).
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -23,6 +25,9 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{Body, Contour, extrude_planar_regions};
 
 use super::*;
+
+#[path = "weld_groove_t_corner_tests.rs"]
+mod t_corner;
 
 /// A plate: the polygon `corners` (x, y, counter-clockwise) swept 120 along z.
 fn plate(corners: &[(f64, f64)]) -> Body {
@@ -273,34 +278,40 @@ fn a_right_outer_face_off_the_arrow_side_is_refused() {
     assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, down)[0] });
 }
 
-/// brett19's point 3 on #22033 review 5: a right outer face square to the left one (a corner joint,
-/// not covered here) is refused whatever the rounding, on the world axes and off them (the plane of
-/// [`a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance`]). The right
-/// plate stands below the joint: its top is its groove face, its side facing away from the left
-/// plate its outer face.
+/// brett19's point 3 on #22033 review 5, at a corner: a right outer face square to the left one is
+/// read as a corner joint's whatever the rounding, on the world axes and off them (the plane of
+/// [`a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance`]): the frame is
+/// the left plate's, and the weld fills the groove (brett19's point 8 on #22504). A lying plate 8
+/// thick, its square end at x = 0, on an upright plate 8 thick whose top is beveled 45° from its
+/// outer face x = 8 down to the lying plate's corner: the triangle (0, 0), (8, 0), (0, -8), 32 mm²
+/// over 120.
 #[test]
-fn a_right_outer_face_square_to_the_left_one_is_refused_on_and_off_the_world_axes() {
+fn a_right_outer_face_square_to_the_left_one_is_read_as_a_corner_on_and_off_the_world_axes() {
     let r5 = 5.0_f64.sqrt();
     let off = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0), y: Vec3::new(-1.0 / r5, 2.0 / r5, 0.0) };
+    let h = 0.5_f64.sqrt();
     for plane in [Plane::XY, off] {
         let (ex, ey) = (plane.x, plane.y);
         let world = |a: f64, b: f64| [a * ex.x + b * ey.x, a * ex.y + b * ey.y, a * ex.z + b * ey.z];
-        let left = swept(&plane, &[(-40.0, 0.0), (-40.0, -6.0), (-1.0, -6.0), (-1.0, 0.0)]);
-        let right = swept(&plane, &[(1.0, -40.0), (7.0, -40.0), (7.0, 0.0), (1.0, 0.0)]);
-        let (lf, rf) = (facing(&left, world(1.0, 0.0)), facing(&right, world(0.0, 1.0)));
+        let left = swept(&plane, &[(-40.0, 0.0), (-40.0, -8.0), (0.0, -8.0), (0.0, 0.0)]);
+        let right = swept(&plane, &[(0.0, -48.0), (8.0, -48.0), (8.0, 0.0), (0.0, -8.0)]);
+        let (lf, rf) = (facing(&left, world(1.0, 0.0)), facing(&right, world(-h, h)));
         assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
-        let side = world(1.0, 0.0);
-        let got = frame_of([pick_up(&left, &lf, world(0.0, 1.0)), pick_up(&right, &rf, side)]).unwrap_err();
-        assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, side)[0] });
+        let picks = [pick_up(&left, &lf, world(0.0, 1.0)), pick_up(&right, &rf, world(1.0, 0.0))];
+        let frame = joint_frame([&picks[0], &picks[1]]).unwrap();
+        let (x, y) = (world(1.0, 0.0), world(0.0, 1.0));
+        assert!(near(frame.x, x) && near(frame.y, y), "{frame:?}");
+        let volume = groove_weld([&picks[0], &picks[1]], &flat()).unwrap().body.volume_at(1e-9).unwrap();
+        assert!((volume - 32.0 * 120.0).abs() <= 1e-6 * volume, "{volume}");
     }
 }
 
 /// brett19's point A on #22033 review 6: a right plate turned up from the left one about its toe, so
-/// the plates meet at 180° less the turn, on the world axes and off them. At 40° it is a butt
-/// joint; at 45° (two equal components, decided by the margin, not the rounding) and at 50° it is
-/// refused as a corner joint, not as a face off the arrow side.
+/// the plates meet at 180° less the turn and its outer face faces back over the groove, on the
+/// world axes and off them. At 40° it is a butt joint; at 45° (two equal components, decided by
+/// the margin, not the rounding) and at 50° it is refused as a face off the arrow side.
 #[test]
-fn a_right_outer_face_turned_45_degrees_or_more_is_refused_as_a_corner_on_and_off_the_world_axes() {
+fn a_right_outer_face_turned_back_45_degrees_or_more_is_refused_on_and_off_the_world_axes() {
     let r5 = 5.0_f64.sqrt();
     let off = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0), y: Vec3::new(-1.0 / r5, 2.0 / r5, 0.0) };
     for plane in [Plane::XY, off] {
@@ -322,7 +333,7 @@ fn a_right_outer_face_turned_45_degrees_or_more_is_refused_as_a_corner_on_and_of
             }
             let got = got.unwrap_err();
             assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, up)[0] }, "{degrees}");
-            assert!(got.to_string().contains("a corner joint, not built yet"), "{got}");
+            assert!(got.to_string().contains("turned back over the groove"), "{got}");
         }
     }
 }
@@ -807,4 +818,189 @@ fn two_halves_of_one_circle_are_not_one_section() {
     let (upper, lower) = (half(0.0), half(std::f64::consts::PI));
     assert!(!same(&upper, &lower, 1e-9));
     assert!(same(&upper, &upper, 1e-9) && same(&upper, &reversed(&upper), 1e-9));
+}
+
+// ---- no groove modelled ----
+
+/// Two plates 6 thick edge to edge, the right one `gap` off the left, and each one's square end.
+fn square_butt(gap: f64) -> ([Body; 2], [Vec<usize>; 2]) {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(gap, 0.0), (gap, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let faces = [facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0])];
+    ([left, right], faces)
+}
+
+#[test]
+fn plates_edge_to_edge_have_no_groove_and_a_seam_mark_on_each_side() {
+    let (parts, faces) = square_butt(0.0);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    let GrooveRefusal::NoGroove(no) = got else {
+        panic!("not NoGroove: {got:?}");
+    };
+    let (top, under) = (no.arrow, no.other.expect("a seam under the plates"));
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // the seam on the surface at the left toe, and under the plates 6 below it
+    assert!(close(top.at.x, 0.0) && close(top.at.y, 0.0) && close(top.normal.y, 1.0) && close(top.thickness, 6.0), "{top:?}");
+    assert!(close(under.at.x, 0.0) && close(under.at.y, -6.0) && close(under.normal.y, -1.0) && close(under.thickness, 6.0), "{under:?}");
+    // the default marks: 6 wide (the plates' thickness), 0.2 high, along the whole joint
+    for (seam, [y0, y1]) in [(top, [0.0, MARK_HEIGHT]), (under, [-6.0 - MARK_HEIGHT, -6.0])] {
+        let mark = no.mark(&seam, seam.mark_width(), MARK_HEIGHT).unwrap();
+        let volume = mark.volume_at(1e-9).unwrap();
+        assert!((volume - 6.0 * MARK_HEIGHT * 120.0).abs() <= 1e-6 * volume, "{volume}");
+        let (lo, hi) = bounds(&mark);
+        let want = ([-3.0, y0, 0.0], [3.0, y1, 120.0]);
+        assert!(lo.iter().zip(want.0).chain(hi.iter().zip(want.1)).all(|(&a, b)| (a - b).abs() < 1e-6), "{lo:?} {hi:?}");
+    }
+    // plates over 10 thick get a mark 5 wide; a mark of no width is refused
+    assert!(close(Seam { thickness: 12.0, ..top }.mark_width(), 5.0));
+    assert!(matches!(no.mark(&top, 0.0, MARK_HEIGHT), Err(GrooveRefusal::Invalid(_))));
+}
+
+#[test]
+fn plates_just_apart_are_a_sliver() {
+    let zone = zone();
+    let (parts, faces) = square_butt(1.5 * zone);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    assert!(matches!(got, GrooveRefusal::Sliver { gap } if (gap - 1.5 * zone).abs() <= 0.01 * zone), "{got:?} (zone {zone})");
+}
+
+/// brett19's point 1 on #22504: a 12 mm plate against a 6 mm one, tops flush and square ends
+/// touching, and a lying plate's square end against an upright plate's side, tops flush. Each is
+/// no groove, its seam on the tops, but with no seam under it: the thicker plate, or the upright,
+/// runs on below the root, where that seam's mark would go into it. Both orders.
+#[test]
+fn no_groove_beside_a_thicker_plate_or_an_upright_has_no_seam_under_it() {
+    let thick = plate(&[(-40.0, 0.0), (-40.0, -12.0), (0.0, -12.0), (0.0, 0.0)]);
+    let thin = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let lying = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let upright = plate(&[(0.0, -48.0), (8.0, -48.0), (8.0, 0.0), (0.0, 0.0)]);
+    let (right, left) = ([1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+    let (tf, nf, lf, uf) = (facing(&thick, right), facing(&thin, left), facing(&lying, right), facing(&upright, left));
+    assert_eq!((tf.len(), nf.len(), lf.len(), uf.len()), (1, 1, 1, 1));
+    let (t, n, l, u) = (pick(&thick, &tf), pick(&thin, &nf), pick(&lying, &lf), pick(&upright, &uf));
+    for (name, picks) in [("thick, thin", [&t, &n]), ("thin, thick", [&n, &t]), ("lying, upright", [&l, &u]), ("upright, lying", [&u, &l])] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("{name}: not NoGroove: {got:?}");
+        };
+        let top = no.arrow;
+        assert!(top.at.x.abs() < 1e-9 && top.at.y.abs() < 1e-9 && (top.thickness - 6.0).abs() < 1e-9, "{name}: {top:?}");
+        assert_eq!(no.other, None, "{name}");
+    }
+}
+
+/// CodeRabbit on #22504: the left plate of [`square_butt`] with a rib 1 deep under it, 1 to 2
+/// from the joint, inside the default mark (6 wide, 3 each side). The undersides beside the root
+/// are flat out to the mark's edges, but the mark would go into the rib: no seam under the root.
+#[test]
+fn a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (-2.0, -6.0), (-1.5, -7.0), (-1.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}
+
+/// CodeRabbit on #22504: the left plate's square end split into two coplanar faces at 2 deep,
+/// both picked, against the right plate's one: the walls coincide, so no groove, with both seams.
+#[test]
+fn a_square_end_split_into_coplanar_faces_still_has_no_groove() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, -2.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (2, 1), "{lf:?} {rf:?}");
+    let got = weld(&[left, right], &[lf, rf], &flat()).unwrap_err();
+    let GrooveRefusal::NoGroove(no) = got else {
+        panic!("not NoGroove: {got:?}");
+    };
+    assert!(no.arrow.at.x.abs() < 1e-9 && no.arrow.at.y.abs() < 1e-9 && no.other.is_some(), "{no:?}");
+}
+
+/// CodeRabbit on #22504: `apart` joins lines that carry straight on, and tells two arcs with the
+/// same ends, centre and radius apart by the way they turn: the halves of one circle around a
+/// hole (each bowing into its own plate) are not one wall; the same arc is.
+#[test]
+fn walls_apart_join_straight_lines_and_tell_the_halves_of_a_circle_apart() {
+    let tol = zone() * ALLOWANCE;
+    let whole = [line((0.0, 0.0), (0.0, -6.0))];
+    let split = [line((0.0, 0.0), (0.0, -2.0)), line((0.0, -2.0), (0.0, -6.0))];
+    assert_eq!(apart(&whole, &split, tol), Some(0.0));
+    // a wall that turns is not joined
+    let turned = [line((0.0, 0.0), (0.0, -2.0)), line((0.0, -2.0), (1.0, -6.0))];
+    assert!(apart(&whole, &turned, tol).is_none_or(|gap| gap > 0.5), "{:?}", apart(&whole, &turned, tol));
+    // from the toe (0, 0) down to the root (0, -6) about (0, -3): through (-3, -3), and through (3, -3)
+    let into_left = arc((0.0, -3.0), 3.0, FRAC_PI_2, std::f64::consts::PI);
+    let into_right = arc((0.0, -3.0), 3.0, FRAC_PI_2, -std::f64::consts::PI);
+    assert_eq!(apart(&[into_left], &[into_right], tol), None);
+    assert_eq!(apart(&[into_left], &[into_left], tol), Some(0.0));
+}
+
+/// CodeRabbit on #22504: the rib of [`a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root`]
+/// only over the last 0.04 of the joint (z from 119.96 to 120), joined to the left plate: still
+/// inside the mark, so still no seam under the root.
+#[test]
+fn a_rib_inside_the_mark_only_at_the_joint_s_end_leaves_no_seam_under_the_root() {
+    let plain = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let end = Plane { origin: Vec3::new(0.0, 0.0, 119.96), ..Plane::XY };
+    let rib = swept_by(&end, &[(-2.0, -6.0), (-1.5, -7.0), (-1.0, -6.0)], 0.04);
+    let left = solidcraft_kernel::boolean(&plain, &rib, solidcraft_kernel::BoolOp::Union).unwrap().unwrap();
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}
+
+/// CodeRabbit on #22504: the rib of [`a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root`]
+/// only 0.04 deep (a fifth of the mark's height), between the points where the undersides are read
+/// flat: still inside the mark, so still no seam under the root.
+#[test]
+fn a_shallow_rib_inside_the_mark_leaves_no_seam_under_the_root() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (-2.0, -6.0), (-1.5, -6.04), (-1.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}
+
+/// CodeRabbit on #22504: the shallow rib of [`a_shallow_rib_inside_the_mark_leaves_no_seam_under_the_root`]
+/// (1 wide, 0.04 deep) only over the joint's last 0.005, joined to the left plate: a rib that small
+/// inside the mark still leaves no seam under the root.
+#[test]
+fn a_tiny_rib_inside_the_mark_at_the_joint_s_end_leaves_no_seam_under_the_root() {
+    let plain = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let end = Plane { origin: Vec3::new(0.0, 0.0, 119.995), ..Plane::XY };
+    let rib = swept_by(&end, &[(-2.0, -6.0), (-1.5, -6.04), (-1.0, -6.0)], 0.005);
+    let left = solidcraft_kernel::boolean(&plain, &rib, solidcraft_kernel::BoolOp::Union).unwrap().unwrap();
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
 }
