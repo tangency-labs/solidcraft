@@ -401,9 +401,9 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
     // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
     ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
+    ApiPreset { name: "LLMTR", base_url: "https://llmtr.com/v1" },
     // AI/ML API lists image, video and speech models too; the picker keeps the chat ones (#20006).
     ApiPreset { name: "AI/ML API", base_url: "https://api.aimlapi.com/v1" },
-    ApiPreset { name: "LLMTR", base_url: "https://llmtr.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
