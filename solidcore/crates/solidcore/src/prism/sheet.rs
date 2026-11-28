@@ -24,7 +24,7 @@ const OP: &str = "prism::sheet::sheet_regions";
 const OP_LOOPS: &str = "prism::sheet::region_loops";
 
 /// The most work one reading of a sheet may do (curve spans times their knots, and so on).
-pub const READ_WORK: usize = 2_000_000;
+pub const READ_WORK: usize = 32_000_000;
 
 /// A sheet's faces as regions, and whether two of its faces touch (share a vertex).
 #[derive(Clone, Debug, Default, PartialEq)]
