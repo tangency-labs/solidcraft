@@ -1039,6 +1039,7 @@ mod checkbox_in_use {
                 }
                 for name in ["config", "appearance", "preferences", "menu"] {
                     let ctx = crate::fonts::test_context();
+                    ctx.enable_accesskit();
                     ctx.set_pixels_per_point(ppp);
                     ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
                     let mut app = crate::SolveApp::new(Default::default(), Default::default());
@@ -1076,6 +1077,24 @@ mod checkbox_in_use {
                     }
                     let output = final_output.unwrap();
                     let boxes = checkbox_shapes(&output);
+                    if name == "menu" {
+                        // Shared menu choices use a check glyph in their row, rather than a
+                        // form checkbox square. Their actual checked state remains accessible.
+                        assert!(boxes.is_empty(), "menu choices do not paint form checkbox controls");
+                        let label = app.tr_label("Select bodies (a face picks its body)");
+                        let node = output
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .unwrap()
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(label) && node.role() == egui::accesskit::Role::CheckBox)
+                            .map(|(_, node)| node)
+                            .expect("the actual shared Select bodies menu choice");
+                        assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::True));
+                        continue;
+                    }
                     assert!(boxes.len() >= if matches!(name, "config" | "appearance") { 2 } else { 1 }, "{name}: missing actual checkbox controls");
                     let mut ticks = 0;
                     for (square, shapes) in boxes {

@@ -163,6 +163,24 @@ pub fn rigid_plane_through(
     Ok(([o.x, o.y, o.z], [[u.x, u.y, u.z], [v.x, v.y, v.z]]))
 }
 
+/// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+/// through `at` along the unit direction `dir`, through [`solidcore::math::plane_onto_line`]:
+/// tilted by the least turn that makes it parallel to the line, then moved along its normal until
+/// it holds the line; a plane that already holds it comes back unchanged. The new origin and axes;
+/// `None` for a number not finite or a line square to the plane (within
+/// [`solidcore::math::PLANE_ONTO_LINE_SQUARE_SIN`] of its normal).
+pub fn plane_onto_line(
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    at: [f64; 3],
+    dir: [f64; 3],
+) -> Option<([f64; 3], [[f64; 3]; 2])> {
+    let (o, x, y) =
+        solidcore::math::plane_onto_line(vec3(origin), vec3(x), vec3(y), vec3(at), vec3(dir))?;
+    Some(([o.x, o.y, o.z], [[x.x, x.y, x.z], [y.x, y.y, y.z]]))
+}
+
 /// The scale by `factor` in every direction about `centre`, which it keeps.
 ///
 /// # Errors

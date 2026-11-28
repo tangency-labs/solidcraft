@@ -63,11 +63,14 @@ pub(super) fn follow(app: &mut SolveApp) -> bool {
 }
 
 /// Whether the pointer picks nothing this frame: the triad drags a component drawn as a layer
-/// (`layered`) and "Highlight what is under the pointer while Move's arrows drag a component"
-/// is off. Picking the dragged bodies would mesh them where they stand at every step, and a
-/// highlight has the Browser look up its row again.
+/// (`layered`) or a Move dialog's bodies drawn as a preview layer (`dialogs_move::drawn_as_layer`)
+/// and "Highlight what is under the pointer while Move's arrows drag a component" is off. Picking
+/// the dragged bodies would mesh or raycast them where they stand at every step, rebuild the
+/// highlight whenever what is under the pointer changes, and have the Browser look up its row
+/// again.
 pub(super) fn holds_pointer(app: &SolveApp, layered: bool, manipulator_dragging: bool) -> bool {
-    layered && manipulator_dragging && !app.preferences.move_drag_highlights
+    let move_layer = crate::dialogs_move::drawn_as_layer(app) && (manipulator_dragging || crate::dialogs_move::dragging(app));
+    ((layered && manipulator_dragging) || move_layer) && !app.preferences.move_drag_highlights
 }
 
 fn transform(delta: &Mat) -> [[f32; 4]; 4] {
@@ -379,6 +382,30 @@ mod tests {
         crate::prefs::set(&mut app, &json!({"move_drag_highlights": true})).unwrap();
         assert!(app.preferences.move_drag_highlights, "the control channel sets it");
         assert!(!holds_pointer(&app, layered, true), "with the preference the drag picks under the pointer");
+    }
+
+    /// While the triad drags a Move/Copy dialog's bodies drawn as a preview layer
+    /// (`dialogs_move::drawn_as_layer`), the pointer picks nothing unless `move_drag_highlights`
+    /// is enabled: otherwise every drag step crossing a face behind the arrow raycasts and
+    /// rebuilds the highlight scene.
+    #[test]
+    fn a_move_dialog_preview_layer_drag_holds_pointer_unless_preference_is_on() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        with_gpu(&mut app);
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        app.start("solid.move");
+        app.preview.show_layer_for_tests(1);
+        assert!(crate::dialogs_move::drawn_as_layer(&app));
+        assert!(!app.preferences.move_drag_highlights, "off by default");
+        assert!(!holds_pointer(&app, false, false), "idle Move dialog still picks under the pointer");
+        assert!(holds_pointer(&app, false, true), "dragging the triad holds the pointer");
+        if let Some(d) = app.dialog.as_mut() {
+            d.extra.insert("drag0".into(), json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        }
+        assert!(crate::dialogs_move::dragging(&app));
+        assert!(holds_pointer(&app, false, false), "active Move drag holds the pointer even before gizmo flag");
+        crate::prefs::set(&mut app, &json!({"move_drag_highlights": true})).unwrap();
+        assert!(!holds_pointer(&app, false, true), "preference re-enables picking during Move drag");
     }
 
     /// Isocurve Analysis draws its curves where the bodies are, so a drag with them shown
