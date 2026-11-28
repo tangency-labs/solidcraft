@@ -2469,6 +2469,13 @@ impl SolveApp {
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
+                    // A design read from its file gets back the views it was closed with, as the
+                    // window's own open gives them (the browser runs `doc.open` here, #23271).
+                    if id == "doc.open"
+                        && let Some(path) = self.session.path.clone()
+                    {
+                        documents::design_opened(self, &path);
+                    }
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
