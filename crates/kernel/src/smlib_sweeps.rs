@@ -87,8 +87,8 @@ pub(crate) use imp::{
 };
 #[cfg(feature = "backend-occt")]
 pub(crate) use imp::{
-    cylinder_circle, extrusion_curves, loft_curves_of, name_cylinder, name_extrusion, name_loft, name_revolution, name_revolved_primitive,
-    revolution_curves,
+    cylinder_circle, extrusion_curves, loft_curves_of, name_cylinder, name_extrusion, name_loft, name_loft_to_point, name_revolution,
+    name_revolved_primitive, revolution_curves, section_curves,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -2757,9 +2757,21 @@ mod imp {
     pub(crate) fn loft_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let brep = Brep::loft_to_point(&c, p(apex)).map_err(|e| failed("loft to a point", e))?;
-        let body = body_of(brep, "loft to a point")?;
+        name_loft_to_point(body_of(brep, "loft to a point")?, plane, pieces)
+    }
+
+    /// `body`, a loft of `pieces` on `plane` to a point, with the roles and history
+    /// [`loft_to_point`] gives its own: the base is the start cap, each wall comes from the
+    /// segment it stands on.
+    pub(crate) fn name_loft_to_point(body: Body, plane: &Plane, pieces: &[Piece]) -> Result<Body> {
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
         with_history(body, &roles, pieces)
+    }
+
+    /// The section curves [`loft_to_point`] lofts: what another kernel lofts.
+    #[cfg(feature = "backend-occt")]
+    pub(crate) fn section_curves(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Curve>> {
+        curves(plane, pieces)
     }
 
     /// [`loft_to_point`] following one or two guide `rails` (polylines from the section to the

@@ -88,6 +88,25 @@ API uint32_t occt_fillet_nearest(uint32_t h, const void* points, size_t count, d
   });
 }
 
+// Constant-radius fillets, the edge nearest each point (count * 3 doubles) at its own radius
+// (count doubles). Two points nearest one edge are refused.
+API uint32_t occt_fillet_each(uint32_t h, const void* points, const void* radii, size_t count) {
+  return guard_handle([&]() -> uint32_t {
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_EDGE, points, count);
+    if (static_cast<size_t>(chosen.Extent()) != count) throw std::invalid_argument("two picks are nearest one edge");
+    BRepFilletAPI_MakeFillet maker(shape);
+    for (int e = 1; e <= chosen.Extent(); ++e) {
+      const double r = read_unaligned<double>(radii, static_cast<size_t>(e - 1));
+      if (!(r > 0.0) || !std::isfinite(r)) throw std::invalid_argument("a radius must be above 0");
+      maker.Add(r, TopoDS::Edge(chosen(e)));
+    }
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("fillet failed");
+    return put_shape(maker.Shape());
+  });
+}
+
 // Equal-distance chamfer of the edges nearest each point (count * 3 doubles).
 API uint32_t occt_chamfer_nearest(uint32_t h, const void* points, size_t count, double distance) {
   return guard_handle([&]() -> uint32_t {
@@ -431,5 +450,22 @@ API uint32_t occt_solid_at(uint32_t h, int32_t index) {
     TopExp::MapShapes(get_shape(h), TopAbs_SOLID, solids);
     if (index < 0 || index >= solids.Extent()) throw std::out_of_range("the shape has no such solid");
     return put_shape(solids(index + 1));
+  });
+}
+
+// A solid ruled from a closed section (read_profile's data of one loop) to the point (x, y, z).
+API uint32_t occt_loft_to_point(const void* data, size_t count, double x, double y, double z) {
+  return guard_handle([&]() -> uint32_t {
+    ProfileReader r{data, count};
+    const std::vector<TopoDS_Wire> wires = read_loops(r);
+    if (wires.size() != 1) throw std::invalid_argument("a loft section is one loop");
+    if (r.at != count) throw std::invalid_argument("the loft's data runs past its section");
+    BRepOffsetAPI_ThruSections maker(Standard_True, Standard_True, 1e-7);
+    maker.CheckCompatibility(Standard_False);
+    maker.AddWire(wires[0]);
+    maker.AddVertex(BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex());
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("the loft to a point could not be built");
+    return put_shape(maker.Shape());
   });
 }

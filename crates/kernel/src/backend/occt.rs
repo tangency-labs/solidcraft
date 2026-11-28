@@ -152,13 +152,13 @@ impl Backend for Occt {
             OpKind::Box | OpKind::Cylinder | OpKind::Sphere | OpKind::Torus | OpKind::Boolean => Support::Yes,
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
             OpKind::Revolve => Support::Yes,
-            OpKind::Fillet => Support::Some("constant radius with mitred turns".into()),
+            OpKind::Fillet => Support::Some("constant radii (one for each edge) with mitred turns".into()),
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
             OpKind::Thicken => Support::Yes,
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
-            OpKind::Loft => Support::Some("two sections, no rails".into()),
+            OpKind::Loft => Support::Some("two sections, or a section to a point; no rails".into()),
             OpKind::Split => Support::Some("a body split by a plane into one piece on each side; a sheet trimmed by a plane".into()),
             _ => Support::No,
         }
@@ -293,8 +293,19 @@ impl Modelling for Occt {
         self.fillet(body, edges, radius, turn).map(|s| (s, Vec::new()))
     }
 
-    fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
-        unsupported("a fillet of several radii")
+    fn fillet_each(&self, body: &Shape, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Shape, BackendError> {
+        if turn != FilletTurn::Mitre {
+            return unsupported("swept fillet turns");
+        }
+        if edges.is_empty()
+            || edges.len() != radii.len()
+            || radii.iter().any(|r| !(*r > 0.0) || !r.is_finite())
+            || edges.iter().any(|p| !finite(&xyz(*p)))
+        {
+            return unsupported("a fillet solidcore refuses");
+        }
+        let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
+        body.fillet_each(&points, radii).map_err(failed)
     }
 
     fn fillet_setback(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _setbacks: &[(Vec3, f64)]) -> Result<Shape, BackendError> {
@@ -444,8 +455,15 @@ impl Modelling for Occt {
         unsupported("a loft")
     }
 
-    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
-        unsupported("a loft to a point")
+    fn loft_to_point(&self, plane: &Plane, section: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        if !rails.is_empty() {
+            return unsupported("a loft to a point along rails");
+        }
+        // solidcore plans the section (checked, wound away from the apex); OCCT rules exactly
+        // those curves to the apex, as solidcore's loft does.
+        let pieces = crate::helix::loft_to_point_plan(plane, section, apex).map_err(refused)?;
+        let curves = crate::smlib_sweeps::section_curves(plane, &pieces).map_err(refused)?;
+        Shape::loft_to_point(&encode_profile(&curves)?, xyz(apex)).map_err(failed)
     }
 }
 
@@ -838,6 +856,17 @@ mod tests {
     }
 
     #[test]
+    fn the_split_feature_s_halves_match_solidcore() {
+        use solidcraft_geom::PlaneGeom as _;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let plane = Plane::from_normal(v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)).unwrap();
+        let half =
+            |positive: bool| move || crate::half_space(&cube()?, &plane, positive)?.0.ok_or_else(|| crate::KernelError::Failed("empty".into()));
+        same_solid("the half above z 3", 700.0, half(true));
+        same_solid("the half below z 3", 300.0, half(false));
+    }
+
+    #[test]
     fn sheets_trimmed_by_a_plane_match_solidcore() {
         use crate::route::foreign::{Kernel, fell_back, set_kernel};
         use solidcraft_geom::PlaneGeom as _;
@@ -894,6 +923,34 @@ mod tests {
         // The four top edges, mitred (the matrix's closed form).
         let top = vec![v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0), v(5.0, 10.0, 10.0), v(0.0, 5.0, 10.0)];
         same_solid("the top edges rounded, mitred", 1000.0 - 4.0 * (10.0 * (1.0 - PI / 4.0) - 2.0 * (5.0 / 6.0 - PI / 4.0)), removing(top, 1.0));
+    }
+
+    #[test]
+    fn lofts_to_a_point_match_solidcore_with_the_same_names() {
+        use solidcore_record::{Loop2, Vec2};
+        use std::f64::consts::PI;
+        let one = |b: crate::Result<Body>| b.map(|b| vec![b]);
+        let sq = Loop2::polygon(&[Vec2::new(-2.0, -2.0), Vec2::new(2.0, -2.0), Vec2::new(2.0, 2.0), Vec2::new(-2.0, 2.0)]);
+        // A square pyramid: A h / 3.
+        parity("a square to a point above", Some(16.0 * 3.0 / 3.0), || one(crate::route::loft_to_point(&Plane::XY, &sq, v(0.0, 0.0, 3.0))));
+        parity("a square to a point below, off centre", Some(16.0 * 2.0 / 3.0), || {
+            one(crate::route::loft_to_point(&Plane::XY, &sq, v(1.0, 0.5, -2.0)))
+        });
+        // A cone of r 2, 3 high.
+        parity("a circle to a point", Some(PI * 4.0 * 3.0 / 3.0), || {
+            one(crate::route::loft_to_point(&Plane::XY, &Loop2::circle(Vec2::ZERO, 2.0), v(0.0, 0.0, 3.0)))
+        });
+    }
+
+    #[test]
+    fn rounds_of_several_radii_match_solidcore() {
+        use std::f64::consts::PI;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let off = |r: f64| 10.0 * r * r * (1.0 - PI / 4.0);
+        // Two edges apart (top front, bottom back), r 1 and r 2: each its own section along 10.
+        same_solid("two edges apart, r 1 and r 2", 1000.0 - off(1.0) - off(2.0), || {
+            crate::route::fillet_each(&cube()?, &[v(5.0, 0.0, 10.0), v(5.0, 10.0, 0.0)], &[1.0, 2.0], FilletTurn::Mitre)
+        });
     }
 
     #[test]

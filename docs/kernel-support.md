@@ -21,7 +21,7 @@ later.
 | Kernel | Adapter | Maintained by | Build feature | Operations | Naming gate | Accuracy gate |
 |---|---|---|---|---|---|---|
 | solidcore | `crates/kernel` (`Solidcore`) | SolidCraft | always on | all (`OpKind::ALL`) | the reference | the reference |
-| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude (not tapered) and revolve of sketch profiles, boolean, fillet (constant radius, mitred turns, the Fillet feature's too), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
+| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude (not tapered) and revolve of sketch profiles, boolean, fillet (constant radii, mitred turns, the Fillet feature's too), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, or a section to a point; no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
 
 The Open CASCADE row is an experiment that checks the interface fits a second kernel; no build we
 ship routes anything to it. OCCT is LGPL-2.1 with the Open CASCADE exception: it lives in
@@ -66,6 +66,13 @@ extrude and revolve at 058b6c9807):
   of the STEP crossing. The accuracy gate takes no looser case, so it fails here.
 - The worst tolerance the records declare is 1e-7 on OCCT results (OCCT's STEP uncertainty, as
   solidcore's reader records it) against 2e-5 to 8e-5 on solidcore's.
+
+**More matrix rows (at f59520a67e):** on every one of these, OCCT passes, with 0 fail and 0 unsupported:
+- a revolve of a disc drawn as two half circles, the arcs joined first as the Revolve feature asks;
+- a fillet as the Fillet feature rounds it (`fillet_removing`);
+- an equal chamfer, a shell open at the top, a thickened sheet, a face moved out, a drafted side, a two-section loft (square to square), and a loft of a square to a point.
+
+Two cases are looser, both below 1e-12: the draft's volume (2.4e-15 on OCCT against 0 on solidcore) and the loft to a point's volume (6.0e-13 against 2.2e-16).
 
 **Chamfer, shell, thicken and offset faces** (`chamfers_shells_and_thickened_sheets_match_solidcore`
 in `backend/occt.rs`): a cube's edge chamfered 1 back, the cube shelled 1 thick open at the top, a

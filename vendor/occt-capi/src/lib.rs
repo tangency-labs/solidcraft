@@ -33,6 +33,7 @@ mod raw {
         pub fn occt_cut(a: u32, b: u32) -> u32;
         pub fn occt_common(a: u32, b: u32) -> u32;
         pub fn occt_fillet_nearest(h: u32, points: *const f64, count: usize, radius: f64) -> u32;
+        pub fn occt_fillet_each(h: u32, points: *const f64, radii: *const f64, count: usize) -> u32;
         pub fn occt_chamfer_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
         pub fn occt_shell_nearest(h: u32, points: *const f64, count: usize, thickness: f64) -> u32;
         pub fn occt_draft_nearest(
@@ -53,6 +54,7 @@ mod raw {
         pub fn occt_offset_faces_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
         pub fn occt_thicken(h: u32, thickness: f64, symmetric: i32) -> u32;
         pub fn occt_loft_ruled(data: *const f64, count: usize) -> u32;
+        pub fn occt_loft_to_point(data: *const f64, count: usize, x: f64, y: f64, z: f64) -> u32;
         pub fn occt_prism_profile(data: *const f64, count: usize, dx: f64, dy: f64, dz: f64, distance: f64) -> u32;
         pub fn occt_revol_profile(data: *const f64, count: usize, ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> u32;
 
@@ -69,7 +71,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 9;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,6 +199,17 @@ impl Shape {
         shape(unsafe { raw::occt_fillet_nearest(self.0, flat.as_ptr(), points.len(), radius) })
     }
 
+    /// Constant-radius rounds, the edge nearest each of `points` at the radius in the same place
+    /// of `radii` (as many).
+    pub fn fillet_each(&self, points: &[[f64; 3]], radii: &[f64]) -> Result<Shape> {
+        if points.len() != radii.len() {
+            return Err(Error("a radius for each edge".into()));
+        }
+        let flat: Vec<f64> = points.iter().flatten().copied().collect();
+        // SAFETY: a live handle, `points.len()` triples of doubles and as many radii.
+        shape(unsafe { raw::occt_fillet_each(self.0, flat.as_ptr(), radii.as_ptr(), points.len()) })
+    }
+
     /// A planar profile's face extruded `distance` along the unit `dir`. `profile` is the loop
     /// count, then each loop (outer first, then its holes) as its curve count and curves: `0`
     /// and a line's start and end; `1` and an arc's centre, unit axis, unit reference, radius
@@ -291,6 +304,13 @@ impl Shape {
         let n = i32::try_from(self.solid_count()?).map_err(|_| Error("too many solids".into()))?;
         // SAFETY: a live handle and an index below its solid count.
         (0..n).map(|i| shape(unsafe { raw::occt_solid_at(self.0, i) })).collect()
+    }
+
+    /// A solid ruled from a closed section ([`Shape::prism_profile`]'s encoding with one loop)
+    /// to the point `apex`.
+    pub fn loft_to_point(section: &[f64], apex: [f64; 3]) -> Result<Shape> {
+        // SAFETY: `section.len()` readable doubles.
+        shape(unsafe { raw::occt_loft_to_point(section.as_ptr(), section.len(), apex[0], apex[1], apex[2]) })
     }
 
     /// Whether OCCT's own checker passes the shape.
