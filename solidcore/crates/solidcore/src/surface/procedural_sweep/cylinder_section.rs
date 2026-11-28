@@ -155,7 +155,8 @@ pub(crate) fn intersect(
         // A cut at an end, or within rounding of one, is the end itself (a helix that starts or
         // stops on the seam).
         let lead = m.pitch() / std::f64::consts::TAU;
-        let near = tolerance / (radius * radius + lead * lead).sqrt();
+        // a tolerance's length along the helix, in the face's parameter (t = a + b q)
+        let near = tolerance / ((radius * radius + lead * lead).sqrt() * b[1].abs());
         let mut ends = vec![q0];
         for c in cuts {
             if c - ends.last().copied().unwrap_or(q0) > near && q1 - c > near {
@@ -295,7 +296,13 @@ fn line_crossings(
     tolerance: f64,
 ) -> Result<Option<Vec<f64>>> {
     let c = profile.canonical()?;
-    if c.degree != 1 || !c.weights.iter().all(|&w| w == 1.0) || !(lo < hi) {
+    // one control point per unique knot: every inner knot single, so span i runs between
+    // knots i and i + 1
+    if c.degree != 1
+        || c.control_points.len() != c.knots.len()
+        || !c.weights.iter().all(|&w| w == 1.0)
+        || !(lo < hi)
+    {
         return Ok(None);
     }
     let radial = |v: Vec3| v - axis * v.dot(axis);
