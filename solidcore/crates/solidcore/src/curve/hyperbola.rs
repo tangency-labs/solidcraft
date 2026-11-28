@@ -554,13 +554,8 @@ impl Hyperbola {
         let knots = [t1, t2];
         let knot_mult = [3usize, 3];
 
-        // Calculate weight of mid control-point
-        let start_to_end_v = e0 - s0;
-        let v0 = mid_pnt - s0;
-        let v1 = mid_ctrl_pnt - mid_pnt;
-        let v2 = mid_pnt - e0;
-        let (x1, _) = line_line_closest_point(s0, start_to_end_v, mid_pnt, v1)?;
-        // Error: midPoint line fails to intersect hyperpola's base chord
+        // Check that the line through the middle point and control point cuts the chord.
+        let (x1, _) = line_line_closest_point(s0, e0 - s0, mid_pnt, mid_ctrl_pnt - mid_pnt)?;
         if x1 < EFF_ZERO || x1 > 1.0 - EFF_ZERO {
             return Err(SolidError::curve(
                 OP_MAKE_NURB,
@@ -568,15 +563,11 @@ impl Hyperbola {
             ));
         }
 
-        // mid ControlPoint weight =
-        let mut val = sqrt(x1 / (1.0 - x1));
-        val = val / (1.0 + val);
-        let da = (1.0 - val) * (1.0 - val);
-        let db = val * val;
-        let dc = 2.0 * val * (1.0 - val);
-        let num = da * (v0.dot(v1)) + db * (v1.dot(v2));
-        let denom = dc * (v1.dot(v1));
-        let weights = [1.0, num / denom, 1.0];
+        // In a frame centred on the parameter midpoint, the unit hyperbola's ends
+        // have x = cosh(half_span) and their tangents meet at x = 1/cosh(half_span).
+        // With unit end weights the Bézier midpoint has x = 1 when w = cosh(half_span).
+        // An affine placement changes the control points but preserves this weight.
+        let weights = [1.0, det::cosh(0.5 * (t2 - t1)), 1.0];
 
         // build temporary SmBSplineCurve with appropriate Nurb object
         let tmp = BSplineCurve::create_canonical(&CanonicalData {
@@ -865,6 +856,29 @@ mod tests {
         let (s, _) = h.step_inversion(mid, false).unwrap();
         let on = h.evaluate_step(s, 0).unwrap()[0];
         assert!(on.distance(mid) < 1e-9);
+    }
+
+    #[test]
+    fn the_middle_weight_depends_only_on_the_parameter_span() {
+        let h = std::f64::consts::LN_2;
+        let weight = |center, start| {
+            let arc = Hyperbola::new(
+                center,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(start, start + 2.0 * h),
+                2.0,
+                1.0,
+                3,
+            );
+            arc.base().gw_nurb().unwrap().cpts()[1].w
+        };
+        // cosh(ln 2) = (2 + 1/2) / 2 for either interval.
+        for start in [-h, 0.0] {
+            let w = weight(Vec3::ZERO, start);
+            assert!((w - 1.25).abs() <= f64::EPSILON);
+            assert_eq!(weight(Vec3::new(100_000.0, -25.0, 3.0), start), w);
+        }
     }
 
     #[test]
