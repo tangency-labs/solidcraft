@@ -158,8 +158,9 @@ macro_rules! layout_preferences {
             /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
             /// and the design's units (#7243). Off by default.
             status_bar: bool = false, PAGE_LAYOUT;
-            /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
-            /// as the rest of the title bar does, as before.
+            /// A double-click on a design tab renames the design in the tab, and one on a view's sub-tab
+            /// renames the view; off, a double-click on a tab maximizes the window as the rest of the
+            /// title bar does, and one on a sub-tab only shows the view, as before.
             tab_double_click_renames: bool = true, PAGE_LAYOUT;
             /// Two-dimensional (2D) Timeline with multi-track component layout,
             /// two-tier header, movable corridor brackets, and feature grouping.
