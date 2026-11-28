@@ -2172,65 +2172,81 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
+    use crate::ui_kit;
     let t = Tokens::get();
     if let Some(e) = r.get("error").and_then(Value::as_str) {
-        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
+        ui_kit::status_line(ui, e, ui_kit::StatusTone::Error);
         return;
     }
-    let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
     form_row(ui, "Checked", |ui| {
         ui.label(solidcraft_ui_text::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
     });
-    let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
-    let near = r["near"].as_array().cloned().unwrap_or_default();
-    let pair = |h: &Value| format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or(""));
+    let list = |key: &str| r[key].as_array().map_or(&[][..], Vec::as_slice);
+    let (hits, unchecked, near) = (list("overlaps"), list("unchecked"), list("near"));
     if hits.is_empty() && unchecked.is_empty() {
-        crate::ui_kit::status_line(ui, "no interference", crate::ui_kit::StatusTone::Dim);
+        ui_kit::status_line(ui, "no interference", ui_kit::StatusTone::Dim);
     }
-    // Pairs closer than the clearance, nearest first.
-    if !near.is_empty() {
-        form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in &near {
-        form_row(ui, &pair(h), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["distance_mm"].as_f64().unwrap_or(0.0), 1)).color(t.warning));
-        });
-    }
-    // Each body's nearest neighbour.
-    let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
-    if !nearest.is_empty() {
-        form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for (body, list) in &nearest {
-        let Some(n) = list.get(0) else { continue };
-        form_row(ui, &format!("{body} → {}", n["body"].as_str().unwrap_or("")), |ui| {
-            ui.label(crate::prefs::show_mm(app, n["distance_mm"].as_f64().unwrap_or(0.0), 1));
-        });
-    }
-    if hits.is_empty() && unchecked.is_empty() {
+    if hits.is_empty() && unchecked.is_empty() && near.is_empty() && r["nearest"].as_object().is_none_or(|map| map.is_empty()) {
         return;
     }
-    if !hits.is_empty() {
-        form_row(ui, "Interferes", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in hits {
-        form_row(ui, &format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["volume_mm3"].as_f64().unwrap_or(0.0), 3)).color(t.error));
-        });
-    }
-    // Pairs the check could not work out: not clear, not known to interfere.
-    for u in unchecked {
-        form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("dialog.could_not_be_checked")).color(t.warning))
-                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
-        });
-    }
+    let columns = [
+        ui_kit::Column::new(solidcraft_ui_text::tr("ui.bodies"), 1.5).flex(),
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Value"), 1.0).flex(),
+    ];
+    ui_kit::report_list(ui, "interference_results", ui_kit::table_row_height() * 10.0, &columns, "", |ui, table| {
+        for (key, heading, metric, field, power, ink) in [
+            ("near", "Too close", "Distance", "distance_mm", 1, t.warning),
+            ("nearest", "Nearest", "Distance", "distance_mm", 1, t.text),
+            ("overlaps", "Interferes", "Volume", "volume_mm3", 3, t.error),
+            ("unchecked", "dialog.could_not_be_checked", "", "", 0, t.warning),
+        ] {
+            let pairs: Vec<_> = if key == "nearest" {
+                r[key]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|(body, list)| {
+                        let n = list.get(0)?;
+                        Some((format!("{body} → {}", n["body"].as_str().unwrap_or("")), n))
+                    })
+                    .collect()
+            } else {
+                list(key).iter().map(|h| (format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), h)).collect()
+            };
+            if pairs.is_empty() {
+                continue;
+            }
+            let heading = if metric.is_empty() {
+                solidcraft_ui_text::tr(heading).to_owned()
+            } else {
+                format!("{} · {}", solidcraft_ui_text::tr_label(heading), solidcraft_ui_text::tr_label(metric))
+            };
+            let id = ui.make_persistent_id(("interference_results", key));
+            let mut open = ui.data(|data| data.get_temp(id)).unwrap_or(true);
+            table.group(ui, key, &heading, pairs.len(), &mut open);
+            ui.data_mut(|data| data.insert_temp(id, open));
+            if !open {
+                continue;
+            }
+            for (index, (pair, hit)) in pairs.iter().enumerate() {
+                let value = if power == 0 {
+                    solidcraft_ui_text::tr("dialog.could_not_be_checked").to_owned()
+                } else {
+                    crate::prefs::show_mm(app, hit[field].as_f64().unwrap_or(0.0), power)
+                };
+                let response = table.row(ui, &format!("{key}:{index}"), false, |row| {
+                    let label = row.cell(|ui| ui_kit::text(ui, pair, ui_kit::Text::Cell));
+                    let value = row.cell(|ui| {
+                        ui.add(egui::Label::new(RichText::new(&value).color(ink)).truncate())
+                            .backing_on_hover_text(hit["reason"].as_str().unwrap_or(&value))
+                    });
+                    crate::scenario::publish_rect(&format!("dialog:label:{pair}"), label.rect);
+                    crate::scenario::publish_rect(&format!("dialog:control:{pair}"), value.rect);
+                });
+                crate::scenario::publish_target(&format!("dialog:row:{pair}"), response.rect);
+            }
+        }
+    });
 }
 
 // ---- commands ----

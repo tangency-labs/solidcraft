@@ -648,17 +648,39 @@ activation, rule and preview handles remain. The "+ Add column" button above the
 Add forms and column-removal band have been removed.
 
 
-Crash Reports uses `report_list` (bordered bounded scroll), `report_header` (kind,
-count pill and mono UTC time), `path_chip` (clipped mono path and adjacent action),
-`empty_box` (dashed empty state), and `icon_label_button` (secondary icon/text,
-optional danger ink). These use `dialog_rule/footer`, `control_*`, `form_*`,
-`font_label/small` and spacing tokens. The report header retains the combined-title
-cell alias; bins retain the previous Delete handle. Report actions remain immediate.
-`list_frame` supplies the same border to virtualised library rows.
-The list frame owns its border and horizontal padding; the report viewport adds
-no inherited scroll margin. Report list measurements publish
-`dialog:list:KEY:viewport` and `dialog:list:KEY:content_width`. Reports use vertical
-scrolling; the horizontal rule beneath each report remains a divider.
+Read-only reports use `report_list(ui, key, height, columns, empty, |ui, table| …)`,
+a thin bounded viewport over `table_custom` with one shared header band. Add comparable
+results with `Table::row` and `TableRow::cell`; `Table::group` supplies optional folding
+sections. Interference pairs, contact collision depths and unconstrained sketch entities
+use this path, with flexible columns and the table's horizontal overflow in narrow windows.
+`report_header(ui, table, key, title, actions)` is a summary/action row on that same grid.
+Measurement item descriptions wrap above the table so complete coordinate triples stay visible.
+Single-unit results use named value rows, preserving distance selection and copy;
+dual-unit measurements retain a wrapping report so both units remain visible in narrow panels; import losses,
+plugin details and folding importer groups use shared tables with header bands too.
+Crash reports use compact expandable `report_card` cards with `space_4` inner margins, spaced by `space_8`.
+The host supplies the copy-path action's tooltip as data; the kit does not reference host message IDs.
+Their headers use hover and expanded tints only; clicking or focusing a header adds no outline.
+`ReportCardSummary` supplies the title, short subtitle, severity icon and semantic ink;
+`ReportCardDetails` supplies `(key, label, value)` fields and the original diagnostic text.
+The caller owns a per-report expansion boolean and receives `ReportCardAction` responses.
+The chevron, tinted severity tile and text form one keyboard-focusable disclosure; Report
+and Delete are separate framed buttons. Expanded cards have an accent outline, a divider,
+a three-column details grid (one column when narrow), and a mono code strip with Copy
+details and Copy path actions. Values are selectable, elided with full-text tooltips and
+registered as `dialog:card:KEY:FIELD`; summary, toggle, code and actions also publish targets.
+CrashUi keeps expansion in memory only and retains the `crash:ID:report/copy/delete` and
+legacy dialog button aliases. The gallery has four severity examples, one initially expanded.
+The gallery has no runtime pending-catalogue loader: its small build script merges pending
+English messages with the base and shared catalogues into `OUT_DIR`, rejecting duplicate IDs.
+Source catalogues and pending files remain untouched, so new kit labels work before the locale fold.
+All surfaces, ink and sizing come from existing theme tokens. The existing plain shield and
+stop icons stand in for shield-check and power, which are absent from the icon set.
+`path_chip` supplies a clipped mono path and adjacent action, `empty_box` the dashed empty
+state, and `list_frame` the border for virtualised library rows. Report viewports publish
+`dialog:list:KEY`, `dialog:list:KEY:viewport` and `dialog:list:KEY:content_width` alongside
+the table's `dialog:table:…` targets. These components use the table, typography, colour
+and spacing tokens; report actions remain immediate.
 Appearance uses a 340 pt card derived from card/label/spacing tokens, with the
 104 pt label basis where space permits, 10 pt body gaps, and a count on In This Design.
 
