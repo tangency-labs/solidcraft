@@ -1,0 +1,58 @@
+{
+  "en": {
+    "plugin_import.folder_title": "Read files in this folder",
+    "plugin_import.folder_question": "{plugin} wants to read the files in {folder} to open this file.",
+    "plugin_import.folder_once": "Allow for this file",
+    "plugin_import.folder_always": "Always for this plugin",
+    "plugin_import.folder_cancel": "Cancel"
+  },
+  "ar": {
+    "plugin_import.folder_title": "قراءة الملفات في هذا المجلد",
+    "plugin_import.folder_question": "يريد {plugin} قراءة الملفات في {folder} لفتح هذا الملف.",
+    "plugin_import.folder_once": "السماح لهذا الملف",
+    "plugin_import.folder_always": "دائمًا لهذه الإضافة",
+    "plugin_import.folder_cancel": "إلغاء"
+  },
+  "de": {
+    "plugin_import.folder_title": "Dateien in diesem Ordner lesen",
+    "plugin_import.folder_question": "{plugin} möchte die Dateien in {folder} lesen, um diese Datei zu öffnen.",
+    "plugin_import.folder_once": "Für diese Datei erlauben",
+    "plugin_import.folder_always": "Immer für dieses Plugin",
+    "plugin_import.folder_cancel": "Abbrechen"
+  },
+  "he": {
+    "plugin_import.folder_title": "קריאת קבצים בתיקייה זו",
+    "plugin_import.folder_question": "{plugin} רוצה לקרוא את הקבצים ב־{folder} כדי לפתוח קובץ זה.",
+    "plugin_import.folder_once": "לאפשר לקובץ זה",
+    "plugin_import.folder_always": "תמיד עבור תוסף זה",
+    "plugin_import.folder_cancel": "ביטול"
+  },
+  "ja": {
+    "plugin_import.folder_title": "このフォルダー内のファイルを読み取る",
+    "plugin_import.folder_question": "{plugin} がこのファイルを開くために、{folder} 内のファイルを読み取ろうとしています。",
+    "plugin_import.folder_once": "このファイルに対して許可",
+    "plugin_import.folder_always": "このプラグインに常に許可",
+    "plugin_import.folder_cancel": "キャンセル"
+  },
+  "ko": {
+    "plugin_import.folder_title": "이 폴더의 파일 읽기",
+    "plugin_import.folder_question": "{plugin} 플러그인이 이 파일을 열기 위해 {folder}의 파일을 읽으려고 합니다.",
+    "plugin_import.folder_once": "이 파일에 대해 허용",
+    "plugin_import.folder_always": "이 플러그인에 항상 허용",
+    "plugin_import.folder_cancel": "취소"
+  },
+  "vi": {
+    "plugin_import.folder_title": "Đọc các tệp trong thư mục này",
+    "plugin_import.folder_question": "{plugin} muốn đọc các tệp trong {folder} để mở tệp này.",
+    "plugin_import.folder_once": "Cho phép đối với tệp này",
+    "plugin_import.folder_always": "Luôn cho phép plugin này",
+    "plugin_import.folder_cancel": "Hủy"
+  },
+  "zh": {
+    "plugin_import.folder_title": "读取此文件夹中的文件",
+    "plugin_import.folder_question": "{plugin} 想要读取 {folder} 中的文件以打开此文件。",
+    "plugin_import.folder_once": "允许打开此文件时读取",
+    "plugin_import.folder_always": "始终允许此插件",
+    "plugin_import.folder_cancel": "取消"
+  }
+}
