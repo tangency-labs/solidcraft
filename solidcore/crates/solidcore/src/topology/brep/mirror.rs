@@ -623,6 +623,7 @@ pub fn transform_matrix_with_notifications(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1;
 
@@ -646,7 +647,7 @@ mod tests {
             Point3::new(-20., 0., -10.),
         ];
         let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
-        let angle = 100.0_f64.atan2(20.).to_degrees();
+        let angle = det::atan2(100.0_f64, 20.).to_degrees();
         let arc = Ellipse::create_canonical_circle(
             k,
             &Axis2Placement::new(Point3::new(0., 0., -110.), Vec3::X, Vec3::Z),
@@ -682,7 +683,7 @@ mod tests {
         let at = Point3::new(
             0.0,
             10.0,
-            -110.0 + 10_400.0_f64.sqrt() + 10.0 * 12.0_f64.to_radians().tan(),
+            -110.0 + 10_400.0_f64.sqrt() + 10.0 * det::tan(12.0_f64.to_radians()),
         );
         let edge = *body
             .edge_list()
@@ -1120,7 +1121,7 @@ mod tests {
     /// perpendicular unit vectors, row 2 zero, so `AngleBetween` fails.
     fn rank_two(t: [f64; 3]) -> [[f64; 4]; 4] {
         let (a, c) = (0.3_f64, 0.8_f64);
-        let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+        let (ca, sa, cc, sc) = (det::cos(a), det::sin(a), det::cos(c), det::sin(c));
         [
             [ca, sa, 0.0, 0.0],
             [-sa * cc, ca * cc, sc, 0.0],
