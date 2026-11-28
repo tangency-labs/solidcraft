@@ -678,3 +678,65 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
     assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
 }
+
+/// Two 9 mm-diameter circular tubes meeting end-to-end across a shared cut plane at z = 0
+/// (both coaxial and with a 1 deg axis tilt) join cleanly through `boolean_tagged_owned`
+/// (shared and owned operands) and `union_all_tagged`, keeping both operand origins.
+#[test]
+fn tagged_owned_and_union_all_join_coincident_cut_tubes() {
+    use std::collections::BTreeSet;
+
+    let radius = 4.5;
+    for tilt_deg in [0.0_f64, 1.0_f64] {
+        let make_pair = || {
+            let tube_a = if tilt_deg == 0.0 {
+                make_cylinder([0.0, 0.0, -20.0], radius, 20.0).unwrap()
+            } else {
+                let raw = make_cylinder([0.0, 0.0, -25.0], radius, 30.0).unwrap();
+                let (s, c) = tilt_deg.to_radians().sin_cos();
+                let tilted =
+                    super::transform::transform(&raw, &[[c, 0.0, -s, 0.0], [0.0, 1.0, 0.0, 0.0], [s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+                let cut_halfspace = make_box([-20.0, -20.0, 0.0], [40.0, 40.0, 20.0]).unwrap();
+                boolean(&tilted, &cut_halfspace, BooleanOp::Subtract).unwrap().unwrap()
+            };
+            let tube_b = make_cylinder([0.0, 0.0, 0.0], radius, 20.0).unwrap();
+            (tube_a, tube_b)
+        };
+
+        let (a0, b0) = make_pair();
+        let expected_vol = volume(&a0, 1e-6).unwrap() + volume(&b0, 1e-6).unwrap();
+
+        let shared = super::boolean::boolean_tagged_owned(Ok(&a0), Ok(&b0), BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg shared: {e:?}"))
+            .unwrap();
+        assert_eq!(solid_count(&shared).unwrap(), 1, "tilt {tilt_deg} deg shared");
+        assert!(
+            (volume(&shared, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg shared: {} vs {expected_vol}",
+            volume(&shared, 1e-6).unwrap()
+        );
+        let sh = super::history::read(&shared).unwrap();
+        let s_origins: BTreeSet<usize> = sh.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
+        assert_eq!(s_origins, BTreeSet::from([0, 1]), "tilt {tilt_deg} deg shared");
+
+        let (a1, b1) = make_pair();
+        let owned = super::boolean::boolean_tagged_owned(Err(a1), Err(b1), BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg owned: {e:?}"))
+            .unwrap();
+        assert_eq!(solid_count(&owned).unwrap(), 1, "tilt {tilt_deg} deg owned");
+        assert!(
+            (volume(&owned, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg owned: {} vs {expected_vol}",
+            volume(&owned, 1e-6).unwrap()
+        );
+
+        let (a2, b2) = make_pair();
+        let all = super::boolean::union_all_tagged(&[&a2, &b2]).unwrap_or_else(|e| panic!("tilt {tilt_deg} deg union_all_tagged: {e:?}"));
+        assert_eq!(solid_count(&all).unwrap(), 1, "tilt {tilt_deg} deg union_all_tagged");
+        assert!(
+            (volume(&all, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg union_all_tagged: {} vs {expected_vol}",
+            volume(&all, 1e-6).unwrap()
+        );
+    }
+}

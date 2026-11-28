@@ -92,7 +92,38 @@ mod smlib {
                 (None, Some(shared)) => Ok(shared),
                 (None, None) => return Err(KernelError::Internal("SMLib boolean: an operand went missing".into())),
             };
-            let Some(r) = solidcraft_smlib::Brep::boolean_tagged_owned(a_in, b_in, kind).map_err(|e| failed("operation", e))? else {
+            let first = solidcraft_smlib::Brep::boolean_tagged_owned(a_in, b_in, kind);
+            let outcome = match first {
+                Ok(r) => Ok(r),
+                Err(ref err)
+                    if op == BoolOp::Union
+                        && (ka.is_none() || kb.is_none())
+                        && matches!(
+                            err,
+                            solidcraft_smlib::Error::Solidcore(msg)
+                                if msg.contains("boolean::merge::p2::make_faceuse") && msg.contains("no radial edge use")
+                        ) =>
+                {
+                    let retry_a = match ka {
+                        Some(s) => Ok(s),
+                        None => smlib_operand_ordered(a).map(|(s, _)| s),
+                    };
+                    let retry_b = match kb {
+                        Some(s) => Ok(s),
+                        None => smlib_operand_ordered(b).map(|(s, _)| s),
+                    };
+                    match (retry_a, retry_b) {
+                        (Ok(ra), Ok(rb)) => match ra.boolean_tagged(&rb, kind) {
+                            ok @ Ok(Some(_)) => ok,
+                            Err(e @ solidcraft_smlib::Error::Cancelled(_)) => Err(e),
+                            _ => first,
+                        },
+                        _ => first,
+                    }
+                }
+                err => err,
+            };
+            let Some(r) = outcome.map_err(|e| failed("operation", e))? else {
                 return Ok(None);
             };
             (r, None)

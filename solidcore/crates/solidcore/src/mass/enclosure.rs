@@ -122,11 +122,31 @@ pub const ORDER: usize = 8;
 /// before it is cut.
 pub const FIRST_ORDER: usize = 3;
 
-/// The refinement cells past which an enclosure is no longer refined (the last bisection's two
-/// come on top). Work stays bounded at starting cells + [`CELL_BUDGET`] + 1. A bound on the
-/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5
-/// refinement cells.
+/// The base refinement cells past which an enclosure is no longer refined (the last
+/// bisection's two come on top). A small or medium body (up to
+/// `CELL_BUDGET / CELL_BUDGET_PER_START` starting cells) stays bounded at starting cells +
+/// [`CELL_BUDGET`] + 1; a larger body scales up to [`CELL_BUDGET_PER_START`] refinement
+/// cells per starting cell, capped at [`MAX_CELL_BUDGET`].
 pub const CELL_BUDGET: usize = 1 << 17;
+
+/// Refinement cells allowed per starting cell once a body's starting cells exceed
+/// `CELL_BUDGET / CELL_BUDGET_PER_START` (8,192): each wide starting cell may need
+/// promotion from [`FIRST_ORDER`] to [`ORDER`] plus a few bisections, so work scales
+/// linearly with trim/knot complexity up to [`MAX_CELL_BUDGET`].
+pub const CELL_BUDGET_PER_START: usize = 16;
+
+/// Hard upper bound on refinement cells regardless of starting cell count, keeping work
+/// and memory strictly bounded even on adversarial inputs.
+pub const MAX_CELL_BUDGET: usize = 1 << 22;
+
+/// Default refinement budget for a body with `start` starting cells: [`CELL_BUDGET`] for
+/// small and medium bodies, scaling linearly at [`CELL_BUDGET_PER_START`] refinement cells
+/// per starting cell up to [`MAX_CELL_BUDGET`].
+fn default_refinement_budget(start: usize) -> usize {
+    start
+        .saturating_mul(CELL_BUDGET_PER_START)
+        .clamp(CELL_BUDGET, MAX_CELL_BUDGET)
+}
 
 /// The most bisections from a starting cell to one of its cells: past it a cell is kept
 /// as it is (its parameters are then within a few roundings of each other).
@@ -585,13 +605,19 @@ pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
     // each decision a call of this scope (feature `profile`; nothing without it)
     crate::profile::profile_scope!(k, "mass::enclosure::volume_sign");
     k.work_counters.add_volume_sign_decision();
-    volume_sign_within(k, b, CELL_BUDGET)
+    volume_sign_work(Work::new(k, b)?)
 }
 
 /// [`volume_sign`] within `budget` refinement cells.
+#[cfg(test)]
 fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeSign> {
     let mut w = Work::new(k, b)?;
     w.budget = budget;
+    volume_sign_work(w)
+}
+
+/// Refines `w` until its volume sign is decided or its stop condition ends refinement.
+fn volume_sign_work(mut w: Work<'_>) -> Result<VolumeSign> {
     // the settled cells and the fixed terms are symmetric about 0: once their half width is
     // at least the magnitude of everything else, 0 stays inside however the rest is refined
     let e = w.refine(
@@ -784,13 +810,23 @@ fn compose_partial(
 struct Weight {
     quantity: Quantity,
     centre: [f64; 3],
+    /// Coordinate axis along which the flux field points (`0`: x, `1`: y, `2`: z).
+    /// Always `2` for area and higher moments; for pure volume (`(0, 0, 0)`), may be `0` or
+    /// `1` when the body's bounding box is much shorter along that axis than along z, since
+    /// `div ((x_k - c_k) e_k) = 1` for every axis `k`.
+    axis: usize,
 }
 
 impl Weight {
-    /// The factors of `Phi = X^a Y^b Z^(c+1) / (c+1)`: each coordinate's power, and the
-    /// divisor `c + 1`.
+    /// The factors of `Phi = X^a Y^b Z^(c+1) / (c+1)` (or `X_axis` for pure volume): each
+    /// coordinate's power, and the divisor.
     fn powers(&self) -> ([u8; 3], u8) {
         match self.quantity {
+            Quantity::Moment { x: 0, y: 0, z: 0 } => match self.axis {
+                0 => ([1, 0, 0], 1),
+                1 => ([0, 1, 0], 1),
+                _ => ([0, 0, 1], 1),
+            },
             Quantity::Moment { x, y, z } => ([x, y, z.saturating_add(1)], z.saturating_add(1)),
             Quantity::Area => ([0, 0, 1], 1),
         }
@@ -845,17 +881,22 @@ impl Weight {
         ]
     }
 
-    /// The integrand `g` at partials `p` (order 1): `Phi(S) (S_u x S_v)_z` of a moment,
+    /// The integrand `g` at partials `p` (order 1): `Phi(S) (S_u x S_v)_axis` of a moment,
     /// `|S_u x S_v|` of the area.
     fn density(&self, p: &Partials<Ivl>) -> Ivl {
         let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
-        let nz = su.x * sv.y - su.y * sv.x;
         if self.is_area() {
             let nx = su.y * sv.z - su.z * sv.y;
             let ny = su.z * sv.x - su.x * sv.z;
+            let nz = su.x * sv.y - su.y * sv.x;
             (sq(nx) + sq(ny) + sq(nz)).sqrt()
         } else {
-            self.phi(self.centred(s)) * nz
+            let n_axis = match self.axis {
+                0 => su.y * sv.z - su.z * sv.y,
+                1 => su.z * sv.x - su.x * sv.z,
+                _ => su.x * sv.y - su.y * sv.x,
+            };
+            self.phi(self.centred(s)) * n_axis
         }
     }
 }
@@ -900,6 +941,8 @@ fn sqrt_series(f: &Bs, n: usize) -> Option<Bs> {
 /// A face's surface and the levels its trims are swept down to.
 struct FaceGeo {
     cn: Nurbs,
+    /// Unique ascending u knots of `cn` (for binary-searched knot-line crossing cuts).
+    lines_u: Vec<f64>,
     /// The base `vb` (at most every trim's lowest v), then the surface's v knots above it
     /// and below the trims' highest v, ascending.
     levels: Vec<f64>,
@@ -1017,6 +1060,69 @@ fn constant_u(cn: &NurbsCurve, span: usize) -> bool {
     first.0.is_some()
         && first.1.is_some()
         && ((span + 1).saturating_sub(cn.p + 1)..=span).all(|i| point(i) == first)
+}
+
+/// Whether `v` is identically `level` on the curve's polynomial piece `span`, exactly: every
+/// control point defining it has weight `1.0` and `v == level`, so `b(t) = v(t) - level = 0`
+/// everywhere (the basis functions sum to 1), and its non-whole sweep cell carries `b = 0`.
+fn constant_v_at(cn: &NurbsCurve, span: usize, level: f64) -> bool {
+    let start = (span + 1).saturating_sub(cn.p + 1);
+    (start..=span).all(|i| {
+        cn.pw.get(4 * i + 1).is_some_and(|&v| v == level)
+            && cn.pw.get(4 * i + 3).is_some_and(|&w| w == 1.0)
+    })
+}
+
+/// Strictly ascending unique knot values extracted from a non-decreasing knot vector.
+fn sorted_unique_knots(knots: &[f64]) -> Vec<f64> {
+    let mut out = Vec::new();
+    for &x in knots {
+        if out.last() != Some(&x) {
+            out.push(x);
+        }
+    }
+    out
+}
+
+/// Tightens a curve's `(u, v)` parameter box over `tt` via the Mean Value Theorem when a
+/// coordinate's first derivative over `tt` does not change sign: a monotone coordinate lies
+/// between its point enclosures at `tt.lo` and `tt.hi`, removing the Taylor evaluation's
+/// `O(h^2)` wrapping that can otherwise push the box across a surface knot line.
+fn tighten_monotone(
+    cn: &NurbsCurve,
+    sp: usize,
+    tt: Ivl,
+    du_slope: Ivl,
+    dv_slope: Ivl,
+    u: Ivl,
+    v: Ivl,
+) -> Result<(Ivl, Ivl)> {
+    if tt.lo.partial_cmp(&tt.hi) != Some(core::cmp::Ordering::Less) {
+        return Ok((u, v));
+    }
+    let mono_u = du_slope.lo >= 0.0 || du_slope.hi <= 0.0;
+    let mono_v = dv_slope.lo >= 0.0 || dv_slope.hi <= 0.0;
+    if !mono_u && !mono_v {
+        return Ok((u, v));
+    }
+    let p0 = curve_derivs_over(cn, Ivl::from(tt.lo), 0, Some(sp))?;
+    let p1 = curve_derivs_over(cn, Ivl::from(tt.hi), 0, Some(sp))?;
+    let (Some(a), Some(b)) = (p0.first(), p1.first()) else {
+        return Ok((u, v));
+    };
+    let clamp = |cur: Ivl, ea: Ivl, eb: Ivl| {
+        let h = ea.hull(eb);
+        let lo = cur.lo.max(h.lo);
+        let hi = cur.hi.min(h.hi);
+        if lo <= hi {
+            Ivl::new(lo, hi)
+        } else {
+            cur
+        }
+    };
+    let u = if mono_u { clamp(u, a.x, b.x) } else { u };
+    let v = if mono_v { clamp(v, a.y, b.y) } else { v };
+    Ok((u, v))
 }
 
 /// The closed parameter range of span `k` of `knots` (degree `p`, `n` control points), the
@@ -1240,9 +1346,29 @@ impl<'a> Work<'a> {
         let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
         let mid = bbox.mid();
         let z0 = mid.z;
+        let size = bbox.size();
+        // For pure volume, any coordinate axis `k` gives `div ((x_k - c_k) e_k) = 1`. When the
+        // body is elongated along z (such as a long lead screw or shaft), integrating the flux
+        // along a much shorter transverse axis avoids catastrophic cancellation and shrinks
+        // strip and cap bounds proportionally.
+        let axis = if quantity == (Quantity::Moment { x: 0, y: 0, z: 0 })
+            && size.x.is_finite()
+            && size.y.is_finite()
+            && size.z.is_finite()
+        {
+            let (sx, sy, sz) = (size.x.abs(), size.y.abs(), size.z.abs());
+            if sx.min(sy) < 0.5 * sz {
+                usize::from(sy < sx)
+            } else {
+                2
+            }
+        } else {
+            2
+        };
         let weight = Weight {
             quantity,
             centre: [mid.x, mid.y, mid.z],
+            axis,
         };
         let mut w = Self {
             k,
@@ -1273,6 +1399,7 @@ impl<'a> Work<'a> {
         }
         if w.weight.is_area() {
             // an area is the faces' alone: no strips or caps close a surface
+            w.budget = default_refinement_budget(w.counts.cells);
             return Ok(w);
         }
         // each edge's face sides in pairs of opposite sense along it, a strip for each pair
@@ -1291,7 +1418,7 @@ impl<'a> Work<'a> {
         }
         // the caps: closed curves of total length L, each within L of the points near it
         // (each coordinate within its greatest distance plus L of the centre's: `|Phi|` at
-        // most its magnitude over that box; the volume's `|z - z0| + L`)
+        // most its magnitude over that box; the volume's `|x_axis - c_axis| + L`)
         let l = open_length.hi;
         let reach = zcap.map(|c| {
             let r = (Ivl::from(c) + Ivl::from(l)).hi;
@@ -1300,6 +1427,7 @@ impl<'a> Work<'a> {
         let phi = w.weight.phi(reach).mag();
         let cap = Ivl::from(phi) * Ivl::from(l) * Ivl::from(l) / Ivl::from(4.0);
         w.fixed = w.fixed + Ivl::new(-cap.hi, cap.hi);
+        w.budget = default_refinement_budget(w.counts.cells);
         Ok(w)
     }
 
@@ -1407,7 +1535,13 @@ impl<'a> Work<'a> {
                 levels.push(x);
             }
         }
-        self.faces.push(FaceGeo { cn, levels, sign });
+        let lines_u = sorted_unique_knots(&cn.u);
+        self.faces.push(FaceGeo {
+            cn,
+            lines_u,
+            levels,
+            sign,
+        });
         for lp in loops {
             // each curve's start and end point (as walked), enclosed
             let mut ends = Vec::new();
@@ -1498,14 +1632,9 @@ impl<'a> Work<'a> {
     /// cross a knot line of the surface, swept down to the base.
     fn add_piece(&mut self, face: usize, cn: &NurbsCurve, dir: f64) -> Result<()> {
         let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
-        let mut lines_u: Vec<f64> = Vec::new();
-        for &x in &fg.cn.u {
-            if lines_u.last() != Some(&x) {
-                lines_u.push(x);
-            }
-        }
+        let lines_u = fg.lines_u.clone();
         let levels = fg.levels.clone();
-        let lines_v: Vec<f64> = levels.iter().skip(1).copied().collect();
+        let lines_v = levels.get(1..).unwrap_or(&[]);
         for (s, a, z) in curve_spans(cn) {
             // a piece of constant u has no flux (its cells' integrand carries u' = 0): no
             // cells, and the enclosure is that of the other pieces
@@ -1513,11 +1642,7 @@ impl<'a> Work<'a> {
                 continue;
             }
             let mut cuts = vec![a, z];
-            for (c, lines) in [(0usize, &lines_u), (1, &lines_v)] {
-                for &line in lines {
-                    crossings(cn, s, a, z, c, line, &mut cuts)?;
-                }
-            }
+            add_knot_crossings(cn, s, a, z, &lines_u, lines_v, &mut cuts)?;
             cuts.sort_by(f64::total_cmp);
             cuts.dedup();
             let piece = self.pieces.len();
@@ -1537,12 +1662,12 @@ impl<'a> Work<'a> {
                 let vc = mid.first().map_or(f64::NAN, |p| p.y.mid());
                 let j_top = levels.iter().rposition(|&l| l <= vc).unwrap_or(0);
                 for j in 0..=j_top {
+                    let whole = j < j_top;
+                    if !whole && levels.get(j).is_some_and(|&l| constant_v_at(cn, s, l)) {
+                        continue;
+                    }
                     self.push(Item {
-                        kind: Kind::Sweep {
-                            piece,
-                            j,
-                            whole: j < j_top,
-                        },
+                        kind: Kind::Sweep { piece, j, whole },
                         t: (t0, t1),
                         s: (0.0, 1.0),
                         depth: 0,
@@ -1594,18 +1719,38 @@ impl<'a> Work<'a> {
                 *c = c.max((xi - Ivl::from(ci)).mag());
             }
         }
-        // cut at both curves' knots
-        let sg = self.strips.get(strip).ok_or_else(|| defect(NO_ENTRY))?;
+        // cut at both curves' knots, then where either side crosses its surface's knot lines
         let mut cuts = vec![t0, t1];
-        for (_, cn) in &sg.sides {
-            for &x in &cn.u {
-                if x > t0 && x < t1 {
-                    cuts.push(x);
+        {
+            let sg = self.strips.get(strip).ok_or_else(|| defect(NO_ENTRY))?;
+            for (_, cn) in &sg.sides {
+                for &x in &cn.u {
+                    if x > t0 && x < t1 {
+                        cuts.push(x);
+                    }
                 }
             }
+            cuts.sort_by(f64::total_cmp);
+            cuts.dedup();
+            let mut extra = Vec::new();
+            for pair in cuts.windows(2) {
+                if let &[x0, x1] = pair {
+                    let tm = 0.5 * (x0 + x1);
+                    for (face_idx, cn) in &sg.sides {
+                        let fg = self.faces.get(*face_idx).ok_or_else(|| defect(NO_ENTRY))?;
+                        let sp = span(&cn.u, cn.p, cn.n, tm);
+                        let lines_v = fg.levels.get(1..).unwrap_or(&[]);
+                        add_knot_crossings(cn, sp, x0, x1, &fg.lines_u, lines_v, &mut extra)?;
+                    }
+                }
+            }
+            if !extra.is_empty() {
+                cuts.extend(extra);
+                cuts.sort_by(f64::total_cmp);
+                cuts.dedup();
+            }
         }
-        cuts.sort_by(f64::total_cmp);
-        cuts.dedup();
+        let sg = self.strips.get(strip).ok_or_else(|| defect(NO_ENTRY))?;
         let spans_at = |t: f64| -> [usize; 2] {
             let s = |cn: &NurbsCurve| span(&cn.u, cn.p, cn.n, t);
             [s(&sg.sides[0].1), s(&sg.sides[1].1)]
@@ -1675,18 +1820,25 @@ impl<'a> Work<'a> {
         if self.counts.cells % 64 == 0 {
             self.k.check_cancelled(OP)?;
         }
-        let (enc, split_t) = match it.kind {
+        let (enc, split_t, taylor_used) = match it.kind {
             Kind::Sweep { piece, j, whole } => {
                 self.sweep_cell(piece, j, whole, it.t, it.s, it.order)?
             }
             Kind::Strip { strip, spans } => {
                 self.counts.strips += 1;
-                let (enc, settled, least) = self.strip_cell(strip, spans, it.t, it.order)?;
+                let (enc, settled, least, taylor) =
+                    self.strip_cell_eval(strip, spans, it.t, it.order)?;
                 it.settled = settled;
                 it.least = least;
-                (enc, true)
+                (enc, true, taylor)
             }
         };
+        // Raising `order` from FIRST_ORDER to ORDER cannot narrow a ranged, non-Taylor, or
+        // unbounded cell: mark it at ORDER so refinement bisects it directly instead of
+        // wasting a redundant re-evaluation.
+        if !taylor_used {
+            it.order = ORDER;
+        }
         it.enc = enc;
         it.split_t = split_t;
         let index = self.items.len();
@@ -1698,7 +1850,8 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    /// A sweep cell's enclosure, signed, and whether it is to be cut along `t`.
+    /// A sweep cell's enclosure, signed, whether it is to be cut along `t`, and whether it
+    /// used its Taylor model.
     fn sweep_cell(
         &mut self,
         piece: usize,
@@ -1707,13 +1860,12 @@ impl<'a> Work<'a> {
         t: (f64, f64),
         s: (f64, f64),
         ord: usize,
-    ) -> Result<(Ivl, bool)> {
+    ) -> Result<(Ivl, bool, bool)> {
         let p = self.pieces.get(piece).ok_or_else(|| defect(NO_ENTRY))?;
         let fg = self.faces.get(p.face).ok_or_else(|| defect(NO_ENTRY))?;
         let sign = Ivl::from(fg.sign * p.dir);
         let a = fg.levels.get(j).copied().ok_or_else(|| defect(NO_ENTRY))?;
         let next = fg.levels.get(j + 1).copied();
-        let z0 = Ivl::from(self.z0);
         let (tc, sc) = (0.5 * (t.0 + t.1), 0.5 * (s.0 + s.1));
         let (xl, xh) = (
             Ivl::from(t.0) - Ivl::from(tc),
@@ -1724,12 +1876,13 @@ impl<'a> Work<'a> {
             Ivl::from(s.1) - Ivl::from(sc),
         );
         let (hull_u, hull_v) = piece_hull(&p.cn, p.span);
-        // the series of u and of b (v = a + sigma b) at `tt` (a point or the cell's t), and
-        // the box the points map into
-        let series = |tt: Ivl, sg: Ivl, n: usize| -> Result<(Bs, Bs, Ivl, Ivl)> {
+        // the series of u and of b (v = a + sigma b) at `tt` (a point or the cell's t),
+        // the box the points map into, and the first derivatives `(u', v')` over `tt`
+        let series = |tt: Ivl, sg: Ivl, n: usize| -> Result<(Bs, Bs, Ivl, Ivl, Ivl, Ivl)> {
             let d = curve_derivs_over(&p.cn, tt, n, Some(p.span))?;
             let (u0, du) = curve_series(&d, 0, n);
             let (v0, vs) = curve_series(&d, 1, n);
+            let (u_slope, v_slope) = (du.at(1, 0), vs.at(1, 0));
             let (b0, bs) = match (whole, next) {
                 (true, Some(top)) => (Ivl::from(top) - Ivl::from(a), Bs::zero()),
                 (true, None) => {
@@ -1754,41 +1907,39 @@ impl<'a> Work<'a> {
                 _ => Ivl::new(a.min(hull_v.lo), a.max(hull_v.hi)),
             };
             let v = Ivl::new(vb.lo.max(true_v.lo), vb.hi.min(true_v.hi));
-            Ok((du, dv, u, v))
+            Ok((du, dv, u, v, u_slope, v_slope))
         };
-        // the integrand -(S_z - z0) (S_u x S_v)_z u'(t) b(t) as a series of degree `n` (the
-        // Jacobian of phi is u' b): in this form no product cancels another, where the
+        // the integrand -(S_axis - c_axis) (S_u x S_v)_axis u'(t) b(t) as a series of degree
+        // `n` (the Jacobian of phi is u' b): in this form no product cancels another, where the
         // equal form (X_t x X_sigma)_z of the composed surface does, and an interval keeps
         // a cancellation's whole width (from partials to order n + 1, du and dv to n + 1)
-        // A moment's `Phi(S)` takes the place of `S_z - z0`. The area's `|S_u x S_v|` is the
-        // root of a series ([`sqrt_series`]): `None` where its value is not proved positive
+        // A moment's `Phi(S)` takes the place of `S_axis - c_axis`. The area's `|S_u x S_v|` is
+        // the root of a series ([`sqrt_series`]): `None` where its value is not proved positive
         // over the cell (a pole's), and the cell is then enclosed by its range.
         let weight = self.weight;
-        let [x0, y0, _] = weight.centre;
+        let [x0, y0, z0] = weight.centre;
         let integrand = |p: &Partials<Ivl>, du: &Bs, dv: &Bs, n: usize| -> Option<Bs> {
             let [xx, xy, xz] = compose_partial(p, (0, 0), du, dv, n);
             let [sux, suy, suz] = compose_partial(p, (1, 0), du, dv, n);
             let [svx, svy, svz] = compose_partial(p, (0, 1), du, dv, n);
-            let normal = sux.mul(&svy, n).sub(&suy.mul(&svx, n));
             let g = if weight.is_area() {
                 let nx = suy.mul(&svz, n).sub(&suz.mul(&svy, n));
                 let ny = suz.mul(&svx, n).sub(&sux.mul(&svz, n));
-                let mut nn = nx
-                    .mul(&nx, n)
-                    .add(&ny.mul(&ny, n))
-                    .add(&normal.mul(&normal, n));
+                let nz = sux.mul(&svy, n).sub(&suy.mul(&svx, n));
+                let mut nn = nx.mul(&nx, n).add(&ny.mul(&ny, n)).add(&nz.mul(&nz, n));
                 // the value is a sum of squares: each square enclosed as one (`sq`), not as
                 // a product, so a component crossing 0 over the cell adds no negative part
-                nn.set(
-                    0,
-                    0,
-                    sq(nx.at(0, 0)) + sq(ny.at(0, 0)) + sq(normal.at(0, 0)),
-                );
+                nn.set(0, 0, sq(nx.at(0, 0)) + sq(ny.at(0, 0)) + sq(nz.at(0, 0)));
                 sqrt_series(&nn, n)?
             } else {
+                let normal = match weight.axis {
+                    0 => suy.mul(&svz, n).sub(&suz.mul(&svy, n)),
+                    1 => suz.mul(&svx, n).sub(&sux.mul(&svz, n)),
+                    _ => sux.mul(&svy, n).sub(&suy.mul(&svx, n)),
+                };
                 let cx = xx.sub(&Bs::constant(Ivl::from(x0)));
                 let cy = xy.sub(&Bs::constant(Ivl::from(y0)));
-                let cz = xz.sub(&Bs::constant(z0));
+                let cz = xz.sub(&Bs::constant(Ivl::from(z0)));
                 weight.phi_series([&cx, &cy, &cz], n).mul(&normal, n)
             };
             let mut b = Bs::zero();
@@ -1799,11 +1950,25 @@ impl<'a> Work<'a> {
         };
         let tcell = Ivl::new(t.0, t.1);
         let scell = Ivl::new(s.0, s.1);
-        let (du_c, dv_c, u_c, v_c) = series(tcell, scell, ord + 1)?;
-        let taylor = piece_of(&fg.cn, u_c, v_c);
+        let (du_c, dv_c, mut u_c, mut v_c, u_slope, v_slope) = series(tcell, scell, ord + 1)?;
+        let mut taylor = piece_of(&fg.cn, u_c, v_c);
+        if taylor.is_none() {
+            let (u_tight, v_tight_raw) =
+                tighten_monotone(&p.cn, p.span, tcell, u_slope, v_slope, u_c, hull_v)?;
+            u_c = u_tight;
+            if !whole {
+                let vb = Ivl::from(a) + scell * (v_tight_raw - Ivl::from(a));
+                let lo = v_c.lo.max(vb.lo);
+                let hi = v_c.hi.min(vb.hi);
+                if lo <= hi {
+                    v_c = Ivl::new(lo, hi);
+                }
+            }
+            taylor = piece_of(&fg.cn, u_c, v_c);
+        }
         // the range over the cell times its area
         let ranged = || -> Result<(Ivl, bool)> {
-            let (du1, dv1, u1, v1) = series(tcell, scell, 1)?;
+            let (du1, dv1, u1, v1, _, _) = series(tcell, scell, 1)?;
             let Some(pr) = partials_over(&fg.cn, u1, v1, 1)? else {
                 return Ok((Ivl::whole(), true));
             };
@@ -1820,16 +1985,17 @@ impl<'a> Work<'a> {
         };
         let Some((ku, kv)) = taylor else {
             self.counts.ranged += 1;
-            return ranged();
+            let (enc, split) = ranged()?;
+            return Ok((enc, split, false));
         };
         // the remainder: the coefficients of degree ORDER over the cell
-        let (du_m, dv_m, u_m, v_m) = series(Ivl::from(tc), Ivl::from(sc), ord)?;
+        let (du_m, dv_m, u_m, v_m, _, _) = series(Ivl::from(tc), Ivl::from(sc), ord)?;
         let (Some(pr), Some(pm)) = (
             piece_partials(&fg.cn, (ku, kv), u_c, v_c, ord + 1),
             piece_partials(&fg.cn, (ku, kv), u_m, v_m, ord),
         ) else {
             self.counts.taylor += 1;
-            return Ok((Ivl::whole(), true));
+            return Ok((Ivl::whole(), true, false));
         };
         // the polynomial: the coefficients of degree < ORDER at the middle
         let (Some(fr), Some(fm)) = (
@@ -1838,7 +2004,8 @@ impl<'a> Work<'a> {
         ) else {
             // an area's root not proved analytic over the cell
             self.counts.ranged += 1;
-            return ranged();
+            let (enc, split) = ranged()?;
+            return Ok((enc, split, false));
         };
         self.counts.taylor += 1;
         let mx: Vec<Ivl> = (0..=ord).map(|i| moment(xl, xh, i)).collect();
@@ -1878,7 +2045,7 @@ impl<'a> Work<'a> {
         }
         let taylor_cell = (sign * sum, wt >= ws);
         if !weight.is_area() {
-            return Ok(taylor_cell);
+            return Ok((taylor_cell.0, taylor_cell.1, true));
         }
         // an area's cell near a pole: the root's series divides by the least value of
         // `|S_u x S_v|^2` over the cell, near 0 there, and its remainder is wider than the
@@ -1888,14 +2055,14 @@ impl<'a> Work<'a> {
         let (t_cell, _) = taylor_cell;
         let (lo, hi) = (t_cell.lo.max(by_range.lo), t_cell.hi.min(by_range.hi));
         if lo > hi || lo.is_nan() || hi.is_nan() {
-            return Ok((t_cell.hull(by_range), taylor_cell.1));
+            return Ok((t_cell.hull(by_range), taylor_cell.1, true));
         }
         let split = if by_range.hi - by_range.lo < t_cell.hi - t_cell.lo {
             range_split
         } else {
             taylor_cell.1
         };
-        Ok((Ivl::new(lo, hi), split))
+        Ok((Ivl::new(lo, hi), split, true))
     }
 
     /// A strip cell's enclosure, `[-w, w]` with `w` its flux's bound, and whether it is
@@ -1907,6 +2074,7 @@ impl<'a> Work<'a> {
     /// widths of any cut of it into strip cells, `2 |Phi|_least speed_least kept`: each
     /// part's `|Phi|` and speed bounds are at least these least values over this cell, and
     /// its `int |D|` bound at least its own share of `kept` ([`Work::least`]).
+    #[cfg(test)]
     fn strip_cell(
         &self,
         strip: usize,
@@ -1914,12 +2082,22 @@ impl<'a> Work<'a> {
         t: (f64, f64),
         ord: usize,
     ) -> Result<(Ivl, bool, f64)> {
+        let (enc, settled, least, _) = self.strip_cell_eval(strip, spans, t, ord)?;
+        Ok((enc, settled, least))
+    }
+
+    fn strip_cell_eval(
+        &self,
+        strip: usize,
+        spans: [usize; 2],
+        t: (f64, f64),
+        ord: usize,
+    ) -> Result<(Ivl, bool, f64, bool)> {
         let tc = 0.5 * (t.0 + t.1);
         let (xl, xh) = (
             Ivl::from(t.0) - Ivl::from(tc),
             Ivl::from(t.1) - Ivl::from(tc),
         );
-        let z0 = Ivl::from(self.z0);
         // each side's curve in 3D as a series in x: at the middle (degree < ORDER) and over
         // the cell (degree ORDER), or its range over the cell where a box may cross a knot
         // line
@@ -1937,8 +2115,12 @@ impl<'a> Work<'a> {
                 let v = Ivl::new(v0.lo.max(hv.lo), v0.hi.min(hv.hi));
                 Ok((du, dv, u, v))
             };
-            let (du, dv, u, v) = at(Ivl::new(t.0, t.1), ord)?;
+            let (du, dv, mut u, mut v) = at(Ivl::new(t.0, t.1), ord)?;
             let (dum, dvm, um, vm) = at(Ivl::from(tc), ord - 1)?;
+            if piece_of(&face.cn, u, v).is_none() {
+                (u, v) =
+                    tighten_monotone(cn, sp, Ivl::new(t.0, t.1), du.at(1, 0), dv.at(1, 0), u, v)?;
+            }
             let pieces = piece_of(&face.cn, u, v).and_then(|kk| {
                 Some((
                     piece_partials(&face.cn, kk, u, v, ord)?,
@@ -1954,7 +2136,7 @@ impl<'a> Work<'a> {
                     taylor = false;
                     let (du, dv, u, v) = at(Ivl::new(t.0, t.1), 1)?;
                     let Some(p) = partials_over(&face.cn, u, v, 1)? else {
-                        return Ok((Ivl::whole(), false, 0.0));
+                        return Ok((Ivl::whole(), false, 0.0, false));
                     };
                     over.push(compose(&p, &du, &dv, 1));
                 }
@@ -1968,14 +2150,14 @@ impl<'a> Work<'a> {
         };
         let comp = |s: &[Bs; 3], i: usize| [s[0].at(i, 0), s[1].at(i, 0), s[2].at(i, 0)];
         let diff = |a: [Ivl; 3], b: [Ivl; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        // |X_1'| + |D'| and max |z - z0| over the cell
+        // |X_1'| + |D'| and max |x_axis - c_axis| over the cell
         let speed = mag3([
             Ivl::from(mag3(comp(o1, 1))),
             Ivl::from(mag3(diff(comp(o1, 1), comp(o2, 1)))),
             IZ,
         ]);
         // `|Phi|` over the strip: each point of it lies between its sides' points, in the
-        // hull of their ranges (the volume's `max |z - z0|`)
+        // hull of their ranges (the volume's `max |x_axis - c_axis|`)
         let hull = |i: usize| {
             let c = self.weight.centre.get(i).copied();
             let side = |o: &[Bs; 3]| match (o.get(i), c) {
@@ -1984,8 +2166,21 @@ impl<'a> Work<'a> {
             };
             side(o1).hull(side(o2))
         };
+        let axis = self.weight.axis;
+        let pick_at0 = |s: &[Bs; 3]| match axis {
+            0 => s[0].at(0, 0),
+            1 => s[1].at(0, 0),
+            _ => s[2].at(0, 0),
+        };
+        let c_axis = Ivl::from(match axis {
+            0 => self.weight.centre[0],
+            1 => self.weight.centre[1],
+            _ => self.z0,
+        });
         let zmax = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
-            (o1[2].at(0, 0) - z0).mag().max((o2[2].at(0, 0) - z0).mag())
+            (pick_at0(o1) - c_axis)
+                .mag()
+                .max((pick_at0(o2) - c_axis).mag())
         } else {
             self.weight.phi([hull(0), hull(1), hull(2)]).mag()
         };
@@ -2079,10 +2274,12 @@ impl<'a> Work<'a> {
         let settled = kept + kept >= gap.hi;
         // lower bounds of every cut's `|Phi|` and speed bounds (`zmax`, `speed`): each is at
         // least its value at a point of this cell, so at least these (for the volume, the
-        // larger side's least `|z - z0|`, which `zmax` takes the larger of), and the cuts'
-        // `int |D|` bounds sum to at least `kept`
+        // larger side's least `|x_axis - c_axis|`, which `zmax` takes the larger of), and the
+        // cuts' `int |D|` bounds sum to at least `kept`
         let phi_least = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
-            (o1[2].at(0, 0) - z0).mig().max((o2[2].at(0, 0) - z0).mig())
+            (pick_at0(o1) - c_axis)
+                .mig()
+                .max((pick_at0(o2) - c_axis).mig())
         } else {
             self.weight.phi([hull(0), hull(1), hull(2)]).mig()
         };
@@ -2096,7 +2293,7 @@ impl<'a> Work<'a> {
         } else {
             0.0
         };
-        Ok((Ivl::new(-w.hi, w.hi), settled, at_least))
+        Ok((Ivl::new(-w.hi, w.hi), settled, at_least, taylor))
     }
 
     /// The enclosure: the cells' sum and the fixed terms, in insertion order.
@@ -2211,16 +2408,45 @@ impl<'a> Work<'a> {
         let start = self.counts.cells;
         let limit = start.saturating_add(self.budget);
         // running sums in f64 say when to sum the enclosure in intervals again: when they
-        // look done, or every quarter of the work list's length
+        // look done, or every quarter of the work list's length. For non-area enclosures we
+        // track infinite cells apart from `(lo, hi)` so replacing an unbounded cell never
+        // leaves `(lo, hi)` as `NaN` for a quarter of the work list.
         let total = self.total();
-        let (mut lo, mut hi) = (total.lo, total.hi);
+        let is_area = self.weight.is_area();
+        let (mut lo, mut hi, mut inf_count) = if is_area {
+            (total.lo, total.hi, 0usize)
+        } else {
+            let mut f_lo = self.fixed.lo;
+            let mut f_hi = self.fixed.hi;
+            let mut inf = usize::from(!(f_lo.is_finite() && f_hi.is_finite()));
+            if inf > 0 {
+                f_lo = 0.0;
+                f_hi = 0.0;
+            }
+            for (it, alive) in self.items.iter().zip(&self.alive) {
+                if *alive {
+                    if it.enc.lo.is_finite() && it.enc.hi.is_finite() {
+                        f_lo += it.enc.lo;
+                        f_hi += it.enc.hi;
+                    } else {
+                        inf += 1;
+                    }
+                }
+            }
+            (f_lo, f_hi, inf)
+        };
         // the intersection of the enclosures summed so far
         let mut best = total;
         let mut checked = self.counts.cells;
         let mut next_check = 0usize;
         loop {
+            let looks_done = if is_area {
+                done(Ivl::new(lo, hi))
+            } else {
+                inf_count == 0 && done(Ivl::new(lo, hi))
+            };
             let due = self.counts.cells >= next_check
-                || (done(Ivl::new(lo, hi)) && self.counts.cells >= checked + 16);
+                || (looks_done && self.counts.cells >= checked + 16);
             if due {
                 let total = self.total();
                 best = intersect(total, best)?;
@@ -2240,7 +2466,9 @@ impl<'a> Work<'a> {
                         return out(self, best, EnclosureStop::Floor);
                     }
                 }
-                (lo, hi) = (total.lo, total.hi);
+                if is_area || inf_count == 0 {
+                    (lo, hi) = (total.lo, total.hi);
+                }
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
@@ -2261,12 +2489,20 @@ impl<'a> Work<'a> {
                 if let Some(a) = self.alive.get_mut(i) {
                     *a = false;
                 }
-                lo -= it.enc.lo;
-                hi -= it.enc.hi;
+                if is_area || (it.enc.lo.is_finite() && it.enc.hi.is_finite()) {
+                    lo -= it.enc.lo;
+                    hi -= it.enc.hi;
+                } else {
+                    inf_count = inf_count.saturating_sub(1);
+                }
                 self.push(Item { order: ORDER, ..it })?;
                 if let Some(n) = self.items.last() {
-                    lo += n.enc.lo;
-                    hi += n.enc.hi;
+                    if is_area || (n.enc.lo.is_finite() && n.enc.hi.is_finite()) {
+                        lo += n.enc.lo;
+                        hi += n.enc.hi;
+                    } else {
+                        inf_count += 1;
+                    }
                 }
                 continue;
             }
@@ -2302,13 +2538,21 @@ impl<'a> Work<'a> {
             if let Some(a) = self.alive.get_mut(i) {
                 *a = false;
             }
-            lo -= it.enc.lo;
-            hi -= it.enc.hi;
+            if is_area || (it.enc.lo.is_finite() && it.enc.hi.is_finite()) {
+                lo -= it.enc.lo;
+                hi -= it.enc.hi;
+            } else {
+                inf_count = inf_count.saturating_sub(1);
+            }
             for c in children {
                 self.push(c)?;
                 if let Some(n) = self.items.last() {
-                    lo += n.enc.lo;
-                    hi += n.enc.hi;
+                    if is_area || (n.enc.lo.is_finite() && n.enc.hi.is_finite()) {
+                        lo += n.enc.lo;
+                        hi += n.enc.hi;
+                    } else {
+                        inf_count += 1;
+                    }
                 }
             }
         }
@@ -2340,10 +2584,40 @@ fn intersect(a: Ivl, b: Ivl) -> Result<Ivl> {
     }
 }
 
+/// Appends all crossings of curve `cn` (on span `s` over `(a, z)`) with the strictly
+/// ascending surface knot lines `lines_u` and `lines_v`, binary-searching to visit only
+/// knots strictly inside the curve span's control-point hull.
+fn add_knot_crossings(
+    cn: &NurbsCurve,
+    s: usize,
+    a: f64,
+    z: f64,
+    lines_u: &[f64],
+    lines_v: &[f64],
+    out: &mut Vec<f64>,
+) -> Result<()> {
+    let (hu, hv) = piece_hull(cn, s);
+    for (c, lines, h) in [(0usize, lines_u, hu), (1, lines_v, hv)] {
+        if h.lo.partial_cmp(&h.hi) != Some(core::cmp::Ordering::Less) {
+            continue;
+        }
+        let lo_idx = lines.partition_point(|&x| x <= h.lo);
+        let hi_idx = lines.partition_point(|&x| x < h.hi);
+        if let Some(slice) = lines.get(lo_idx..hi_idx) {
+            for &line in slice {
+                crossings(cn, s, a, z, c, line, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The parameters in `(a, z)` where the curve's coordinate `c` (0: u, 1: v) on span `s`
-/// crosses `line`, located by sign changes between 16 evenly spaced points and bisection
-/// (where the cells are cut; a cut off the exact crossing only leaves a cell whose image
-/// may cross the line, enclosed by its range).
+/// crosses `line`, located by sign changes between 16 evenly spaced points and bisection.
+/// Each crossing is bracketed by two cuts `(tl, tr)` whose certified point enclosures lie
+/// on opposite sides of `line`, leaving only a machine-epsilon cell straddling the knot
+/// line while both adjacent cells stay inside one surface piece and take Taylor models at
+/// once.
 fn crossings(
     cn: &NurbsCurve,
     s: usize,
@@ -2359,15 +2633,20 @@ fn crossings(
     if !(h.lo < line && line < h.hi) {
         return Ok(());
     }
-    let at = |t: f64| -> Result<f64> {
+    let eval = |t: f64| -> Result<Ivl> {
         let d = curve_derivs_over(cn, Ivl::from(t), 0, Some(s))?;
         let p = d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?;
-        Ok((if c == 0 { p.x } else { p.y }).mid() - line)
+        Ok(if c == 0 { p.x } else { p.y })
     };
+    let at = |t: f64| -> Result<f64> { Ok(eval(t)?.mid() - line) };
     let mut t0 = a;
     let mut f0 = at(t0)?;
     for i in 1..=SAMPLES {
-        let t1 = a + (z - a) * (i as f64) / (SAMPLES as f64);
+        let t1 = if i == SAMPLES {
+            z
+        } else {
+            a + (z - a) * (i as f64) / (SAMPLES as f64)
+        };
         let f1 = at(t1)?;
         if f0 * f1 < 0.0 {
             let (mut lo, mut hi, mut flo) = (t0, t1, f0);
@@ -2384,7 +2663,42 @@ fn crossings(
                     flo = fm;
                 }
             }
-            out.push(0.5 * (lo + hi));
+            let on_side = |v: Ivl, below: bool| if below { v.hi <= line } else { v.lo >= line };
+            let below_left = flo < 0.0;
+            let mut tl = lo;
+            let mut step = (hi - lo).max(f64::EPSILON * (1.0 + lo.abs()));
+            for _ in 0..16 {
+                if on_side(eval(tl)?, below_left) {
+                    break;
+                }
+                let cand = tl - step;
+                if !(a < cand && cand < tl) {
+                    tl = lo;
+                    break;
+                }
+                tl = cand;
+                step *= 2.0;
+            }
+            let mut tr = hi;
+            let mut step = (hi - lo).max(f64::EPSILON * (1.0 + hi.abs()));
+            for _ in 0..16 {
+                if on_side(eval(tr)?, !below_left) {
+                    break;
+                }
+                let cand = tr + step;
+                if !(tr < cand && cand < z) {
+                    tr = hi;
+                    break;
+                }
+                tr = cand;
+                step *= 2.0;
+            }
+            if a < tl && tl < z {
+                out.push(tl);
+            }
+            if a < tr && tr < z && tr != tl {
+                out.push(tr);
+            }
         }
         t0 = t1;
         f0 = f1;
@@ -3161,5 +3475,65 @@ mod tests {
             piece_partials(cn, (ku, kv), Ivl::from(u), Ivl::from(v), lk).unwrap(),
             nurbs_partials_within_span(cn, ku, kv, u, u, v, v, lk).unwrap()
         );
+    }
+
+    #[test]
+    fn default_refinement_budget_scales_with_starting_cells() {
+        assert_eq!(default_refinement_budget(0), CELL_BUDGET);
+        assert_eq!(
+            default_refinement_budget(CELL_BUDGET / CELL_BUDGET_PER_START),
+            CELL_BUDGET
+        );
+        assert_eq!(
+            default_refinement_budget(50_000),
+            50_000 * CELL_BUDGET_PER_START
+        );
+        assert_eq!(default_refinement_budget(usize::MAX), MAX_CELL_BUDGET);
+    }
+
+    #[test]
+    fn constant_v_at_is_exact_on_the_piece_control_points() {
+        assert!(constant_v_at(
+            &segment([0.0, 0.5], [1.0, 0.5]).unwrap(),
+            1,
+            0.5
+        ));
+        assert!(!constant_v_at(
+            &segment([0.0, 0.5], [1.0, 0.5]).unwrap(),
+            1,
+            0.25
+        ));
+        assert!(!constant_v_at(
+            &segment([0.0, 0.0], [1.0, 1.0]).unwrap(),
+            1,
+            0.0
+        ));
+        let mut seg = segment([0.0, 0.5], [1.0, 0.5]).unwrap();
+        seg.pw[7] = 2.0;
+        assert!(!constant_v_at(&seg, 1, 0.5));
+    }
+
+    #[test]
+    fn elongated_z_body_uses_transverse_flux_axis_and_holds_volume() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            400.0,
+        )
+        .unwrap();
+        let w = Work::new(&k, &mut b).unwrap();
+        assert_ne!(w.weight.axis, 2);
+        let exact = std::f64::consts::PI * 4.0 * 400.0;
+        let e = enclose_volume(&k, &mut b, 1e-6 * exact).unwrap();
+        assert_eq!(e.stop, EnclosureStop::Reached, "{e:?}");
+        assert!(e.lo <= exact && exact <= e.hi, "{e:?} misses {exact}");
+        match volume_sign(&k, &mut b).unwrap() {
+            VolumeSign::Positive(v) => {
+                assert!(v.lo <= exact && exact <= v.hi, "{v:?} misses {exact}");
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
     }
 }

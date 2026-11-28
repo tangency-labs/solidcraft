@@ -71,7 +71,7 @@ pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option
     let Err(ref err) = first else {
         return first;
     };
-    if !matches!(err, Error::Solidcore(msg) if msg.contains("boolean::merge::p2::make_faceuse") && msg.contains("no radial edge use")) {
+    if !err.is_radial_sector_failure() {
         return first;
     }
     let ta = super::history::tag(a, 0)?;
@@ -94,11 +94,17 @@ pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option
 /// ([`super::history::tag_owned`]), the copy [`boolean_tagged`] would make of it skipped. The
 /// tagged bodies are the same either way, so the result is. Bodies are handed over only while no
 /// failure dump folder is set ([`super::dump::dumping`]); a failure's dump gets the read operands.
+/// When both operands are read (`Ok`), a union radial-sector failure retries via
+/// [`ops::union_copies`] on fresh tagged copies, matching [`boolean_tagged`].
 pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::result::Result<&Body, Body>, op: BooleanOp) -> Result<Option<Body>> {
     let read: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().ok().copied()).collect();
     let owned: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().err()).collect();
     usable("SmApiBoolean", &read)?;
     usable("SmApiBoolean", &owned)?;
+    let shared_pair = match (&a, &b) {
+        (Ok(sa), Ok(sb)) => Some((*sa, *sb)),
+        _ => None,
+    };
     let tag = |x: &std::result::Result<&Body, Body>, n: usize| -> Option<Result<Body>> { x.as_ref().ok().map(|x| super::history::tag(x, n)) };
     let (ta, tb) = (tag(&a, 0), tag(&b, 1));
     let inputs: Vec<(&'static str, &Body)> = [(OPERANDS.first(), &a), (OPERANDS.get(1), &b)]
@@ -115,7 +121,26 @@ pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::
         (None, Err(owned)) => super::history::tag_owned(owned, 1)?,
         (None, Ok(_)) => return Err(Error::Argument),
     };
-    call::ops_on("SmApiBoolean", &inputs, || ops::boolean(ta, tb, operation(op)))
+    let first = call::ops_on("SmApiBoolean", &inputs, || ops::boolean(ta, tb, operation(op)));
+    if op != BooleanOp::Union {
+        return first;
+    }
+    let Err(ref err) = first else {
+        return first;
+    };
+    let Some((sa, sb)) = shared_pair else {
+        return first;
+    };
+    if !err.is_radial_sector_failure() {
+        return first;
+    }
+    let ta = super::history::tag(sa, 0)?;
+    let tb = super::history::tag(sb, 1)?;
+    match call::ops_on("SmApiBoolean", &operands(&[sa, sb]), || ops::union_copies(&ta, &tb)) {
+        ok @ Ok(Some(_)) => ok,
+        Err(e @ Error::Cancelled(_)) => Err(e),
+        _ => first,
+    }
 }
 
 /// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
@@ -123,13 +148,14 @@ pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::
 ///
 /// Not upstream: when the level-by-level union fails with the classification's own typed
 /// refusal ([`Error::NotOneFoot`], `compute_point_parameters` finding no single nearest point
-/// on a face's surface), the same bodies are united once more on fresh copies, one at a time
-/// against the result so far ([`union_one_by_one`]). The union of solids is the same set
-/// whichever pairing computes it, and a pair the level scheme cannot classify may classify fine
-/// against the accumulated body, so a join of many bodies that fails one pairing is built
-/// instead of refused (SolidCraft issue #16552). Any other failure — a deliberate refusal such
-/// as the solid leak, an unported step, a cancellation — keeps its own error; so does a failure
-/// of the retry.
+/// on a face's surface) or a shared-edge radial-sector failure in `make_faceuse`, the same
+/// bodies are united once more on fresh copies, one at a time against the result so far
+/// ([`union_one_by_one`]). The union of solids is the same set whichever pairing computes it,
+/// and a pair the level scheme cannot classify may classify fine against the accumulated body,
+/// or recover via [`ops::union_copies`], so a join of many bodies that fails one pairing is
+/// built instead of refused (SolidCraft issue #16552). Any other failure — a deliberate refusal
+/// such as the solid leak, an unported step, a cancellation — keeps its own error; so does a
+/// failure of the retry.
 pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
@@ -147,6 +173,14 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
                 // is the answer, not masked by the level scheme's refusal
                 Err(Error::NotOneFoot { .. }) => Err(first),
                 Err(e) => Err(e),
+            }
+        }
+        Err(first) if first.is_radial_sector_failure() => {
+            let fresh = copies(bodies)?;
+            match union_one_by_one(fresh) {
+                Ok(b) => Ok(b),
+                Err(e @ Error::Cancelled(_)) => Err(e),
+                Err(_) => Err(first),
             }
         }
         Err(first) => Err(first),
@@ -178,19 +212,19 @@ fn union_one_by_one(bodies: Vec<Body>) -> Result<Body> {
     Ok(acc)
 }
 
-/// A union of two bodies on copies, as [`ops::boolean`] gives it (the result is `None` only
-/// where a union of nonempty solids never lands: an empty body).
+/// A union of two bodies on copies, using [`ops::union_copies`] so pairwise retries keep
+/// radial-sector recovery (the result is `None` only where a union of nonempty solids never
+/// lands: an empty body).
 fn boolean_pair(a: &Body, b: &Body) -> Result<Option<Body>> {
-    let mut c = copies(&[a, b])?.into_iter();
-    let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
     let inputs = [("a", a), ("b", b)];
-    call::ops_on("smlib_boolean_union_all", &inputs, || ops::boolean(ca, cb, operation(BooleanOp::Union)))
+    call::ops_on("smlib_boolean_union_all", &inputs, || ops::union_copies(a, b))
 }
 
 /// [`union_all`] of `bodies` tagged each as its own operand, in order
 /// ([`super::history::tag`]): the tagged copies are the union's to consume, so they are not
-/// copied again, as in [`boolean_tagged`]. Keeps [`union_all`]'s `NotOneFoot` one-by-one retry
-/// (#16552) on fresh tagged copies. A failure's dump gets `bodies`.
+/// copied again, as in [`boolean_tagged`]. Keeps [`union_all`]'s `NotOneFoot` and
+/// radial-sector one-by-one retries (#16552) on fresh tagged copies. A failure's dump gets
+/// `bodies`.
 pub(crate) fn union_all_tagged(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
@@ -206,6 +240,14 @@ pub(crate) fn union_all_tagged(bodies: &[&Body]) -> Result<Body> {
                 Ok(b) => Ok(b),
                 Err(Error::NotOneFoot { .. }) => Err(first),
                 Err(e) => Err(e),
+            }
+        }
+        Err(first) if first.is_radial_sector_failure() => {
+            let fresh = tag_all()?;
+            match union_one_by_one(fresh) {
+                Ok(b) => Ok(b),
+                Err(e @ Error::Cancelled(_)) => Err(e),
+                Err(_) => Err(first),
             }
         }
         Err(first) => Err(first),

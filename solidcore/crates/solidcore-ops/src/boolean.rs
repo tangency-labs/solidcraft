@@ -184,7 +184,11 @@ pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Resu
         let [(mut ca, _), (mut cb, _)] = operands;
         matched_tolerances(k, &mut ca, &mut cb)?;
         let witnesses = Witnesses::of(k, &ca, &cb, op, expect)?;
-        let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
+        let mut r = if op == BooleanOp::Union {
+            sm::boolean_union_constrained(k, ca, cb)?
+        } else {
+            sm::boolean(k, ca, cb, operation(op))?.result
+        };
         after_boolean(k, &mut r)?;
         Ok(match finished(k, r, expect, contract)? {
             Done::Empty => witnesses.refute(k),
@@ -230,12 +234,40 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
         {
             return reverse;
         }
-        let rebuilt = (|| {
+        let constrained_forward = (|| {
+            let ca = read_locked(a, |a| brep_copy(k, a))?;
+            let cb = read_locked(b, |b| brep_copy(k, b))?;
+            union_pair_constrained(k, ca, cb, expect, Contract::Proved)
+        })();
+        if matches!(
+            constrained_forward,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ) || constrained_forward
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return constrained_forward;
+        }
+        let rebuilt_reverse = (|| {
             let cb = read_locked(b, |b| rebuild_native(k, b))?;
             let ca = read_locked(a, |a| rebuild_native(k, a))?;
-            union_pair(k, cb, ca, expect, Contract::Proved)
+            union_pair_constrained(k, cb, ca, expect, Contract::Proved)
         })();
-        match rebuilt {
+        if matches!(
+            rebuilt_reverse,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ) || rebuilt_reverse
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return rebuilt_reverse;
+        }
+        let rebuilt_forward = (|| {
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            union_pair_constrained(k, ca, cb, expect, Contract::Proved)
+        })();
+        match rebuilt_forward {
             done @ (Ok(Done::Body(..))
             | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => done,
             Err(e) if e.root_cause().is_not_certified() => Err(e),
@@ -270,6 +302,19 @@ fn union_pair(
 ) -> KernelResult<Done> {
     matched_tolerances(k, &mut a, &mut b)?;
     let mut r = sm::boolean_union(k, a, b)?;
+    after_boolean(k, &mut r)?;
+    finished(k, r, expect, contract)
+}
+
+fn union_pair_constrained(
+    k: &mut Kernel,
+    mut a: Brep,
+    mut b: Brep,
+    expect: Expect,
+    contract: Contract,
+) -> KernelResult<Done> {
+    matched_tolerances(k, &mut a, &mut b)?;
+    let mut r = sm::boolean_union_constrained(k, a, b)?;
     after_boolean(k, &mut r)?;
     finished(k, r, expect, contract)
 }

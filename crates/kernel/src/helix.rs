@@ -292,6 +292,24 @@ mod tests {
         assert!((got - want).abs() <= bound, "{got} vs {want} within {bound}");
     }
 
+    /// #22577: a 446 mm lead screw coil of 281 turns at pitch 1.5875 along the X axis builds
+    /// through `sweep_helix` (passing the solid result check's certified `volume_sign`) with
+    /// Pappus's volume within the wall tolerance bound.
+    #[test]
+    fn a_lead_screw_coil_of_281_turns_builds() {
+        use std::f64::consts::TAU;
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let v = Loop2::polygon(&[Vec2::new(-1.6, 8.5), Vec2::new(-0.4, 8.5), Vec2::new(-1.0, 7.2)]);
+        let region = Region2 { outer: v, holes: vec![] };
+        let (pitch, turns) = (1.5875, 281.0);
+        let b = sweep_helix(&pl, &region, Vec3::new(-1.0, 0.0, 0.0), Vec3::X, pitch, turns).unwrap();
+        assert_eq!(b.face_count(), 3 * 562 + 2, "three walls in 562 half turns, two caps");
+        let want = 0.5 * 1.2 * 1.3 * TAU * (7.2 + 8.5 + 8.5) / 3.0 * turns;
+        let bound = pitch * 1e-4 * (1.2 + 2.0 * 0.6f64.hypot(1.3)) * (TAU * 8.5).hypot(pitch) * turns;
+        let got = crate::measure(&b).unwrap().volume;
+        assert!((got - want).abs() <= bound, "{got} vs {want} within {bound}");
+    }
+
     #[test]
     fn pyramid() {
         let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };

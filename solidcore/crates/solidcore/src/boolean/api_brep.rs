@@ -605,11 +605,31 @@ fn merge_boolean(
 /// B-rep (`SmMerge::m_vEdges`) as it left them.
 fn merge_boolean_by(
     k: &mut Kernel,
+    brep1: Brep,
+    brep2: Brep,
+    operation: BooleanOperation,
+    options: Option<MergeOptions>,
+    method: MergeMethod,
+) -> Result<(BooleanOutcome, Vec<EdgeId>)> {
+    merge_boolean_with_driver(
+        k,
+        brep1,
+        brep2,
+        operation,
+        options,
+        method,
+        crate::boolean::merge::p3::DependencyMerge::carrying_attributes(),
+    )
+}
+
+fn merge_boolean_with_driver(
+    k: &mut Kernel,
     mut brep1: Brep,
     mut brep2: Brep,
     operation: BooleanOperation,
     options: Option<MergeOptions>,
     method: MergeMethod,
+    mut driver: crate::boolean::merge::p3::DependencyMerge,
 ) -> Result<(BooleanOutcome, Vec<EdgeId>)> {
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
@@ -619,9 +639,6 @@ fn merge_boolean_by(
     // (not upstream: WR-754) the operands' self-touch edge copies glued first
     glue_self_touching_edges(k, &mut brep1)?;
     glue_self_touching_edges(k, &mut brep2)?;
-    // (not upstream) the driver carries the operands' attributes through the merge, as
-    // upstream's live on the objects the merge edits
-    let mut driver = crate::boolean::merge::p3::DependencyMerge::carrying_attributes();
     let mut primary = Some(brep1);
     let mut other = Some(brep2);
     driver.construct(k, &mut primary, &mut other, 0.0, 0.0, options.as_ref())?;
@@ -704,6 +721,28 @@ pub fn boolean(
 pub fn boolean_union(k: &mut Kernel, brep1: Brep, brep2: Brep) -> Result<Brep> {
     validate_boolean_operands(BooleanOperation::Union)?;
     merge_boolean(k, brep1, brep2, BooleanOperation::Union, None).map(|o| o.result)
+}
+
+/// Unions two B-reps while constraining unmated faces of `brep2` to regions bordered by
+/// every mated edge on the union's kept void side (recovery for grazing radial-sector
+/// misclassifications in `make_faceuse`).
+///
+/// # Errors
+///
+/// The merge's error.
+pub fn boolean_union_constrained(k: &mut Kernel, brep1: Brep, brep2: Brep) -> Result<Brep> {
+    validate_boolean_operands(BooleanOperation::Union)?;
+    merge_boolean_with_driver(
+        k,
+        brep1,
+        brep2,
+        BooleanOperation::Union,
+        None,
+        MergeMethod::ByOperands,
+        crate::boolean::merge::p3::DependencyMerge::carrying_attributes()
+            .with_constrain_mated_regions(true),
+    )
+    .map(|(o, _)| o.result)
 }
 
 /// Combines non-empty mutually disjoint closed manifold solids sharing the same B-rep tolerance

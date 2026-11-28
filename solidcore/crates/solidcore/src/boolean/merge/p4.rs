@@ -286,6 +286,19 @@ pub trait ManifoldIntersector {
         other: &mut Brep,
         faceuse: FaceuseId,
     ) -> Result<Option<RegionId>>;
+    /// [`Self::find_region_of_other_face`] constrained to the operation's kept void/solid side
+    /// of `primary` when that side is unique.
+    fn find_region_of_other_face_with_void(
+        &mut self,
+        k: &Kernel,
+        primary: &mut Brep,
+        other: &mut Brep,
+        faceuse: FaceuseId,
+        required_void: Option<bool>,
+    ) -> Result<Option<RegionId>> {
+        let _ = required_void;
+        self.find_region_of_other_face(k, primary, other, faceuse)
+    }
     /// `PropagateOtherSrcRegionAttribs`: adapter target is `merge_p1` with source lookups
     /// and the contexts' notification handlers. Its ordinary status is ignored.
     fn propagate_regions(
@@ -489,6 +502,21 @@ fn region_keep(
         BooleanOperation::ExclusiveOr
         | BooleanOperation::Merge
         | BooleanOperation::PartialMerge => Some(true),
+        _ => None,
+    }
+}
+
+/// The `is_void` parity of the primary region in which unmated faces of `faces.other_keep`
+/// lie for `operation` (`Union` keeps other faces in void regions; `Difference`,
+/// `Intersection` and `Slice` keep them in solid regions; operations keeping both sides
+/// return `None`).
+fn other_keep_void(operation: BooleanOperation) -> Option<bool> {
+    match (
+        region_keep(operation, true, true, None),
+        region_keep(operation, true, false, None),
+    ) {
+        (Some(true), Some(false)) => Some(true),
+        (Some(false), Some(true)) => Some(false),
         _ => None,
     }
 }
@@ -2031,15 +2059,33 @@ fn make_other_faces(
         let original = if let Some(r) = kept_patch_region(primary, operation, faces, f)? {
             Some(r)
         } else if all_opaque {
-            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+            intersector.find_region_of_other_face_with_void(
+                kernels.primary,
+                primary,
+                other,
+                fu1,
+                other_keep_void(operation),
+            )?
         } else if let Some(&(r0, pt)) = preclassified.get(&f) {
             if let Some(r) = resolve_preclassified_region(r0, pt, &region_splits) {
                 Some(r)
             } else {
-                intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+                intersector.find_region_of_other_face_with_void(
+                    kernels.primary,
+                    primary,
+                    other,
+                    fu1,
+                    other_keep_void(operation),
+                )?
             }
         } else {
-            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+            intersector.find_region_of_other_face_with_void(
+                kernels.primary,
+                primary,
+                other,
+                fu1,
+                other_keep_void(operation),
+            )?
         };
         let original_void = if let Some(r) = original {
             void(primary, r)?

@@ -367,6 +367,39 @@ fn issue_22577_a_thread_of_202_turns_builds() {
     );
 }
 
+/// #22577: a 446 mm lead screw thread of 281 turns at pitch 1.5875 (tolerance 1e-4 of pitch)
+/// decides positive volume through the certified enclosure (`volume_sign`), holding Pappus's
+/// volume within the wall tolerance bound.
+#[test]
+fn issue_22577_a_lead_screw_coil_of_281_turns_decides_positive_volume() {
+    use solidcore::mass::enclosure::{volume_sign, EnclosureStop, VolumeSign};
+    let mut k = Kernel::default();
+    let (p, turns) = (1.5875, 281.0);
+    let tol = p * 1e-4;
+    let m = Meridian::Polygon(vec![(7.2, 0.6), (8.5, 0.0), (8.5, 1.2)]);
+    let mut b = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    let halves = 2 * turns as usize;
+    assert_eq!(p1::faces(&b, None).unwrap().len(), 3 * halves + 2);
+    let (area, centroid) = (0.5 * 1.2 * 1.3, (7.2 + 8.5 + 8.5) / 3.0);
+    let expected = area * 2.0 * PI * centroid * turns;
+    let flank = 0.6f64.hypot(1.3);
+    let helix = (2.0 * PI * 8.5).hypot(p) * turns;
+    let bound = tol * (1.2 + 2.0 * flank) * helix;
+    match volume_sign(&k, &mut b).unwrap() {
+        VolumeSign::Positive(e) => {
+            assert_eq!(e.stop, EnclosureStop::Reached, "{e:?}");
+            assert!(
+                e.lo > 0.0 && e.lo <= expected + bound && expected - bound <= e.hi,
+                "enclosure [{}, {}] misses {expected} +- {bound} ({e:?})",
+                e.lo,
+                e.hi
+            );
+        }
+        other => panic!("expected Positive volume sign for 281-turn lead screw, got {other:?}"),
+    }
+}
+
 #[test]
 fn issue_22577_more_turns_than_the_spans_hold_are_refused_by_the_spans() {
     // At this tolerance a half turn takes eight spans: 1000 turns take 16000, more than

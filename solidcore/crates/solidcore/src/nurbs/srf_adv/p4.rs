@@ -173,8 +173,23 @@ pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
 /// Those of [`create_b_vectors`]; `InvalidInput` for parameters that do not ascend from
 /// the first to the last.
 pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, bool)> {
+    create_b_vectors_closing_with(cur, b0, t, |u| Ok(cur.eval_tangent(u, Side::Left)?.1))
+}
+
+/// [`create_b_vectors_closing`] using a caller-supplied unit tangent at each sample
+/// parameter (used by `sweep_scale` when bridging a short rounding-perturbed linear piece
+/// so the frame chain stays orthogonal to the bridged tangent across both piece joints).
+pub(super) fn create_b_vectors_closing_with<F>(
+    cur: &Curve,
+    b0: Vec3,
+    t: &[f64],
+    tangent_at: F,
+) -> Result<(Vec<Vec3>, bool)>
+where
+    F: FnMut(f64) -> Result<Vec3>,
+{
     const OP: &str = OP_BVEC;
-    let (mut b, tg) = projection_b_vectors(cur, b0, t)?;
+    let (mut b, tg) = projection_b_vectors_with(b0, t, tangent_at)?;
     if !closing_gap(cur, &b)? {
         return Ok((b, false));
     }
@@ -211,6 +226,18 @@ pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec
 /// The projection normal method's vectors `B` and the unit tangents `T` along `cur` at
 /// `t` (`T[0]` is not computed: zero), before any correction for a closed curve.
 fn projection_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, Vec<Vec3>)> {
+    projection_b_vectors_with(b0, t, |u| Ok(cur.eval_tangent(u, Side::Left)?.1))
+}
+
+/// [`projection_b_vectors`] with a caller-supplied unit tangent at each sample `t[1..=k]`.
+fn projection_b_vectors_with<F>(
+    b0: Vec3,
+    t: &[f64],
+    mut tangent_at: F,
+) -> Result<(Vec<Vec3>, Vec<Vec3>)>
+where
+    F: FnMut(f64) -> Result<Vec3>,
+{
     const OP: &str = OP_BVEC;
     let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
     let mut b = vec![Vec3::ZERO; k + 1];
@@ -222,7 +249,7 @@ fn projection_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, 
 
     // Compute unit tangents and the B's in one direction.
     for i in 1..=k {
-        let (_, ti) = cur.eval_tangent(at(t, i, OP)?, Side::Left)?;
+        let ti = tangent_at(at(t, i, OP)?)?;
         put(&mut tg, i, ti, OP)?;
         // let B[i] = B[i-1] - (B[i-1]*T[i])*T[i]
         let bp = at(&b, i - 1, OP)?;

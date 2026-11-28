@@ -6163,3 +6163,159 @@ fn faceted_sphere_plane_split_produces_both_halves() {
         pos_vol + neg_vol
     );
 }
+
+/// Two 9 mm-diameter circular tubes meeting end-to-end across a shared planar cut at z = 0:
+/// both coaxial (0 deg tilt) and with the first tube tilted 1 deg so its cut cap is a nearly
+/// circular ellipse grazing the second tube's circular start cap. Joining them via `boolean`,
+/// `union_copies`, and `union_all` produces a single valid solid whose volume is the sum.
+#[test]
+fn coincident_tubes_on_shared_cut_plane_join_cleanly() {
+    all_fixes();
+    let radius = 4.5;
+    for (tilt_deg, s, c) in [
+        (0.0_f64, 0.0_f64, 1.0_f64),
+        (
+            1.0_f64,
+            0.017_452_406_437_283_51_f64,
+            0.999_847_695_156_391_3_f64,
+        ),
+    ] {
+        let make_pair = || {
+            let tube_a = if tilt_deg == 0.0 {
+                solidcore_ops::make_cylinder([0.0, 0.0, -20.0], radius, 20.0).unwrap()
+            } else {
+                let raw = solidcore_ops::make_cylinder([0.0, 0.0, -25.0], radius, 30.0).unwrap();
+                raw.transform(&[
+                    [c, 0.0, -s, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [s, 0.0, c, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ])
+                .unwrap();
+                let cut_halfspace = make_box([-20.0, -20.0, 0.0], [40.0, 40.0, 20.0]).unwrap();
+                boolean(raw, cut_halfspace, BooleanOp::Subtract)
+                    .unwrap()
+                    .unwrap()
+            };
+            let tube_b = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], radius, 20.0).unwrap();
+            (tube_a, tube_b)
+        };
+
+        let (a0, b0) = make_pair();
+        let expected_vol = volume(&a0) + volume(&b0);
+
+        let via_copies = union_copies(&a0, &b0)
+            .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg union_copies: {e:?}"))
+            .unwrap();
+        assert_eq!(via_copies.solid_count().unwrap(), 1, "tilt {tilt_deg} deg");
+        assert!(
+            via_copies.check(CheckLevel::All).unwrap().is_valid(),
+            "tilt {tilt_deg} deg union_copies check"
+        );
+        assert!(
+            (volume(&via_copies) - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg union_copies: {} vs {expected_vol}",
+            volume(&via_copies)
+        );
+
+        let (a1, b1) = make_pair();
+        let via_boolean = boolean(a1, b1, BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg boolean: {e:?}"))
+            .unwrap();
+        assert_eq!(via_boolean.solid_count().unwrap(), 1, "tilt {tilt_deg} deg");
+        assert!(
+            via_boolean.check(CheckLevel::All).unwrap().is_valid(),
+            "tilt {tilt_deg} deg boolean check"
+        );
+        assert!(
+            (volume(&via_boolean) - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg boolean: {} vs {expected_vol}",
+            volume(&via_boolean)
+        );
+
+        let (a2, b2) = make_pair();
+        let via_all = union_all(vec![a2, b2])
+            .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg union_all: {e:?}"));
+        assert_eq!(via_all.solid_count().unwrap(), 1, "tilt {tilt_deg} deg");
+        assert!(
+            via_all.check(CheckLevel::All).unwrap().is_valid(),
+            "tilt {tilt_deg} deg union_all check"
+        );
+        assert!(
+            (volume(&via_all) - expected_vol).abs() <= 1e-5 * expected_vol,
+            "tilt {tilt_deg} deg union_all: {} vs {expected_vol}",
+            volume(&via_all)
+        );
+    }
+}
+
+/// Issue #21113: a symmetric hollow cylindrical enclosure with two curved-wall-flush tabs
+/// already joined on the +X inner wall joins the YZ-mirrored copies of both tabs onto the
+/// opposite (-X) curved inner wall cleanly via `boolean`, `union_copies`, and `union_all`.
+#[test]
+fn mirrored_tabs_join_opposite_curved_wall_of_hollow_cylinder() {
+    all_fixes();
+    let mirror_yz = [
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let make_tab = |y0: f64| {
+        let outer = solidcore_ops::make_cylinder([0.0, 0.0, 4.0], 25.0, 12.0).unwrap();
+        let inner = solidcore_ops::make_cylinder([0.0, 0.0, 3.0], 20.0, 14.0).unwrap();
+        let ring = boolean(outer, inner, BooleanOp::Subtract).unwrap().unwrap();
+        let clip = make_box([15.0, y0, 4.0], [12.0, 8.0, 12.0]).unwrap();
+        boolean(ring, clip, BooleanOp::Intersect).unwrap().unwrap()
+    };
+    let make_inputs = || {
+        let outer = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], 30.0, 20.0).unwrap();
+        let inner = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 25.0, 22.0).unwrap();
+        let housing = boolean(outer, inner, BooleanOp::Subtract).unwrap().unwrap();
+        let seed_upper = make_tab(4.0);
+        let seed_lower = make_tab(-12.0);
+        let with_seeds = union_all(vec![housing, seed_upper, seed_lower]).unwrap();
+        let mirror_upper = make_tab(4.0);
+        mirror_upper.transform(&mirror_yz).unwrap();
+        let mirror_lower = make_tab(-12.0);
+        mirror_lower.transform(&mirror_yz).unwrap();
+        (with_seeds, mirror_upper, mirror_lower)
+    };
+
+    let (base0, m1_0, m2_0) = make_inputs();
+    let expected_vol = volume(&base0) + volume(&m1_0) + volume(&m2_0);
+
+    // 1. Sequential `union_copies`
+    let step1 = union_copies(&base0, &m1_0).unwrap().unwrap();
+    let via_copies = union_copies(&step1, &m2_0).unwrap().unwrap();
+    assert_eq!(via_copies.solid_count().unwrap(), 1);
+    assert!(via_copies.check(CheckLevel::All).unwrap().is_valid());
+    assert!(
+        (volume(&via_copies) - expected_vol).abs() <= 1e-5 * expected_vol,
+        "union_copies: {} vs {expected_vol}",
+        volume(&via_copies)
+    );
+
+    // 2. Sequential `boolean`
+    let (base1, m1_1, m2_1) = make_inputs();
+    let step1 = boolean(base1, m1_1, BooleanOp::Union).unwrap().unwrap();
+    let via_boolean = boolean(step1, m2_1, BooleanOp::Union).unwrap().unwrap();
+    assert_eq!(via_boolean.solid_count().unwrap(), 1);
+    assert!(via_boolean.check(CheckLevel::All).unwrap().is_valid());
+    assert!(
+        (volume(&via_boolean) - expected_vol).abs() <= 1e-5 * expected_vol,
+        "boolean: {} vs {expected_vol}",
+        volume(&via_boolean)
+    );
+
+    // 3. Batched `union_all`
+    let (base2, m1_2, m2_2) = make_inputs();
+    let via_all = union_all(vec![base2, m1_2, m2_2]).unwrap();
+    assert_eq!(via_all.solid_count().unwrap(), 1);
+    assert!(via_all.check(CheckLevel::All).unwrap().is_valid());
+    assert!(
+        (volume(&via_all) - expected_vol).abs() <= 1e-5 * expected_vol,
+        "union_all: {} vs {expected_vol}",
+        volume(&via_all)
+    );
+}

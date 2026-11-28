@@ -317,6 +317,104 @@ pub fn find_brep_region_of_other_face(
     other_faceuse: FaceuseId,
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
 ) -> Result<Option<RegionId>> {
+    find_brep_region_of_other_face_inner(k, brep, other, other_faceuse, brep_mates, false, None)
+}
+
+/// Primary regions bordered by every already-mated edge of `edges`, filtered by
+/// `required_void` when at least one common region matches. `None` when `edges` has no
+/// mated edges or the mated edges share no primary region.
+fn eligible_mated_regions(
+    brep: &Brep,
+    other: &Brep,
+    edges: &[crate::topology::EdgeuseId],
+    brep_mates: &BTreeMap<EdgeId, EdgeId>,
+    required_void: Option<bool>,
+) -> Result<Option<BTreeSet<RegionId>>> {
+    let mut common_regions: Option<BTreeSet<RegionId>> = None;
+    let mut seen_mates = BTreeSet::new();
+    for &other_eu in edges {
+        let e = eu::edge(other, other_eu)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "an edge use of the other face's loops has no edge, though the kernel links \
+                 every edge use to its edge",
+            )
+        })?;
+        let Some(&mate) = brep_mates.get(&e) else {
+            continue;
+        };
+        if !seen_mates.insert(mate) {
+            continue;
+        }
+        let mut edge_regions = BTreeSet::new();
+        for eu_id in edge::edgeuses(brep, mate, None, None)? {
+            if let Some(shell) = eu::shell(brep, eu_id)? {
+                if let Some(r) = eu::shell_region(brep, shell)? {
+                    edge_regions.insert(r);
+                }
+            }
+        }
+        match &mut common_regions {
+            None => common_regions = Some(edge_regions),
+            Some(acc) => acc.retain(|r| edge_regions.contains(r)),
+        }
+    }
+    let Some(common) = common_regions.filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let mut filtered = BTreeSet::new();
+    for &r in &common {
+        let matches = match required_void {
+            Some(want) => region_is_void(brep, r)? == want,
+            None => true,
+        };
+        if matches {
+            filtered.insert(r);
+        }
+    }
+    Ok(Some(if filtered.is_empty() {
+        common
+    } else {
+        filtered
+    }))
+}
+
+/// [`find_brep_region_of_other_face`] constrained to regions bordered by every already-mated
+/// edge of `other_faceuse` and, when `required_void` is given, matching the operation's kept
+/// void/solid side of `brep`. A face can only be built in a region bordered by all of its
+/// mated edges (`make_faceuse` culls candidate edge uses to that region, failing with
+/// `NoRadialCandidate` otherwise), so preferring regions in that intersection prevents a
+/// grazing or coplanar radial-sector misclassification on one edge from placing a face into
+/// a region another mated edge does not touch.
+pub(crate) fn find_brep_region_of_other_face_with_void(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    other_faceuse: FaceuseId,
+    brep_mates: &BTreeMap<EdgeId, EdgeId>,
+    required_void: Option<bool>,
+) -> Result<Option<RegionId>> {
+    find_brep_region_of_other_face_inner(
+        k,
+        brep,
+        other,
+        other_faceuse,
+        brep_mates,
+        true,
+        required_void,
+    )
+}
+
+fn find_brep_region_of_other_face_inner(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    other_faceuse: FaceuseId,
+    brep_mates: &BTreeMap<EdgeId, EdgeId>,
+    constrain_mated: bool,
+    required_void: Option<bool>,
+) -> Result<Option<RegionId>> {
     // `GetSize() == 1` and `GetList()`: the B-rep's region list, not its region records
     // (a region `DeleteFace` merged away keeps its record off the list)
     let listed = crate::topology::brep::p1::regions(brep, None)?;
@@ -326,6 +424,29 @@ pub fn find_brep_region_of_other_face(
         }
     }
     let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
+    let eligible = if constrain_mated {
+        eligible_mated_regions(brep, other, &edges, brep_mates, required_void)?
+    } else {
+        None
+    };
+    if let Some(ref set) = eligible {
+        if set.len() == 1 {
+            return Ok(set.iter().next().copied());
+        }
+    }
+    let is_eligible = |brep: &Brep, r: RegionId| -> Result<bool> {
+        if !constrain_mated {
+            return Ok(true);
+        }
+        if let Some(ref set) = eligible {
+            return Ok(set.contains(&r));
+        }
+        Ok(match required_void {
+            Some(want) => region_is_void(brep, r)? == want,
+            None => true,
+        })
+    };
+    let mut fallback: Option<RegionId> = None;
     for &other_eu in &edges {
         let e = eu::edge(other, other_eu)?.ok_or_else(|| {
             SolidError::boolean_null_defect(
@@ -388,8 +509,12 @@ pub fn find_brep_region_of_other_face(
         } else {
             return Ok(None);
         };
-        if region.is_some() {
-            return Ok(region);
+        if let Some(r) = region {
+            if is_eligible(brep, r)? {
+                return Ok(Some(r));
+            }
+            fallback.get_or_insert(r);
+            continue;
         }
         break;
     }
@@ -429,17 +554,24 @@ pub fn find_brep_region_of_other_face(
             continue;
         }
         // use the point's classified region as the input face's Brep region
-        return match pc.object() {
-            Some(EntityRef::Region(r)) => Ok(Some(r)),
-            _ => Err(SolidError::boolean_null_defect(
-                OP,
-                BooleanStage::Classify,
-                "the point classified to a region records no region, though a region class \
-                 always records the region it found",
-            )),
-        };
+        match pc.object() {
+            Some(EntityRef::Region(r)) => {
+                if is_eligible(brep, r)? {
+                    return Ok(Some(r));
+                }
+                fallback.get_or_insert(r);
+            }
+            _ => {
+                return Err(SolidError::boolean_null_defect(
+                    OP,
+                    BooleanStage::Classify,
+                    "the point classified to a region records no region, though a region class \
+                     always records the region it found",
+                ))
+            }
+        }
     }
-    Ok(None)
+    Ok(fallback)
 }
 
 /// Classify an unmated other-operand face use into a primary region using a caller-owned
@@ -2112,6 +2244,155 @@ mod tests {
             )
             .unwrap(),
             Some(r)
+        );
+    }
+
+    #[test]
+    fn region_lookup_intersects_mated_edge_regions_and_respects_void_side() {
+        use crate::topology::{Edgeuse, EdgeuseOwner, Faceuse, Loopuse, LoopuseStart, Region};
+
+        let mut b = Brep::new();
+        let r_solid = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        b.region_mut(r_solid).unwrap().set_is_void(0);
+        let r_void = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        b.region_mut(r_void).unwrap().set_is_void(1);
+        let s_solid = b.add_shell().unwrap();
+        b.shell_mut(s_solid).unwrap().region = Some(r_solid);
+        let s_void = b.add_shell().unwrap();
+        b.shell_mut(s_void).unwrap().region = Some(r_void);
+
+        let v0 = b.add_vertex(Vec3::ZERO).unwrap();
+        let v1 = b.add_vertex(Vec3::X).unwrap();
+        // e1 borders both r_solid and r_void; e2 borders only r_void.
+        let e1 = b.add_edge(v0, v1).unwrap();
+        for s in [s_solid, s_void] {
+            let eu_id = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(e1),
+                    owner: EdgeuseOwner::Shell(Some(s)),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            b.edge_mut(e1).unwrap().edgeuses.push(eu_id);
+        }
+        let e2 = b.add_edge(v1, v0).unwrap();
+        let eu_void = b
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(e2),
+                owner: EdgeuseOwner::Shell(Some(s_void)),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        b.edge_mut(e2).unwrap().edgeuses.push(eu_void);
+
+        let make_other_face = |two_edges: bool| {
+            let mut other = Brep::new();
+            let os = other.add_shell().unwrap();
+            let of = other.add_face(os).unwrap();
+            let ofu = other
+                .add_faceuse_record(Faceuse {
+                    face: Some(of),
+                    shell: Some(os),
+                    ..Faceuse::default()
+                })
+                .unwrap();
+            let olu = other
+                .add_loopuse_record(Loopuse {
+                    faceuse: Some(ofu),
+                    ..Loopuse::default()
+                })
+                .unwrap();
+            other.faceuse_mut(ofu).unwrap().loopuses.push(olu);
+            let ov0 = other.add_vertex(Vec3::ZERO).unwrap();
+            let ov1 = other.add_vertex(Vec3::X).unwrap();
+            let oe1 = other.add_edge(ov0, ov1).unwrap();
+            let oeu1 = other
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(oe1),
+                    owner: EdgeuseOwner::Loopuse(Some(olu)),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            other.edge_mut(oe1).unwrap().edgeuses.push(oeu1);
+            let oe2 = if two_edges {
+                let oe2 = other.add_edge(ov1, ov0).unwrap();
+                let oeu2 = other
+                    .add_edgeuse_record(Edgeuse {
+                        edge: Some(oe2),
+                        owner: EdgeuseOwner::Loopuse(Some(olu)),
+                        ccw: Some(oeu1),
+                        cw: Some(oeu1),
+                        ..Edgeuse::default()
+                    })
+                    .unwrap();
+                other.edge_mut(oe2).unwrap().edgeuses.push(oeu2);
+                other.edgeuse_mut(oeu1).unwrap().ccw = Some(oeu2);
+                other.edgeuse_mut(oeu1).unwrap().cw = Some(oeu2);
+                Some(oe2)
+            } else {
+                other.edgeuse_mut(oeu1).unwrap().ccw = Some(oeu1);
+                other.edgeuse_mut(oeu1).unwrap().cw = Some(oeu1);
+                None
+            };
+            other.loopuse_mut(olu).unwrap().start = LoopuseStart::Edgeuse(Some(oeu1));
+            (other, ofu, oe1, oe2)
+        };
+
+        // 1. Two mated edges: intersection of bordered regions uniquely selects r_void.
+        let (mut other_two, ofu_two, oe1, oe2) = make_other_face(true);
+        let mut mates = BTreeMap::new();
+        mates.insert(oe1, e1);
+        mates.insert(oe2.unwrap(), e2);
+        assert_eq!(
+            find_brep_region_of_other_face_with_void(
+                &Kernel::default(),
+                &mut b,
+                &mut other_two,
+                ofu_two,
+                &mates,
+                None,
+            )
+            .unwrap(),
+            Some(r_void)
+        );
+
+        // 2. Single mated edge bordering both r_solid and r_void: required_void selects side.
+        let (mut other_one, ofu_one, oe_single, _) = make_other_face(false);
+        let mut mates_one = BTreeMap::new();
+        mates_one.insert(oe_single, e1);
+        assert_eq!(
+            find_brep_region_of_other_face_with_void(
+                &Kernel::default(),
+                &mut b,
+                &mut other_one,
+                ofu_one,
+                &mates_one,
+                Some(true),
+            )
+            .unwrap(),
+            Some(r_void)
+        );
+        assert_eq!(
+            find_brep_region_of_other_face_with_void(
+                &Kernel::default(),
+                &mut b,
+                &mut other_one,
+                ofu_one,
+                &mates_one,
+                Some(false),
+            )
+            .unwrap(),
+            Some(r_solid)
         );
     }
 

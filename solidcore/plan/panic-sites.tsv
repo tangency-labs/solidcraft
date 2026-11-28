@@ -621,6 +621,7 @@ crates/solidcore/src/intersect/surface_tracer.rs	find_boundary_start_points_base
 crates/solidcore/src/intersect/surface_tracer.rs	flush_curve	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/intersect/topology_solver/p2.rs	swap_curve_surface_parameters	rotate	1	proven	rotate_left(1)	get_mut(..3)? yields a slice of length 3, so rotation by 1 fits
 crates/solidcore/src/intersect/topology_solver/p2.rs	swap_curve_surface_parameters	rotate	2	proven	rotate_left(1)	get_mut(..3)? yields a slice of length 3, so rotation by 1 fits
+crates/solidcore/src/mass/enclosure.rs	default_refinement_budget	Ord::clamp	1	proven	clamp(CELL_BUDGET, MAX_CELL_BUDGET)	constant bounds CELL_BUDGET (1 << 17) <= MAX_CELL_BUDGET (1 << 22)
 crates/solidcore/src/mass/integrator.rs	OdeIntegrator::integrate	copy_from_slice	1	open	copy_from_slice(&y)	
 crates/solidcore/src/mass/integrator/properties.rs	boundary_properties	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/nurbs/b_spline_curve/analysis.rs	pairs	windows	1	proven	windows(2)	constant non-zero size
