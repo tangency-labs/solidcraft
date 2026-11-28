@@ -94,9 +94,11 @@ pub use cmd::find_command;
 pub use cmd::motion::AutomaticExplode;
 pub use cmd::normalize_command_id;
 pub use cmd::resolve_design_links;
+pub use cmd::scan_align::preview_align as preview_scan_align;
 pub use cmd::settings::MAX_PROFILE_NAME;
 pub use cmd::settings::profile_name;
 pub use cmd::shown_scope;
+pub use cmd::shown_scope_for;
 pub use cmd::sketch_selection;
 pub use cmd::standard_view;
 pub use cmd::use_import_cache_dir;
@@ -546,6 +548,8 @@ pub struct Snapshot {
     pub sketching_view: Option<u64>,
     /// Temporary editor position to finalize if its former view has since closed.
     pub sketch_restore_marker: Option<Option<usize>>,
+    /// Where Cancel returns when history reopens the model sketch.
+    pub(crate) sketch_entry: Option<SketchEntry>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
@@ -573,6 +577,7 @@ impl Snapshot {
             active_sketch: s.active_sketch,
             sketching_view: s.sketching_view,
             sketch_restore_marker: s.sketch_restore_marker(),
+            sketch_entry: s.sketch_entry.clone(),
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: s.pending_moves.clone(),
             pending_move_records: s.pending_move_records.clone(),
@@ -592,6 +597,7 @@ impl Snapshot {
             active_sketch: None,
             sketching_view: None,
             sketch_restore_marker: None,
+            sketch_entry: None,
             active_sheet_sketch: None,
             pending_moves: Default::default(),
             pending_move_records: Vec::new(),
@@ -630,7 +636,7 @@ pub struct DragPreview {
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
 /// the undo history then, so `sketch.cancel` can tell the entry still describes the history.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SketchEntry {
     pub(crate) sketch: u64,
     pub(crate) doc: Arc<Document>,
@@ -3125,6 +3131,12 @@ impl Session {
         self.visibility_revision += 1;
     }
 
+    /// Revision of the document and its evaluated model within this session. Selecting or
+    /// hiding an item redraws the view without changing either input.
+    pub fn model_revision(&self) -> u64 {
+        self.revision.wrapping_sub(self.visibility_revision)
+    }
+
     /// Show the sketch a live frame changed, leaving the features after it as they were last
     /// evaluated (marked stale); a full `refresh` when the model cannot show it that way.
     fn refresh_live(&mut self, edit: LiveEdit) {
@@ -3654,6 +3666,7 @@ impl Session {
                 self.active_sheet_sketch = before.active_sheet_sketch.clone();
                 self.active_sketch = before.active_sketch;
                 self.sketching_view = before.sketching_view;
+                self.sketch_entry.clone_from(&before.sketch_entry);
                 if let Some(section) = before.section.take() {
                     self.set_section_state(section);
                 }
@@ -4588,7 +4601,8 @@ impl Session {
         Ok((self, replies))
     }
 
-    /// Measure one or two selections (see `inspect.measure` with `items`); errors come back as
+    /// Measure one or two selections, or three or more round ones for their spacing (see
+    /// `inspect.measure` with `items`); errors come back as
     /// `{"error": …}`.
     pub fn measure_items(&self, items: &[Sel]) -> Value {
         let v = serde_json::to_value(items).unwrap_or(Value::Null);

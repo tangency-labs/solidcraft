@@ -3232,20 +3232,19 @@ impl Batches {
             std::hash::Hash::hash(&(Arc::as_ptr(&b.plan) as usize), &mut h);
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
-        let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
         // Looked up, not searched for: a large model has thousands of chunks.
-        let live: std::collections::HashSet<Vec<usize>> = chunks.iter().map(|c| key(c)).collect();
-        self.resident.retain(|k, _| live.contains(k));
-        self.chunk_colors.retain(|k, _| live.contains(k));
+        let chunk_keys: Vec<Vec<usize>> = chunks.iter().map(|c| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect()).collect();
+        let live: std::collections::HashSet<&[usize]> = chunk_keys.iter().map(Vec::as_slice).collect();
+        self.resident.retain(|k, _| live.contains(k.as_slice()));
+        self.chunk_colors.retain(|k, _| live.contains(k.as_slice()));
         let mut out = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            let k = key(chunk);
+        for (chunk, k) in chunks.iter().zip(chunk_keys) {
             if !self.resident.contains_key(&k)
                 && let Some(shared) = donor.as_deref_mut().and_then(|d| d.resident.remove(&k))
             {
-                self.resident.insert(k, shared);
+                self.resident.insert(k.clone(), shared);
             }
-            let mesh = match self.resident.get(&key(chunk)) {
+            let mesh = match self.resident.get(&k) {
                 Some((_, m)) => m.clone(),
                 None => {
                     let plans: Vec<&solidcore_tess::TessPlan> = chunk.iter().map(|b| &*b.plan).collect();
@@ -3254,7 +3253,7 @@ impl Batches {
                             self.uploads.evaluated += plans.iter().map(|p| p.vertex_count() as u64).sum::<u64>();
                             tess.record(encoder, &m);
                             let m = Arc::new(m);
-                            self.resident.insert(key(chunk), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
+                            self.resident.insert(k.clone(), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
                             m
                         }
                         Err(e) => {
@@ -3272,9 +3271,9 @@ impl Batches {
                 }
                 std::hash::Hasher::finish(&h)
             };
-            if let Some((_, colors)) = self.chunk_colors.get(&key(chunk)).filter(|(l, _)| *l == looks) {
+            if let Some((_, colors)) = self.chunk_colors.get(&k).filter(|(l, _)| *l == looks) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: key(chunk) });
+                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: k });
                 continue;
             }
             let mut bytes = Vec::with_capacity(mesh.vertex_face.len() * 4);
@@ -3288,8 +3287,8 @@ impl Batches {
             self.uploads.planned += bytes.len() as u64;
             if let Some((colors, _)) = upload_write(device, queue, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
-                out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
+                self.chunk_colors.insert(k.clone(), (looks, colors.clone()));
+                out.push(PlannedDraw { mesh, colors, class, closed, plans: k });
             }
         }
         out
@@ -3399,7 +3398,10 @@ pub struct Renderer {
     pbr_palette: wgpu::RenderPipeline,
     /// `pbr_palette` for placements of a shared smooth mesh ([`InstanceLook::Pbr`]).
     pbr_instanced: wgpu::RenderPipeline,
+    /// Unbiased translucent overlays (sketch fills and highlights) drawn over opaque faces.
     trans: wgpu::RenderPipeline,
+    /// Faded model faces (non-OIT fallback), pushed back by [`SEE_THROUGH_BIAS`].
+    faded: wgpu::RenderPipeline,
     /// Glass: far sides (front faces culled), then near sides (back faces culled).
     glass_far: wgpu::RenderPipeline,
     glass_near: wgpu::RenderPipeline,
@@ -4078,7 +4080,10 @@ impl Renderer {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        let see_through_depth = || split_push(pushed(wgpu::CompareFunction::LessEqual, false, SEE_THROUGH_BIAS));
         let glass = |label: &str, cull: wgpu::Face| {
+            let (ds, push) = see_through_depth();
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -4086,10 +4091,10 @@ impl Renderer {
                     module: &module,
                     entry_point: Some("vs_tri"),
                     buffers: &[Some(tri_layout())],
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: Some(cull), ..Default::default() },
-                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -4104,6 +4109,8 @@ impl Renderer {
         // See-through instanced meshes: blended, depth tested, not written; `cull` for glass.
         let placed_see_through = [Some(shared_layout()), Some(instance_layout())];
         let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>| {
+            let (ds, push) = see_through_depth();
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -4111,10 +4118,10 @@ impl Renderer {
                     module: &module,
                     entry_point: Some(source.entry()),
                     buffers: &placed_see_through,
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
-                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -4425,6 +4432,7 @@ impl Renderer {
             (
                 pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), highlight_depth(t.depth), alpha),
                 pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_faded", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, SEE_THROUGH_BIAS), alpha),
                 glass("sc_glass_far", wgpu::Face::Front),
                 glass("sc_glass_near", wgpu::Face::Back),
                 pipeline("sc_ghost", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, GHOST_BIAS), alpha),
@@ -4525,6 +4533,7 @@ impl Renderer {
             let (
                 tri_hl,
                 trans,
+                faded,
                 glass_far,
                 glass_near,
                 ghost,
@@ -4665,6 +4674,7 @@ impl Renderer {
                 pbr_palette,
                 pbr_instanced,
                 trans,
+                faded,
                 glass_far,
                 glass_near,
                 ghost,
@@ -4735,12 +4745,15 @@ pub const FACE_STEPS: i32 = 8;
 /// which writes its own depth, adds the same in the shader.
 pub const FACE_SLOPE: f32 = 1.0;
 /// The model's edges' depth, written before its see-through faces are drawn (`line_depth`): pushed
-/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through body's own faces at its edges
-/// still pass and tint them, while a face further behind (faded context, another see-through body)
-/// fails and leaves the edge alone. The slope term is the line's own (flat across its width), so
-/// where a body's face recedes steeply from its edge, the part of it under the line's far half is
-/// behind the line and does not tint it, as an opaque face does not cover its edge.
+/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through face at or behind an edge fails
+/// and leaves the edge crisp, while a see-through face in front of an edge still passes and tints
+/// it.
 const EDGE_DEPTH_BIAS: wgpu::DepthBiasState = FACE_BIAS;
+/// See-through model faces (glass and faded bodies): pushed back by the same slope as
+/// [`FACE_BIAS`], and one [`FACE_STEPS`] further, so an opaque face lying flush on or coplanar
+/// with a see-through face stays in front of it at any viewing angle, while a thin see-through
+/// face in front of an opaque one still shows over it (#23422).
+pub(super) const SEE_THROUGH_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: FACE_SLOPE, clamp: 0.0 };
 /// A blend that leaves the target's colour as it is.
 const KEEP: wgpu::BlendComponent =
     wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add };
@@ -5960,12 +5973,12 @@ impl Renderer {
         in_moving(pass, &|pass, mv| {
             tris(pass, &res.glass_near, &mv.glass);
             see_through(pass, InstanceLook::Glass, &res.glass_near_instanced, mv);
-            tris(pass, &res.trans, &mv.trans);
-            blocks_of(pass, &res.trans, TriClass::Faded, mv);
+            tris(pass, &res.faded, &mv.trans);
+            blocks_of(pass, &res.faded, TriClass::Faded, mv);
             see_through(pass, InstanceLook::Faded, &res.trans_instanced, mv);
         });
-        tris(pass, &res.trans, &m.trans);
-        block_class(pass, &res.trans, TriClass::Faded);
+        tris(pass, &res.faded, &m.trans);
+        block_class(pass, &res.faded, TriClass::Faded);
         see_through(pass, InstanceLook::Faded, &res.trans_instanced, m);
         Self::draw_over(res, pass, sk, h, pv, m, moving, &tris, &lines);
     }
@@ -7887,9 +7900,23 @@ mod glass_tests {
 
     /// [`middle_pixel_cut`] into a target of `format`.
     fn middle_pixel_on(format: wgpu::TextureFormat, scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
+        middle_pixel_on_depth(format, None, scene, sketch, oit, samples, clip)
+    }
+
+    /// [`middle_pixel_on`] with an optional explicit depth format (to test both reversed and
+    /// standard depth buffers).
+    fn middle_pixel_on_depth(
+        format: wgpu::TextureFormat,
+        depth_override: Option<wgpu::TextureFormat>,
+        scene: GpuScene,
+        sketch: GpuScene,
+        oit: bool,
+        samples: u32,
+        clip: [f32; 4],
+    ) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
-        let depth = crate::depth_format(&device, true);
+        let depth = depth_override.unwrap_or_else(|| crate::depth_format(&device, true));
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         assert!(r.oit.is_some(), "this device does order-independent transparency");
         if !oit {
@@ -9214,6 +9241,92 @@ mod glass_tests {
             let thin_alone = middle_pixel(scene(5.0, None, 0.75), oit).unwrap();
             let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
             assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
+        }
+    }
+
+    /// Regression test for #23422: at an oblique angle, opaque faces pushed back by [`FACE_BIAS`]
+    /// must still beat flush or coplanar see-through model faces (glass or faded), while a thin
+    /// see-through face in front of an opaque face and a sketch overlay coplanar with an opaque
+    /// face still show over it. Tested with both OIT and sorted fallback, on both reversed and
+    /// standard depth buffers.
+    #[test]
+    fn opaque_face_flush_on_see_through_face_stays_in_front_at_oblique_angle() {
+        let white = [250, 250, 250, 255];
+        let green = [32, 128, 64, 191];
+        let n = [0.0, -std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2];
+        let add_tilted = |sc: &mut GpuScene, half: f32, z_off: f32, col: PaletteIndex, kind: u8| {
+            let pts = [[-half, -half], [half, -half], [half, half], [-half, -half], [half, half], [-half, half]];
+            for [x, y] in pts {
+                let p = [x, y, y + z_off];
+                match kind {
+                    0 => sc.tri(p, n, col),
+                    1 => sc.glass_tri(p, n, col),
+                    _ => sc.trans_tri(p, n, col),
+                }
+            }
+        };
+        let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2);
+
+        for (depth_fmt, oit) in
+            [(wgpu::TextureFormat::Depth32Float, true), (wgpu::TextureFormat::Depth32Float, false), (wgpu::TextureFormat::Depth24Plus, false)]
+        {
+            let run_px =
+                |sc: GpuScene, sk: GpuScene| middle_pixel_on_depth(wgpu::TextureFormat::Rgba8Unorm, Some(depth_fmt), sc, sk, oit, 1, [0.0; 4]);
+
+            // Baseline: opaque white tilted quad alone at z = y + 0.01.
+            let mut solo = GpuScene::default();
+            let cw = solo.color(white);
+            add_tilted(&mut solo, 4.0, 0.01, cw, 0);
+            let Some(opaque_alone) = run_px(solo, GpuScene::default()) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            assert!(opaque_alone[0] > 180 && opaque_alone[0].abs_diff(opaque_alone[1]) <= 2, "baseline should be neutral white: {opaque_alone:?}");
+
+            // 1. Thin (0.01 mm) opaque white face lying flush on a tilted glass green face (z = y):
+            // 1 px of slope is 0.3125 mm >> 0.01 mm, so without SEE_THROUGH_BIAS the glass covers it.
+            let mut flush_glass = GpuScene::default();
+            let (cw, cg) = (flush_glass.color(white), flush_glass.color(green));
+            add_tilted(&mut flush_glass, 8.0, 0.0, cg, 1);
+            add_tilted(&mut flush_glass, 4.0, 0.01, cw, 0);
+            let px = run_px(flush_glass, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: flush opaque on glass covered by glass: {px:?} vs {opaque_alone:?}");
+
+            // 2. Exactly coplanar opaque face (z = y, half=4) on glass face (z = y, half=8):
+            // opaque must win without z-fighting despite different triangle extents.
+            let mut coplanar = GpuScene::default();
+            let (cw, cg) = (coplanar.color(white), coplanar.color(green));
+            add_tilted(&mut coplanar, 8.0, 0.0, cg, 1);
+            add_tilted(&mut coplanar, 4.0, 0.0, cw, 0);
+            let px = run_px(coplanar, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: coplanar opaque on glass covered by glass: {px:?} vs {opaque_alone:?}");
+
+            // 3. Reverse: thin (0.01 mm) glass green face IN FRONT OF opaque white face must still
+            // show over it at the same oblique angle.
+            let mut glass_on_opaque = GpuScene::default();
+            let (cw, cg) = (glass_on_opaque.color(white), glass_on_opaque.color(green));
+            add_tilted(&mut glass_on_opaque, 8.0, 0.0, cw, 0);
+            add_tilted(&mut glass_on_opaque, 4.0, 0.01, cg, 1);
+            let px = run_px(glass_on_opaque, GpuScene::default()).unwrap();
+            assert!(px[1] > px[0] + 20, "{depth_fmt:?} oit={oit}: thin glass in front of opaque must tint it green: {px:?}");
+
+            // 4. Flush opaque white face on faded model face (m.trans) must also stay in front.
+            let mut flush_faded = GpuScene::default();
+            let (cw, cg) = (flush_faded.color(white), flush_faded.color(green));
+            add_tilted(&mut flush_faded, 8.0, 0.0, cg, 2);
+            add_tilted(&mut flush_faded, 4.0, 0.01, cw, 0);
+            let px = run_px(flush_faded, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: flush opaque on faded covered: {px:?} vs {opaque_alone:?}");
+
+            // 5. Sketch translucent fill (sk.trans) coplanar with an opaque face stays in front.
+            let mut base = GpuScene::default();
+            let cw = base.color(white);
+            add_tilted(&mut base, 8.0, 0.0, cw, 0);
+            let mut sk = GpuScene::default();
+            let cg = sk.color(green);
+            add_tilted(&mut sk, 4.0, 0.0, cg, 2);
+            let px = run_px(base, sk).unwrap();
+            assert!(px[1] > px[0] + 20, "{depth_fmt:?} oit={oit}: coplanar sketch fill must still tint opaque face: {px:?}");
         }
     }
 

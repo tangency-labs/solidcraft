@@ -242,8 +242,54 @@ impl Drop for NetScope<'_> {
 /// definition made, copied or moved takes a new one, and two are the same only when they
 /// are one allocation ([`Arc::ptr_eq`]). The memo holds one while it keeps a station, so
 /// an identity is never reused while a station is kept for it.
-#[derive(Debug, Default)]
-pub struct DefinitionIdentity;
+///
+/// Not upstream: it also keeps what a station reads of the definition's leader and law that
+/// is the same at every station, their distinct knots, multiplicities and degree
+/// ([`DefinitionIdentity::knots`]): a definition whose leader or law changes is made anew or
+/// renewed, which gives it a new identity, as the memo's stations need.
+#[derive(Default)]
+pub struct DefinitionIdentity {
+    /// The leader's knots, multiplicities and degree, once read.
+    leader_knots: std::sync::OnceLock<CurveKnots>,
+    /// The law's, once read.
+    law_knots: std::sync::OnceLock<CurveKnots>,
+}
+
+/// A curve's distinct knots, their multiplicities and its degree
+/// ([`BSplineCurve::knots`], [`BSplineCurve::degree`]).
+pub(crate) type CurveKnots = (Vec<f64>, Vec<usize>, usize);
+
+/// Written as the identity alone, as before it kept the knots: what it keeps is read from the
+/// definition, not part of it, and a definition's debug text (which tests compare) stays the
+/// same whether a station has read the knots yet or not.
+impl std::fmt::Debug for DefinitionIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DefinitionIdentity")
+    }
+}
+
+impl DefinitionIdentity {
+    /// The knots, multiplicities and degree of the definition's leader (`law` false) or its
+    /// law, read from `curve` (that curve) the first time and kept. A read that fails is not
+    /// kept: the next asks again.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::knots`] and [`BSplineCurve::degree`].
+    pub(crate) fn knots(&self, curve: &BSplineCurve, law: bool) -> Result<&CurveKnots> {
+        let cell = if law {
+            &self.law_knots
+        } else {
+            &self.leader_knots
+        };
+        if let Some(kept) = cell.get() {
+            return Ok(kept);
+        }
+        let (knots, mult) = curve.knots(None)?;
+        let deg = curve.degree()?;
+        Ok(cell.get_or_init(|| (knots, mult, deg)))
+    }
+}
 
 /// A blend's definition (the members of `SmProceduralBlend` past its net). A clone
 /// keeps the identity: it is the same definition (the fork's copy constructor renews it,
@@ -573,7 +619,7 @@ pub(crate) fn count_area_root(k: &Kernel) {
 
 /// `++s_lLastSerial`: a new identity.
 fn new_identity() -> Arc<DefinitionIdentity> {
-    Arc::new(DefinitionIdentity)
+    Arc::new(DefinitionIdentity::default())
 }
 
 impl ProceduralBlend {

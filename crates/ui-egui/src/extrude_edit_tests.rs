@@ -1839,6 +1839,76 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
     assert!(extent(&h).symmetric_offset);
 }
 
+/// Clearing a moved command window must leave both real Extrude arrow grips accessible,
+/// including the primary arrow that is drawn after Distance 2's floating box.
+#[test]
+fn floating_extrude_fields_clear_both_arrow_grips_beside_the_window() {
+    for secondary in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+        let mut h = make_in(h, json!({"distance":"2 mm","distance2":"1 mm"}));
+        h.call("ui.view", json!({"view":"iso"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        open(&mut h);
+        h.app.cam = h.app.cam.looking_from(solidcore_record::Vec3::new(1.0, -1.0, 0.8));
+        h.app.cam.target += solidcore_record::Vec3::new(3.0, -2.0, 0.0);
+        h.frames(4);
+        let name = if secondary { "arrow2" } else { "arrow" };
+        let tip = crate::scenario::handle_at(name).expect("the drawn Extrude arrow");
+        let window = h.app.viewport.dialog_rect.unwrap();
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+        h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+        h.frames(24);
+        let tip = crate::scenario::handle_at(name).unwrap();
+        let window = h.app.viewport.dialog_rect.unwrap();
+        assert!((window.left() - tip.x - 30.0).abs() < 3.0 && window.y_range().contains(tip.y), "window beside {name}: {window:?}, {tip:?}");
+        let fields: Vec<_> = ["sc_canvas_area", "sc_canvas_area2"]
+            .into_iter()
+            .map(|id| h.ctx.memory(|m| m.area_rect(egui::Id::unique(id))).expect("each actual floating box"))
+            .collect();
+        let grabs: Vec<_> = ["arrow", "arrow2"]
+            .into_iter()
+            .map(|id| egui::Rect::from_center_size(crate::scenario::handle_at(id).unwrap(), egui::vec2(20.0, 20.0)))
+            .collect();
+        let design = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let to = base + dir.unwrap() * if secondary { -6.0 } else { 6.0 };
+        h.step(&json!({"drag":[{"handle":name},{"world":[to.x,to.y,to.z]}],"ctrl":true})).unwrap();
+        h.frames(4);
+        for field in fields {
+            for grab in &grabs {
+                assert!(!field.intersects(*grab), "{name}: floating field {field:?} covers real arrow grip {grab:?}");
+            }
+        }
+        let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+        let eval = |text: &str| h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        let (first, second) = (eval(distance), eval(distance2));
+        let (changed, kept, original) = if secondary { (second, first, 2.0) } else { (first, second, 1.0) };
+        assert!((changed - 6.0).abs() < 0.3, "{name}: Distance={first}, Distance2={second}");
+        assert!((kept - original).abs() < 1e-9, "the other distance stays unchanged");
+        assert_eq!(h.app.session.doc.to_json(), design, "a preview drag does not commit the feature");
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+/// Deferring Distance 2's box until the arrows are known keeps its own text and keyboard target.
+#[test]
+fn floating_extrude_second_field_types_into_its_own_distance() {
+    let mut h = make(json!({"distance":"5 mm","distance2":"3 mm"}));
+    open(&mut h);
+    let field = h.ctx.read_response(egui::Id::unique("sc_canvas_value2")).expect("Distance 2's actual input").rect;
+    h.step(&json!({"click":[field.center().x,field.center().y]})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7 mm"})).unwrap();
+    h.frames(3);
+    let Some(crate::dialogs::Kind::Extrude { distance, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("Extrude") };
+    assert_eq!((distance.as_str(), distance2.as_str()), ("5 mm", "7 mm"));
+}
+
 #[test]
 fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     use crate::dialogs::{Kind, apply_commands};

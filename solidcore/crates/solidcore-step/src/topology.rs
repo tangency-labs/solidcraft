@@ -941,6 +941,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// roots of their vertices' joined sets ([`Builder::join_vertices`]).
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         self.join_vertices()?;
+        self.asm.source_bytes = self.ex.source_bytes as u64;
         self.asm.finish(item, name, shells, kind)
     }
 
