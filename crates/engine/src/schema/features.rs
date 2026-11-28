@@ -24,15 +24,18 @@ use super::types::{
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
 
-/// Add a box primitive.
+/// Add a box primitive. Its corner or centre and its sizes are in world coordinates, also while a
+/// moved component is active: the box goes into that component. In a component turned by other
+/// than quarter turns its sizes lie along the component's own axes; without `corner` or `center`
+/// it sits at the component's origin, along its axes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BoxParams {
-    /// Size along X.
+    /// Size along the world X axis.
     pub length: LengthExpr,
-    /// Size along Y.
+    /// Size along the world Y axis.
     pub width: LengthExpr,
-    /// Size along Z.
+    /// Size along the world Z axis.
     pub height: LengthExpr,
     /// The box's minimum corner. Default: the origin. When both `corner` and `center` are given,
     /// `corner` is used.
@@ -355,7 +358,8 @@ pub struct NoticeAction {
     pub params: Value,
 }
 
-/// Add a cylinder primitive.
+/// Add a cylinder primitive. `base` and `axis` are in world coordinates, also while a moved
+/// component is active: the cylinder goes into that component.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CylinderParams {

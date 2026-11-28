@@ -821,6 +821,58 @@ fn a_combine_tool_stays_where_it_is_placed() {
     assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
 }
 
+/// #22426: with a component turned a quarter turn about X active (as a STEP part stood up), a
+/// box's corner and sizes and a cylinder's base and `[x, y, z]` axis are all read along the world
+/// axes. Edit Feature gives back what the box saved, in the component's frame, and keeps it. An
+/// axis named X, Y or Z is read the same way (#21098).
+#[test]
+fn primitives_in_a_turned_active_component_take_world_axes() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(&mut s, "component.capture_position", json!({}));
+    let (lo, hi) = world_bbox(&s, "Plate");
+    assert!(near(lo, Vec3::new(0.0, -5.0, 0.0)) && near(hi, Vec3::new(20.0, 0.0, 10.0)), "{lo:?} {hi:?}");
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    let boxes = [
+        (json!({"corner": [0, 0, 10], "length": 4, "width": 2, "height": 1}), Vec3::new(0.0, 0.0, 10.0), Vec3::new(4.0, 2.0, 11.0)),
+        (
+            json!({"corner": ["2 mm", 0, "5 mm + 5 mm"], "length": "4 mm", "width": 2, "height": "1 mm"}),
+            Vec3::new(2.0, 0.0, 10.0),
+            Vec3::new(6.0, 2.0, 11.0),
+        ),
+        (json!({"center": [2, 1, 10.5], "length": 4, "width": 2, "height": 1}), Vec3::new(0.0, 0.0, 10.0), Vec3::new(4.0, 2.0, 11.0)),
+    ];
+    for (k, (params, want_lo, want_hi)) in boxes.into_iter().enumerate() {
+        let name = format!("Key{k}");
+        let mut p = params.clone();
+        p["operation"] = json!("new");
+        p["name"] = json!(name);
+        p["body_name"] = json!(name);
+        run(&mut s, "solid.box", p);
+        let (lo, hi) = world_bbox(&s, &name);
+        assert!(near(lo, want_lo) && near(hi, want_hi), "box {params}: {lo:?} {hi:?}");
+        let d = run(&mut s, "timeline.inspect", json!({"feature": name}))["definition"].clone();
+        let placement = if d["centred"] == json!(true) { "center" } else { "corner" };
+        let edited = json!({placement: d["corner"], "length": d["length"], "width": d["width"], "height": d["height"], "operation": "new"});
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": "solid.box", "params": edited}));
+        let (lo, hi) = world_bbox(&s, &name);
+        assert!(near(lo, want_lo) && near(hi, want_hi), "box {params} after Edit Feature: {lo:?} {hi:?}");
+    }
+    for (k, axis) in [json!([0, 0, 1]), json!(["0", "0", "1"])].into_iter().enumerate() {
+        let name = format!("Pin{k}");
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 1, "height": 3, "base": [10, 0, 10], "axis": axis, "operation": "new", "name": name, "body_name": name}),
+        );
+        let (lo, hi) = world_bbox(&s, &name);
+        assert!(lo.dist(Vec3::new(9.0, -1.0, 10.0)) < 1e-3 && hi.dist(Vec3::new(11.0, 1.0, 13.0)) < 1e-3, "cylinder along {axis}: {lo:?} {hi:?}");
+    }
+}
+
 /// The volume of one body in its own frame (a component's body once, however often it is placed).
 fn body_volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).unwrap_or_else(|| panic!("no body {body}")).measure().unwrap().volume

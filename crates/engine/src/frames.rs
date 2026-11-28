@@ -64,6 +64,11 @@ use K::*;
 /// What `timeline.redefine` maps for a surface revolve, which no command is called.
 const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
 
+/// What `timeline.redefine` maps for a box: Edit Feature gives back the sizes the box saved, in
+/// its component's frame, so only a new corner or centre is a world point (`Mapper::world_box`
+/// is for a new box).
+const BOX_EDIT: &str = "solid.box (edit)";
+
 /// The construction planes made of picks alone (`cmd::picked_plane`): their references are
 /// parsed and mapped as a whole, saved forms included, rather than key by key (#12022).
 const PICKED_PLANES: [&str; 4] =
@@ -92,7 +97,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
         SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
-        "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
+        // A new box's corner or centre and its sizes are along the world axes (`Mapper::world_box`).
+        "solid.box" | BOX_EDIT | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
         // Coil's axis may also be a reference (a named axis, an edge, `{origin, dir}`); `Axis`
         // turns a bare direction (including X, Y or Z by name, #21098) as `PrimitiveAxis` does.
@@ -195,6 +201,21 @@ fn vec3(v: &Value) -> Option<Vec3> {
 
 fn pt(p: Vec3) -> Value {
     serde_json::json!([p.x, p.y, p.z])
+}
+
+/// A coordinate less a length, each a number or an expression: a number when both are, else an
+/// expression that keeps following their parameters. A size that defines a parameter (`l = 20`)
+/// takes its value, as the parameter doesn't exist yet.
+fn minus(a: &Value, b: &Value) -> Option<Value> {
+    if let (Some(x), Some(y)) = (a.as_f64(), b.as_f64()) {
+        return serde_json::Number::from_f64(x - y).map(Value::Number);
+    }
+    let text = |v: &Value| match v {
+        Value::Number(n) => crate::params::number_text(n),
+        Value::String(t) => Some(solidcraft_doc::expr::definition(t).map_or(t.as_str(), |(_, rhs)| rhs).trim().to_string()),
+        _ => None,
+    };
+    Some(Value::String(format!("({}) - ({})", text(a)?, text(b)?)))
 }
 
 /// The frame of the body a world point lies on (the nearest), or of the named body, with the
@@ -308,6 +329,65 @@ impl Mapper<'_> {
         let v = xyz.as_ref().unwrap_or(v);
         let Some(p) = vec3(v) else { return self.map_expr(&m, v, map_point_expr) };
         self.local_point(&m, p)
+    }
+
+    /// A new box, given along the world axes (its corner or centre, its length along X, width
+    /// along Y and height along Z), into the active component's frame (#22426). A frame turned by
+    /// quarter turns lays each world axis along one of the component's axes: the sizes go to the
+    /// axes they lie along, and the corner becomes the box's lowest corner in the component.
+    /// False (the corner or centre is then mapped as a point, the sizes stay along the component's
+    /// own axes) when the frame turns otherwise, as a box can't lie askew in its component, or
+    /// when no corner or centre is given: the box then sits at the component's origin, along its
+    /// axes.
+    fn world_box(&mut self, obj: &Map<String, Value>, out: &mut Map<String, Value>) -> bool {
+        const SIZES: [&str; 3] = ["length", "width", "height"];
+        let frame = self.f.active;
+        if is_identity(&frame) {
+            return false;
+        }
+        let Some(inv) = mat_inverse(&frame) else { return false };
+        // For each of the component's axes, the world axis it lies along and whether it points
+        // the other way.
+        let mut along = [(0_usize, false); 3];
+        for (row, slot) in along.iter_mut().enumerate() {
+            let mut found = None;
+            for col in 0..3 {
+                let c = inv.get(col).and_then(|column| column.get(row)).copied().unwrap_or(0.0);
+                if (c.abs() - 1.0).abs() <= 1e-9 && found.is_none() {
+                    found = Some((col, c < 0.0));
+                } else if c.abs() > 1e-9 {
+                    return false;
+                }
+            }
+            let Some(axis) = found else { return false };
+            *slot = axis;
+        }
+        if along[0].0 == along[1].0 || along[1].0 == along[2].0 || along[0].0 == along[2].0 {
+            return false;
+        }
+        let size = |k: &str| obj.get(k).filter(|v| v.is_number() || v.is_string()).cloned();
+        let Some(sizes) = SIZES.iter().map(|k| size(k)).collect::<Option<Vec<Value>>>() else { return false };
+        let (key, given) = match (obj.get("corner"), obj.get("center")) {
+            (Some(c), _) => ("corner", c),
+            (None, Some(c)) => ("center", c),
+            (None, None) => return false,
+        };
+        let Some(Value::Array(mut point)) = self.make(given) else { return false };
+        for (i, (world, reversed)) in along.iter().enumerate() {
+            let Some(s) = sizes.get(*world) else { return false };
+            // The corner is the lowest one: along an axis that points the other way, the box
+            // reaches back from the mapped corner by its size there.
+            if key == "corner" && *reversed {
+                let Some(c) = point.get_mut(i) else { return false };
+                let Some(lowest) = minus(c, s) else { return false };
+                *c = lowest;
+            }
+            if let Some(k) = SIZES.get(i) {
+                out.insert((*k).to_string(), s.clone());
+            }
+        }
+        out.insert(key.to_string(), Value::Array(point));
+        true
     }
 
     /// Coordinates such as `["w / 2", 0, 0]`, mapped without evaluating their expressions.
@@ -1069,7 +1149,11 @@ fn map_local_with_input(
             }
             _ => None,
         };
-        let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
+        let edited = match cmd {
+            "surface.revolve" => SURFACE_REVOLVE_EDIT,
+            "solid.box" => BOX_EDIT,
+            _ => cmd,
+        };
         let copies = edited_copy_frames(s, params);
         let mapped =
             if placed(s) || copies.is_some() { map_local_with_input(&context, world, edited, params.get("params")?, input, copies) } else { None };
@@ -1192,6 +1276,7 @@ fn map_local_with_input(
     let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
+    let box_done = id == "solid.box" && m.world_box(obj, &mut out);
     if id == "solid.move" && obj.get("copy").and_then(Value::as_bool) == Some(true) {
         let copies = match saved_copies {
             Some(copies) => copies.to_vec(),
@@ -1223,6 +1308,8 @@ fn map_local_with_input(
                 Pick => m.pick(v, body.as_deref()),
                 Picks => m.picks(v, body.as_deref()),
                 ToolPicks => m.picks(v, obj.get("tool").and_then(|t| t.get("body")).and_then(Value::as_str)),
+                // A new box's corner or centre went with its sizes.
+                Make if box_done => None,
                 Make => m.make(v),
                 Dir => m.dir(v),
                 // An axis holding expressions (#18822), as `[x, y, z]` or `{x, y, z}`, turns with
