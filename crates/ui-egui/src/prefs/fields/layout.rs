@@ -125,8 +125,8 @@ macro_rules! layout_preferences {
             /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
             /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
             remember_toolbar_tab: bool = false, PAGE_LAYOUT;
-            /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
-            /// instead of a list of small icons with names (#4739).
+            /// Legacy serialized choice, retained so old preference files still load.
+            /// Command menus now use the shared compact menu rows.
             ribbon_icon_grid: bool = false, PAGE_LAYOUT;
             /// Show command names beneath ribbon icons, independently of workspace layout.
             ribbon_labels: bool = true, PAGE_LAYOUT;

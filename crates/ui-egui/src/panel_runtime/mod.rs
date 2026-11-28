@@ -9,6 +9,8 @@ mod specimen;
 
 pub use app::*;
 pub use fixtures::*;
+#[cfg(test)]
+pub(crate) use plugin::instance_for as plugin_instance;
 pub(crate) use plugin::queue_selection;
 pub(crate) use preferences::PanelLayoutSnapshot;
 pub(crate) use preferences::panel_layout_matches;
@@ -23,6 +25,8 @@ pub(crate) use production::report_content_composer_height;
 pub(crate) use production::report_content_extent;
 pub(crate) use production::shared_content_composer_height;
 pub(crate) use production::shared_content_measurement;
+#[cfg(test)]
+pub(crate) use production::timeline_tall;
 pub use solidcraft_ui_kit::panel_runtime::*;
 pub use specimen::*;
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: fusion spot</title>
+  <path d="M6 26L46 26L46 36L6 36Z" fill="#b8c3cf"/>
+  <path d="M6 26L46 26L46 36L6 36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 36L58 36L58 46L18 46Z" fill="#b8c3cf"/>
+  <path d="M18 36L58 36L58 46L18 46Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 26Q32 14 40 26Z" fill="#328bd3"/>
+  <path d="M24 26Q32 14 40 26Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 36A8 8 0 1 0 40 36A8 8 0 1 0 24 36Z" fill="#328bd3"/>
+  <path d="M24 36A8 8 0 1 0 40 36A8 8 0 1 0 24 36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -361,9 +361,9 @@ fn disjoint_sphere_box_union_moved_far() {
     assert!(close(there, here, va + vb), "{there} moved, {here} at the origin");
 }
 
-/// Two crossing cylinders: the union moved 1000 mm away loses about a tenth of its volume.
+/// Two crossing cylinders: the union moved 1000 mm away keeps its volume. It lost about a
+/// tenth of it there (#1649).
 #[test]
-#[ignore = "kernel bug, #1649"]
 fn crossing_cylinders_union_moved_far() {
     let a = Prim::Cyl { at: [17.5, 30.0, 7.5], axis: 0, r: 5.0, h: 10.0 }.body();
     let b = Prim::Cyl { at: [17.5, 30.0, 15.0], axis: 1, r: 12.5, h: 5.0 }.body();

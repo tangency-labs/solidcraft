@@ -545,6 +545,18 @@ pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlaceme
     convert::loop2(lp).placement(&convert::loop2(other), tol)
 }
 
+/// Whether the closed loop `lp` (in one plane's coordinates) crosses or touches itself anywhere
+/// but where its neighbouring pieces join, pieces within `tol` of each other counting as meeting
+/// ([`kp::loop_crosses`]): what a loop moved past a neck does
+/// ([`crate::develop::offset_closed_contour`]). `None` for a loop with a segment other than a
+/// line or an arc, or a `tol` that is not positive and finite.
+#[must_use]
+pub fn loop_crosses_itself(lp: &Loop2, tol: f64) -> Option<bool> {
+    let lp = convert::loop2(lp);
+    (tol.is_finite() && tol > 0.0 && lp.segs.iter().all(kp::Seg2::is_line_or_arc))
+        .then(|| kp::loop_crosses(&lp.segs, &[], tol))
+}
+
 /// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
 #[must_use]
 pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {

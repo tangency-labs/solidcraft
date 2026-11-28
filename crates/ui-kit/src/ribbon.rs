@@ -1,5 +1,5 @@
-//! The ribbon as components: its tab row ([`tabs`]), its groups' menus ([`menu_row`], [`grid`]) and
-//! its panel row: groups of command buttons, each with its label under
+//! The ribbon as components: its tab row ([`tabs`]) and its panel row. Overflow menus use the
+//! shared [`crate::Item`] definition and [`crate::Menu`] renderer. Groups have command labels under
 //! them, fitted to the room there is ([`fit`]): buttons narrow, groups hand buttons to their menu
 //! and collapse, and the last groups go into a » menu. The app describes the groups as plain data
 //! ([`Row`]); [`show`] draws them and returns what was chosen ([`Action`]) with what the app
@@ -429,7 +429,7 @@ pub struct Group<'a> {
     /// The command running now, lit on the label while it is in the menu only.
     pub running: Option<&'a str>,
     /// The rows it lists in the » menu.
-    pub more: Vec<MoreRow<'a>>,
+    pub more: Vec<crate::Item>,
 }
 
 /// A command button (or a gallery cell).
@@ -464,20 +464,6 @@ pub struct Split<'a> {
     pub key: &'a str,
     pub title: &'a str,
     pub name: &'a str,
-}
-
-/// A row of a group in the » menu.
-pub struct MoreRow<'a> {
-    pub id: &'a str,
-    /// Its label (the menu row translates it) and kit icon.
-    pub label: &'a str,
-    pub icon: &'a str,
-    pub shortcut: &'a str,
-    pub enabled: bool,
-    /// A check mark: on or off (None: none).
-    pub checked: Option<bool>,
-    /// Its hover text.
-    pub hint: Option<&'a str>,
 }
 
 /// Where a command was started from.
@@ -546,6 +532,10 @@ pub struct Out {
     pub actions: Vec<Action>,
     pub groups: Vec<GroupOut>,
     pub buttons: Vec<Drawn>,
+    /// Picks from the shared overflow menu, including secondary and context actions.
+    pub menu_picked: Vec<crate::Item>,
+    /// Shared overflow responses retained for host drag payloads and action anchors.
+    pub menu_rows: Vec<(crate::Item, egui::Response)>,
 }
 
 /// The dropdown chevron every ribbon menu shares.
@@ -594,11 +584,9 @@ fn handle(prefix: &str, key: &str) -> String {
     format!("{prefix}{key}")
 }
 
-/// Draws the groups in `rect` (below the tabs, from the first group's left edge), fitting them to
-/// its width ([`fit`]); the groups that do not fit go into the » menu. `more_rows` may draw a
-/// group's rows in the » menu itself: given the group's place, it returns true when it did (the
-/// row then lists none of its own).
-pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(&mut egui::Ui, usize) -> bool) -> Out {
+/// Draws the groups in `rect`, fitting them to its width. Overflow groups are shared menu
+/// definitions; `more_items` may provide entries in place of each group's default commands.
+pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_items: &mut dyn FnMut(usize) -> Option<Vec<crate::Item>>) -> Out {
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let labels = row.labels;
@@ -643,7 +631,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         h.trimmed_count,
         plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
     );
-    let mut out = Out { actions: Vec::new(), groups: Vec::new(), buttons: Vec::new() };
+    let mut out = Out { actions: Vec::new(), groups: Vec::new(), buttons: Vec::new(), menu_picked: Vec::new(), menu_rows: Vec::new() };
     let mut overflow = Vec::new();
     let accent = row.accent;
     for (gi, (group, plan)) in row.groups.iter().zip(plans).enumerate() {
@@ -711,6 +699,16 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     br.max.x -= 14.0;
                 }
             }
+            let (br_radius, ar_radius) = if b.split.is_some() {
+                let r = t.radius_sm;
+                if labels {
+                    (egui::CornerRadius { nw: r, ne: r, sw: 0, se: 0 }, egui::CornerRadius { nw: 0, ne: 0, sw: r, se: r })
+                } else {
+                    (egui::CornerRadius { nw: r, ne: 0, sw: r, se: 0 }, egui::CornerRadius { nw: 0, ne: r, sw: 0, se: r })
+                }
+            } else {
+                (egui::CornerRadius::same(t.radius_sm), egui::CornerRadius::same(t.radius_sm))
+            };
             let resp = ui.interact(br, ui.scope_id().with(("cmd", b.id)), Sense::click_and_drag());
             for prefix in h.button {
                 solidcraft_ui_registry::publish_handle(&handle(prefix, b.id), br.center());
@@ -724,17 +722,12 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
             let background = painter.add(egui::Shape::Noop);
             let split_id = b.split.map(|s| ui.scope_id().with(("family", s.key)));
-            let split_open = split_id.is_some_and(|id| egui::Popup::is_id_open(ui.ctx(), id.with("popup")));
-            let neutral = if !b.exit && (resp.is_pointer_button_down_on() || b.pressed || split_open) {
-                egui::Shape::Rect(egui::epaint::RectShape::new(
-                    whole,
-                    t.radius_sm,
-                    accent.soft,
-                    Stroke::new(1.0, accent.color),
-                    egui::StrokeKind::Inside,
-                ))
+            let split_open = split_id.is_some_and(|id| crate::Menu::is_open(ui.ctx(), id.with("shared_menu")));
+            let br_active = !b.exit && (resp.is_pointer_button_down_on() || b.pressed);
+            let neutral = if br_active {
+                egui::Shape::Rect(egui::epaint::RectShape::new(br, br_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside))
             } else if resp.hovered() && b.enabled {
-                egui::Shape::rect_filled(whole, t.radius_sm, t.hover)
+                egui::Shape::rect_filled(br, br_radius, t.hover)
             } else {
                 egui::Shape::Noop
             };
@@ -769,21 +762,37 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 });
             } else if let (Some(s), Some(split_id)) = (b.split, split_id) {
                 let ar = if labels {
-                    Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
+                    Rect::from_min_max(pos2(whole.left(), br.bottom() + 1.0), pos2(whole.right(), whole.top() + 49.0))
                 } else {
-                    Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
+                    Rect::from_min_max(pos2(br.right() + 1.0, whole.top()), whole.right_bottom())
                 };
                 let arrow = ui.interact(ar, split_id, Sense::click());
                 solidcraft_ui_registry::publish_handle(&handle(h.split, s.key), ar.center());
-                if arrow.hovered() {
-                    painter.rect_filled(ar, t.radius_sm, t.hover);
+                let ar_active = arrow.is_pointer_button_down_on() || split_open;
+                if ar_active {
+                    painter.rect(ar, ar_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                } else if arrow.hovered() {
+                    painter.rect_filled(ar, ar_radius, t.hover);
                 }
-                // The title sits on the same line as the other buttons' labels.
+                if (drawn_button.response.hovered() && b.enabled) || arrow.hovered() {
+                    if !br_active && !ar_active {
+                        painter.rect_stroke(br.union(ar), t.radius_sm, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        let divider = if labels {
+                            [pos2(whole.left() + 1.0, br.bottom() + 0.5), pos2(whole.right() - 1.0, br.bottom() + 0.5)]
+                        } else {
+                            [pos2(br.right() + 0.5, whole.top() + 1.0), pos2(br.right() + 0.5, whole.bottom() - 1.0)]
+                        };
+                        painter.line_segment(divider, Stroke::new(1.0, t.border));
+                    } else if br_active && !ar_active {
+                        painter.rect_stroke(ar, ar_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    } else if ar_active && !br_active {
+                        painter.rect_stroke(br, br_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    }
+                }
                 if labels {
-                    let title_y = whole.top() + 39.0;
                     let galley = button_galley(&painter, s.title, ar.width() - 16.0, t.text);
-                    painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
-                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
+                    painter.galley(pos2(ar.center().x - 4.0, label_top(whole, galley.size().y)), galley, t.text);
+                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, ar.center().y), t.text_dim);
                 } else {
                     dropdown_arrow(&painter, ar.center(), t.text_dim);
                 }
@@ -924,37 +933,41 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
     }
     if !overflow.is_empty() {
         let at = Rect::from_min_size(pos2(px.min(right - exit_width - 40.0), top + 4.0), vec2(38.0, button_height));
-        let actions = &mut out.actions;
         ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-            let response = crate::Menu::button(ui, "»", |ui| {
-                for &gi in &overflow {
-                    let Some(group) = row.groups.get(gi) else { continue };
-                    crate::Menu::button(ui, group.name, |ui| {
-                        if more_rows(ui, gi) {
-                            return;
-                        }
-                        for r in &group.more {
-                            let response = if r.checked.is_some() {
-                                let mut item = crate::MenuItem::new(r.id, r.label, r.icon);
-                                item.shortcut = r.shortcut;
-                                item.enabled = r.enabled;
-                                item.checked = r.checked;
-                                item.show(ui)
-                            } else {
-                                crate::command_menu_button(ui, r.id, r.label, r.icon, r.shortcut, r.enabled)
-                            };
-                            let response = if let Some(hint) = r.hint { response.backing_on_hover_text(hint) } else { response };
-                            solidcraft_ui_registry::publish_handle(&handle(h.more_row, r.id), response.rect.center());
-                            if response.clicked() {
-                                actions.push(Action::Run { id: r.id.to_string(), rect: response.rect, place: Place::More });
-                                ui.close();
-                            }
-                        }
-                    });
+            let response = crate::text_button(ui, "\u{bb}", true);
+            solidcraft_ui_registry::publish_target(h.more, response.rect);
+            if response.clicked() || crate::Menu::response_is_open(&response) {
+                let entries = overflow
+                    .iter()
+                    .filter_map(|&gi| {
+                        let group = row.groups.get(gi)?;
+                        let items = more_items(gi).unwrap_or_else(|| {
+                            group
+                                .more
+                                .iter()
+                                .map(|r| {
+                                    let mut item = r.clone();
+                                    item.aliases.push(handle(h.more_row, &r.id));
+                                    item.params = Some(serde_json::json!({"ribbon_fallback":true}));
+                                    item
+                                })
+                                .collect()
+                        });
+                        Some(crate::Item::submenu(&format!("ribbon:overflow:{gi}"), group.name, "", items))
+                    })
+                    .collect::<Vec<_>>();
+                let output = crate::Menu::button_items_output(&response, &entries);
+                if let Some(picked) = output.picked {
+                    if picked.params.as_ref().and_then(|p| p.get("ribbon_fallback")).and_then(serde_json::Value::as_bool) == Some(true) {
+                        let rect = output.rows.iter().find(|(item, _)| item == &picked).map_or(response.rect, |(_, row)| row.rect);
+                        out.actions.push(Action::Run { id: picked.id.clone(), rect, place: Place::More });
+                    } else {
+                        out.menu_picked.push(picked);
+                    }
                 }
-            });
-            solidcraft_ui_registry::publish_target(h.more, response.response.rect);
-            response.response.backing_on_hover_text(row.more_tip);
+                out.menu_rows.extend(output.rows);
+            }
+            response.backing_on_hover_text(row.more_tip);
         });
     }
     out
@@ -1183,648 +1196,6 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
         );
     }
     TabsOut { actions, search }
-}
-
-/// A group menu's row height.
-pub const ROW_H: f32 = 30.0;
-
-/// A list row's pin centre, in from the row's right edge; its ⋯ sits this far left of the pin.
-const PIN_INSET: f32 = 13.0;
-const MORE_GAP: f32 = 12.0;
-const ROW_BUTTON: f32 = 20.0;
-/// What a list row keeps clear at its end for the ⋯ and the pin.
-const ROW_END: f32 = PIN_INSET + ROW_BUTTON + MORE_GAP + 4.0;
-
-/// What a click on a group menu's row or grid icon asks for.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum MenuAction {
-    /// Run the command, from `rect`.
-    Run(Rect),
-    /// Its menu, at the point.
-    Menu(Pos2),
-    /// Its menu from the row's ⋯, at the point; the drop-down stays open under it.
-    More(Pos2),
-    /// Pin it on the ribbon, or take it off.
-    TogglePin,
-}
-
-/// A row's hover text, shown beside the menu: one line, or a line with the command's help under
-/// it.
-#[derive(Clone, Copy, Debug)]
-pub enum RowTip<'a> {
-    Plain(&'a str),
-    Help { text: &'a str, help: Option<&'a str> },
-}
-
-/// A command in a group's menu: a row of the list or an icon of the grid.
-#[derive(Clone, Copy, Debug)]
-pub struct MenuEntry<'a> {
-    pub id: &'a str,
-    /// Its label, already translated.
-    pub label: &'a str,
-    /// A kit icon name.
-    pub icon: &'a str,
-    pub shortcut: &'a str,
-    pub enabled: bool,
-    /// A check mark, on or off (None: none).
-    pub checked: Option<bool>,
-    /// It is pinned on the ribbon.
-    pub pinned: bool,
-    /// A row's hover text.
-    pub tip: Option<RowTip<'a>>,
-    /// The app paints a grid icon's background itself, after the menu ([`GridCell::background`]).
-    pub app_paints: bool,
-}
-
-/// How a group's menus look and where they publish their parts.
-#[derive(Clone, Copy, Debug)]
-pub struct MenuStyle<'a> {
-    /// The pin's hover text when the command is not pinned, and when it is, translated.
-    pub pin_tip: &'a str,
-    pub unpin_tip: &'a str,
-    /// The search's mark on a row it points out.
-    pub accent: TabAccent,
-    /// Where a menu's rows keep their keyboard focus, the same in every menu that shares it.
-    pub focus: egui::Id,
-    /// Each entry's centre, under each of these prefixes followed by its id.
-    pub entry: &'a [&'a str],
-    /// An entry's pin, a hot grid icon, and what the search points out.
-    pub pin: &'a str,
-    /// A list row's ⋯ beside its pin (opens the row's menu, as a right-click does) and its hover text.
-    pub more: &'a str,
-    pub more_tip: &'a str,
-    pub hot: &'a str,
-    pub reveal: &'a str,
-}
-
-impl MenuStyle<'_> {
-    /// The id an entry keeps its keyboard focus by.
-    pub fn focus_id(&self, id: &str) -> egui::Id {
-        self.focus.with(id)
-    }
-}
-
-/// A group heading inside a menu (Edges, Faces…; Line, Rectangle…), in the list and the grid: a
-/// step below the menu's own header, written as named, not in capitals, so it reads as part of
-/// the menu rather than above it.
-pub fn heading_font() -> FontId {
-    crate::type_face::semibold(Tokens::get().font_micro)
-}
-
-/// A group heading in a menu's list, `label` translated.
-pub fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
-    ui.painter().text(rect.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, label, heading_font(), t.text_dim);
-}
-
-/// The note under a menu (how pinning works), translated.
-pub fn section_footer(ui: &mut egui::Ui, message: &str) {
-    let t = Tokens::get();
-    crate::Menu::separator(ui);
-    ui.add_space(2.0);
-    ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_small).color(t.text_dim)).wrap());
-    ui.add_space(4.0);
-}
-
-/// The widest menu row, at least 200, including space for a checkmark beside icon-bearing entries.
-pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str, &'a str, &'a str, bool)>) -> f32 {
-    let t = Tokens::get();
-    let font = FontId::proportional(t.font_button);
-    entries
-        .into_iter()
-        .map(|(label, shortcut, icon, checkable)| {
-            let label = ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x;
-            let key = if shortcut.is_empty() {
-                0.0
-            } else {
-                ui.painter().layout_no_wrap(shortcut.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0
-            };
-            let check = crate::MenuItem::trailing_check_width(icon.into(), checkable);
-            6.0 + 20.0 + 8.0 + label + key + ROW_END + 4.0 + check
-        })
-        .fold(200.0, f32::max)
-}
-
-/// True once the pointer has rested on this row long enough for its tip. egui's shared tooltip
-/// grace time lets every row after the first show its tip the moment the pointer reaches it;
-/// timing each row's own hover restarts the delay for each newly hovered row instead (#10481).
-fn tip_ready(ui: &egui::Ui, resp: &egui::Response) -> bool {
-    let ctx = ui.ctx();
-    let key = resp.id.with("sc_dropdown_tip");
-    if !resp.hovered() {
-        ctx.data_mut(|d| d.remove::<(f64, u64)>(key));
-        return false;
-    }
-    let pass = ctx.cumulative_pass_nr();
-    let now = ctx.input(|i| i.time);
-    let (mut began, seen) = ctx.data(|d| d.get_temp::<(f64, u64)>(key)).unwrap_or((now, 0));
-    // A menu that closed and opened again under the pointer starts the delay afresh.
-    if seen + 1 < pass {
-        began = now;
-    }
-    ctx.data_mut(|d| d.insert_temp(key, (began, pass)));
-    let delay = f64::from(ui.style().interaction.tooltip_delay);
-    if now - began < delay {
-        ctx.request_repaint_after_secs((delay - (now - began)) as f32);
-        return false;
-    }
-    true
-}
-
-/// Show `add` as `resp`'s tip beside the menu rather than under the pointer: to the right of the
-/// menu, or to its left when the right has no room, so the tip never covers the menu's rows
-/// (#10481). Returns the tip's rect when it was shown.
-pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOnce(&mut egui::Ui)) -> Option<Rect> {
-    use crate::{Container, Surface};
-    if !tip_ready(ui, resp) {
-        return None;
-    }
-    let ctx = ui.ctx();
-    let tip_id = resp.id.with("sc_dropdown_tip_area");
-    // Last pass's size; the first pass assumes the tip fits on the right.
-    let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
-    let screen = ctx.content_rect();
-    let gap = 6.0;
-    let x = if menu.right() + gap + size.x <= screen.right() { menu.right() + gap } else { (menu.left() - gap - size.x).max(screen.left()) };
-    let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
-    let area = Container::new(ctx, Surface::Popup)
-        .area(tip_id)
-        .order(egui::Order::Tooltip)
-        .interactable(false)
-        .fixed_pos(pos2(x, y))
-        .show(ctx, |ui| Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), add));
-    Some(area.inner.response.rect)
-}
-
-/// One command row of a group's menu: icon, label and shortcut, with the hover background under
-/// the pointer or keyboard focus (like every menu), and a pin at its end. `revealed` is the pulse
-/// strength when the search points this row out (#7287). Returns what was chosen, with the row's
-/// response (for the app's drags and tips).
-pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Option<f32>, style: &MenuStyle) -> (Option<MenuAction>, egui::Response) {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
-    // Every row drags onto the ribbon (to pin it there); enabled rows also start their command.
-    let sense = if entry.enabled { Sense::click_and_drag() } else { Sense::drag() };
-    let resp = ui.interact(rect, style.focus_id(entry.id), sense);
-    // Focus can settle on the following frame, after the key event has gone.
-    // Keep the focused row visible even then in a menu taller than the window.
-    if resp.has_focus() && !ui.clip_rect().contains_rect(rect) {
-        resp.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
-    }
-    if resp.drag_started() {
-        resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
-    }
-    // The pin at the row's end (above the row, so it takes its own clicks).
-    let pr = Rect::from_center_size(pos2(rect.right() - PIN_INSET, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
-    let pin = ui.interact(pr, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click());
-    // Its ⋯ beside the pin: the entry's menu, as a right-click on the row opens it.
-    let mr = Rect::from_center_size(pos2(pr.left() - MORE_GAP, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
-    let more = ui.interact(mr, ui.scope_id().with(("dropdown_more", entry.id)), Sense::click());
-    let pointer_on = (resp.hovered() || pin.hovered() || more.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
-    // A checkable row announces its on/off state, since its label no longer says it.
-    resp.widget_info(|| match entry.checked {
-        Some(on) => egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && entry.enabled, on, entry.label),
-        None => egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && entry.enabled, entry.label),
-    });
-    for prefix in style.entry {
-        solidcraft_ui_registry::publish_handle(&handle(prefix, entry.id), rect.center());
-    }
-    let hot = entry.enabled && (pointer_on || resp.has_focus());
-    let mut row = crate::MenuItem::new(entry.id, entry.label, entry.icon);
-    row.enabled = entry.enabled;
-    row.checked = entry.checked;
-    row.highlighted = hot || revealed.is_some();
-    row.shortcut = entry.shortcut;
-    row.paint(ui, rect, &resp, ROW_END);
-    if let Some(strength) = revealed {
-        paint_reveal(ui.painter(), rect, &style.accent, strength, false);
-        solidcraft_ui_registry::publish_rect(style.reveal, rect);
-        if !ui.clip_rect().contains_rect(rect) {
-            ui.scroll_to_rect(rect, None);
-        }
-    }
-    if hot {
-        solidcraft_ui_registry::publish_handle(&handle(style.hot, entry.id), rect.center());
-    }
-    let p = ui.painter();
-    if pointer_on || resp.has_focus() {
-        if pin.hovered() {
-            p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
-        }
-        crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
-        solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
-        if more.hovered() {
-            p.rect_filled(mr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
-        }
-        for dx in [-5.0, 0.0, 5.0] {
-            p.circle_filled(pos2(mr.center().x + dx, mr.center().y), 1.6, if more.hovered() { t.text } else { t.text_dim });
-        }
-        solidcraft_ui_registry::publish_handle(&handle(style.more, entry.id), mr.center());
-    }
-    let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
-    // The menu's rect from the last pass: tips sit beside it, never over its rows (#10481).
-    let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(rect);
-    if pin.clicked() {
-        return (Some(MenuAction::TogglePin), resp);
-    }
-    menu_tip(ui, menu, &pin, |ui| {
-        ui.label(tip);
-    });
-    menu_tip(ui, menu, &more, |ui| {
-        ui.label(style.more_tip);
-    });
-    if more.clicked() {
-        return (Some(MenuAction::More(mr.left_bottom())), resp);
-    }
-    match entry.tip {
-        Some(RowTip::Plain(text)) => {
-            menu_tip(ui, menu, &resp, move |ui| {
-                ui.label(text);
-            });
-        }
-        Some(RowTip::Help { text, help }) => {
-            menu_tip(ui, menu, &resp, move |ui| {
-                ui.set_max_width(300.0);
-                ui.label(text);
-                if let Some(help) = help {
-                    ui.add_space(2.0);
-                    ui.label(egui::RichText::new(help).weak());
-                }
-            });
-        }
-        None => {}
-    }
-    if resp.secondary_clicked() {
-        let at = resp.interact_pointer_pos().unwrap_or(rect.left_bottom());
-        return (Some(MenuAction::Menu(at)), resp);
-    }
-    if resp.clicked() && entry.enabled {
-        return (Some(MenuAction::Run(rect)), resp);
-    }
-    (None, resp)
-}
-
-/// Up and Down move the keyboard focus through a list's enabled rows (`enabled`, their ids, in
-/// order; from none focused: the first or the last), instead of egui's own spatial move. A
-/// submenu draws before the rest of its parent: a key is handled once per pass among the menus
-/// that share `style.focus`.
-pub fn list_keys(ui: &egui::Ui, enabled: &[&str], style: &MenuStyle) {
-    let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
-    if !down && !up {
-        return;
-    }
-    let handled = style.focus.with("key_pass");
-    let pass = ui.ctx().cumulative_pass_nr();
-    if ui.ctx().data(|d| d.get_temp::<u64>(handled)) == Some(pass) {
-        return;
-    }
-    ui.ctx().data_mut(|d| d.insert_temp(handled, pass));
-    if enabled.is_empty() {
-        return;
-    }
-    let focused = ui.ctx().memory(|m| m.focused());
-    let at = enabled.iter().position(|id| focused == Some(style.focus_id(id)));
-    let n = enabled.len();
-    let next = match (at, down) {
-        (None, true) => 0,
-        (None, false) => n - 1,
-        (Some(i), true) => (i + 1) % n,
-        (Some(i), false) => (i + n - 1) % n,
-    };
-    if let Some(id) = enabled.get(next) {
-        ui.ctx().memory_mut(|m| {
-            m.request_focus(style.focus_id(id));
-            m.move_focus(egui::FocusDirection::None);
-        });
-    }
-}
-
-/// A grid menu's cell (#4739): the icon twice the size of a list row's, with room around it.
-pub const GRID_CELL: f32 = 48.0;
-const GRID_ICON: f32 = 32.0;
-/// Columns a grid fills before a second row; a group with fewer commands is as wide as it needs.
-pub const GRID_COLUMNS: usize = 5;
-/// Rows at most: a bigger menu grows to the right instead (unless the window is too narrow).
-pub const GRID_ROWS: usize = 3;
-/// The height of a group's heading in a grid menu.
-pub const GRID_HEADING: f32 = 24.0;
-/// Icons side by side in a group's column, when groups stand side by side.
-pub const GROUP_COLUMNS: usize = 2;
-
-/// Where a grid menu puts things, relative to its top left: each entry's icon with its (row,
-/// column) for the arrow keys, each group heading (where, how wide, its text), the separators
-/// between groups side by side (their x), and the whole size.
-#[derive(Debug)]
-pub struct GridLayout<'a> {
-    pub cells: Vec<(Rect, (usize, usize))>,
-    pub headings: Vec<(Pos2, f32, &'a str)>,
-    pub separators: Vec<f32>,
-    pub size: egui::Vec2,
-}
-
-/// Lay out a grid menu, at most [`GRID_ROWS`] high, growing to the right. `grouped` is each
-/// entry's id with the heading that starts its group. A menu of two or more headed groups puts
-/// the groups side by side, each heading over a column of its icons, [`GROUP_COLUMNS`] across
-/// (more for a group too big for three rows), when that fits in `room` (wide). Any other menu, or
-/// one too wide for the window, fills rows: [`GRID_COLUMNS`] across, more when that would take
-/// over three rows, fewer when the window is narrower; a heading starts a new row. `loose` names
-/// the entries in no group: they stand apart after the groups, without a heading, so they stay
-/// put when a group is left out.
-pub fn grid_layout<'a>(grouped: &[(Option<&'a str>, &str)], loose: &[&str], room: f32) -> GridLayout<'a> {
-    let mut groups: Vec<(Option<&'a str>, Vec<usize>)> = Vec::new();
-    for (i, (heading, id)) in grouped.iter().enumerate() {
-        let after_a_group = groups.last().is_some_and(|(h, _)| h.is_some());
-        if heading.is_some() || groups.is_empty() || (after_a_group && loose.contains(id)) {
-            groups.push((*heading, Vec::new()));
-        }
-        if let Some((_, items)) = groups.last_mut() {
-            items.push(i);
-        }
-    }
-    // A heading needs two icons' width; loose entries only as many columns as they fill.
-    let group_columns = |heading: Option<&str>, n: usize| n.div_ceil(GRID_ROWS).max(if heading.is_some() { GROUP_COLUMNS } else { 1 });
-    let headed = groups.iter().filter(|(h, _)| h.is_some()).count();
-    let side_columns: usize = groups.iter().map(|(h, items)| group_columns(*h, items.len())).sum();
-    let side_by_side = headed >= 2 && side_columns as f32 * GRID_CELL <= room;
-    let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
-    let mut headings = Vec::new();
-    let mut separators = Vec::new();
-    let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(GRID_CELL, GRID_CELL));
-    let size = if side_by_side {
-        let (mut first_column, mut rows) = (0, 0);
-        for (g, (heading, items)) in groups.iter().enumerate() {
-            let columns = group_columns(*heading, items.len());
-            let x = first_column as f32 * GRID_CELL;
-            if g > 0 {
-                separators.push(x);
-            }
-            if let Some(h) = heading {
-                headings.push((pos2(x, 0.0), columns as f32 * GRID_CELL, *h));
-            }
-            for (k, i) in items.iter().enumerate() {
-                let (row, column) = (k / columns, k % columns);
-                if let Some(slot) = cells.get_mut(*i) {
-                    *slot = (cell(x + column as f32 * GRID_CELL, GRID_HEADING + row as f32 * GRID_CELL), (row, first_column + column));
-                }
-            }
-            rows = rows.max(items.len().div_ceil(columns));
-            first_column += columns;
-        }
-        vec2(first_column as f32 * GRID_CELL, GRID_HEADING + rows as f32 * GRID_CELL)
-    } else {
-        let n = grouped.len();
-        let fit = ((room / GRID_CELL).floor() as usize).max(1);
-        let columns = n.div_ceil(GRID_ROWS).max(n.min(GRID_COLUMNS)).min(fit).max(1);
-        let (mut y, mut first_row) = (0.0, 0);
-        for (heading, items) in &groups {
-            if let Some(h) = heading {
-                headings.push((pos2(0.0, y), columns as f32 * GRID_CELL, *h));
-                y += GRID_HEADING;
-            }
-            for (k, i) in items.iter().enumerate() {
-                let (row, column) = (k / columns, k % columns);
-                if let Some(slot) = cells.get_mut(*i) {
-                    *slot = (cell(column as f32 * GRID_CELL, y + row as f32 * GRID_CELL), (first_row + row, column));
-                }
-            }
-            let rows = items.len().div_ceil(columns);
-            y += rows as f32 * GRID_CELL;
-            first_row += rows;
-        }
-        vec2(columns as f32 * GRID_CELL, y)
-    };
-    GridLayout { cells, headings, separators, size }
-}
-
-/// An arrow key in a grid menu.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GridKey {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-/// Where an arrow key moves the focus in a grid menu, as an index into `enabled` (the enabled
-/// entries, as indices into `cells`): Left and Right step through them in order, Up and Down to
-/// the nearest one in the row above or below, all wrapping. From none focused, Right and Down go
-/// to the first, Left and Up to the last.
-pub fn grid_step(cells: &[(usize, usize)], enabled: &[usize], at: Option<usize>, key: GridKey) -> Option<usize> {
-    let n = enabled.len();
-    if n == 0 {
-        return None;
-    }
-    let Some(at) = at.filter(|at| *at < n) else {
-        return Some(if matches!(key, GridKey::Right | GridKey::Down) { 0 } else { n - 1 });
-    };
-    let cell = |k: usize| enabled.get(k).and_then(|i| cells.get(*i)).copied();
-    match key {
-        GridKey::Right => Some((at + 1) % n),
-        GridKey::Left => Some((at + n - 1) % n),
-        GridKey::Up | GridKey::Down => {
-            let (row, column) = cell(at)?;
-            let rows: Vec<usize> = (0..n).filter_map(|k| cell(k).map(|c| c.0)).collect();
-            let target = if key == GridKey::Down {
-                rows.iter().copied().filter(|r| *r > row).min().or_else(|| rows.iter().copied().min())
-            } else {
-                rows.iter().copied().filter(|r| *r < row).max().or_else(|| rows.iter().copied().max())
-            }?;
-            (0..n)
-                .filter_map(|k| cell(k).filter(|c| c.0 == target).map(|c| (k, c.1.abs_diff(column))))
-                .min_by_key(|(_, distance)| *distance)
-                .map(|(k, _)| k)
-        }
-    }
-}
-
-/// Arrow keys move the keyboard focus through a grid menu's enabled icons ([`grid_step`]).
-fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(usize, usize)], style: &MenuStyle) {
-    let key = ui.input(|i| {
-        [
-            (egui::Key::ArrowLeft, GridKey::Left),
-            (egui::Key::ArrowRight, GridKey::Right),
-            (egui::Key::ArrowUp, GridKey::Up),
-            (egui::Key::ArrowDown, GridKey::Down),
-        ]
-        .into_iter()
-        .find(|(k, _)| i.key_pressed(*k))
-        .map(|(_, key)| key)
-    });
-    let Some(key) = key else { return };
-    let enabled: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| e.enabled).map(|(i, _)| i).collect();
-    let focused = ui.ctx().memory(|m| m.focused());
-    let at = enabled.iter().position(|i| entries.get(*i).is_some_and(|e| focused == Some(style.focus_id(e.id))));
-    if let Some(e) = grid_step(cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| entries.get(*i)) {
-        ui.ctx().memory_mut(|m| {
-            m.request_focus(style.focus_id(e.id));
-            m.move_focus(egui::FocusDirection::None);
-        });
-    }
-}
-
-/// A grid icon the menu drew, for the app's own part of it (hover text, drags, deferred paint).
-pub struct GridCell {
-    /// Its place among the entries.
-    pub index: usize,
-    pub rect: Rect,
-    pub response: egui::Response,
-    /// An `app_paints` entry's paint, for [`paint_deferred`].
-    pub deferred: Option<Deferred>,
-}
-
-/// The grid drawn: the entry chosen and how, and each icon drawn.
-pub struct GridOut {
-    pub action: Option<(usize, MenuAction)>,
-    pub cells: Vec<GridCell>,
-}
-
-/// How long the pointer rests on a grid icon before its corner pin can be clicked (seconds).
-pub const PIN_DELAY: f64 = 2.0;
-
-/// Whether the corner pin of grid icon `id` takes clicks: the pointer (`on`) has rested on the
-/// icon for [`PIN_DELAY`]. One icon is timed at a time; the window redraws when the pin is due.
-fn pin_armed(ui: &egui::Ui, key: egui::Id, id: &str, on: bool) -> bool {
-    let now = ui.input(|i| i.time);
-    let since = ui.ctx().data_mut(|d| {
-        let rest = d.get_temp::<(String, f64)>(key).filter(|(at, _)| at == id);
-        match (on, rest) {
-            (true, Some((_, since))) => Some(since),
-            (true, None) => {
-                d.insert_temp(key, (id.to_string(), now));
-                Some(now)
-            }
-            (false, Some(_)) => {
-                d.remove::<(String, f64)>(key);
-                None
-            }
-            (false, None) => None,
-        }
-    });
-    let Some(since) = since else { return false };
-    let left = PIN_DELAY - (now - since);
-    if left > 0.0 {
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-    }
-    left <= 0.0
-}
-
-/// A group's menu drawn as a grid of large icons (#4739): the same entries, headings (translated)
-/// and actions as the list, the names in the tooltips. `loose` as for [`grid_layout`].
-pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&str], style: &MenuStyle) -> GridOut {
-    // Wide enough for groups side by side, short of the window's edge.
-    let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
-    let grouped: Vec<(Option<&str>, &str)> = entries.iter().map(|(heading, e)| (*heading, e.id)).collect();
-    let layout = grid_layout(&grouped, loose, room);
-    let width = layout.size.x.max(200.0);
-    // A narrow grid sits in the middle of the menu's least width.
-    let inset = ((width - layout.size.x) / 2.0).max(0.0);
-    ui.set_width(width);
-    let plain: Vec<MenuEntry> = entries.iter().map(|(_, e)| *e).collect();
-    let keys: Vec<(usize, usize)> = layout.cells.iter().map(|(_, at)| *at).collect();
-    grid_keys(ui, &plain, &keys, style);
-    // Like the list, the grid scrolls when it would run past the window's bottom (#874).
-    let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
-    let mut out = GridOut { action: None, cells: Vec::new() };
-    egui::ScrollArea::vertical().id_salt("panel_menu_grid").max_height(height).min_scrolled_height(height).show(ui, |ui| {
-        let (area, _) = ui.allocate_exact_size(vec2(width, layout.size.y), Sense::hover());
-        let origin = area.left_top() + vec2(inset, 0.0);
-        let t = Tokens::get();
-        for (at, w, heading) in &layout.headings {
-            let clip = ui.clip_rect().intersect(Rect::from_min_size(origin + at.to_vec2(), vec2(*w, GRID_HEADING)));
-            let painter = ui.painter().with_clip_rect(clip);
-            // Centred over its group's icons.
-            let centre = origin + at.to_vec2() + vec2(w / 2.0, GRID_HEADING / 2.0);
-            painter.text(centre, egui::Align2::CENTER_CENTER, *heading, heading_font(), t.text_dim);
-        }
-        // A line between groups side by side, as between the ribbon's groups.
-        for x in &layout.separators {
-            let x = origin.x + x;
-            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], crate::Menu::separator_stroke(&t));
-        }
-        for (index, (entry, (rect, _))) in plain.iter().zip(&layout.cells).enumerate() {
-            let rect = rect.translate(origin.to_vec2());
-            let (action, cell) = grid_cell(ui, entry, rect, style);
-            out.cells.push(GridCell { index, ..cell });
-            if let Some(action) = action {
-                out.action = Some((index, action));
-            }
-        }
-    });
-    out
-}
-
-/// One icon of a grid menu at `rect`: clicked, dragged or right-clicked like a list row; a pin in
-/// its corner says it is on the ribbon. Returns what was chosen, with the icon drawn.
-pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuStyle) -> (Option<MenuAction>, GridCell) {
-    let t = Tokens::get();
-    let sense = if entry.enabled { Sense::click_and_drag() } else { Sense::drag() };
-    let resp = ui.interact(rect, style.focus_id(entry.id), sense);
-    if resp.has_focus() && !ui.clip_rect().contains_rect(rect) {
-        resp.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
-    }
-    if resp.drag_started() {
-        resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
-    }
-    // The pin in the corner, as at a list row's end. It takes clicks (above the cell) only once
-    // the pointer has rested on the icon for PIN_DELAY: until then a click anywhere runs the
-    // command, so a quick click near the corner never pins or unpins it by accident.
-    let pr = Rect::from_min_size(pos2(rect.right() - 15.0, rect.top()), vec2(15.0, 15.0));
-    let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
-    let armed = pin_armed(ui, style.focus.with("grid_pin_hover"), entry.id, ui.rect_contains_pointer(rect) && !dragging);
-    let pin = armed.then(|| ui.interact(pr, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click()));
-    let pin_hovered = pin.as_ref().is_some_and(egui::Response::hovered);
-    if !entry.app_paints {
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && entry.enabled, entry.label));
-    }
-    for prefix in style.entry {
-        solidcraft_ui_registry::publish_handle(&handle(prefix, entry.id), rect.center());
-    }
-    let pointer_on = (resp.hovered() || pin_hovered) && !dragging;
-    let hot = entry.enabled && (pointer_on || resp.has_focus());
-    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
-    let cell = rect.shrink(2.0);
-    let mut neutral = Vec::new();
-    if hot {
-        neutral.push(egui::Shape::rect_filled(cell, t.control_radius, t.accent_soft));
-        solidcraft_ui_registry::publish_handle(&handle(style.hot, entry.id), rect.center());
-    }
-    if resp.has_focus() && !entry.app_paints {
-        neutral.push(egui::Shape::rect_stroke(cell, t.control_radius, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside));
-    }
-    let neutral = egui::Shape::Vec(neutral);
-    let deferred = if entry.app_paints {
-        // Only responses and paint slots survive until the app paints them.
-        let (background, label_slot) = (painter.add(egui::Shape::Noop), painter.add(egui::Shape::Noop));
-        Some(Deferred { response: resp.clone(), painter: painter.clone(), rect: cell, background, label_slot, neutral })
-    } else {
-        painter.add(neutral);
-        None
-    };
-    crate::tint::icon(&painter, Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)), entry.icon, if entry.enabled { 1.0 } else { 0.4 });
-    // A pinned entry always shows its pin, clear of the icon's own artwork; any other shows one
-    // to pin it once it can be clicked.
-    if entry.pinned || armed {
-        if pin_hovered {
-            painter.rect_filled(pr, 3.0, t.border.gamma_multiply(0.6));
-        }
-        crate::icons::glyphs::pin_icon(&painter, pr.shrink(2.5), entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
-    }
-    if let Some(pin) = pin {
-        solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
-        let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
-        if pin.backing_on_hover_text(tip).clicked() {
-            return (Some(MenuAction::TogglePin), GridCell { index: 0, rect, response: resp, deferred });
-        }
-    }
-    let action = if resp.secondary_clicked() {
-        Some(MenuAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom())))
-    } else if resp.clicked() && entry.enabled {
-        Some(MenuAction::Run(rect))
-    } else {
-        None
-    };
-    (action, GridCell { index: 0, rect, response: resp, deferred })
 }
 
 /// A command being dragged: off a button or cell of the row, or out of a menu.

@@ -257,6 +257,7 @@ fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
             crate::FacePaint { face: usize::MAX, color: [0.0; 3], opacity: 1.0, name: None },
         ],
         name: Some("Body".into()),
+        layer: None,
     });
     records.bodies[0].color = Some([-1.0, 0.5, 2.0]);
     let imp = records_import(&records).unwrap();
@@ -413,4 +414,81 @@ fn a_small_cylinder_imported_with_coarse_distance_accuracy_meshes() {
         assert!(b.faces.iter().any(|f| matches!(f.surface, brep::Surface::Cylinder { .. })));
         assert_closed_import_mesh(&b, (8.0 * r * r + h * h).sqrt(), 1e-4);
     }
+}
+
+#[test]
+fn parallel_records_import_matches_serial_and_respects_cancellation() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let parts = ["cone_point", "cylinder_seam", "dome", "washer"];
+    let mut combined = ImportRecords { bodies: Vec::new(), tree: Vec::new(), warnings: vec!["header note".into()], system: "test".into() };
+    let mut indices = Vec::new();
+    for (idx, part) in parts.iter().enumerate() {
+        let mut r = kept(&std::fs::read_to_string(dir.join(format!("{part}.step"))).unwrap());
+        let mut orig = r.bodies.remove(0);
+        orig.name = format!("{part}_{idx}");
+        let orig_index = combined.bodies.len();
+        combined.bodies.push(orig);
+        indices.push(orig_index);
+        // Add a placed copy of the original to exercise both parallel prep and copy ordering.
+        let copy_index = combined.bodies.len();
+        combined.bodies.push(RecordBody {
+            name: format!("{part}_{idx}_copy"),
+            path: Vec::new(),
+            instance: Some(format!("inst_{idx}")),
+            color: None,
+            paint: None,
+            hidden: false,
+            placement: Some([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [50.0 * (idx as f64 + 1.0), 0.0, 0.0, 1.0]]),
+            brep: None,
+            face_origin: Vec::new(),
+            sheet: false,
+            copy_of: Some(orig_index),
+            mesh: None,
+        });
+        indices.push(copy_index);
+    }
+    // Insert a broken record to verify deterministic warning and left-out placement.
+    let mut broken = combined.bodies[0].clone();
+    broken.name = "broken_mid".into();
+    broken.face_origin.pop();
+    let broken_idx = combined.bodies.len();
+    combined.bodies.push(broken);
+    indices.push(broken_idx);
+    combined.tree.push(StepNode {
+        name: "assembly".into(),
+        transform: IDENTITY,
+        bodies: indices,
+        items: Vec::new(),
+        left_out: Vec::new(),
+        children: Vec::new(),
+    });
+
+    let serial = super::records_import_with_workers(&combined, 1).unwrap();
+    let parallel = super::records_import_with_workers(&combined, 4).unwrap();
+    assert_eq!(parallel.bodies.len(), serial.bodies.len());
+    assert_eq!(parallel.warnings, serial.warnings);
+    assert_eq!(parallel.tree, serial.tree);
+    assert_eq!(parallel.report.parts, serial.report.parts);
+    assert_eq!(parallel.report.solids, serial.report.solids);
+    assert_eq!(parallel.report.issues, serial.report.issues);
+    for (p, s) in parallel.bodies.iter().zip(&serial.bodies) {
+        let (mp, ms) = (measure(&p.body).unwrap(), measure(&s.body).unwrap());
+        assert_eq!((&p.name, p.source_item, p.closed, &p.face_origin, mp.faces), (&s.name, s.source_item, s.closed, &s.face_origin, ms.faces));
+        assert_eq!(mp.volume.to_bits(), ms.volume.to_bits());
+        assert_eq!(mp.area.to_bits(), ms.area.to_bits());
+    }
+
+    struct CancelWatch(AtomicBool);
+    impl crate::watch::Watch for CancelWatch {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+        fn progress(&self, _: &'static str, _: usize, _: usize) {}
+    }
+    let watch = Arc::new(CancelWatch(AtomicBool::new(true)));
+    let err = crate::watch::watching(watch, || super::records_import_with_workers(&combined, 4)).unwrap_err();
+    assert!(err.to_string().contains("cancel"), "{err}");
 }

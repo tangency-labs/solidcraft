@@ -26,22 +26,47 @@ pub mod affine;
 pub mod cell_grid;
 pub mod curves;
 pub mod develop;
+pub mod dxf;
 pub mod exchange;
 pub mod frames;
+pub mod hatch;
+pub mod hole_stacks;
+pub mod mesh;
 pub mod modelling;
+pub mod planar;
 pub mod points;
+pub mod profiles;
 pub mod projection;
 pub mod query;
+pub mod runtime;
+pub mod sections;
+pub mod shaft_spline;
+pub mod sweep;
+pub mod tessellate;
+pub mod tube_cope;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
-pub use curves::{CurveRefused, Curves};
+pub use curves::{CurveRefused, CurveSample, Curves};
+pub use dxf::Dxf;
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
-pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
-pub use points::{Distance, PointSetSummary, Points, PointsRefused};
+pub use hole_stacks::{HoleStacks, HoleStacksRefused};
+pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
+pub use modelling::{
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, SplitTool, Taper, TrimKeep,
+};
+pub use planar::{Planar, PlanarRefused};
+pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
+pub use profiles::{ProfileCurve, ProfileRefused, Profiles};
 pub use projection::{ProjectionRefused, Projections};
-pub use query::{OutlineStretch, Queries, QueryRefused};
+pub use query::{FaceHit, MembersClosest, OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use runtime::{ErrorClass, FailureCode, Runtime};
+pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
+pub use shaft_spline::ShaftSplines;
+pub use sweep::{Helix, PathSpan, PointPath, PointPiece, RailFit, SpaceSpan, SweepOptions, SweepOrientation};
+pub use tessellate::{PlanarFill, TessRefused, Tessellate};
+pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -84,6 +109,15 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// Faces tilted about a neutral plane ([`Modelling::draft`]).
+    Draft,
+    /// Faces and bodies split by a tool, and surface bodies trimmed ([`Modelling::split_body`],
+    /// [`Modelling::split_faces`], [`Modelling::trim_keep`]).
+    Split,
+    /// A profile swept along a path or a helix ([`Modelling::sweep`], [`Modelling::sweep_helix`]).
+    Sweep,
+    /// Sections lofted into a solid ([`Modelling::loft`]).
+    Loft,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
@@ -95,6 +129,12 @@ pub enum OpKind {
     Points,
     /// Exact queries of a body's record ([`Queries`]).
     Query,
+    /// Hole stacks through touching bodies ([`HoleStacks`]).
+    HoleStacks,
+    /// Planar helpers: sketch arcs, path turns, section corners, paper strokes ([`Planar`]).
+    Planar,
+    /// Hatching: line families clipped into marks, pen dots ([`hatch::Hatching`]).
+    Hatch,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
     /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
@@ -104,6 +144,24 @@ pub enum OpKind {
     Affine,
     /// Curves queried and splines fitted ([`Curves`]).
     Curves,
+    /// Source meshes rebuilt as solids ([`Meshes`]).
+    Mesh,
+    /// Round-tube copes and their templates ([`TubeCopes`]).
+    TubeCope,
+    /// Shaft splines planned, and round faces' seats and ends ([`ShaftSplines`]).
+    ShaftSpline,
+    /// DXF geometry: paths converted for a file, bounds, scales, entity checks ([`Dxf`]).
+    Dxf,
+    /// Blend sections: a section's frames from its points, which open sections to turn
+    /// ([`Sections`]).
+    Sections,
+    /// Planar fills: loops and unions of regions filled with triangles ([`Tessellate`]).
+    Tessellate,
+    /// The kernel's runtime: stopping its work, the code of its last failed call ([`Runtime`]).
+    Runtime,
+    /// Bodies from profiles of curves in space: revolved, extruded, planar sheets, balls
+    /// ([`Profiles`]).
+    Profiles,
 }
 
 impl OpKind {
@@ -121,15 +179,30 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::Draft,
+        OpKind::Split,
+        OpKind::Sweep,
+        OpKind::Loft,
         OpKind::CellGrid,
         OpKind::Exchange,
         OpKind::Develop,
         OpKind::Points,
         OpKind::Query,
+        OpKind::HoleStacks,
+        OpKind::Planar,
+        OpKind::Hatch,
         OpKind::Frames,
         OpKind::Projection,
         OpKind::Affine,
         OpKind::Curves,
+        OpKind::Mesh,
+        OpKind::TubeCope,
+        OpKind::ShaftSpline,
+        OpKind::Dxf,
+        OpKind::Sections,
+        OpKind::Tessellate,
+        OpKind::Runtime,
+        OpKind::Profiles,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -147,15 +220,30 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::Draft => "draft",
+            OpKind::Split => "split",
+            OpKind::Sweep => "sweep",
+            OpKind::Loft => "loft",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
             OpKind::Develop => "develop",
             OpKind::Points => "points",
             OpKind::Query => "query",
+            OpKind::HoleStacks => "hole_stacks",
+            OpKind::Planar => "planar",
+            OpKind::Hatch => "hatch",
             OpKind::Frames => "frames",
             OpKind::Projection => "projection",
             OpKind::Affine => "affine",
             OpKind::Curves => "curves",
+            OpKind::Mesh => "mesh",
+            OpKind::TubeCope => "tube_cope",
+            OpKind::ShaftSpline => "shaft_spline",
+            OpKind::Dxf => "dxf",
+            OpKind::Sections => "sections",
+            OpKind::Tessellate => "tessellate",
+            OpKind::Runtime => "runtime",
+            OpKind::Profiles => "profiles",
         }
     }
 

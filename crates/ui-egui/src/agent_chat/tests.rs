@@ -449,7 +449,7 @@ fn a_plan_update_replaces_the_turns_plan() {
 fn a_permission_is_answered_once() {
     let mut c = chat();
     let opts = vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }];
-    c.push(Item::Permission { key: 5, title: "batch".into(), options: opts, answer: None });
+    c.push(Item::Permission { key: 5, title: "batch".into(), options: opts, answer: None, plan: None });
     assert_eq!(c.waiting(), 1);
     c.answer(0, Some("allow"));
     c.answer(0, None);
@@ -507,6 +507,129 @@ fn a_messages_changes_undo_as_one_step() {
     undo_changes(&mut app, n);
     assert!(Arc::ptr_eq(&app.session.doc, &before), "back to the design before the message");
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
+}
+
+#[test]
+fn show_in_model_highlights_only_the_assistants_features() {
+    use solidcraft_engine::Sel;
+
+    let (mut app, tx) = app_in_a_turn();
+    let plate = app.run("solid.box", json!({"length": 60, "width": 40, "height": 8, "corner": [0, 0, 0], "body_name": "Plate"})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let hole = ask(&tx, "engine.execute", json!({"command": "solid.hole", "params": {"position": [15, 12, 8], "diameter": 6, "targets": ["Plate"]}}));
+    frame(&mut app);
+    let reply = hole.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let hole = reply["result"]["feature"].as_u64().unwrap();
+    let human_box = app.run("solid.box", boxed(90.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(features.as_slice(), [hole]);
+
+    app.agent_chat.open = true;
+    app.home.open = false;
+    let selection = vec![Sel::Feature { id: human_box }];
+    app.session.selection = selection.clone();
+    let cam = app.cam;
+    let target = Sel::Feature { id: hole };
+    let show = |app: &mut SolveApp| panel::run(app, &crate::fonts::test_context(), panel::PanelAction::ShowModelChanges(index));
+    show(&mut app);
+    assert_eq!(app.highlighted(), [selection[0].clone(), target.clone()]);
+    assert_eq!(app.session.selection, selection);
+    assert_eq!(app.cam, cam);
+    let faces = crate::viewport::displayed_selection(&app, &target);
+    assert!(!faces.is_empty());
+    assert!(faces.iter().all(|face| matches!(face, Sel::Face { body, .. } if body == "Plate")), "{faces:?}");
+    assert!(!app.highlighted().contains(&Sel::Feature { id: plate }), "the earlier human edit is outside the card");
+
+    app.run("select.set", json!({"items": []})).unwrap();
+    assert_eq!(app.highlighted().as_slice(), std::slice::from_ref(&target), "changing selection keeps the separate model highlight");
+    app.home.open = true;
+    assert!(!app.highlighted().contains(&target), "Home does not show the model");
+    let _ = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| app.ui(ui));
+    assert!(app.home.open, "the Home frame did not leave Home");
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "returning from Home does not restore the highlight");
+    app.home.open = true;
+    show(&mut app);
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "the control does not arm from Home");
+    show(&mut app);
+    assert!(app.highlighted().contains(&target));
+    show(&mut app);
+    assert!(app.highlighted().is_empty());
+    show(&mut app);
+    undo_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), None);
+    assert!(!app.highlighted().contains(&target));
+}
+
+#[test]
+fn showing_model_changes_does_not_resume_after_the_design_revision_changes() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(features.as_slice(), [feature]);
+    app.agent_chat.open = true;
+    app.home.open = false;
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index));
+
+    app.run("solid.box", boxed(20.0)["params"].clone()).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index), "the unchanged completion can be shown again on request");
+    app.agent_chat.swap_document(&mut AgentChat::default());
+    assert!(app.agent_chat.model_changes_shown.is_none());
+}
+
+#[test]
+fn show_in_model_omits_a_feature_the_user_overwrites_before_completion() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height and add another box".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    app.run("timeline.edit", json!({"feature": feature, "set": {"height": "14"}})).unwrap();
+
+    let reply = ask(&tx, "engine.execute", boxed(25.0));
+    frame(&mut app);
+    let made = reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["result"]["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let features = app.agent_chat.items.iter().find_map(|item| match item {
+        Item::Changes { features, .. } => Some(features.as_slice()),
+        _ => None,
+    });
+    assert_eq!(features, Some([made].as_slice()), "only the feature whose current definition the assistant wrote is offered");
 }
 
 /// The conversation knows a design by its revision: the very design the host gave it, never an
@@ -919,15 +1042,322 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+    on_permission(&mut app, question(1, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None));
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft-app__batch")));
-    on_permission(&mut app, 2, "Run ls".into(), None, opts());
+    on_permission(&mut app, question(2, "Run ls".into(), None, opts(), None));
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
     let n = app.agent_chat.items.len() - 1;
     answer_permission(&mut app, n, Some("always"));
     assert!(agents::always_allowed(&app.preferences, "claude", "Run ls"));
-    on_permission(&mut app, 3, "Run ls".into(), None, opts());
+    on_permission(&mut app, question(3, "Run ls".into(), None, opts(), None));
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
+}
+
+/// A file whose line the message's cap cut off was never named to the agent, so it doesn't count
+/// as attached (Review: every file sent by path was taken as named).
+#[test]
+fn a_path_cut_off_by_the_cap_is_not_read_without_asking() {
+    let d = attachable("cut-path");
+    let (mut app, script, ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    send(&mut app, &ctx, "x".repeat(MAX_PROMPT));
+    assert!(!text_of(&script.prompts()[0]).contains("brief.md"), "cut off by the cap");
+    assert!(!app.agent_chat.attached_by_path(&d.join("brief.md")));
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    send(&mut app, &ctx, "now this".into());
+    assert!(text_of(&script.prompts()[1]).contains("brief.md"));
+    assert!(app.agent_chat.attached_by_path(&d.join("brief.md")));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Claude Code's own read tools ask before every read. A read inside a file or folder sent by
+/// path in this conversation is answered at once, and the chat says so. Any other is declined
+/// without asking, even under Allow everything with the title remembered: a read before anything
+/// was sent, of anything else, stepping out of the folder, through a link in it that leads out,
+/// or after New chat. Another agent's reads are its own, and go through the user's mode.
+#[test]
+fn claude_code_reads_only_what_was_sent_by_path() {
+    let d = attachable("reads");
+    let (photos, outside) = (d.join("photos"), d.join("outside"));
+    std::fs::create_dir_all(&photos).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(photos.join("a.jpg"), b"x").unwrap();
+    std::fs::write(outside.join("secret.txt"), b"x").unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    app.agent_chat.running_id = "claude-test".into();
+    app.preferences.agent_permissions.insert("claude-test".into(), agents::Mode::All);
+    let opts = || {
+        vec![
+            PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "always".into(), name: "Always".into(), kind: "allow_always".into() },
+            PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
+        ]
+    };
+    let answer = |key: u64| script.calls().into_iter().rev().find(|c| c.starts_with(&format!("permission: {key} ")));
+    let declined = |key: u64| answer(key).as_deref() == Some(&*format!("permission: {key} Some(\"no\")"));
+    let photo = photos.join("a.jpg");
+    let secret = outside.join("secret.txt");
+    on_permission(&mut app, question(1, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo)));
+    assert!(declined(1), "nothing was sent by path yet: {:?}", script.calls());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg")));
+    attach_path(&mut app, &photos.to_string_lossy()).unwrap();
+    send(&mut app, &ctx, "look at these".into());
+    on_permission(&mut app, question(2, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo)));
+    assert_eq!(answer(2).as_deref(), Some("permission: 2 Some(\"allow\")"));
+    assert!(
+        matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg") && text.contains("attached")),
+        "answered at once"
+    );
+    on_permission(&mut app, question(3, "Find photos".into(), Some("search"), opts(), Some(&photos)));
+    assert_eq!(answer(3).as_deref(), Some("permission: 3 Some(\"allow\")"), "the folder itself");
+    agents::remember(&mut app.preferences, "claude-test", "Read secret.txt");
+    on_permission(&mut app, question(4, "Read secret.txt".into(), Some("read"), opts(), Some(&secret)));
+    assert!(declined(4), "outside what was sent, though remembered and under Allow everything");
+    on_permission(&mut app, question(5, "Read secret.txt".into(), Some("read"), opts(), Some(&photos.join("../outside/secret.txt"))));
+    assert!(declined(5), "stepping out of the folder");
+    on_permission(&mut app, question(6, "Find /".into(), Some("search"), opts(), None));
+    assert!(declined(6), "a pattern that can't be checked");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&secret, photos.join("link.txt")).unwrap();
+        on_permission(&mut app, question(7, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt"))));
+        assert!(declined(7), "a link in the folder that leads out of it");
+    }
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Permission { .. })), "nothing waits for the user");
+    new_chat(&mut app);
+    on_permission(&mut app, question(8, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo)));
+    assert!(declined(8), "a new chat starts with nothing sent");
+
+    app.agent_chat.running_id = "codex".into();
+    app.preferences.agent_permissions.insert("codex".into(), agents::Mode::Ask);
+    app.agent_chat.items.clear();
+    on_permission(&mut app, question(9, "Read secret.txt".into(), Some("read"), opts(), Some(&secret)));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "another agent's read goes to the user");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Claude Code's adapter started by a command that doesn't name it (a wrapper script, `node
+/// …/dist/index.js`) reads nothing unsent either, under Allow everything: a question the adapter
+/// names as one of its read tools is declined, while the same question from an agent that names
+/// no tool goes through the mode. A read that ran without asking stops the message (#16458 review).
+#[test]
+fn a_claude_adapter_started_another_way_reads_nothing_unsent() {
+    let d = attachable("wrapped");
+    let outside = d.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let secret = outside.join("secret.txt");
+    std::fs::write(&secret, b"x").unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "wrapped".into(),
+        name: "Claude Code (wrapper)".into(),
+        command: "node /opt/claude/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js".into(),
+        ..Default::default()
+    });
+    app.agent_chat.agent_id = Some("wrapped".into());
+    app.agent_chat.running_id = "wrapped".into();
+    app.preferences.agent_permissions.insert("wrapped".into(), agents::Mode::All);
+    assert!(!runs_claude_code(&app), "its command doesn't name the adapter");
+    let opts = || {
+        vec![
+            PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
+        ]
+    };
+    let answer = |key: u64| script.calls().into_iter().rev().find(|c| c.starts_with(&format!("permission: {key} ")));
+    on_permission(
+        &mut app,
+        Question { claude_tool: Some("Read".into()), ..question(1, format!("Read {}", secret.display()), Some("read"), opts(), Some(&secret)) },
+    );
+    assert_eq!(answer(1).as_deref(), Some("permission: 1 Some(\"no\")"), "Read /outside under Allow everything");
+    on_permission(&mut app, Question { claude_tool: Some("Glob".into()), ..question(2, "Find **".into(), Some("search"), opts(), None) });
+    assert_eq!(answer(2).as_deref(), Some("permission: 2 Some(\"no\")"), "a listing it can't check");
+    on_permission(&mut app, question(3, format!("Read {}", secret.display()), Some("read"), opts(), Some(&secret)));
+    assert_eq!(answer(3).as_deref(), Some("permission: 3 Some(\"allow\")"), "an agent naming no tool: its mode answers");
+    let write = Question { claude_tool: Some("Write".into()), ..question(4, format!("Write {}", secret.display()), Some("edit"), opts(), None) };
+    on_permission(&mut app, Question { writes: Some(secret.clone()), ..write });
+    assert_eq!(answer(4).as_deref(), Some("permission: 4 Some(\"no\")"), "a write it names, not its plan");
+
+    send(&mut app, &ctx, "look".into());
+    script.report(Event::Unasked { tool: "Read".into() });
+    poll(&mut app, &ctx);
+    assert!(script.calls().iter().any(|c| c == "cancel"), "the message stops: {:?}", script.calls());
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("Read"))));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A permission question with no file to write and no plan.
+fn question(key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>, reads: Option<&std::path::Path>) -> Question {
+    Question {
+        key,
+        title,
+        kind: kind.map(str::to_string),
+        options,
+        reads: reads.map(std::path::Path::to_path_buf),
+        writes: None,
+        plan: None,
+        claude_tool: None,
+    }
+}
+
+/// Claude Code's write tools are on only for its plan (#19571). Writing a Markdown file right in
+/// its plan folder is allowed at once, and the chat says so; any other write is declined without a
+/// question, even under Allow everything or after "Always allow": outside the folder, stepping out
+/// of it, not Markdown, in a folder below it, through a link in it that leads out or to nothing,
+/// a path that isn't absolute, or before the agent started. Another agent's write goes through the
+/// user's mode as before, even in the plan folder.
+#[test]
+fn claude_code_writes_only_its_plan() {
+    let d = attachable("plans");
+    let plans = d.join("plans");
+    std::fs::create_dir_all(plans.join("deeper")).unwrap();
+    let (mut app, script, _ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    app.agent_chat.running_id = "claude-test".into();
+    app.preferences.agent_permissions.insert("claude-test".into(), agents::Mode::All);
+    let opts = || {
+        vec![
+            PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "always".into(), name: "Always allow".into(), kind: "allow_always".into() },
+            PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
+        ]
+    };
+    let write = |key: u64, path: std::path::PathBuf| Question {
+        key,
+        title: format!("Write {}", path.display()),
+        kind: Some("edit".into()),
+        options: opts(),
+        reads: None,
+        writes: Some(path),
+        plan: None,
+        claude_tool: None,
+    };
+    let answered = |script: &Script, key: u64| script.calls().iter().rev().find(|c| c.starts_with(&format!("permission: {key} "))).cloned();
+    on_permission(&mut app, write(1, plans.join("plan-a.md")));
+    assert_eq!(answered(&script, 1).as_deref(), Some("permission: 1 Some(\"no\")"), "no plan folder before the agent starts");
+    app.agent_chat.plans = Some(plans.clone());
+    on_permission(&mut app, write(2, plans.join("plan-a.md")));
+    assert_eq!(answered(&script, 2).as_deref(), Some("permission: 2 Some(\"allow\")"));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("plan-a.md") && text.contains("plan")));
+    std::fs::write(plans.join("plan-a.md"), "# Plan").unwrap();
+    on_permission(&mut app, write(3, plans.join("plan-a.md")));
+    assert_eq!(answered(&script, 3).as_deref(), Some("permission: 3 Some(\"allow\")"), "a plan being revised");
+    // It may read its plan back; any other read of a file not sent by path is declined.
+    let read = |key: u64, path: std::path::PathBuf| Question {
+        key,
+        title: format!("Read {}", path.display()),
+        kind: Some("read".into()),
+        options: opts(),
+        reads: Some(path),
+        writes: None,
+        plan: None,
+        claude_tool: None,
+    };
+    on_permission(&mut app, read(4, plans.join("plan-a.md")));
+    assert_eq!(answered(&script, 4).as_deref(), Some("permission: 4 Some(\"allow\")"), "reading its plan back");
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("plan-a.md") && text.contains("plan")));
+    std::fs::write(d.join("notes.md"), "x").unwrap();
+    on_permission(&mut app, read(5, d.join("notes.md")));
+    assert_eq!(answered(&script, 5).as_deref(), Some("permission: 5 Some(\"no\")"), "any other read");
+    std::fs::remove_file(d.join("notes.md")).unwrap();
+    agents::remember(&mut app.preferences, "claude-test", &format!("Write {}", d.join("notes.md").display()));
+    let elsewhere = [
+        d.join("notes.md"),
+        plans.join("../notes.md"),
+        plans.join("plan.txt"),
+        plans.join("deeper/plan.md"),
+        d.join("missing/plan.md"),
+        std::path::PathBuf::from("plans/plan-a.md"),
+    ];
+    for (n, path) in elsewhere.into_iter().enumerate() {
+        let key = 10 + n as u64;
+        on_permission(&mut app, write(key, path.clone()));
+        assert_eq!(answered(&script, key), Some(format!("permission: {key} Some(\"no\")")), "{}", path.display());
+        assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains(&*path.to_string_lossy())));
+    }
+    #[cfg(unix)]
+    {
+        std::fs::write(d.join("outside.md"), "x").unwrap();
+        std::os::unix::fs::symlink(d.join("outside.md"), plans.join("link.md")).unwrap();
+        on_permission(&mut app, write(20, plans.join("link.md")));
+        assert_eq!(answered(&script, 20).as_deref(), Some("permission: 20 Some(\"no\")"), "a link in the folder that leads out of it");
+        std::os::unix::fs::symlink(d.join("not-yet.md"), plans.join("dangling.md")).unwrap();
+        on_permission(&mut app, write(22, plans.join("dangling.md")));
+        assert_eq!(answered(&script, 22).as_deref(), Some("permission: 22 Some(\"no\")"), "a link in the folder to nothing yet");
+        std::os::unix::fs::symlink(&plans, d.join("plans-link")).unwrap();
+        on_permission(&mut app, write(21, d.join("plans-link").join("plan-b.md")));
+        assert_eq!(answered(&script, 21).as_deref(), Some("permission: 21 Some(\"allow\")"), "the folder reached through a link");
+    }
+    assert_eq!(app.agent_chat.waiting(), 0, "nothing waits for the user");
+    // Another agent: its own write is the user's call, in their mode.
+    app.agent_chat.running_id = "codex".into();
+    app.preferences.agent_permissions.insert("codex".into(), agents::Mode::Ask);
+    on_permission(&mut app, write(30, d.join("notes.md")));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
+    // Even a Markdown file in Claude Code's plan folder: only Claude Code's plan is allowed at once.
+    on_permission(&mut app, write(31, plans.join("plan-c.md")));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { key: 31, answer: None, .. })));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The question that asks to approve Claude Code's plan keeps the plan, which the panel shows with
+/// it (#19571), and is the user's to answer even under Allow everything or after Always allow.
+#[test]
+fn the_plan_comes_with_the_question_that_asks_to_approve_it() {
+    let (mut app, script, _ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    app.agent_chat.running_id = "claude-test".into();
+    app.preferences.agent_permissions.insert("claude-test".into(), agents::Mode::All);
+    agents::remember(&mut app.preferences, "claude-test", "Ready to code?");
+    let options = vec![
+        PermissionOption { id: "exit-plan-default".into(), name: "Yes, manually approve edits".into(), kind: "allow_once".into() },
+        PermissionOption { id: "reject".into(), name: "No, keep planning".into(), kind: "reject_once".into() },
+    ];
+    let plan = "# Plan\n\n1. A 40 x 20 x 10 mm block.".to_string();
+    on_permission(
+        &mut app,
+        Question {
+            key: 1,
+            title: "Ready to code?".into(),
+            kind: Some("switch_mode".into()),
+            options,
+            reads: None,
+            writes: None,
+            plan: Some(plan.clone()),
+            claude_tool: None,
+        },
+    );
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, plan: Some(p), .. }) if *p == plan));
+    assert!(script.calls().iter().all(|c| !c.starts_with("permission:")), "the user answers it");
+    assert_eq!(status(&app)["items"][0]["plan"], json!(plan));
+}
+
+/// Plans not changed for a week are deleted when the agent starts; newer ones, anything that isn't
+/// a file (a folder, a link) and what a link leads to stay. A missing folder is made.
+#[test]
+fn old_plans_are_deleted_when_the_agent_starts() {
+    let d = attachable("old-plans");
+    let plans = d.join("plans");
+    tidy_plans(&plans, std::time::SystemTime::now());
+    assert!(plans.is_dir(), "made");
+    for name in ["old.md", "new.md"] {
+        std::fs::write(plans.join(name), "# Plan").unwrap();
+    }
+    std::fs::create_dir_all(plans.join("folder")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(d.join("brief.md"), plans.join("link.md")).unwrap();
+    let later = std::time::SystemTime::now() + PLAN_KEPT + std::time::Duration::from_secs(60);
+    std::fs::File::options().write(true).open(plans.join("new.md")).unwrap().set_modified(later).unwrap();
+    tidy_plans(&plans, later);
+    assert!(!plans.join("old.md").exists());
+    assert!(plans.join("new.md").exists() && plans.join("folder").is_dir() && d.join("brief.md").exists());
+    #[cfg(unix)]
+    assert!(plans.join("link.md").symlink_metadata().is_ok());
+    let _ = std::fs::remove_dir_all(&d);
 }
 
 /// A title that only mentions SolidCraft is no tool of SolidCraft's: in every mode but Allow
@@ -947,17 +1377,17 @@ fn a_title_that_mentions_solidcraft_goes_through_the_users_mode() {
     for mode in [agents::Mode::Ask, agents::Mode::Edits] {
         app.preferences.agent_permissions.insert("codex".into(), mode);
         for (title, kind) in titles {
-            on_permission(&mut app, 1, title.into(), kind, opts());
+            on_permission(&mut app, question(1, title.into(), kind, opts(), None));
             assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "{mode:?}: {title}");
             app.agent_chat.items.clear();
         }
         // The chat's own tool stays a single question, the gate's.
-        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+        on_permission(&mut app, question(2, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None));
         assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "{mode:?}");
         app.agent_chat.items.clear();
     }
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
-    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts());
+    on_permission(&mut app, question(3, titles[0].0.into(), titles[0].1, opts(), None));
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "Allow everything answers it");
 }
 
@@ -973,6 +1403,8 @@ struct Script {
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
     allow_paths: Arc<Mutex<Vec<Vec<std::path::PathBuf>>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    service_tier: Arc<Mutex<agents::ServiceTier>>,
 }
 
 impl Script {
@@ -1011,6 +1443,10 @@ impl ChatBackend for Script {
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_service_tier(&mut self, tier: agents::ServiceTier) {
+        *self.service_tier.lock().unwrap() = tier;
+    }
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
     }
@@ -1028,6 +1464,18 @@ fn app_with_script() -> (SolveApp, Script, egui::Context) {
     app.agent_chat.backend = Some(Box::new(script.clone()));
     app.agent_chat.state = Some(State::Ready);
     (app, script, crate::fonts::test_context())
+}
+
+/// The chat's agent is a coding agent (Claude Code over ACP), which reads files with tools of its
+/// own: every file and folder goes to it by its path.
+fn with_coding_agent(app: &mut SolveApp) {
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "claude-test".into(),
+        name: "Claude Code".into(),
+        command: "/opt/homebrew/bin/claude-agent-acp".into(),
+        ..Default::default()
+    });
+    app.agent_chat.agent_id = Some("claude-test".into());
 }
 
 fn ended(script: &Script, reason: &str) {
@@ -1126,6 +1574,10 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
         title: "mcp__solidcraft-app__batch".into(),
         kind: None,
         options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
+        reads: None,
+        writes: None,
+        plan: None,
+        claude_tool: None,
     });
     ended(&script, "auth");
     script.report(Event::AuthRequired { methods: Vec::new() });
@@ -2374,6 +2826,32 @@ fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
     (app, script, ctx)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn new_chat_resets_the_running_service_tier_after_the_endpoint_url_changes() {
+    use agents::ServiceTier;
+
+    let (mut app, script, ctx) = endpoint_with_script();
+    app.preferences.agents[0].openai_responses = true;
+    app.agent_chat.agent_id = Some("api-1".into());
+    set_service_tier(&mut app, ServiceTier::Fast);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    control(
+        &mut app,
+        &ctx,
+        &json!({"add_agent": {"id": "api-1", "kind": "api", "base_url": "http://localhost:11435/v1", "model": "fast", "openai_responses": true}}),
+    )
+    .unwrap();
+    set_service_tier(&mut app, ServiceTier::Ultrafast);
+    set_service_tier(&mut app, ServiceTier::Default);
+    assert!(app.agent_chat.api_service_tier.is_none());
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    new_chat(&mut app);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Default);
+}
+
 /// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
 /// the agent's default.
 #[cfg(not(target_arch = "wasm32"))]
@@ -3487,6 +3965,126 @@ fn at_most_eight_files_on_a_message() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// To a coding agent every file and folder goes by its path, whatever its kind and however many
+/// (up to MAX_ON_MESSAGE): nothing is read, decoded or imported, and the agent reads them whole
+/// with its own tools. A pasted picture has no path, so it goes with the message, at most eight.
+#[test]
+fn a_coding_agent_gets_every_file_and_folder_by_its_path() {
+    let d = attachable("by-path");
+    std::fs::write(d.join("block.stl"), b"solid x\nendsolid x\n").unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    for name in ["target.png", "brief.md", "block.stl"] {
+        attach_path(&mut app, &at(&d, name)).unwrap();
+    }
+    attach_dropped(&mut app, [d.clone()].into_iter());
+    for _ in 0..attach::MAX_FILES {
+        attach_path(&mut app, &at(&d, "target.png")).unwrap();
+    }
+    assert!(app.agent_chat.loading.is_empty(), "nothing is read");
+    assert_eq!(app.agent_chat.attachments.len(), attach::MAX_FILES + 4, "nothing refused past eight");
+    assert!(app.agent_chat.attachments.iter().all(attach::Attachment::by_place), "all by path");
+    assert!(matches!(app.agent_chat.attachments[2].content, attach::Content::Reference { mime: "model/stl", .. }), "not imported");
+    assert!(attach_path(&mut app, &at(&d, "missing.png")).is_err(), "a missing file is still refused");
+    send(&mut app, &ctx, "these".into());
+    let sent = &script.prompts()[0];
+    let text = text_of(sent);
+    assert_eq!(pictures_in(sent), 0, "{text}");
+    assert!(text.contains("Attached file `target.png` (image/png, "), "{text}");
+    assert!(text.contains("Attached file `brief.md` (text/markdown, ") && !text.contains("wall 2 mm"), "its text is not in it: {text}");
+    assert!(text.contains("Attached file `block.stl` (model/stl, "), "{text}");
+    let folder = d.file_name().unwrap().to_string_lossy().to_string();
+    assert!(text.contains(&format!("Attached folder `{folder}/` (at ")), "{text}");
+    assert_eq!(text.matches("read it with your own tools").count(), attach::MAX_FILES + 4, "{text}");
+    for _ in 0..attach::MAX_FILES {
+        attach_rgba(&mut app, 2, 2, &[9; 16]).unwrap();
+    }
+    assert!(attach_rgba(&mut app, 2, 2, &[9; 16]).unwrap_err().contains("save the picture as a file"));
+    new_chat(&mut app);
+    for _ in 0..attach::MAX_ON_MESSAGE {
+        attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    }
+    assert!(attach_path(&mut app, &at(&d, "brief.md")).unwrap_err().contains("200"), "a bound on files in all");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A folder attached through the control channel goes to a coding agent by its path, nothing in it
+/// listed or read; without one (an endpoint can't open it), it is refused.
+#[test]
+fn an_attached_folder_tells_the_agent_where_it_is() {
+    let d = attachable("folder");
+    let (mut app, script, ctx) = app_with_script();
+    assert!(control(&mut app, &ctx, &json!({"attach": d.to_string_lossy()})).is_err(), "no coding agent: no folders");
+    with_coding_agent(&mut app);
+    control(&mut app, &ctx, &json!({"attach": d.to_string_lossy()})).unwrap();
+    assert!(app.agent_chat.loading.is_empty(), "nothing in it is read");
+    send(&mut app, &ctx, "look in here".into());
+    let text = text_of(&script.prompts()[0]);
+    assert!(text.contains(&format!("Attached folder `{}/` (at ", d.file_name().unwrap().to_string_lossy())), "{text}");
+    assert!(!text.contains("target.png"), "nothing in it is listed: {text}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// For a coding agent, where the host's dialogs choose files or folders but not both (Windows,
+/// Linux), the + menu has Choose files… (any type) and Choose folders…, each taking several at
+/// once; where one dialog mixes them (macOS), one Choose files or folders… takes both.
+#[test]
+fn the_plus_menu_chooses_several_files_and_folders() {
+    use solidcraft_ui_registry::handle_at;
+    let d = attachable("choose-many");
+    let (one, two) = (d.join("one"), d.join("two"));
+    std::fs::create_dir_all(&one).unwrap();
+    std::fs::create_dir_all(&two).unwrap();
+    let mut h = narrow_chat();
+    with_coding_agent(&mut h.app);
+    let chosen = vec![at(&d, "brief.md"), at(&d, "target.png")];
+    h.app.services.pick_files = Some(Box::new(move |_: &str, exts: &[&str]| {
+        assert!(exts.is_empty(), "a coding agent reads any type: {exts:?}");
+        let all = chosen.clone();
+        Box::pin(async move { all })
+    }));
+    let folders = vec![one.to_string_lossy().to_string(), two.to_string_lossy().to_string()];
+    h.app.services.pick_folders = Some(Box::new(move || {
+        let all = folders.clone();
+        Box::pin(async move { all })
+    }));
+    h.frames(2);
+    let plus = handle_at("agent_chat:add").expect("a + button");
+    let choose = |h: &mut crate::scenario::Harness, item: &str| {
+        h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+        h.frames(2);
+        let at = handle_at(item).unwrap_or_else(|| panic!("{item} in the + menu"));
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        settle_chat(h);
+    };
+    choose(&mut h, "agent_chat:add_file");
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png"]), "both chosen files");
+    assert!(handle_at("agent_chat:add_any").is_none(), "no mixed item where the dialogs don't mix");
+    choose(&mut h, "agent_chat:add_folder");
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png", "one/", "two/"]), "both chosen folders");
+    assert!(h.app.agent_chat.attachments.iter().all(attach::Attachment::by_place), "all by their path");
+    // Cancelled: nothing more.
+    h.app.services.pick_files = Some(Box::new(|_: &str, _: &[&str]| Box::pin(async { Vec::new() })));
+    choose(&mut h, "agent_chat:add_file");
+    assert_eq!(h.app.agent_chat.attachments.len(), 4);
+    // One dialog for both.
+    h.app.agent_chat.attachments.clear();
+    let mixed = vec![at(&d, "brief.md"), one.to_string_lossy().to_string()];
+    h.app.services.pick_files_or_folders = Some(Box::new(move || {
+        let all = mixed.clone();
+        Box::pin(async move { all })
+    }));
+    h.frames(2);
+    choose(&mut h, "agent_chat:add_any");
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "one/"]), "a file and a folder from one dialog");
+    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+    h.frames(2);
+    assert!(handle_at("agent_chat:add_file").is_none() && handle_at("agent_chat:add_folder").is_none(), "one item instead of two");
+    assert!(handle_at("agent_chat:paste_picture").is_some());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// While the agent works, a message queues with its files: the queue shows them, Stop keeps
 /// them, and they go with the queue.
 #[test]
@@ -3770,6 +4368,33 @@ fn assert_inside_the_panel(chips: usize) {
     }
 }
 
+/// Many files on a message (to a coding agent, up to 200) scroll in a strip of chips about three
+/// rows high, so the text box stays in the panel; eight or fewer show whole, as before.
+#[test]
+fn many_files_scroll_in_a_strip_of_chips() {
+    use solidcraft_ui_registry::rect_of;
+    let d = attachable("many-chips");
+    let mut h = narrow_chat();
+    with_coding_agent(&mut h.app);
+    for _ in 0..attach::MAX_FILES {
+        attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
+    }
+    h.frames(3);
+    let last = rect_of(&format!("agent_chat:file:{}", attach::MAX_FILES - 1)).expect("the eighth chip");
+    let input = rect_of("agent_chat:input").expect("the text box");
+    assert!(last.bottom() <= input.top(), "eight chips show whole: the eighth {last:?}, text box {input:?}");
+    for _ in attach::MAX_FILES..40 {
+        attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
+    }
+    h.frames(3);
+    let first = rect_of("agent_chat:file:0").expect("the first chip");
+    let input = rect_of("agent_chat:input").expect("the text box");
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    assert!(input.top() - first.top() <= panel::CHIPS_MAX_HEIGHT + 24.0, "the chips stay in their strip: {first:?}, text box {input:?}");
+    assert!(panel.contains_rect(input), "the text box stays in the panel: {input:?} in {panel:?}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// Files for the next message show as chips above the text box (a picture's thumbnail, the name,
 /// a × that takes it off), inside the chat, and Send sends files with no text.
 #[test]
@@ -3829,9 +4454,10 @@ fn each_file_has_its_own_id_and_thumbnail() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// The + button: "Choose a file…" asks the app's file picker for the types that can be attached
-/// (not the design types Open shows) and attaches what it answers; "Paste a picture" attaches
-/// the clipboard's picture (here given as RGBA, as the system does).
+/// The + button: "Choose files…" asks the app's file picker for several files, the types that can
+/// be attached listed (not the design types Open shows), and attaches what it answers; "Paste a
+/// picture" attaches the clipboard's picture (here given as RGBA, as the system does). An endpoint
+/// can't open folders, so there is no item for them, even where the host's dialog could mix them.
 #[test]
 fn the_plus_button_attaches_a_chosen_file_or_a_pasted_picture() {
     use solidcraft_ui_registry::handle_at;
@@ -3840,17 +4466,19 @@ fn the_plus_button_attaches_a_chosen_file_or_a_pasted_picture() {
     let chosen = at(&d, "brief.md");
     let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
     let seen = asked.clone();
-    h.app.services.pick_file = Some(Box::new(move |_label: &str, exts: &[&str]| {
+    h.app.services.pick_files = Some(Box::new(move |_label: &str, exts: &[&str]| {
         *seen.borrow_mut() = exts.iter().map(|e| e.to_string()).collect();
         let p = chosen.clone();
-        Box::pin(async move { Some(p) })
+        Box::pin(async move { vec![p] })
     }));
+    h.app.services.pick_files_or_folders = Some(Box::new(|| Box::pin(async { Vec::new() })));
     h.frames(2);
     let plus = handle_at("agent_chat:add").expect("a + button");
     h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
     h.frames(2);
-    let choose = handle_at("agent_chat:add_file").expect("Choose a file… in its menu");
+    let choose = handle_at("agent_chat:add_file").expect("Choose files… in its menu");
     assert!(handle_at("agent_chat:paste_picture").is_some(), "Paste a picture in its menu");
+    assert!(handle_at("agent_chat:add_folder").is_none() && handle_at("agent_chat:add_any").is_none(), "no folders");
     h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
     h.frames(4);
     assert_eq!(status(&h.app)["attachments"], json!(["brief.md"]));
@@ -6047,6 +6675,58 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     (h, script)
 }
 
+#[test]
+fn add_agent_copies_an_install_command_without_interrupting_the_chat() {
+    use solidcraft_ui_registry::handle_at;
+
+    const INSTALL: &str = "npm install -g @agentclientprotocol/codex-acp";
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.running_id = "claude".into();
+    h.app.agent_chat.agent_id = Some("claude".into());
+    h.app.agent_chat.picking = Some(false);
+    h.app.agent_chat.detection = Some(discover::Detection {
+        found: vec![discover::Found {
+            id: "claude",
+            name: "Claude Code",
+            argv: vec!["claude-agent-acp".into()],
+            version: Some("1.0".into()),
+            login: discover::Login::Unknown,
+            problem: None,
+            install: "",
+        }],
+        missing: vec![discover::Missing { id: "codex", name: "Codex", install: INSTALL }],
+        ..Default::default()
+    });
+    h.frames(3);
+
+    let switcher = handle_at("agent_chat:switcher").expect("the connected agent switcher");
+    click_at(&mut h, switcher, egui::PointerButton::Primary);
+    h.frames(2);
+    let add = handle_at("dialog:list:add").expect("Add agent in the switcher");
+    click_at(&mut h, add, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.app.agent_chat.settings.add.is_some(), "the switcher opens Add agent");
+
+    let missing = handle_at("dialog:section:Not installed").expect("Add agent lists installation instructions");
+    click_at(&mut h, missing, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.widget(INSTALL).is_some(), "the complete Codex installation command is visible");
+    let copy = handle_at("sc_ai_add_missing:copy:codex").expect("the Codex Copy button");
+    click_at(&mut h, copy, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some(INSTALL));
+
+    let cancel = handle_at("dialog:cancel").expect("the Add agent Cancel button");
+    click_at(&mut h, cancel, egui::PointerButton::Primary);
+    h.frames(2);
+    assert!(h.app.agent_chat.settings.add.is_none());
+    assert_eq!(h.app.agent_chat.state(), State::Ready);
+    assert_eq!(h.app.agent_chat.running_id, "claude");
+    assert!(h.app.agent_chat.backend.is_some());
+    assert!(matches!(h.app.agent_chat.items.as_slice(), [Item::Agent { text, .. }] if text == "A retained conversation"));
+    assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+    assert!(script.calls().is_empty(), "no action was sent to the current agent");
+}
+
 fn shared_assistant_float(h: &mut crate::scenario::Harness, width: f32, height: f32) {
     use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
     let instance = InstanceId::new("assistant").unwrap();
@@ -6114,6 +6794,57 @@ fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
     }
     let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
     assert!(providers.contains(at), "scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}");
+}
+
+/// #21643: in a short docked Assistant, the card that waits for Allow or Deny stays in view
+/// above the message box, with its buttons: the agent list above gives up its room first.
+#[test]
+fn a_waiting_allow_card_stays_in_view_in_a_short_docked_assistant() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.app.agent_chat.state = Some(State::Busy);
+    h.app.agent_chat.items.push(Item::Approval {
+        id: 1,
+        title: "Save a copy of the design to /tmp/copy.solidcraft".into(),
+        tool: "file.save".into(),
+        answer: None,
+    });
+    // The report's 1280x720 and 1000x625 at 125 %, and 800x500 at 100 %. Its 800x500 at 125 %
+    // (640x400 points) leaves the docked Assistant less height than the message box needs.
+    for (width, height) in [(1280.0, 720.0), (1024.0, 576.0), (800.0, 500.0)] {
+        h.call("ui.resize", json!({"width": width, "height": height}));
+        h.frames(8);
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+        let body = shared_assistant_body(&h);
+        let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+        let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+        assert!(window.expand(1.0).contains_rect(body), "{width}x{height}: the Assistant {body:?} fits the window");
+        assert!(body.expand(1.0).contains_rect(composer), "{width}x{height}: the message box {composer:?} stays inside {body:?}");
+        assert!(
+            conversation.bottom() <= composer.top() + 1.0,
+            "{width}x{height}: the conversation {conversation:?} ends above the message box {composer:?}"
+        );
+        for button in ["agent_chat:allow", "agent_chat:always", "agent_chat:deny"] {
+            let at = handle_at(button).expect("the card's buttons are drawn");
+            assert!(conversation.contains(at), "{width}x{height}: {button} {at:?} shows in the conversation {conversation:?}");
+        }
+    }
+    // Answered, the card no longer claims room: the agent list gets its share back.
+    if let Some(Item::Approval { answer, .. }) = h.app.agent_chat.items.last_mut() {
+        *answer = Some(false);
+    }
+    h.frames(8);
+    let free = rect_of("agent_chat:providers").expect("the agent list").height();
+    h.app.agent_chat.items.push(Item::Approval { id: 2, title: "Save again".into(), tool: "file.save".into(), answer: None });
+    h.frames(8);
+    let waiting = rect_of("agent_chat:providers").expect("the agent list").height();
+    h.app.agent_chat.items.pop();
+    h.frames(8);
+    let back = rect_of("agent_chat:providers").expect("the agent list").height();
+    assert!(waiting < free, "a waiting card takes room from the agent list ({waiting} vs {free})");
+    assert!((back - free).abs() < 1.0, "with no card waiting the agent list has its room back ({back} vs {free})");
 }
 
 #[test]
@@ -6259,7 +6990,13 @@ fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() 
         assert_eq!(presentation.attention, matches!(state, State::NeedsAuth | State::Exited | State::Failed));
     }
     h.app.agent_chat.state = Some(State::Ready);
-    h.app.agent_chat.items.push(Item::Permission { key: 42, title: "Review this local request".into(), options: Vec::new(), answer: None });
+    h.app.agent_chat.items.push(Item::Permission {
+        key: 42,
+        title: "Review this local request".into(),
+        options: Vec::new(),
+        answer: None,
+        plan: None,
+    });
     h.frames(2);
     let presentation = h.app.panel_runtime().unwrap().instance_presentation(&assistant).unwrap();
     assert_eq!(presentation.status.as_deref(), Some(trf("ui.assistant_waiting", &[("count", "1")]).as_str()));
@@ -6580,7 +7317,7 @@ fn a_working_agent_shows_how_long_it_has_been_thinking() {
     h.frames(2);
     assert!(drawn(&h, "Thinking for 2 h 5 min") > 0);
     // Waiting for the user is not thinking.
-    h.app.agent_chat.push(Item::Permission { key: 1, title: "Write a file".into(), options: Vec::new(), answer: None });
+    h.app.agent_chat.push(Item::Permission { key: 1, title: "Write a file".into(), options: Vec::new(), answer: None, plan: None });
     h.frames(2);
     assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "an open question is the user's turn");
     ended(&script, "");
@@ -6920,4 +7657,452 @@ fn the_header_shows_stop_and_login_only_when_they_apply() {
         assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
     }
     assert!(State::NeedsAuth.shows_auth_status());
+}
+
+#[test]
+fn markdown_snapshot_preserves_retained_message_bodies_in_order() {
+    let prompt = "図面を確認  \r\n\r\n- First\r\n- Second  \r\n";
+    let reply = "### Result\n\nCheck the numbers.\n\n```rust\nlet radius = 4;  \n```\n\t ";
+    let items = [
+        Item::User { text: prompt.into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+        Item::Agent { thought: false, text: reply.into() },
+        Item::Agent { thought: false, text: " \t\n  ".into() },
+        Item::User { text: String::new(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+    ];
+
+    let snapshot = export::markdown_snapshot(&items, false);
+    assert_eq!(
+        snapshot,
+        format!(
+            "# SolidCraft Assistant conversation\n\n> Snapshot of the retained conversation. Earlier messages may have been discarded.\n\n\
+             ## User\n\n{prompt}\n\n## Assistant\n\n{reply}\n\n## Assistant\n\n \t\n  \n\n## User\n\n\n\n"
+        )
+    );
+}
+
+#[test]
+fn markdown_snapshot_keeps_attachments_and_filters_chat_cards() {
+    let revision = Revision::of(&Arc::new(()));
+    let items = [
+        Item::User {
+            text: "Use these references".into(),
+            image: true,
+            pictures: vec![
+                Picture::new(b"secret-picture-bytes".to_vec(), "reference [front].png"),
+                Picture::shared(Arc::new(b"secret-view-bytes".to_vec()), "", true),
+            ],
+            files: vec!["- draft.step".into(), "1. part.step".into(), "2) alternate.step".into()],
+            context: Context { groups: vec![(1, "secret-context".into())], ..Context::default() },
+        },
+        Item::Agent { thought: true, text: "secret-thought".into() },
+        Item::Plan(vec![("secret-plan".into(), "pending".into())]),
+        Item::Permission { key: 1, title: "secret-permission".into(), options: Vec::new(), answer: Some("Allow".into()), plan: None },
+        Item::Approval { id: 2, title: "secret-approval".into(), tool: "file.save".into(), answer: None },
+        Item::Changes { steps: 4, summary: Vec::new(), features: Vec::new(), revision: revision.clone(), history: revision, undone: false },
+        Item::Tool {
+            id: "tool-id".into(),
+            title: "Read dimensions".into(),
+            kind: "read".into(),
+            status: Some(ToolStatus::Completed),
+            input: None,
+            output: Some("tool-result".into()),
+        },
+        Item::Notice { text: "The agent stopped.".into(), error: true },
+        Item::Agent { thought: false, text: "The plate fits.".into() },
+    ];
+
+    for include_tools in [false, true] {
+        let snapshot = export::markdown_snapshot(&items, include_tools);
+        assert!(snapshot.contains(
+            "Attachments:\n\n- File: - draft.step\n- File: 1. part.step\n- File: 2) alternate.step\n- Image: reference \\[front\\].png\n- Image: Model view\n"
+        ));
+        assert!(!snapshot.contains("secret-"), "picture bytes, selected model context and hidden cards stay out");
+        assert!(!snapshot.contains("file.save"), "held operations stay out");
+        assert_eq!(snapshot.contains("tool-result"), include_tools);
+        assert_eq!(snapshot.contains("The agent stopped."), include_tools);
+        if include_tools {
+            let call = snapshot.find("## Tool call: Read dimensions").expect("the labelled tool");
+            let notice = snapshot.find("## Notice (error)").expect("the labelled notice");
+            let reply = snapshot.find("## Assistant").expect("the reply");
+            assert!(call < notice && notice < reply);
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_keeps_complete_tools_and_distinguishes_unavailable_fields() {
+    let input = json!({"description": "計測\n".repeat(4_000) + "input end"});
+    let result = format!("{}\n`````\n## A heading inside the result\nResult end  \n\n", "Measured: 20 mm³\n".repeat(4_000));
+    let items = [
+        Item::Tool {
+            id: "first".into(),
+            title: "Measure\n## Another heading".into(),
+            kind: "read`".into(),
+            status: Some(ToolStatus::Completed),
+            input: Some(input.clone()),
+            output: Some(result.clone()),
+        },
+        Item::Tool { id: "second".into(), title: String::new(), kind: String::new(), status: None, input: None, output: Some(String::new()) },
+        Item::Tool {
+            id: "third".into(),
+            title: String::new(),
+            kind: String::new(),
+            status: Some(ToolStatus::InProgress),
+            input: Some(Value::Null),
+            output: None,
+        },
+    ];
+
+    let snapshot = export::markdown_snapshot(&items, true);
+    assert!(snapshot.contains("Review it for paths and other sensitive data before sharing."));
+    assert!(snapshot.contains("## Tool call: Measure\\n\\#\\# Another heading\n\n- Call ID: first\n- Kind: read\\`\n- Status: Completed"));
+    assert!(snapshot.contains(&format!("Input:\n\n```json\n{input}\n```\n\n")));
+    assert!(snapshot.contains(&format!("Output:\n\n``````\n{result}``````\n\n")));
+    assert!(snapshot.contains("Input: not retained.\n\nOutput:\n\n```\n```\n"));
+    assert!(snapshot.contains("Input:\n\n```json\nnull\n```\n\nOutput: not retained."));
+}
+
+#[test]
+fn markdown_snapshot_keeps_later_sections_out_of_an_unfinished_code_block() {
+    for (lead, indent, fence) in [("The code is streaming:", "", "```"), ("- Streaming code:", "  ", "~~~~")] {
+        let partial_reply = format!("{lead}\n\n{indent}{fence}rust\n{indent}let height = 10;  ");
+        let items = [
+            Item::Agent { thought: false, text: partial_reply.clone() },
+            Item::User { text: "Continue".into(), image: false, pictures: Vec::new(), files: Vec::new(), context: Context::default() },
+        ];
+
+        let snapshot = export::markdown_snapshot(&items, true);
+        assert!(snapshot.contains(&format!("## Assistant\n\n{partial_reply}\n{indent}{fence}\n\n## User\n\nContinue")));
+    }
+}
+
+fn finish_markdown_snapshot_save(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.file_picker_busy() {
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        if h.app.file_picker_busy() {
+            assert!(began.elapsed().as_secs() < 10, "the conversation export did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_save_keeps_the_reply_from_before_the_picker_answer() {
+    use crate::picker_test_support::{Slot, save};
+
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("conversation.md");
+    std::fs::write(&path, b"Old file contents").unwrap();
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+    h.app.session.mark_saved();
+    let document = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Retained reply  ".into() });
+    h.app.agent_chat.input = "Unsent draft".into();
+
+    let slot: Slot = Default::default();
+    save(&mut h.app, &slot);
+    panel::run(&mut h.app, &h.ctx, panel::PanelAction::ExportConversation { include_tools: false });
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    assert!(h.app.file_picker_busy());
+    assert_eq!(std::fs::read(&path).unwrap(), b"Old file contents", "the target stays intact until the picker answers");
+
+    let Some(Item::Agent { text, .. }) = h.app.agent_chat.items.last_mut() else { panic!("the retained reply") };
+    text.push_str("Later streamed text");
+    *slot.borrow_mut() = Some(Some(path.to_string_lossy().into_owned()));
+    finish_markdown_snapshot_save(&mut h);
+
+    let transcript = std::fs::read_to_string(&path).unwrap();
+    assert!(transcript.contains("## Assistant\n\nRetained reply  \n\n"));
+    assert!(!transcript.contains("Later streamed text") && !transcript.contains("Unsent draft"));
+    assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "Retained reply  Later streamed text"));
+    assert_eq!(h.app.agent_chat.input, "Unsent draft");
+    assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(!h.app.session.is_dirty());
+    assert!(matches!(&h.app.status, Some((message, _, false)) if message == tr("ui.agent_chat_export_saved")));
+}
+
+#[test]
+fn markdown_snapshot_save_cancel_and_failure_preserve_the_conversation_and_design() {
+    use crate::picker_test_support::{Slot, save};
+
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("occupied.md");
+    std::fs::create_dir(&path).unwrap();
+    let existing = path.join("keep.txt");
+    std::fs::write(&existing, b"Existing contents").unwrap();
+    h.app.session.mark_saved();
+    let document = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Retained reply".into() });
+    h.app.set_status("Earlier status", false);
+    let earlier_status = h.app.status.clone();
+
+    for destination in [None, Some(path.to_string_lossy().into_owned())] {
+        let cancelled = destination.is_none();
+        let slot: Slot = Default::default();
+        save(&mut h.app, &slot);
+        panel::run(&mut h.app, &h.ctx, panel::PanelAction::ExportConversation { include_tools: false });
+        assert!(h.app.file_picker_busy());
+        *slot.borrow_mut() = Some(destination);
+        finish_markdown_snapshot_save(&mut h);
+
+        assert_eq!(std::fs::read(&existing).unwrap(), b"Existing contents");
+        assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(!h.app.session.is_dirty());
+        assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "Retained reply"));
+        if cancelled {
+            assert_eq!(h.app.status, earlier_status);
+        } else {
+            let prefix = trf("ui.agent_chat_export_failed", &[("error", "")]);
+            assert!(matches!(&h.app.status, Some((message, _, true)) if message.starts_with(&prefix)));
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_empty_assistant_stays_visible_with_export_disabled() {
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items.clear();
+    h.frames(3);
+
+    let instance = solidcraft_engine::panels::InstanceId::new("assistant").unwrap();
+    let presentation = h.app.panel_runtime().unwrap().instance_presentation(&instance).unwrap();
+    let action = presentation.actions.iter().find(|action| action.id.0 == "export-chat").unwrap();
+    assert!(!action.enabled);
+    assert_eq!(action.disabled_reason.as_deref(), Some(tr("ui.agent_chat_export_empty")));
+    assert!(solidcraft_ui_registry::rect_of("agent_chat:composer_footer").is_some());
+    assert!(script.calls().is_empty());
+}
+
+#[test]
+fn markdown_snapshot_shared_headers_open_export_without_clearing_chat() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+
+    let (mut h, script) = shared_assistant_harness();
+    let target = HostControlTarget::Pointer(HostPointerTarget::HeaderAction {
+        instance: InstanceId::new("assistant").unwrap(),
+        action: ControlId::new("export-chat").unwrap(),
+    });
+    for floating in [false, true] {
+        if floating {
+            shared_assistant_float(&mut h, 700.0, 380.0);
+        }
+        let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
+        let at = egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0);
+        click_at(&mut h, at, egui::PointerButton::Primary);
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.export_tools, Some(false), "the actual header opens the export choices with tools off");
+        assert!(h.widget(tr("ui.agent_chat_export_tools")).is_some(), "the dialog shows the opt-in");
+        assert!(!h.app.file_picker_busy(), "the file picker waits for the user's Save choice");
+        assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "A retained conversation"));
+        assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+        assert!(script.calls().is_empty());
+        click_handle(&mut h, "agent_chat:export_cancel");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.export_tools, None);
+    }
+}
+
+#[test]
+fn markdown_snapshot_collapsed_assistant_can_export_from_its_overflow() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+
+    let (mut h, script) = shared_assistant_harness();
+    let instance = InstanceId::new("assistant").unwrap();
+    let action = ControlId::new("export-chat").unwrap();
+    let params = json!({"target":{"type":"instance","id":"assistant"},"action":"export-chat"});
+    h.app.run_panel_command("panel.action", &params).unwrap();
+    h.app.panel_content_action(&instance, &action).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.export_tools, None, "programmatic panel actions do not open the export dialog");
+    assert!(!h.app.file_picker_busy());
+
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+    // Keep Export registered and available, but leave it out of the header so
+    // the host exposes it through its normal overflow menu.
+    h.app.panel_runtime_mut().unwrap().host_mut().unwrap().set_header_action_visible(instance.clone(), action.clone(), false);
+    h.frames(3);
+    let header = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: instance.clone(), action: action.clone() });
+    let position = |h: &crate::scenario::Harness, target: HostControlTarget| {
+        let control = h.app.universal_panel_frame()?.controls.iter().find(|control| control.target == target)?;
+        Some(egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0))
+    };
+    assert!(position(&h, header).is_none());
+    let menu = HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() });
+    let at = position(&h, menu).expect("the collapsed panel's menu");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    let at = position(&h, HostControlTarget::Content { instance, action }).expect("the menu offers the overflow export action");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.widget(tr("ui.agent_chat_export_tools")).is_some(), "export still opens when the Assistant body is collapsed");
+    assert!(!h.app.file_picker_busy(), "the choice dialog shows before the file picker");
+    assert!(script.calls().is_empty());
+}
+
+#[test]
+fn markdown_snapshot_popped_out_header_saves_with_chosen_tool_details() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items.push(Item::Tool {
+        id: "detached-tool".into(),
+        title: "Measure".into(),
+        kind: "read".into(),
+        status: Some(ToolStatus::Completed),
+        input: None,
+        output: Some("Detached tool result".into()),
+    });
+    let path = h.dir.join("detached.md");
+    let destination = path.to_string_lossy().into_owned();
+    h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+        assert_eq!(name, "assistant-conversation.md");
+        assert_eq!(extensions, &["md"]);
+        Box::pin(std::future::ready(Some(destination.clone())))
+    }));
+    h.call("ui.agent_chat", json!({"popped": true}));
+    h.frames(4);
+
+    // As in the existing pop-out tests, the harness embeds the Assistant's own viewport.
+    let window = rect_of("agent_chat:window").expect("the popped-out Assistant");
+    let at = handle_at("agent_chat:export-chat").expect("the popped-out header action");
+    assert!(window.contains(at));
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.export_tools, Some(false));
+    assert!(!h.app.file_picker_busy() && !path.exists());
+    click_handle(&mut h, "agent_chat:export_tools");
+    assert_eq!(h.app.agent_chat.export_tools, Some(true));
+    click_handle(&mut h, "agent_chat:export_save");
+    finish_markdown_snapshot_save(&mut h);
+
+    let transcript = std::fs::read_to_string(path).unwrap();
+    assert!(transcript.contains("A retained conversation"));
+    assert!(transcript.contains("Detached tool result"));
+    assert!(h.app.preferences.agent_chat_popped);
+    assert_eq!(h.app.agent_chat.export_tools, None);
+    assert!(script.calls().is_empty());
+}
+
+/// The shared document diff produces accurate per-turn Undo card summaries (added/edited/removed
+/// features with names and types, parameter `old -> new` edits, History marker moves, and empty
+/// output when nothing changed) while preserving `changed_note` verbatim.
+#[test]
+fn turn_diff_summary_reports_features_parameters_and_marker() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let empty = app.session.doc.as_ref().clone();
+    assert!(turn_diff_summary(&empty, &empty).is_empty());
+    assert!(changed_note(&empty, &empty).is_none());
+
+    app.run("parameters.add", json!({"name": "w", "expression": "10", "unit": "mm"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(turn_diff_summary(&empty, &app.session.doc), [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let base = app.session.doc.as_ref().clone();
+    let mut edited = base.clone();
+    edited.features[0].name = "MainPlate".into();
+    edited.params.iter_mut().find(|p| p.name == "w").unwrap().expr = "25".into();
+    edited.marker = Some(0);
+    assert_eq!(
+        turn_diff_summary(&base, &edited),
+        ["~ MainPlate (Box)".to_string(), format!("~ w: {w_expr} -> 25"), "~ History marker before MainPlate".to_string()]
+    );
+    let edited_note = changed_note(&base, &edited).unwrap();
+    assert!(edited_note.contains(&format!("parameters: w {w_expr} -> 25")), "{edited_note}");
+    assert!(edited_note.contains("features: MainPlate (edited)"), "{edited_note}");
+    assert!(edited_note.contains("the History marker is now before MainPlate, so it"), "{edited_note}");
+
+    let mut removed = edited.clone();
+    removed.features.clear();
+    removed.params.retain(|p| p.name != "w");
+    removed.marker = None;
+    assert_eq!(turn_diff_summary(&edited, &removed), ["- MainPlate (Box)", "- w", "~ History marker at end"]);
+    let removed_note = changed_note(&edited, &removed).unwrap();
+    assert!(removed_note.contains("w (removed)"), "{removed_note}");
+    assert!(removed_note.contains("MainPlate (removed)"), "{removed_note}");
+    assert!(removed_note.contains("the History marker is now at the end"), "{removed_note}");
+}
+
+/// Large turns cap their Undo card diff summary cleanly with a "+N more" overflow line without
+/// altering `changed_note`'s own item cap.
+#[test]
+fn turn_diff_summary_caps_large_turns_with_overflow_indicator() {
+    use solidcraft_engine::doc::Param;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("parameters.add", json!({"name": "seed", "expression": "10", "unit": "mm"})).unwrap();
+    let before = app.session.doc.as_ref().clone();
+    let seed = before.params.iter().find(|p| p.name == "seed").cloned().unwrap();
+
+    let mut exact = before.clone();
+    exact.params.extend((0..MAX_CHANGES_SUMMARY).map(|i| Param { name: format!("q{i}"), ..seed.clone() }));
+    let exact_lines = turn_diff_summary(&before, &exact);
+    assert_eq!(exact_lines.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(exact_lines[MAX_CHANGES_SUMMARY - 1], format!("+ q{} = {}", MAX_CHANGES_SUMMARY - 1, seed.expr));
+
+    let mut many = before.clone();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..seed.clone() }));
+    let capped = turn_diff_summary(&before, &many);
+    let expected_more = 20 - (MAX_CHANGES_SUMMARY - 1);
+    assert_eq!(capped.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(capped[0], format!("+ p0 = {}", seed.expr));
+    assert_eq!(capped[MAX_CHANGES_SUMMARY - 1], format!("+{expected_more} more"));
+    assert!(changed_note(&before, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", seed.expr)));
+}
+
+/// Completing a turn populates `Item::Changes::summary` and exposes it in `ui.agent_chat` status;
+/// undoing marks the card undone while preserving its diff summary, and a no-change turn adds none.
+#[test]
+fn undo_card_records_turn_diff_summary_and_exposes_it_in_status() {
+    let (mut app, tx) = app_in_a_turn();
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+    end_turn(&mut app);
+
+    let (n, summary) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, item)| match item {
+            Item::Changes { steps: 2, summary, .. } => Some((i, summary.clone())),
+            _ => None,
+        })
+        .expect("the turn's changes item is present");
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(summary, [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let state = status(&app);
+    assert_eq!(state["items"][n]["changes"], json!(2));
+    assert_eq!(state["items"][n]["features"], json!(1));
+    assert_eq!(state["items"][n]["undone"], json!(false));
+    assert_eq!(state["items"][n]["summary"], json!(summary));
+
+    undo_changes(&mut app, n);
+    let after_undo = status(&app);
+    assert_eq!(after_undo["items"][n]["undone"], json!(true));
+    assert_eq!(after_undo["items"][n]["summary"], json!(summary));
+
+    // A no-change turn records no `Item::Changes`.
+    let before_count = app.agent_chat.items.len();
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "inspect".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert!(!app.agent_chat.items[before_count..].iter().any(|i| matches!(i, Item::Changes { .. })));
 }

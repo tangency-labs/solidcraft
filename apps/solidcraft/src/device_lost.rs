@@ -1,7 +1,7 @@
 //! The graphics device was lost after the window opened: the driver was reset (on Windows a TDR,
 //! "Display driver stopped responding and has recovered") or the GPU went away (#4172). A lost
 //! device can't draw again, so the window can't show anything more, not even a message. The
-//! painter stops drawing (`egui_wgpu::DeviceLost`); the app then closes, keeping unsaved changes
+//! window device's lost callback marks it (`solidcraft_viewport_gpu::DeviceLost`); the app then closes, keeping unsaved changes
 //! for recovery as a forced quit does, and starts again ([`restart`]), and the new start says what
 //! happened ([`note`]). A device lost again soon after such a restart starts the next one on the
 //! software renderer, which doesn't depend on the graphics driver.
@@ -82,7 +82,7 @@ fn command(
 ) -> std::process::Command {
     let mut command = std::process::Command::new(exe);
     // The notice of a hang that restarted this launch isn't the next one's (`App::watch_for_a_hang`).
-    command.args(args).env(LOST_ENV, lost_at.to_string()).env_remove(startup::HUNG_ENV);
+    command.args(args).env(LOST_ENV, lost_at.to_string());
     match self::reason(Some(reason)) {
         Some(reason) => command.env(REASON_ENV, reason),
         // Not one inherited from an earlier loss.
