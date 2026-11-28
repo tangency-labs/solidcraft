@@ -16,7 +16,7 @@ use super::{extrusion, invalid, native, TriMesh, MAX_BOUNDARY, MAX_TRIANGLES};
 const MAX_ATTEMPTS: usize = 24;
 const MAX_DEPTH: usize = 8;
 const MAX_COMPONENTS: usize = 32;
-const MAX_FACES: usize = 256;
+pub(super) const MAX_FACES: usize = 256;
 
 /// Start bounded shoulder decomposition with one shared cut budget and original-mesh circle hints.
 pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Brep>> {
@@ -33,7 +33,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
 }
 
 /// Rank at most sixteen canonical face-normal directions by triangle area to bound the reconstruction search.
-fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
+pub(super) fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
     let mut out = BTreeMap::new();
     for &[a, b, c] in &mesh.triangles {
         let (Some(a), Some(b), Some(c)) = (

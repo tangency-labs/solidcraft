@@ -285,6 +285,12 @@ pub(super) fn union(k: &mut Kernel, a: Brep, b: Brep) -> Result<Brep> {
     Ok(body)
 }
 
+/// `a` less `b`, through the kernel's B-rep Boolean; `None` when nothing is left.
+pub(super) fn difference(k: &mut Kernel, a: Brep, b: Brep) -> Result<Option<Brep>> {
+    let body = boolean(k, a, b, BooleanOperation::Difference)?.result;
+    Ok((!body.face_list().is_empty()).then_some(body))
+}
+
 /// Expected inability to certify an analytic candidate is applicability, while missing
 /// topology, cancellation, unported operations and unexpected kernel defects stay errors.
 pub(super) fn certificate<T>(answer: Result<T>) -> Result<Option<T>> {

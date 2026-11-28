@@ -334,7 +334,7 @@ fn line_distance(a: Vec2, b: Vec2, p: Vec2) -> f64 {
     distance_to_segment(&Seg2::Line { a, b }, p)
 }
 /// Certify projected polygon coverage against line or circular walls, including chord and angular bounds.
-fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
+pub(super) fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
     curves.iter().any(|curve| match curve {
         Seg2::Line { a, b } => points
             .iter()
