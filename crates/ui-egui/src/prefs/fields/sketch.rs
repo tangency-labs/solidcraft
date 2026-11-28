@@ -71,6 +71,8 @@ macro_rules! sketch_preferences {
             /// sketches have always had, up to 200000, so a dense SVG or DXF drawing fits in one sketch.
             max_sketch_points: usize = solidcraft_engine::sketch::limits::DEFAULT_POINTS, PAGE_SKETCH,
                 accept(solidcraft_engine::sketch::limits::DEFAULT_POINTS..=solidcraft_engine::sketch::limits::CEILING_POINTS);
+            /// Enable the registered G shortcut for Grease Pencil in Model.
+            model_g_starts_grease_pencil: bool = false, PAGE_SKETCH;
             /// Web app Pencil mode: pen taps toggle items and a pen double-tap takes the whole body or
             /// sketch; finger touches in the view only navigate, and a finger double-tap on a flat face
             /// starts a sketch on it. Off (the default): pens and fingers act as the mouse does.

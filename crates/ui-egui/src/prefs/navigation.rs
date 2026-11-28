@@ -131,6 +131,8 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.drag_keeps_mode.help"));
         crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
+        let rotate = setting::prefer_option_drag_rotation(app, ui).backing_on_hover_text(app.tr("nav.prefer_option_drag_rotation.help"));
+        crate::scenario::publish_target("prefs:prefer_option_drag_rotation", rotate.rect);
         if super::platform::shown(app, super::platform::Needs::CursorWarp) {
             let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
             crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);

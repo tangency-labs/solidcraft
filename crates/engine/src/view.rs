@@ -771,7 +771,7 @@ fn sketch_lines_in(
     }
     // 3D curves are in world coordinates already.
     let hidden_link = |w: &solidcraft_sketch::Wire| w.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
-    for w in sk.wires.iter().filter(|w| (!w.fit.is_empty() || !sk.view.hide_projected) && !hidden_link(w)) {
+    for w in sk.wires.iter().filter(|w| w.ink_diameter.is_none() && (!w.fit.is_empty() || !sk.view.hide_projected) && !hidden_link(w)) {
         // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
         let col = if w.fit.is_empty() {
             p.sketch_projected
@@ -1197,6 +1197,12 @@ fn build_scene(
         }
         for (pts, col, cons) in sketch_lines_in(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, &mut sampler, p) {
             sc.lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
+        }
+        for wire in &ss.sketch.wires {
+            if let Some(diameter) = wire.ink_diameter {
+                let color = wire.ink_color.map_or(p.sketch, |[r, g, b]| Rgb(r, g, b));
+                sc.lines.push(SceneLine { points: wire.pts.clone(), color, alpha: 1.0, width: (diameter * 8.0).clamp(0.5, 1024.0), on_top: false });
+            }
         }
     }
     Ok(sc)

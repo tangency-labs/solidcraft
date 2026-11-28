@@ -194,6 +194,21 @@ impl Transform {
         t
     }
 
+    /// The translation that brings `from` to `to`, if the displacement is finite.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error if the displacement has a non-finite component.
+    pub fn translation_between(from: Point3, to: Point3) -> Result<Self, crate::SolidError> {
+        let displacement = to - from;
+        if !displacement.to_array().into_iter().all(f64::is_finite) {
+            return Err(crate::SolidError::invalid_input(
+                "math::Transform::translation_between",
+                "non-finite displacement",
+            ));
+        }
+        Ok(Self::translation(displacement))
+    }
+
     /// Builds a transform from the images of the axes and the origin
     /// (`SetToXAxis`/`SetToYAxis`/`SetToZAxis`/`SetToDisp`).
     #[must_use]
@@ -1451,6 +1466,19 @@ pub fn left_side_inside_circle_2d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_between_brings_the_first_point_to_the_second() {
+        let from = Vec3::new(4.0, 5.0, -10.0);
+        let to = Vec3::new(5.0, -1.0, 20.0);
+        let translation = Transform::translation_between(from, to).unwrap();
+        let mut points = [from.to_array()];
+        translation.transform_points(&mut points);
+        assert_eq!(points, [to.to_array()]);
+        assert!(
+            Transform::translation_between(Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 0.0)).is_err()
+        );
+    }
 
     /// Rounding below `noise` along a world axis is dropped and the axes come back unit; a plane
     /// tilted for real, and one with nothing to drop, keep their axes; parallel, empty or

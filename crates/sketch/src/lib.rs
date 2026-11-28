@@ -252,6 +252,7 @@ pub use text::text_geometry_in;
 pub use text::text_geometry_styled;
 pub use thin::MAX_THIN_SEGMENTS;
 pub use thin::thin_wall_regions;
+pub use wire::DEFAULT_INK_DIAMETER;
 pub use wire::MAX_FIT_POINTS;
 pub use wire::MAX_WIRE_POINTS;
 pub use wire::MIN_CONTROL_POINTS;

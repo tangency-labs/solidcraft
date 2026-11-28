@@ -620,7 +620,7 @@ pub fn says_newer(text: &str) -> bool {
 /// The checks of a design's JSON that need nothing outside the part of it they are given.
 pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> {
     validate_top_level_counts(v)?;
-    check_design_numbers(v)?;
+    check_design_numbers(v, true)?;
     crate::config::validate_rules_json(v)?;
     crate::config::validate_styles_json(v)?;
     crate::face_anchor::validate_face_anchors_json(v)?;
@@ -1357,11 +1357,25 @@ pub const MAX_REAL: f64 = 1e9;
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
 /// already bounds its nesting. Engineering SI constants have their own bounded admission
-/// (e.g. E in Pa): only the exact root user-material card field bypasses the coordinate bound.
-fn check_design_numbers(v: &Value) -> Result<()> {
+/// (e.g. E in Pa) and legacy screen widths have their own checks at their exact file paths.
+fn check_design_numbers(v: &Value, raw: bool) -> Result<()> {
     let Some(root) = v.as_object() else { return check_numbers(v, "design", 0) };
     for (key, value) in root {
         if key == "metadata" {
+            continue;
+        }
+        if raw
+            && key == "features"
+            && let Some(features) = value.as_array()
+        {
+            let width_path = &[Some("sketch"), Some("wires"), None, Some("ink_width")];
+            for feature in features {
+                if feature.get("type").and_then(Value::as_str) == Some("sketch") {
+                    check_numbers_with_legacy_width(feature, 2, width_path)?;
+                } else {
+                    check_numbers(feature, "design", 2)?;
+                }
+            }
             continue;
         }
         if key != "user_materials" {
@@ -1391,6 +1405,20 @@ fn check_design_numbers(v: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Follow the path to a legacy screen width (`None` walks array entries). Only a finite number
+/// at the exact path may pass the coordinate limit. The migration converts it to a bounded
+/// physical diameter before the typed design is checked.
+fn check_numbers_with_legacy_width(value: &Value, depth: usize, path: &[Option<&str>]) -> Result<()> {
+    match (value, path) {
+        (Value::Array(items), [None, rest @ ..]) => items.iter().try_for_each(|item| check_numbers_with_legacy_width(item, depth + 1, rest)),
+        (Value::Object(fields), [Some(key), rest @ ..]) => fields.iter().try_for_each(|(name, field)| {
+            if name.as_str() == *key { check_numbers_with_legacy_width(field, depth + 1, rest) } else { check_numbers(field, "design", depth + 1) }
+        }),
+        (Value::Number(width), []) if width.as_f64().is_some_and(f64::is_finite) => Ok(()),
+        _ => check_numbers(value, "design", depth),
+    }
+}
+
 /// The range check again, on the typed design: an integer such as `9223372036854775808` passes
 /// [`check_numbers`] in the file (ids and counters are integers and may be large), but once it
 /// lands in a coordinate or size it is a float, and floats are written as floats. Integer fields
@@ -1398,7 +1426,7 @@ fn check_design_numbers(v: &Value) -> Result<()> {
 /// what is checked, not its name.
 fn check_typed_numbers(d: &Document) -> Result<()> {
     let typed = serde_json::to_value(d).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
-    check_design_numbers(&typed)
+    check_design_numbers(&typed, false)
 }
 
 /// Every non-integer number in a `noun`'s file, outside separately validated engineering cards,
@@ -2142,6 +2170,54 @@ mod tests {
         let reopened = read(&new.to_json()).unwrap();
         assert_eq!(reopened, new);
         assert_eq!(reopened.param_values().0["load"], crate::expr::Value::mass(50.0));
+    }
+
+    #[test]
+    fn opens_strokes_from_the_standalone_grease_pencil_patch() {
+        use solidcore_record::Vec3;
+        use solidcraft_sketch::{Sketch, WireSpace};
+
+        let mut document = Document::new("Studio notes");
+        let mut sketch = Sketch::new();
+        let points = [Vec3::ZERO, Vec3::X];
+        sketch.add_drawn_wire_in(&points, WireSpace::Component).unwrap();
+        sketch.view.three_d = true;
+        let plane = crate::PlaneRef::Origin { name: "XY".into() };
+        let id = document.add_feature(crate::FeatureKind::Sketch { plane, sketch }, Some("SketchGP1")).unwrap();
+        let mut file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        file["format"] = Value::from("solidcraft/69");
+        // An early patch saved widths in screen points.
+        file["format_pending"] = serde_json::json!(["grease-pencil-width"]);
+        file["features"][0]["sketch"]["wires"][0]["ink_width"] = Value::from(8.0);
+        let opened = read(&file.to_string()).unwrap();
+        assert!(opened.newer_file.is_none());
+        assert_eq!(opened.sketch(id).unwrap().wires[0].ink_diameter, Some(1.0));
+        for (width, diameter) in [(1e-10, 1e-9), (1e11, 1e9)] {
+            file["features"][0]["sketch"]["wires"][0]["ink_width"] = Value::from(width);
+            let opened = read(&file.to_string()).unwrap();
+            assert_eq!(opened.sketch(id).unwrap().wires[0].ink_diameter, Some(diameter));
+        }
+        for (path, out_of_range) in
+            [("/features/0/sketch/ink_width", Value::from(1e11)), ("/features/0/sketch/wires/0/ink_width", serde_json::json!({"nested": 1e11}))]
+        {
+            let mut damaged = file.clone();
+            let (parent, key) = path.rsplit_once('/').unwrap();
+            damaged.pointer_mut(parent).unwrap()[key] = out_of_range;
+            assert!(read(&damaged.to_string()).unwrap_err().to_string().contains("out of range"));
+        }
+
+        // The next patch added a physical diameter and color. An old screen width
+        // alongside the diameter must not override it.
+        file["format_pending"] = serde_json::json!(["grease-pencil-color", "grease-pencil-diameter", "grease-pencil-width"]);
+        let wire = &mut file["features"][0]["sketch"]["wires"][0];
+        wire["ink_diameter"] = Value::from(2.0);
+        wire["ink_color"] = serde_json::json!([235, 64, 65]);
+        let opened = read(&file.to_string()).unwrap();
+        assert!(opened.newer_file.is_none());
+        let wire = &opened.sketch(id).unwrap().wires[0];
+        assert_eq!(wire.ink_diameter, Some(2.0));
+        assert_eq!(wire.ink_color, Some([235, 64, 65]));
+        assert_eq!(wire.fit, points);
     }
 
     /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange

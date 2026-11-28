@@ -124,8 +124,12 @@ fn sketch_dialog_mirror_refuses_external_and_curved_references() {
     h.app.start("sketch.mirror");
     let d = h.app.dialog.as_mut().unwrap();
     d.active = 1;
-    assert!(candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 2, id: "l1".into(), straight: true, point: Vec3::ZERO }).is_none());
-    assert!(candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 1, id: "c1".into(), straight: false, point: Vec3::ZERO }).is_none());
+    assert!(
+        candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 2, id: "l1".into(), straight: true, point: Vec3::ZERO, ink_frame: None }).is_none()
+    );
+    assert!(
+        candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 1, id: "c1".into(), straight: false, point: Vec3::ZERO, ink_frame: None }).is_none()
+    );
 }
 
 #[test]
@@ -164,7 +168,10 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
     for command in ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular", "sketch.offset", "sketch.move", "sketch.scale"] {
         h.app.start(command);
         let d = h.app.dialog.as_ref().unwrap();
-        assert!(candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 2, id: "l1".into(), straight: true, point: Vec3::ZERO }).is_none());
+        assert!(
+            candidate(d, &h.app.session, &Hit::SketchCurve { sketch: 2, id: "l1".into(), straight: true, point: Vec3::ZERO, ink_frame: None })
+                .is_none()
+        );
         assert!(candidate(d, &h.app.session, &Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcore_record::Vec2::ZERO }).is_none());
         if command != "sketch.offset" {
             assert!(d.inputs[0].accept & crate::selection::SKETCH_POINTS != 0);

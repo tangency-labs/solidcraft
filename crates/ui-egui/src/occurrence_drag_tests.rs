@@ -106,6 +106,34 @@ fn grounded_parts_empty_space_and_modifier_drags_draw_a_selection_box() {
     }
 }
 
+#[test]
+fn option_drag_orbits_when_the_free_parts_pivot_is_behind_the_camera() {
+    let (mut h, _, free) = two_parts();
+    let part = h.app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == free).unwrap().component;
+    run(&mut h, "component.activate", json!({"component": part, "occurrence": free, "path": [free]}));
+    run(&mut h, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 900]}));
+    run(&mut h, "component.activate", json!({"component": "root"}));
+    crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("maya"));
+    h.app.preferences.prefer_option_drag_rotation = true;
+    h.call("ui.set", json!({"perspective": true}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [25, 5, 0], "distance": 200}));
+    h.frames(3);
+
+    let start = screen(&mut h, Vec3::new(25.0, 5.0, 10.0));
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let (body, _) = super::grabbed_face(&h.app, &proj, start).expect("the nearer body can be grabbed");
+    assert_eq!(super::placement_of(&h.app, &body), Some(vec![free]));
+    assert!(proj.to_screen(Vec3::new(25.0, 5.0, 455.0)).is_none(), "the combined bounds center cannot project");
+
+    let before = h.app.cam.back();
+    let end = start + egui::vec2(40.0, 40.0);
+    press_and_move(&mut h, start, end, egui::Modifiers::ALT);
+    assert!(h.app.viewport.occurrence_drag.is_none());
+    release(&mut h, end);
+    assert_ne!(h.app.cam.back(), before, "the Maya binding orbits when no rotation starts");
+}
+
 /// Escape during a drag puts the part back and leaves no undo step.
 #[test]
 fn escape_cancels_a_drag() {

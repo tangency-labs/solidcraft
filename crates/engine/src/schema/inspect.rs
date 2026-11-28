@@ -1594,6 +1594,12 @@ pub struct SketchWire {
     pub points: usize,
     pub start: Option<[f64; 3]>,
     pub end: Option<[f64; 3]>,
+    /// Grease Pencil diameter in millimetres, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ink_diameter: Option<f64>,
+    /// Custom Grease Pencil sRGB color, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ink_color: Option<[u8; 3]>,
     /// For a linked curve: the link that owns it; `null` otherwise.
     pub link: Option<String>,
     /// For an exact circular arc: its geometry; `null` otherwise.

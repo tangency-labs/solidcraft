@@ -1435,6 +1435,107 @@ fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
 }
 
+// A round ink segment on a depth plane. Its screen radius and depth are evaluated at the
+// closest point along the projected centerline, including the two end caps.
+struct InkOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) xy: vec2<f32>, // clip w is 1, so this interpolates linearly on WebGL2 too
+    @location(1) @interpolate(flat) line: vec3<f32>, // screen length and the endpoint radii
+    @location(2) @interpolate(flat) depth: vec4<f32>, // endpoint depths, then reciprocal w
+    @location(3) @interpolate(flat) a: vec3<f32>,
+    @location(4) @interpolate(flat) b: vec3<f32>,
+    @location(5) @interpolate(flat) color: vec4<f32>,
+};
+
+@vertex
+fn vs_ink(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> InkOut {
+    let width = bitcast<f32>(wbits);
+    var pa = a;
+    var pb = b;
+    var ca = u.vp * vec4<f32>(a, 1.0);
+    var cb = u.vp * vec4<f32>(b, 1.0);
+    let za = near_z(ca);
+    let zb = near_z(cb);
+    if (za < 0.0 && zb >= 0.0) {
+        let t = za / (za - zb);
+        pa = mix(a, b, t);
+        ca = mix(ca, cb, t);
+    } else if (zb < 0.0 && za >= 0.0) {
+        let t = zb / (zb - za);
+        pb = mix(b, a, t);
+        cb = mix(cb, ca, t);
+    }
+    let half = u.screen.xy * 0.5;
+    let iw = 1.0 / max(vec2<f32>(ca.w, cb.w), vec2<f32>(1e-6));
+    let sa = ca.xy * iw.x * half;
+    let sb = cb.xy * iw.y * half;
+    let delta = sb - sa;
+    let length_px = length(delta);
+    let dir = select(vec2<f32>(1.0, 0.0), delta / max(length_px, 1e-6), length_px > 1e-6);
+    let nrm = vec2<f32>(-dir.y, dir.x);
+    let radii = min(select(vec2<f32>(width), -width * iw, width < 0.0) * 0.5, vec2<f32>(512.0));
+    let extent = max(max(radii.x, radii.y), 0.5);
+    let right = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0)[vi];
+    let side = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0)[vi];
+    let x = mix(-extent, length_px + extent, right);
+    let y = side * extent;
+    var out: InkOut;
+    let p = sa + x * dir + y * nrm;
+    out.pos = vec4<f32>(p / half, 0.5, 1.0);
+    if (za < 0.0 && zb < 0.0) { out.pos = vec4<f32>(2.0, 2.0, 0.5, 1.0); }
+    out.xy = vec2<f32>(x, y);
+    out.line = vec3<f32>(length_px, radii);
+    out.depth = vec4<f32>(ca.z * iw.x, cb.z * iw.y, iw);
+    out.a = pa;
+    out.b = pb;
+    out.color = palette(c);
+    return out;
+}
+
+struct InkPixel {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+};
+
+fn ink_pixel(i: InkOut) -> InkPixel {
+    let x = clamp(i.xy.x, 0.0, i.line.x);
+    let closest_b = select((i.depth.y < i.depth.x), (i.depth.y > i.depth.x), reversed());
+    let t = select(select(0.0, 1.0, closest_b), x / max(i.line.x, 1e-6), i.line.x > 1e-6);
+    let radius = mix(i.line.y, i.line.z, t);
+    let draw_radius = max(radius, 0.5);
+    let alpha = i.color.a * (radius / draw_radius);
+    if (alpha <= 0.0) { discard; }
+    if (length(vec2<f32>(i.xy.x - x, i.xy.y)) > draw_radius) { discard; }
+    let depth = mix(i.depth.x, i.depth.y, t);
+    if (!(depth >= 0.0 && depth <= 1.0)) { discard; }
+    let world_t = t * i.depth.w / mix(i.depth.z, i.depth.w, t);
+    if (clipped(mix(i.a, i.b, world_t))) { discard; }
+    let across = i.xy.y / draw_radius;
+    var out: InkPixel;
+    out.color = out_color(vec4<f32>(i.color.rgb * (1.0 - 0.20 * across * across), alpha));
+    out.depth = depth;
+    return out;
+}
+
+@fragment
+fn fs_ink(i: InkOut) -> InkPixel {
+    let pixel = ink_pixel(i);
+    if (pixel.color.a < 1.0) { discard; }
+    return pixel;
+}
+
+@fragment
+fn fs_ink_fractional(i: InkOut) -> InkPixel {
+    let pixel = ink_pixel(i);
+    if (pixel.color.a >= 1.0) { discard; }
+    return pixel;
+}
+
+@fragment
+fn fs_ink_no_depth(i: InkOut) -> @location(0) vec4<f32> {
+    return ink_pixel(i).color;
+}
+
 // Point clouds and their cells (`view/clouds.rs`): dots, segments as beads (or lines when they
 // have no size) and triangles, from one record per element. The cloud's style colours them by
 // their own colour, a ramp or a palette, and shows only those whose filtered values lie in its

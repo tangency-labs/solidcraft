@@ -661,6 +661,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(point_cloud_deviation::COMMANDS.iter());
     v.extend(scan_align::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
+    v.extend(sketch_3d::ink::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
     v.extend(surface::COMMANDS.iter());

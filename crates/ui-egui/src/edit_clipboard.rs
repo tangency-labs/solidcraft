@@ -98,6 +98,9 @@ fn copying_design(app: &SolveApp) -> bool {
 
 /// Is there something Copy would copy?
 pub fn something_to_copy(app: &SolveApp) -> bool {
+    if crate::grease_pencil::can_copy_strokes(app) {
+        return true;
+    }
     if app.session.active_sketch.is_some() {
         !sketch_selection(app).is_empty()
     } else {
@@ -122,7 +125,7 @@ fn foreign_sketch(app: &SolveApp) -> Option<&solidcraft_engine::cmd::sketch_clip
 /// Is there sketch geometry to paste into the active sketch: this design's, or another's copied
 /// last?
 pub fn can_paste_sketch(app: &SolveApp) -> bool {
-    app.session.sketch_clipboard.is_some() || foreign_sketch(app).is_some()
+    !app.copied_ink.is_empty() || app.session.sketch_clipboard.is_some() || foreign_sketch(app).is_some()
 }
 
 /// Bodies another design copied or cut last: they paste here as imported bodies.
@@ -144,6 +147,9 @@ pub(crate) fn drop_stale(app: &mut SolveApp) {
 
 /// Is there something Paste would paste here?
 pub fn can_paste(app: &SolveApp) -> bool {
+    if !app.copied_ink.is_empty() {
+        return true;
+    }
     if app.session.active_sketch.is_some() {
         can_paste_sketch(app)
     } else if app.linked_design_clipboard.is_some() {
@@ -232,6 +238,9 @@ pub fn paste_into_group(app: &mut SolveApp, at: Option<Pos2>, into: Option<(u64,
 /// Is there something Paste would paste into `component` (a component's menu)? Copied components
 /// never go inside themselves or what they hold.
 pub fn can_paste_into(app: &SolveApp, component: u64) -> bool {
+    if !app.copied_ink.is_empty() {
+        return false;
+    }
     let placements = if pasting_components(app) {
         &app.copied_placements
     } else if app.session.clipboard.is_empty() && app.linked_design_clipboard.is_none() && !app.cut.placements.is_empty() {
@@ -261,6 +270,7 @@ fn replace_clipboard(app: &mut SolveApp) {
     app.own_clipboard_stamp = app.clipboard_stamp;
     app.foreign_copy = None;
     app.foreign_sketch_clip = None;
+    app.copied_ink.clear();
     app.copied_bodies.clear();
     app.copied_placements.clear();
     app.cut = CutSet::default();
@@ -299,6 +309,13 @@ pub fn copy_design(app: &mut SolveApp) -> bool {
 
 /// Copy the selection: sketch geometry in a sketch, otherwise timeline features.
 pub fn copy(app: &mut SolveApp) -> bool {
+    if let Some(strokes) = crate::grease_pencil::copy_strokes(app) {
+        clear_clipboard(app);
+        app.copied_ink = strokes;
+        let text = app.tr("sketch.grease_pencil.clipboard").into();
+        leave_text(app, text);
+        return true;
+    }
     if copying_design(app) {
         return copy_design(app);
     }
@@ -519,6 +536,9 @@ pub enum SketchPaste {
 /// sketch it was copied from lands offset from the original.
 pub fn paste_sketch(app: &mut SolveApp, at: Option<Pos2>, how: SketchPaste) -> bool {
     let Some(active) = app.session.active_sketch else { return false };
+    if !app.copied_ink.is_empty() {
+        return crate::grease_pencil::paste_strokes(app, at, how == SketchPaste::InPlace);
+    }
     // Another design copied sketch geometry last: it pastes here at the same sketch
     // coordinates, its dimensions keeping their values rather than that design's parameters.
     if let Some(clip) = foreign_sketch(app).map(|c| c.for_another_design()) {
@@ -558,14 +578,16 @@ pub fn paste_as(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool) -> bool {
 /// [`paste_as`], copied bodies and components going into `into` (a component and the placement
 /// of it to place them by: a component's menu) instead of the active component.
 pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Option<(u64, Vec<u64>)>) -> bool {
+    if app.session.active_sketch.is_some() {
+        return paste_sketch(app, at, if new_copy { SketchPaste::InPlace } else { SketchPaste::Menu });
+    }
+    if !app.copied_ink.is_empty() && into.is_none() {
+        return crate::grease_pencil::paste_strokes(app, at, false);
+    }
     let into = into.unwrap_or_else(|| {
         let active = app.session.active_component;
         (active, app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(active)))
     });
-    if app.session.active_sketch.is_some() {
-        // A menu's Paste: at the point the menu was opened; its Paste in Place where it was.
-        return paste_sketch(app, at, if new_copy { SketchPaste::InPlace } else { SketchPaste::Menu });
-    }
     if design_copied_here(app) {
         app.set_status("A design can't be pasted into itself: paste it as a linked component in another design", true);
         return false;

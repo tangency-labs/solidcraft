@@ -759,3 +759,45 @@ and association survive save/reopen and undo/redo. Symmetric offsets share one d
 Two Sides has an independent distance for each side. Disconnected selected curves or chains are
 all offset. Breaking an association retains its current geometry and removes that association's
 driver. Older offsets retain their saved fixed distances.
+
+## Grease Pencil
+
+Use **Grease Pencil** in the Model or Sketch toolbar to sketch ideas and annotations in 3D.
+To start it with **G** in Model, enable Preferences › Sketch › Opening and closing ›
+**G starts Grease Pencil in Model**. With SolidCraft's shortcuts, **G** resumes drawing in an
+active Grease Pencil sketch and starts **Transform** in an ordinary sketch. When no sketch is
+open, SolidCraft creates the next available sketch named `SketchGP1`, `SketchGP2`, and so on.
+To continue a sketch, right-click its Browser row or one of its strokes and choose **Grease Pencil**.
+The view stays where it is.
+
+Drag in the viewport to draw. The stroke follows the pointer on a plane facing the camera.
+Hover over a body or an earlier stroke to highlight it and set the plane through that point.
+The last depth stays set as the cursor moves into empty space. The grid has no effect on depth.
+Before the first hover, the plane passes through the view target. Orbit to draw on a plane at
+a different angle. The strokes have a model-space diameter and can pass in front of or behind
+other geometry in orthographic and perspective views.
+
+Choose white, black, red, yellow, green, or blue. Open **Custom color** to use the color wheel
+or paste a hex color. Use **Sample color and width** to pick both from a stroke or pick a body's
+color. The brush keeps its color and width when you leave and start Grease Pencil again. The
+width slider adjusts its range to the current zoom.
+
+Press **Esc** to leave drawing and keep the sketch open. Press **G** to draw again or
+**Shift+G** to switch to the eraser. Click or drag over a stroke to erase it. Removing the last
+stroke deletes the sketch if it contains nothing else. Press **Esc** to leave the eraser.
+Press **Esc** again to finish the sketch when **Double Esc finishes the sketch** is enabled.
+
+Click a stroke to select it, **Shift**-click to add strokes, or drag a selection box.
+A selected sketch in the Browser selects all its strokes as a group. Selected strokes turn dark
+blue. Drag a selected stroke to move the whole group in the plane of the view. To rotate the group
+around its center, enable Preferences › Navigation › Mouse › **Rotate with Option/Alt-drag**,
+then hold **Option** (**Alt**) while dragging.
+
+Right-click the selection and choose **Edit Stroke** to preview a new color or width. A width
+change gives every selected stroke the same diameter. Use **Scale** to resize the group
+uniformly about its center, including the stroke diameters. Use Copy and Paste on one or more
+selected strokes to place a copy near the cursor, with the same widths, colors, and spacing.
+Use **Paste in Place** to keep their original position. Paste into an open sketch or let
+SolidCraft create a new Grease Pencil sketch.
+
+Strokes and their styling are saved with the design. Undo and Redo work for stroke changes.

@@ -2426,6 +2426,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     remember_views(app, i);
     if let Some(uid) = closing_uid {
         crate::render_workspace::prepare::document_closing(app, uid);
+        app.viewport.ink_selected_paths.retain(|(session, _, _), _| *session != uid);
     }
     if n <= 1 {
         crate::browser::discard_reveals(app);

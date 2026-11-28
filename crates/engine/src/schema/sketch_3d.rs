@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 
 use super::check::whole;
+use super::component::MatrixParam;
+use super::inspect::SketchTarget as ExactSketchTarget;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
 use super::sketch_shapes::Created;
@@ -82,6 +84,102 @@ pub struct Spline3dParams {
     /// The sketch to draw in: its feature id or its name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
+}
+
+/// Add one freehand stroke as a 3D spline, enabling 3D Sketch on the target. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct GreasePencilParams {
+    /// The sampled world points [x, y, z] in mm, 2 to 500.
+    #[serde(default, deserialize_with = "some")]
+    #[schemars(with = "DrawnPoints")]
+    pub points: Option<DrawnPoints>,
+    /// Feature id or name of the sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// Brush diameter in millimetres. Defaults to 1 mm.
+    #[serde(default)]
+    #[schemars(range(min = 1e-9, max = 1e9))]
+    pub diameter: Option<f64>,
+    /// Opaque sRGB color as three bytes. Defaults to the theme's sketch color.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+}
+
+/// A copied stroke in world coordinates, independent of its source sketch.
+#[derive(Clone, Debug, Deserialize, serde::Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopiedInk {
+    #[schemars(length(min = 2, max = 500))]
+    pub points: Vec<[f64; 3]>,
+    #[schemars(range(min = 1e-9, max = 1e9))]
+    pub diameter: f64,
+    pub color: Option<[u8; 3]>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteInkParams {
+    #[schemars(length(min = 1, max = 10000))]
+    pub strokes: Vec<CopiedInk>,
+    pub sketch: Option<SketchTarget>,
+}
+
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct PasteInkResult {
+    pub sketch: u64,
+    pub strokes: Vec<String>,
+}
+
+/// Move or rotate one or more finished Grease Pencil strokes in world coordinates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveInkParams {
+    #[schemars(length(min = 1, max = 10000))]
+    pub strokes: Vec<InkStroke>,
+    pub by: Option<[f64; 3]>,
+    pub matrix: Option<MatrixParam>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InkStroke {
+    pub sketch: ExactSketchTarget,
+    pub wire: String,
+}
+
+/// Strokes to erase in one undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EraseInkParams {
+    #[schemars(length(min = 1, max = 10000))]
+    pub strokes: Vec<InkStroke>,
+}
+
+/// Set the width, sRGB color, or both on the selected strokes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditInkParams {
+    #[schemars(length(min = 1, max = 10000))]
+    pub strokes: Vec<InkStroke>,
+    #[schemars(range(min = 1e-9, max = 1e9))]
+    pub diameter: Option<f64>,
+    pub color: Option<[u8; 3]>,
+}
+
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct InkEditResult {
+    pub strokes: usize,
+}
+
+/// Uniform scale about the center of the selected strokes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScaleInkParams {
+    #[schemars(length(min = 1, max = 10000))]
+    pub strokes: Vec<InkStroke>,
+    #[schemars(range(min = 0.01, max = 100))]
+    pub factor: f64,
 }
 
 /// Draw a smooth cubic 3D curve shaped by world control points: it starts on the first, ends on

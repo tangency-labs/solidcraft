@@ -166,9 +166,11 @@ pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, S
             return;
         }
     };
-    let asked =
-        params.get("items").and_then(Value::as_array).map_or(0, |a| a.iter().filter(|i| i["type"] == "feature" || i["type"] == "plane").count());
-    let extra = report["deleted"].as_array().map_or(0, Vec::len) > asked;
+    let items = params.get("items").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let asked = items.iter().filter(|i| i["type"] == "feature" || i["type"] == "plane").count();
+    // An ink delete can remove the sketch it emptied as part of the requested delete.
+    let emptied = report["emptied_ink_sketches"].as_array().map_or(0, Vec::len);
+    let extra = report["deleted"].as_array().is_some_and(|deleted| deleted.len() > asked + emptied);
     let fails = report["would_fail"].as_array().is_some_and(|a| !a.is_empty());
     let shared = shared_occurrences(app, &params);
     if extra || fails || shared {

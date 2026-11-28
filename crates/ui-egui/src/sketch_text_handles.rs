@@ -192,7 +192,7 @@ pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit>
     let ss = state.sketch(sketch)?;
     let curve = ss.sketch.curves.iter().find(|c| c.id == id)?;
     let straight = matches!(curve.kind, CurveKind::Line { .. });
-    Some(Hit::SketchCurve { sketch, id, straight, point: ss.plane.to_world(at) })
+    Some(Hit::SketchCurve { sketch, id, straight, point: ss.plane.to_world(at), ink_frame: None })
 }
 
 /// Where the pointer is on the active sketch's plane.

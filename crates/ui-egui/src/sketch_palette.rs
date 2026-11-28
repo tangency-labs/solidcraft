@@ -401,6 +401,18 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     if !editing(app) {
         return image_tool_presentation(app);
     }
+    if let Some(tool) = app.tool.as_ref().filter(|t| crate::grease_pencil::is_tool(t.kind)) {
+        let (title, icon) =
+            if tool.kind == crate::tools::Kind::InkErase { ("cmd.sketch.erase_ink", "delete") } else { ("cmd.sketch.grease_pencil", "spline") };
+        return Some(crate::panel_runtime::PanelPresentation {
+            title: app.tr(title).into(),
+            icon: icon.into(),
+            status: None,
+            attention: false,
+            actions: Vec::new(),
+            menu_heading: None,
+        });
+    }
     let active = app.session.active_sketch?;
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(active)?;
@@ -428,6 +440,30 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !editing(app) {
         if image_tool(app) {
             image_tool_body(app, ui);
+        }
+        return;
+    }
+    let width_range = crate::grease_pencil::width_range(app);
+    if let Some(tool) = app.tool.as_mut().filter(|t| t.kind == crate::tools::Kind::Freehand) {
+        let done = crate::ui_kit::scope(ui, |ui| {
+            let top = ui.cursor().top();
+            crate::grease_pencil::width_slider(ui, &mut app.ink_diameter, width_range);
+            if let Some(color) = crate::grease_pencil::color_picker(ui, app.ink_color, &mut tool.brush.picking_color) {
+                app.ink_color = Some(color);
+            }
+            let done = crate::ui_kit::button(ui, solidcraft_ui_text::tr("sketch.grease_pencil.done"), crate::ui_kit::Button::Primary);
+            crate::panel_runtime::register_content_focus(ui.ctx(), &done);
+            crate::panel_runtime::report_content_extent(ui, top, done.rect.bottom() - top, false);
+            done.clicked()
+        });
+        if done {
+            crate::tools::finish(app);
+        }
+        return;
+    }
+    if app.tool.as_ref().is_some_and(|tool| tool.kind == crate::tools::Kind::InkErase) {
+        if crate::ui_kit::button(ui, solidcraft_ui_text::tr("sketch.grease_pencil.done"), crate::ui_kit::Button::Primary).clicked() {
+            crate::tools::finish(app);
         }
         return;
     }

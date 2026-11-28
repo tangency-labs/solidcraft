@@ -23,8 +23,16 @@ fn axis_refused(e: solidcore_ops::Error) -> AxisRefusal {
 }
 
 impl Affine for Solidcore {
+    fn translation(&self, by: [f64; 3]) -> Result<Matrix, AffineRefused> {
+        ops::translation(by).map_err(refused)
+    }
+
     fn rotation(&self, point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused> {
         ops::rotation(point, axis, angle).map_err(refused)
+    }
+
+    fn scaling(&self, center: [f64; 3], factor: f64) -> Result<Matrix, AffineRefused> {
+        ops::scaling(center, factor).map_err(refused)
     }
 
     fn then(&self, first: &Matrix, second: &Matrix) -> Result<Matrix, AffineRefused> {
@@ -37,6 +45,10 @@ impl Affine for Solidcore {
 
     fn apply_point(&self, matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
         ops::apply_point(matrix, point)
+    }
+
+    fn translation_between(&self, from: [f64; 3], to: [f64; 3]) -> Result<Matrix, AffineRefused> {
+        ops::translation_between(from, to).map_err(refused)
     }
 
     fn is_rigid(&self, matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {

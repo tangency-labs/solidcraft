@@ -1079,7 +1079,7 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
         for id in [&line, &spline, &linked, &"side".to_owned()] {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sketch).unwrap().sketch;
-            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
+            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO, ink_frame: None };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
             // Fillet takes a drawn 3D line, to round the corner it makes with another (#21319).
             let fillet_line = cmd == "sketch.fillet" && *id == line;

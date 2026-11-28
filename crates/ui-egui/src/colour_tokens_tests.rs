@@ -181,6 +181,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
     ("ui_kit/file_preview.rs", 2, "a preview's shadow: a black tint over its coverage mask, kept in white; a shadow is black in every theme"),
+    ("ui_kit/color.rs", 3, "the color picker previews and edits the user's exact sRGB data"),
     ("ui_kit/icons/mod.rs", 3, "the white tint carrying an icon's opacity, greyscale, and a pixel's brightness for a plugin tint"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
@@ -190,11 +191,11 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("issue_report.rs", 1, "a shrunk screenshot's averaged pixels: image data"),
     (
         "viewport.rs",
-        13,
+        14,
         "colours from data (a component's, a face's or a body's appearance, the analysis legend), tokens given an alpha or \
          blended (the selected origin plane, the section rim, the faded edges of what Isolate shows as wireframe), the grey ring of the origin point and of a component's origin, the white \
          outline of the orbit mark, and the yellow of a sketch path's first point, which should become a token; the guard now also counts \
-         the literals below viewport.rs's mid-file test items (#13497)",
+         the literals below viewport.rs's mid-file test items (#13497), and the black used to shade the ink highlight token",
     ),
 ];
 

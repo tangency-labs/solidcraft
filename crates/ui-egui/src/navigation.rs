@@ -1110,6 +1110,38 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // text field, and while a dimension's text is being edited, so those keep the keyboard.
     let space_pan =
         (inside || primary_down) && !ui.ctx().text_edit_focused() && !crate::dim_view::editing() && ui.input(|i| i.key_down(egui::Key::Space));
+    // Keep the mouse binding until the drag starts. A grounded part or a pivot outside the
+    // projection cannot rotate, so in those cases the binding still owns the whole drag.
+    if app.preferences.prefer_option_drag_rotation
+        && app.viewport.primary_nav.is_some()
+        && app.viewport.nav.is_none()
+        && !space_pan
+        && !middle
+        && !secondary_down
+        && !had_touch
+        && !touch.active
+        && picking
+        && crate::viewport::option_only(mods)
+        && app.tool.is_none()
+        && app.dialog.is_none()
+        && !crate::render_workspace::active(app)
+        && !crate::select_other::is_open(app)
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(p) = ui.input(|i| i.pointer.press_origin().filter(|_| i.focused))
+        && rect.contains(p)
+        && !on_control(p)
+        && !crate::shell::covered(app, p)
+    {
+        let proj = projection(app, rect);
+        let joint_handle = |p| crate::joint_handles::owns_pointer(app, &proj, p);
+        if !joint_handle(p)
+            && !(inside && hover.is_some_and(joint_handle))
+            && (crate::grease_pencil::can_rotate_at(app, &proj, p)
+                || (crate::sketch_view::active_sketch(app).is_none() && crate::occurrence_drag::can_rotate_at(app, &proj, p)))
+        {
+            app.viewport.primary_nav = None;
+        }
+    }
     if zoom_held {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
     } else if space_pan {

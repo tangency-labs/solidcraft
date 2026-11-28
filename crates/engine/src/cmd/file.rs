@@ -2506,7 +2506,13 @@ fn missing_save_cache(
     } else if !s.pending_moves.is_empty() {
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
-        first_error().unwrap_or_else(|| "there are no evaluated bodies to cache".into())
+        if let Some(reason) = first_error() {
+            reason
+        } else if s.model.state().sketches.iter().any(|sketch| sketch.sketch.wires.iter().any(|wire| wire.ink_diameter.is_some())) {
+            return None;
+        } else {
+            "there are no evaluated bodies to cache".into()
+        }
     } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
         refusal
     } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
@@ -6023,6 +6029,19 @@ mod tests {
         );
         let on_disk = save_limit_warning(limit + 1, false).unwrap();
         assert!(on_disk.contains("Largest file to open") && on_disk.contains(solidcraft_io::limits::how_to_raise()), "{on_disk}");
+    }
+
+    #[test]
+    fn ink_only_design_does_not_need_a_model_cache() -> Result<()> {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"}))?;
+        s.execute("sketch.grease_pencil", &json!({"points": [[0,0,0],[10,0,0]], "diameter": 1}))?;
+        s.execute("sketch.finish", &json!({}))?;
+        let bytes = s.design_container(solidcraft_io::DesignCompression::Fast, false, false)?;
+        let reader = DesignContainerReader::new(Cursor::new(bytes.as_slice()))?;
+        assert!(!reader.has_model_cache());
+        assert!(missing_save_cache(&s, true, None, Some(&reader)).is_none());
+        Ok(())
     }
 
     /// When the model cache could not be saved due to an exact body round-trip failure or size refusal,

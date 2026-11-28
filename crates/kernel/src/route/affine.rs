@@ -10,11 +10,25 @@ pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, Matrix, Offs
 use super::{Which, which};
 use crate::backend::Solidcore;
 
+/// The move by `by`.
+pub fn translation(by: [f64; 3]) -> Result<Matrix, AffineRefused> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.translation(by),
+    }
+}
+
 /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
 /// line through `point` along it.
 pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused> {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.rotation(point, axis, angle),
+    }
+}
+
+/// The uniform scale by `factor`, keeping `center` in place.
+pub fn scaling(center: [f64; 3], factor: f64) -> Result<Matrix, AffineRefused> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.scaling(center, factor),
     }
 }
 
@@ -36,6 +50,13 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix, AffineRefused> {
 pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.apply_point(matrix, point),
+    }
+}
+
+/// The translation that brings `from` to `to`.
+pub fn translation_between(from: [f64; 3], to: [f64; 3]) -> Result<Matrix, AffineRefused> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.translation_between(from, to),
     }
 }
 

@@ -123,6 +123,17 @@ pub trait Points: Backend {
     fn hole_spacing(&self, items: &[([f64; 3], [f64; 3])]) -> Result<HoleSpacing, PointsRefused>;
     /// The distance from `a` to `b`, with its proved rounding bound.
     fn point_distance(&self, a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused>;
+    /// The centre of the tight 3D box around the finite input points.
+    fn point_bounds_center(&self, points: impl IntoIterator<Item = [f64; 3]>) -> Option<[f64; 3]>;
+    /// The finite point where the line meets a plane.
+    fn line_plane_point(
+        &self,
+        plane: &solidcore_record::Plane,
+        origin: solidcore_record::Vec3,
+        direction: solidcore_record::Vec3,
+    ) -> Option<solidcore_record::Vec3>;
+    /// Approximate a polyline within the given tolerance and merge points closer than `min_step`.
+    fn simplify_polyline(&self, points: &[solidcore_record::Vec3], tolerance: f64, min_step: f64) -> Vec<solidcore_record::Vec3>;
     /// Whether `a` and `b` meet: their rounded distance is not more than `tol`.
     fn points_meet(&self, a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool, PointsRefused>;
     /// The vector from `from` to `to`.
@@ -132,6 +143,8 @@ pub trait Points: Backend {
     /// The distance from `point` to the polyline through `points`, and its closest point; `None`
     /// for a polyline of no points.
     fn polyline_2d_closest_point(&self, point: [f64; 2], points: &[[f64; 2]]) -> Result<Option<(f64, [f64; 2])>, PointsRefused>;
+    /// A point of the trace within the axis's linearly varying radius.
+    fn segment_band_contact(&self, trace: [[f64; 2]; 2], axis: [[f64; 2]; 2], radii: [f64; 2]) -> Option<[f64; 2]>;
     /// Whether `point` still lies on face `face` of `record`, on its surface and within its trims,
     /// to a thousandth of the body's box diagonal.
     fn stored_face(&self, record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused>;

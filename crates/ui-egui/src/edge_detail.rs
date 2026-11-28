@@ -63,57 +63,9 @@ fn length(a: Vec3) -> f64 {
     dot(a, a).sqrt()
 }
 
-/// The distance from `p` to the segment `a`–`b` (to `a` where they are the same point).
-fn to_segment(p: Vec3, a: Vec3, b: Vec3) -> f64 {
-    let ab = b - a;
-    let len2 = dot(ab, ab);
-    let t = if len2 > 0.0 { (dot(p - a, ab) / len2).clamp(0.0, 1.0) } else { 0.0 };
-    length(p - (a + ab * t))
-}
-
-/// `points` with the points dropped that lie within `tol` of the simplified line (Douglas and
-/// Peucker): the ends are kept, and no dropped point is farther than `tol` from the result. A
-/// closed loop (first point equals the last) keeps its point farthest from the start, so it stays a
-/// loop. A point whose distance is not a number is kept. Iterative: no recursion on long edges.
+/// A reduced polyline within `tol` millimetres of the display edge.
 pub(crate) fn simplify(points: &[Vec3], tol: f64) -> Vec<Vec3> {
-    let n = points.len();
-    if n <= 2 || !(tol > 0.0) {
-        return points.to_vec();
-    }
-    let mut keep = vec![false; n];
-    keep[0] = true;
-    keep[n - 1] = true;
-    let mut stack = vec![(0, n - 1)];
-    // A closed loop's ends are one point: split it at its point farthest from them first.
-    if points[0] == points[n - 1] {
-        let start = points[0];
-        let far = (1..n - 1).max_by(|&i, &j| length(points[i] - start).total_cmp(&length(points[j] - start)));
-        if let Some(far) = far {
-            keep[far] = true;
-            stack = vec![(0, far), (far, n - 1)];
-        }
-    }
-    while let Some((a, b)) = stack.pop() {
-        if b <= a + 1 {
-            continue;
-        }
-        let (pa, pb) = (points[a], points[b]);
-        let mut far = (a + 1, -1.0);
-        for (i, p) in points.iter().enumerate().take(b).skip(a + 1) {
-            let d = to_segment(*p, pa, pb);
-            // A distance that is not a number keeps its point.
-            let d = if d.is_nan() { f64::INFINITY } else { d };
-            if d > far.1 {
-                far = (i, d);
-            }
-        }
-        if far.1 > tol {
-            keep[far.0] = true;
-            stack.push((a, far.0));
-            stack.push((far.0, b));
-        }
-    }
-    points.iter().zip(keep).filter_map(|(p, k)| k.then_some(*p)).collect()
+    solidcraft_kernel::points::simplify_polyline(points, tol, 0.0)
 }
 
 #[cfg(test)]
@@ -122,42 +74,6 @@ mod tests {
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)
-    }
-
-    /// A circle of `r` in `n` segments (closed: the last point is the first).
-    fn circle(r: f64, n: usize) -> Vec<Vec3> {
-        (0..=n).map(|i| std::f64::consts::TAU * (i % n) as f64 / n as f64).map(|a| v(r * a.cos(), r * a.sin(), 0.0)).collect()
-    }
-
-    #[test]
-    fn a_fine_circle_keeps_only_the_points_its_tolerance_needs_and_no_point_moves_further() {
-        let fine = circle(10.0, 720);
-        let tol = 0.05;
-        let coarse = simplify(&fine, tol);
-        assert_eq!((coarse.first(), coarse.last()), (fine.first(), fine.last()), "the ends stay");
-        // A chord of sagitta 0.05 on r 10 spans 2·acos(1 − 0.005) ≈ 11.5°: about 32 segments.
-        assert!((20..=64).contains(&(coarse.len() - 1)), "{} segments", coarse.len() - 1);
-        let worst = fine.iter().map(|p| coarse.windows(2).map(|w| to_segment(*p, w[0], w[1])).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max);
-        assert!(worst <= tol, "every dropped point lies within the tolerance: {worst}");
-    }
-
-    #[test]
-    fn straight_runs_and_short_edges_are_left_as_they_are_where_nothing_can_go() {
-        let line: Vec<Vec3> = (0..10).map(|i| v(f64::from(i), 0.0, 0.0)).collect();
-        assert_eq!(simplify(&line, 0.01), vec![line[0], line[9]], "a straight run is its two ends");
-        let corner = vec![v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(1.0, 1.0, 0.0)];
-        assert_eq!(simplify(&corner, 0.1), corner, "a corner larger than the tolerance stays");
-        assert_eq!(simplify(&corner[..2], 5.0), corner[..2], "a single segment stays");
-        assert_eq!(simplify(&corner, 0.0), corner, "no tolerance, no change");
-        assert_eq!(simplify(&corner, f64::NAN), corner, "a tolerance that is not a number changes nothing");
-    }
-
-    #[test]
-    fn a_closed_loop_stays_a_loop_and_points_that_are_not_numbers_are_kept() {
-        let tiny = simplify(&circle(1.0, 64), 10.0);
-        assert!(tiny.len() >= 3 && tiny.first() == tiny.last(), "a loop smaller than the tolerance keeps its far point: {tiny:?}");
-        let odd = vec![v(0.0, 0.0, 0.0), v(f64::NAN, 0.0, 0.0), v(2.0, 0.0, 0.0)];
-        assert_eq!(simplify(&odd, 1.0).len(), 3, "a point at no known distance is kept");
     }
 
     #[test]

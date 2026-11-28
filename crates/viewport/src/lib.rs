@@ -42,6 +42,7 @@ pub use footprint::Footprint;
 pub use footprint::footprint;
 pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;
+pub use pick::nearest_on_screen_segment;
 pub use raster::Canvas;
 pub use raster::render;
 pub use raster::render_picture;

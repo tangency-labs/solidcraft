@@ -3,6 +3,7 @@
 //! stored picks checked against their face or edge, and flush contacts between bodies.
 
 use solidcore_record::brep::Brep;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_kernel_api::{OpKind, Points};
 
 pub use solidcraft_kernel_api::points::{
@@ -32,6 +33,27 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefuse
     }
 }
 
+/// The centre of the tight 3D box around the finite input points.
+pub fn point_bounds_center(points: impl IntoIterator<Item = [f64; 3]>) -> Option<[f64; 3]> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.point_bounds_center(points),
+    }
+}
+
+/// The finite point where the line meets a plane.
+pub fn line_plane_point(plane: &Plane, origin: Vec3, direction: Vec3) -> Option<Vec3> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.line_plane_point(plane, origin, direction),
+    }
+}
+
+/// Approximate a polyline within the given tolerance and merge points closer than `min_step`.
+pub fn simplify_polyline(points: &[Vec3], tolerance: f64, min_step: f64) -> Vec<Vec3> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.simplify_polyline(points, tolerance, min_step),
+    }
+}
+
 /// Whether `a` and `b` meet: their rounded distance is not more than `tol`.
 pub fn points_meet(a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool, PointsRefused> {
     match which(OpKind::Points) {
@@ -58,6 +80,13 @@ pub fn centroid_and_mean_radius(points: &[[f64; 2]]) -> Result<PointSetSummary, 
 pub fn polyline_2d_closest_point(point: [f64; 2], points: &[[f64; 2]]) -> Result<Option<(f64, [f64; 2])>, PointsRefused> {
     match which(OpKind::Points) {
         Which::Solidcore => Solidcore.polyline_2d_closest_point(point, points),
+    }
+}
+
+/// A point of the trace within the axis's linearly varying radius.
+pub fn segment_band_contact(trace: [[f64; 2]; 2], axis: [[f64; 2]; 2], radii: [f64; 2]) -> Option<[f64; 2]> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.segment_band_contact(trace, axis, radii),
     }
 }
 

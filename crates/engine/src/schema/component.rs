@@ -2120,6 +2120,9 @@ pub struct DragKeys {
     #[serde(default, deserialize_with = "point_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point3")]
     pub point: Option<Point3>,
+    /// Optional rigid world transform applied before the pointer translation.
+    #[serde(default)]
+    pub matrix: Option<MatrixParam>,
     /// Reply `continuous`, for a drag that goes on over several calls (the viewport's). It
     /// changes nothing else. Default: `false`.
     #[serde(default)]

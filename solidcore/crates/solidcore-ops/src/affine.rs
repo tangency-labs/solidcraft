@@ -306,6 +306,14 @@ pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
     p
 }
 
+/// The translation that brings `from` to `to`.
+///
+/// # Errors
+/// [`Error::Argument`] for a displacement that is not finite.
+pub fn translation_between(from: [f64; 3], to: [f64; 3]) -> Result<Matrix> {
+    taken(Transform::translation_between(vec3(from), vec3(to)))
+}
+
 /// The corners of a parallelogram on a plane, in that plane's coordinates, through
 /// [`solidcore::math::rect_of_aspect`]: its bottom edge from `bl` to `br`, its top-left corner
 /// `top_left` when it may stretch, else `aspect` (height over width) times as high as wide with

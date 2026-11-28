@@ -453,6 +453,7 @@ fn apply(app: &mut SolveApp, row: &Row, add: bool, toggle: bool) {
         crate::viewport::dialog_pick(app, &row.hit, row.sel.clone());
     } else {
         crate::viewport::select(app, Some(row.sel.clone()), add, toggle);
+        crate::grease_pencil::remember_pick(app, &row.hit);
     }
 }
 

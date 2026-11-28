@@ -99,7 +99,7 @@ impl Projection {
 
 /// The parameter in [0, 1] of the point of segment `a`–`b` nearest `p` (0 for a segment of no
 /// length).
-fn nearest_on_screen_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+pub fn nearest_on_screen_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let length2 = dx * dx + dy * dy;
     if length2 <= 0.0 || !length2.is_finite() {

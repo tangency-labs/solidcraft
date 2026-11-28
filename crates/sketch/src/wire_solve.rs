@@ -1250,21 +1250,34 @@ impl Sketch {
     /// Join drawn 3D curves that meet: each end of the curves `ids` (a 3D point is its own end)
     /// that is at the same place as an end of another drawn curve, in the same space, gets a
     /// Coincident with it, unless the two are joined already. Lines drawn end to end, one call
-    /// or one segment at a time, stay joined when their constraints are solved. Returns the
-    /// constraints added.
+    /// or one segment at a time, stay joined when their constraints are solved. Ink strokes
+    /// do not get automatic joints. Returns the constraints added.
     pub fn join_drawn_ends(&mut self, ids: &[String]) -> Result<Vec<String>> {
-        let ends: Vec<(WirePoint, Vec3, crate::WireSpace)> = self
+        struct End {
+            point: WirePoint,
+            at: Vec3,
+            space: crate::WireSpace,
+            joinable: bool,
+        }
+        let ends: Vec<End> = self
             .wires
             .iter()
             .filter(|w| w.link.is_none() && !w.fit.is_empty())
             .flat_map(|w| {
                 let last = w.fit.len() - 1;
                 let idx: Vec<usize> = if last == 0 { vec![0] } else { vec![0, last] };
-                idx.into_iter().filter_map(move |index| w.fit.get(index).map(|at| (WirePoint { wire: w.id.clone(), index }, *at, w.space)))
+                idx.into_iter().filter_map(move |index| {
+                    w.fit.get(index).map(|&at| End {
+                        point: WirePoint { wire: w.id.clone(), index },
+                        at,
+                        space: w.space,
+                        joinable: w.ink_diameter.is_none(),
+                    })
+                })
             })
             .collect();
-        // The ends already joined, as sets.
-        let slot: HashMap<&WirePoint, usize> = ends.iter().enumerate().map(|(i, e)| (&e.0, i)).collect();
+        // Include explicitly joined ink ends when finding which ends already move together.
+        let slot: HashMap<&WirePoint, usize> = ends.iter().enumerate().map(|(i, e)| (&e.point, i)).collect();
         let mut parent: Vec<usize> = (0..ends.len()).collect();
         for c in &self.wire_constraints {
             if let WireConstraintKind::Coincident { a, b } = &c.kind
@@ -1273,10 +1286,10 @@ impl Sketch {
                 union(&mut parent, *i, *j);
             }
         }
-        // Ends sorted along x, so each looks only at its near neighbours.
-        let mut order: Vec<usize> = (0..ends.len()).collect();
+        // Only ordinary ends can get automatic joints. Sort them along x to search nearby ends.
+        let mut order: Vec<usize> = ends.iter().enumerate().filter_map(|(i, e)| e.joinable.then_some(i)).collect();
         order.sort_by(|a, b| {
-            let (pa, pb) = (ends.get(*a).map_or(0.0, |e| e.1.x), ends.get(*b).map_or(0.0, |e| e.1.x));
+            let (pa, pb) = (ends.get(*a).map_or(0.0, |e| e.at.x), ends.get(*b).map_or(0.0, |e| e.at.x));
             pa.total_cmp(&pb)
         });
         let rank: Vec<usize> = {
@@ -1290,21 +1303,23 @@ impl Sketch {
         };
         let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
         let mut pairs = Vec::new();
-        for (i, (p, at, space)) in ends.iter().enumerate() {
-            if !wanted.contains(p.wire.as_str()) {
+        for (i, end) in ends.iter().enumerate() {
+            if !end.joinable || !wanted.contains(end.point.wire.as_str()) {
                 continue;
             }
-            let near = |j: &usize| ends.get(*j).is_some_and(|(q, b, s)| q.wire != p.wire && s == space && at.dist(*b) < MEET);
+            let near = |j: &usize| {
+                ends.get(*j).is_some_and(|other| other.point.wire != end.point.wire && other.space == end.space && end.at.dist(other.at) < MEET)
+            };
             let k = rank.get(i).copied().unwrap_or(0);
-            let below = order.get(..k).unwrap_or(&[]).iter().rev().take_while(|j| ends.get(**j).is_some_and(|e| at.x - e.1.x < MEET));
-            let above = order.get(k + 1..).unwrap_or(&[]).iter().take_while(|j| ends.get(**j).is_some_and(|e| e.1.x - at.x < MEET));
+            let below = order.get(..k).unwrap_or(&[]).iter().rev().take_while(|j| ends.get(**j).is_some_and(|e| end.at.x - e.at.x < MEET));
+            let above = order.get(k + 1..).unwrap_or(&[]).iter().take_while(|j| ends.get(**j).is_some_and(|e| e.at.x - end.at.x < MEET));
             let mut found: Vec<usize> = below.chain(above).copied().filter(near).collect();
             found.sort_unstable();
             for j in found {
                 if find(&mut parent, i) != find(&mut parent, j) {
                     union(&mut parent, i, j);
                     if let (Some(a), Some(b)) = (ends.get(j), ends.get(i)) {
-                        pairs.push((a.0.clone(), b.0.clone()));
+                        pairs.push((a.point.clone(), b.point.clone()));
                     }
                 }
             }

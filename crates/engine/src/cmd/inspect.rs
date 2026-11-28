@@ -569,6 +569,8 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             points: w.pts.len(),
             start: w.pts.first().map(|&p| p.into()),
             end: w.pts.last().map(|&p| p.into()),
+            ink_diameter: w.ink_diameter,
+            ink_color: w.ink_color,
             link: w.link.clone(),
             arc: w.arc.map(|a| WireArcInfo {
                 center: a.center.into(),

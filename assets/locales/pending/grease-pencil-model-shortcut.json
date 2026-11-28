@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch.model_g_starts_grease_pencil": "G starts Grease Pencil in Model",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "Use the default G shortcut to start a Grease Pencil sketch from the Model workspace. Your custom shortcuts still apply."
+  },
+  "ar": {
+    "prefs.sketch.model_g_starts_grease_pencil": "يبدأ G استخدام قلم الرسم الحر في مساحة النمذجة",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "استخدم الاختصار الافتراضي G لبدء رسم حر من مساحة النمذجة. تظل اختصاراتك المخصصة سارية."
+  },
+  "de": {
+    "prefs.sketch.model_g_starts_grease_pencil": "G startet den Freihandstift im Modell",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "Verwenden Sie die Standardtaste G, um im Modell-Arbeitsbereich eine Freihandskizze zu beginnen. Ihre eigenen Tastenkürzel gelten weiterhin."
+  },
+  "he": {
+    "prefs.sketch.model_g_starts_grease_pencil": "המקש G מפעיל ציור חופשי בסביבת המודל",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "אפשר להשתמש בקיצור ברירת המחדל G כדי להתחיל סקיצה חופשית מסביבת המודל. קיצורי המקשים האישיים שלך ימשיכו לפעול."
+  },
+  "ja": {
+    "prefs.sketch.model_g_starts_grease_pencil": "モデルで G キーを押すとグリースペンシルを開始",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "既定のショートカット G キーで、モデルワークスペースからグリースペンシルのスケッチを開始します。カスタムショートカットは引き続き有効です。"
+  },
+  "ko": {
+    "prefs.sketch.model_g_starts_grease_pencil": "모델에서 G 키로 그리스 펜슬 시작",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "기본 단축키 G로 모델 작업 공간에서 그리스 펜슬 스케치를 시작합니다. 사용자 지정 단축키는 계속 적용됩니다."
+  },
+  "vi": {
+    "prefs.sketch.model_g_starts_grease_pencil": "Phím G mở bút vẽ trong không gian Mô hình",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "Dùng phím tắt mặc định G để bắt đầu bản phác thảo bằng bút vẽ trong không gian Mô hình. Các phím tắt tùy chỉnh vẫn có hiệu lực."
+  },
+  "zh": {
+    "prefs.sketch.model_g_starts_grease_pencil": "在模型中按 G 启动蜡笔",
+    "prefs.sketch.model_g_starts_grease_pencil_note": "使用默认快捷键 G 在模型工作区开始蜡笔草图。自定义快捷键仍然有效。"
+  }
+}

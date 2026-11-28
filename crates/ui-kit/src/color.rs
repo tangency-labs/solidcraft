@@ -103,6 +103,87 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
     if ui.style().explanation_tooltips { response.backing_on_hover_text(solidcraft_ui_text::tr("color.edit")) } else { response }
 }
 
+/// A wheel button for an opaque picker with a single copyable hex field.
+pub fn color_wheel_field(ui: &mut Ui, size: egui::Vec2, rgb: &mut [u8; 3], label: &str) -> Response {
+    let t = Tokens::get();
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ColorWell, ui.is_enabled(), label));
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.39;
+    let mut wheel = egui::Mesh::default();
+    const SECTORS: u32 = 24;
+    for i in 0..=SECTORS {
+        let h = i as f32 / SECTORS as f32;
+        let direction = egui::Vec2::angled(h * std::f32::consts::TAU);
+        let color = Color32::from(HsvaGamma { h, s: 1.0, v: 1.0, a: 1.0 });
+        wheel.colored_vertex(center + direction * radius, color);
+        wheel.colored_vertex(center + direction * (radius * 0.63), color);
+        if i < SECTORS {
+            let j = i * 2;
+            wheel.add_triangle(j, j + 1, j + 2);
+            wheel.add_triangle(j + 1, j + 2, j + 3);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(wheel));
+    ui.painter().circle_filled(center, radius * 0.45, Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+    let before = *rgb;
+    let popup = Container::new(ui.ctx(), Surface::Popup)
+        .menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(t.control_height * 7.5)
+        .show(|ui| super::scope(ui, |ui| compact_color_popover(ui, rgb)));
+    if popup.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        response.request_focus();
+    }
+    if *rgb != before {
+        response.mark_changed();
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
+}
+
+fn compact_color_popover(ui: &mut Ui, rgb: &mut [u8; 3]) {
+    let t = Tokens::get();
+    let id = ui.scope_id().with("compact_color");
+    let color = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+    let (saved, mut hsv, mut hex) =
+        ui.ctx().data(|d| d.get_temp::<([u8; 3], HsvaGamma, HexEdit)>(id)).unwrap_or_else(|| (*rgb, color.into(), HexEdit::new(*rgb, None)));
+    if saved != *rgb {
+        hsv = color.into();
+    }
+    hex.sync(*rgb, None);
+    if color_gradients(ui, &mut hsv, dimension(ui.available_width()), t.control_height * 4.5) {
+        let color = Color32::from(hsv);
+        *rgb = [color.r(), color.g(), color.b()];
+        hex.set(*rgb, None);
+    }
+    ui.horizontal(|ui| {
+        let label = ui.label(solidcraft_ui_text::tr("color.hex"));
+        let response = ui
+            .allocate_ui(vec2(t.control_height * 4.0, t.control_height), |ui| {
+                super::cell_editor(ui, id.with("hex"), &mut hex.draft, solidcraft_ui_text::tr("color.hex_hint"), false).labelled_by(label.id)
+            })
+            .inner;
+        publish("color:hex", &response);
+        if response.changed()
+            && let Some((value, None)) = solidcraft_color::hex::parse_digits(hex.draft.trim().strip_prefix('#').unwrap_or(hex.draft.trim()))
+        {
+            *rgb = value;
+            hex.set(*rgb, None);
+            hsv = Color32::from_rgb(rgb[0], rgb[1], rgb[2]).into();
+        }
+        let (_, rect) = ui.allocate_space(egui::Vec2::splat(t.control_height));
+        let copy = super::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr("color.copy"));
+        publish("color:copy", &copy);
+        if copy.clicked() {
+            ui.ctx().copy_text(hex.accepted.clone());
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(id, (*rgb, hsv, hex)));
+}
+
 /// Popover body, also rendered independently by the gallery. Format is global, alpha is opaque.
 /// Tokens: form_card_width, control_*, form_*, on_accent, border, radius_xl, font_small, space_*.
 pub fn color_popover(ui: &mut Ui, rgb: &mut [u8; 3]) -> bool {
@@ -243,31 +324,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             graphical_edit = true;
         }
         let width = dimension(ui.available_width());
-        let (square, response) = ui.allocate_exact_size(vec2(width, t.control_height * 7.0 + t.space_4), Sense::click_and_drag());
-        if (response.clicked() || response.dragged())
-            && let Some(pos) = response.interact_pointer_pos()
-        {
-            hsv.s = ((pos.x - square.left()) / square.width()).clamp(0.0, 1.0);
-            hsv.v = (1.0 - (pos.y - square.top()) / square.height()).clamp(0.0, 1.0);
-            graphical_edit = true;
-        }
-        gradient(ui, square, |x, y| Color32::from(HsvaGamma { h: hsv.h, s: x, v: 1.0 - y, a: 1.0 }));
-        marker(ui, pos2(square.left() + hsv.s * square.width(), square.bottom() - hsv.v * square.height()), t.space_6);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), solidcraft_ui_text::tr("color.saturation_value")));
-        publish("color:sv", &response);
-        response.backing_on_hover_text(solidcraft_ui_text::tr("color.saturation_value"));
-        let (hue, response) = ui.allocate_exact_size(vec2(width, t.space_14), Sense::click_and_drag());
-        if (response.clicked() || response.dragged())
-            && let Some(pos) = response.interact_pointer_pos()
-        {
-            hsv.h = ((pos.x - hue.left()) / hue.width()).clamp(0.0, 1.0);
-            graphical_edit = true;
-        }
-        gradient(ui, hue, |x, _| Color32::from(HsvaGamma { h: x, s: 1.0, v: 1.0, a: 1.0 }));
-        marker(ui, pos2(hue.left() + hsv.h * hue.width(), hue.center().y), t.space_8);
-        response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(hsv.h), solidcraft_ui_text::tr("color.hue")));
-        publish("color:hue", &response);
-        response.backing_on_hover_text(solidcraft_ui_text::tr("color.hue"));
+        graphical_edit |= color_gradients(ui, &mut hsv, width, t.control_height * 7.0 + t.space_4);
         if graphical_edit {
             let c = Color32::from(hsv);
             *rgb = [c.r(), c.g(), c.b()];
@@ -542,6 +599,37 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
         }
     });
     picked
+}
+
+fn color_gradients(ui: &mut Ui, hsv: &mut HsvaGamma, width: f32, height: f32) -> bool {
+    let t = Tokens::get();
+    let mut graphical_edit = false;
+    let (square, response) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
+    if (response.clicked() || response.dragged())
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        hsv.s = ((pos.x - square.left()) / square.width()).clamp(0.0, 1.0);
+        hsv.v = (1.0 - (pos.y - square.top()) / square.height()).clamp(0.0, 1.0);
+        graphical_edit = true;
+    }
+    gradient(ui, square, |x, y| Color32::from(HsvaGamma { h: hsv.h, s: x, v: 1.0 - y, a: 1.0 }));
+    marker(ui, pos2(square.left() + hsv.s * square.width(), square.bottom() - hsv.v * square.height()), t.space_6);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), solidcraft_ui_text::tr("color.saturation_value")));
+    publish("color:sv", &response);
+    response.backing_on_hover_text(solidcraft_ui_text::tr("color.saturation_value"));
+    let (hue, response) = ui.allocate_exact_size(vec2(width, t.space_14), Sense::click_and_drag());
+    if (response.clicked() || response.dragged())
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        hsv.h = ((pos.x - hue.left()) / hue.width()).clamp(0.0, 1.0);
+        graphical_edit = true;
+    }
+    gradient(ui, hue, |x, _| Color32::from(HsvaGamma { h: x, s: 1.0, v: 1.0, a: 1.0 }));
+    marker(ui, pos2(hue.left() + hsv.h * hue.width(), hue.center().y), t.space_8);
+    response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(hsv.h), solidcraft_ui_text::tr("color.hue")));
+    publish("color:hue", &response);
+    response.backing_on_hover_text(solidcraft_ui_text::tr("color.hue"));
+    graphical_edit
 }
 
 fn marker(ui: &Ui, at: egui::Pos2, radius: f32) {

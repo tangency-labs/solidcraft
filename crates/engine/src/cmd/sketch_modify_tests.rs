@@ -5963,6 +5963,23 @@ fn move_copy_drawn_arc_keeps_exact_geometry_and_original() {
 }
 
 #[test]
+fn move_copy_joins_ordinary_drawn_ends_without_joining_ink() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let line = ids(&run(&mut s, "sketch.line3d", json!({"points":[[0,0,3],[10,0,3]]}))["curves"])[0].clone();
+    let ink = ids(&run(&mut s, "sketch.grease_pencil", json!({"points":[[10,0,3],[20,0,3]],"diameter":2}))["curves"])[0].clone();
+    let ink_copy = ids(&run(&mut s, "sketch.move", json!({"entities":[ink],"translate":[-20,0],"copy":true}))["curves"])[0].clone();
+    let sketch = s.active_sketch.unwrap();
+    assert!(s.doc.sketch(sketch).unwrap().wire_constraints.is_empty());
+    let line_copy = ids(&run(&mut s, "sketch.move", json!({"entities":[line],"translate":[10,0],"copy":true}))["curves"])[0].clone();
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert_eq!(sk.wires[sk.wire_index(&ink_copy).unwrap()].ink_diameter, Some(2.0));
+    assert_eq!(sk.wire_constraints.len(), 1);
+    let joined = sk.wire_constraints[0].kind.wires();
+    assert!(joined.contains(&line.as_str()) && joined.contains(&line_copy.as_str()));
+}
+
+#[test]
 fn move_copy_drawn_arc_turns_in_the_sketch_plane_without_flattening() {
     use solidcore_record::Vec3;
     let mut s = Session::default();

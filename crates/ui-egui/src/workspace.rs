@@ -572,9 +572,10 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",
         panel: "SKETCH",
-        promoted: 1,
+        promoted: 2,
         ids: &[
             "sketch.create",
+            "sketch.grease_pencil",
             "sketch.create3d",
             "sketch.edit",
             "sketch.line3d",
@@ -774,6 +775,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.arc.three_point",
             "sketch.construction_line",
             "sketch.infinite",
+            "sketch.grease_pencil",
         ],
     },
     Section {
@@ -1008,6 +1010,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.create", "New Sketch"),
     ("sketch.dimension", "Dimension"),
     ("sketch.finish", "Finish Sketch"),
+    ("sketch.grease_pencil", "Grease Pencil"),
     ("sketch.inspect", "Sketch Report"),
     ("sketch.pattern.circular", "Circular"),
     ("sketch.pattern.rectangular", "Rectangular"),
@@ -2154,7 +2157,7 @@ mod tests {
     fn model_defaults_and_shared_commands_follow_the_map() {
         let specs = solidcraft_engine::command_specs();
         for (panel, expected) in [
-            ("SKETCH", vec!["sketch.create"]),
+            ("SKETCH", vec!["sketch.create", "sketch.grease_pencil"]),
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),

@@ -478,9 +478,11 @@ sketch.drag                       2D sketch only (the sketch solver and engine t
 sketch.drag_end                   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.draw.dimensioned           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.drawing_bounds             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.edit_ink                   stroke color and width: tested in crates/ui-egui/tests/scenarios/grease_pencil.json
 sketch.edit_text                  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.equation_curve             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.equation_curve.edit        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.erase_ink                  stroke deletion and undo: tested in crates/engine/src/cmd/sketch_3d_frame_tests.rs
 sketch.export_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.export_svg                 writes a 2D sketch as SVG (the export_svg tests in crates/engine); no kernel operation
 sketch.extend                     2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -488,6 +490,7 @@ sketch.fillet                     2D sketch only (the sketch solver and engine t
 sketch.finish_auto_constrain      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.freeze_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.glyphs                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.grease_pencil              freehand 3D sketch strokes: tested in crates/ui-egui/tests/scenarios/grease_pencil.json
 sketch.infinite                   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.insert_airfoil             2D sketch only; tested in crates/engine/src/cmd/sketch_import.rs (its file reader in crates/io/src/airfoil.rs, its bounds in solidcore-ops curve_fit)
 sketch.insert_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -501,10 +504,12 @@ sketch.merge_lines                2D sketch only; crates/engine/src/cmd/sketch_m
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move_ink                   stroke translation and rotation: tested in crates/ui-egui/tests/scenarios/grease_pencil.json
 sketch.move_points                2D sketch only; crates/engine/src/cmd/sketch_ux_tests.rs: move_points_moves_each_point_to_its_own_target and move_points_refuses_a_near_that_two_points_answer
 sketch.offset                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.paste_ink                   pasted stroke position and style: tested in crates/ui-egui/tests/scenarios/grease_pencil.json
 sketch.pattern.rectangular        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.point.divide               2D sketch only; crates/engine/src/cmd/sketch_divide_tests.rs: a_line_divided_in_four_keeps_its_quarters_when_it_grows and a_spline_is_divided_into_equal_lengths_along_it
 sketch.point3d                    2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -518,6 +523,7 @@ sketch.repair_link                projection links: engine tests in crates/engin
 sketch.replace                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.resume_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.scale                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.scale_ink                  stroke scaling about the selected placement: tested in crates/engine/src/cmd/sketch_3d_frame_tests.rs
 sketch.slot.arc_center            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation

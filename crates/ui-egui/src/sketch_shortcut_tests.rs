@@ -181,19 +181,77 @@ fn a_sketch_key_with_nothing_selected_asks_for_the_plane_then_starts_the_tool() 
 
 #[test]
 fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
-    for key in ["T", "G"] {
-        let mut h = Harness::new();
-        let id = crate::keymap::commands_for(&h.app, key).into_iter().find(|id| id.starts_with("sketch.")).unwrap_or_default();
-        assert_eq!(solidcraft_engine::find_command(id).map(|c| c.panel), Some("MODIFY"), "{key} is a sketch Modify tool's key");
-        press(&mut h, key);
-        assert!(h.app.dialog.is_none(), "{key} opened {:?}", h.app.dialog.as_ref().map(|d| &d.kind));
-        assert!(h.app.session.active_sketch.is_none(), "{key}");
-        assert!(tool(&h).is_none(), "{key}");
-    }
     let mut h = Harness::new();
+    let id = crate::keymap::commands_for(&h.app, "T").into_iter().find(|id| id.starts_with("sketch.")).unwrap_or_default();
+    assert_eq!(solidcraft_engine::find_command(id).map(|c| c.panel), Some("MODIFY"));
+    press(&mut h, "T");
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(tool(&h).is_none());
     assert!(crate::keymap::commands_for(&h.app, "O").contains(&"sketch.offset"));
     press(&mut h, "O");
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)));
+    assert!(h.app.session.active_sketch.is_none());
+}
+
+#[test]
+fn g_starts_grease_pencil_in_model_only_when_enabled() {
+    let mut h = Harness::new();
+    let grease = crate::grease_pencil::COMMAND;
+    assert_eq!(crate::keymap::command_for(&h.app, "G"), None);
+    assert_eq!(crate::keymap::display_for(&h.app, grease), None);
+    press(&mut h, "G");
+    assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none() && tool(&h).is_none());
+
+    assert_eq!(h.call("ui.prefs", json!({"model_g_starts_grease_pencil":true}))["ok"], true);
+    assert_eq!(crate::keymap::command_for(&h.app, "G"), Some(grease));
+    assert_eq!(crate::keymap::display_for(&h.app, grease).as_deref(), Some("G"));
+    press(&mut h, "G");
+    assert_eq!(tool(&h), Some(grease));
+}
+
+#[test]
+fn g_resumes_grease_pencil_in_an_ink_sketch_and_runs_transform_in_an_ordinary_sketch() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    assert_eq!(crate::keymap::command_for(&h.app, "G"), Some("sketch.transform"));
+    h.app.run("sketch.grease_pencil", json!({"points":[[0,0,0],[4,5,0]]})).unwrap();
+    h.settle();
+    assert_eq!(crate::keymap::command_for(&h.app, "G"), Some(crate::grease_pencil::COMMAND));
+    press(&mut h, "G");
+    assert_eq!(tool(&h), Some(crate::grease_pencil::COMMAND));
+}
+
+#[test]
+fn a_saved_grease_pencil_key_works_in_model_without_the_g_preference() {
+    let mut h = Harness::new();
+    let grease = crate::grease_pencil::COMMAND;
+    // Explicitly saving even the registered chord is an opt-in to the command.
+    h.app.keymap.custom.insert(grease.to_owned(), vec!["G".into()]);
+    let saved = h.app.prefs();
+    let mut h = Harness::new();
+    h.app.load_prefs(&saved);
+    assert!(!h.app.preferences.model_g_starts_grease_pencil);
+    press(&mut h, "G");
+    assert_eq!(tool(&h), Some(grease));
+}
+
+#[test]
+fn grease_pencil_escape_respects_the_finish_sketch_preference() {
+    let mut h = Harness::new();
+    let pasted = h.app.run("sketch.paste_ink", json!({"strokes":[{"points":[[0,0,0],[1,0,0]],"diameter":1,"color":[0,0,0]}]})).unwrap();
+    let sketch = pasted["sketch"].as_u64().unwrap();
+    h.app.run("sketch.edit", json!({"sketch": sketch})).unwrap();
+    h.settle();
+    assert!(crate::grease_pencil::editing(&h.app));
+    h.app.preferences.escape_twice_finishes_sketch = false;
+    press(&mut h, "Escape");
+    press(&mut h, "Escape");
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+
+    h.app.preferences.escape_twice_finishes_sketch = true;
+    press(&mut h, "Escape");
     assert!(h.app.session.active_sketch.is_none());
 }
 

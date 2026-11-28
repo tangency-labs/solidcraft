@@ -5,7 +5,7 @@
 //! annotations. `dry_run` reports what would go and what would fail without changing anything, so the UI
 //! can ask first.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views and annotations ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines, sketches, fills: [the ids that went], deleted: the names of the views that went with those asked for",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, emptied_ink_sketches (if any), deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views and annotations ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines, sketches, fills: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -86,6 +86,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
         spec.run_nested_continuing(s, &json!({"entities":entities}))?;
         return serde_json::to_value(SelectionDeleteResult {
             deleted: Vec::new(),
+            emptied_ink_sketches: Vec::new(),
             deleted_joints: Vec::new(),
             bodies: Vec::new(),
             would_fail: Vec::new(),
@@ -176,6 +177,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
     let reply = SelectionDeleteResult {
         deleted: also,
+        emptied_ink_sketches: Vec::new(),
         deleted_joints: Vec::new(),
         bodies: Vec::new(),
         would_fail: Vec::new(),
@@ -266,6 +268,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let mut entities = Vec::new();
+    let mut ink = BTreeMap::<u64, Vec<String>>::new();
     let mut features: Vec<u64> = Vec::new();
     let mut bodies: Vec<String> = Vec::new();
     let mut faces: Vec<(String, Vec<Vec3>)> = Vec::new();
@@ -331,6 +334,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
+            Sel::ExternalSketchCurve { sketch, id }
+                if before.state().sketch(*sketch).is_some_and(|s| s.sketch.wires.iter().any(|w| w.id == *id && w.ink_diameter.is_some())) =>
+            {
+                ink.entry(*sketch).or_default().push(id.clone());
+            }
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
             Sel::Drawing { .. } => skip("a drawing's objects are deleted with the drawing open".into()),
         }
@@ -352,6 +360,15 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             )?;
             done = true;
         }
+    }
+    let mut emptied_ink_sketches = Vec::new();
+    for (sketch, entities) in ink.into_iter().filter(|(sketch, _)| !features.contains(sketch)) {
+        super::sketch_3d::ink::delete_strokes(s, sketch, &entities)?;
+        if s.doc.feature(sketch).is_none() {
+            emptied_ink_sketches.push(sketch);
+        }
+        s.refresh();
+        done = true;
     }
     // Faces of a body that is going anyway are left to it; the rest become Delete Face features.
     for (body, points) in faces.iter().filter(|(b, _)| !bodies.contains(b)) {
@@ -430,6 +447,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
     let reply = SelectionDeleteResult {
         deleted,
+        emptied_ink_sketches,
         deleted_joints: joints,
         bodies,
         would_fail,

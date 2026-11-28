@@ -1882,6 +1882,48 @@ fn move_copy_moves_drawn_points_and_curves() {
 }
 
 #[test]
+fn ink_scale_keeps_the_center_of_the_active_occurrence() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let out = run(&mut s, "sketch.grease_pencil", json!({"points":[[17,32,45],[17,36,45]],"diameter":2}));
+    let wire = out["curves"][0].as_str().unwrap();
+    run(&mut s, "sketch.scale_ink", json!({"strokes":[{"sketch":sketch,"wire":wire}],"factor":2}));
+    let world = s.world_state().unwrap();
+    let scaled = world.sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == wire).unwrap();
+    near(scaled.fit[0], Vec3::new(17.0, 30.0, 45.0));
+    near(scaled.fit[1], Vec3::new(17.0, 38.0, 45.0));
+    assert_eq!(scaled.ink_diameter, Some(4.0));
+}
+
+#[test]
+fn ink_paste_clears_the_whole_body_selection() {
+    let mut s = Session { selection_all_bodies: true, ..Session::default() };
+    let pasted = run(&mut s, "sketch.paste_ink", json!({"strokes":[{"points":[[1,2,3],[4,5,6]],"diameter":1}]}));
+    assert_eq!(s.selection.len(), 1);
+    assert!(matches!(&s.selection[0], crate::Sel::ExternalSketchCurve { sketch, id }
+        if Some(*sketch) == pasted["sketch"].as_u64() && Some(id.as_str()) == pasted["strokes"][0].as_str()));
+    assert!(!s.selection_all_bodies);
+}
+
+#[test]
+fn ink_erase_removes_the_named_stroke_and_undo_restores_it() {
+    let mut s = Session::default();
+    let pasted =
+        run(&mut s, "sketch.paste_ink", json!({"strokes":[{"points":[[0,0,0],[10,0,0]],"diameter":1},{"points":[[0,5,0],[10,5,0]],"diameter":2}]}));
+    let sketch = pasted["sketch"].as_u64().unwrap();
+    let first = pasted["strokes"][0].as_str().unwrap();
+    let second = pasted["strokes"][1].as_str().unwrap();
+    let before = s.doc.to_json();
+    let erased = run(&mut s, "sketch.erase_ink", json!({"strokes":[{"sketch":sketch,"wire":first}]}));
+    assert_eq!(erased["strokes"], 1);
+    let wires = &s.doc.sketch(sketch).unwrap().wires;
+    assert_eq!(wires.len(), 1);
+    assert_eq!(wires[0].id, second);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
 fn move_drawn_point_past_the_end_changes_nothing() {
     let (mut s, _, _, _) = second_frame();
     let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();

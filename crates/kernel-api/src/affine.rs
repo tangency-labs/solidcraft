@@ -45,15 +45,21 @@ pub struct SquareFaceLevel {
 
 /// The placement maths of one kernel ([`crate::OpKind::Affine`]).
 pub trait Affine: Backend {
+    /// The move by `by`.
+    fn translation(&self, by: [f64; 3]) -> Result<Matrix, AffineRefused>;
     /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
     /// line through `point` along it.
     fn rotation(&self, point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused>;
+    /// The uniform scale by `factor`, keeping `center` in place.
+    fn scaling(&self, center: [f64; 3], factor: f64) -> Result<Matrix, AffineRefused>;
     /// `first`, then `second`: steps stacked into one map.
     fn then(&self, first: &Matrix, second: &Matrix) -> Result<Matrix, AffineRefused>;
     /// The map that undoes `matrix`.
     fn inverse(&self, matrix: &Matrix) -> Result<Matrix, AffineRefused>;
     /// `point` under `matrix`.
     fn apply_point(&self, matrix: &Matrix, point: [f64; 3]) -> [f64; 3];
+    /// The translation that brings `from` to `to`.
+    fn translation_between(&self, from: [f64; 3], to: [f64; 3]) -> Result<Matrix, AffineRefused>;
     /// Whether `matrix` is a rotation or reflection and a translation, with the axis and
     /// homogeneous-entry tolerances given. A map not finite, or a tolerance not valid, is not.
     fn is_rigid(&self, matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool;

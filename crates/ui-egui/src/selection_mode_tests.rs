@@ -121,7 +121,7 @@ fn the_filter_narrows_the_mode() {
     stacked(&mut h);
     let top = face(&h, "Base", true);
     let edge = Hit::Edge { body: "Base".into(), index: 0, mid: Vec3::ZERO, point: Vec3::ZERO };
-    let curve = Hit::SketchCurve { sketch: 1, id: "c1".into(), straight: true, point: Vec3::ZERO };
+    let curve = Hit::SketchCurve { sketch: 1, id: "c1".into(), straight: true, point: Vec3::ZERO, ink_frame: None };
     let allowed = |h: &Harness, hit: &Hit| crate::selection_mode::allowed(&h.app, hit);
     h.app.ui.pick_off = vec!["faces".into()];
     set_mode(&mut h, PickMode::Faces);
