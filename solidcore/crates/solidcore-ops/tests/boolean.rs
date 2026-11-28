@@ -1756,10 +1756,11 @@ fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
 /// Every slice of the coil square to the axis, from z = 12 to 30, is the circle turned about
 /// the axis, and so is its part inside the cylinder: the lens of the circle (radius r = 1, its
 /// centre d = 10 from the axis) and the cylinder's disc (R = 10), of area
-/// r² acos((d² + r² - R²) / 2dr) + R² acos((d² + R² - r²) / 2dR)
-/// - √((-d + r + R)(d + r - R)(d - r + R)(d + r + R)) / 2. The cut's volume is the cylinder's,
-/// 3000 π, less 18 lenses (Cavalieri). The coil's wall lies within the sweep's tolerance of its
-/// screw surface, so the cut's volume is within the coil's area times that tolerance of it.
+/// r² acos((d² + r² - R²) / 2dr) + R² acos((d² + R² - r²) / 2dR) -
+/// √((-d + r + R)(d + r - R)(d - r + R)(d + r + R)) / 2. The cut's volume is the
+/// cylinder's, 3000 π, less 18 lenses (Cavalieri). The coil's wall lies within the sweep's
+/// tolerance of its screw surface, so the cut's volume is within the coil's area times that
+/// tolerance of it.
 ///
 /// The counts: the groove's two helices on the cylinder (radius 10, where the circle crosses
 /// it at angles ±acos(-1/20) about its centre) cross the cylinder's seam half-plane (y 0,
@@ -1770,6 +1771,7 @@ fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
 /// end cap inside the shaft, and the cylinder's side in seven pieces between them: 11.
 /// Edges by Euler's formula for one shell without a handle: 18 + 11 - 2 = 27.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn a_coil_cut_from_a_circle_on_a_shafts_end_face_builds_like_its_mirror_image() {
     use solidcore_ops::sweep::screw_sweep;
     all_fixes();
