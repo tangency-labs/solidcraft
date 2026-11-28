@@ -118,8 +118,8 @@ pub trait LocaleNames {
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
     /// another component, a feature's request to reselect a reference it lost, an open Stitch
-    /// result and a profile pick with too many curves are translated where they are shown. Other
-    /// text is returned unchanged.
+    /// result, a profile pick with too many curves and a pattern's coordinate range refusal are
+    /// translated where they are shown. Other text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -177,6 +177,12 @@ impl LocaleNames for Locale {
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
             return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+        }
+        for id in ["diagnostic.pattern_circular_coordinate_range", "diagnostic.pattern_spacing_coordinate_range"] {
+            let english = Locale::new(&ENGLISH).text(id);
+            if let Some((before, after)) = text.split_once(english) {
+                return format!("{before}{}{after}", self.text(id));
+            }
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)

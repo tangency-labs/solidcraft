@@ -76,6 +76,8 @@ impl From<KernelError> for BackendError {
     fn from(e: KernelError) -> BackendError {
         match e {
             KernelError::Invalid(m) => BackendError::Invalid(m),
+            // The same words the record check gave before this had its own variant.
+            KernelError::CoordinateCeiling => BackendError::Invalid(solidcore_record::brep::Invalid(crate::BREP_COORDINATE_CEILING).to_string()),
             KernelError::TooLarge(why) => {
                 let largest = crate::blend::named_fit(&why);
                 BackendError::TooLarge { why, largest }
