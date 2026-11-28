@@ -10,7 +10,6 @@
 //! | [`certify_no_fold`]   | none     |
 //! | [`FoldCertificate`]   | none     |
 //! | [`NotProvedReason`]   | none     |
-//! | `normal_angle_bound` (crate) | none |
 //!
 //! **What is proved.** A fold of the continuation is where its normal `N = Du x Dv`
 //! vanishes (the map stops being an immersion there), or where `N` reverses across the
@@ -44,10 +43,6 @@
 //! cell wide) only the computed `N . d >= -E` is shown: a zero of `N` there (an
 //! even-order zero of `N . d` up to `1 / 16` of a cell off the face, for one), or a
 //! reversal within `2 E`, is not excluded.
-//!
-//! **The normal's angle.** The same polynomial normals give `normal_angle_bound` (for
-//! `query::face_normal_angle`): a proved upper bound of the angle between a direction and
-//! a B-spline net's normal over a domain, from a cone per piece (see its docs).
 //!
 //! **What is not proved.** That the continuation does not come back over the face
 //! without folding (a revolution swept past a full turn, a sheet curling round onto
@@ -422,36 +417,19 @@ fn extruded_net(
     n: crate::geom::extent1d::Extent1d,
     d: crate::geom::extent1d::Extent1d,
 ) -> Result<FoldCertificate> {
-    let (surface, extra) = match extrusion_net(c, e)? {
-        Ok(net) => net,
-        Err(reason) => {
-            return Ok(FoldCertificate::NotProved {
-                uv: Point2::new(0.5 * (d.min() + d.max()), 0.5),
-                reason,
-            });
-        }
+    let not = |reason| FoldCertificate::NotProved {
+        uv: Point2::new(0.5 * (d.min() + d.max()), 0.5),
+        reason,
     };
-    let natural = Extent2d::from_bounds(n.min(), 0.0, n.max(), 1.0);
-    let domain = Extent2d::from_bounds(d.min(), 0.0, d.max(), 1.0);
-    net_certificate(k, &surface, &natural, &domain, extra, false)
-}
-
-/// The B-spline net of the extrusion `C(u) + v E` of the B-spline generator `c` over
-/// `v` in `[0, 1]`, and its `extra` error ([`extruded_net`]); why not, where the
-/// generator has no NURBS form here.
-fn extrusion_net(
-    c: &crate::nurbs::b_spline_curve::p1::BSplineCurve,
-    e: Vec3,
-) -> Result<core::result::Result<(NlSurface, f64), NotProvedReason>> {
     let Some(nurb) = c.gw_nurb() else {
-        return Ok(Err(NotProvedReason::NetForm));
+        return Ok(not(NotProvedReason::NetForm));
     };
     let emax = e.x.abs().max(e.y.abs()).max(e.z.abs());
     let mut extra = 0.0_f64;
     let mut net = Vec::new();
     for &cp in nurb.cpts() {
         if cp.z == NOZ {
-            return Ok(Err(NotProvedReason::NetForm));
+            return Ok(not(NotProvedReason::NetForm));
         }
         let w = if cp.w == NOW { 1.0 } else { cp.w };
         let moved = CPoint::new(cp.x + w * e.x, cp.y + w * e.y, cp.z + w * e.z, cp.w);
@@ -466,7 +444,9 @@ fn extrusion_net(
         nurb.knots().to_vec(),
         vec![0.0, 0.0, 1.0, 1.0],
     )?;
-    Ok(Ok((surface, extra)))
+    let natural = Extent2d::from_bounds(n.min(), 0.0, n.max(), 1.0);
+    let domain = Extent2d::from_bounds(d.min(), 0.0, d.max(), 1.0);
+    net_certificate(k, &surface, &natural, &domain, extra, false)
 }
 
 /// A polynomial with its two magnitude twins (see the module header).
@@ -700,29 +680,15 @@ fn net_certificate(
     extra: f64,
     split_v: bool,
 ) -> Result<FoldCertificate> {
-    match form_of(nurb, extra, split_v)? {
-        Ok(form) => certify_pieces(k, &form, natural, domain),
-        Err(reason) => Ok(FoldCertificate::NotProved {
-            uv: domain.evaluate(0.5, 0.5),
-            reason,
-        }),
-    }
-}
-
-/// The polynomial pieces' data ([`Form`]) of the NURBS net `nurb`, `extra` and `split_v`
-/// as in [`net_certificate`]; why not, where the net has none here.
-fn form_of(
-    nurb: &NlSurface,
-    extra: f64,
-    split_v: bool,
-) -> Result<core::result::Result<Form, NotProvedReason>> {
+    let centre = domain.evaluate(0.5, 0.5);
+    let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
     let (p, q) = (nurb.p(), nurb.q());
     let mut rational = false;
     let mut net_size = 0.0_f64;
     for row in nurb.rows() {
         for c in row {
             if c.z == NOZ {
-                return Ok(Err(NotProvedReason::NetForm));
+                return Ok(not(NotProvedReason::NetForm));
             }
             let w = if c.w == NOW {
                 1.0
@@ -736,7 +702,7 @@ fn form_of(
                 && above(w, 0.0)
                 && w.is_finite())
             {
-                return Ok(Err(NotProvedReason::NetNotFinite));
+                return Ok(not(NotProvedReason::NetNotFinite));
             }
             net_size = net_size.max(c.x.abs()).max(c.y.abs()).max(c.z.abs()).max(w);
         }
@@ -747,7 +713,7 @@ fn form_of(
         (2 * p, 2 * q)
     };
     if du > MAX_DEGREE || dv > MAX_DEGREE || p == 0 || q == 0 {
-        return Ok(Err(NotProvedReason::Degrees));
+        return Ok(not(NotProvedReason::Degrees));
     }
     // an interior knot below full multiplicity is where the extraction inserts
     let inserts = |knots: &[f64], degree: usize| {
@@ -797,7 +763,7 @@ fn form_of(
         extraction
     };
     if !e0.is_finite() {
-        return Ok(Err(NotProvedReason::NetNotFinite));
+        return Ok(not(NotProvedReason::NetNotFinite));
     }
     let mut patches = Vec::new();
     for column in decompose_to_bez(nurb)? {
@@ -808,10 +774,10 @@ fn form_of(
             let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
                 (uk.first(), uk.last(), vk.first(), vk.last())
             else {
-                return Ok(Err(NotProvedReason::Patches));
+                return Ok(not(NotProvedReason::Patches));
             };
             if !(above(u1, u0) && above(v1, v0)) {
-                return Ok(Err(NotProvedReason::Patches));
+                return Ok(not(NotProvedReason::Patches));
             }
             let mut c: [Vec<f64>; 4] = Default::default();
             for row in patch.rows() {
@@ -844,7 +810,7 @@ fn form_of(
         patches.push(out);
     }
     if patches.first().is_none_or(Vec::is_empty) {
-        return Ok(Err(NotProvedReason::Patches));
+        return Ok(not(NotProvedReason::Patches));
     }
     // NLib's span search skips an end span narrower than `1e-12` (it continues the next
     // one past the knot range), which the patches here would not: refused
@@ -855,7 +821,7 @@ fn form_of(
         || narrow(column.first().map(|x| x.v))
         || narrow(column.last().map(|x| x.v))
     {
-        return Ok(Err(NotProvedReason::Patches));
+        return Ok(not(NotProvedReason::Patches));
     }
     // rounding levels: restriction, derivative, products and differences, the dot
     let product = |a: (usize, usize)| (a.0 + 1) * (a.1 + 1) + 7;
@@ -881,7 +847,7 @@ fn form_of(
         c0_lines,
         split_v,
     };
-    Ok(Ok(form))
+    certify_pieces(k, &form, natural, domain)
 }
 
 /// A rectangle `[x0, x1] x [y0, y1]` of STEP parameters.
@@ -1320,244 +1286,6 @@ fn certify_pieces(
     Ok(FoldCertificate::Proved)
 }
 
-/// The half angle (radians) below which a piece of [`normal_angle_bound`] is not quartered
-/// further: its cone is then within this of the piece's own normals.
-pub(crate) const FINE_ANGLE: f64 = 0.02;
-
-/// The most times a piece of [`normal_angle_bound`] is quartered (a span's piece is then
-/// `1 / 256` of it across).
-const ANGLE_SPLITS: usize = 8;
-
-/// The operation path of [`normal_angle_bound`]'s cancel polls.
-const OP_ANGLE: &str = "surface::fold_certificate::normal_angle_bound";
-
-/// A proved upper bound, in radians (at most pi), of the angle between the unit `d` and the
-/// normal `Du x Dv` of `s` (reversed when `reversed`) at every point of `domain` (STEP
-/// parameters), for a B-spline net (a ball patch's too) and an extrusion of a B-spline
-/// generator (as the B-spline net [`extrusion_net`] makes, over `v` in `[0, 1]`: its normal
-/// does not depend on `v`). `None` for every other kind, a net with no form here
-/// ([`form_of`]), a domain that is not finite or has no width, a weight not proved positive
-/// on a piece, a piece whose normals are not proved within a quarter turn of one direction
-/// after [`ANGLE_SPLITS`] quarterings, or past the work bound.
-///
-/// The domain is cut at the patches' spans; on each piece the normal's components are
-/// polynomials ([`normal_on`]) whose values lie in their coefficients' hull, each computed
-/// coefficient within its bound `E` ([`Net::bounds`]) of the exact one. With `a` the
-/// direction of the computed normal at the piece's centre, every exact normal `N` of the
-/// piece has `N . a >= m` (the least coefficient of `N . a` less its `E`) and
-/// `|N x a| <= P` (each component of `N x a` is `N` dotted with a vector of `a`'s
-/// components, bounded by its largest coefficient magnitude plus its `E`), so it lies
-/// within `h = atan(P / m)` of `a` when `m > 0` (`tan` of the angle between `N` and `a` is
-/// `|N x a| / N . a` for any `a`, unit or not); the piece's bound is the angle between `a`
-/// (in the sense asked) and `d` plus `h`, each rounded up, and the domain's bound is the
-/// largest. A piece is quartered (halved in `u` where the normal does not depend on `v`)
-/// while no cone is proved, or while `h` is above [`FINE_ANGLE`] and its bound would raise
-/// the largest so far, at most [`ANGLE_SPLITS`] times; past that, a piece with a cone keeps
-/// its looser bound and one without proves nothing.
-///
-/// # Errors
-///
-/// Cancellation, and those of the constructions [`form_of`] and [`normal_on`] make.
-pub(crate) fn normal_angle_bound(
-    k: &Kernel,
-    s: &Surface,
-    domain: &Extent2d,
-    reversed: bool,
-    d: Vec3,
-) -> Result<Option<f64>> {
-    fn net_of(b: &BSplineSurface) -> Option<&NlSurface> {
-        if b.form() == BSplineSurfaceForm::Polynomial {
-            None
-        } else {
-            b.gw_nurb()
-        }
-    }
-    let (form, domain) = match s.kind() {
-        SurfaceKind::BSpline(b) => {
-            let Some(nurb) = net_of(b) else {
-                return Ok(None);
-            };
-            (form_of(nurb, 0.0, true)?, *domain)
-        }
-        SurfaceKind::BallPatch(bp) => {
-            let Some(nurb) = net_of(bp.net()) else {
-                return Ok(None);
-            };
-            (form_of(nurb, 0.0, true)?, *domain)
-        }
-        SurfaceKind::SurfOfExtrusion(e) => {
-            let Some(CurveKind::BSpline(c)) = e.gen_curve().map(Curve::kind) else {
-                return Ok(None);
-            };
-            let Ok((net, extra)) = extrusion_net(c, e.extrusion_vector())? else {
-                return Ok(None);
-            };
-            let u = domain.u_interval();
-            (
-                form_of(&net, extra, false)?,
-                Extent2d::from_bounds(u.min(), 0.0, u.max(), 1.0),
-            )
-        }
-        _ => return Ok(None),
-    };
-    let Ok(form) = form else {
-        return Ok(None);
-    };
-    cone_bound(k, &form, &domain, reversed, d)
-}
-
-/// [`normal_angle_bound`] on the pieces of `form` over `domain`.
-fn cone_bound(
-    k: &Kernel,
-    form: &Form,
-    domain: &Extent2d,
-    reversed: bool,
-    d: Vec3,
-) -> Result<Option<f64>> {
-    let (lo, hi) = (domain.min(), domain.max());
-    if !(lo.x.is_finite()
-        && lo.y.is_finite()
-        && hi.x.is_finite()
-        && hi.y.is_finite()
-        && above(hi.x, lo.x)
-        && above(hi.y, lo.y)
-        && d.x.is_finite()
-        && d.y.is_finite()
-        && d.z.is_finite())
-    {
-        return Ok(None);
-    }
-    let b = Binomials::new();
-    let uspans: Vec<[f64; 2]> = form
-        .patches
-        .iter()
-        .filter_map(|c| c.first().map(|p| p.u))
-        .collect();
-    let vspans: Vec<[f64; 2]> = form
-        .patches
-        .first()
-        .map(|c| c.iter().map(|p| p.v).collect())
-        .unwrap_or_default();
-    let ubreaks: Vec<f64> = uspans.iter().flat_map(|s| *s).collect();
-    let vbreaks: Vec<f64> = vspans.iter().flat_map(|s| *s).collect();
-    let mut stack: Vec<(Rect, usize)> = Vec::new();
-    for x in cuts(lo.x, hi.x, &ubreaks) {
-        for y in cuts(lo.y, hi.y, &vbreaks) {
-            stack.push((Rect { x, y }, 0));
-        }
-    }
-    let mut bound = 0.0_f64;
-    let mut work = 0_usize;
-    while let Some((r, depth)) = stack.pop() {
-        k.check_cancelled(OP_ANGLE)?;
-        work = work.saturating_add(1);
-        if work > form.max_pieces {
-            return Ok(None);
-        }
-        let m = r.centre();
-        let Some(patch) = form
-            .patches
-            .get(span_of(&uspans, m.x))
-            .and_then(|col| col.get(span_of(&vspans, m.y)))
-        else {
-            return Ok(None);
-        };
-        let Some(n) = normal_on(form, patch, &r, &b)? else {
-            return Ok(None);
-        };
-        let last = depth >= ANGLE_SPLITS;
-        match piece_cone(form, &n, &b)? {
-            Some((a, h)) => {
-                let a = if reversed { a * -1.0 } else { a };
-                let here = angle_up(a, d) + h;
-                // a piece that cannot raise the largest bound is not split
-                if last || h <= FINE_ANGLE || here <= bound {
-                    bound = bound.max(here);
-                } else {
-                    for q in r.splits(form.split_v) {
-                        stack.push((q, depth + 1));
-                    }
-                }
-            }
-            None if last => return Ok(None),
-            None => {
-                for q in r.splits(form.split_v) {
-                    stack.push((q, depth + 1));
-                }
-            }
-        }
-    }
-    Ok(Some(bound.min(core::f64::consts::PI)))
-}
-
-/// The cone about `a`, the direction of the computed normal `n` at the piece's centre, that
-/// holds every exact normal of the piece: `(a, h)`, `a` unit, its half angle `h` in radians
-/// below a quarter turn, rounding included ([`normal_angle_bound`]); `None` where none is
-/// proved.
-fn piece_cone(form: &Form, n: &[Net; 3], b: &Binomials) -> Result<Option<(Vec3, f64)>> {
-    let [nx, ny, nz] = n;
-    let a = Vec3::new(
-        nx.v.eval(0.5, 0.5),
-        ny.v.eval(0.5, 0.5),
-        nz.v.eval(0.5, 0.5),
-    );
-    // the largest exact `|f|` of the net `f`: each coefficient's magnitude plus its bound
-    let largest = |f: &Net| {
-        let mut top = 0.0_f64;
-        for (&x, &e) in f.v.coefficients().iter().zip(&f.bounds(form.levels)) {
-            if !(x.is_finite() && e.is_finite()) {
-                return None;
-            }
-            top = top.max((x.abs() + e) * (1.0 + gamma(1)));
-        }
-        Some(top)
-    };
-    // the least exact `N . a`: each computed coefficient less its bound, and the
-    // subtraction's own rounding
-    let along = Net::combine(n, a, b)?;
-    let mut least = f64::INFINITY;
-    for (&x, &e) in along
-        .v
-        .coefficients()
-        .iter()
-        .zip(&along.bounds(form.levels))
-    {
-        if !(x.is_finite() && e.is_finite()) {
-            return Ok(None);
-        }
-        least = least.min((x - e) - gamma(2) * (x.abs() + e));
-    }
-    // the largest exact `|N x a|`: its components are `N` dotted with exact vectors of
-    // `a`'s components (copies and negations)
-    let mut across = 0.0_f64;
-    for v in [
-        Vec3::new(0.0, a.z, -a.y),
-        Vec3::new(-a.z, 0.0, a.x),
-        Vec3::new(a.y, -a.x, 0.0),
-    ] {
-        let Some(top) = largest(&Net::combine(n, v, b)?) else {
-            return Ok(None);
-        };
-        across += top * top;
-    }
-    let across = across.sqrt() * (1.0 + gamma(4));
-    if !(least.is_finite() && across.is_finite() && above(least, 0.0)) {
-        return Ok(None);
-    }
-    let h = (across / least).atan() * (1.0 + gamma(8)) + gamma(8);
-    let len = a.length();
-    if !(h < core::f64::consts::FRAC_PI_2 && len.is_finite() && above(len, 0.0)) {
-        return Ok(None);
-    }
-    Ok(Some((a / len, h)))
-}
-
-/// The angle between the unit vectors `a` and `b`, by `atan2` of the cross and the dot
-/// products, rounded up.
-fn angle_up(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b)) * (1.0 + gamma(8)) + gamma(8)
-}
-
 /// Closed-form certificates of the analytic kinds. In their STEP parameters (`u` the
 /// angle about the axis, `v` the latitude, height or minor angle; angles in degrees)
 /// `Du x Dv = lambda(v) n(u, v)` with `n` a normal field that never vanishes:
@@ -1701,97 +1429,6 @@ mod tests {
             t: c(t),
             te: c(te),
         }
-    }
-
-    /// The B-spline surface of the net `rows` (homogeneous points), degrees `p`, `q`.
-    fn surface(rows: Vec<Vec<CPoint>>, p: usize, q: usize, uk: Vec<f64>, vk: Vec<f64>) -> Surface {
-        Surface::from(BSplineSurface::from_nurb(
-            NlSurface::new(rows, p, q, uk, vk).unwrap(),
-            false,
-        ))
-    }
-
-    /// The paraboloid `z = x^2 + y^2` over `[-a, a]^2`, an exact biquadratic Bezier net
-    /// (normal `(-2 x, -2 y, 1)`): from `+z` the normals turn at most `atan(2 a sqrt 2)` (at
-    /// the corners), and reversed, from `-z`, the same; from `+x` at most a quarter turn
-    /// plus `atan(2 a)` (at `x = a`, `y = 0`). Each bound holds its largest angle and is
-    /// within `0.05` of it.
-    #[test]
-    fn a_paraboloid_normal_angle_bound_holds_its_largest_angle() {
-        let k = Kernel::default();
-        let a = 0.25;
-        let xs = [-a, 0.0, a];
-        let zs = [a * a, -a * a, a * a];
-        let rows = (0..3)
-            .map(|i| {
-                (0..3)
-                    .map(|j| CPoint::new(xs[i], xs[j], zs[i] + zs[j], NOW))
-                    .collect()
-            })
-            .collect();
-        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-        let s = surface(rows, 2, 2, knots.clone(), knots);
-        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let corner = (2.0 * a * 2.0_f64.sqrt()).atan();
-        let side = core::f64::consts::FRAC_PI_2 + (2.0 * a).atan();
-        for (reversed, d, exact) in [
-            (false, Vec3::new(0.0, 0.0, 1.0), corner),
-            (true, Vec3::new(0.0, 0.0, -1.0), corner),
-            (false, Vec3::new(1.0, 0.0, 0.0), side),
-        ] {
-            let bound = normal_angle_bound(&k, &s, &domain, reversed, d)
-                .unwrap()
-                .unwrap();
-            assert!(
-                (exact..=exact + 0.05).contains(&bound),
-                "{reversed} {d:?}: {bound} against {exact}"
-            );
-        }
-    }
-
-    /// The rational branch: the half cylinder of radius 1 about z (two rational quadratic
-    /// quarter arcs, `(1, 0)` to `(-1, 0)`, extruded 1 along z; normal radial). Over
-    /// `u` in `[0.25, 0.5]` (45 to 90 degrees) the normals are within 45 degrees of `+y`;
-    /// over the whole half (0 to 180 degrees) one is opposite `+x`: the bound is pi.
-    #[test]
-    fn a_rational_cylinder_normal_angle_bound_holds_its_largest_angle() {
-        let k = Kernel::default();
-        let w = core::f64::consts::FRAC_1_SQRT_2;
-        let row = |x: f64, y: f64, wt: f64| {
-            vec![
-                CPoint::new(x * wt, y * wt, 0.0, wt),
-                CPoint::new(x * wt, y * wt, wt, wt),
-            ]
-        };
-        let rows = vec![
-            row(1.0, 0.0, 1.0),
-            row(1.0, 1.0, w),
-            row(0.0, 1.0, 1.0),
-            row(-1.0, 1.0, w),
-            row(-1.0, 0.0, 1.0),
-        ];
-        let s = surface(
-            rows,
-            2,
-            1,
-            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
-            vec![0.0, 0.0, 1.0, 1.0],
-        );
-        let eighth = Extent2d::from_bounds(0.25, 0.0, 0.5, 1.0);
-        let bound = normal_angle_bound(&k, &s, &eighth, false, Vec3::new(0.0, 1.0, 0.0))
-            .unwrap()
-            .unwrap();
-        let exact = core::f64::consts::FRAC_PI_4;
-        assert!(
-            (exact..=exact + 0.05).contains(&bound),
-            "{bound} against {exact}"
-        );
-        let half = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let turned = normal_angle_bound(&k, &s, &half, false, Vec3::new(1.0, 0.0, 0.0)).unwrap();
-        assert!(
-            turned.is_none_or(|b| b >= core::f64::consts::PI),
-            "{turned:?}"
-        );
     }
 
     /// A coefficient or bound that is not finite decides nothing, strict or not

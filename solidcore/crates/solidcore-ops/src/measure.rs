@@ -28,7 +28,7 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
-use solidcore::query::face_normal_angle::normal_angle_bound;
+use solidcore::query::face_normal_angle::normal_angle_interval;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::brep::p3::{
@@ -2214,32 +2214,32 @@ impl Body {
         })
     }
 
-    /// A proved upper bound, in radians (`0` to pi), of the angle between `direction` and
-    /// record face `face`'s outward normal at every point of the face
-    /// ([`solidcore::query::face_normal_angle::normal_angle_bound`]: plane; cylinder, cone,
-    /// sphere and ring torus over a ball that holds the face; B-spline nets and extrusions over
-    /// the face's UV domain). Below a quarter turn, the face turns toward `direction`
-    /// everywhere: it is single-valued over the planes square to it. `None` where nothing is
-    /// proved (see the kernel's list), or for a `direction` of no length.
+    /// A proved interval `[lo, hi]` (radians, within `0..=pi`) of the angle between `direction`
+    /// and record face `face`'s outward normal at every point of the face
+    /// ([`solidcore::query::face_normal_angle::normal_angle_interval`]: plane, cylinder, cone,
+    /// sphere and ring torus, over a ball that holds the face). An upper end below a quarter
+    /// turn makes the face's projection along `direction` a local diffeomorphism, not a
+    /// one-to-one one (the kernel's docs). `None` where nothing is proved (another surface
+    /// kind, a cone a quarter turn or wider, ...), or for a `direction` of no length.
     ///
     /// # Errors
     /// [`Error::Argument`] for an index past the faces, a `direction` that is not finite, or a
     /// face without two uses; [`Error::Unsupported`] for a face with material on both sides;
     /// the errors of the session.
-    pub fn face_normal_angle_bound(
+    pub fn face_normal_angle_interval(
         &self,
         order: &Order,
         face: usize,
         direction: [f64; 3],
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<[f64; 2]>> {
         let f = order::face(order, face)?;
         let d = point(direction)?;
-        read_body("face_normal_angle_bound", self, |k, b| {
+        read_body("face_normal_angle_interval", self, |k, b| {
             let fu = match outer_faceuse(b, f)? {
                 Ok(fu) => fu,
                 Err(e) => return Ok(Err(e)),
             };
-            Ok(Ok(normal_angle_bound(k, b, f, fu, d)?))
+            Ok(Ok(normal_angle_interval(k, b, f, fu, d)?))
         })?
     }
 
