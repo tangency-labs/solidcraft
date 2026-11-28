@@ -1521,7 +1521,8 @@ fn cmd_mcp_setup(args: &[String]) -> Result<(), String> {
 }
 
 const MCP_VALUED_FLAGS: &[&str] = &["--in", "--connect", "--token", "--allow-path", "--param-check"];
-const MCP_SWITCH_FLAGS: &[&str] = &["--headless", "--allow-any-path", "--require-allow-path", "--render-gpu", "--compact"];
+const MCP_SWITCH_FLAGS: &[&str] =
+    &["--headless", "--allow-any-path", "--require-allow-path", "--render-gpu", solidcraft_mcp::COMPACT_FLAG, solidcraft_mcp::STRUCTURED_FLAG];
 
 /// MCP server on stdio: headless (optionally starting from a design or script) or bridged to
 /// a running app's control port. stdout carries only protocol messages. Files the agent's tool

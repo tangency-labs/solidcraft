@@ -84,6 +84,8 @@ fn mcp_rejects_unknown_flags_and_missing_values() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(expected), "{extra:?}: {stderr}");
     }
+    let structured = cli().args(["mcp", "--headless", "--structured"]).stdin(Stdio::null()).output().unwrap();
+    assert!(structured.status.success(), "{}", String::from_utf8_lossy(&structured.stderr));
 }
 
 #[test]
