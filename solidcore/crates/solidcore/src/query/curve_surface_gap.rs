@@ -46,7 +46,7 @@ use crate::blend::fillet_section::station::{
 };
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
+use crate::geom::nurbs_enclosure::{nurbs_partials_over_piece, partials_over_piece, Shift};
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
