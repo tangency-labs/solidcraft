@@ -531,6 +531,88 @@ fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_wi
     assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
 }
 
+/// Two countersunk holes cut from one plate, each as SolidCraft drills one: a revolved cone (90°,
+/// radius 4.5 at the top, z = 12, running on to 0.9 of the bore's radius, inside the bore) cut
+/// first, then the bore's cylinder (radius 2.25). The cone and the bore are coaxial, so they meet
+/// in one exact circle (z = 9.75) where their generators meet. Traced instead, that circle was a
+/// fitted cubic on both faces, and every later cut that carried its trims bisected each of them
+/// hundreds to thousands of times to prove it within its edge's tolerance
+/// (tangency-labs/solidcraft#22596). The second hole's cuts carry the first hole's trims: each is
+/// gated, and none is bisected. The plate keeps the closed-form volume,
+/// `30 · 20 · 12 − 2 · (π · 2.25² · 9.75 + π · 2.25 / 3 · (4.5² + 4.5 · 2.25 + 2.25²))`.
+#[test]
+fn countersinks_carry_their_exact_circles_trims_without_bisecting_them() {
+    all_fixes();
+    let tools = |x: f64| {
+        let p = |r: f64, z: f64| [x + r, 0.0, z];
+        let section = |points: &[[f64; 3]]| -> Vec<Curve> {
+            points
+                .iter()
+                .zip(points.iter().cycle().skip(1))
+                .map(|(a, b)| Curve::Line { start: *a, end: *b })
+                .collect()
+        };
+        let revolved = |points: &[[f64; 3]]| {
+            revolve(&section(points), [x, 0.0, 0.0], [0.0, 0.0, 1.0], TAU, true).unwrap()
+        };
+        let low = 12.0 - (4.5 - 0.9 * 2.25);
+        [
+            revolved(&[
+                p(4.5, 12.0),
+                p(0.9 * 2.25, low),
+                p(0.0, low),
+                p(0.0, 13.0),
+                p(4.5, 13.0),
+            ]),
+            revolved(&[p(0.0, -1.0), p(2.25, -1.0), p(2.25, 13.0), p(0.0, 13.0)]),
+        ]
+    };
+    let plate = || make_box([0.0, -10.0, 0.0], [30.0, 20.0, 12.0]).unwrap();
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held = |b: &Body| {
+        let record = b.to_record().unwrap().0;
+        solidcore_convert::brep::to_kernel(&mut k, &record, true)
+            .unwrap()
+            .0
+    };
+    let mut cut = held(&plate());
+    let ([sink, bore], [sink2, bore2]) = (tools(8.0), tools(21.0));
+    let (first, second) = ([held(&sink), held(&bore)], [held(&sink2), held(&bore2)]);
+    for tool in first {
+        cut = solidcore::boolean::api_brep::boolean_difference(&mut k, cut, tool).unwrap();
+    }
+    k.work_counters.reset();
+    for tool in second {
+        cut = solidcore::boolean::api_brep::boolean_difference(&mut k, cut, tool).unwrap();
+    }
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    let mut body = plate();
+    for tool in tools(8.0).into_iter().chain(tools(21.0)) {
+        body = boolean(body, tool, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let hole = PI * 2.25 * 2.25 * 9.75 + PI * 2.25 / 3.0 * (4.5 * 4.5 + 4.5 * 2.25 + 2.25 * 2.25);
+    let expected = 30.0 * 20.0 * 12.0 - 2.0 * hole;
+    assert!(
+        near(volume(&body), expected),
+        "{} != {expected}",
+        volume(&body)
+    );
+}
+
 /// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
 /// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
 /// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's

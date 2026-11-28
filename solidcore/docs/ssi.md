@@ -512,6 +512,7 @@ These are the pairs solved in closed form; every other pair is traced.
 | sphere/cone | centre on the cone's axis | circles of the cone | `Sphere::intersect_with_cone` |
 | cylinder/cylinder | parallel axes | lines from the circle/circle section | `Cone::intersect_with_cone` |
 | cylinder/cylinder | equal radii, axes meeting | two ellipses | same |
+| cone/cone or cylinder | same axis | circles where the generators meet | same, `intersect_revolved_into` (`surf_of_revolution/p3.rs`) |
 | plane/surface of revolution | plane through the axis; square to it | the generator rotated in; circles | `surface/surf_of_revolution/p1.rs` |
 | revolution/revolution | same axis, planar generators | circles at the generators' intersections | `surf_of_revolution/p3.rs` |
 | plane/extrusion, extrusion/extrusion or cylinder | extrusion parallel to the plane or to the other | lines along the extrusion | `surface/surf_of_extrusion/p2.rs` |

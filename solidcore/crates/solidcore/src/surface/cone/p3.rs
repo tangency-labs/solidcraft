@@ -55,6 +55,10 @@
 //! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
 //! up to [`contact_tol_3d`] (`within_contact_tol`) touch along one line; bare surfaces keep
 //! two crossings.
+//! Coaxial cones, and a cone and a cylinder about one axis, meet in circles where their
+//! generators meet ([`intersect_revolved_into`], as against a surface of revolution about the
+//! axis); upstream sends them to the general intersector, whose fitted curves the boolean's
+//! carried-trim proofs had to bisect (tangency-labs/solidcraft#22596).
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -86,7 +90,9 @@ use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
 use crate::surface::sphere::Sphere;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
-use crate::surface::surf_of_revolution::p3::Revolved;
+use crate::surface::surf_of_revolution::p3::{
+    intersect_revolved_into, revolved_contact_tol, Revolved,
+};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType, CONE_TYPE, CYLINDER_TYPE};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -865,7 +871,21 @@ impl Cone {
                 return Ok(false);
             }
             if !self.is_cylinder() || !other.is_cylinder() {
-                return Ok(true);
+                // Not upstream: coaxial quadrics of revolution meet in circles where their
+                // generators meet (docs/ssi.md §5), as a cone meets a surface of revolution
+                // about its axis; upstream traced them into fitted curves, which every later
+                // proof against the faces had to bisect. Axes merely parallel still trace.
+                let contact = revolved_contact_tol(k, surfaces);
+                return intersect_revolved_into(
+                    self,
+                    k,
+                    domain,
+                    other,
+                    other_domain,
+                    approx_tol,
+                    contact,
+                    out,
+                );
             }
             // Face domains can be shorter than either underlying cylinder, where
             // upstream spans the full cylinders (WR-259). Work relative to
@@ -1363,10 +1383,7 @@ impl Cone {
             // the other surface's first surface is this one: its UV curves are swapped,
             // also in a partial output
             IntersectTarget::Revolution(r) => {
-                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
-                    k,
-                    [this, other_surface],
-                );
+                let contact = revolved_contact_tol(k, [this, other_surface]);
                 let more = r.intersect_with_cone_into(
                     k,
                     other_domain,
@@ -1527,6 +1544,91 @@ mod tests {
             assert!(!more);
             assert_axial_lines(&out, [a, b], 2, 0.0, 10.0);
             assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        }
+    }
+
+    /// A countersink's cone on its bore, and two coaxial cones, meet in one exact circle where
+    /// their generators meet, at the origin and 3.6 m from it; the general tracer fitted a cubic
+    /// that every later proof against the faces bisected (tangency-labs/solidcraft#22596).
+    #[test]
+    fn coaxial_cones_and_cylinders_meet_in_an_exact_circle() {
+        let k = Kernel::default();
+        for x0 in [0.0, 3600.0] {
+            let origin = Vec3::new(x0, 0.0, 0.0);
+            let mut bore = Cone::new_cylinder_bounded(
+                origin,
+                Vec3::X,
+                Vec3::Y,
+                2.25,
+                0.0,
+                360.0,
+                12.0,
+                false,
+                true,
+                false,
+            );
+            bore.make_nurb(&k).unwrap();
+            // the countersink: radius 2.25 at z = 9.75 to 4.5 at z = 12 (90 degrees)
+            let at = origin + Vec3::new(0.0, 0.0, 9.75);
+            let mut sink = Cone::new_bounded(
+                at,
+                Vec3::X,
+                Vec3::Y,
+                2.25,
+                4.5,
+                0.0,
+                360.0,
+                2.25,
+                false,
+                true,
+                false,
+            );
+            sink.make_nurb(&k).unwrap();
+            // a steeper cone through the same circle: radius 0.75 at z = 9 to 3.75 at z = 10.5
+            let mut steep = Cone::new_bounded(
+                origin + Vec3::new(0.0, 0.0, 9.0),
+                Vec3::X,
+                Vec3::Y,
+                0.75,
+                3.75,
+                0.0,
+                360.0,
+                1.5,
+                false,
+                true,
+                false,
+            );
+            steep.make_nurb(&k).unwrap();
+            for (a, b) in [
+                (&sink, &bore),
+                (&bore, &sink),
+                (&sink, &steep),
+                (&steep, &sink),
+            ] {
+                let (da, db) = (
+                    a.rev().base().natural_uv_domain(),
+                    b.rev().base().natural_uv_domain(),
+                );
+                let (more, out) = a.intersect_with_cone(&k, &da, b, &db, Some(1e-7)).unwrap();
+                assert!(!more, "x0={x0}");
+                assert_eq!(out.curves_3d.len(), 1, "x0={x0}");
+                let curve = &out.curves_3d[0];
+                assert!(
+                    matches!(curve.kind(), CurveKind::Ellipse(e) if e.is_circle_class()),
+                    "x0={x0}: {:?}",
+                    curve.kind()
+                );
+                let span = curve.natural_interval();
+                for i in 0..=16 {
+                    let t = span.min() + span.length() * f64::from(i) / 16.0;
+                    let p = curve.evaluate_point(&k, t).unwrap();
+                    let r = (p.x - x0).hypot(p.y);
+                    assert!(
+                        (r - 2.25).abs() < 1e-9 && (p.z - 9.75).abs() < 1e-9,
+                        "x0={x0}: {p:?}"
+                    );
+                }
+            }
         }
     }
 
