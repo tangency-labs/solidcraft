@@ -314,6 +314,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "up_to": {"face": {"body": "B", "point": o}}, "neighbours": false}),
         ),
         (
+            "surface_extend_law",
+            json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "mode": "law", "angle": "extend.law_angle"}),
+        ),
+        (
             "surface_ruled",
             json!({"type": "surface_ruled", "body": "B", "edges": [o], "distance": "ruled.distance", "mode": "angle", "angle": "ruled.angle",
                 "direction": [0, 0, 1], "face": [1, 0, 0]}),

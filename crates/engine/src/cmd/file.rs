@@ -342,6 +342,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
             "format?: 3mf|stl|3mf-tagged|step (default 3mf, in millimetres; a 3MF that can't be written goes as STL; step: the bodies as exact B-rep with their colours, which the slicer meshes itself, for slicers that read STEP); ",
+            "name?: the file's name without extension, as the slicer shows it (default: the design's name and a code that tells designs and body selections apart; a given name is used as it is, so two sends under one name share one file; not used with copy_to, whose file is named after the design; refused when it is blank, over 240 bytes, starts or ends with a space or a dot, holds / \\ : * ? \" < > | or a control character, or is a name Windows keeps for a device, such as CON or NUL); ",
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
@@ -2349,11 +2350,15 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
         if snap.doc.name == from {
             let old = std::sync::Arc::as_ptr(&snap.doc);
-            std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
-            renamed.push((old, snap.doc.clone()));
+            if let Some((_, new)) = renamed.iter().find(|(known, _)| *known == old) {
+                snap.doc = new.clone();
+            } else {
+                std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
+                renamed.push((old, snap.doc.clone()));
+            }
         }
     }
-    if let Some(entry) = s.sketch_entry.as_mut() {
+    for entry in s.undo.iter_mut().chain(s.redo.iter_mut()).filter_map(|snap| snap.sketch_entry.as_mut()).chain(s.sketch_entry.as_mut()) {
         let follow = |doc: &mut std::sync::Arc<solidcraft_doc::Document>| match renamed.iter().find(|(old, _)| *old == std::sync::Arc::as_ptr(doc)) {
             Some((_, new)) => *doc = new.clone(),
             None if doc.name == from => std::sync::Arc::make_mut(doc).name = to.to_string(),
@@ -4386,6 +4391,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality,
                 dest: send::Dest::Path(path),
+                name: None,
                 copy: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
@@ -4424,6 +4430,15 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
+        // Anything but text is refused, not read as "no name": the caller asked for a name.
+        let name = match p.get("name") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(name)) => {
+                crate::slicer_files::check_name(name).map_err(|why| bad(cmd, format!("`name` can't be the file's name: {why}")))?;
+                Some(name.as_str())
+            }
+            Some(other) => return Err(bad(cmd, format!("`name` must be text, not {other}"))),
+        };
         // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
         // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
         let copy = match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
@@ -4446,6 +4461,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality: Default::default(),
                 dest: send::Dest::Folder,
+                name,
                 copy,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,

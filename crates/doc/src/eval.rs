@@ -695,9 +695,9 @@ impl ModelBody {
     /// (once, however often this is asked) and `None` comes back meanwhile, so a caller drawing a
     /// frame (a face highlighted under the pointer) is not held up by a large body's plan
     /// (#3745): the plan mesh of a long modelled thread takes most of a second. The browser
-    /// build has no threads: there it is made now.
-    pub fn plan_mesh_soon(&self) -> Option<Arc<Mesh>> {
-        let q = crate::display_quality::current();
+    /// build has no threads: there it is made now. At `q`, the display quality the window asking
+    /// draws at (another window in the process may have set the process-wide level since).
+    pub fn plan_mesh_soon(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<Mesh>> {
         let cell = self.plan_mesh.get(q.index())?;
         if let Some(mesh) = cell.get() {
             return mesh.clone();
@@ -789,14 +789,14 @@ impl ModelBody {
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
     /// spaced across the face (faces on one surface spaced together, so they share them), exact
     /// and cut to its trims ([`kernel::iso_grid`]), their points at the chord
-    /// tolerance of the viewport's display quality. Worked out once per face, count and display
-    /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
-    /// body has no surfaces, so none.
-    pub fn iso_lines(&self, face: usize, count: usize) -> Result<Arc<[kernel::IsoLine]>> {
+    /// tolerance of display quality `quality` (a viewport's: the one its window draws at, which
+    /// another window in the process may have changed the process-wide level from). Worked out
+    /// once per face, count and display quality, and shared by every clone of this body (timeline
+    /// snapshots, world states). A mesh body has no surfaces, so none.
+    pub fn iso_lines(&self, face: usize, count: usize, quality: crate::display_quality::DisplayQuality) -> Result<Arc<[kernel::IsoLine]>> {
         if self.body.is_mesh() {
             return Err(DocError::Invalid(format!("{} is a mesh body: its faces have no surface parameters, so no isoparametric curves", self.name)));
         }
-        let quality = crate::display_quality::current();
         let key = (face, count, quality.index());
         let make = || kernel::iso_grid(&self.body, face, count, quality.chord(self.body.size())).map(Arc::from);
         let Ok(mut cache) = self.iso.lock() else { return Ok(make()?) };
@@ -1043,13 +1043,65 @@ fn tapered_note(tapers: &[Option<kernel::Taper>]) -> Option<String> {
     Some(format!("the radius tapers to the room on {n} of {} edges, down to {} mm", tapers.len(), show_mm(low)))
 }
 
-/// Blend `edges` one at a time with `blend`, each blend's lineage over the one before: the
-/// result and the lineage of what the last blend started from.
-fn one_by_one(input: Traced, edges: &[Vec3], blend: impl Fn(&kernel::Body, Vec3) -> kernel::Result<kernel::Body>) -> Result<(kernel::Body, Traced)> {
+/// A round of `edges` with the radius `law` from the end nearest `start`, one blend at a time,
+/// each blend's lineage over the one before: the result and the lineage of what the last blend
+/// started from. With `tangent_chain`, each picked edge's open tangent chain takes the law
+/// along its whole length in one blend ([`kernel::fillet_variable_spline_chain`]), so the round
+/// runs on into the edges that continue the picked one as a constant round does; a pick on a
+/// chain an earlier pick took is that chain, rounded once. A pick whose chain closes on itself,
+/// which has no end for the law to start from, and every pick of a round without
+/// `tangent_chain` take the picked edge alone. A chain the kernel cannot round with the law
+/// (SMLib refuses some laws that vary along a chain through a curved edge) also takes the
+/// picked edge alone, as before chains were followed, and `warning` says so with the reason.
+fn law_by_law(
+    input: Traced,
+    edges: &[Vec3],
+    start: Vec3,
+    law: &kernel::RadiusSpline,
+    tangent_chain: bool,
+    warning: &mut Option<String>,
+) -> Result<(kernel::Body, Traced)> {
+    let mut picks = Vec::with_capacity(edges.len());
+    let mut taken: Vec<usize> = Vec::new();
+    for p in edges {
+        if !tangent_chain {
+            picks.push((*p, false, Vec::new(), Vec::new()));
+            continue;
+        }
+        let chain = kernel::tangent_chain_edges(&input.body, &[*p])?;
+        let along = chain.len() > 1 && !kernel::tangent_chain_closes(&input.body, *p)?;
+        let picked = kernel::pick_edges(&input.body, &[kernel::EdgePick::Point(*p)])?;
+        picks.push((*p, along, chain, picked));
+    }
     let mut b = input;
     let mut from = None;
-    for p in edges {
-        let next = Traced::step(blend(&b.body, *p)?, &[&b]);
+    for (p, along, chain, picked) in picks {
+        if picked.iter().any(|e| taken.contains(e)) {
+            continue;
+        }
+        let chained =
+            if along { Some(kernel::fillet_variable_spline_chain(&b.body, &kernel::tangent_chain(&b.body, &[p])?, start, law)) } else { None };
+        let made = match chained {
+            Some(Ok(made)) => {
+                taken.extend(chain);
+                made
+            }
+            Some(Err(e @ kernel::KernelError::Internal(_))) => return Err(e.into()),
+            Some(Err(e)) => {
+                let made = kernel::fillet_variable_spline(&b.body, p, start, law)?;
+                append_warning(
+                    warning,
+                    format!(
+                        "the radius could not run along the tangent chain of the edge at ({:.3}, {:.3}, {:.3}), so the round takes that edge alone ({e})",
+                        p.x, p.y, p.z
+                    ),
+                );
+                made
+            }
+            None => kernel::fillet_variable_spline(&b.body, p, start, law)?,
+        };
+        taken.extend(picked);
+        let next = Traced::step(made, &[&b]);
         from = Some(std::mem::replace(&mut b, next));
     }
     match from {
@@ -5224,7 +5276,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         hash_placement(&owner_in_lca, &mut h);
         has_captured_profile = true;
     } else {
-        for (sketch, _) in f.kind.profile_sels() {
+        // Thin extrudes skip `profile_sels` (they follow curves, not profiles) yet still map
+        // their sketch through `constructor_profile_in_frame`.
+        let thin_extrude = match &f.kind {
+            FeatureKind::Extrude { sketch, thin: Some(_), .. } => Some(sketch.0),
+            _ => None,
+        };
+        for sketch in f.kind.profile_sels().into_iter().map(|(s, _)| s).chain(thin_extrude) {
             if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
                 reads.sketch(doc, sketch);
                 // A later transfer can preserve this profile's historical frame. Changes to that
@@ -5284,48 +5342,75 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             _ => {}
         }
     }
-    let path = match &f.kind {
-        FeatureKind::Sweep { path_sketch, .. }
-        | FeatureKind::SurfaceSweep { path_sketch, .. }
-        | FeatureKind::Pipe { path_sketch, .. }
-        | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => Some(*path_sketch),
-        FeatureKind::FrameMember { path_sketch, .. } => *path_sketch,
-        _ => None,
-    };
-    let wired = |id: &crate::SketchId| doc.sketch(id.0).is_ok_and(|sketch| !sketch.wires.is_empty());
-    let rails: &[crate::SweepRail] = match &f.kind {
-        FeatureKind::Sweep { rails, .. }
-        | FeatureKind::SurfaceSweep { rails, .. }
-        | FeatureKind::Loft { rails, .. }
-        | FeatureKind::SurfaceLoft { rails, .. } => rails,
-        _ => &[],
-    };
-    // Members map their frame sketch into their own component's frame, 2D lines included.
-    let member = matches!(f.kind, FeatureKind::FrameMember { .. });
-    // A feature that captured its component's frame reads the components it names through that
-    // frame, so their placement still counts (the path of a sweep, the rails of any of them).
-    if path.as_ref().is_some_and(|p| member || wired(p) || has_captured_profile) || rails.iter().any(|r| wired(&r.sketch) || has_captured_profile) {
-        if let Some(path) = path {
-            reads.sketch(doc, path.0);
+    // Every sketch evaluation maps into `f.component` (via `path_in_frame`, `path_curves`,
+    // `rail_polylines`, `profile_in_frame`, or `sketch_in_feature_frame`): register it when
+    // owned by another component or carrying World-space wires in a non-root component, so a
+    // component holding a planar path or rail that moves recomputes the feature.
+    let read_mapped_sketch = |reads: &mut PlacementReads, id: u64| {
+        let owner = doc.feature(id).map(|s| s.component).unwrap_or(0);
+        let world = f.component != 0 && doc.sketch(id).is_ok_and(|sk| sk.wires.iter().any(|w| w.space == solidcraft_sketch::WireSpace::World));
+        if owner != f.component || world {
+            reads.sketch(doc, id);
         }
-        // A sweep's profile and the rails' components place them too.
-        let profile = match &f.kind {
-            FeatureKind::Sweep { sketch, .. } | FeatureKind::SurfaceSweep { sketch, .. } => Some(sketch),
-            _ => None,
-        };
-        for sketch in profile.into_iter().chain(rails.iter().map(|r| &r.sketch)) {
-            reads.sketch(doc, sketch.0);
-        }
-    }
-    // A network through 3D sketch curves reads their points through the components the
-    // feature and those sketches are placed in, as a sweep's wired path does.
-    if let FeatureKind::SurfaceNetwork { u, v, .. } = &f.kind {
-        let sketches: Vec<crate::SketchId> = u.iter().chain(v).filter_map(|c| c.sketch).collect();
-        if sketches.iter().any(wired) {
-            for sketch in &sketches {
-                reads.sketch(doc, sketch.0);
+    };
+    match &f.kind {
+        FeatureKind::Sweep { sketch, path_sketch, path, path_body, rails, .. } => {
+            if path_body.is_none() {
+                read_mapped_sketch(&mut reads, path_sketch.0);
+                for entry in path {
+                    read_mapped_sketch(&mut reads, entry.split(*path_sketch).0.0);
+                }
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
             }
         }
+        FeatureKind::SurfaceSweep { sketch, path_sketch, path_body, rails, .. } => {
+            if path_body.is_none() {
+                read_mapped_sketch(&mut reads, path_sketch.0);
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::Pipe { path_sketch, .. } | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => {
+            read_mapped_sketch(&mut reads, path_sketch.0);
+        }
+        FeatureKind::FrameMember { path_sketch: Some(p), .. } => {
+            read_mapped_sketch(&mut reads, p.0);
+        }
+        FeatureKind::Loft { rails, .. } => {
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::SurfaceLoft { sections, rails, .. } => {
+            for sec in sections {
+                if sec.body.is_none() {
+                    read_mapped_sketch(&mut reads, sec.sketch.0);
+                }
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::SurfaceNetwork { u, v, .. } => {
+            for sketch in u.iter().chain(v).filter_map(|c| c.sketch) {
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+        }
+        FeatureKind::SurfaceBoundary { sketch, .. } => {
+            read_mapped_sketch(&mut reads, sketch.0);
+        }
+        FeatureKind::SurfaceTrim { curves: Some(c), .. } => {
+            read_mapped_sketch(&mut reads, c.sketch.0);
+        }
+        FeatureKind::SurfaceExtrude { sketch, .. } | FeatureKind::SurfaceRevolve { sketch, .. } if f.profile_frame.is_none() => {
+            read_mapped_sketch(&mut reads, sketch.0);
+        }
+        _ => {}
     }
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
@@ -6576,6 +6661,12 @@ impl Model {
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
+                // The snapshots of the features that are evaluated again predate the refused
+                // results: they are dropped, so that a pattern that copies one of them reads no
+                // state of the refused pass.
+                for f in doc.features.iter().skip(start) {
+                    before_states.remove(&f.id);
+                }
             }
             for (i, f) in doc.features.iter().enumerate().skip(start) {
                 if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
@@ -8487,7 +8578,8 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 }
 
 /// A Join whose material meets none of its targets still joins it, to the first target as a
-/// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
+/// separate piece (see `apply_traced`), and so does an Emboss, which raises its profiles with a Join
+/// and has no operation to pick (#23375): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
@@ -8495,14 +8587,14 @@ fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &
     if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
         !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
     }));
-    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
+    let emboss = matches!(&f.kind, FeatureKind::Emboss { deboss: false, .. });
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join && !emboss {
         return;
     }
+    // The Emboss window has no New Body to point to.
+    let hint = if emboss { "" } else { " (New Body makes it a body of its own)" };
     for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
+        append_warning(warning, format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces{hint}"));
     }
 }
 
@@ -10763,11 +10855,15 @@ fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> kernel::Result<Vec<Vec<Vec
 /// blend those edges: a separate feature or tangent propagation may fail where they meet. When
 /// the check cannot run (`beyond` is the kernel's error, or the result's points cannot be
 /// classified) the note says so with the kernel's reason; the blend itself stands.
-fn left_sharp_note(blended: &Body, beyond: &kernel::Result<Vec<Vec<Vec3>>>, picked: usize, kind: &FeatureKind) -> Option<String> {
+fn left_sharp_note(blended: &Body, beyond: &kernel::Result<Vec<Vec<Vec3>>>, picked: usize, kind: &FeatureKind, closed_chain: bool) -> Option<String> {
     let (feature, why) = match kind {
         FeatureKind::Chamfer { .. } => ("chamfer", "tangent_chain: false chamfers only the picked edges"),
-        FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, .. } => {
-            ("fillet", "a variable or spline round runs along its picked edge only")
+        FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, tangent_chain: true, .. } => {
+            if closed_chain {
+                ("fillet", "a variable or spline round takes its picked edge alone where the tangent chain closes on itself")
+            } else {
+                ("fillet", "the round takes the picked edges alone")
+            }
         }
         _ => ("fillet", "tangent_chain: false rounds only the picked edges"),
     };
@@ -10869,21 +10965,22 @@ fn blend_raw(
             }
         }
         FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => (kernel::fillet_chord(&mb.body, edges, r)?, input),
-        FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
+        FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, tangent_chain, .. } => {
             let r2 = val(vals, radius2, Kind::Length)?;
             let mut pts = vec![(0.0, r), (1.0, r2)];
             for (t, e) in mid {
                 pts.push((*t, val(vals, e, Kind::Length)?));
             }
-            one_by_one(input, edges, |b, p| kernel::fillet_variable_points(b, p, start.0, &pts, *smooth))?
+            let law = kernel::RadiusSpline::of_points(&pts, *smooth)?;
+            law_by_law(input, edges, start.0, &law, *tangent_chain, warning)?
         }
-        FeatureKind::Fillet { style: crate::FilletStyle::Spline { start, knots, radii }, .. } => {
+        FeatureKind::Fillet { style: crate::FilletStyle::Spline { start, knots, radii }, tangent_chain, .. } => {
             let mut values = vec![r];
             for e in radii {
                 values.push(val(vals, e, Kind::Length)?);
             }
             let law = crate::FilletStyle::spline(knots, values);
-            one_by_one(input, edges, |b, p| kernel::fillet_variable_spline(b, p, start.0, &law))?
+            law_by_law(input, edges, start.0, &law, *tangent_chain, warning)?
         }
         FeatureKind::Fillet { fit: crate::FilletFit::Taper, .. } => {
             let (b, tapers) = kernel::fillet_tapered(&mb.body, edges, r)?;
@@ -12747,6 +12844,9 @@ fn feature_tools_with_constructor(
                 && val(vals, tp, Kind::Angle)? != 0.0
             {
                 let taper = val(vals, tp, Kind::Angle)?;
+                if extent.extend_to_face && curved.is_some() {
+                    return Err(DocError::Invalid("not supported yet: extending the To face with a taper".into()));
+                }
                 if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
                     return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
                 }
@@ -12815,7 +12915,7 @@ fn feature_tools_with_constructor(
                     tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
-                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
+                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len, extent.extend_to_face)?;
                 }
                 return Ok(tools);
             }
@@ -12862,6 +12962,17 @@ fn feature_tools_with_constructor(
                 if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
                     let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off)?;
                     hs.extend([rise_lo, rise_hi]);
+                }
+                // The To face's surface carried on past its edges can lie farther along than the
+                // target does: the tool runs out to where it meets the profile's footprint.
+                if extent.extend_to_face {
+                    let surface = to_face.and_then(|(_, face)| kernel::face_surface(&tb.body, face));
+                    let Some(surface) = surface else {
+                        return Err(DocError::Invalid(
+                            "not supported yet: extending a To face that is not a plane, cylinder, cone, sphere or torus".into(),
+                        ));
+                    };
+                    hs.extend(kernel::extended_levels(&surface, &ss.plane, &footprint_points(&ss.plane, &regions)).into_iter().map(|h| h - off));
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
@@ -12970,7 +13081,7 @@ fn feature_tools_with_constructor(
             {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
-                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
+                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far, extent.extend_to_face)?;
             }
             if let Some((s_lo, s_hi)) = side_two {
                 let mut second = Vec::new();
@@ -16542,6 +16653,10 @@ fn replay(
                 // the model as it was then, so that it is the source's own tool, moved (#14305).
                 Err(e) => {
                     let Some(before) = sources.and_then(|s| s.get(&src.id)) else { return Err(e) };
+                    // The retry is built against the model as it was before the source ran, with
+                    // that model's frames: a target the source's own result consumed is measured
+                    // where it is shown, and not in the frames of the model as it is now (#14305).
+                    let _retry_frames = ToolFrames::install(doc, src, before).unwrap_or_else(ToolFrames::clear);
                     feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), before, &mut None, &mut Vec::new(), &mut None)?
                 }
             };
@@ -16857,6 +16972,37 @@ fn replay(
             }
             continue;
         }
+        // A Draft repeats at the copied faces of the body they lie on, about the copied neutral
+        // plane and pull direction (#18048).
+        if let FeatureKind::Draft { faces, angle, neutral, pull, body } = &src.kind {
+            if let Some(batch) = pending.take() {
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
+            }
+            let a = val(vals, angle, Kind::Angle)?;
+            let pl = doc.resolve_plane_in(vals, neutral, 0, src.component, Some(st))?;
+            let picked: Vec<Vec3> = crate::plain(faces);
+            let picks = PickFrames::new(doc, st, own, src);
+            let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
+            for m in mats {
+                let (m, on) = match picked.first() {
+                    Some(p) => picks.copy(st, m, *p, named)?,
+                    None => (*m, None),
+                };
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
+                let i = match on {
+                    Some(i) => i,
+                    None => body_at(st, body, &moved)?,
+                };
+                let neutral = placed_plane(&m, &pl)?;
+                let pull = crate::apply_vector(&m, pull.0);
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = Traced::step(kernel::draft(&mb.body, &moved, &neutral, pull, a)?, &[&mb.traced()]);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = mb.remade(nb);
+                }
+            }
+            continue;
+        }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
         // placed by the pattern (#5931). Frame members are too: each instance is every member
         // the feature made, as it is here, placed by the pattern.
@@ -17088,6 +17234,7 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
         }
         FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::Draft { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
         FeatureKind::Hole { position, points: None, .. } => (
             match src.participants.as_slice() {
                 [one] if one != "*" => Some(one.as_str()),
@@ -17307,7 +17454,9 @@ enum Tapped {
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
-pub use thread::{ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in};
+pub use thread::{
+    THREAD_OFFSET_NEGATIVE, THREAD_OFFSET_WITH_TIP, ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in,
+};
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
 /// there if it is planar and parallel (its plane), else where a ray from `centre` along the
@@ -17669,7 +17818,19 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 /// at the face's surface extended past them ([`trim_to_offset_face`] with no offset), refused
 /// when a piece still runs out to `far`. `near` is a point on the face (the To pick).
 #[allow(clippy::too_many_arguments)]
-fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+fn trim_to_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    plane: &Plane,
+    start: f64,
+    far: f64,
+    extend: bool,
+) -> Result<Vec<Traced>> {
+    if extend {
+        return trim_to_extended_face(tools, target, face, plane, start, far);
+    }
     let mut out = Vec::new();
     let mut on_face = true;
     for t in &tools {
@@ -17710,6 +17871,47 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3,
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run to the To face's surface carried on past the face's edges (the Extend the To face
+/// option): each tool's prism split by that surface (the kernel's
+/// [`kernel::face_split_extended`], no on-face test), the pieces that start at `start` kept. Refused
+/// where the surface does not cross the tool's path over some of the profile (a cone's apex side,
+/// a plane that runs along the extrusion), which leaves that part with no end.
+fn trim_to_extended_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let mut out = Vec::new();
+    for t in &tools {
+        let Some(parts) = kernel::face_split_extended(&t.body, &target.body, face, plane, start, far)? else {
+            return Err(DocError::Invalid(
+                "the To face, extended, does not meet the whole profile: its surface never crosses the extrusion's path over part of it (the far side of a cone's apex, or a plane that runs along the extrusion)".into(),
+            ));
+        };
+        out.extend(parts.into_iter().map(|part| Traced::step(part, &[t])));
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// Points over `regions` in `plane`'s frame, in the plane: the outlines and a grid across their box.
+fn footprint_points(plane: &Plane, regions: &[Region2]) -> Vec<Vec3> {
+    let outline: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in &outline {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    let mut pts = outline;
+    if lo.x <= hi.x && lo.y <= hi.y {
+        const N: usize = 16;
+        for i in 0..=N {
+            for j in 0..=N {
+                pts.push(Vec2::new(lo.x + (hi.x - lo.x) * i as f64 / N as f64, lo.y + (hi.y - lo.y) * j as f64 / N as f64));
+            }
+        }
+    }
+    pts.into_iter().map(|p| plane.to_world(p)).collect()
 }
 
 /// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
@@ -17769,9 +17971,10 @@ fn trim_to_curved_face(
     plane: &Plane,
     start: f64,
     far: f64,
+    extend: bool,
 ) -> Result<Vec<Traced>> {
     if to_offset.abs() <= 1e-9 {
-        return trim_to_face(tools, target, face, to, plane, start, far);
+        return trim_to_face(tools, target, face, to, plane, start, far, extend);
     }
     let n = plane.normal();
     let travel = if far > start { n } else { n * -1.0 };
@@ -17835,7 +18038,7 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
-    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through, false) {
         Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
         cut => cut?,
     };
@@ -19566,8 +19769,8 @@ fn eval_feature_kind(
             let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), on_several, Vec::new(), Vec::new());
             let mut reduced = false;
             // The kernel blends exactly the edges given: the feature adds each one's tangent
-            // chain when it asks for it. A radius law runs along one edge, so a variable or
-            // spline round takes its edge alone.
+            // chain when it asks for it. A variable or spline round is given its picked edges
+            // and takes each one's chain itself, the law along the whole chain (`law_by_law`).
             let chain = match &f.kind {
                 FeatureKind::Fillet { tangent_chain, style, .. } => {
                     *tangent_chain && !matches!(style, crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. })
@@ -19617,6 +19820,15 @@ fn eval_feature_kind(
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let picked_edges: &[Vec3] = edges;
                 let picked = picked_edges.len();
+                let closed_chain = matches!(
+                    &f.kind,
+                    FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, tangent_chain: true, .. }
+                ) && edges
+                    .iter()
+                    .map(|p| kernel::tangent_chain_closes(&mb.body, *p))
+                    .collect::<kernel::Result<Vec<_>>>()?
+                    .iter()
+                    .all(|closed| *closed);
                 let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, picked_edges) };
                 let edges = if chain { kernel::tangent_chain(&mb.body, picked_edges)? } else { picked_edges.to_vec() };
                 let mut note = None;
@@ -19633,7 +19845,7 @@ fn eval_feature_kind(
                 if let Some(n) = note {
                     group_notes.push(n);
                 }
-                if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind) {
+                if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind, closed_chain) {
                     group_notes.push(n);
                 }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
@@ -20123,6 +20335,7 @@ fn eval_feature_kind(
             }
             if !*copy {
                 move_constructions_with(doc, st, bodies, &base_motion, carry, leave);
+                move_threads(st, bodies, &base_motion);
             }
             Ok(())
         }
@@ -20591,6 +20804,23 @@ fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<St
     Ok((origin, axis))
 }
 
+/// The thread record is the thread's place on the body. A plain move carries the body and would
+/// leave that place behind, so the record is carried by the same motion and stays the thread
+/// feature's. The body transform runs once per listing, so a name listed more than once takes
+/// the motion once for each; a step the motion cannot place leaves the record as it was.
+fn move_threads(st: &mut ModelState, bodies: &[crate::BodyName], m: &Mat) {
+    for t in &mut st.threads {
+        let n = bodies.iter().filter(|name| **name == t.body).count();
+        let mut moved = (n > 0).then(|| t.clone());
+        for _ in 0..n {
+            moved = moved.and_then(|cur| cur.moved(m));
+        }
+        if let Some(moved) = moved.filter(|_| n > 0) {
+            *t = moved;
+        }
+    }
+}
+
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
 /// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
 /// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
@@ -20740,6 +20970,13 @@ impl ToolFrames {
             return None;
         }
         Some(ToolFrames(TOOL_FRAMES.with(|t| std::mem::replace(&mut *t.borrow_mut(), frames))))
+    }
+
+    /// The frames of [`TOOL_FRAMES`] cleared: what was there before is put back when it is
+    /// dropped. A model with no body placed differently has no frames of its own, so a tool
+    /// built against it must not meet the bodies in the frames of another model.
+    fn clear() -> ToolFrames {
+        ToolFrames(TOOL_FRAMES.with(|t| std::mem::take(&mut *t.borrow_mut())))
     }
 }
 
@@ -21883,10 +22120,10 @@ mod chain_tests {
         let mesh = kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap();
         let beyond = chain_beyond_picks(&mesh, &[Vec3::new(0.5, 0.0, 0.0)]);
         let Err(e) = &beyond else { panic!("a mesh body has no tangent chain: {beyond:?}") };
-        let note = left_sharp_note(&mesh, &beyond, 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)).expect("a note");
+        let note = left_sharp_note(&mesh, &beyond, 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false), false).expect("a note");
         assert_eq!(note, format!("could not check whether the picked edge runs on smoothly into edges this fillet left sharp ({e})"));
         // A check that ran and found nothing beyond the picks still says nothing.
-        assert_eq!(left_sharp_note(&mesh, &Ok(Vec::new()), 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)), None);
+        assert_eq!(left_sharp_note(&mesh, &Ok(Vec::new()), 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false), false), None);
     }
 
     fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {
@@ -22076,8 +22313,9 @@ mod chain_tests {
     /// chain of 8 edges, 4 lines and 4 arcs. A round of the front top line with tangent_chain:
     /// false says the other 7 are still sharp at every radius. From r1.6 up the round runs on past
     /// the line's ends and takes the middle of each neighbouring arc, but most of those arcs stay
-    /// sharp, so they are counted too. A variable round, which runs along its picked edge whatever
-    /// tangent_chain says, is told so rather than told to turn tangent_chain on.
+    /// sharp, so they are counted too. A variable round with tangent_chain: false is told the same.
+    /// With tangent_chain, the outline closes on itself, so its law has no end to start from: the
+    /// round takes the picked edge alone, and is told so rather than told to turn tangent_chain on.
     #[test]
     fn a_round_that_runs_past_its_edge_still_counts_the_edges_it_left_partly_sharp() {
         let build = |round: FeatureKind| {
@@ -22111,17 +22349,23 @@ mod chain_tests {
             let warning = build(fillet(front, radius, false));
             assert!(warning.starts_with("7 edges that the picked edge runs on into smoothly are still sharp"), "r{radius}: {warning}");
         }
-        let mut variable = fillet(front, "1", false);
-        if let FeatureKind::Fillet { style, .. } = &mut variable {
-            *style = crate::FilletStyle::Variable {
-                radius2: "0.5".into(),
-                start: crate::Position(Vec3::new(-15.0, -20.0, 10.0)),
-                mid: Vec::new(),
-                smooth: false,
-            };
-        }
-        let warning = build(variable);
-        assert!(warning.contains("still sharp because a variable or spline round runs along its picked edge only"), "{warning}");
+        let variable = |tangent_chain: bool| {
+            let mut variable = fillet(front, "1", tangent_chain);
+            if let FeatureKind::Fillet { style, .. } = &mut variable {
+                *style = crate::FilletStyle::Variable {
+                    radius2: "0.5".into(),
+                    start: crate::Position(Vec3::new(-15.0, -20.0, 10.0)),
+                    mid: Vec::new(),
+                    smooth: false,
+                };
+            }
+            build(variable)
+        };
+        let warning = variable(false);
+        assert!(warning.starts_with("7 edges that the picked edge runs on into smoothly are still sharp because tangent_chain: false"), "{warning}");
+        let warning = variable(true);
+        assert!(warning.starts_with("7 edges that the picked edge runs on into smoothly are still sharp"), "{warning}");
+        assert!(warning.contains("takes its picked edge alone where the tangent chain closes on itself"), "{warning}");
         assert!(!warning.contains("tangent_chain"), "{warning}");
     }
 }
