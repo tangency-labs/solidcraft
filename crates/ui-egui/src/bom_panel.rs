@@ -340,12 +340,12 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value]) {
         qty_width = qty_width.max(ui_kit::ContentWidth::monospace(ui, &text(row, "count")));
     }
     let mut columns = vec![
-        ui_kit::Column::new("Item", 0.0).min_content_width(item_width.min(t.control_height * 2.0)),
+        ui_kit::Column::new(solidcraft_ui_text::tr("bom.column.item"), 0.0).min_content_width(item_width.min(t.control_height * 2.0)),
         ui_kit::Column::new("Part number", 0.0).min_content_width(part_width.min(available * 0.3)),
         ui_kit::Column::new("Description", 1.0).flex().min_content_width(ui_kit::ContentWidth::label(ui, "Description") + t.space_4),
-        ui_kit::Column::new("Qty", 0.0).min_content_width(qty_width.min(t.control_height * 2.0)),
-        ui_kit::Column::new("Rev", 0.0),
-        ui_kit::Column::new("Definition", 0.0),
+        ui_kit::Column::new(solidcraft_ui_text::tr("bom.column.quantity"), 0.0).min_content_width(qty_width.min(t.control_height * 2.0)),
+        ui_kit::Column::new(solidcraft_ui_text::tr("bom.column.revision"), 0.0),
+        ui_kit::Column::new(solidcraft_ui_text::tr("bom.column.definition"), 0.0),
         ui_kit::Column::new("Material", 0.0),
         ui_kit::Column::new("Finish", 0.0),
     ];
@@ -813,7 +813,13 @@ mod tests {
                 for (column, value) in [("Material", "304, 2 mm"), ("Finish", "Brushed")] {
                     let cell = solidcraft_ui_registry::rect_of(&format!("dialog:table:bom:{index}:cell:{column}")).unwrap();
                     let caption = solidcraft_ui_registry::rect_of(&format!("dialog:inline:{value}")).unwrap();
-                    assert!(viewport.expand(1.0).contains_rect(cell) && cell.contains_rect(caption), "the wide table retains main's {column} column");
+                    // The report scrolls vertically beside the editor; column fit concerns X.
+                    let visible = viewport.expand(1.0);
+                    assert!(
+                        cell.left() >= visible.left() && cell.right() <= visible.right(),
+                        "the wide table retains main's {column} column horizontally: viewport={viewport:?}, cell={cell:?}"
+                    );
+                    assert!(cell.contains_rect(caption), "{column} contains its whole caption: cell={cell:?}, caption={caption:?}");
                 }
             }
             if width == 280 {

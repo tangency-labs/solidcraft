@@ -1,10 +1,58 @@
 {
-  "en": { "bom.summary": "{rows} rows, {placed} placed" },
-  "ar": { "bom.summary": "{rows} صفوف، {placed} موضوعة" },
-  "he": { "bom.summary": "{rows} שורות, {placed} מוצבים" },
-  "ja": { "bom.summary": "{rows} 行、{placed} 個配置済み" },
-  "vi": { "bom.summary": "{rows} hàng, {placed} đã đặt" },
-  "zh": { "bom.summary": "{rows} 行，已放置 {placed} 个" },
-  "de": { "bom.summary": "{rows} Zeilen, {placed} platziert" },
-  "ko": { "bom.summary": "{rows}개 행, {placed}개 배치됨" }
+  "en": {
+    "bom.column.definition": "Definition",
+    "bom.column.item": "Item",
+    "bom.column.quantity": "Qty",
+    "bom.column.revision": "Rev",
+    "bom.summary": "{rows} rows, {placed} placed"
+  },
+  "ar": {
+    "bom.column.definition": "التعريف",
+    "bom.column.item": "البند",
+    "bom.column.quantity": "الكمية",
+    "bom.column.revision": "المراجعة",
+    "bom.summary": "{rows} صفوف، {placed} موضوعة"
+  },
+  "he": {
+    "bom.column.definition": "הגדרה",
+    "bom.column.item": "פריט",
+    "bom.column.quantity": "כמות",
+    "bom.column.revision": "מהדורה",
+    "bom.summary": "{rows} שורות, {placed} מוצבים"
+  },
+  "ja": {
+    "bom.column.definition": "定義",
+    "bom.column.item": "項目",
+    "bom.column.quantity": "数量",
+    "bom.column.revision": "改訂",
+    "bom.summary": "{rows} 行、{placed} 個配置済み"
+  },
+  "vi": {
+    "bom.column.definition": "Định nghĩa",
+    "bom.column.item": "Mục",
+    "bom.column.quantity": "SL",
+    "bom.column.revision": "Sửa đổi",
+    "bom.summary": "{rows} hàng, {placed} đã đặt"
+  },
+  "zh": {
+    "bom.column.definition": "定义",
+    "bom.column.item": "项目",
+    "bom.column.quantity": "数量",
+    "bom.column.revision": "修订",
+    "bom.summary": "{rows} 行，已放置 {placed} 个"
+  },
+  "de": {
+    "bom.column.definition": "Definition",
+    "bom.column.item": "Pos.",
+    "bom.column.quantity": "Menge",
+    "bom.column.revision": "Rev.",
+    "bom.summary": "{rows} Zeilen, {placed} platziert"
+  },
+  "ko": {
+    "bom.column.definition": "정의",
+    "bom.column.item": "항목",
+    "bom.column.quantity": "수량",
+    "bom.column.revision": "개정",
+    "bom.summary": "{rows}개 행, {placed}개 배치됨"
+  }
 }
