@@ -28,7 +28,8 @@
 //! (tangency-labs/solidcore#3446): a minimize that converges to a saddle of the distance (a
 //! point off the surface whose Hessian has a negative eigenvalue) goes on from the least
 //! distance along that eigenvalue's direction ([`SurfPtSolveStepper::leave_saddle`]), within
-//! the same 35 steps; upstream reports the saddle as the minimum.
+//! the same 35 steps, and ends no farther than the nearest point such a move reached;
+//! upstream reports the saddle as the minimum (`plan/upstream-issues/WR-23428--*`).
 
 use super::p1::ErrorNormType;
 use super::p2::with_out_of_bounds_enabled_in_place;
@@ -248,22 +249,26 @@ impl SurfPtSolveStepper<'_> {
     }
 
     /// Not upstream (tangency-labs/solidcore#3446): moves a point the minimize converged to
-    /// off a saddle of the distance and returns whether it moved. The Newton step solves
-    /// for a zero of the distance's gradient, so it converges to a saddle as readily as to a
-    /// minimum (Nocedal and Wright, *Numerical Optimization*, 2nd ed., §3.4); a point off the
-    /// surface where the Hessian of `|S - P|² / 2`,
+    /// off a saddle (or a maximum) of the distance and returns whether it moved. The Newton
+    /// step solves for a zero of the distance's gradient, so it converges to a saddle as
+    /// readily as to a minimum (Nocedal and Wright, *Numerical Optimization*, 2nd ed., §3.4).
+    /// Where the Hessian of `|S - P|² / 2`,
     /// `[[Su·Su + g·Suu, Su·Sv + g·Suv], [Su·Sv + g·Suv, Sv·Sv + g·Svv]]` with `g = S - P`,
-    /// has a negative eigenvalue is no minimum, and the distance falls along that
-    /// eigenvalue's eigenvector `e` (a direction of negative curvature: Moré and Sorensen,
-    /// *Math. Programming* 16 (1979) 1–20). The point moves to the least distance along the
-    /// line `uv + s e` in whichever direction is lower (a golden-section search over `s` in
-    /// the domain, and no farther than the 3D reach `|Su e_u + Sv e_v| s` of twice the
-    /// distance, past which no point of the line's tangent is nearer), when that is nearer
-    /// by more than the solve's tight tolerance; the iteration goes on from there. The
-    /// iso-direction tests of [`SurfPtGlobalSolver::is_local_max`] miss such a saddle where
-    /// the surface's parameter lines meet at a small angle and the descent is across them
-    /// (a coil's wall where the profile circle runs almost along the screw motion: its
-    /// partials 3° apart, a saddle 0.0137 from a point on the wall's start station).
+    /// has a negative eigenvalue `λ`, the distance falls along its eigenvector `e`, a
+    /// direction of negative curvature (Moré and Sorensen, *Math. Programming* 16 (1979)
+    /// 1–20), unless the domain's boundary stops it (a point the boundary search converged
+    /// to). The point moves to the least distance along the line `uv + s e`, in whichever
+    /// direction is lower: a golden-section search over `s` inside the domain, its window
+    /// ending where the line's tangent image `|Su e_u + Sv e_v| s` reaches twice the
+    /// distance. It moves only when that point is nearer by more than the solve's tight
+    /// tolerance, so a minimum never moves; and a direction is searched only where the
+    /// quadratic model, a fall of `|λ| s² / 2` in `|S - P|² / 2` over the window, can give
+    /// that much (so a degenerate minimum, on a surface of revolution's axis, costs no
+    /// search). A distance whose evaluation fails is no candidate. The iso-direction tests
+    /// of [`SurfPtGlobalSolver::is_local_max`] miss a saddle whose descent runs across the
+    /// parameter lines: a coil's wall where the profile circle runs almost along the screw
+    /// motion (its partials 3° apart), a saddle 0.0137 from a point on the wall's start
+    /// station.
     ///
     /// # Errors
     ///
@@ -282,12 +287,12 @@ impl SurfPtSolveStepper<'_> {
         let c = sv.dot(sv) + g.dot(svv);
         // the smaller eigenvalue of [[a, b], [b, c]] and its eigenvector, the longer of the
         // two rows of the matrix less it, turned a quarter
-        let low = 0.5 * (a + c) - (0.25 * (a - c) * (a - c) + b * b).sqrt();
+        let low = 0.5 * (a + c) - (0.5 * (a - c)).hypot(b);
         if low.is_nan() || low >= 0.0 {
             return Ok(false);
         }
         let (e1, e2) = (Point2::new(b, low - a), Point2::new(low - c, b));
-        let e = if e1.x * e1.x + e1.y * e1.y >= e2.x * e2.x + e2.y * e2.y {
+        let e = if e1.x.hypot(e1.y) >= e2.x.hypot(e2.y) {
             e1
         } else {
             e2
@@ -300,10 +305,20 @@ impl SurfPtSolveStepper<'_> {
         let e = Point2::new(e.x / len, e.y / len);
         let domain = *self.base.domain();
         let uv = self.uv();
-        let mut best: Option<(f64, Self)> = None;
+        let target = self.base.test_point();
+        let surface = self.base.surface();
+        // the distance at a parameter of the line; a failed evaluation is no candidate
+        let value = |at: Point2| -> Result<f64> {
+            match surface.evaluate_point(k, at) {
+                Ok(q) => Ok((q - target).length()),
+                Err(error) if error.is_unported_or_cancelled() => Err(error),
+                Err(_) => Ok(f64::INFINITY),
+            }
+        };
+        let mut best: Option<(f64, Point2)> = None;
         for sign in [1.0, -1.0] {
             let d = Point2::new(sign * e.x, sign * e.y);
-            // the line's last parameter in the domain, and within the reach
+            // the line's last parameter in the domain, and in the window
             let mut far = 2.0 * distance / reach;
             for (x, step, lo, hi) in [
                 (uv.x, d.x, domain.min().x, domain.max().x),
@@ -315,45 +330,41 @@ impl SurfPtSolveStepper<'_> {
                     far = far.min((lo - x) / step);
                 }
             }
-            if far.is_nan() || far <= 0.0 {
+            // the model's fall in |S - P|² / 2 over the window, against the least fall a
+            // move needs there, (distance - (distance - tight))(2 distance) / 2
+            if far.is_nan() || -low * far * far <= 2.0 * tight * distance {
                 continue;
             }
-            let at = |s: f64| Point2::new(uv.x + s * d.x, uv.y + s * d.y);
-            let mut trial = Self::copy_of(k, self);
-            let value = |s: f64, trial: &mut Self| -> Result<f64> {
-                trial.set_uv(domain.clamp_point(at(s)));
-                trial.gap_length()
-            };
+            let at = |s: f64| domain.clamp_point(Point2::new(uv.x + s * d.x, uv.y + s * d.y));
             // golden-section search on [0, far], each step a fixed fraction of the bracket,
             // until the bracket is below the rounding of its ends
             let ratio = 0.5 * (5.0_f64.sqrt() - 1.0);
             let (mut lo, mut hi) = (0.0, far);
             let mut x1 = hi - ratio * (hi - lo);
             let mut x2 = lo + ratio * (hi - lo);
-            let mut f1 = value(x1, &mut trial)?;
-            let mut f2 = value(x2, &mut trial)?;
+            let mut f1 = value(at(x1))?;
+            let mut f2 = value(at(x2))?;
             for _ in 0..GOLDEN_STEPS {
                 if f1 <= f2 {
                     hi = x2;
                     (x2, f2) = (x1, f1);
                     x1 = hi - ratio * (hi - lo);
-                    f1 = value(x1, &mut trial)?;
+                    f1 = value(at(x1))?;
                 } else {
                     lo = x1;
                     (x1, f1) = (x2, f2);
                     x2 = lo + ratio * (hi - lo);
-                    f2 = value(x2, &mut trial)?;
+                    f2 = value(at(x2))?;
                 }
             }
-            let s = if f1 <= f2 { x1 } else { x2 };
-            let f = value(s, &mut trial)?;
-            if f < distance - tight && best.as_ref().is_none_or(|(b, _)| f < *b) {
-                best = Some((f, trial));
+            let (s, f) = if f1 <= f2 { (x1, f1) } else { (x2, f2) };
+            if f < distance - tight && best.is_none_or(|(b, _)| f < b) {
+                best = Some((f, at(s)));
             }
         }
         Ok(match best {
-            Some((_, point)) => {
-                self.assign(&point);
+            Some((_, to)) => {
+                self.set_uv(to);
                 true
             }
             None => false,
@@ -717,10 +728,24 @@ impl Surface {
         *solution.start.param_mut(0)? = guess.x;
         *solution.start.param_mut(1)? = guess.y;
         solution.start.solution_value = curr.gap_length()?;
-        // (a guess at a saddle of a minimize goes on from below it: `leave_saddle`)
+        // Not upstream (tangency-labs/solidcore#3446): a minimize converged to a saddle goes on
+        // from below it (`leave_saddle`), each move counted as a step, and the solve ends no
+        // farther than the nearest point a move reached (the Newton steps after a move need
+        // not lower the distance)
+        let mut moved: Option<(f64, Point2)> = None;
+        let mut leave = |at: &mut SurfPtSolveStepper<'_>| -> Result<bool> {
+            if op != SolverOperation::Minimize || !at.leave_saddle(k)? {
+                return Ok(false);
+            }
+            let reached = at.gap_length()?;
+            if moved.is_none_or(|(nearest, _)| reached < nearest) {
+                moved = Some((reached, at.uv()));
+            }
+            Ok(true)
+        };
         if curr.converged(k, EFF_ZERO / 1000.0)?
             && (!curr.is_singular()?.0 || curr.gap_length()? < tight)
-            && !(op == SolverOperation::Minimize && curr.leave_saddle(k)?)
+            && !leave(&mut curr)?
         {
             return Ok(LocalPointSolve {
                 found: true,
@@ -735,13 +760,8 @@ impl Surface {
         while iterations < 35 {
             let step = next.find_next_step(k, &mut curr)?;
             reason = step.reason;
-            // Not upstream (tangency-labs/solidcore#3446): a minimize converged to a saddle
-            // goes on from below it (`leave_saddle`), the move counted as a step
-            let saddle = |next: &mut SurfPtSolveStepper<'_>| -> Result<bool> {
-                Ok(op == SolverOperation::Minimize && next.leave_saddle(k)?)
-            };
             if next.converged_with(k, true)? {
-                if saddle(&mut next)? {
+                if leave(&mut next)? {
                     curr.assign(&next);
                     iterations += 1;
                     curr.set_iter_count(iterations);
@@ -795,7 +815,7 @@ impl Surface {
                 }
             }
 
-            if !step.failed && reason == Converged && saddle(&mut next)? {
+            if !step.failed && reason == Converged && leave(&mut next)? {
                 reason = StillIterating;
             }
             if step.failed || reason != StillIterating {
@@ -804,6 +824,11 @@ impl Surface {
             curr.assign(&next);
             curr.set_iter_count(iterations + 1);
             iterations += 1;
+        }
+        if let Some((nearest, at)) = moved {
+            if next.gap_length()? > nearest {
+                next.set_uv(at);
+            }
         }
         *solution.start.param_mut(0)? = next.uv().x;
         *solution.start.param_mut(1)? = next.uv().y;
@@ -833,5 +858,67 @@ impl Surface {
             reason,
             iterations,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+
+    /// tangency-labs/solidcore#3446: the saddle `z = 2 x y` over `[-1, 1]²` (an exact
+    /// twisted bilinear patch, `S(u, v) = (2u - 1, 2v - 1, 2 (2u - 1)(2v - 1))`) and the
+    /// point `P = (0, 0, 1)` above its centre. The centre is a stationary point of the
+    /// distance, 1 away: the gradient's `g·Su` and `g·Sv` vanish there, and the Hessian of
+    /// `|S - P|² / 2` is `[[4, -8], [-8, 4]]`, of eigenvalues 12 and -4. The nearest points
+    /// are on the diagonal `x = y`, where `|S - P|² = 2x² + (2x² - 1)²` is least at
+    /// `x² = 1/4`: `(±1/2, ±1/2, 1/2)`, `√3 / 2` away, at `(u, v) = (3/4, 3/4)` or
+    /// `(1/4, 1/4)`. A minimize started at the centre stopped there (the shortcut for a
+    /// guess already converged); it goes on to a nearest point. The same far from the origin
+    /// (moved by `1e6` in each coordinate). The bounds are a thousand times the solve's tight
+    /// tolerance, `EFF_ZERO (1 + |P|)`, which its convergence meets, and far below what tells
+    /// the answers apart (the saddle's excess `1 - √3/2 = 0.134`, the parameters a quarter
+    /// apart).
+    #[test]
+    fn a_minimize_started_at_a_saddle_goes_on_to_the_nearest_point() {
+        let k = Kernel::default();
+        for shift in [0.0, 1e6] {
+            let at = |x: f64, y: f64, z: f64| Point3::new(x + shift, y + shift, z + shift);
+            let s = Surface::from(
+                BSplineSurface::create_bilinear_surface(
+                    at(-1.0, -1.0, 2.0),
+                    at(1.0, -1.0, -2.0),
+                    at(-1.0, 1.0, -2.0),
+                    at(1.0, 1.0, 2.0),
+                )
+                .unwrap(),
+            );
+            let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+            let r = s
+                .local_point_solve_1::<()>(
+                    &k,
+                    &domain,
+                    SolverOperation::Minimize,
+                    at(0.0, 0.0, 1.0),
+                    Point2::new(0.5, 0.5),
+                    None,
+                )
+                .unwrap();
+            let (u, v) = (
+                r.solution.start.param(0).unwrap(),
+                r.solution.start.param(1).unwrap(),
+            );
+            let d = r.solution.start.solution_value;
+            let bound = 1000.0 * EFF_ZERO * (1.0 + at(0.0, 0.0, 1.0).max_dimension());
+            assert!(r.found, "shift {shift}");
+            assert!(
+                (d - 0.75_f64.sqrt()).abs() < bound,
+                "shift {shift}: {d} at ({u}, {v})"
+            );
+            assert!(
+                (u - v).abs() < bound && ((u - 0.75).abs() < bound || (u - 0.25).abs() < bound),
+                "shift {shift}: ({u}, {v})"
+            );
+        }
     }
 }

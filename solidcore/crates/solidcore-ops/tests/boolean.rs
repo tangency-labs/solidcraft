@@ -1760,6 +1760,15 @@ fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
 /// - √((-d + r + R)(d + r - R)(d - r + R)(d + r + R)) / 2. The cut's volume is the cylinder's,
 /// 3000 π, less 18 lenses (Cavalieri). The coil's wall lies within the sweep's tolerance of its
 /// screw surface, so the cut's volume is within the coil's area times that tolerance of it.
+///
+/// The counts: the groove's two helices on the cylinder (radius 10, where the circle crosses
+/// it at angles ±acos(-1/20) about its centre) cross the cylinder's seam half-plane (y 0,
+/// x > 0) once a turn; the groove covers the seam just below the top face and over the end
+/// cap, so the seam is left in seven pieces: six between the groove's turns and the one
+/// below the end cap. Vertices: those 14 ends, and the ends of the circle's inner arc on the
+/// top face and on the end cap: 18. Faces: the top and bottom discs, the coil's wall and its
+/// end cap inside the shaft, and the cylinder's side in seven pieces between them: 11.
+/// Edges by Euler's formula for one shell without a handle: 18 + 11 - 2 = 27.
 #[test]
 fn a_coil_cut_from_a_circle_on_a_shafts_end_face_builds_like_its_mirror_image() {
     use solidcore_ops::sweep::screw_sweep;
@@ -1832,6 +1841,7 @@ fn a_coil_cut_from_a_circle_on_a_shafts_end_face_builds_like_its_mirror_image() 
     };
     // the mirror image first: it built before this change too
     let twin = cut(1.0);
+    assert_eq!(twin, [11, 27, 18]);
     assert_eq!(cut(-1.0), twin);
 }
 
