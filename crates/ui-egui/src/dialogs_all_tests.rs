@@ -2978,6 +2978,8 @@ fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
     d.extra.insert("section".into(), json!("square"));
     d.extra.insert("section_position".into(), json!("outside"));
     d.extra.insert("start_angle".into(), json!("30 deg"));
+    // The profile's sketch is on XY, so the axis lies in its plane (the default axis is across it).
+    d.extra.insert("axis".into(), json!([0.0, 1.0, 0.0]));
     h.app.dialog = Some(d.clone());
     h.frames(2);
     for label in ["Section position", "Start angle"] {
@@ -3008,10 +3010,10 @@ fn coil_reverse_direction_winds_the_coil_down_its_axis() {
     let mut h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     d.extra.insert("reversed".into(), json!(true));
-    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    d.extra.insert("axis".into(), json!([0.0, 1.0, 0.0]));
     let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
-    assert_eq!((&p["axis"], &p["reversed"]), (&json!([1.0, 0.0, 0.0]), &json!(true)), "{p}");
-    d.extra.remove("axis");
+    assert_eq!((&p["axis"], &p["reversed"]), (&json!([0.0, 1.0, 0.0]), &json!(true)), "{p}");
+    // The profile's sketch is on XY, so the axis [0, 1, 0] lies in its plane, clear of the profile; it stays set.
     let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     h.app.dialog = Some(d.clone());

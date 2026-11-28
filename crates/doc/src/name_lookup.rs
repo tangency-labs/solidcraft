@@ -238,6 +238,7 @@ pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: 
             .or_else(|| recover_blend_numbered_edge(b, name, near))
             .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
             .or_else(|| recover_misnumbered_side_edge(b, name, near))
+            .or_else(|| recover_numbered_edge_of_split_face(b, name, near))
             .or_else(|| recover_positional_edge(b, name, near))
             .or_else(|| recover_numbered_rib_edge(b, name, near))
             .ok_or(miss)
@@ -426,6 +427,39 @@ fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Optio
         verified: false,
         on_point: true,
     })
+}
+
+/// A saved edge that was one of several between two faces, numbered by where they lay
+/// (`F20:side:l7|F34:side:c3~1`), where a face it names has been split into pieces since, each
+/// named after the faces around it (`F34:side:c3#[F20:side:a14,F20:side:l7]`): every piece
+/// answers to the saved face, so the edges between the other face and those pieces are more than
+/// the saved name told apart, and the number, given by where the edges lay, says nothing about
+/// which one it was (#22928). The saved point decides: of the B-rep's edges between faces that
+/// answer exactly to the two saved faces (see [`exactly`]), at least one of them as a piece, the
+/// one whose exact curve the point lies on, within a pick's reach. None or several, and the name
+/// asks to be picked again. No mesh or nearest-edge substitution decides this.
+fn recover_numbered_edge_of_split_face(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let wanted = strip_edge_number(name);
+    if wanted.len() == name.len() {
+        return None;
+    }
+    let parts = split_top_level_bars(wanted);
+    let [x, y] = parts.as_slice() else { return None };
+    let faces = naming::names(b);
+    let level = |f: u32, n: &str| crate::history_names::matches(&faces, f as usize, n).filter(|l| exactly(*l));
+    // Both faces answer exactly, and at least one is a piece of the saved face.
+    let between = |p: u32, q: u32| level(p, x).zip(level(q, y)).is_some_and(|(lp, lq)| lp == Match::Piece || lq == Match::Piece);
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        (between(p.face, q.face) || between(q.face, p.face))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older

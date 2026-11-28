@@ -55,12 +55,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&AXIS_THROUGH_CYLINDER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("face: ref (a cylinder, cone or torus face, or a circular edge); name?"),
-    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
+    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face or Plane", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_normal_to_face")
         .contract(&AXIS_NORMAL_TO_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref; point: ref (the axis goes through it, square to the face); name?"),
+        .params("face: ref (a face, or a construction or origin plane, #23006); point: ref (the axis goes through it, square to the face or plane); name?"),
     CommandSpec::new("construct.axis.two_planes", "Axis Through Two Planes", crate::checked!("construct.axis.two_planes", axis_planes)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_two_planes")
