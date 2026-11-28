@@ -2,8 +2,7 @@
 //! edges at one end of a 40 x 10 x 20 box rounded past half the box's width. Each
 //! round's rail on the end face lies inside the band the other takes off it, and no
 //! corner trims them (the edges share no vertex); upstream builds a body that is not
-//! closed. With `fillet_refuse_overlapping_bands` the fillet is refused (no room), and
-//! a radius that fits still builds.
+//! closed. The fillet is refused (no room), and a radius that fits still builds.
 
 #![allow(
     clippy::unwrap_used,
@@ -19,7 +18,6 @@ use solidcore::Kernel;
 
 fn round_the_end(radius: f64) -> solidcore::Result<()> {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_overlapping_bands = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 10.0, 20.0).unwrap();
     // the two vertical edges at x = 40
     let ends: Vec<_> = b

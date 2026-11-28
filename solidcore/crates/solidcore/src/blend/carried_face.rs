@@ -74,7 +74,7 @@ pub struct CarriedFace {
 }
 
 /// Whether `face`'s surface is a plane within `tol`, and then its unit normal (either way).
-fn plane_normal(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<Option<Vec3>> {
+pub(crate) fn plane_normal(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<Option<Vec3>> {
     let Some(surface) = b.face(face)?.surface.as_ref() else {
         return Ok(None);
     };

@@ -47,8 +47,14 @@
 //! Partial lists from completed merge intervals survive ignored failures.
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
+//! `Fix_DegenEdges` decides each listed edge again with its tolerance as it is then, and
+//! squeezes an open edge by the certified `heal::tolerance_defects::collapse_short_edge`
+//! (not upstream's `SqueezeEdge`): the survivor moves to the midpoint of the two vertices
+//! and the neighbouring edges are re-ended there.
 
-use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError};
+use crate::error::heal::HealFailure;
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignored as ignore_soft, EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
@@ -76,6 +82,13 @@ use crate::topology::face::p1::{self as fp1, SeamProblem};
 use crate::topology::vertex;
 
 const OP: &str = "heal::heal_data::p3";
+
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
+}
 /// Maximum number of nested `UpdateTargetLists` catch-up passes.
 pub const MAX_TARGET_UPDATE_DEPTH: u64 = 32;
 
@@ -131,10 +144,7 @@ impl<O: LoopObject> HealData<O> {
         through: HealerOpType,
     ) -> Result<()> {
         if tracker.is_tracking(Some(&k.context)) {
-            return Err(SolidError::heal_failed(
-                OP,
-                "the topology changes are still being tracked",
-            ));
+            return Err(SolidError::heal(OP, HealFailure::ChangesStillTracked));
         }
         if let Some(error) = tracker.failure() {
             return Err(error);
@@ -444,6 +454,16 @@ impl<O: LoopObject> HealData<O> {
 
     /// Squeezes degenerate edges in reverse problem-list order, deleting closed
     /// single-vertex edges instead, then updates all target and problem lists.
+    ///
+    /// Not upstream: each listed edge is decided again on the B-rep as it is now
+    /// ([`super::p2::degenerate_edge`] with the edge's tolerance, which `Fix_TolSizes` may
+    /// have changed since the edge was cached), and one that is no longer degenerate is left.
+    /// An open edge is squeezed by [`crate::heal::tolerance_defects::collapse_short_edge`] into
+    /// the midpoint of its two vertices, keeping the vertex with the larger tolerance, and every
+    /// edge that met either vertex is re-ended there, each step certified over the whole curve;
+    /// an edge whose squeeze is not certified (`Refusal`) is left as it is. Upstream's
+    /// `SqueezeEdge` keeps the start vertex where it is and leaves the neighbouring curves
+    /// ending at the vertex it deletes.
     pub fn fix_degen_edges(
         &mut self,
         k: &mut Kernel,
@@ -459,21 +479,21 @@ impl<O: LoopObject> HealData<O> {
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
                 let e = p.edge.ok_or_else(|| {
-                    SolidError::heal_failed(OP, "the edge properties have no edge")
+                    defect(
+                        "the edge properties the healer listed as degenerate have no edge, \
+                         though it lists only properties it built for an edge",
+                    )
                 })?;
-                if p.bad_degen_edge.is_false() {
+                if p.bad_degen_edge.is_false()
+                    || !super::p2::degenerate_edge(b, e, edge::tolerance(b, e)?)?
+                {
                     continue;
                 }
                 let (a, d) = edge::start_end_vertices(b, e)?;
                 let edits = if a == d {
                     delete_edge(k, b, e)?
                 } else {
-                    squeeze_edge(
-                        k,
-                        b,
-                        e,
-                        a.ok_or_else(|| invalid("edge without start vertex"))?,
-                    )?
+                    collapse_edge(k, b, e)?
                 };
                 changes.append(edits);
             }
@@ -640,11 +660,24 @@ fn tracked_edit<R>(
     lent.unwrap_or_else(|e| (Err(e), Changes::default()))
 }
 /// `SqueezeEdge(e, survivor)` under the edit tracker ([`tracked_edit`]).
+#[cfg(test)]
 fn squeeze_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId, survivor: VertexId) -> Result<Changes> {
     let (r, changes) = tracked_edit(k, b, |k, b, env| {
         crate::topology::brep::p3::squeeze_edge(k, b, env, e, survivor)
     });
     r.map(|()| changes)
+}
+/// [`crate::heal::tolerance_defects::collapse_short_edge`] of `e` into the midpoint of its
+/// vertices under the edit tracker ([`tracked_edit`]): what it changed. A refused squeeze
+/// changes nothing, so nothing is tracked, and the edge is left.
+fn collapse_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<Changes> {
+    let (r, changes) = tracked_edit(k, b, |k, b, env| {
+        crate::heal::tolerance_defects::collapse_short_edge(k, b, env, e, None)
+    });
+    match r? {
+        // a refusal changed nothing, so its tracked lists are empty
+        Ok(_) | Err(_) => Ok(changes),
+    }
 }
 /// `SmBrep::DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`) under the edit
 /// tracker ([`tracked_edit`]).
@@ -913,7 +946,18 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
-                return Err(SolidError::heal_failed(OP, "the edge was not split"));
+                // the split declines with editing off (the caller's state; only
+                // `heal_targets` enables it), a parameter outside the edge's interval,
+                // or a parameter at an end the edge has no vertex for
+                if !b.editing_enabled() {
+                    return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
+                }
+                return Err(defect(
+                    "the edge split was declined without naming an end, on a B-rep open for \
+                     editing, so the pole's parameter lies outside the edge's interval or at \
+                     an end with no vertex, though the healer takes it from a crossing on an \
+                     edge of a face's loop, which has both its vertices",
+                ));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
             self.update_target_lists(
@@ -1727,6 +1771,8 @@ mod tests {
                 HealerOpType::FixDegenEdges
             ),
             Err(e) if e.upstream_status() == Some(SM_ERR)
+                && e.is_defect()
+                && matches!(e.heal_failure(), Some(HealFailure::Defect { .. }))
         ));
     }
 
@@ -1786,9 +1832,10 @@ mod tests {
         assert!(squeeze_edge(&mut k, &mut b, e0, a).is_ok());
     }
 
-    /// The A--B--C chain of [`wire_chain`] with line curves and AB's uses reversed (its
-    /// first edge use at B, so `GetVertex`, the vertex `FixDegenEdges` keeps, is B), a
-    /// kernel with a recording user callback, and healers queueing AB and BC.
+    /// The A--B--C chain of [`wire_chain`] shrunk within its tolerance, with line curves and
+    /// AB's uses reversed (its first edge use at B, so `GetVertex`, the vertex
+    /// `FixDegenEdges` keeps on the tie of tolerances, is B), a kernel with a recording user
+    /// callback, and healers queueing AB and BC.
     #[allow(clippy::type_complexity)]
     fn two_healer_setup() -> (
         Brep,
@@ -1844,6 +1891,11 @@ mod tests {
         b.vertex_mut(bv).unwrap().vertexuses = vec![vu0, VertexuseId::from_index(2)];
         b.edge_mut(e0).unwrap().vertices = [bv, a];
         assert_eq!(edge::start_end_vertices(&b, e0).unwrap().0, Some(bv));
+        // the chain 1e-7 long between vertices, within the 1e-6 tolerance of its edges: both
+        // edges are degenerate, so the certified squeeze takes them
+        for (v, x) in [(a, 0.0), (bv, 1e-7), (c, 2e-7)] {
+            b.vertex_mut(v).unwrap().point = crate::math::Vec3::new(x, 0.0, 0.0);
+        }
         for (e, p, q) in [(e0, bv, a), (e1, bv, c)] {
             let (pp, qq) = (b.vertex(p).unwrap().point, b.vertex(q).unwrap().point);
             b.edge_mut(e).unwrap().curve = Some(Curve::from(Line::from_points(pp, qq, 3)));

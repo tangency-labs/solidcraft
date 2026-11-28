@@ -1,14 +1,13 @@
 //! What a face measures on the surface behind it (#9086), and around it (#12048).
 //!
 //! A curved face's area is the area of the surface it lies on: a cylinder's band is
-//! r·θ·h and a whole sphere 4πr². The display mesh's triangles run inside a curve, so
-//! their sum falls short of it.
+//! r·θ·h and a whole sphere 4πr². A face on a sphere, cut or whole, takes the kernel's
+//! exact face area (#22556). The display mesh's triangles run inside a curve, so their
+//! sum falls short of it.
 //!
 //! A flat face's area is the area its exact edges enclose (#12372): its outer loop's area
 //! less its holes'. The display mesh's polygon for a round hole runs inside the circle, so
 //! the mesh's holes are too small and the face reads too big.
-
-use std::f64::consts::PI;
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Loop};
@@ -23,9 +22,15 @@ pub(crate) fn patch_area(body: &Body, mesh: &Mesh, patch: &[usize]) -> Option<f6
     match solidcraft_kernel::face_surface(body, *patch.first()?)? {
         FaceSurface::Plane { normal, point } => flat_patch(body, patch, normal, point),
         FaceSurface::Cylinder { origin, axis, radius } => cylinder_band(body, mesh, patch, origin, axis, radius),
-        FaceSurface::Sphere { radius, .. } => sphere(body, patch, radius),
+        FaceSurface::Sphere { center, radius } => sphere(body, patch, center, radius),
         _ => None,
     }
+}
+
+/// The exact area of one face, from its surface and trim by the kernel
+/// ([`Body::face_area`]), with no display mesh (#22556). `None` where the kernel gives none.
+pub(crate) fn face_area(body: &Body, face: usize) -> Option<f64> {
+    body.face_area(face).ok().flatten().filter(|a| a.is_finite())
 }
 
 /// Two orthonormal directions in a plane and a point on it: the plane's own 2D coordinates.
@@ -318,30 +323,19 @@ fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: 
     Some(radius * low_turn * height)
 }
 
-/// The area of a sphere: 4πr², when the body is the whole of it.
-fn sphere(body: &Body, patch: &[usize], radius: f64) -> Option<f64> {
+/// The area of a patch of faces on one sphere: the sum of its faces' exact areas, each from
+/// the kernel ([`face_area`]).
+fn sphere(body: &Body, patch: &[usize], center: Vec3, radius: f64) -> Option<f64> {
     if !(radius.is_finite() && radius > 0.0) {
         return None;
     }
-    // The whole patch lies on one sphere.
-    for f in patch {
-        match solidcraft_kernel::face_surface(body, *f)? {
-            FaceSurface::Sphere { radius: r, .. } if (r - radius).abs() <= radius * 1e-6 => {}
+    let mut total = 0.0;
+    for &face in patch {
+        match solidcraft_kernel::face_surface(body, face)? {
+            FaceSurface::Sphere { center: c, radius: r } if (r - radius).abs() <= radius * 1e-6 && c.dist(center) <= radius * 1e-6 => {}
             _ => return None,
         }
+        total += face_area(body, face)?;
     }
-    // The body is the whole sphere: every face of it lies on that sphere and the patch
-    // holds them all. A body with a face of its own (a sphere that was cut) is a piece of
-    // the sphere, whose area this does not work out: the measure of the mesh stands in
-    // for it.
-    for f in 0..body.record().faces.len() {
-        match solidcraft_kernel::face_surface(body, f)? {
-            FaceSurface::Sphere { radius: r, .. } if (r - radius).abs() <= radius * 1e-6 => {}
-            _ => return None,
-        }
-        if !patch.contains(&f) {
-            return None;
-        }
-    }
-    Some(4.0 * PI * radius * radius)
+    (total.is_finite() && total > 0.0).then_some(total)
 }

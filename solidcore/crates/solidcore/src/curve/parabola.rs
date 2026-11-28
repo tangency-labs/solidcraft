@@ -178,7 +178,11 @@ fn trim_infinite(domain: &mut Extent1d) {
 /// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
 fn ignore_status<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         _ => Ok(()),
     }
 }
@@ -795,7 +799,11 @@ impl Parabola {
         // read the base type (status ignored upstream)
         let (base, read_ok) = match BSplineCurve::read_from_db(db, dim, version) {
             Ok(b) => (b, true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => (BSplineCurve::default(), false),
         };
         let mut parabola = Self {

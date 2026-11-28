@@ -73,8 +73,13 @@ pub fn check_arguments(defs: &[Value], name: &str, args: &Value) -> Result<(), S
         }
     }
     let props = schema["properties"].as_object();
+    let additional = schema.get("additionalProperties").and_then(Value::as_bool).unwrap_or(false);
     for (k, v) in a {
         let Some(p) = props.and_then(|p| p.get(k)) else {
+            // Open schemas delegate unknown keys to the tool, such as desktop preferences.
+            if additional {
+                continue;
+            }
             let valid: Vec<&str> = props.map(|p| p.keys().map(String::as_str).collect()).unwrap_or_default();
             let valid = if valid.is_empty() { "none".to_string() } else { valid.join(", ") };
             let k: String = k.chars().take(64).collect();

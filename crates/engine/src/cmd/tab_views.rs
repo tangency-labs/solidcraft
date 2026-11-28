@@ -8,6 +8,7 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
+use crate::schema::tab_views::TabViewCollapseParams;
 use crate::schema::tab_views::ViewCompassParams;
 use crate::schema::tab_views::{
     MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams,
@@ -35,6 +36,7 @@ const LINK_CONTRACT: TypedContract<TabViewLinkParams> = TypedContract::new();
 const CLEAN_CONTRACT: TypedContract<TabWindowCleanParams> = TypedContract::new();
 const BESIDE_CONTRACT: TypedContract<TabViewBesideParams> = TypedContract::new();
 const NO_PARAMS_CONTRACT: TypedContract<TabViewNoParams> = TypedContract::new();
+const COLLAPSE_CONTRACT: TypedContract<TabViewCollapseParams> = TypedContract::new();
 const MOVE_TO_WINDOW_CONTRACT: TypedContract<TabViewMoveToWindowParams> = TypedContract::new();
 const WINDOW_ID_CONTRACT: TypedContract<TabWindowIdParams> = TypedContract::new();
 const WINDOW_OPTIONS_CONTRACT: TypedContract<TabWindowOptionParams> = TypedContract::new();
@@ -120,9 +122,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the open Model, Sheet or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge}; window?: id (default: last focused) → id, edge or placement, shown; allows up to four views without a limit per kind"),
+    CommandSpec::new("tab.view.collapse", "Collapse Views", crate::checked!("tab.view.collapse", collapse))
+        .icon("list").noundo().doc_only().contract(&COLLAPSE_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("collapsed?: bool (default: the other way round from now) → collapsed: as the views are now; folds the shown design's sub-tabs into its tab (its name and how many views it has) or shows them again; the views themselves are unchanged"),
     CommandSpec::new("tab.view.list", "List Views", crate::checked!("tab.view.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
+        .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order, collapsed: whether they are folded into its tab; read-only")];
 
 /// `p` as the contract type `P`; no parameters at all (`null`) is the empty object.
 fn set_compass(_session: &mut Session, p: &Value) -> Result<Value> {
@@ -336,6 +341,11 @@ fn beside(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let edge = request.placement.is_none().then_some(request.edge.unwrap_or(TabViewEdge::Right));
     reply(cmd, TabViewReply { id: request.id, edge, placement: request.placement, window: request.window, ..Default::default() })
+}
+
+fn collapse(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: TabViewCollapseParams = parse("tab.view.collapse", p)?;
+    reply("tab.view.collapse", TabViewReply { collapsed: request.collapsed, ..Default::default() })
 }
 
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {

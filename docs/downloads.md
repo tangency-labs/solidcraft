@@ -10,7 +10,8 @@ Every platform and package. The links point at the latest release.
 - **Linux:** download the [AppImage][linux-appimage], allow it to run as a program and open it.
   Or install the [.deb][linux-deb] (Ubuntu, Debian, Mint) or [.rpm][linux-rpm] (Fedora,
   openSUSE), or use [Flatpak](https://docs.solidcraft.io/guide/getting-started.html#linux-flatpak).
-  With Snap: `sudo snap install solidcraft` ([Snap Store][snap-store], or the [.snap file][linux-snap]).
+  With Snap: download the [.snap file][linux-snap] (ARM64: [.snap file][linux-arm64-snap]) and follow the
+  [local installation instructions](https://docs.solidcraft.io/guide/getting-started.html#linux-snap).
   For ARM64: [AppImage][linux-arm64-appimage], [.deb][linux-arm64-deb], [.rpm][linux-arm64-rpm].
   On Arch Linux: `sudo pacman -U` the [package][linux-arch] (ARM64: [package][linux-arm64-arch]).
 - **Web:** [try it in your browser][web-app], no install. This is the latest release. To try
@@ -53,7 +54,7 @@ Install details, upgrading from earlier builds and building from source are in
 [linux-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap
 [linux-arch]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.pkg.tar.zst
 [linux-arm64-arch]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.pkg.tar.zst
-[snap-store]: https://snapcraft.io/solidcraft
+[linux-arm64-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.snap
 [web-app]: https://solidcraft.io/app
 [web-rc]: https://docs.solidcraft.io/app-rc/
 [web-edge]: https://docs.solidcraft.io/app-edge/

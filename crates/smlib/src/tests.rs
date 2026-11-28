@@ -131,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 16] = [
+const NO_KERNEL: [&str; 17] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -148,9 +148,10 @@ const NO_KERNEL: [&str; 16] = [
     "in_call",
     "hold_a_kernel",
     "start",
+    "write_kernel_profiles",
 ];
 
-const ANSWERING: [&str; 69] = [
+const ANSWERING: &[&str] = &[
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -162,7 +163,10 @@ const ANSWERING: [&str; 69] = [
     "volume",
     "counts",
     "boolean",
+    "boolean_tagged",
+    "boolean_tagged_owned",
     "union_all",
+    "union_all_tagged",
     "boolean2d",
     "imprint",
     "solid_count",
@@ -173,18 +177,24 @@ const ANSWERING: [&str; 69] = [
     "blend_setback",
     "blend_setback_open",
     "fillet_variable",
+    "fillet_variable_chain",
     "chamfer_sides",
     "shell",
     "offset_faces",
     "thicken",
+    "offset_solid",
     "merge_faces",
+    "merge_faces_keeping_edges",
     "draft",
     "split_faces",
     "split_body",
     "split_body_by_sheet",
+    "trim_sheet",
+    "split_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
+    "trim_by_dropped_curves",
     "stitch",
     "offset_sheet",
     "classify_point",
@@ -198,6 +208,7 @@ const ANSWERING: [&str; 69] = [
     "tagged",
     "history",
     "check",
+    "check_local",
     "check_owned",
     "check_stitched",
     "make_cylinder",
@@ -210,6 +221,7 @@ const ANSWERING: [&str; 69] = [
     "planar_faces",
     "extrude",
     "revolve",
+    "revolve_joining_arcs",
     "sweep",
     "sweep_placed",
     "project_curves",
@@ -217,6 +229,7 @@ const ANSWERING: [&str; 69] = [
     "loft",
     "sweep_stations",
     "loft_to_point",
+    "loft_to_point_through",
     "screw_sweep",
     "screw_sweep_radial",
     "screw_sweep_with_options",
@@ -295,7 +308,10 @@ fn every_entry_point_answers() {
     says("volume", a.volume(1e-6));
     says("counts", a.counts());
     says("boolean", a.boolean(&t, BooleanOp::Union));
+    says("boolean_tagged", a.boolean_tagged(&t, BooleanOp::Union));
+    says("boolean_tagged_owned", a.try_clone().and_then(|x| Brep::boolean_tagged_owned(Err(x), Ok(&t), BooleanOp::Union)));
     says("union_all", Brep::union_all(&[&a, &t]));
+    says("union_all_tagged", Brep::union_all_tagged(&[&a, &t]));
     says("boolean2d", a.boolean2d(&t, BooleanOp::Union));
     says("imprint", a.imprint(&t));
     says("solid_count", a.solid_count());
@@ -308,11 +324,14 @@ fn every_entry_point_answers() {
     says("blend_setback", a.blend_setback(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("blend_setback_open", a.blend_setback_open(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("fillet_variable", a.fillet_variable(edge[0], 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
+    says("fillet_variable_chain", a.fillet_variable_chain(&edge, 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
     says("chamfer_sides", a.chamfer_sides(&edge, 0.1, 1.0, ChamferSecond::Distance(2.0), p(0.0, 0.0, 1.0)));
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
     says("thicken", a.thicken(1.0, false));
+    says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));
+    says("merge_faces_keeping_edges", a.merge_faces_keeping_edges(&[0]));
     says("draft", a.draft(&[p(5.0, 10.0, 5.0)], 0.1, [0.0; 3], p(0.0, 0.0, 1.0), p(0.0, 0.0, 1.0), 0.1));
     let tool =
         says("Surface::plane", ssi::Surface::plane(p(0.0, 0.0, 5.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), [-50.0, 50.0], [-50.0, 50.0])).unwrap();
@@ -322,9 +341,12 @@ fn every_entry_point_answers() {
     let lines: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
+    says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
+    says("split_sheet", a.split_sheet(&sheet));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
+    says("trim_by_dropped_curves", sheet.trim_by_dropped_curves(std::slice::from_ref(&lines), &[p(5.0, 5.0, 5.0)], 1e-6));
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
@@ -339,6 +361,7 @@ fn every_entry_point_answers() {
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
     says("check_stitched", a.check_stitched(CheckLevel::All));
+    says("check_local", a.check_local(&[0], &[0], CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
@@ -349,6 +372,7 @@ fn every_entry_point_answers() {
     says("to_native_prepared", a.to_native_prepared().map_err(|_| Error::Argument));
     says("extrude", Brep::extrude(&lines, p(0.0, 0.0, 1.0), 1.0, 0.0, DraftCorner::Curvature, true));
     says("revolve", Brep::revolve(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
+    says("revolve_joining_arcs", Brep::revolve_joining_arcs(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
     let run = [Curve::Line { start: p(5.0, 5.0, 5.0), end: p(5.0, 5.0, 15.0) }];
     says("sweep", Brep::sweep(&lines, &run, SweepFrame::Follow, true));
     says("sweep_placed", Brep::sweep_placed(&lines, &run, SweepFrame::Follow, true));
@@ -361,6 +385,8 @@ fn every_entry_point_answers() {
     let i3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     says("sweep_stations", Brep::sweep_stations(&lines, &[Affine { m: i3, t: [0.0; 3] }, Affine { m: i3, t: [0.0, 0.0, 2.0] }], Ends::Capped));
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
+    // The base twice, at one height: its own refusal.
+    says("loft_to_point_through", Brep::loft_to_point_through(&[lines.clone(), lines.clone()], p(5.0, 5.0, 12.0), &[0.0, 0.5, 1.0]));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
     says(
@@ -796,6 +822,40 @@ fn a_token_under_another_stops_when_either_does() {
     assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
 }
 
+/// A limit on a call's work (#20575) stops it at the check that makes the count, the same on every
+/// machine, and says it was the limit: a call that stays under it, and one stopped from outside,
+/// do not.
+#[test]
+fn a_work_limit_stops_a_call_at_its_count_and_says_so() {
+    let checks = std::cell::Cell::new(0_u32);
+    let (result, spent) = stop::within_polls(500, || {
+        let result: Result<()> = core::run("limited_call", |k| {
+            loop {
+                checks.set(checks.get() + 1);
+                k.check_cancelled("limited_call")?;
+            }
+        });
+        result
+    });
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(spent);
+    // The call's own check before it starts counts too, and nothing else does.
+    assert!((490..=499).contains(&checks.get()), "{}", checks.get());
+
+    let (result, spent) = stop::within_polls(500, || -> Result<()> { core::run("short_call", |k| k.check_cancelled("short_call")) });
+    assert!(result.is_ok() && !spent);
+
+    let outer = stop::Stop::new();
+    let (result, spent) = outer.within(|| {
+        stop::within_polls(u64::MAX, || {
+            outer.stop();
+            let result: Result<()> = core::run("stopped_call", |k| k.check_cancelled("stopped_call"));
+            result
+        })
+    });
+    assert!(result.is_err() && !spent, "stopped from outside, not by the limit");
+}
+
 /// Every call samples the same random points, whatever its kernel did before: what depends on
 /// them answers the same on any kernel of the pool. (Seven points of a box's first face, each
 /// dithered by a random draw, after the call has sampled the box's other faces.)
@@ -832,8 +892,7 @@ fn every_call_starts_clean_on_any_kernel() {
 /// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
 #[test]
 fn status_sites_only_shrink() {
-    const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+    const SITES: &[(&str, usize)] = &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {
@@ -904,4 +963,81 @@ fn status_sites_only_shrink() {
         assert!(*n <= listed, "{file} makes {n} bare statuses, {listed} listed: carry the typed refusal (Error::Refused), not a new status");
     }
     assert_eq!(found, expected, "fewer bare statuses than listed: lower the counts in SITES");
+}
+
+/// Each operand of a boolean tagged as it is and combined (solidcore#3359): the same record, the
+/// same numbering and the same history as tagging copies of them and combining those, which
+/// copied each operand once more. A cut by a box and by a cylinder, a union and an intersection.
+#[test]
+fn a_tagged_boolean_is_the_boolean_of_tagged_copies() {
+    let plate = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
+    let pocket = Brep::make_box([5.0, 5.0, 2.0], [8.0, 6.0, 10.0]).unwrap();
+    let bore = Brep::made_core(core::make_cylinder([25.0, 15.0, -1.0], 4.0, 8.0).unwrap());
+    let boss = Brep::made_core(core::make_cylinder([30.0, 10.0, 3.0], 3.0, 9.0).unwrap());
+    let cases = [
+        (&plate, &pocket, BooleanOp::Subtract),
+        (&plate, &bore, BooleanOp::Subtract),
+        (&plate, &boss, BooleanOp::Union),
+        (&plate, &boss, BooleanOp::Intersect),
+    ];
+    for (a, b, op) in cases {
+        let before = a.tagged(0).unwrap().boolean(&b.tagged(1).unwrap(), op).unwrap().unwrap();
+        let after = a.boolean_tagged(b, op).unwrap().unwrap();
+        assert_eq!(after.to_native_ordered().unwrap(), before.to_native_ordered().unwrap(), "{op:?}");
+        assert_eq!(after.history().unwrap(), before.history().unwrap(), "{op:?}");
+    }
+    // The operands are left as they were: untagged, their records unchanged.
+    let plain = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
+    assert_eq!(plate.to_native_ordered().unwrap(), plain.to_native_ordered().unwrap());
+}
+
+/// A boolean of operands handed over and tagged themselves, with no copy: the same record,
+/// numbering and history as the boolean that tags copies of them. Each operand is imported from
+/// its record, as a body's form is made for a boolean, once handed over and once read. A cut by a
+/// box and by a cylinder, a union and an intersection, with one operand handed over and both.
+#[test]
+fn a_boolean_of_handed_over_operands_is_the_boolean_of_tagged_copies() {
+    let plate = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap().to_native().unwrap();
+    let pocket = Brep::make_box([5.0, 5.0, 2.0], [8.0, 6.0, 10.0]).unwrap().to_native().unwrap();
+    let bore = Brep::made_core(core::make_cylinder([25.0, 15.0, -1.0], 4.0, 8.0).unwrap()).to_native().unwrap();
+    let boss = Brep::made_core(core::make_cylinder([30.0, 10.0, 3.0], 3.0, 9.0).unwrap()).to_native().unwrap();
+    let import = |r| Brep::from_record(r, true).unwrap();
+    let cases = [
+        (&plate, &pocket, BooleanOp::Subtract),
+        (&plate, &bore, BooleanOp::Subtract),
+        (&plate, &boss, BooleanOp::Union),
+        (&plate, &boss, BooleanOp::Intersect),
+    ];
+    for (a, b, op) in cases {
+        let (ra, rb) = (import(a), import(b));
+        let want = ra.boolean_tagged(&rb, op).unwrap().unwrap();
+        for (hand_a, hand_b) in [(true, false), (false, true), (true, true)] {
+            let (sa, sb) = (import(a), import(b));
+            let (sa_before, sb_before) = (sa.to_native().unwrap(), sb.to_native().unwrap());
+            let ia = if hand_a { Err(import(a)) } else { Ok(&sa) };
+            let ib = if hand_b { Err(import(b)) } else { Ok(&sb) };
+            let got = Brep::boolean_tagged_owned(ia, ib, op).unwrap().unwrap();
+            assert_eq!(got.to_native_ordered().unwrap(), want.to_native_ordered().unwrap(), "{op:?} {hand_a} {hand_b}");
+            assert_eq!(got.history().unwrap(), want.history().unwrap(), "{op:?} {hand_a} {hand_b}");
+            // a read operand is left as it was
+            assert_eq!(sa.to_native().unwrap(), sa_before, "{op:?}");
+            assert_eq!(sb.to_native().unwrap(), sb_before, "{op:?}");
+        }
+    }
+}
+
+/// A union of operands each tagged as it is (solidcore#3359): the same record, numbering and
+/// history as the union of tagged copies.
+#[test]
+fn a_tagged_union_is_the_union_of_tagged_copies() {
+    let a = Brep::make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    let b = Brep::make_box([8.0, 2.0, 2.0], [10.0, 6.0, 6.0]).unwrap();
+    let c = Brep::made_core(core::make_cylinder([5.0, 5.0, 9.0], 3.0, 5.0).unwrap());
+    let operands = [&a, &b, &c];
+    let tagged: Vec<Brep> = operands.iter().enumerate().map(|(i, x)| x.tagged(i).unwrap()).collect();
+    let refs: Vec<&Brep> = tagged.iter().collect();
+    let before = Brep::union_all(&refs).unwrap();
+    let after = Brep::union_all_tagged(&operands).unwrap();
+    assert_eq!(after.to_native_ordered().unwrap(), before.to_native_ordered().unwrap());
+    assert_eq!(after.history().unwrap(), before.history().unwrap());
 }

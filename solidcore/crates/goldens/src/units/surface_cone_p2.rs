@@ -332,6 +332,16 @@ fn status(e: &SolidError) -> f64 {
 }
 
 /// Builds the cone (the `surface.cone_p1` constructions).
+/// The cone a `surface.cone_p2` case's `inputs` builds (before its op), for replay tests.
+///
+/// # Errors
+///
+/// A [`HarnessError`] when `inputs` is not a case of this unit.
+pub fn case_cone(k: &Kernel, inputs: &Value) -> Result<solidcore::Result<Cone>, HarnessError> {
+    let i: Inputs = serde_json::from_value(inputs.clone()).map_err(|e| harness(e.to_string()))?;
+    Ok(rust_cone(k, &i.cone))
+}
+
 fn rust_cone(k: &Kernel, c: &ConeIn) -> solidcore::Result<Cone> {
     let (o, x, y) = (v3(c.origin), v3(c.x), v3(c.y));
     let a2p = Axis2Placement::new(o, x, y);

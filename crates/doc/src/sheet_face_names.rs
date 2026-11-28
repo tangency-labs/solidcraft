@@ -17,12 +17,14 @@ use crate::SurfaceSheet;
 
 /// What the builder of a folded sheet made from surfaces sews a face for (see
 /// `sheet_surface_fold::solid`): one of a piece's two caps, on the sheet's surface or the other
-/// face, `at` the middle of the piece, or a wall along the run of its outline from `a` through
-/// `mid` to `b` (flat coordinates).
+/// face, `at` the middle of the piece, a wall along the run of its outline from `a` through
+/// `mid` to `b` (flat coordinates), or a face of the sheet's `bead`th bead (see
+/// [`crate::sheet_surface_bead::Form`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FaceRole {
     Cap { surface: bool, at: Vec2 },
     Wall { a: Vec2, b: Vec2, mid: Vec2 },
+    Bead { bead: usize, face: solidcraft_develop::BeadFace },
 }
 
 /// What each face of a folded sheet made from surfaces (#6748) was made for, as its builder makes
@@ -33,6 +35,8 @@ pub(crate) struct FaceNamer<'a> {
     dev: &'a Development,
     /// What made each panel, by its key (see [`PanelMade`]).
     recipes: &'a [(String, PanelMade)],
+    /// The sheet's beads, which name their own faces.
+    beads: &'a [crate::SurfaceBead],
     /// Each panel's rims in the flat, and what made each (see [`rim_edges`]).
     rims: Vec<Vec<(Vec2, Vec2, Option<RimEdge>)>>,
     /// Each corner relief cut from the flat (see [`Development::cuts`]), with the panels the two
@@ -48,6 +52,7 @@ impl<'a> FaceNamer<'a> {
         pieces: &[(Piece, Region2)],
         curves: &[(String, String, Vec2, Vec2)],
         recipes: &'a [(String, PanelMade)],
+        beads: &'a [crate::SurfaceBead],
     ) -> FaceNamer<'a> {
         let rims = (0..sheet.panels.len())
             .map(|i| {
@@ -83,7 +88,7 @@ impl<'a> FaceNamer<'a> {
                 _ => None,
             })
             .collect();
-        FaceNamer { sheet, dev, recipes, rims, reliefs }
+        FaceNamer { sheet, dev, recipes, beads, rims, reliefs }
     }
 
     /// What the face made for `role` of `piece` was made for, as the sheet reports it to the model
@@ -92,8 +97,9 @@ impl<'a> FaceNamer<'a> {
     /// a bend's curved face or end by the panel the bend makes; a tab's cap, along its bend; a
     /// corner relief's wall by its corner's two bends, along the relief's outline from where it
     /// meets the first bend's zone (see [`relief_start`]); a hole's wall (see [`HoleRecord`],
-    /// `holes`), along its sketch curve. None for a wall nothing says what made (the model names
-    /// it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
+    /// `holes`), along its sketch curve; a bead's face by its feature and centreline (see
+    /// [`crate::sheet_surface_bead::face_role`]). None for a wall nothing says what made (the model
+    /// names it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
     /// the faces the fold parted.
     pub(crate) fn part(&self, piece: Piece, role: FaceRole, holes: &[HoleRecord]) -> Option<(SheetPart, Option<f64>)> {
         let key = |i: usize| self.sheet.panels.get(i).map(|p| p.name.clone());
@@ -118,11 +124,24 @@ impl<'a> FaceNamer<'a> {
                     return Some((SheetPart::Relief { panels: panels.clone() }, Some(along)));
                 }
             }
-            let (feature, curve, along) = hole_at(self.sheet, self.dev, holes, run)?;
-            Some((SheetPart::Hole { feature, curve }, Some(along)))
+            let (part, along) = hole_at(self.sheet, self.dev, holes, run)?;
+            Some((part, Some(along)))
         };
         match (piece, role) {
-            (Piece::Panel(i), FaceRole::Cap { surface, .. }) => Some((SheetPart::Cap { panel: parted(i)?, surface }, None)),
+            (_, FaceRole::Bead { bead, face }) => {
+                let b = self.beads.get(bead)?;
+                Some((SheetPart::Bead { feature: b.feature, curve: b.curve.clone(), face: crate::sheet_surface_bead::face_role(face) }, None))
+            }
+            // A cap's pieces (a fold parts the panel) in the order of their panels' keys, which
+            // say what made each (see `PanelMade`): exact, never a build order. It finds each
+            // piece in the body before, and the folds' roles that name it (see `fold_cap_roles`),
+            // for pieces nothing around them tells apart (a round panel's, #21300).
+            (Piece::Panel(i), FaceRole::Cap { surface, .. }) => {
+                let (r, mine) = (root(self.sheet, self.recipes, i), key(i)?);
+                let pieces = self.sheet.panels.iter().enumerate().filter(|(k, _)| root(self.sheet, self.recipes, *k) == r);
+                let before = pieces.filter(|(_, p)| p.name < mine).count();
+                Some((SheetPart::Cap { panel: key(r)?, surface }, Some(before as f64)))
+            }
             (Piece::Panel(i), FaceRole::Wall { a, b, mid }) => {
                 let m = (a + b) * 0.5;
                 if let Some(relief) = cut([a, mid, b]).filter(|(p, _)| matches!(p, SheetPart::Relief { .. })) {
@@ -150,6 +169,7 @@ impl<'a> FaceNamer<'a> {
                             None => cut([a, mid, b]),
                         }
                     }
+                    FaceRole::Bead { .. } => None,
                 }
             }
             (Piece::Tab(z, _), FaceRole::Cap { surface, at }) => {
@@ -274,28 +294,33 @@ pub(crate) fn ranked(made: Vec<Option<(SheetPart, Option<f64>)>>) -> Vec<Option<
 
 /// The hole of `holes` whose wall the run `run` (from its start through its middle to its end,
 /// the flat's coordinates) of a sheet developed as `dev` lies along, wherever the hole now is: the
-/// cut that made it, the sketch curve under the run, and where along that curve's drawn segment
-/// the run starts (see [`starts_at`]). None for a run along no recorded hole, or along records
-/// that disagree.
-fn hole_at(sheet: &Sheet, dev: &Development, holes: &[HoleRecord], run: [Vec2; 3]) -> Option<(u64, String, f64)> {
+/// feature and curve or drill that made it, and where along its recorded segment the run starts
+/// (see [`starts_at`]). None for a run along no recorded hole, or along records that disagree.
+fn hole_at(sheet: &Sheet, dev: &Development, holes: &[HoleRecord], run: [Vec2; 3]) -> Option<(SheetPart, f64)> {
     let small = sheet.thickness * 1e-3;
-    let mut found: Option<(u64, String, f64)> = None;
+    let mut found: Option<(SheetPart, f64)> = None;
     for h in holes {
         // The hole's chart is its panel's (by key), which a fold's pieces keep.
         let Some(Some(at)) = sheet.panels.iter().position(|p| p.name == h.panel).and_then(|k| dev.placements.get(k)) else { continue };
         let back = at.inverse();
         let chart = run.map(|x| back.point(x));
-        let Some((_, curve, drawn)) = h.segs.iter().find(|(seg, curve, _)| !curve.is_empty() && chart.iter().all(|x| on_seg(seg, *x, small))) else {
+        let Some((_, curve, drawn)) =
+            h.segs.iter().find(|(seg, curve, _)| (h.drill_role.is_some() || !curve.is_empty()) && chart.iter().all(|x| on_seg(seg, *x, small)))
+        else {
             continue;
         };
-        if let Some((feature, named, _)) = &found {
-            if (*feature, named) != (h.feature, curve) {
+        let part = match &h.drill_role {
+            Some(role) => SheetPart::Drill { feature: h.feature, role: role.clone() },
+            None => SheetPart::Hole { feature: h.feature, curve: curve.clone() },
+        };
+        if let Some((named, _)) = &found {
+            if *named != part {
                 return None;
             }
             continue;
         }
         let start = drawn.as_ref().map_or(0.0, |g| starts_at(g, chart, small));
-        found = Some((h.feature, curve.clone(), start));
+        found = Some((part, start));
     }
     found
 }
@@ -326,12 +351,18 @@ fn on_seg(s: &Seg2, p: Vec2, tol: f64) -> bool {
 /// (`before`), through the operation's history: a face kept, trimmed or split from a named face
 /// keeps its name; a face the operation made has none. All none without a history.
 pub(crate) fn carried<T: Clone>(before: &[Option<T>], body: &solidcraft_kernel::Body) -> Vec<Option<T>> {
+    carried_from(before, &[], body)
+}
+
+/// Carry parts from both operands when a result face has exactly one source.
+pub(crate) fn carried_from<T: Clone>(before: &[Option<T>], tool: &[Option<T>], body: &solidcraft_kernel::Body) -> Vec<Option<T>> {
     let n = body.face_count();
     let Some(h) = body.history().filter(|h| h.faces.len() == n) else { return vec![None; n] };
     h.faces
         .iter()
         .map(|p| match p.origins.as_slice() {
             [solidcore_record::brep::history::FaceOrigin::Face { operand: 0, face }] => before.get(*face).cloned().flatten(),
+            [solidcore_record::brep::history::FaceOrigin::Face { operand: 1, face }] => tool.get(*face).cloned().flatten(),
             _ => None,
         })
         .collect()
@@ -403,6 +434,89 @@ fn rim_edges(
     out.retain(|(a, b, _, _)| !on_zone(*a, *b));
     out
 }
+
+/// The folds' roles of each face of `sheet`'s body that is a piece of a panel's cap folds parted
+/// (see `Lineage::cap_pieces`), `None` for any other face: for each fold that parted the panel the
+/// piece is on or a panel it came from, `F<fold>:fold:<n>` where the piece is on the `n`th part
+/// that fold folded (see `PanelMade::Fold`), else `F<fold>:fold:stay` (the piece was still on the
+/// panel it folded, and stayed). What made each panel, never
+/// where it lies. The cap's place (see [`FaceNamer::part`]) is its piece's rank among its panel's
+/// pieces by key: where it can't be read (a piece without its cap), no piece of that cap has roles.
+pub(crate) fn fold_cap_roles(sheet: &crate::SurfaceSheet) -> Vec<Option<Vec<String>>> {
+    let recipes = &sheet.recipes;
+    let panels = &sheet.sheet.panels;
+    let made = |key: &str| recipes.iter().find(|(k, _)| k == key).map(|(_, m)| m);
+    // The keys of each cap's pieces, in order: the pieces of the panel the cap is named after.
+    let pieces_of = |root_key: &str| -> Vec<&str> {
+        let Some(r) = panels.iter().position(|p| p.name == root_key) else { return Vec::new() };
+        let mut keys: Vec<&str> =
+            panels.iter().enumerate().filter(|(k, _)| root(&sheet.sheet, recipes, *k) == r).map(|(_, p)| p.name.as_str()).collect();
+        keys.sort_unstable();
+        keys
+    };
+    // The places each cap has, which must be one per piece.
+    let mut places: std::collections::HashMap<&SheetPart, std::collections::BTreeSet<usize>> = std::collections::HashMap::new();
+    for x in sheet.parts.iter().flatten() {
+        if let (SheetPart::Cap { .. }, Some(place)) = (&x.part, x.place) {
+            places.entry(&x.part).or_default().insert(place);
+        }
+    }
+    // The roles of the piece on panel `key`: the panel and every panel it came from, through folds.
+    let roles = |key: &str| -> Vec<String> {
+        let mut chain: Vec<&str> = vec![key];
+        for _ in 0..panels.len() {
+            let Some(PanelMade::Fold { from, .. }) = chain.last().and_then(|k| made(k)) else { break };
+            chain.push(from.as_str());
+        }
+        let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut folded: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        for (k, m) in recipes {
+            if let PanelMade::Fold { feature, place, .. } = m
+                && chain.contains(&k.as_str())
+            {
+                folded.insert(*feature);
+                out.insert(format!("F{feature}:{FOLD_ROLE}{place}"));
+            }
+        }
+        // A fold of a panel the piece is on, or came from, left it where it was, unless the piece
+        // had left that panel before (a fold made earlier parted it off): recipes are in the order
+        // they were made.
+        let made_at = |key: &str| recipes.iter().position(|(k, _)| k == key);
+        for (at, (_, m)) in recipes.iter().enumerate() {
+            let PanelMade::Fold { feature, from, .. } = m else { continue };
+            if folded.contains(feature) {
+                continue;
+            }
+            let Some(k) = chain.iter().position(|c| c == from) else { continue };
+            let left_after = match k.checked_sub(1).and_then(|c| chain.get(c)) {
+                None => true,
+                Some(child) => made_at(child).is_some_and(|c| c > at),
+            };
+            if left_after {
+                out.insert(format!("F{feature}:{FOLD_ROLE}stay"));
+            }
+        }
+        out.into_iter().collect()
+    };
+    sheet
+        .parts
+        .iter()
+        .map(|x| {
+            let x = x.as_ref()?;
+            let (SheetPart::Cap { panel, .. }, Some(place)) = (&x.part, x.place) else { return None };
+            let keys = pieces_of(panel);
+            if keys.len() < 2 || places.get(&x.part).map(std::collections::BTreeSet::len) != Some(keys.len()) {
+                return None;
+            }
+            let roles = roles(keys.get(place.checked_sub(1)?)?);
+            (!roles.is_empty()).then_some(roles)
+        })
+        .collect()
+}
+
+/// What starts a fold's role of a piece of a panel's cap (`F30:fold:1`, see [`fold_cap_roles`]):
+/// no face has it.
+pub(crate) const FOLD_ROLE: &str = "fold:";
 
 /// The panel whose faces panel `i`'s caps and rims are pieces of: the panel a fold parted it from
 /// (by its key, through every fold), whose chart a fold's piece keeps, else `i` itself.
@@ -555,6 +669,6 @@ impl SurfaceSheet {
                 }
             })
             .collect();
-        self.holes.push(HoleRecord { panel: panel.to_string(), feature, segs });
+        self.holes.push(HoleRecord { panel: panel.to_string(), feature, segs, drill_role: None });
     }
 }

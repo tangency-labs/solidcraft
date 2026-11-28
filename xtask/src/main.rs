@@ -3,9 +3,11 @@
 //! Rust workspace tooling. External tools (`cargo`, and Python 3.11+ for the
 //! original icon collection) are invoked through `std::process::Command`.
 
+mod app_geometry;
 mod app_icons;
 mod assets;
 mod book;
+mod ci;
 mod external_corpus;
 mod fast;
 mod features;
@@ -23,6 +25,7 @@ mod parallel;
 mod params;
 mod pending;
 mod plugin_examples;
+mod python;
 mod render_assets;
 mod rustfmt;
 mod shared;
@@ -30,6 +33,7 @@ mod skills;
 mod solidcore_paths;
 mod test;
 mod test_nextest;
+mod typescript;
 mod ui_containers;
 mod web_offline;
 mod web_offline_test;
@@ -58,6 +62,8 @@ commands:
                   and build them for wasm32-unknown-unknown; --run also wraps each as a component
                   and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
+  python          the Python client's generated bindings in python/src/solidcraft/_generated/ [--cli PATH] [--out DIR]
+  typescript      the TypeScript client's generated bindings in typescript/src/generated/ [--cli PATH] [--out DIR]
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
@@ -135,6 +141,14 @@ commands:
                   geometry: fails on a function outside display, export, previews and mesh bodies
                   that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
+  app-geometry [--print] [--base REF]
+                  check that apps compute no geometry: fails on a function in crates/doc, engine,
+                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
+                  new since the base (git merge-base HEAD REF with --base, which ci --base passes
+                  on, else git merge-base HEAD origin/main, else HEAD~1) and
+                  xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
+                  on stale lines; prints the listed count per crate. --print writes the sites
+                  found, in the list's format
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
@@ -145,7 +159,7 @@ commands:
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
                   Trunk after release builds of apps/solidcraft-web, or on a built site in DIR
-  web-api-test [--site DIR]  Test the command API in a real browser build (default: dist/web)
+  web-api-test [--site DIR] [--smoke]  Test the real browser build (default: dist/web); --smoke checks startup, frames and opening a design
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
@@ -160,10 +174,15 @@ commands:
                   units (a kernel change without it prints a hint). -p names the packages to
                   test instead; --list only prints what would run. Every step runs; the failures
                   are listed at the end. CI runs the full gate
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
-                  with the wasm check alongside, then web-offline-test when Chrome is installed
-                  (stops at the first failing step)
+  ci [--all] [--base REF]
+                  the check before a push: runs what the change needs. Always fmt --check,
+                  assets, icons, licences --check, lists, skills, layers, shared, ui-containers,
+                  mesh-decisions, app-geometry, clippy -D warnings, then the tests with the wasm
+                  check alongside, then web-offline-test when Chrome is installed; and, when the
+                  branch (against the merge-base with REF, default origin/main) changes their
+                  paths, i18n --check, kernel-cases --coverage, plugin-examples and the
+                  design-format pending check (xtask/src/ci.rs, PATH_GATES). Prints what it runs
+                  and skips and why; --all runs everything (stops at the first failing step)
 ";
 
 fn main() -> ExitCode {
@@ -180,6 +199,8 @@ fn main() -> ExitCode {
         Some("icons") => icons::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
+        Some("python") => python::run(&root(), &rest),
+        Some("typescript") => typescript::run(&root(), &rest),
         Some("i18n") => i18n::run(&root(), &rest),
         Some("kernel-cases") => kernel_cases::run(&rest),
         Some("known-failing") => known_failing::run(&root(), &rest),
@@ -194,6 +215,7 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("app-geometry") => app_geometry::run(&root(), &rest),
         Some("fmt") => match rest[..] {
             [] => rustfmt::run(&root(), false),
             ["--check"] => rustfmt::run(&root(), true),
@@ -205,7 +227,7 @@ fn main() -> ExitCode {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
             test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
         }
-        Some("ci") => cmd_ci(),
+        Some("ci") => ci::run(&root(), &rest),
         Some("fast") => fast::run(&root(), &rest),
         Some("plugin-examples") => plugin_examples::run(&root(), rest.contains(&"--run")),
         Some("wasm") => cmd_wasm(),
@@ -216,7 +238,7 @@ fn main() -> ExitCode {
         }
         Some("web-api-test") => {
             let site = rest.iter().position(|a| *a == "--site").and_then(|i| rest.get(i + 1)).copied().unwrap_or("dist/web");
-            web_offline_test::run_api(site)
+            web_offline_test::run_api(site, rest.contains(&"--smoke"))
         }
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
@@ -327,6 +349,8 @@ fn cmd_layers() -> Result<(), String> {
     let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    let adapter = std::fs::read_to_string(root().join(layers::ADAPTER_LIST)).map_err(|e| format!("{}: {e}", layers::ADAPTER_LIST))?;
+    violations.extend(layers::adapter_check(&crates, &adapter));
     violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
     let paths = solidcore_paths::counts(&solidcore_paths::scan(
         &root(),
@@ -529,29 +553,6 @@ fn wasm_check() -> Result<(Command, usize), String> {
         c.args(["-p", p]);
     }
     Ok((c, set.len()))
-}
-
-/// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
-/// binaries do, which leaves cargo's build lock free.
-fn cmd_ci() -> Result<(), String> {
-    rustfmt::run(&root(), true)?;
-    assets::run(&root())?;
-    icons::run(&root())?;
-    licences::run(&root(), true)?;
-    lists::run(&root(), false)?;
-    skills::run(&root())?;
-    cmd_layers()?;
-    shared::run(&root())?;
-    ui_containers::run(&root())?;
-    mesh_decisions::run(&root())?;
-    let mut c = cargo();
-    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
-    run(c, "cargo clippy -D warnings")?;
-    let (wasm, n) = wasm_check()?;
-    test_nextest::run_selected(vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
-    web_offline_test::run(&root(), None, false)?;
-    eprintln!("ci: all gates passed");
-    Ok(())
 }
 
 #[cfg(test)]

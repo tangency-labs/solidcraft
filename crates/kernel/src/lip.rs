@@ -3,7 +3,7 @@
 //! directly on the body's schema 4 record (the band's walls continue the walls below, which a
 //! boolean union can't join: their faces would coincide).
 
-use solidcore_ops::prism::{LoopPlacement, loop_placement};
+use solidcore_ops::prism::{LoopPlacement, loop_crosses_itself, loop_placement};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
 use solidcraft_geom::Ring;
@@ -85,63 +85,44 @@ fn face_at(body: &Body, rec: &Brep, at: Vec3) -> Result<(usize, Vec3)> {
 }
 
 /// The face's loop moved `w` into the face (to the left of its edges, as a face's boundary has
-/// its inside on the left), corners mitred where the offsets don't already meet.
+/// its inside on the left), as the kernel moves a closed profile in the face's plane
+/// ([`solidcore_ops::develop::offset_closed_contour`]): each line shifted and each arc's radius
+/// changed, the moved pieces meeting again at every corner (at a sharp one beside an arc, where
+/// the moved curves cross).
 fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>> {
-    let left = |a: Vec3, b: Vec3| n.cross(b - a).normalized();
-    let mut out: Vec<Piece> = Vec::new();
-    for p in pieces {
-        out.push(match p.arc {
-            None => {
-                let l = left(p.a, p.b).ok_or_else(|| fail("zero edge"))?;
-                p.moved(l * w)
-            }
-            Some(arc) => {
-                // Each point moves along its radius, to the left: towards the centre of an arc
-                // turning counter-clockwise, away from that of one turning clockwise.
-                let r = p.a.dist(arc.centre);
-                let shift = if arc.sweep > 0.0 { -w } else { w };
-                if r + shift <= tol {
-                    return Err(fail("the offset closes an arc"));
-                }
-                let moved = |q: Vec3| arc.centre + (q - arc.centre) * ((r + shift) / r);
-                Piece { a: moved(p.a), b: moved(p.b), arc: Some(arc) }
-            }
-        });
-    }
-    // Joints: where the offsets don't meet (sharp corners of lines), the lines are extended or
-    // cut back to their crossing.
-    let k = out.len();
-    for i in 0..k {
-        let j = (i + 1) % k;
-        let (Some(pi), Some(pj)) = (out.get(i).copied(), out.get(j).copied()) else { continue };
-        if pi.b.dist(pj.a) < tol {
-            if let Some(x) = out.get_mut(j) {
-                x.a = pi.b;
-            }
-            continue;
-        }
-        match (pi.arc, pj.arc) {
-            (None, None) => {
-                let (d1, d2) = (pi.b - pi.a, pj.b - pj.a);
-                let w0 = pj.a - pi.a;
-                let cr = d1.cross(d2);
-                let den = cr.len2();
-                if den < 1e-24 {
-                    return Err(fail("parallel edges at a corner"));
-                }
-                let t = w0.cross(d2).dot(cr) / den;
-                let x = pi.a + d1 * t;
-                if let Some(e) = out.get_mut(i) {
-                    e.b = x;
-                }
-                if let Some(e) = out.get_mut(j) {
-                    e.a = x;
-                }
-            }
-            _ => return Err(fail("an arc meeting another edge at a corner")),
-        }
-    }
-    Ok(out)
+    use solidcore_ops::develop::{ContourRefusal, offset_closed_contour};
+    let origin = pieces.first().map(|p| p.a).ok_or_else(|| fail("piece"))?;
+    let plane = Plane::from_normal(origin, n).ok_or_else(|| fail("rim plane"))?;
+    // A corner turning through an angle parts the moved ends by about `w` times it: where that
+    // stays within the model's tolerance the corner is smooth, and the moved pieces meet on the
+    // common normal.
+    let smooth = tol / w.abs();
+    let segs = offset_closed_contour(&profile(pieces, &plane)?.segs, w, 0.0, false, smooth).map_err(|e| {
+        fail(match e {
+            ContourRefusal::ZeroLength => "zero edge",
+            ContourRefusal::TurnsBack => "parallel edges at a corner",
+            ContourRefusal::CornersMiss => "an arc meeting another edge at a corner the band's edge can't go round",
+            ContourRefusal::LineTooShort => "the offset swallows an edge",
+            ContourRefusal::RadiusTooSmall => "the offset closes an arc",
+            ContourRefusal::ArcTooShort => "the offset swallows an arc",
+        })
+    })?;
+    // Back on the face: each piece from where it starts to where the next one does.
+    let starts: Vec<Vec3> = segs.iter().map(|s| plane.to_world(s.start())).collect();
+    segs.iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let (Some(&a), Some(&b)) = (starts.get(i), starts.get((i + 1) % segs.len())) else { return Err(fail("piece")) };
+            let arc = match *s {
+                Seg2::Line { .. } => None,
+                // An arc left no wider than the model's tolerance has closed, as at a radius of 0.
+                Seg2::Arc { radius, .. } if radius <= tol => return Err(fail("the offset closes an arc")),
+                Seg2::Arc { center, sweep, .. } => Some(Arc { centre: plane.to_world(center), sweep }),
+                _ => return Err(fail("piece")),
+            };
+            Ok(Piece { a, b, arc })
+        })
+        .collect()
 }
 
 /// The pieces of a loop (seen from outside the body, whose normal is `n`), from its record edges:
@@ -166,7 +147,10 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
                     let sweep = (t1 - t0) * along * z.dot(n).signum();
                     Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep }) })
                 }
-                _ => Err(fail("edges must be lines or arcs")),
+                Curve::Ellipse { .. } => Err(LipRefusal::RimCurve("an ellipse").into()),
+                Curve::Polyline { .. } => Err(LipRefusal::RimCurve("a polyline").into()),
+                Curve::Spline { .. } | Curve::RationalSpline { .. } => Err(LipRefusal::RimCurve("a spline").into()),
+                Curve::SurfaceIntersection { .. } => Err(LipRefusal::RimCurve("a curve where two surfaces meet").into()),
             }
         })
         .collect()
@@ -258,6 +242,60 @@ pub enum LipRefusal {
     /// The band's far edge crosses the rim's other edge in some places only.
     #[error("the band's far edge crosses the rim's other edge in part, so the face left beside it has no single side")]
     BandCrossesRim,
+    /// The band's far edge crosses itself, where the face is narrower than twice the band.
+    #[error("the band's far edge crosses itself where the face is narrower than twice the band")]
+    BandCrossesItself,
+    /// A rim edge of a curve the band cannot follow, such as the ellipse a tilted cut leaves.
+    #[error("not supported yet: a rim edge that is {0}; a lip follows only lines and arcs")]
+    RimCurve(&'static str),
+}
+
+/// A rim edge's NURBS form moved by `d`.
+fn moved_form(c: &Curve, d: Vec3) -> Option<Curve> {
+    match c {
+        Curve::Spline { knots, points } => {
+            Some(Curve::Spline { knots: knots.clone(), points: points.iter().map(|&p| arr(Vec3::from(p) + d)).collect() })
+        }
+        Curve::RationalSpline { knots, homogeneous } => Some(Curve::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: homogeneous.iter().map(|&[x, y, z, w]| [x + d.x * w, y + d.y * w, z + d.z * w, w]).collect(),
+        }),
+        _ => None,
+    }
+}
+
+/// The surface a rim edge's NURBS form sweeps along `up`: the form along u, from 0 to `up`'s
+/// length along v. A wall on it has the rim edge, and the edge above it on the form moved by
+/// `up`, as straight lines in its parameters, as an extrusion's side has its profile edges.
+fn swept_form(c: &Curve, up: Vec3) -> Option<Surface> {
+    let v_knots = vec![0.0, 0.0, up.len(), up.len()];
+    match c {
+        Curve::Spline { knots, points } => {
+            Some(Surface::Spline { u_knots: knots.clone(), v_knots, points: points.iter().map(|&p| vec![p, arr(Vec3::from(p) + up)]).collect() })
+        }
+        Curve::RationalSpline { knots, homogeneous } => Some(Surface::RationalSpline {
+            u_knots: knots.clone(),
+            v_knots,
+            homogeneous: homogeneous.iter().map(|&q| vec![q, [q[0] + up.x * q[3], q[1] + up.y * q[3], q[2] + up.z * q[3], q[3]]]).collect(),
+        }),
+        _ => None,
+    }
+}
+
+/// The edge above rim edge `e` (used `forward` from `a` to `b`), moved by `up` with its NURBS
+/// form, when it is an arc that has one: the use from `a` to `b` and the wall's form.
+fn form_above(asm: &mut Assembly, e: u32, forward: bool, a: u32, b: u32, up: Vec3) -> Result<Option<(AUse, Surface)>> {
+    let edge = asm.edges.get(e as usize).ok_or_else(|| fail("edge"))?;
+    let (Curve::Circle { frame, radius }, Some(form)) = (&edge.curve, &edge.nurbs) else { return Ok(None) };
+    let (Some(moved), Some(swept)) = (moved_form(form, up), swept_form(form, up)) else { return Ok(None) };
+    let frame = Frame { origin: arr(Vec3::from(frame.origin) + up), ..frame.clone() };
+    let (curve, interval) = (Curve::Circle { frame, radius: *radius }, edge.interval);
+    let (s, t) = if forward { (a, b) } else { (b, a) };
+    let top = asm.edge(curve, interval, s, t)?;
+    if let Some(x) = asm.edges.get_mut(top as usize) {
+        x.nurbs = Some(moved);
+    }
+    Ok(Some((AUse { edge: top, forward, given: None }, swept)))
 }
 
 /// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc of its circle about `n`):
@@ -275,7 +313,7 @@ fn piece_edge(asm: &mut Assembly, a: u32, b: u32, p: &Piece, n: Vec3) -> Result<
 
 /// The wall raised along `p` (from `bottom` to `top`, joined by `up_a` and `up_b` from its
 /// ends), its outside on the right of `p` seen from `n` (`right`) or on its left.
-fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, right: bool, shell: usize) -> Result<AFace> {
+fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, right: bool, shell: usize, form: Option<Surface>) -> Result<AFace> {
     let mut lp = vec![
         bottom.clone(),
         AUse { edge: up_b, forward: true, given: None },
@@ -303,7 +341,10 @@ fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, rig
             u.forward = !u.forward;
         }
     }
-    Ok(AFace { surface, nurbs: None, natural_out, loops: vec![lp], shell, domain: None })
+    // On the swept form of the edge below, the natural normal is the edge's direction × n: out
+    // on the right of a use that runs the edge's way.
+    let natural_out = if form.is_some() { bottom.forward == right } else { natural_out };
+    Ok(AFace { surface, nurbs: form, natural_out, loops: vec![lp], shell, domain: None })
 }
 
 /// Raise the band of the planar face at `at` that runs `width` wide along its outer loop
@@ -331,6 +372,11 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         // the two loops' exact lines and arcs, loops within `tol` (from the body's size) meeting.
         let plane = Plane::from_normal(at, n).ok_or_else(|| fail("rim plane"))?;
         let (far, other_loop) = (profile(&moved, &plane)?, profile(&pieces(&asm, &other, n)?, &plane)?);
+        // The kernel's offset meets only neighbouring pieces: moved past a neck narrower than
+        // twice the band, the far edge crosses itself, and bounds no face.
+        if loop_crosses_itself(&far, tol).ok_or_else(|| fail("whether the band's far edge crosses itself"))? {
+            return Err(LipRefusal::BandCrossesItself.into());
+        }
         let placed = loop_placement(&far, &other_loop, tol).ok_or_else(|| fail("where the band's far edge lies"))?;
         // The band's edge follows the outer loop (the other is the hole) or the hole (the other is
         // the outer loop): it clears the other loop on the face's side, or reaches past it.
@@ -349,6 +395,9 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let ctop: Vec<u32> = moved.iter().map(|p| asm.vertex(p.a + up)).collect::<Result<_>>()?;
         let lift = |p: &Piece| p.moved(up);
         let (mut cedges, mut aup, mut cup, mut atops, mut ctops) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // The NURBS forms of the walls on arcs of the face's loop that have their own: the wall on
+        // the edge's form swept up, so the edge below and the one above lie on it exactly.
+        let mut forms: Vec<Option<Surface>> = Vec::with_capacity(k);
         for i in 0..k {
             let j = (i + 1) % k;
             let (Some(&ca), Some(&cb), Some(&ta), Some(&tb), Some(&da), Some(&db), Some(&va)) =
@@ -358,7 +407,16 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
             };
             let (Some(pb), Some(pc)) = (below.get(i), moved.get(i)) else { return Err(fail("piece")) };
             cedges.push(piece_edge(&mut asm, ca, cb, pc, n)?);
-            atops.push(piece_edge(&mut asm, ta, tb, &lift(pb), n)?);
+            let above = match (pb.arc, along.get(i)) {
+                (Some(_), Some(u)) => form_above(&mut asm, u.edge, u.forward, ta, tb, up)?,
+                _ => None,
+            };
+            let (top, form) = match above {
+                Some((top, form)) => (top, Some(form)),
+                None => (piece_edge(&mut asm, ta, tb, &lift(pb), n)?, None),
+            };
+            atops.push(top);
+            forms.push(form);
             ctops.push(piece_edge(&mut asm, da, db, &lift(pc), n)?);
             aup.push(asm.line(va, ta)?);
             cup.push(asm.line(ca, da)?);
@@ -387,7 +445,8 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
                     return Err(fail("wall"));
                 };
                 let bottom = AUse { edge: bottom.edge, forward: bottom.forward, given: None };
-                walls.push(wall(p, n, &bottom, top, ua, ub, right, face.shell)?);
+                let form = if right { forms.get(i).cloned().flatten() } else { None };
+                walls.push(wall(p, n, &bottom, top, ua, ub, right, face.shell, form)?);
             }
         }
         // The band's top: above the face's loop as it runs, above the band's edge the other way.

@@ -1226,6 +1226,37 @@ pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> Result<&m
     Ok(sur)
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]): the control net, the
+/// degrees and the knots, the storage beyond the indices in use too.
+impl crate::geom::content::Content for Surface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            net,
+            n,
+            m,
+            p,
+            q,
+            u,
+            r,
+            v,
+            s,
+        } = self;
+        d.tag(0x50);
+        d.usize(net.len());
+        for row in net.iter() {
+            row.as_slice().content(d)?;
+        }
+        for x in [n, m, p, q] {
+            d.usize(*x);
+        }
+        d.f64s(u);
+        d.usize(*r);
+        d.f64s(v);
+        d.usize(*s);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

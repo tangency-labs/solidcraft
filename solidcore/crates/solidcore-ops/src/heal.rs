@@ -256,7 +256,7 @@ pub fn heal_tolerance_defects(
     // no heal, and is given back as it is.
     let made = match made.and_then(|r| r) {
         Ok(made) => made,
-        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(e @ (Error::Cancelled | Error::OutOfFuel { .. })) => return Err(e),
         Err(e) => {
             let before = body.check(CheckLevel::All)?;
             if !before.is_valid() {

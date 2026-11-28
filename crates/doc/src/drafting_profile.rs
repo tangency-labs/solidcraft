@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::display_units::{DecimalMarker, DimensionStyle, MAX_DECIMALS, NumberFormat};
 use crate::expr::Kind;
-use crate::tolerance::Repeat;
+use crate::tolerance::{GeneralTolerance, Repeat};
 use crate::{DocError, Result};
 
 /// The longest id, and the longest name or edition, in characters.
@@ -32,6 +32,11 @@ pub struct DraftingProfile {
     pub angle_decimals: u8,
     pub tolerance_decimals: u8,
     pub repeat: Repeat,
+    /// The ± a dimension with no tolerance of its own takes: none in the built-ins (ISO 2768-1's
+    /// values wait for a reviewed table); a template gives its own. A copy saved before this
+    /// field existed reads with none.
+    #[serde(default, skip_serializing_if = "GeneralTolerance::is_none")]
+    pub general_tolerance: GeneralTolerance,
 }
 
 impl Default for DraftingProfile {
@@ -53,6 +58,7 @@ impl DraftingProfile {
             angle_decimals: 2,
             tolerance_decimals: 2,
             repeat,
+            general_tolerance: GeneralTolerance::None,
         }
     }
 
@@ -87,7 +93,7 @@ impl DraftingProfile {
         if [self.length_decimals, self.angle_decimals, self.tolerance_decimals].iter().any(|d| *d > MAX_DECIMALS) {
             return Err(invalid(&format!("a drafting profile gives at most {MAX_DECIMALS} decimals")));
         }
-        Ok(())
+        self.general_tolerance.validate(&self.number)
     }
 
     /// What one dimension of `kind`, shown in `unit`, takes from the profile.
@@ -95,15 +101,17 @@ impl DraftingProfile {
         let decimals = match kind {
             Kind::Length => self.length_decimals,
             Kind::Angle => self.angle_decimals,
-            Kind::Unitless => return Err(invalid("a dimension is a length or an angle")),
+            Kind::Unitless | Kind::Mass | Kind::Volume | Kind::Area => return Err(invalid("a dimension is a length or an angle")),
         };
         Ok(DimensionStyle { unit: unit.into(), number: self.number, decimals, tolerance_decimals: self.tolerance_decimals, repeat: self.repeat })
     }
 
     /// The built-in this copy came from, when it isn't the same any more: this copy's version
-    /// and the library's. Reported (the drawing check), never applied.
+    /// and the library's. Reported (the drawing check), never applied. A general tolerance is the
+    /// template's, not the built-in's, so the copy's own is no change.
     pub fn differs_from_library(&self) -> Option<(u32, u32)> {
-        let current = DraftingProfile::library().into_iter().find(|p| p.id == self.id)?;
+        let built_in = DraftingProfile::library().into_iter().find(|p| p.id == self.id)?;
+        let current = DraftingProfile { general_tolerance: self.general_tolerance.clone(), ..built_in };
         (current != *self).then_some((self.version, current.version))
     }
 }

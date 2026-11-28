@@ -7,14 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use core_graphics::display::{CGDisplay, CGPoint};
 use monitor::VideoModeHandle;
-use objc2::rc::{autoreleasepool, Retained};
+use objc2::rc::{autoreleasepool, Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_app_kit::{
     NSAppKitVersionNumber, NSAppKitVersionNumber10_12, NSAppearance, NSAppearanceCustomization,
     NSAppearanceNameAqua, NSApplication, NSApplicationPresentationOptions, NSBackingStoreType,
     NSColor, NSDraggingDestination, NSFilenamesPboardType, NSPasteboard,
-    NSRequestUserAttentionType, NSScreen, NSView, NSWindowButton, NSWindowDelegate,
+    NSRequestUserAttentionType, NSScreen, NSView, NSWindow, NSWindowButton,
+    NSWindowCollectionBehavior, NSWindowDelegate,
     NSWindowFullScreenButton, NSWindowLevel, NSWindowOcclusionState, NSWindowOrderingMode,
     NSWindowSharingType, NSWindowStyleMask, NSWindowTabbingMode, NSWindowTitleVisibility,
 };
@@ -84,6 +85,15 @@ pub(crate) struct State {
     app_delegate: Retained<ApplicationDelegate>,
 
     window: Retained<WinitWindow>,
+    /// SolidCraft: the windows this one owns (`WindowAttributes::with_owned_by`).
+    owned_windows: RefCell<Vec<Weak<NSWindow>>>,
+    /// SolidCraft: the owned windows this one took off the screen when it was minimized.
+    owned_hidden: RefCell<Vec<Weak<NSWindow>>>,
+    /// SolidCraft: this window's top left corner when its owned windows last moved with it.
+    owned_anchor: Cell<Option<NSPoint>>,
+    /// SolidCraft: the owned windows that share this window's full-screen space, each with the
+    /// collection behaviour it had before (`owned_windows_join_full_screen`).
+    owned_in_full_screen: RefCell<Vec<(Weak<NSWindow>, NSWindowCollectionBehavior)>>,
 
     // During `windowDidResize`, we use this to only send Moved if the position changed.
     //
@@ -165,6 +175,8 @@ declare_class!(
             trace_scope!("windowDidResize:");
             // NOTE: WindowEvent::Resized is reported in frameDidChange.
             self.emit_move_event();
+            // SolidCraft: a resize that moves the top left corner moves the owned windows too.
+            self.move_owned_windows();
         }
 
         #[method(windowWillStartLiveResize:)]
@@ -186,6 +198,8 @@ declare_class!(
         fn window_did_move(&self, _: Option<&AnyObject>) {
             trace_scope!("windowDidMove:");
             self.emit_move_event();
+            // SolidCraft: the windows this one owns move with it.
+            self.move_owned_windows();
         }
 
         #[method(windowDidChangeBackingProperties:)]
@@ -207,9 +221,25 @@ declare_class!(
         #[method(windowDidBecomeKey:)]
         fn window_did_become_key(&self, _: Option<&AnyObject>) {
             trace_scope!("windowDidBecomeKey:");
+            // SolidCraft: the windows this one owns come forward with it.
+            self.raise_owned_windows();
             // TODO: center the cursor if the window had mouse grab when it
             // lost focus
             self.queue_event(WindowEvent::Focused(true));
+        }
+
+        #[method(windowDidMiniaturize:)]
+        fn window_did_miniaturize(&self, _: Option<&AnyObject>) {
+            trace_scope!("windowDidMiniaturize:");
+            // SolidCraft: the windows this one owns leave the screen with it.
+            self.hide_owned_windows();
+        }
+
+        #[method(windowDidDeminiaturize:)]
+        fn window_did_deminiaturize(&self, _: Option<&AnyObject>) {
+            trace_scope!("windowDidDeminiaturize:");
+            // SolidCraft: and they come back with it.
+            self.show_owned_windows();
         }
 
         #[method(windowDidResignKey:)]
@@ -231,6 +261,8 @@ declare_class!(
         #[method(windowWillEnterFullScreen:)]
         fn window_will_enter_fullscreen(&self, _: Option<&AnyObject>) {
             trace_scope!("windowWillEnterFullScreen:");
+            // SolidCraft: the windows this one owns go into its full-screen space with it.
+            self.owned_windows_join_full_screen();
 
             self.ivars().maximized.set(self.is_zoomed());
             let mut fullscreen = self.ivars().fullscreen.borrow_mut();
@@ -293,6 +325,11 @@ declare_class!(
             trace_scope!("windowDidEnterFullScreen:");
             self.ivars().initial_fullscreen.set(false);
             self.ivars().in_fullscreen_transition.set(false);
+            // SolidCraft: the way into full screen is not passed on to the owned windows.
+            self.ivars().owned_anchor.set(Some(self.top_left()));
+            // They show in this window's space now, above it.
+            self.owned_windows_join_full_screen();
+            self.raise_owned_windows();
             if let Some(target_fullscreen) = self.ivars().target_fullscreen.take() {
                 self.set_fullscreen(target_fullscreen);
             }
@@ -302,6 +339,11 @@ declare_class!(
         #[method(windowDidExitFullScreen:)]
         fn window_did_exit_fullscreen(&self, _: Option<&AnyObject>) {
             trace_scope!("windowDidExitFullScreen:");
+            // SolidCraft: nor is the way back out of it.
+            self.ivars().owned_anchor.set(Some(self.top_left()));
+            // The owned windows are ordinary windows again, above this one on the desktop.
+            self.owned_windows_leave_full_screen();
+            self.raise_owned_windows();
 
             self.restore_state_from_fullscreen();
             self.ivars().in_fullscreen_transition.set(false);
@@ -329,6 +371,8 @@ declare_class!(
         #[method(windowDidFailToEnterFullScreen:)]
         fn window_did_fail_to_enter_fullscreen(&self, _: Option<&AnyObject>) {
             trace_scope!("windowDidFailToEnterFullScreen:");
+            // SolidCraft: there is no full-screen space for the owned windows to share.
+            self.owned_windows_leave_full_screen();
             self.ivars().in_fullscreen_transition.set(false);
             self.ivars().target_fullscreen.replace(None);
             if self.ivars().initial_fullscreen.get() {
@@ -430,8 +474,8 @@ declare_class!(
         }
     }
 
-    // Key-Value Observing
     unsafe impl WindowDelegate {
+        // Key-Value Observing
         #[method(observeValueForKeyPath:ofObject:change:context:)]
         fn observe_value(
             &self,
@@ -673,6 +717,126 @@ fn new_window(
 }
 
 impl WindowDelegate {
+    /// SolidCraft: put the windows this one owns right above it, as an owner does on the other
+    /// platforms. An owned window is not attached as a child window: AppKit keeps a child on its
+    /// parent's screen, so one dragged to another screen jumped back when the drag ended, and one
+    /// opened on another screen did not come forward with its parent.
+    fn raise_owned_windows(&self) {
+        // Relative ordering with window number zero would raise it globally.
+        let number = unsafe { self.window().windowNumber() };
+        if number <= 0 {
+            return;
+        }
+        for window in self.owned_windows_on_screen() {
+            unsafe { window.orderWindow_relativeTo(NSWindowOrderingMode::NSWindowAbove, number) };
+        }
+    }
+
+    /// SolidCraft: a full-screen window has a space of its own, and raising an ordinary window
+    /// from there takes the user out of it, to the space that window is in. While this window
+    /// is full screen, the windows it owns are full-screen auxiliary windows instead: raised
+    /// with it (`raise_owned_windows`), they show in its space, above it, as a child window
+    /// does. One on another screen stays there. Each gets the collection behaviour it had back
+    /// on the way out (`owned_windows_leave_full_screen`).
+    fn owned_windows_join_full_screen(&self) {
+        let owned: Vec<_> = {
+            let mut owned = self.ivars().owned_windows.borrow_mut();
+            owned.retain(|window| window.load().is_some());
+            owned.iter().filter_map(Weak::load).collect()
+        };
+        let mut joined = self.ivars().owned_in_full_screen.borrow_mut();
+        joined.retain(|(window, _)| window.load().is_some());
+        for window in owned {
+            let known = joined.iter().filter_map(|(known, _)| known.load()).any(|known| Retained::as_ptr(&known) == Retained::as_ptr(&window));
+            if known {
+                continue;
+            }
+            let before = unsafe { window.collectionBehavior() };
+            // Auxiliary, so that it may share a full-screen space; moving to the active space, so
+            // that raising it there brings it over instead of taking the user to its own space.
+            let auxiliary = (before - NSWindowCollectionBehavior::FullScreenPrimary)
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::MoveToActiveSpace;
+            unsafe { window.setCollectionBehavior(auxiliary) };
+            joined.push((Weak::new(&*window), before));
+        }
+    }
+
+    /// SolidCraft: see `owned_windows_join_full_screen`.
+    fn owned_windows_leave_full_screen(&self) {
+        let joined = std::mem::take(&mut *self.ivars().owned_in_full_screen.borrow_mut());
+        for (window, before) in joined {
+            if let Some(window) = window.load() {
+                unsafe { window.setCollectionBehavior(before) };
+            }
+        }
+    }
+
+    /// SolidCraft: this window is full screen, or on its way in or out.
+    fn in_full_screen(&self) -> bool {
+        self.ivars().in_fullscreen_transition.get()
+            || self.ivars().is_simple_fullscreen.get()
+            || self.window().styleMask().contains(NSWindowStyleMask::FullScreen)
+    }
+
+    /// SolidCraft: the windows this one owns that are on the screen. The borrow ends before
+    /// AppKit is called with them: ordering a window calls back into its delegate.
+    fn owned_windows_on_screen(&self) -> Vec<Retained<NSWindow>> {
+        let mut owned = self.ivars().owned_windows.borrow_mut();
+        owned.retain(|window| window.load().is_some());
+        owned.iter().filter_map(Weak::load).filter(|window| window.isVisible() && !window.isMiniaturized()).collect()
+    }
+
+    /// SolidCraft: this window's top left corner, in AppKit's screen coordinates.
+    fn top_left(&self) -> NSPoint {
+        let frame = self.window().frame();
+        NSPoint::new(frame.origin.x, frame.origin.y + frame.size.height)
+    }
+
+    /// SolidCraft: the windows this one owns move with it, by what its top left corner moved,
+    /// as AppKit moves a child window with its parent: a resize that keeps that corner leaves
+    /// them where they are. They keep the place the user gives them, on any screen, since only
+    /// this window's own moves are passed on. A full-screen transition is not such a move.
+    fn move_owned_windows(&self) {
+        let corner = self.top_left();
+        let Some(before) = self.ivars().owned_anchor.replace(Some(corner)) else {
+            return;
+        };
+        let (dx, dy) = (corner.x - before.x, corner.y - before.y);
+        if (dx == 0.0 && dy == 0.0) || self.in_full_screen() {
+            return;
+        }
+        for window in self.owned_windows_on_screen() {
+            let origin = window.frame().origin;
+            unsafe { window.setFrameOrigin(NSPoint::new(origin.x + dx, origin.y + dy)) };
+        }
+    }
+
+    /// SolidCraft: a minimized owner takes the windows it owns off the screen, as an owner does
+    /// on Windows and as AppKit does for a child window. They are remembered, so only those
+    /// come back (`show_owned_windows`).
+    fn hide_owned_windows(&self) {
+        let shown = self.owned_windows_on_screen();
+        for window in &shown {
+            window.orderOut(None);
+        }
+        *self.ivars().owned_hidden.borrow_mut() = shown.iter().map(|window| Weak::new(&**window)).collect();
+    }
+
+    /// SolidCraft: the owner is back from the Dock: so are the windows it took with it, right
+    /// above it and without taking the keyboard from it.
+    fn show_owned_windows(&self) {
+        let hidden = std::mem::take(&mut *self.ivars().owned_hidden.borrow_mut());
+        let number = unsafe { self.window().windowNumber() };
+        for window in hidden.iter().filter_map(Weak::load) {
+            if number > 0 {
+                unsafe { window.orderWindow_relativeTo(NSWindowOrderingMode::NSWindowAbove, number) };
+            } else {
+                window.orderFront(None);
+            }
+        }
+    }
+
     pub(super) fn new(
         app_delegate: &ApplicationDelegate,
         attrs: WindowAttributes,
@@ -681,8 +845,26 @@ impl WindowDelegate {
         let window = new_window(app_delegate, &attrs, mtm)
             .ok_or_else(|| os_error!(OsError::CreationError("couldn't create `NSWindow`")))?;
 
+        // SolidCraft: an owned window is registered with its owner, which raises it
+        // (`raise_owned_windows`). An explicit parent window keeps winit's child window.
         #[cfg(feature = "rwh_06")]
-        match attrs.parent_window.map(|handle| handle.0) {
+        let owner = attrs.owned_by.as_ref().filter(|_| attrs.parent_window.is_none());
+        #[cfg(not(feature = "rwh_06"))]
+        let owner = attrs.owned_by.as_ref();
+        if let Some(owner) = owner {
+            let owned: &NSWindow = &window;
+            let owner = owner.window.delegate(mtm);
+            owner.ivars().owned_windows.borrow_mut().push(Weak::new(owned));
+            // From where the owner is now, its moves are passed on (`move_owned_windows`).
+            owner.ivars().owned_anchor.set(Some(owner.top_left()));
+            // One that opens while the owner is full screen shows in the owner's space.
+            if owner.in_full_screen() {
+                owner.owned_windows_join_full_screen();
+            }
+        }
+
+        #[cfg(feature = "rwh_06")]
+        match attrs.parent_window.as_ref().map(|handle| handle.0) {
             Some(rwh_06::RawWindowHandle::AppKit(handle)) => {
                 // SAFETY: Caller ensures the pointer is valid or NULL
                 // Unwrap is fine, since the pointer comes from `NonNull`.
@@ -721,6 +903,10 @@ impl WindowDelegate {
             app_delegate: app_delegate.retain(),
             window: window.retain(),
             previous_position: Cell::new(flip_window_screen_coordinates(window.frame())),
+            owned_windows: RefCell::new(Vec::new()),
+            owned_hidden: RefCell::new(Vec::new()),
+            owned_anchor: Cell::new(None),
+            owned_in_full_screen: RefCell::new(Vec::new()),
             previous_scale_factor: Cell::new(scale_factor),
             resize_increments: Cell::new(resize_increments),
             decorations: Cell::new(attrs.decorations),
@@ -1806,6 +1992,21 @@ impl WindowExtMacOS for WindowDelegate {
     #[inline]
     fn set_has_shadow(&self, has_shadow: bool) {
         self.window().setHasShadow(has_shadow)
+    }
+
+    // SolidCraft: the buttons `with_titlebar_buttons_hidden` hides at creation, at any time.
+    fn set_titlebar_buttons_hidden(&self, hidden: bool) {
+        for titlebar_button in &[
+            #[allow(deprecated)]
+            NSWindowFullScreenButton,
+            NSWindowButton::NSWindowMiniaturizeButton,
+            NSWindowButton::NSWindowCloseButton,
+            NSWindowButton::NSWindowZoomButton,
+        ] {
+            if let Some(button) = self.window().standardWindowButton(*titlebar_button) {
+                button.setHidden(hidden);
+            }
+        }
     }
 
     #[inline]

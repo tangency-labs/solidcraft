@@ -5,6 +5,56 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn footer_left_icon_label_truncates_without_overlapping_the_normal_pair() {
+    for width in [480.0, 240.0, 180.0] {
+        let ctx = context();
+        ctx.enable_accesskit();
+        let label = "Start another bead with the current settings";
+        let clicked = std::cell::Cell::new(false);
+        let action = std::cell::Cell::new(Action::None);
+        let run = |events| {
+            raw_frame(&ctx, egui::RawInput { events, focused: true, ..Default::default() }, |ui| {
+                ui.set_width(width);
+                scope(ui, |ui| {
+                    action.set(footer_with_left(ui, "OK", "Cancel", true, Footer::default(), |ui| {
+                        let response = icon_label_button(ui, label, "plus", true, false);
+                        registry::publish_target("test:left", response.rect);
+                        clicked.set(response.clicked());
+                    }));
+                });
+            })
+        };
+        run(vec![]);
+        let output = run(vec![]);
+        let band = registry::rect_of("dialog:footer").unwrap();
+        let left = registry::rect_of("test:left").unwrap();
+        let cancel = registry::rect_of("dialog:cancel").unwrap();
+        let ok = registry::rect_of("dialog:ok").unwrap();
+        assert!(band.contains_rect(left) && band.contains_rect(cancel) && band.contains_rect(ok), "width {width}");
+        assert_eq!(left.left(), band.left() + solidcraft_theme::Tokens::get().space_12);
+        assert!(left.right() <= cancel.left() && cancel.right() <= ok.left(), "width {width}: {left:?}, {cancel:?}, {ok:?}");
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == left && rect.stroke.width > 0.0)));
+        let update = output.platform_output.accesskit_update.as_ref().unwrap();
+        assert!(update.nodes.iter().any(|(_, node)| node.label() == Some(label) && node.role() == egui::accesskit::Role::Button));
+        if width == 480.0 {
+            assert!(text_shapes(&output).any(|text| text.galley.job.text == label && !text.galley.elided));
+        } else if width == 240.0 {
+            assert!(text_shapes(&output).any(|text| text.galley.job.text == label && text.galley.elided));
+        }
+        run(pointer(left.center(), true));
+        run(pointer(left.center(), false));
+        assert!(clicked.get(), "width {width}: left action works");
+        assert_eq!(action.get(), Action::None, "the caller owns the left action");
+        run(pointer(cancel.center(), true));
+        run(pointer(cancel.center(), false));
+        assert_eq!(action.get(), Action::Cancel);
+        run(pointer(ok.center(), true));
+        run(pointer(ok.center(), false));
+        assert_eq!(action.get(), Action::Ok);
+    }
+}
+
+#[test]
 fn footer_clicks_and_keyboard_respect_validation_and_editor_focus() {
     for enabled in [false, true] {
         let ctx = crate::test_support::context();

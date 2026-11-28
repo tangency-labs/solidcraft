@@ -625,6 +625,7 @@ impl Sketch {
                     fixed: false,
                     infinite: false,
                     spline_handle_of: None,
+                    spline_control_polygon_of: None,
                 });
                 outputs.push(output);
             }
@@ -780,6 +781,7 @@ impl Sketch {
                         fixed: role.flags.fixed,
                         infinite: role.flags.infinite,
                         spline_handle_of: None,
+                        spline_control_polygon_of: None,
                     });
                 }
                 outputs.push(role.output.clone());

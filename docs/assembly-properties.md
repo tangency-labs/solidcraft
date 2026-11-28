@@ -28,6 +28,15 @@ several instances of its parent; supply `path` (the complete list of occurrence 
 root) to choose one of those placements. An ambiguous occurrence without a path returns an
 error. Both commands accept `descendants: false` to measure only directly owned bodies.
 
+`occurrence.properties` also says where the instance sits, as `placement`: `in_parent` (its own
+placement in the component it is placed in) and `world` (every placement above it applied),
+pending moves included. Each has `position` (mm), `axis` and `angle_deg` (the turn from the
+frame's axes; no turn is 0° about +Z) and `matrix`, three rows of four with the translation in
+the last column. `occurrence.move` takes that matrix back as `to_matrix`: with `space: "local"`
+the `in_parent` one, with `space: "world"` the `world` one. In the Properties window of a
+placement the same numbers are the **Position** and **Rotation** rows, with **Frame** choosing
+between **In parent** and **World**.
+
 A placement inside the one measured that counts as a reference in the bill of materials (its
 occurrence's `bom_type`, else its component's: a fixture shown for context) adds nothing, nor
 does anything inside it: its bodies are not in `bodies`, the totals or `placement_count`. The

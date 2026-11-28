@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    AlongAxisParams, AlongAxisResult, Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, OnPlaneParams, OnPlaneResult,
-    Point3dParams, Point3dResult, Spline3dParams,
+    AlongAxisParams, AlongAxisResult, Arc3dParams, ControlSpline3dParams, Create3dParams, Create3dResult, Curves3dResult, Line3dParams, Move3dParams,
+    Move3dResult, OnPlaneParams, OnPlaneResult, Point3dParams, Point3dResult, Spline3dParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -10,8 +10,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<Create3dParams>(), &["name", "view"]);
     assert_keys(input_schema_for::<Line3dParams>(), &["points", "sketch"]);
     assert_keys(input_schema_for::<Spline3dParams>(), &["points", "sketch"]);
+    assert_keys(input_schema_for::<ControlSpline3dParams>(), &["points", "sketch"]);
     assert_keys(input_schema_for::<Arc3dParams>(), &["end", "sketch", "start", "through"]);
     assert_keys(input_schema_for::<Point3dParams>(), &["point", "sketch"]);
     assert_keys(input_schema_for::<Move3dParams>(), &["by", "index", "point", "sketch", "to", "wire"]);
@@ -38,6 +40,13 @@ fn strict_keeps_todays_errors() {
         ("sketch.spline3d", json!({"points": [[0, 0, 0]]})),
         ("sketch.spline3d", json!({"points": 5})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1]]})),
+        ("sketch.spline3d.control_point", json!({})),
+        ("sketch.spline3d.control_point", json!({"points": null})),
+        ("sketch.spline3d.control_point", json!({"points": 5})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1]]})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0]]})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [true, 0, 3]]})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]], "sketch": true})),
         ("sketch.arc3d", json!({})),
         ("sketch.arc3d", json!({"start": [0, 0, 0]})),
         ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 0, 1]})),
@@ -99,6 +108,11 @@ fn the_types_read_each_key_as_the_handlers_do() {
         ("sketch.line3d", json!({"points": (0..500).map(|i| json!([i, 0, 0])).collect::<Vec<_>>()})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]]})),
         ("sketch.spline3d", json!({"points": [[0, 0, 0], [1, 1, 1]], "sketch": null})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]]})),
+        ("sketch.spline3d.control_point", json!({"points": [{"x": 0, "y": 0, "z": 0}, [1, 1, 1], [2, 0, 3], [4, 4, 4]], "sketch": null})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]], "sketch": "Path"})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0, 3]], "sketch": "no such sketch"})),
+        ("sketch.spline3d.control_point", json!({"points": [[0, 0, 0], [1, 1, 1], [1e9, 0, 3]]})),
         ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10]})),
         ("sketch.arc3d", json!({"start": {"x": 0, "y": 0, "z": 0}, "through": [0, 5, 10], "end": [10, 0, 10], "sketch": null})),
         ("sketch.arc3d", json!({"start": [0, 0, 0], "through": [0, 5, 10], "end": [10, 0, 10], "sketch": "Path"})),
@@ -168,6 +182,21 @@ fn the_schemas_take_what_the_handlers_read() {
             ],
         );
     }
+    let three = json!([[0, 0, 0], [1, 1, 1], [2, 0, 3]]);
+    takes(
+        input_schema_for::<ControlSpline3dParams>(),
+        &[
+            (json!({"points": three}), true),
+            (json!({"points": [{"x": 0, "y": 0, "z": 0}, [1, 1, 1], [2, "h", 3]], "sketch": "Path"}), true),
+            (json!({"points": three, "sketch": 4}), true),
+            (json!({}), false),
+            // Two control points are a line: the curve needs three.
+            (json!({"points": two}), false),
+            (json!({"points": [[0, 0, 0], [1, 1, 1], [2, 0]]}), false),
+            (json!({"points": three, "sketch": true}), false),
+            (json!({"points": three, "degree": 3}), false),
+        ],
+    );
     takes(
         input_schema_for::<Point3dParams>(),
         &[
@@ -246,6 +275,26 @@ fn replies_match_the_output_schema() {
         assert!(moved["moved"].as_u64().is_some_and(|n| n >= 1), "{moved}");
         matches(output_schema_for::<Move3dResult>(), "sketch.move3d", &moved);
     }
+}
+
+/// `sketch.create3d`, in Warn: with and without a name, the reply matches its output schema and
+/// carries no warning; a key it does not take (a plane) is reported, and refused in Strict.
+#[test]
+fn create3d_reply_matches_its_schema_and_a_plane_is_no_key() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for p in [json!({}), json!({"name": "Rail"}), json!({"name": null, "view": null})] {
+        let made = s.execute("sketch.create3d", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(made["sketch"].as_u64().is_some() && made["sketching_view"].as_u64().is_some(), "{made}");
+        matches(output_schema_for::<Create3dResult>(), "sketch.create3d", &made);
+    }
+    let warned = s.execute("sketch.create3d", &json!({"plane": "XZ"})).unwrap_or_else(|e| panic!("{e}"));
+    let warnings = warned["param_warnings"].as_array().cloned().unwrap_or_default();
+    assert!(warnings.len() == 1 && warnings[0].as_str().is_some_and(|w| w.contains("unknown key")), "{warned}");
+    let schema = output_schema_for::<Create3dResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &warned), "{warned}");
+    s.param_check = ParamCheck::Strict;
+    let refused = s.execute("sketch.create3d", &json!({"plane": "XZ"})).unwrap_err().to_string();
+    assert!(refused.contains("plane"), "{refused}");
 }
 
 /// A misspelt key still runs in Warn, and says so, with a reply that still matches.
@@ -349,7 +398,7 @@ fn strict_takes_plane_and_axis_names_in_any_case() {
 
 #[test]
 fn plane_and_axis_names_publish_the_cases_they_take() {
-    use crate::schema::sketch_3d::{AxisName, PlaneName};
+    use crate::schema::sketch_3d::{AxisName, PlaneName, PlaneTarget};
     // The published pattern is any case, as the reader is.
     let pattern = |v: serde_json::Value| v["pattern"].as_str().unwrap_or_default().to_string();
     let plane = pattern(serde_json::to_value(schemars::schema_for!(PlaneName)).unwrap_or_default());
@@ -361,6 +410,13 @@ fn plane_and_axis_names_publish_the_cases_they_take() {
     }
     for name in ["xw", "x", "xyz"] {
         assert!(serde_json::from_value::<PlaneName>(json!(name)).is_err(), "{name}");
+    }
+    // On Plane also takes a construction plane by name or a planar model face (#10616).
+    for plane in [json!("xy"), json!("Plane1"), json!({"face": [1, 2, 3]}), json!({"face": [1, 2, 3], "body": "Body1"})] {
+        assert!(serde_json::from_value::<PlaneTarget>(plane.clone()).is_ok(), "{plane}");
+    }
+    for plane in [json!(""), json!(5), json!({"face": [1, 2]}), json!({"face": [1, 2, 3], "edge": [0, 0, 0]}), json!({"body": "Body1"})] {
+        assert!(serde_json::from_value::<PlaneTarget>(plane.clone()).is_err(), "{plane}");
     }
     for name in ["x", "Y", "z"] {
         assert!(serde_json::from_value::<AxisName>(json!(name)).is_ok(), "{name}");

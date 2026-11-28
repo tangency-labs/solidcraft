@@ -43,12 +43,22 @@ pub fn solve(a: Mat, b: Vec<f64>) -> Option<Vec<f64>> {
 
 /// [`solve`], adding to `ops` the multiply-adds it does (rows it skips cost nothing), for
 /// callers that hold a work budget. The same arithmetic, so the same solution.
-pub fn solve_counted(mut a: Mat, mut b: Vec<f64>, ops: &mut f64) -> Option<Vec<f64>> {
+pub fn solve_counted(a: Mat, b: Vec<f64>, ops: &mut f64) -> Option<Vec<f64>> {
+    solve_unless(a, b, ops, &|| false)
+}
+
+/// [`solve_counted`] that gives up (`None`) once `stop` answers true: it asks before each pivot
+/// column, so a large system stops part way through its elimination. Until then the same
+/// arithmetic, so the same solution.
+pub fn solve_unless(mut a: Mat, mut b: Vec<f64>, ops: &mut f64, stop: &dyn Fn() -> bool) -> Option<Vec<f64>> {
     let n = a.rows;
     if a.cols != n || b.len() != n || n.checked_mul(n) != Some(a.data.len()) {
         return None;
     }
     for k in 0..n {
+        if stop() {
+            return None;
+        }
         let mut piv = k;
         let mut best = a.get(k, k).abs();
         for r in k + 1..n {

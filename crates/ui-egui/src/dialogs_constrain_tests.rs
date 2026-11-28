@@ -18,6 +18,7 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     ghost: true,
     tint_new: true,
     cut_tint: true,
+    replaced_ghost: true,
     glass_new: false,
 };
 
@@ -245,7 +246,7 @@ fn a_new_pick_after_loading_makes_a_new_rule() {
 #[test]
 fn apply_keeps_the_pair_and_starts_the_next_rule_fresh() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     {
         let f = form(&mut h.app);
@@ -354,7 +355,7 @@ fn a_gap_edit_keeps_a_flipped_mate_flipped() {
 #[test]
 fn a_refused_apply_keeps_the_picks() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     form(&mut h.app).offset = "no such length".into();
     h.frames(3);
@@ -366,6 +367,41 @@ fn a_refused_apply_keeps_the_picks() {
     let f = form(&mut h.app);
     assert_eq!(f.offset, "no such length");
     assert!(f.error.is_some());
+}
+
+#[test]
+fn center_mode_accepts_a_round_face_and_restores_ordinary_picking_when_switched_off() {
+    let mut app = plate_and_block();
+    app.run("component.create", json!({"name": "Pin", "grounded": false})).unwrap();
+    app.run("solid.cylinder", json!({"radius": 4, "height": 10, "base": [120, 20, 0]})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+    let (Asm::Constrain(mut f), mut inputs) = start(&app).unwrap() else { panic!("the Constrain form") };
+    let mut active = 0;
+    f.center = true;
+    sync_inputs(&app, &f, &mut inputs, &mut active);
+    assert_eq!(inputs.iter().map(|i| i.accept).collect::<Vec<_>>(), [PLANAR_FACES, PLANAR_FACES, SNAPS]);
+    for (input, point) in inputs.iter_mut().zip([[0., 20., 5.], [100., 20., 5.], [124., 20., 5.]]) {
+        input.items.push(face(&app, Vec3::from(point)));
+    }
+    let cmds = commands(&app, &f, &inputs).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["type"], "line_on_plane");
+    let pin = occ(&app, "Pin:1");
+    assert_eq!(cmds[0].1["b"]["occurrence"], pin);
+    let preview = crate::dialogs_assembly::world_preview(&app.session, &cmds, COLORS).unwrap().unwrap();
+    let report = preview.placed.expect("the round Center preview reports placement");
+    let dof = report["dof"].as_array().unwrap().iter().find(|d| d["occurrence"] == pin).unwrap();
+    assert_eq!(dof["dof"], 4);
+    f.center_pair = true;
+    sync_inputs(&app, &f, &mut inputs, &mut active);
+    assert_eq!(inputs.len(), 4);
+    assert_eq!(active, 2, "the cylinder is not a planar face");
+    assert!(inputs[2].items.is_empty());
+    assert!(commands(&app, &f, &inputs).is_err());
+    f.center = false;
+    sync_inputs(&app, &f, &mut inputs, &mut active);
+    assert_eq!(inputs.iter().map(|i| (i.label, i.accept)).collect::<Vec<_>>(), [("Reference 1", SNAPS), ("Reference 2", SNAPS)]);
+    assert!(active < inputs.len());
 }
 
 /// The moving part is the one the engine moves: the second reference, or the first when the rule

@@ -47,11 +47,20 @@ type R<T> = std::result::Result<T, Unsupported>;
 pub struct Arrays {
     pub ints: BTreeMap<i32, Vec<i64>>,
     pub reals: BTreeMap<i32, Vec<f64>>,
+    /// The faces the laid-out record's open shells use backward
+    /// ([`solidcore_ops::backward_sheet_faces`]): the arrays give an open shell both uses of each
+    /// face, so the body built from them takes these faces' sides by turning them over
+    /// ([`crate::Brep::from_record`]).
+    pub backward: Vec<u32>,
 }
 
 impl Arrays {
     fn i(&mut self, id: i32) -> &mut Vec<i64> {
         self.ints.entry(id).or_default()
+    }
+    /// How many entries array `id` has (0 for one not laid out).
+    fn i_len(&self, id: i32) -> usize {
+        self.ints.get(&id).map_or(0, Vec::len)
     }
     fn r(&mut self, id: i32) -> &mut Vec<f64> {
         self.reals.entry(id).or_default()
@@ -155,7 +164,7 @@ fn runtime_shells(shells: &[u32], material: bool, joined: &[(u32, u32)]) -> Vec<
 /// orthogonal axes, as the bilinear patch it is). The uses in `bare` go without UV trims. The
 /// shells `joined` pairs are one runtime shell on their empty side ([`runtime_shells`]).
 fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, u32, u32)>, joined: &[(u32, u32)]) -> R<Arrays> {
-    let mut a = Arrays::default();
+    let mut a = Arrays { backward: solidcore_ops::backward_sheet_faces(brep), ..Arrays::default() };
 
     // Regions and shells. Each region gets its own copy of each shell it lists.
     let enclosed_by: HashMap<u32, usize> =
@@ -185,7 +194,8 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
                     let normals_into_this = if k == 0 && r > 0 { inside_is_void } else { !inside_is_void };
                     uses.extend(faces.iter().map(|f| (f.face, f.forward == normals_into_this)));
                 } else {
-                    // An open shell lies in one region and holds both sides of each face.
+                    // An open shell lies in one region and holds both sides of each face; a face
+                    // it uses backward is turned over once the body is built (`Arrays::backward`).
                     uses.extend(faces.iter().flat_map(|f| [(f.face, true), (f.face, false)]));
                 }
             }
@@ -589,17 +599,24 @@ fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f
     }
     let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
     let y = cross(z, x);
-    let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
-        let d = add(scale(u, s), scale(v, t));
-        [dot(d, x), dot(d, y)]
-    });
-    let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
-    let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+    let range = if x == u && y == v {
+        // Equal surface coefficients mean equal parameters. Projecting onto the same
+        // rounded axes again changes the domain on every record import.
+        [u0, v0, u1, v1]
+    } else {
+        let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
+            let d = add(scale(u, s), scale(v, t));
+            [dot(d, x), dot(d, y)]
+        });
+        let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
+        let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+        [lo(0), lo(1), hi(0), hi(1)]
+    };
     a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
     a.r3(flat::FACE_PLANE_ORIGIN, origin);
     a.r3(flat::FACE_PLANE_AXIS, z);
     a.r3(flat::FACE_PLANE_REF_DIRECTION, x);
-    a.r(flat::FACE_RANGE).extend([lo(0), lo(1), hi(0), hi(1)]);
+    a.r(flat::FACE_RANGE).extend(range);
     Ok(())
 }
 
@@ -747,6 +764,24 @@ impl crate::Brep {
         Ok(self)
     }
 
+    /// This body, built from `a` (and its blend faces given their definitions), with the faces its
+    /// record uses backward in an open shell given that side (`Arrays::backward`): SMLib uses
+    /// every face of an open shell forward and keeps a sheet face's side in its surface, so each
+    /// is turned over (`solidcore_ops::Body::turn_over_listed`). The arrays list the faces in the
+    /// record's order, which the body built from them keeps; a body whose healer changed its
+    /// faces has no such order, and a backward face of it is refused rather than its side lost.
+    fn sided(self, a: &Arrays) -> crate::Result<crate::Brep> {
+        if a.backward.is_empty() {
+            return Ok(self);
+        }
+        let faces = a.i_len(flat::FACE_LOOP_COUNT);
+        if crate::core::counts(self.core())?[0] != faces {
+            return Err(crate::Error::Record(Unsupported::NotYet("a healed sheet with faces its record uses backward")));
+        }
+        self.core().turn_over_listed(&a.backward).map_err(|e| crate::Error::Solidcore(e.to_string()))?;
+        Ok(self)
+    }
+
     pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
         let (body, proven) = crate::core::from_arrays_with_shell_order(a, false)?;
         Ok(Self { enclosing_shell_order_proven: proven, ..Self::made_core(body) })
@@ -756,14 +791,16 @@ impl crate::Brep {
     pub(crate) fn from_proven_shell_order(record: &b::Brep) -> crate::Result<Self> {
         let arrays = arrays(record, true).map_err(crate::Error::Record)?;
         let (body, proven) = crate::core::from_arrays_with_shell_order(&arrays, true)?;
-        let rebuilt = Self { enclosing_shell_order_proven: proven, ..Self::made_core(body) }.adopt(record);
+        let rebuilt = Self { enclosing_shell_order_proven: proven, ..Self::made_core(body) }.adopt(record).and_then(|b| b.sided(&arrays));
         crate::trace::imported(&rebuilt, record, true, false);
         rebuilt
     }
 
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a)).and_then(|body| body.adopt(brep));
+        let r = arrays(brep, trusted)
+            .map_err(crate::Error::Record)
+            .and_then(|a| crate::Brep::from_arrays(&a).and_then(|body| body.adopt(brep)).and_then(|body| body.sided(&a)));
         crate::trace::imported(&r, brep, trusted, false);
         r
     }
@@ -774,7 +811,7 @@ impl crate::Brep {
     /// [`crate::Brep::from_record`] is the operand.
     pub fn from_record_touching(brep: &b::Brep, trusted: bool) -> crate::Result<Option<crate::Brep>> {
         let Some(a) = arrays_touching(brep, trusted).map_err(crate::Error::Record)? else { return Ok(None) };
-        let r = crate::Brep::from_arrays(&a).and_then(|body| body.adopt(brep));
+        let r = crate::Brep::from_arrays(&a).and_then(|body| body.adopt(brep)).and_then(|body| body.sided(&a));
         crate::trace::imported(&r, brep, trusted, false);
         r.map(Some)
     }
@@ -783,8 +820,7 @@ impl crate::Brep {
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let r = arrays_keeping_splines(brep, trusted)
             .map_err(crate::Error::Record)
-            .and_then(|a| crate::Brep::from_arrays(&a))
-            .and_then(|body| body.adopt(brep));
+            .and_then(|a| crate::Brep::from_arrays(&a).and_then(|body| body.adopt(brep)).and_then(|body| body.sided(&a)));
         crate::trace::imported(&r, brep, trusted, true);
         r
     }

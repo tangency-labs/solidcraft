@@ -85,6 +85,42 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
     Ok(chain)
 }
 
+/// The edges of `body` a path, rail or boundary pick of edges `edges` (the record's edge indices,
+/// which are the display's) stands for with its curve chain: the picked edges (each once, in
+/// order), then every edge that continues one of them within `angle` radians at a shared vertex,
+/// and so on, stopping at a branch (`solidcore_ops::tangent::curve_chain_ordered`). Unlike a
+/// blend's chain ([`crate::tangent_chain_edges`]) the faces play no part.
+pub fn curve_chain_of_edges(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("an edge chain")?;
+    let count = body.record().edges.len();
+    if edges.is_empty() || edges.len() > 10_000 || edges.iter().any(|&e| e >= count) {
+        return Err(KernelError::Invalid("pick 1 to 10000 edges of the body".into()));
+    }
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("an edge chain: the body is no SMLib body".into()))?;
+    let (ops, order) = &*form;
+    solidcore_ops::tangent::curve_chain_ordered(ops, order, edges, angle)
+        .map(|chain| chain.members)
+        .map_err(|e| KernelError::Failed(format!("an edge chain: {e}")))
+}
+
+/// The faces of `body` a pick of faces `faces` (the record's face indices, which are the
+/// display's) stands for with its tangent ring: the picked faces (each once, in order), then every
+/// face joined to one of them across a smooth edge (its two faces meeting within `angle` radians
+/// all along it), and so on (`solidcore_ops::tangent::tangent_face_chain_ordered`): a part's side
+/// of flats and rounds tangent to each other, from any one of them.
+pub fn tangent_face_chain_of_faces(body: &Body, faces: &[usize], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("a face chain")?;
+    let count = body.record().faces.len();
+    if faces.is_empty() || faces.len() > 10_000 || faces.iter().any(|&f| f >= count) {
+        return Err(KernelError::Invalid("pick 1 to 10000 faces of the body".into()));
+    }
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("a face chain: the body is no SMLib body".into()))?;
+    let (ops, order) = &*form;
+    solidcore_ops::tangent::tangent_face_chain_ordered(ops, order, faces, angle)
+        .map(|chain| chain.members)
+        .map_err(|e| KernelError::Failed(format!("a face chain: {e}")))
+}
+
 /// Whether a chain of `body`'s edges closes back on itself.
 pub fn chain_closes(body: &Body, chain: &Chain) -> bool {
     closes(body.record(), chain)

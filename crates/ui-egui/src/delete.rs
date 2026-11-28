@@ -43,7 +43,14 @@ pub fn selection_params(app: &SolveApp) -> Value {
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
     // Undo can remove a canvas while its Browser selection survives.
     let canvases: Vec<u64> = app.tree.picked_canvases.iter().copied().filter(|id| app.session.doc.canvases.iter().any(|c| c.id == *id)).collect();
-    let mut params = json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints });
+    // A whole-body selection is a scope: name it, not the 56,100 bodies it covers.
+    let mut params = json!({
+        "items": items,
+        "all_bodies": app.session.all_bodies_selected(),
+        "occurrences": occurrences,
+        "canvases": canvases,
+        "joints": app.tree.picked_joints,
+    });
     // A drawing's view goes with the views projected or cut from it, as a view takes its
     // dimensions with it: one delete, one undo step, and Ctrl+Z brings them all back.
     if items.iter().any(|item| matches!(item, Sel::Drawing { .. })) {
@@ -53,7 +60,11 @@ pub fn selection_params(app: &SolveApp) -> Value {
 }
 
 fn is_empty(p: &Value) -> bool {
-    ["items", "occurrences", "components", "canvases", "joints"].iter().all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
+    let scoped = p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false);
+    !scoped
+        && ["items", "occurrences", "components", "canvases", "joints"]
+            .iter()
+            .all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
 }
 
 fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
@@ -119,7 +130,10 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
 /// Delete `params` (as `selection.delete` takes them): at once, or after a confirmation when
 /// other features go with it or would fail. The dry run that finds out evaluates the history
 /// after what is deleted, so it may compute off the window thread (#2678).
-pub fn request(app: &mut SolveApp, params: Value) {
+pub fn request(app: &mut SolveApp, mut params: Value) {
+    if let Some(params) = params.as_object_mut() {
+        params.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+    }
     let joints: Vec<u64> = params.get("joints").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
     if !joints.is_empty() {
         // Deleting just the joint Edit Joint edits closes the dialog first, as its Cancel does.

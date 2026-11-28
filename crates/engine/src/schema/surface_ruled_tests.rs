@@ -27,6 +27,7 @@ fn schemas_and_the_key_check_agree() {
             "mode",
             "name",
             "participants",
+            "stays_surface",
         ],
     );
 }

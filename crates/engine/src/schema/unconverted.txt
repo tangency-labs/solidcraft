@@ -4,4 +4,3 @@
 # per line.
 solid.hole
 solid.loft
-solid.thread

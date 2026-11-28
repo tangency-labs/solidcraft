@@ -19,15 +19,19 @@ pub const TOOL_COMMANDS: &[(&str, &str)] = &[
 
 /// Tools that are no command: each has a message `ui.agent_tool.<tool>`.
 pub const MESSAGE_TOOLS: &[&str] = &[
+    "agent_cursor",
     "batch",
     "body_topology",
     "cancel",
     "check_parameters",
     "compare_picture",
     "describe_command",
+    "documents",
     "execute",
     "list_commands",
     "pending",
+    "preferences",
+    "quit_app",
     "running",
     "screenshot",
     "skill_reference",

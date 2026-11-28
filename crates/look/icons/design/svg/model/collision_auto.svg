@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Automatic collision</title>
+  <path d="M5.31 27.66L24.36 38.66L24.36 60.66L5.31 49.66Z" fill="#b8c3cf"/>
+  <path d="M43.41 27.66L24.36 38.66L24.36 60.66L43.41 49.66Z" fill="#8e9faf"/>
+  <path d="M24.36 16.66L43.41 27.66L24.36 38.66L5.31 27.66Z" fill="#e2e8ef"/>
+  <path d="M24.36 16.66L43.41 27.66L43.41 49.66L24.36 60.66L5.31 49.66L5.31 27.66Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.31 27.66L24.36 38.66L43.41 27.66" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.36 38.66L24.36 60.66" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.36 4.66Q46.56 15.46 57.36 16.66Q46.56 17.86 45.36 28.66Q44.16 17.86 33.36 16.66Q44.16 15.46 45.36 4.66Z" fill="#ffffff" stroke="#ffffff" stroke-width="5.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.36 4.66Q46.56 15.46 57.36 16.66Q46.56 17.86 45.36 28.66Q44.16 17.86 33.36 16.66Q44.16 15.46 45.36 4.66Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -908,12 +908,48 @@ impl Context {
 
     /// Do read-only (shared access) transaction on Context
     fn read<R>(&self, reader: impl FnOnce(&ContextImpl) -> R) -> R {
-        reader(&self.0.read())
+        // SolidCraft: a read inside a read of this context on this thread goes ahead of a waiting
+        // writer. A plain read would wait on the writer, which waits on this thread
+        // (#21091).
+        let held = lock_nesting::Held::enter(self.lock_key(), false);
+        if held.nested_read {
+            reader(&self.0.read_recursive())
+        } else {
+            reader(&self.0.read())
+        }
     }
 
     /// Do read-write (exclusive access) transaction on Context
     fn write<R>(&self, writer: impl FnOnce(&mut ContextImpl) -> R) -> R {
+        // SolidCraft: tracked so a read inside this write is not taken for a nested read
+        // (#21091).
+        let _held = lock_nesting::Held::enter(self.lock_key(), true);
         writer(&mut self.0.write())
+    }
+
+    /// SolidCraft: what tells this context's lock apart from another context's
+    /// (#21091).
+    fn lock_key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+
+    /// SolidCraft: run `f` and report each time this thread locked a [`Context`] while it already
+    /// held a lock of that same context: a closure given to [`Self::data`], [`Self::memory`],
+    /// [`Self::input`], [`Self::style`] and the like that calls the context again (as
+    /// `ctx.data(|d| d.get_temp::<T>(Id::new(ctx.viewport_id())))` does).
+    ///
+    /// egui forbids that (see [`Self::run_ui`]). A write inside a lock, or a read inside a write,
+    /// deadlocks at once. A read inside a read deadlocked only when another thread asked to write
+    /// between the two reads (a worker's [`Self::request_repaint`]), so it froze the window
+    /// rarely; such reads now go ahead of the waiting writer, and this lets tests find them.
+    ///
+    /// Each report names the two locks and has a backtrace of the inner one. Only with the
+    /// `lock_nesting_report` feature, which tests enable.
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    pub fn record_nested_locks<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
+        let recording = lock_nesting::Recording::start();
+        let result = f();
+        (result, recording.finish())
     }
 
     /// Run the ui code for one frame.
@@ -5029,11 +5065,170 @@ fn flatten_labelled_by(nodes: &mut [(accesskit::NodeId, accesskit::Node)]) {
     }
 }
 
+/// SolidCraft: the [`Context`] locks each thread holds, so a nested read can go ahead of a waiting
+/// writer and tests can find nested locks ([`Context::record_nested_locks`];
+/// #21091).
+mod lock_nesting {
+    use std::cell::RefCell;
+
+    std::thread_local! {
+        /// The contexts this thread holds a lock of, innermost last, and whether each is a write.
+        static HELD: RefCell<Vec<(usize, bool)>> = const { RefCell::new(Vec::new()) };
+        /// While a test records: a report of each lock taken inside a lock of the same context.
+        #[cfg(any(test, feature = "lock_nesting_report"))]
+        static RECORDED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    /// One lock this thread holds, from just before it is taken until just after it is released.
+    pub(super) struct Held {
+        /// A read inside a read of the same context.
+        pub(super) nested_read: bool,
+    }
+
+    impl Held {
+        pub(super) fn enter(key: usize, write: bool) -> Self {
+            let outer = HELD
+                .try_with(|held| {
+                    let mut held = held.borrow_mut();
+                    let outer = held.iter().rev().find(|(k, _)| *k == key).map(|&(_, w)| w);
+                    held.push((key, write));
+                    outer
+                })
+                .ok()
+                .flatten();
+            #[cfg(any(test, feature = "lock_nesting_report"))]
+            if let Some(outer_write) = outer {
+                record(outer_write, write);
+            }
+            Self {
+                nested_read: outer == Some(false) && !write,
+            }
+        }
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            let _ = HELD.try_with(|held| held.borrow_mut().pop());
+        }
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    fn record(outer_write: bool, write: bool) {
+        let kind = |write: bool| if write { "write" } else { "read" };
+        let _ = RECORDED.try_with(|recorded| {
+            if let Some(reports) = recorded.borrow_mut().as_mut() {
+                reports.push(format!(
+                    "a {} of the Context inside a {} of it:\n{}",
+                    kind(write),
+                    kind(outer_write),
+                    std::backtrace::Backtrace::force_capture()
+                ));
+            }
+        });
+    }
+
+    /// Records this thread's nested locks until finished (or dropped), then restores the
+    /// recording around it.
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    pub(super) struct Recording {
+        outer: Option<Option<Vec<String>>>,
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    impl Recording {
+        pub(super) fn start() -> Self {
+            Self {
+                outer: RECORDED
+                    .try_with(|recorded| recorded.replace(Some(Vec::new())))
+                    .ok(),
+            }
+        }
+
+        pub(super) fn finish(mut self) -> Vec<String> {
+            self.restore().unwrap_or_default()
+        }
+
+        fn restore(&mut self) -> Option<Vec<String>> {
+            let outer = self.outer.take()?;
+            RECORDED
+                .try_with(|recorded| recorded.replace(outer))
+                .ok()
+                .flatten()
+        }
+    }
+
+    #[cfg(any(test, feature = "lock_nesting_report"))]
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            self.restore();
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{FontDefinitions, Panel};
 
     use super::Context;
+
+    /// SolidCraft (#21091): a read inside a read on one thread, with another
+    /// thread waiting to write between the two, used to wait on that writer while the writer
+    /// waited on the reader.
+    #[test]
+    fn a_nested_read_does_not_wait_on_a_waiting_writer() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let ctx = Context::default();
+        let (queued, writer_queued) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let (wrote, written) = mpsc::channel();
+        let reader = ctx.clone();
+        std::thread::spawn(move || {
+            let viewport = reader.data(|_| {
+                // A worker asks for a repaint (a write) while this thread reads.
+                let worker = reader.clone();
+                std::thread::spawn(move || {
+                    worker.request_repaint();
+                    let _ = wrote.send(());
+                });
+                // The writer has claimed the lock and waits for this read to end: while a reader
+                // holds the lock, nothing else sets its exclusive bit.
+                let deadline = std::time::Instant::now() + Duration::from_secs(120);
+                while !reader.0.is_locked_exclusive() && std::time::Instant::now() < deadline {
+                    std::thread::yield_now();
+                }
+                let is_queued = reader.0.is_locked_exclusive();
+                let _ = queued.send(is_queued);
+                is_queued.then(|| reader.viewport_id())
+            });
+            let _ = done.send(viewport);
+        });
+        assert_eq!(
+            writer_queued.recv_timeout(Duration::from_secs(150)).ok(),
+            Some(true),
+            "the writer queued behind the read before the nested read"
+        );
+        // Well under the 10 s after which a debug build's waiting writer gives up and frees it.
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(5)).ok(),
+            Some(Some(crate::ViewportId::ROOT)),
+            "the nested read waited on the writer that waited on it"
+        );
+        assert!(
+            written.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the writer completes once the reads end"
+        );
+        let ((), nested) = Context::record_nested_locks(|| {
+            ctx.data(|_| ctx.viewport_id());
+        });
+        assert_eq!(nested.len(), 1, "a nested read is reported");
+        let ((), nested) = Context::record_nested_locks(|| {
+            ctx.data(|_| ());
+            ctx.viewport_id();
+        });
+        assert!(nested.is_empty(), "consecutive locks are not nested");
+    }
 
     #[cfg(debug_assertions)]
     #[test]

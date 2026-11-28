@@ -47,7 +47,7 @@ pub(crate) fn items(app: &SolveApp, id: Option<&str>) -> Vec<Item> {
         ] {
             rows.push(
                 Item::action("ui.appBarEdit", app.tr(key), icon)
-                    .on_if(action != "hide" || app_bar_items::can_remove(id))
+                    .on_if(action != "hide" || (app_bar_items::can_remove(id) && !locked(app, id)))
                     .with(json!({"item":id,"action":action})),
             );
         }
@@ -59,8 +59,17 @@ pub(crate) fn items(app: &SolveApp, id: Option<&str>) -> Vec<Item> {
     }
     rows
 }
+/// A link pill the organization's policy shows (`ShowDonateButton`, `ShowDiscordButton` = 1)
+/// stays on the bar: no hide path, saved layout or preset takes it off.
+pub(crate) fn locked(app: &SolveApp, id: &str) -> bool {
+    crate::links::by_id(if id == "donate" { "kofi" } else { id }).is_some_and(|link| app.policy.locks(link.pref) && (link.shown)(&app.preferences))
+}
 pub(crate) fn run(app: &mut SolveApp, p: &Value) {
     let id = p.get("item").and_then(Value::as_str).unwrap_or("");
+    if p.get("action").and_then(Value::as_str) == Some("hide") && locked(app, id) {
+        app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+        return;
+    }
     let defaults = defaults(app);
     let layout = &mut app.toolbar_custom.app_bar;
     match p.get("action").and_then(Value::as_str).unwrap_or("") {
@@ -128,8 +137,13 @@ pub(crate) fn preview(app: &SolveApp, ctx: &egui::Context) -> Layout {
                 layout.move_before(&drag.id, slot.zone, slot.before.as_deref(), &defaults);
                 layout.set_shown(&drag.id, true, &defaults);
             }
-        } else if drag.from_bar && drag.below {
+        } else if drag.from_bar && drag.below && !locked(app, &drag.id) {
             layout.set_shown(&drag.id, false, &defaults);
+        }
+    }
+    for id in ["donate", "discord"] {
+        if locked(app, id) {
+            layout.set_shown(id, true, &defaults(app));
         }
     }
     layout
@@ -329,7 +343,12 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
                             }
                         }
                     }
-                    DragRelease::Remove => run(app, &json!({"item":held.id,"action":"hide"})),
+                    DragRelease::Remove => {
+                        run(app, &json!({"item":held.id,"action":"hide"}));
+                        if locked(app, &held.id) {
+                            spring(ui.ctx(), held);
+                        }
+                    }
                     DragRelease::Return => spring(ui.ctx(), held),
                 }
             }
@@ -371,7 +390,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         return (app.tr_command(c.id, c.label).into(), c.info(&app.session).icon.into());
     }
     let (key, icon) = match id {
-        "documents" => ("app_bar.documents", "document_browser"),
+        "documents" => ("parts_library.title", "document_browser"),
         "separator" => ("app_bar.separator", "help"),
         "space" => ("app_bar.space", "help"),
         "file" => ("ui.file", "new"),
@@ -456,7 +475,7 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let spring = ui.ctx().data(|d| d.get_temp::<Spring>(spring_key()));
     let returning = drag.as_ref().is_some_and(|d| d.active && d.from_bar && d.below && d.id == id);
     let empty = drag.as_ref().is_some_and(|d| d.active && !d.from_bar && d.id == id) || spring.as_ref().is_some_and(|s| !s.from_bar && s.id == id);
-    let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
+    let on_bar = locked(app, id) || (app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning);
     let placeable = !on_bar && !empty;
     if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) {
         ui.ctx().set_cursor_icon(app_bar::drag_cursor(response.is_pointer_button_down_on()));

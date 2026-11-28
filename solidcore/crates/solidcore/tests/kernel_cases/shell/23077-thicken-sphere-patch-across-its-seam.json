@@ -1,0 +1,57 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b0"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": 0.03
+      }
+    }
+  ],
+  "case": "23077-thicken-sphere-patch-across-its-seam",
+  "expected": {
+    "body_count": 1,
+    "edges": 8,
+    "faces": 6,
+    "method": "thicken offsets the face along its normals (radially) and closes its sides along them: the slab is the cone of half angle alpha, sin alpha = a/R = 2.655/52.5, between radii R and R + t, V = 2 pi (1 - cos alpha) ((R + t)^3 - R^3)/3 = 0.6651602123. Faces: the two sheet faces, their two offsets and two walls (6); edges: the rim's two halves and their offsets, the seam piece on each sphere and the two wall seams (8); vertices 4. Tolerance: the measure's 1e-8 plus the walls' area 2 pi a t (1 + t/R)^2 times how far a rim within the body's 2e-5 of both the sphere and the cylinder can lie along the sphere, 2e-5 (1 + sin alpha)/cos alpha: relative 1.59e-05, rounded up",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#23077"
+    ],
+    "tolerance": {
+      "rel": 1.7e-05
+    },
+    "vertices": 4,
+    "volume_mm3": 0.6651602123422823,
+    "what": "the patch across the seam thickened 0.03 out: one slab"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "params": {},
+  "records": "23077-thicken-sphere-patch-across-its-seam.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#23077"
+  ],
+  "ungraded": [],
+  "what": "a small patch of the R 52.5 face of a sphere-shell cap (polar angles 0 to 0.5 between radii 51.5 and 52.5, revolved a whole turn about Z, its seam in the XZ plane at x > 0), cut by a cylinder of radius 2.655 about the radial line at polar angle 0.25 in the seam's plane, so it lies across the seam: two faces and a piece of the seam. Thickened 0.03 out it was refused in SolidCraft's export ('pcurve: off the surface's range: OffRangeBeyondReach'): the wall merge's topology test grew one offset face's surface the whole way round on another parameterisation under its old domain; the same patch off the seam thickened",
+  "why_not": []
+}

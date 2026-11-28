@@ -30,6 +30,7 @@ pub fn synthetic_registry() -> PanelResult<PanelRegistry> {
             features: PanelFeatures { multi_instance: multi, ..PanelFeatures::default() },
             side_height_policy: SideHeightPolicy::Content,
             fixed_bottom_height: None,
+            bottom_always_open: false,
             header_actions: Vec::new(),
             text_heavy: false,
         })?;
@@ -97,11 +98,11 @@ pub struct FakePersistence {
 }
 impl LayoutPersistence for FakePersistence {
     fn load(&mut self, workspace: &WorkspaceId) -> PanelResult<Option<Vec<u8>>> {
-        valid_id(&workspace.0)?;
+        valid_workspace_id(&workspace.0)?;
         Ok(self.layouts.get(workspace).cloned())
     }
     fn save(&mut self, workspace: &WorkspaceId, envelope: &[u8]) -> PanelResult<()> {
-        valid_id(&workspace.0)?;
+        valid_workspace_id(&workspace.0)?;
         if envelope.len() > MAX_ENVELOPE_BYTES || (!self.layouts.contains_key(workspace) && self.layouts.len() >= MAX_SECTIONS) {
             return Err(error(Rule::CollectionLimit, "fake persistence capacity"));
         }

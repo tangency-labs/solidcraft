@@ -104,6 +104,7 @@
 //!   instead of a cache's arrays, which stay empty until the tree is built, as
 //!   upstream's.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -1245,8 +1246,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 let built = self.build_tree(k, false);
                 self.face_containment_done = saved;
                 built?;
+                // (point testing is left on: a surface without a face keeps every
+                // point, `SurfaceCache::point_test_with`)
                 self.process_boundary_curves = true;
-                self.point_test_enabled = false;
                 self.have_t_surface_cache = false;
             } else {
                 self.build_tree(k, false)?;
@@ -1292,9 +1294,9 @@ fn half_box(
             )?
             .normal
             .ok_or_else(|| invalid(OP_NODE, "no bounding box")),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_NODE,
-            "the node's data is not a surface",
+            SurfaceFailure::UnsupportedSurfaceKind,
         )),
     }
 }

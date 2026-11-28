@@ -23,10 +23,10 @@ pub struct TileCallback(pub u64, pub Frame);
 pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
-/// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
+/// bottom edge, through `middle` halfway down when given (#9230). The viewport callback composites transparently onto this egui mesh, so the host
 /// passes the colours it shows (its theme's, as they animate); no background colour belongs to a
 /// cached model scene or GPU upload.
-pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
+pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, middle: Option<egui::Color32>, bottom: egui::Color32) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
     mesh.colored_vertex(rect.right_top(), top);
@@ -34,6 +34,16 @@ pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Co
     mesh.colored_vertex(rect.left_bottom(), bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
+    // A colour of the user's halfway down (#9230): two bands, top to middle and middle to bottom.
+    if let Some(middle) = middle {
+        mesh.indices.clear();
+        mesh.colored_vertex(egui::pos2(rect.right(), rect.center().y), middle);
+        mesh.colored_vertex(egui::pos2(rect.left(), rect.center().y), middle);
+        mesh.add_triangle(0, 1, 4);
+        mesh.add_triangle(0, 4, 5);
+        mesh.add_triangle(5, 4, 2);
+        mesh.add_triangle(5, 2, 3);
+    }
     painter.add(egui::Shape::mesh(mesh));
 }
 
@@ -69,6 +79,36 @@ pub struct Built {
     pub renderer: Renderer,
     stats: DrawStatsHandle,
     ready: Option<TessReady>,
+}
+
+/// The window device's lost flag and the sample count egui's own pass draws with, kept in the egui
+/// renderer's callback resources by the host ([`watch_window`]) so anything holding the render
+/// state reads them ([`window_device`]). Stock egui-wgpu keeps neither.
+#[derive(Clone, Debug)]
+pub struct WindowDevice {
+    pub lost: solidcraft_viewport_gpu::DeviceLost,
+    /// `NativeOptions::multisampling` (egui's pass, not the scene's).
+    pub msaa_samples: u32,
+}
+
+impl Default for WindowDevice {
+    fn default() -> Self {
+        Self { lost: Default::default(), msaa_samples: 1 }
+    }
+}
+
+/// Watch the window's device for a loss (its one lost callback) and keep that, with egui's sample
+/// count `msaa_samples`, for [`window_device`]. The host calls it once, where it gets the render
+/// state.
+pub fn watch_window(rs: &egui_wgpu::RenderState, msaa_samples: u32) -> WindowDevice {
+    let window = WindowDevice { lost: solidcraft_viewport_gpu::DeviceLost::watch(&rs.device), msaa_samples: msaa_samples.max(1) };
+    rs.renderer.write().callback_resources.insert(window.clone());
+    window
+}
+
+/// The window device's state [`watch_window`] kept; never lost and 1x if the host didn't watch it.
+pub fn window_device(rs: &egui_wgpu::RenderState) -> WindowDevice {
+    rs.renderer.read().callback_resources.get::<WindowDevice>().cloned().unwrap_or_default()
 }
 
 /// [`install`]'s slow half, the shader compile (seconds on some devices): it only needs the
@@ -259,7 +299,7 @@ mod tests {
         let (top, bottom) = (egui::Color32::from_rgb(10, 20, 30), egui::Color32::from_rgb(200, 150, 100));
         let rect = Rect::from_min_size(pos2(5.0, 7.0), vec2(300.0, 200.0));
         let ctx = egui::Context::default();
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, bottom));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, None, bottom));
         // The first frame of a bare context uploads the font atlas; nothing displays it here.
         out.textures_delta.clear();
         let meshes: Vec<_> = out

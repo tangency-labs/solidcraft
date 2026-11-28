@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::curve::composite_curve::OffsetMapAttribute;
+use crate::error::curve::CurveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::TagData;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -542,7 +543,8 @@ fn issue_2009_pipe_sweep_passes_on_a_failed_circle() {
         );
         matches!(
             r,
-            Err(SolidError::Upstream { operation, .. }) if operation.contains("ellipse")
+            Err(ref err) if err.operation().contains("ellipse")
+                && err.curve_failure() == Some(&CurveFailure::RadiusNotPositive { radius: 0.0 })
         )
     };
     assert!(circle_error());

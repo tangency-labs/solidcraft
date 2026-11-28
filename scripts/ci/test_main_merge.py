@@ -147,5 +147,47 @@ class MergeOfMain(unittest.TestCase):
         self.assertIsNone(main_merge.merge_of_main(base, head))
 
 
+
+class Reuse(unittest.TestCase):
+    """The same commit, the same tree or this run's previous attempt that passed is carried."""
+
+    def setUp(self):
+        self.calls = []
+        self.real_get = main_merge.get
+
+    def tearDown(self):
+        main_merge.get = self.real_get
+
+    def fake(self, answers):
+        def get(url, token):
+            self.calls.append(url)
+            for key, value in answers.items():
+                if key in url:
+                    return value
+            return {}
+        main_merge.get = get
+
+    def test_previous_attempt_that_passed_with_shards(self):
+        self.fake({"attempts/1/jobs": {"jobs": [{"name": "Native Linux tests", "conclusion": "success"}]},
+                   "attempts/1": {"conclusion": "success", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "u1")
+
+    def test_previous_attempt_that_failed_or_first_attempt(self):
+        self.fake({"attempts/1": {"conclusion": "failure", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "")
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 1, "t"), "")
+
+    def test_previous_attempt_without_shards_is_not_carried(self):
+        self.fake({"attempts/1/jobs": {"jobs": [{"name": "ci", "conclusion": "success"}]},
+                   "attempts/1": {"conclusion": "success", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "")
+
+    def test_same_commit_needs_this_pull_request_and_shards(self):
+        run = {"id": 5, "pull_requests": [{"number": 7}], "html_url": "u5"}
+        self.fake({"/jobs": {"jobs": [{"name": "Native Linux tests", "conclusion": "success"}]},
+                   "runs?head_sha=abc": {"workflow_runs": [run]}})
+        self.assertEqual(main_merge.passing_run("o/r", "abc", "t", 7, "o/r", "b"), "u5")
+        self.assertEqual(main_merge.passing_run("o/r", "abc", "t", 8, "o/r", "b"), "")
+
 if __name__ == "__main__":
     unittest.main()

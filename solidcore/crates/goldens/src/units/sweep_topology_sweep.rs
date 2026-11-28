@@ -1430,15 +1430,14 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // HCR's scene transform is wired (topology::brep::p5::transform_with_notifications):
-        // the scene is built, then this fixture has no service to retain it in.
+        // HCR must propagate the scene copy's error for the bare face.
         let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
         assert!(
             matches!(
                 hcr,
                 Err(SolidError::InvalidInput {
-                    reason: "fixture has no retained HCR service",
-                    ..
+                    operation: "topology::brep::p3",
+                    reason: "face without face use",
                 })
             ),
             "{hcr:?}"
@@ -1461,6 +1460,28 @@ mod tests {
         );
         assert!(!model.b[0].editing_enabled());
         assert!(!model.k.context.doing_boolean());
+        Ok(())
+    }
+
+    #[test]
+    fn hcr_reaches_scene_retention_for_a_complete_body() -> Result<()> {
+        use solidcore::geom::axis2_placement::Axis2Placement;
+        use solidcore::primitive::api_primitives::create_box;
+
+        let mut model = Model::new([1., 0., 0.])?;
+        let b = BrepId::from_index(0);
+        *model.brep_mut(b)? = create_box(&mut model.k, Point3::ZERO, 4., 3., 2.)?;
+        let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
+        assert!(
+            matches!(
+                hcr,
+                Err(SolidError::InvalidInput {
+                    operation: "sweep test model",
+                    reason: "fixture has no retained HCR service",
+                })
+            ),
+            "{hcr:?}"
+        );
         Ok(())
     }
 
@@ -1554,5 +1575,185 @@ mod tests {
         assert_eq!(point, Point3::new(7., 8., 9.));
         assert_eq!(normal, Point3::new(3., 2., 1.));
         Ok(())
+    }
+}
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// rotational rows whose vertex points moved. A rotational sweep moves no vertex but to the
+/// image of an input vertex: each output vertex is one of the input vertices or
+/// their images turned through the sweep's angle about its axis (`R(theta) v = c + cos theta
+/// (v - c) + sin theta (a x (v - c)) + (1 - cos theta) (a . (v - c)) a`), and each edge end
+/// is one of the output vertices. The rows are replayed and `points` is checked against
+/// those closed-form images.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+    use crate::interval::{sin_cos_deg, Iv};
+    use solidcore::math::Vec3;
+    use solidcore::sweep::topology_sweep::store::SweepIdentities;
+
+    /// The rows #14425 moved.
+    const ROWS: [&str; 10] = [
+        "nl_pc21_rotate_one_face_higher_axis_through_edge",
+        "nl_test_edges_higher_rotation",
+        "nm_box_rotation_y_30",
+        "nm_face_only_rotation_neg_y_36",
+        "nm_faces_higher_box_rotation_full_turn",
+        "nm_faces_higher_test_rotation_neg_y_36",
+        "nm_faces_higher_test_rotation_x_36_tagging",
+        "whole_rotation_x_30",
+        "whole_rotation_y_90",
+        "whole_rotation_z_45",
+    ];
+
+    /// `v` turned through `deg` degrees about the line through `c` along `axis`, enclosed
+    /// in interval arithmetic from the exact inputs (the unit axis `axis / |axis|` and
+    /// `sin`/`cos` enclosed too).
+    fn turned(v: Point3, c: Point3, axis: Vec3, deg: f64) -> [Iv; 3] {
+        let e = Iv::exact;
+        let (s, co) = sin_cos_deg(deg);
+        let len = e(axis.x).mul(e(axis.x)).add(e(axis.y).mul(e(axis.y))).add(e(axis.z).mul(e(axis.z))).sqrt();
+        let a = [e(axis.x).div(len), e(axis.y).div(len), e(axis.z).div(len)];
+        let d = [e(v.x).sub(e(c.x)), e(v.y).sub(e(c.y)), e(v.z).sub(e(c.z))];
+        let cross = [
+            a[1].mul(d[2]).sub(a[2].mul(d[1])),
+            a[2].mul(d[0]).sub(a[0].mul(d[2])),
+            a[0].mul(d[1]).sub(a[1].mul(d[0])),
+        ];
+        let dot = a[0].mul(d[0]).add(a[1].mul(d[1])).add(a[2].mul(d[2]));
+        let along = e(1.0).sub(co).mul(dot);
+        let cs = [c.x, c.y, c.z];
+        std::array::from_fn(|n| e(cs[n]).add(d[n].mul(co)).add(cross[n].mul(s)).add(a[n].mul(along)))
+    }
+
+    /// An input vertex: its point and tolerance.
+    type Vx = (Point3, f64);
+
+    /// The input body's vertex points and tolerances, its edges' end vertices (an edge
+    /// with an end missing is left out), the axis point, the axis and the angle.
+    fn input(i: &Input) -> (Vec<Vx>, Vec<[Vx; 2]>, Point3, Vec3, f64) {
+        let mut k = Kernel::default();
+        let (b, c, axis, angle) = if let Some([l, w, h, _, vx, vy, vz, angle, ..]) = i.whole {
+            let b = solidcore::primitive::api_primitives::create_box(&mut k, Point3::ZERO, l, w, h)
+                .unwrap();
+            (b, Point3::ZERO, Vec3::new(vx, vy, vz), angle)
+        } else {
+            let [body, _, vx, vy, vz, angle, cx, cy, cz, ..] = i.body.unwrap();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
+            let mut attributes = AttributeStore::new();
+            let handle = BrepId::from_index(0);
+            let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let key = key_of(solidcore::error::EntityRef::Brep(handle)).key;
+            let b = build_body(&mut k, body, key, &mut env).unwrap();
+            (b, Point3::new(cx, cy, cz), Vec3::new(vx, vy, vz), angle)
+        };
+        let vx = |v| {
+            (
+                solidcore::topology::vertex::point(&b, v).unwrap(),
+                solidcore::topology::vertex::tolerance(&b, v).unwrap(),
+            )
+        };
+        let vertices = b.vertex_list().iter().map(|&v| vx(v)).collect();
+        let edges = b
+            .edge_list()
+            .iter()
+            .filter_map(|&ed| {
+                let s = solidcore::topology::edge::start_vertex(&b, ed).unwrap()?;
+                let t = solidcore::topology::edge::end_vertex(&b, ed).unwrap()?;
+                Some([vx(s), vx(t)])
+            })
+            .collect();
+        (vertices, edges, c, axis, angle)
+    }
+
+    /// Whether `p` is within `tol` of the enclosed point `img` (the distance enclosed, so
+    /// certain).
+    fn near(p: Point3, img: [Iv; 3], tol: f64) -> bool {
+        let e = Iv::exact;
+        let d = [p.x, p.y, p.z]
+            .iter()
+            .zip(img)
+            .map(|(&x, y)| e(x).sub(y))
+            .fold(Iv::ZERO, |sum, d| sum.add(d.mul(d)))
+            .sqrt();
+        d.hi <= tol
+    }
+
+    /// Each output vertex is within its input vertex's tolerance of an input vertex or of
+    /// that vertex's exact turned image (the distance enclosed in interval arithmetic, so
+    /// certain; the tolerance is the input's own, which
+    /// [`RotationalSweepGeometry::vertex_sweep_same`] also uses to tell an image from its
+    /// vertex, so no allowance is chosen here), every edge end is bitwise one of the
+    /// output vertices, and every edge joins the ends of one edge a rotational sweep makes:
+    /// an input edge where it was, its turned image, or an input vertex's arc to its image
+    /// (each end within its input vertex's tolerance). The claim is membership only: the recorded vertex lists hold
+    /// coincident vertices (`nl_pc21_rotate_one_face_higher_axis_through_edge` records
+    /// three at the origin), so the outputs are not matched to distinct images.
+    ///
+    /// [`RotationalSweepGeometry::vertex_sweep_same`]: solidcore::sweep::rotational_sweep_geometry::RotationalSweepGeometry::vertex_sweep_same
+    #[test]
+    fn every_moved_vertex_is_an_input_vertex_or_its_turned_image() {
+        for name in ROWS {
+            let i: Input = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (vertices, input_edges, c, axis, angle) = input(&i);
+            let out = rust(&i).unwrap();
+            let whole = &out.ints["whole"];
+            assert_eq!(whole[0], 0, "{name}: a success");
+            let n = whole[6] as usize;
+            let points: Vec<Point3> =
+                out.values["points"].chunks(3).map(|p| Point3::new(p[0], p[1], p[2])).collect();
+            assert!(n > 0 && points.len() >= n, "{name}");
+            let (outputs, ends) = points.split_at(n);
+            let e = Iv::exact;
+            let mut images = Vec::new();
+            for &(v, tol) in &vertices {
+                images.push(([e(v.x), e(v.y), e(v.z)], tol));
+                images.push((turned(v, c, axis, angle), tol));
+            }
+            for &p in outputs {
+                let on = images.iter().any(|&(img, tol)| near(p, img, tol));
+                assert!(on, "{name}: {p:?} is on no input vertex or turned image");
+            }
+            // The edges a rotational sweep can make, as end pairs: each input edge where
+            // it was, its turned image, and each input vertex's arc to its image.
+            let at = |(v, tol): Vx| ([e(v.x), e(v.y), e(v.z)], tol);
+            let image = |(v, tol): Vx| (turned(v, c, axis, angle), tol);
+            let mut allowed = Vec::new();
+            for &[a, b] in &input_edges {
+                allowed.push([at(a), at(b)]);
+                allowed.push([image(a), image(b)]);
+            }
+            for &v in &vertices {
+                allowed.push([at(v), image(v)]);
+            }
+            // every output edge has both ends (`whole` is the status, the six counts, edges
+            // at index 5, then the edges without two vertices), so `ends` holds a pair
+            // per output edge and the checks below see them all
+            assert_eq!(whole[7], 0, "{name}: an edge without two vertices");
+            assert_eq!(ends.len(), 2 * whole[5] as usize, "{name}: an end pair per output edge");
+            assert!(!ends.is_empty(), "{name}: no closed edge recorded");
+            for pair in ends.chunks(2) {
+                let (p, q) = (pair[0], pair[1]);
+                let made = allowed.iter().any(|&[(u, tu), (w, tw)]| {
+                    (near(p, u, tu) && near(q, w, tw)) || (near(p, w, tw) && near(q, u, tu))
+                });
+                assert!(made, "{name}: edge {p:?} - {q:?} is no input edge, image or arc");
+            }
+            for q in ends {
+                assert!(
+                    outputs.iter().any(|p| p.x.to_bits() == q.x.to_bits()
+                        && p.y.to_bits() == q.y.to_bits()
+                        && p.z.to_bits() == q.z.to_bits()),
+                    "{name}: edge end {q:?} is no output vertex"
+                );
+            }
+        }
     }
 }

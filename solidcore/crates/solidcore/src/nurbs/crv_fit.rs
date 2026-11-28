@@ -5,9 +5,14 @@
 //! Upstream: `source/SMLib/src/NL_CrvFit.cpp` (declarations in
 //! `source/SMLib/inc/NL_CrvFit.h`). The file is split over units `nlib.crv_fit_p1`,
 //! `nlib.crv_fit_p2`, `nlib.crv_fit_p3` and `nlib.crv_fit_p4`, one submodule each.
+//!
+//! Two submodules are solidcore's own (not upstream): [`end_directions`] (interpolation and
+//! least squares with the direction of either end held) and [`within`] (a curve refitted to a
+//! tolerance, with the fewest spans a halving search finds and a certified bound).
 
 pub mod end_directions;
 pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod p4;
+pub mod within;

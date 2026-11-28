@@ -22,6 +22,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -37,6 +38,9 @@ use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::primitive::primitive_creation::SweepOptions;
 
 const OP: &str = "primitive::primitive_creation::p3::prepare_curve_sweep";
+/// The path's start point and tangent: its evaluation returns the point and each
+/// derivative it was asked for when it succeeds.
+const PATH_VALUES: &str = "the path's evaluation succeeded without its point or first derivative, though it returns the point and each derivative asked for";
 
 pub(super) fn bspline(curve: &Curve) -> Option<BSplineCurve> {
     match curve.kind() {
@@ -192,7 +196,7 @@ fn scaling(
         )?;
         let solution = solutions
             .get(0)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the closest point on the path"))?;
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::ClosestPointNotFound))?;
         let projected = reference.evaluate_point(k, solution.start.param(0)?)?;
         Ok(point.distance(projected))
     };
@@ -238,7 +242,7 @@ pub fn prepare_curve_sweep(
     test_continuity: bool,
 ) -> Result<PreparedCurveSweep> {
     if profiles_in.is_empty() {
-        return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
+        return Err(SolidError::primitive(OP, PrimitiveFailure::NoProfiles));
     }
     let mut path = path.clone();
     // `(SmBSplineCurve *)` of each profile: the curve with its NURB, as upstream's `SmLine`
@@ -261,7 +265,7 @@ pub fn prepare_curve_sweep(
     let start = values
         .first()
         .copied()
-        .ok_or_else(|| SolidError::primitive_failed(OP, "the path has no start point"))?;
+        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::Defect { why: PATH_VALUES }))?;
     let mut path_to_origin = Axis2Placement::IDENTITY;
     path_to_origin.translate(-start);
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
@@ -306,7 +310,7 @@ pub fn prepare_curve_sweep(
     let tangent = values
         .get(1)
         .copied()
-        .ok_or_else(|| SolidError::primitive_failed(OP, "the path has no start tangent"))?;
+        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::Defect { why: PATH_VALUES }))?;
     let [mut from_x, mut from_y, _] = tangent.make_unit_ortho_vectors(None)?;
     // SolidCraft change, tangency-labs/smlib 1b6f5fa (tangency-labs/solidcore#434): the path
     // is turned so that this frame becomes the global one, and the sweep (`N_CreateSweepScale`,
@@ -354,7 +358,7 @@ pub fn prepare_curve_sweep(
             Some(e) if e.upstream_status() == Some(1001) => {
                 let first = profiles
                     .first()
-                    .ok_or_else(|| SolidError::primitive_failed(OP, "no profiles to sweep"))?;
+                    .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoProfiles))?;
                 let values =
                     first.evaluate(first.natural_interval().evaluate(0.0), 1, true, false)?;
                 Vec3::X.cross(values.get(1).copied().unwrap_or(Vec3::UNDEF))
@@ -388,6 +392,24 @@ pub fn prepare_curve_sweep(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sweep without profiles is the caller's input: refused by name, of class
+    /// `InvalidInput`, with the `SM_ERR` it replaced.
+    #[test]
+    fn a_sweep_without_profiles_is_refused_by_name() -> Result<()> {
+        let k = Kernel::default();
+        let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z)?;
+        let error = prepare_curve_sweep(&k, &[], &path, None, None, SweepOptions::default(), false)
+            .err()
+            .ok_or_else(|| SolidError::sm_err("test"))?;
+        assert_eq!(
+            error.primitive_failure(),
+            Some(&PrimitiveFailure::NoProfiles)
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+        Ok(())
+    }
 
     #[test]
     fn preparation_keeps_analytic_scale_reference() -> Result<()> {

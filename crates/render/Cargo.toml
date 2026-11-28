@@ -11,10 +11,12 @@ workspace = true
 [features]
 default = []
 raytrace-cpu = ["dep:rayon"]
+# `CpuHost::for_platform_with_own_memory_ledger`, for other crates' tests that check exact
+# native RAM-ledger totals while other tests in the same process render.
+test-support = []
 
 [dependencies]
 solidcore-record = { workspace = true }
-solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcraft-geom = { workspace = true }

@@ -160,7 +160,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
         *drag = Some(Drag::Marker);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
     rect.center().y
@@ -307,7 +307,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 }
 
-fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
+pub(crate) fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
     let features = selected_feature_ids(app);
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
@@ -418,7 +418,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
@@ -618,7 +618,7 @@ fn visible_order(
 }
 
 /// Start a folder rename typed in its History row: no floating box (#16217).
-fn start_folder_rename(app: &mut SolveApp, group: u64) {
+pub(crate) fn start_folder_rename(app: &mut SolveApp, group: u64) {
     crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
     if let Some(rename) = app.menu.rename.as_mut() {
         rename.inline = true;
@@ -937,14 +937,19 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
                 rendered_group_header = true;
             }
         }
+        let feature_hidden = table.is_hidden(index);
         let group_open = group_id.is_none_or(|id| table.is_open(&folds, id));
         let indent_group = (!rendered_group_header).then_some(previous_visible_group).flatten().filter(|previous| Some(*previous) != group_id);
         if index == marker && !marker_before_group {
-            slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group: group_open.then_some(group_id).flatten(), indent_group });
+            let marker_group = if feature_hidden { None } else { group_open.then_some(group_id).flatten() };
+            slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group: marker_group, indent_group });
             marker_y = vertical_marker(app, ui, &mut rows.drag);
         }
         // A sketch listed under a feature is drawn after that feature's row.
-        if group_open && let Some(row) = plan.row_at(index) {
+        if !feature_hidden
+            && group_open
+            && let Some(row) = plan.row_at(index)
+        {
             slots.push(VerticalSlot { y: ui.cursor().top(), position: row.slot.min(index), group: group_id, indent_group });
             let indent = group_id.map(|id| (table.depth_of(id) + 1) as f32 * FOLDER_INDENT).unwrap_or(0.0);
             feature_row(app, ui, &mut rows, index, indent, RowKind::Own);
@@ -986,8 +991,9 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
     crate::dialogs_assembly::timeline_joints_vertical(app, ui);
 
     let mut drag = rows.drag.take();
-    if drag.is_some() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // The marker moves up and down, so it keeps its arrows; dragged rows show the closed hand.
+    if let Some(active) = &drag {
+        ui.ctx().set_cursor_icon(if matches!(active, Drag::Marker) { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::Grabbing });
     }
     // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(active), Some(pointer)) = (drag.as_ref(), pointer)
@@ -1061,6 +1067,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     let reference = matches!(row_kind, RowKind::Reference { .. });
     let listed =
         (row_kind == RowKind::Own).then(|| plan.row_at(index)).flatten().map(|row| row.listed.as_slice()).filter(|listed| !listed.is_empty());
+    // Its patterns and projections fold under a sketch.
     let has_patterns = !reference && matches!(kind, TimelineKind::Sketch) && table.has_patterns.get(index).copied().unwrap_or(false);
     // One fold per row: a feature's listed sketches, or a sketch's patterns.
     let fold = match listed {
@@ -1113,6 +1120,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     if names && has_patterns && fold_open {
         let depth = group_id.map_or(1, |group| table.depth_of(group) + 2) + usize::from(row_kind == RowKind::Nested);
         crate::sketch_pattern_tree::rows(app, ui, id, depth, "timeline", None, false);
+        crate::sketch_link_tree::rows(app, ui, id, depth, "timeline", false);
     }
     if let Some(listed) = listed.filter(|_| names && fold_open) {
         for child in listed {
@@ -1247,34 +1255,51 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        // On several selected features an entry acts on them all or cannot be used; the entries
+        // that take one feature go through `one_row`.
+        let rule = crate::timeline::menu_rule(app, id);
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, edit_label, edit_icon, on)).clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && crate::ui_kit::menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
+            && rule
+                .one_row(|on| {
+                    let row = crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on);
+                    // The sketch it opens, on hover (#20405); a reason it is off takes its place.
+                    match crate::timeline::profile_sketch_tip(app, sketch.0).filter(|_| on) {
+                        Some(tip) => {
+                            use crate::ui_kit::BackingTooltipExt as _;
+                            row.backing_on_hover_text(tip)
+                        }
+                        None => row,
+                    }
+                })
+                .clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Rename Feature", "rename").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on)).clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        // The entry for every selected feature takes this one's place. With the rule off it is
+        // an extra entry, and this one still acts on this feature alone.
+        if !rule.many && crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
-        // An extra entry for the selection; the one above still acts on this feature alone.
         if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
             && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
         {
             let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on)).clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }
@@ -2203,7 +2228,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(!h.app.session.has_selection(), "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2275,7 +2300,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: profile }], "the row under the feature is the sketch");
         h.step(&json!({"click": {"handle": "timeline:Profile"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Edit Feature"})).unwrap();
+        // A sketch's row names the item as the Browser does (#14366).
+        h.step(&json!({"widget": "Edit Sketch"})).unwrap();
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(profile));
         assert!(row_y("timeline:Profile") < row_y("timeline:rollback") && row_y("timeline:rollback") < row_y("timeline:Block"));
@@ -2359,7 +2385,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
@@ -2435,7 +2461,10 @@ mod tests {
         for (index, feature) in features.iter().enumerate() {
             assert_eq!(table.group_of[index], group_for(groups, feature.0), "{}", feature.1);
             let sketch = matches!(feature.5, TimelineKind::Sketch);
-            assert_eq!(sketch && table.has_patterns[index], sketch && crate::sketch_pattern_tree::has_patterns(app, feature.0));
+            assert_eq!(
+                sketch && table.has_patterns[index],
+                sketch && (crate::sketch_pattern_tree::has_patterns(app, feature.0) || crate::sketch_link_tree::has_links(app, feature.0))
+            );
         }
         for (at, group) in groups.iter().enumerate() {
             assert_eq!(table.depth[at], group_depth(groups, group.id), "{}", group.name);
@@ -2726,5 +2755,113 @@ mod tests {
         }
         let after: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert_eq!(after, order, "measuring moved nothing");
+    }
+
+    /// Hide Component History (#10393) hides a component's and its children's entries from the
+    /// vertical History panel too (#22211), and the History menu's toggle brings them back.
+    #[test]
+    fn vertical_history_hides_components_and_their_children_and_toggles_them_back() {
+        use crate::context_menu::{self, Target};
+        for dock in ["left", "under_browser"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("view.history_layout", json!({"dock": dock})).unwrap();
+            h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "CopyBox"})).unwrap();
+            h.app.run("component.create", json!({"name": "Inner"})).unwrap();
+            h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "name": "InnerBox"})).unwrap();
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 5, "name": "RootBox"})).unwrap();
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some() && handle_at("timeline:RootBox").is_some(),
+                "dock={dock}: all features start visible"
+            );
+
+            h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+            h.frames(4);
+            assert!(handle_at("timeline:CopyBox").is_none(), "dock={dock}: hidden component leaves vertical History");
+            assert!(handle_at("timeline:InnerBox").is_none(), "dock={dock}: child component leaves vertical History");
+            assert!(handle_at("timeline:RootBox").is_some(), "dock={dock}: root feature stays");
+
+            let toggle = |h: &Harness| {
+                context_menu::items(&h.app, &Target::HistoryControls)
+                    .into_iter()
+                    .find(|i| i.id == "ui.historyShowHidden")
+                    .expect("vertical History menu offers to show hidden entries")
+            };
+            let item = toggle(&h);
+            context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some(),
+                "dock={dock}: show-hidden brings hidden entries back"
+            );
+            let kept = RowPlan::kept(&h.ctx).expect("the History drew a plan");
+            assert_eq!(kept.summary(), RowPlan::of(&h.app, kept.under_feature()).summary(), "dock={dock}: cached plan matches after toggle");
+
+            let item = toggle(&h);
+            context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_none() && handle_at("timeline:InnerBox").is_none(),
+                "dock={dock}: toggling off hides them again"
+            );
+
+            h.app.run("component.show_history", json!({"component": "Copy"})).unwrap();
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some(),
+                "dock={dock}: component.show_history restores entries"
+            );
+        }
+    }
+
+    /// A folder whose features are all in hidden components (and has no joints) is left out of the
+    /// vertical History, while mixed folders and genuinely empty folders stay visible (#22211).
+    #[test]
+    fn vertical_history_hides_folders_with_only_hidden_features() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Hidden1"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [15, 0, 0], "operation": "new_body", "name": "Hidden2"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 5, "name": "RootBox"})).unwrap();
+        h.app.run("timeline.group", json!({"name": "AllHidden", "features": ["Hidden1"]})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Mixed", "features": ["Hidden2", "RootBox"]})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Empty"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+
+        assert!(handle_at("timeline-folder:AllHidden").is_none(), "folder with only hidden features is left out");
+        assert!(handle_at("timeline-folder:Mixed").is_some(), "folder with a visible feature stays");
+        assert!(handle_at("timeline-folder:Empty").is_some(), "genuinely empty folder stays");
+        assert!(handle_at("timeline:Hidden1").is_none() && handle_at("timeline:Hidden2").is_none());
+        assert!(handle_at("timeline:RootBox").is_some());
+
+        h.app.tree.history_show_hidden = true;
+        h.frames(4);
+        assert!(handle_at("timeline-folder:AllHidden").is_some(), "show-hidden brings the folder back");
+        assert!(handle_at("timeline:Hidden1").is_some() && handle_at("timeline:Hidden2").is_some());
+    }
+
+    /// With sketches listed under their features, hiding a component keeps a visible sketch from
+    /// disappearing under a hidden feature built from it (#22211).
+    #[test]
+    fn vertical_history_under_feature_keeps_visible_sketch_when_consumer_is_hidden() {
+        let mut h = nested_history();
+        square(&mut h, "RootSketch", 0.0);
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        extrude(&mut h, "RootSketch", "HiddenExtrude", "new");
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+
+        assert!(handle_at("timeline:HiddenExtrude").is_none(), "hidden feature is left out");
+        assert!(handle_at("timeline:RootSketch").is_some(), "visible sketch keeps its own row");
     }
 }

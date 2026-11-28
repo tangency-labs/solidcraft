@@ -13,8 +13,10 @@
 //! two binomials per coefficient of every factor and product.
 
 use super::{
-    binomial, el, el_mut, el_ref, euclid, sm_err, smax, tensor_elevate, Face, Net, Tensor,
+    binomial, corner_step, el, el_mut, el_ref, euclid, past_table, smax, tensor_elevate, Face, Net,
+    Tensor,
 };
+use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::KnotType;
@@ -158,7 +160,7 @@ impl Binomials {
             self.evaluations = self.evaluations.saturating_add(row.len());
             self.rows.push(row);
         }
-        self.rows.get(n).map(Vec::as_slice).ok_or_else(sm_err)
+        self.rows.get(n).map(Vec::as_slice).ok_or_else(past_table)
     }
 }
 
@@ -174,7 +176,7 @@ pub(super) struct ScaledTensor {
 pub(super) fn t_scaled(a: &Tensor, binomials: &mut Binomials) -> Result<ScaledTensor> {
     let width = a.q + 1;
     if a.c.len() != (a.p + 1) * width {
-        return Err(sm_err());
+        return Err(past_table());
     }
     let bq = binomials.row(a.q)?.to_vec();
     let bp = binomials.row(a.p)?;
@@ -190,7 +192,7 @@ pub(super) fn t_scaled(a: &Tensor, binomials: &mut Binomials) -> Result<ScaledTe
 /// Row `i` of coefficients `c` stored `width` to a row.
 fn row(c: &[f64], i: usize, width: usize) -> Result<&[f64]> {
     let start = i * width;
-    c.get(start..start + width).ok_or_else(sm_err)
+    c.get(start..start + width).ok_or_else(past_table)
 }
 
 /// The product of two scaled polynomials, convolved and unscaled (`sm_SbTMulFast`'s
@@ -209,7 +211,7 @@ pub(super) fn t_mul_scaled(
             }
             for k in 0..=b.p {
                 let start = (i + k) * cw + j;
-                let out = c.c.get_mut(start..start + bw).ok_or_else(sm_err)?;
+                let out = c.c.get_mut(start..start + bw).ok_or_else(past_table)?;
                 for (cv, &bv) in out.iter_mut().zip(row(&b.c, k, bw)?) {
                     *cv += av * bv;
                 }
@@ -220,7 +222,7 @@ pub(super) fn t_mul_scaled(
     let bp = binomials.row(c.p)?;
     for (i, &bpi) in bp.iter().enumerate() {
         let start = i * cw;
-        let out = c.c.get_mut(start..start + cw).ok_or_else(sm_err)?;
+        let out = c.c.get_mut(start..start + cw).ok_or_else(past_table)?;
         for (x, &bqj) in out.iter_mut().zip(&bq) {
             let f = bpi * bqj;
             *x /= f;
@@ -271,7 +273,7 @@ pub(super) fn t_nonneg(a: &Tensor, eps: f64, depth: usize) -> Result<i32> {
         el(&a.c, 0)?,
         el(&a.c, a.q)?,
         el(&a.c, a.p * (a.q + 1))?,
-        *a.c.last().ok_or_else(sm_err)?,
+        *a.c.last().ok_or_else(past_table)?,
     ];
     for corner in corners {
         if corner < -eps {
@@ -368,8 +370,9 @@ pub(super) fn minor_without<'a>(
             }
         }
     }
-    let get =
-        |r: usize, c: usize| -> Result<&'a Tensor> { el(el_ref(&m, r)?, c)?.ok_or_else(sm_err) };
+    let get = |r: usize, c: usize| -> Result<&'a Tensor> {
+        el(el_ref(&m, r)?, c)?.ok_or_else(past_table)
+    };
     Ok([
         [get(0, 0)?, get(0, 1)?, get(0, 2)?],
         [get(1, 0)?, get(1, 1)?, get(1, 2)?],
@@ -463,7 +466,7 @@ pub(super) fn net_surface(net: &Net) -> Result<BSplineSurface> {
     let mut rational = false;
     for h in &net.pts {
         if !(h[3] > 0.0) {
-            return Err(sm_err());
+            return Err(corner_step(CornerStep::SetbackPatchWeightNotPositive));
         }
         pts.push(euclid(h));
         ws.push(h[3]);
@@ -553,7 +556,7 @@ fn affine_fundamentals_with(
             cof_scaled.push(t_scaled(c, binomials)?);
         }
         let [c0, c1, c2, c3] = cof_scaled.as_slice() else {
-            return Err(sm_err());
+            return Err(past_table());
         };
         let out = el_mut(&mut qj, k)?;
         out.clear();
@@ -577,12 +580,25 @@ fn affine_fundamentals_with(
     Ok(AffineFundamentals { q0, qj, o })
 }
 
+/// The largest distance from its plane that [`sides_on_planes`] still reads as the
+/// construction's planarity, relative to the control point's scale. The graph
+/// construction puts a planar side's first two columns on the plane exactly (every one
+/// of the box corners' G1 fills' 960 deviations measures 0.0), and a frame not aligned
+/// with the plane leaves the dot product's own rounding, a few `1e-16 scale`; this
+/// covers that with an order of margin. The fork's `1e-12` also took sides merely near
+/// a plane, whose normal-curvature truth along them is the size the checks' own
+/// tolerance accepts: a saddle referenced to a plane through its first column was
+/// certified that way (#13775).
+const PLANE_SIDE_ROUNDING: f64 = 1.0e-14;
+
 /// `sm_SbSidesOnPlanes` (smlib#125 3e10318): the sides of the setback patches (nets
 /// `0 .. n - 1`) G1 to a plane by construction: patch `m`'s side `v = 0` on face `m`,
 /// `v = 1` on face `m + 1` (`cycle_face`: the cycle's faces), each marked where its first
-/// two rows of control points (the side and its cross derivative) lie on that face's
-/// plane, to rounding at their scale. Two flags per net, `false` for every other net and
-/// side.
+/// two columns of control points (the side and its cross derivative) lie on that face's
+/// plane to [`PLANE_SIDE_ROUNDING`] of their scale - the construction's own rounding
+/// and nothing larger, since [`certified_convex`] reads the mark as the identity
+/// `L = M = 0` along the side, which needs the columns exactly on the plane. Two flags
+/// per net, `false` for every other net and side.
 pub(super) fn sides_on_planes(
     nets: &[Net],
     n: usize,
@@ -623,7 +639,7 @@ pub(super) fn sides_on_planes(
                     let x = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
                     let d = x - face.point;
                     let scale = 1.0 + x.length() + face.point.length();
-                    is_on = d.dot(normal).abs() <= 1.0e-12 * scale;
+                    is_on = d.dot(normal).abs() <= PLANE_SIDE_ROUNDING * scale;
                     if !is_on {
                         break 'rows;
                     }
@@ -646,9 +662,9 @@ pub(super) fn sides_on_planes(
 /// `plane_sides[2 p + e]` (`e = 0`: side `v = 0`, `e = 1`: side `v = 1`; smlib#125
 /// 3e10318) marks a side of patch `p` that is G1 to a plane by the patch's construction
 /// ([`sides_on_planes`]). Along such a side the normal is the plane's, so `N_u = 0`, and
-/// `L = -S_u . N_u` and `M = -S_v . N_u` vanish identically: their Bernstein rows on that
-/// side are set to exactly 0 rather than read from rounding. Every other side keeps its
-/// computed rows.
+/// `L = -S_u . N_u` and `M = -S_v . N_u` vanish identically: their Bernstein
+/// coefficients on that side are set to exactly 0 rather than read from rounding. Every
+/// other side keeps its computed coefficients.
 pub(super) fn certified_convex(
     nets: &[Net],
     plane_sides: &[bool],
@@ -706,7 +722,9 @@ pub(super) fn certified_convex(
 
 #[cfg(test)]
 mod tests {
+    use super::super::graph::GRAPH_DEPTH;
     use super::*;
+    use crate::math::Point3;
     use std::cell::Cell;
 
     thread_local! {
@@ -955,5 +973,68 @@ mod tests {
                 &reference_det4([&rows.h, &rows.hu, &rows.hv, last]),
             );
         }
+    }
+
+    /// A biquadratic net of the height `a[(u + u^2) v + 128 v^2]` over the `(u, v)`
+    /// plane, `a = 2^-42`: its first column lies exactly on the plane `z = 0` and its
+    /// second is `a` off it (`1.1e-13` of its scale, inside the fork's `1e-12` mark and
+    /// a hundred times any rounding), and its Gaussian curvature is negative over the
+    /// strip `v < (1 + 2u)^2 / 512` (the height's Hessian determinant is
+    /// `a^2 (512 v - (1 + 2u)^2)`). Under the fork's mark the side was read as
+    /// planar-by-construction, its `L` and `M` boundary coefficients zeroed, and the
+    /// saddle certified,
+    /// while the same net against a parallel plane a unit away was refused: the
+    /// reference plane alone decided. The mark now takes only the construction's
+    /// rounding, and the saddle is refused at either plane (#13775).
+    #[test]
+    fn a_side_only_near_its_plane_keeps_its_curvature() {
+        let a = 2f64.powi(-42);
+        let u = [0.0, 0.5, 2.0];
+        let v = [0.0, 0.0, 1.0];
+        let mut pts = Vec::new();
+        for (i, &cu) in u.iter().enumerate() {
+            for (j, &dv) in v.iter().enumerate() {
+                let (x, y) = (f64::from(i as u32) * 0.5, f64::from(j as u32) * 0.5);
+                pts.push([x, y, a * (cu * y + 128.0 * dv), 1.0]);
+            }
+        }
+        let net = Net { p: 2, q: 2, pts };
+        let e = Vec3::new(0.0, 0.0, 1.0);
+        for z in [0.0, 1.0] {
+            let plane = Face::plane(Point3::new(0.0, 0.0, z), e);
+            let on = sides_on_planes(std::slice::from_ref(&net), 1, &[plane], &[0]);
+            assert_eq!(on, vec![false, false], "the saddle counts as on z = {z}");
+            assert_eq!(
+                certified_convex(std::slice::from_ref(&net), &on, e, GRAPH_DEPTH).unwrap(),
+                Err(0),
+                "the saddle was certified against z = {z}"
+            );
+        }
+    }
+
+    /// The construction's own sides stay marked: the graph fill puts a planar side's
+    /// first two columns on the plane exactly (every one of the box corners' G1 fills'
+    /// 960 deviations measures 0.0), and along such a side the normal is the plane's,
+    /// so `L = M = 0` there and [`certified_convex`] zeroes their boundary coefficients
+    /// instead of reading rounding. A patch of two exact columns and a convex remainder
+    /// (`z = v^2`) marks its side and is certified through it.
+    #[test]
+    fn a_side_exactly_on_its_plane_is_marked_and_certified() {
+        let mut pts = Vec::new();
+        for i in 0..3 {
+            for j in 0..3 {
+                let (x, y) = (f64::from(i as u32) * 0.5, f64::from(j as u32) * 0.5);
+                pts.push([x, y, if j < 2 { 0.0 } else { 1.0 }, 1.0]);
+            }
+        }
+        let net = Net { p: 2, q: 2, pts };
+        let e = Vec3::new(0.0, 0.0, 1.0);
+        let plane = Face::plane(Point3::new(0.0, 0.0, 0.0), e);
+        let on = sides_on_planes(std::slice::from_ref(&net), 1, &[plane], &[0]);
+        assert_eq!(on, vec![true, false]);
+        assert_eq!(
+            certified_convex(std::slice::from_ref(&net), &on, e, GRAPH_DEPTH).unwrap(),
+            Ok(())
+        );
     }
 }

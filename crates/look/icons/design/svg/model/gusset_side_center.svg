@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Gusset thickness centered on joint plane</title>
+  <path d="M20 16L44 16L44 48L20 48Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 6L32 58" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-dasharray="5 5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

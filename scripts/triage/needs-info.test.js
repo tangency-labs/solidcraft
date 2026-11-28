@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const info = require('./needs-info.js');
+const screenshot = require('./needs-screenshot.js');
 
 const repo = { owner: 'tangency-labs', repo: 'solidcraft' };
 const NOW = Date.parse('2026-10-18T12:00:00Z');
@@ -23,7 +24,10 @@ function fake(world = {}) {
         }),
       },
       issues: {
-        getLabel: async () => ({ data: {} }),
+        getLabel: async () => {
+          if (world.missingLabel) throw Object.assign(new Error('Not found'), { status: 404 });
+          return { data: {} };
+        },
         createLabel: rec('createLabel'),
         addLabels: rec('addLabels'),
         removeLabel: rec('removeLabel'),
@@ -31,6 +35,7 @@ function fake(world = {}) {
         update: rec('update'),
         listForRepo: async () => ({ data: world.issues || [] }),
         listEventsForTimeline: async () => ({ data: world.timeline || [] }),
+        listComments: async () => ({ data: world.comments || [] }),
       },
     },
   };
@@ -148,4 +153,43 @@ test('an issue from the feature form is never asked for steps', async () => {
   ctx.payload.issue.labels = labels(['enhancement']);
   assert.equal(await info.handleOpened({ github, context: ctx }), false);
   assert.equal(calls.length, 0);
+});
+
+test('app reports without images are asked for a screenshot once, including workflow retries', async () => {
+  const body = '## Visual context\nAttach the reviewed screenshot or a short example showing the problem.';
+  const context = opened('EXTRUDE: operation failed', body);
+  const w = fake({ missingLabel: true });
+  assert.equal(await screenshot.handleOpened({ github: w.github, context }), true);
+  assert.equal(find(w.calls, 'createLabel')[1].name, 'needs-screenshot');
+  assert.deepEqual(find(w.calls, 'addLabels')[1].labels, ['needs-screenshot']);
+  const comment = find(w.calls, 'comment')[1].body;
+  assert.match(comment, /paste the screenshot/);
+  for (const image of [
+    '![Screenshot](https://example.org/image.png)',
+    '![Screenshot][image]\n[image]: https://example.org/image.png',
+    '<img src="https://example.org/image.png">',
+    'https://github.com/user-attachments/assets/1234',
+    'https://github.com/tangency-labs/solidcraft/assets/1234/5678',
+    'https://user-images.githubusercontent.com/1234/image.png',
+  ]) {
+    const attached = fake();
+    assert.equal(await screenshot.handleOpened({ github: attached.github, context: opened('Report', `${body}\n${image}`) }), false, image);
+    assert.equal(attached.calls.length, 0);
+  }
+  for (const issue of [
+    { body: 'A hand-written report' },
+    { labels: labels(['needs-screenshot']) },
+    { state: 'closed' },
+    { pull_request: {} },
+    { locked: true },
+  ]) {
+    const ctx = opened('Report', body);
+    Object.assign(ctx.payload.issue, issue);
+    const skipped = fake();
+    assert.equal(await screenshot.handleOpened({ github: skipped.github, context: ctx }), false);
+    assert.equal(skipped.calls.length, 0);
+  }
+  const retried = fake({ comments: [{ body: comment, user: { type: 'Bot' } }] });
+  assert.equal(await screenshot.handleOpened({ github: retried.github, context }), false);
+  assert.equal(retried.calls.length, 0);
 });

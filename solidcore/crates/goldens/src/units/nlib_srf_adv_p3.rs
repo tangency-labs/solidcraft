@@ -857,3 +857,61 @@ mod tests {
         assert!(stats.iter().all(|&k| k >= 10), "{stats:?}");
     }
 }
+
+/// #21383: the 74 rows the G1R change moved, each a G1R extension of a rational surface
+/// whose boundary weight ratios vary along the extended side. The new net is certified
+/// G1 across the side by `crate::g1r_cert` (the ruled span `Q + t I = k B`, one `k`, the
+/// knots' `t > 0`, positive weights), and the base's rows and knots are kept bit for
+/// bit, so the extension is the base on the base's domain.
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::{certify_step, SideCert};
+
+    const MOVED: [&str; 74] = [
+        "gen0062", "gen0188", "gen0224", "gen0251", "gen0329", "gen0384", "gen0404", "gen0467",
+        "gen0481", "gen0535", "gen0599", "gen0627", "gen0728", "gen0763", "gen0799", "gen0816",
+        "gen0968", "gen0984", "gen1075", "gen1113", "gen1154", "gen1166", "gen1275", "gen1279",
+        "gen1287", "gen1336", "gen1365", "gen1369", "gen1498", "gen1598", "gen1661", "gen1662",
+        "gen1721", "gen1767", "gen1770", "gen1782", "gen1820", "gen1827", "gen1866", "gen1877",
+        "gen1905", "gen1958", "gen2025", "gen2035", "gen2040", "gen2096", "gen2124", "gen2126",
+        "gen2127", "gen2182", "gen2246", "gen2292", "gen2346", "gen2379", "gen2476", "gen2478",
+        "gen2518", "gen2521", "gen2552", "gen2564", "gen2578", "gen2611", "gen2637", "gen2682",
+        "gen2706", "gen2717", "gen2727", "gen2781", "gen2839", "gen2911", "gen2941", "gen2946",
+        "gen2977", "gen2993",
+    ];
+
+    #[test]
+    fn each_moved_row_is_a_certified_g1_extension_of_its_base() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let (mut seen, mut removed) = (0, 0);
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::Extend { sur, par, dir, end, cont, .. } = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not an extension", c.name)
+            };
+            assert_eq!(adv::ExtendContinuity::from_flag(cont), Some(adv::ExtendContinuity::G1R), "{}", c.name);
+            let s = build(&resolve(&sur).unwrap()).unwrap();
+            assert!(s.is_rational(), "{}", c.name);
+            let e_end = CurveEnd::from_flag(end).unwrap();
+            let d = direction(dir).unwrap();
+            let e = adv::extend_by_param_dist(&s, par, d, e_end, adv::ExtendContinuity::G1R).unwrap();
+            let udir = d == Direction::U;
+            let at_end = e_end == CurveEnd::End;
+            // `certify_step` also checks the base's knots kept (both kinds) and, for a
+            // ruled side, the base's rows kept bit for bit.
+            match certify_step(&s, &e, udir, at_end) {
+                Ok(SideCert::Ruled { mixed: true, .. }) => {}
+                // C1 by structure; the removal moves the rows next to the side.
+                Ok(SideCert::KnotRemoved) => removed += 1,
+                other => panic!("{}: {other:?}", c.name),
+            }
+        }
+        assert_eq!(seen, MOVED.len());
+        // 3 of the 74 sides lose a knot multiplicity (C1 by structure).
+        assert_eq!(removed, 3, "{removed} of {seen} sides knot-removed");
+    }
+}

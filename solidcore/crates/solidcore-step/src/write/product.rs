@@ -7,7 +7,8 @@
 //! written in), a product per part with its shape representation, named solids, surface and
 //! face colours, and assemblies as
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
-//! CAx-IF recommends and our reader follows). Identical geometric entities (points, directions,
+//! CAx-IF recommends and our reader follows), and each body's presentation layer as a
+//! `PRESENTATION_LAYER_ASSIGNMENT` of its solids and surface model. Identical geometric entities (points, directions,
 //! placements, curves, surfaces) are written once and referenced; ids are dense from `#1`.
 //!
 //! [`products`] writes products and assemblies, [`bodies`] the bodies of one part, and
@@ -49,6 +50,9 @@ pub struct ExportBody<'a> {
     /// Faces with colours of their own: an index into the record's faces (one out of range is
     /// refused, [`ExportError::Face`]) and its colour.
     pub faces: Vec<(usize, Colour)>,
+    /// The presentation layer the body is on, empty for none: bodies with the same layer name,
+    /// in any product, are assigned to one `PRESENTATION_LAYER_ASSIGNMENT` named so.
+    pub layer: String,
 }
 
 /// A part or assembly: its own bodies and placed child products.
@@ -305,6 +309,8 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
     let mut shape_rep = vec![0u64; products.len()];
     let mut product_ids = Vec::new();
     let mut styled = Vec::new();
+    // Layers by name, in the order they are first met, with the items assigned to each.
+    let mut layers: Vec<(&str, Vec<u64>)> = Vec::new();
     let mut face_ids: Vec<Vec<Vec<u64>>> = products.iter().map(|_| Vec::new()).collect();
     for &(pi, p) in &reached {
         let name = product_name(p);
@@ -342,6 +348,13 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
             if let Some(c) = &b.color {
                 for item in &items {
                     styled.push(style(&mut w, *item, c));
+                }
+            }
+            let layer = b.layer.trim();
+            if !layer.is_empty() && !items.is_empty() {
+                match layers.iter_mut().find(|(name, _)| *name == layer) {
+                    Some((_, assigned)) => assigned.extend(&items),
+                    None => layers.push((layer, items.clone())),
                 }
             }
             // Faces with colours of their own.
@@ -413,6 +426,9 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
     }
     if !styled.is_empty() {
         w.add_distinct("MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION", &[s(""), refs(&styled), r(ctx)]);
+    }
+    for (name, assigned) in &layers {
+        w.add_distinct("PRESENTATION_LAYER_ASSIGNMENT", &[s(name), s(""), refs(assigned)]);
     }
 
     let mut text = String::new();
@@ -585,7 +601,7 @@ pub fn solidcore_bodies(named: &[(&str, &solidcore_ops::Body)], header: &Header)
     let list = named
         .iter()
         .zip(&records)
-        .map(|((name, _), record)| ExportBody { name: (*name).to_string(), record, color: None, faces: Vec::new() })
+        .map(|((name, _), record)| ExportBody { name: (*name).to_string(), record, color: None, faces: Vec::new(), layer: String::new() })
         .collect();
     bodies(list, header)
 }
@@ -635,7 +651,7 @@ mod tests {
         let (record, _) = bx.to_record().unwrap();
         let part = ExportProduct {
             name: "Part".into(),
-            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new(), layer: String::new() }],
             children: vec![],
         };
         let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![(1, m, String::new())] };
@@ -687,7 +703,7 @@ mod tests {
         let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![] };
         let stray = ExportProduct {
             name: "Stray".into(),
-            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new(), layer: String::new() }],
             children: vec![],
         };
         let list = [root, stray];
@@ -724,7 +740,44 @@ mod tests {
         solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().to_record().unwrap().0
     }
     fn body<'a>(name: &str, record: &'a Brep) -> ExportBody<'a> {
-        ExportBody { name: name.into(), record, color: None, faces: Vec::new() }
+        ExportBody { name: name.into(), record, color: None, faces: Vec::new(), layer: String::new() }
+    }
+
+    /// Each layer is one `PRESENTATION_LAYER_ASSIGNMENT` naming the solids of every body on it, in
+    /// any product; a body with no layer is on none, and a blank name is no layer.
+    #[test]
+    fn bodies_on_a_layer_are_assigned_to_it() {
+        let record = box_record();
+        let on = |name: &str, layer: &str| ExportBody { layer: layer.into(), ..body(name, &record) };
+        let list = [
+            ExportProduct {
+                name: "Root".into(),
+                bodies: vec![on("A", "Panels"), on("B", "Frame/Rails"), on("C", ""), on("D", "  ")],
+                children: vec![(1, IDENTITY, String::new())],
+            },
+            ExportProduct { name: "Child".into(), bodies: vec![on("E", "Panels")], children: vec![] },
+        ];
+        let text = products(&list, 0, &Header::default()).unwrap();
+        let ex = p21::parse(&text).unwrap();
+        let solid = |name: &str| {
+            ex.entities
+                .iter()
+                .find(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP" && e.params().first().and_then(p21::Param::as_str) == Some(name))
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let mut layers: Vec<(String, Vec<u64>)> = ex
+            .entities
+            .values()
+            .filter(|e| e.name() == "PRESENTATION_LAYER_ASSIGNMENT")
+            .map(|e| {
+                let name = e.params().first().and_then(p21::Param::as_str).unwrap().to_string();
+                let items = e.params().get(2).and_then(p21::Param::as_list).unwrap().iter().filter_map(p21::Param::as_ref_id).collect();
+                (name, items)
+            })
+            .collect();
+        layers.sort();
+        assert_eq!(layers, vec![("Frame/Rails".to_string(), vec![solid("B")]), ("Panels".to_string(), vec![solid("A"), solid("E")])]);
     }
 
     #[test]
@@ -913,7 +966,7 @@ mod tests {
         let faces = record.faces.len();
         let ok = Colour { rgb: [0.0, 0.5, 1.0], opacity: 0.25, name: String::new() };
         let with = |color: Option<Colour>, face: Vec<(usize, Colour)>| {
-            bodies(vec![ExportBody { name: "B".into(), record: &record, color, faces: face }], &Header::default())
+            bodies(vec![ExportBody { name: "B".into(), record: &record, color, faces: face, layer: String::new() }], &Header::default())
         };
         assert!(with(Some(ok.clone()), vec![(faces - 1, ok.clone())]).is_ok());
         for bad in [[f32::NAN, 0.0, 0.0], [1.5, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, f32::INFINITY]] {

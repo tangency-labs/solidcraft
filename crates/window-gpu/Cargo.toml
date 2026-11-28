@@ -1,0 +1,20 @@
+[package]
+name = "solidcraft-window-gpu"
+description = "SolidCraft: its own window painter and runner on a stock egui-wgpu and egui-winit (no eframe)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+egui-wgpu = { workspace = true, features = ["winit", "capture"] }
+log = { workspace = true }
+thiserror = { workspace = true }
+web-time = { workspace = true }
+wgpu = { workspace = true }
+# A window system to build against on Linux (the host picks the one it runs on).
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "x11"] }

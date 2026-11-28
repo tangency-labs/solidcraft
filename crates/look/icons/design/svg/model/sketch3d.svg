@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>3D sketch</title>
+  <path d="M6 43L32 28L58 43L32 58Z" fill="none" stroke="#6f879c" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 5.9"/>
+  <path d="M15 43L32.3 53L32.3 19L49.6 9" fill="none" stroke="#ffffff" stroke-width="8.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 43L32.3 53L32.3 19L49.6 9" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="15" cy="43" r="5.8" fill="#ffffff"/>
+  <circle cx="15" cy="43" r="3.4" fill="#236ead"/>
+  <circle cx="49.6" cy="9" r="5.8" fill="#ffffff"/>
+  <circle cx="49.6" cy="9" r="3.4" fill="#236ead"/>
+</svg>

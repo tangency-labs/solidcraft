@@ -1,0 +1,22 @@
+//! Stored preferences on the Shortcuts page (`PAGE_SHORTCUTS`).
+//!
+//! Each entry is one field of `Prefs`, in `preference_settings!`'s form:
+//! `field: Type = default, PAGE[, accept(range)][ => control(...)];`. Add a new preference
+//! to the file of the page whose Defaults resets it, in alphabetical order by field name, so
+//! two new preferences rarely land on the same line.
+
+macro_rules! shortcuts_preferences {
+    ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
+        $next! { $($rest),* ; $($fields)*
+            /// The keys of another CAD tool under the user's own (`keyboard_profiles`, #15302):
+            /// `solidcraft` (the default) is SolidCraft's own keys; an id this version doesn't know
+            /// keeps them too.
+            keyboard_profile: String = crate::keyboard_profiles::DEFAULT.into(), PAGE_SHORTCUTS;
+            preview_reselect_modifier: crate::tool_modifiers::PreviewModifier = Default::default(), PAGE_SHORTCUTS;
+            /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
+            /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
+            /// runs its command, and one that builds a feature finishes the sketch first (#2815).
+            sketch_keys_only: bool = false, PAGE_SHORTCUTS;
+        }
+    };
+}

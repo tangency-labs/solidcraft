@@ -11,10 +11,10 @@ use solidcraft_doc::drawing::view::{FlatOf, QuarterTurn};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
-use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind};
+use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
 
-use super::lines::drawable;
+use super::lines::{chain_dashes_mm, chain_line, drawable};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -136,26 +136,19 @@ pub fn flat_group(flat: &Flat, frame: &ViewFrame, object: u64, group: LineGroup)
     let map = frame.paper_map();
     let bends = flat.bends.iter().filter_map(|&(a, b, up)| {
         let path = vec![drawable(Seg2::Line { a: map.apply(a), b: map.apply(b) })?];
-        let pattern = Some(centred(bend_dashes_mm(up, group), path.iter().map(Seg2::length).sum()));
+        let pattern = Some(chain_line(bend_dots(up), group, path.iter().map(Seg2::length).sum()));
         Some(Item::Stroke { path, closed: false, width_mm: LineKind::Thin.width_mm(group), pattern })
     });
     Group { object, kind: ObjectKind::View, items: loops.chain(bends).collect() }
 }
 
 /// A bend line's dashes in line `group`: bent up, ISO 128's chain line (type 04: long dash, dot);
-/// bent down, its double-chain line (type 05: long dash, two dots). Dashes are 20 line widths, gaps
-/// 3 and dots 1, of the narrow line.
+/// bent down, its double-chain line (type 05: long dash, two dots) (`chain_dashes_mm`).
 pub fn bend_dashes_mm(up: bool, group: LineGroup) -> Vec<f64> {
-    let widths: &[f64] = if up { &[20.0, 3.0, 1.0, 3.0] } else { &[20.0, 3.0, 1.0, 3.0, 1.0, 3.0] };
-    let d = LineKind::Thin.width_mm(group);
-    widths.iter().map(|w| w * d).collect()
+    chain_dashes_mm(bend_dots(up), group)
 }
 
-/// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle.
-fn centred(lengths_mm: Vec<f64>, length_mm: f64) -> Dashes {
-    let period: f64 = lengths_mm.iter().sum();
-    let long = lengths_mm.first().copied().unwrap_or_default();
-    let phase = (long / 2.0 - length_mm / 2.0).rem_euclid(period);
-    // Rounding can land on the period itself, which a pattern's phase stays below.
-    Dashes { lengths_mm, phase_mm: if phase < period { phase } else { 0.0 } }
+/// A bend line's dots: one bent up, two bent down.
+fn bend_dots(up: bool) -> usize {
+    if up { 1 } else { 2 }
 }

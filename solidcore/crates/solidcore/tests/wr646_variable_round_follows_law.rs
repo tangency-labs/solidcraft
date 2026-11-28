@@ -1,10 +1,9 @@
-//! WR-646 (#1989; the fork's tangency-labs/smlib@4438859): with
-//! `fillet_variable_span_follows_fillet`, `SmFilletIntersector::ComputeNextPoint` rejects
-//! a variable round's span whose Hermite rails stray from the fillet solved inside it. On
-//! planar faces every uv curve lies on its face, so upstream's test passes any span, the
-//! step grows to the angle tolerance and the rails cut across the radius law between the
-//! traced points: the round removes the wrong volume and its surface leaves the law's
-//! circles.
+//! WR-646 (#1989; the fork's tangency-labs/smlib@4438859, now the only path):
+//! `SmFilletIntersector::ComputeNextPoint` rejects a variable round's span whose Hermite
+//! rails stray from the fillet solved inside it. On planar faces every uv curve lies on its
+//! face, so upstream's test passes any span, the step grows to the angle tolerance and the
+//! rails cut across the radius law between the traced points: the round removes the wrong
+//! volume and its surface leaves the law's circles.
 //!
 //! The round of a cube's edge between two perpendicular planes is the union of its balls
 //! (WR-685; since the G^n section's flag was retired, on every kernel: WR-685 addendum
@@ -141,9 +140,8 @@ fn surface_off_law(k: &Kernel, b: &Brep) -> f64 {
 /// The volume of the 20 mm cube after the law 6, 6, 1, 1 rounds its edge y = z = 20,
 /// and the largest distance of the law's sections from the round
 /// ([`surface_off_law`]).
-fn rounded_cube(fixed: bool) -> (f64, f64) {
+fn rounded_cube() -> (f64, f64) {
     let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = fixed;
     let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
     let e = edge_between(
         &k,
@@ -172,7 +170,7 @@ const ENVELOPE_REMOVED: f64 = 64.159_535;
 #[test]
 fn variable_round_on_planes_removes_the_laws_volume() {
     let expected = 8000.0 - ENVELOPE_REMOVED;
-    let (v, off) = rounded_cube(true);
+    let (v, off) = rounded_cube();
     eprintln!(
         "fixed: {v} expected {expected} diff {} off {off}",
         v - expected
@@ -186,23 +184,21 @@ fn variable_round_on_planes_removes_the_laws_volume() {
     assert!(off < 3e-4, "{off}");
 }
 
-/// Without the span fix the rails stray between the traced points, but the round's skin no
-/// longer follows them: it is held to its balls between stations (#15256). So the default
-/// kernel's surface is within T = 4 x the edge tolerance (1e-5 mm) of the balls' touch
-/// circles (sampled here, at the law's sections). A skin within T of the envelope moves
-/// the removed volume by at most about T x the envelope's area (A = 110.7 mm^2 here,
-/// 4.43e-3 mm^3), to first order: a necessary condition, which the result before #15256
-/// failed (6.1e-4 off the circles, 6.2e-3 mm^3 off the volume). The volume and the area are
-/// the balls' closed-form quadratures ([`envelope_removed`], [`envelope_area`]). This test
-/// asserted that defect (`off > 5e-4`).
+/// The round's surface is within T = 4 x the edge tolerance (1e-5 mm) of the balls'
+/// touch circles (sampled here, at the law's sections), and its volume within T x the
+/// envelope's area (A = 110.7 mm^2 here, 4.43e-3 mm^3) of the balls' closed-form
+/// quadrature ([`envelope_removed`], [`envelope_area`]): a skin within T of the envelope
+/// moves the removed volume by at most about that, to first order. Before the span check
+/// became the only path, this ran without it: the skin was held to its balls between
+/// stations (#15256) while the rails strayed.
 #[test]
-fn variable_round_on_planes_holds_its_balls_without_the_span_fix() {
+fn variable_round_on_planes_holds_its_balls() {
     let reference = envelope_removed(&law_6611, 20.0, 6.0, 24);
     let bound = 4e-5 * envelope_area(&law_6611, 20.0, 24);
-    let (v, off) = rounded_cube(false);
+    let (v, off) = rounded_cube();
     let removed = 8000.0 - v;
     eprintln!(
-        "default: removed {removed} reference {reference} diff {} bound {bound} off {off}",
+        "removed {removed} reference {reference} diff {} bound {bound} off {off}",
         removed - reference
     );
     assert!(
@@ -806,6 +802,42 @@ fn the_moved_law_rounds_remove_their_balls_volume() {
         );
         assert!((removed - reference).abs() <= bound, "{}", c.name);
     }
+}
+
+/// `law-cube20-e0-deg2-smooth-xsect-linear`: the law 4, 2, 4 on the cube's edge with a
+/// linear section. Each section is the chord between the ball's feet `(s, 20 - r, 20)` and
+/// `(s, 20, 20 - r)`, in the plane `x = s`, so the volume removed is `int r(s)^2 / 2 ds`
+/// in closed form: `r(u) = 4 - 4u + 4u^2`, `int_0^1 r^2 du = 11.2`, `20 x 11.2 / 2 = 112`.
+/// The chord surface `(s, 20 - r (1 - t), 20 - r t)` has the area `int r sqrt(2 + r'^2) ds`.
+/// The round removes 112 to within T x that area (T = 4 x the edge tolerance); with the
+/// rails crossing the law between traced points it removed 112.0517.
+#[test]
+fn a_linear_section_round_removes_its_chords_volume() {
+    let c = &MOVED_ROWS[0];
+    assert_eq!(c.name, "law-cube20-e0-deg2-smooth-4-2-4");
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+    let e = solidcore::topology::brep::p1::edges(&b, None).unwrap()[c.edge];
+    let tol = edge::tolerance(&b, e).unwrap();
+    {
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_variable_radius_edges(&mut k, &[e], c.radius, bezier_law(c), 0, c.continuity)
+            .unwrap();
+        session.do_fillet(&mut k).unwrap();
+    }
+    let removed = 8000.0 - volume(&k, &mut b);
+    let area = integrate(0.0, 20.0, 8, &mut |s| {
+        let (r, dr) = bezier(c.radii, s / 20.0);
+        let dr = dr / 20.0;
+        r * (2.0 + dr * dr).sqrt()
+    });
+    let bound = 4.0 * tol * area;
+    eprintln!(
+        "linear section: removed {removed} exact 112 diff {:.3e} bound {bound:.3e}",
+        removed - 112.0
+    );
+    assert!((removed - 112.0).abs() <= bound, "{removed} vs 112");
 }
 
 /// Per moved row, the reference volume at twice the panels and twice the ball samples.

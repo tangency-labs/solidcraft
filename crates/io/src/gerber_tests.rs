@@ -601,3 +601,51 @@ fn objects_without_an_aperture_are_skipped_with_a_warning() {
     let l = layer("D11*X0Y0D03*");
     assert!(l.loops.is_empty() && l.warnings.iter().any(|w| w.contains("never defines")), "{:?}", l.warnings);
 }
+
+fn layer_refusal(body: &str) -> String {
+    match read_gerber_layer(&format!("{LAYER_HEAD}{body}M02*")) {
+        Ok(l) => panic!("expected a refusal, got {} loops", l.loops.len()),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// An aperture macro whose shape is a regular polygon outline of `n` corners, radius 1.
+fn polygon_macro(n: usize) -> String {
+    let mut m = format!("%AMPOLY*4,1,{n}");
+    for k in 0..=n {
+        let t = std::f64::consts::TAU * (k % n) as f64 / n as f64;
+        m.push_str(&format!(",{:.6},{:.6}", t.cos(), t.sin()));
+    }
+    m.push_str(",0*%");
+    m
+}
+
+#[test]
+fn a_file_with_too_many_aperture_definitions_is_refused() {
+    // Redefining one number keeps one shape, but each definition still runs again.
+    let defs = "%ADD10C,1*%".repeat(MAX_APERTURE_DEFINITIONS);
+    let l = layer(&format!("{defs}D10*X0Y0D03*"));
+    assert_eq!(l.loops.len(), 1, "{:?}", l.warnings);
+    let e = layer_refusal(&format!("{defs}%ADD10C,1*%D10*X0Y0D03*"));
+    assert!(e.contains(&format!("more than {MAX_APERTURE_DEFINITIONS} apertures")), "{e}");
+}
+
+#[test]
+fn aperture_shapes_that_keep_too_many_corners_together_are_refused() {
+    let mac = polygon_macro(10_000);
+    let body = mac.trim_start_matches("%AMPOLY*").trim_end_matches("*%");
+    let macros = HashMap::from([("POLY".to_string(), body.to_string())]);
+    let corners = match gerber_area::aperture("D10POLY", &macros) {
+        Ok((_, ap)) => ap.vertex_count(),
+        Err(e) => panic!("the polygon macro should run: {e}"),
+    };
+    assert!(corners >= 10_000, "{corners}");
+    let fit = MAX_APERTURE_VERTICES / corners;
+    let defs = |count: usize| (0..count).map(|k| format!("%ADD{}POLY*%", 10 + k)).collect::<String>();
+    // Redefining the same number replaces its shape, so the corners it kept are not counted twice.
+    let same = "%ADD10POLY*%".repeat(fit + 1);
+    let l = layer(&format!("{mac}{same}{}D10*X0Y0D03*", defs(fit)));
+    assert_eq!(l.loops.len(), 1, "{:?}", l.warnings);
+    let e = layer_refusal(&format!("{mac}{}D10*X0Y0D03*", defs(fit + 1)));
+    assert!(e.contains(&format!("more than {MAX_APERTURE_VERTICES} corners")), "{e}");
+}

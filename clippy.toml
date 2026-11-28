@@ -2,3 +2,5 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+# `print_stderr` (see [workspace.lints.clippy] in Cargo.toml) stays out of tests.
+allow-print-in-tests = true

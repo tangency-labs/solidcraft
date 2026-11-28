@@ -106,6 +106,8 @@ enum Cancel {
     Agent,
     /// A save being written: it stops unless the file is already being replaced.
     Save,
+    /// A drawing being read for the Insert SVG/DXF window: its answer is dropped.
+    DrawingRead,
     /// The request held behind the agent's command that has this [`ControlRequest::serial`].
     AgentQueued(u64),
     /// The summary row standing for the waiting requests past [`MAX_WAITING_SHOWN`].
@@ -186,6 +188,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if let Some((done, total)) = crate::open_meshing::progress(app) {
         rows.push(Row { steps: Some((done, total)), ..Row::new("meshing".into(), solidcraft_ui_text::tr("operations.meshing").to_string()) });
     }
+    // A drawing being read for the Insert SVG/DXF window before its placement window opens.
+    if let Some(read) = &app.insert_read {
+        rows.push(Row {
+            cancelling: read.cancelled,
+            cancel: Some(Cancel::DrawingRead),
+            ..Row::new(format!("insert_read:{}", read.serial), crate::dialogs_insert_drawing::reading_label(&read.name))
+        });
+    }
     if let Some(saving) = &app.saving {
         let command = saving.command();
         let (steps, percent) = work_steps(&saving.progress).map_or((None, false), |(steps, percent)| (Some(steps), percent));
@@ -202,6 +212,10 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     for file in app.file_load.operations() {
         let key = format!("file:{}", file.serial);
         let label = if file.name.is_empty() { command_name(file.command) } else { format!("{} {}", command_name(file.command), file.name) };
+        let label = match file.importer_status {
+            Some(stage) => format!("{label}: {stage}"),
+            None => label,
+        };
         let cancel = if file.waiting {
             Cancel::FileWaiting(file.serial)
         } else if file.queued {
@@ -264,9 +278,17 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if app.agent_computing().is_some() {
         let steps = app.agent_steps();
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
-        // A batch counts its steps; one command, the features it evaluates.
+        // A batch counts its steps; one command, the features it evaluates; a plugin, what it reports.
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
-        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, next: app.agent_next(), ..Row::new("agent".into(), label) });
+        let percent = app.agent_plugin_percent();
+        rows.push(Row {
+            steps: steps.or(percent.map(|p| (p, 100))),
+            percent: steps.is_none() && percent.is_some(),
+            cancel: Some(Cancel::Agent),
+            agent: true,
+            next: app.agent_next(),
+            ..Row::new("agent".into(), label)
+        });
     }
     // Each design change waiting behind it is an operation of its own, named by its place in the
     // queue (1 runs next).
@@ -347,6 +369,13 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         }
         Cancel::SketchRefresh => crate::sketch_view::cancel_refresh(app),
         Cancel::Agent => app.stop_agent_command(),
+        Cancel::DrawingRead => {
+            if let Some(read) = app.insert_read.as_mut() {
+                read.cancel();
+            }
+            record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
+            return Ok(());
+        }
         // It says itself how it ended: a save already replacing the file goes through.
         Cancel::Save => {
             if let Some(saving) = &app.saving {
@@ -425,6 +454,12 @@ fn record(panel: &mut Panel, key: &str, label: String, outcome: Outcome) {
         panel.finished.remove(0);
     }
     panel.finished.push(Finished { key: key.to_string(), label, outcome, at: now });
+}
+
+/// Records how an operation ended, for work that finishes on its own (the tests read of a
+/// drawing): `ui.operations` lists it with the ones it cancelled.
+pub(crate) fn record_ended(app: &mut SolveApp, key: &str, label: String, outcome: Outcome) {
+    record(&mut app.operations, key, label, outcome);
 }
 
 /// A row on screen: what it showed last, and since when it is gone (fading out).

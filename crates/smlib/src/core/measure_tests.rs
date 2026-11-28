@@ -307,3 +307,60 @@ fn a_sheet_hung_on_a_solid_counts_in_the_area() {
     let m = mass_properties(&both, 1e-8).unwrap();
     assert!((m.area - 700.0).abs() < 1e-6 && (m.volume - 1000.0).abs() < 1e-6, "{m:?}");
 }
+
+/// Proved curve-to-face gap bounds on a 10 × 20 × 30 box: a spline and a quarter-circle arc on
+/// the top face (z = 33) bound near 0 on that face, the spline lifted by 2.5 mm bounds at 2.5 mm,
+/// a vertical quarter-circle rising 2 mm off the top face bounds at 2 mm, an out-of-range face
+/// returns `None`, invalid intervals/floors/curve kinds return `Error::Argument`, and a stopped
+/// token still gets answers from `curve_face_gap_bound` (spline and conic), `counts`, and `volume`.
+#[test]
+fn curve_face_gap_bound_bounds_splines_and_conics_and_handles_missing_face() {
+    use solidcore_record::brep::{Curve, Frame};
+
+    let (b, _) = case("box");
+    assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
+    let on_top = Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[2.0, 0.0, 33.0], [10.0, 16.0, 33.0]] };
+    let bounds_all: Vec<f64> = (0..6).map(|f| super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], f, 1e-9).unwrap().unwrap()).collect();
+    let zero_faces: Vec<usize> = bounds_all.iter().enumerate().filter_map(|(f, &d)| (d < 1e-9).then_some(f)).collect();
+    assert_eq!(zero_faces.len(), 1, "exactly the top face: {bounds_all:?}");
+    let top = zero_faces[0];
+
+    let lifted = Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[2.0, 0.0, 35.5], [10.0, 16.0, 35.5]] };
+    let gap = super::curve_face_gap_bound(&b, &lifted, [0.0, 1.0], top, 1e-9).unwrap().unwrap();
+    assert!((2.5..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
+
+    let arc = Curve::Circle { frame: Frame { origin: [6.0, 8.0, 33.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 2.0 };
+    // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
+    // zero-gap curve within 1e-9 (remainder <= 1e-10 plus evaluation rounding).
+    let arc_gap = super::curve_face_gap_bound(&b, &arc, [0.0, std::f64::consts::FRAC_PI_2], top, 1e-10).unwrap().unwrap();
+    assert!(arc_gap < 1e-9, "quarter circle on top face: {arc_gap}");
+
+    // Quarter circle rising off the top face to z = 35 at theta = pi/2: catches interval truncation
+    // (`CLOSE_RELATIVE = 1e-3`, so the proved upper bound lies in `[2.0, 2.0 * (1 + 2e-3)]`).
+    let v_arc = Curve::Circle { frame: Frame { origin: [6.0, 8.0, 33.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] }, radius: 2.0 };
+    let v_arc_gap = super::curve_face_gap_bound(&b, &v_arc, [0.0, std::f64::consts::FRAC_PI_2], top, 1e-9).unwrap().unwrap();
+    assert!((2.0..=2.0 * (1.0 + 2.0e-3)).contains(&v_arc_gap), "vertical arc {v_arc_gap}");
+
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], 6, 1e-9).unwrap(), None);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], usize::MAX, 1e-9).unwrap(), None);
+    let line = Curve::Line { start: [2.0, 0.0, 33.0], end: [10.0, 16.0, 33.0] };
+    assert_eq!(super::curve_face_gap_bound(&b, &line, [0.0, 1.0], top, 1e-9).unwrap_err(), crate::Error::Argument);
+    for curve in [&on_top, &arc] {
+        for bad_ivl in [[1.0, 0.0], [1.0, 1.0], [f64::NAN, 1.0], [f64::NEG_INFINITY, 1.0]] {
+            assert_eq!(super::curve_face_gap_bound(&b, curve, bad_ivl, top, 1e-9).unwrap_err(), crate::Error::Argument);
+        }
+        for bad_floor in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(super::curve_face_gap_bound(&b, curve, [0.0, 1.0], top, bad_floor).unwrap_err(), crate::Error::Argument);
+        }
+    }
+
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    let stopped_gap = stop.within(|| super::curve_face_gap_bound(&b, &lifted, [0.0, 1.0], top, 1e-9)).unwrap().unwrap();
+    assert_eq!(stopped_gap, gap);
+    let stopped_conic = stop.within(|| super::curve_face_gap_bound(&b, &v_arc, [0.0, std::f64::consts::FRAC_PI_2], top, 1e-9)).unwrap().unwrap();
+    assert_eq!(stopped_conic, v_arc_gap);
+    assert_eq!(stop.within(|| counts(&b)).unwrap(), [6, 12, 8]);
+    let stopped_vol = stop.within(|| super::volume(&b, 1e-7)).unwrap();
+    assert!((stopped_vol - 6000.0).abs() < 1e-6, "stopped volume {stopped_vol}");
+}

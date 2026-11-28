@@ -130,7 +130,7 @@ use crate::error::nurbs::BSplineFailure;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -460,6 +460,9 @@ pub struct BSplineSurface {
 #[derive(Debug, Default)]
 pub(crate) struct NurbSlot(Arc<OnceLock<Surface>>);
 
+/// A [`NurbSlot`]'s cell, as a cache keeps it ([`NurbSlot::cell`]).
+pub(crate) type NurbCell = Arc<OnceLock<Surface>>;
+
 impl NurbSlot {
     /// No NURB (`NULL`).
     pub(crate) fn none() -> Self {
@@ -469,6 +472,18 @@ impl NurbSlot {
     /// The same cell (for an evaluation copy that stands for the same surface object).
     pub(crate) fn shared(&self) -> Self {
         Self(Arc::clone(&self.0))
+    }
+
+    /// Whether `cell` is this slot's own cell ([`NurbSlot::cell`]).
+    pub(crate) fn is_cell(&self, cell: &NurbCell) -> bool {
+        Arc::ptr_eq(&self.0, cell)
+    }
+
+    /// The cell itself, for a cache that keeps what was read from the NURB it holds: while
+    /// the cache holds it, every edit through a slot sharing it detaches first
+    /// ([`Arc::make_mut`]), so the NURB in the cell is never changed, only filled once.
+    pub(crate) fn cell(&self) -> NurbCell {
+        Arc::clone(&self.0)
     }
 
     /// The NURB, if any.
@@ -1211,7 +1226,11 @@ impl BSplineSurface {
     /// `SM_ERR_NULL_POINTER` without NURB.
     pub fn canonical(&self) -> Result<SurfaceCanonical> {
         let sur = self.nurb_ref().ok_or_else(|| {
-            SolidError::b_spline(OP_GET_CANON, BSplineFailure::Missing("the NURBS form"))
+            SolidError::b_spline_with_status(
+                OP_GET_CANON,
+                BSplineFailure::NoNurbsForm,
+                SM_ERR_NULL_POINTER,
+            )
         })?;
         let (knu, knv) = sur.knot_vectors()?;
         let (u_knots, u_multiplicities) = get_knots(&knu, None);
@@ -2193,7 +2212,7 @@ impl BSplineSurface {
         let Some(&uv) = solutions.first() else {
             return Err(SolidError::b_spline(
                 OP_STEP_INV,
-                BSplineFailure::Failed("the point is not close enough to the surface"),
+                BSplineFailure::NoFootWithinTolerance { tolerance: tol_3d },
             ));
         };
 
@@ -2545,6 +2564,33 @@ fn polar_guess_basis(g: &PolarBox) -> Vec3 {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The NURB is written when
+/// present. Whether it is borrowed decides no evaluation, and the two out-of-bounds flags
+/// are a solve's scope on a shared surface, not the surface: they are left out.
+impl crate::geom::content::Content for BSplineSurface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            nurb,
+            nurb_is_borrowed: _,
+            out_of_bounds_enabled: _,
+            continues_past_domain: _,
+            knot_type,
+            form,
+        } = self;
+        d.tag(0xB55);
+        match nurb.as_ref() {
+            Some(n) => {
+                d.bool(true);
+                n.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.hashed(knot_type);
+        d.hashed(form);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2563,6 +2609,28 @@ mod tests {
             Point3::new(10.0, 10.0, 0.0),
         )
         .unwrap()
+    }
+
+    /// A point 10 off the plane has no foot within the tolerance: the inversion names
+    /// the tolerance it searched within, class not within tolerance, status `SM_ERR`.
+    #[test]
+    fn step_inversion_of_a_point_off_the_surface_names_its_tolerance() {
+        let k = Kernel::default();
+        let s = bilinear();
+        let dom = s.natural_uv_domain();
+        let e = s
+            .step_inversion(&k, &dom, Point3::new(5.0, 5.0, 10.0), 1e-6, None)
+            .unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 }
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
     }
 
     #[test]
@@ -2597,7 +2665,7 @@ mod tests {
             s.canonical(),
             Err(e) if e.sm_status() == Some(1006)
                 && e.nurbs_failure()
-                    == Some(&NurbsFailure::BSpline(BSplineFailure::Missing("the NURBS form")))
+                    == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
         assert!(s.copy().gw_nurb().is_none());
         assert!(s.approx_eq(&BSplineSurface::new()));

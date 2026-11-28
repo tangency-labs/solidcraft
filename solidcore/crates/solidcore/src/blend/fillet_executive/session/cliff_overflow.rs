@@ -17,7 +17,8 @@ use super::{invalid, FilletExecutive, FilletObject, FilletSession, SessionObject
 use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletSurfaceStorage};
 use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::surface::surface::p4::NoObject;
@@ -25,6 +26,20 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::topology::{edge, edgeuse::p1 as eu1, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::cliff_overflow";
+
+/// A missing thing the executive built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why a solver's rolling edge use and its edge are there.
+pub(super) const SOLVER_EDGE: &str =
+    "a solver has no edge use, or its edge use no edge: a solver rolls \
+     on an edge use of the filleted edge it is made for";
 
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
@@ -98,9 +113,13 @@ impl SessionObjects<'_> {
         }
         let mut normals = [Vec3::UNDEF; 2];
         for (rail, normal) in normals.iter_mut().enumerate() {
-            let offset = base
-                .surface(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            let offset = base.surface(rail)?.ok_or_else(|| {
+                null_defect(
+                    "a loaded solver has no offset surface for a rail: the solver set-up \
+                         gives each rail the offset of its face's surface before the solver is \
+                         loaded",
+                )
+            })?;
             let planar = offset.surface.base_surface().is_planar(k, EFF_ZERO)?;
             if !planar.is_planar {
                 return Ok(true);
@@ -116,14 +135,15 @@ impl SessionObjects<'_> {
             return Ok(true);
         };
         let fillet = fillet.clone_for_evaluation()?;
-        let eu = base
-            .edgeuse(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+        let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
         let target = &*self.target;
-        let e = eu1::edge(target, eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-        let curve = edge::curve(target, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+        let e = eu1::edge(target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+        let curve = edge::curve(target, e)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::OverflowInputMissing(OverflowInput::EdgeCurve),
+            )
+        })?;
         if !curve.is_linear(k, EFF_ZERO, false)?.linear {
             return Ok(true);
         }
@@ -141,9 +161,13 @@ impl SessionObjects<'_> {
             i += 1;
             let edge_pv = curve.evaluate(k, t, 1, true, false)?;
             let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the edge curve has no point and derivative",
+                    BlendFailure::Defect {
+                        why: "the filleted edge's curve evaluated with one derivative gives no \
+                              point and derivative: a curve's evaluation returns its point and \
+                              each derivative asked for",
+                    },
                 ));
             };
             let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;

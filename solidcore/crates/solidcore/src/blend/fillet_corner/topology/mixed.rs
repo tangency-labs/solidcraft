@@ -14,18 +14,22 @@
 //! ([`MixedCorner`]) for the later steps, with the blends' solvers' identities (their
 //! first geometries' `GetFilletSolver()`; WR-697). There is no recursion.
 
-use super::{new_corner_vertex, Nx2TopologyEnv, OP_NX2};
+use super::{defect, missing_defect, new_corner_vertex, Nx2TopologyEnv, NO_PRIMARY_EU, OP_NX2};
 use crate::blend::blend_corner::mixed::{mixed_ring, MixedCorner};
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletCornerId, FilletEdgeType, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result};
 use crate::intersect::point_class::PointClassType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::EdgeuseId;
+
+/// Why a blend geometry without its solver is the kernel's fault.
+const NO_GEOM_SOLVER: &str = "a blend's geometry does not name its solver, though each geometry \
+     is made naming the solver it belongs to";
 
 impl FilletCorner {
     /// The fork's `SmBlendCorner::MakeMixedTopology` (WR-697, 6fd0411): vertices X (the
@@ -37,9 +41,10 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a corner that is not a Mixed one, or whose blends' rails on T and on
-    /// their walls are one; `SM_ERR_NULL_POINTER` where the fork dereferences
-    /// missing topology (`NER`); those of the solver and pseudo-topology operations.
+    /// Reviewed `Defect`s: `SM_ERR` for a corner that is not a Mixed one, or whose blends'
+    /// rails on T and on their walls are one; `SM_ERR_NULL_POINTER` where the fork
+    /// dereferences missing topology (`NER`); those of the solver and pseudo-topology
+    /// operations.
     pub(crate) fn make_mixed_topology(&mut self, env: Nx2TopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
             CornerLookup {
@@ -54,16 +59,17 @@ impl FilletCorner {
             corner,
             solvers,
         } = env;
-        let nul = |what: &'static str| SolidError::blend_missing(OP_NX2, what);
-        let err = |what: &'static str| SolidError::blend_failed(OP_NX2, what);
-        let solver_eus = self
-            .solver_eus
-            .clone()
-            .ok_or_else(|| nul("the corner's blended edge uses"))?;
-        let all = self
-            .all_eus
-            .clone()
-            .ok_or_else(|| nul("the corner's outward edge uses"))?;
+        let nul = |why: &'static str| missing_defect(OP_NX2, why);
+        let err = |why: &'static str| defect(OP_NX2, why);
+        let solver_eus = self.solver_eus.clone().ok_or_else(|| {
+            nul("the Mixed corner has no blended edge uses, though the corner is made with them")
+        })?;
+        let all = self.all_eus.clone().ok_or_else(|| {
+            nul(
+                "the Mixed corner has no ring of edge uses, though the corner's create walks \
+                 the ring before it classifies the corner",
+            )
+        })?;
         // GetFilletSolverOfEdgeuse of the ring's blended edge uses: the solvers of the
         // corner's first and second filleted edge uses
         let of = |eu: EdgeuseId| -> Option<&FilletSolver> {
@@ -72,18 +78,22 @@ impl FilletCorner {
                 .position(|&s| s == eu)
                 .and_then(|i| solvers.get(i).copied())
         };
-        let (ring, fs) = mixed_ring(k, target, &solver_eus, &all, &of)?
-            .ok_or_else(|| err("the corner has no Mixed ring"))?;
+        let (ring, fs) = mixed_ring(k, target, &solver_eus, &all, &of)?.ok_or_else(|| {
+            err(
+                "the corner has no Mixed ring, though it was classified Mixed only after \
+                     the same search found the ring",
+            )
+        })?;
         let geoms = [fs[0].first_fillet_geom()?, fs[1].first_fillet_geom()?];
         let ids = [
             pseudo
                 .geom(geoms[0])?
                 .fillet_solver()
-                .ok_or_else(|| nul("the first blend's solver"))?,
+                .ok_or_else(|| nul(NO_GEOM_SOLVER))?,
             pseudo
                 .geom(geoms[1])?
                 .fillet_solver()
-                .ok_or_else(|| nul("the second blend's solver"))?,
+                .ok_or_else(|| nul(NO_GEOM_SOLVER))?,
         ];
         let on_t = [
             fs[0].find_index_of_rail_on_face(target, Some(ring.t))?,
@@ -95,7 +105,9 @@ impl FilletCorner {
         ];
         if on_t[0] == on_wall[0] || on_t[1] == on_wall[1] {
             return Err(err(
-                "a blend's rails on the common face and on its wall are the same rail",
+                "a blend's rails on the common face and on its wall are the same rail, though \
+                 the ring's common face and wall are the blend's two faces, distinct, and the \
+                 rail lookup gives 0 on its first edge use's face and 1 on the other",
             ));
         }
         self.mixed = Some(MixedCorner::new(ring, ids));
@@ -113,9 +125,13 @@ impl FilletCorner {
             vs.push(fv);
         }
         let &[x, a, p, v, q, b] = vs.as_slice() else {
-            return Err(err("the corner did not make its six vertices"));
+            return Err(err(
+                "the Mixed corner did not make its six vertices, though the loop above makes six",
+            ));
         };
-        let vertex = self.vertex.ok_or_else(|| nul("the corner's vertex"))?;
+        let vertex = self.vertex.ok_or_else(|| {
+            nul("the Mixed corner has no vertex, though every corner is made at its vertex")
+        })?;
         {
             let fv = pseudo.fillet_vertex_mut(x)?;
             fv.set_point_class(PointClassType::Face, Some(EntityRef::Face(ring.t)));
@@ -184,8 +200,8 @@ impl FilletCorner {
                 }
             }
             if ii == 0 || ii == 6 {
-                let primary = eu1::primary_edgeuse(pseudo.brep(), e)?
-                    .ok_or_else(|| nul("the corner edge's primary edge use"))?;
+                let primary =
+                    eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| nul(NO_PRIMARY_EU))?;
                 pseudo.set_edgeuse_fillet_geom(primary, Some(if ii == 6 { g1 } else { g0 }))?;
             }
             self.edges.push(e);

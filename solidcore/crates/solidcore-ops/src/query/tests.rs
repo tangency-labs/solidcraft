@@ -483,6 +483,37 @@ fn queries_find_a_tetrahedrons_faces_from_its_record() {
     );
 }
 
+/// Which of a tetrahedron's faces face against a curve along its edge from the origin along x,
+/// with +z as the normal: run along +x the curve means its faces to face -y, as the wall y = 0
+/// does (the floor, facing -z, is square to it and says nothing); run back, the wall faces
+/// against it. A point on no face judges none.
+#[test]
+fn faces_facing_against_a_curve_along_an_edge() {
+    let b = tetra();
+    let q = Query::new(&b);
+    let p = Vec3::new(0.5, 0., 0.);
+    let wall = q.faces_at(p, 1e-9);
+    assert_eq!(wall.len(), 2, "{wall:?}");
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::X)], 1e-9),
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::X * -1.0)], 1e-9),
+        vec![1]
+    );
+    let off = Vec3::new(5., 5., 5.);
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(off, Vec3::X * -1.0)], 1e-9),
+        Vec::<usize>::new()
+    );
+    // along the normal: no side meant
+    assert_eq!(
+        q.faces_against(Vec3::Z, &[(p, Vec3::Z)], 1e-9),
+        Vec::<usize>::new()
+    );
+}
+
 /// A tube's side on its NURBS form, as SMLib holds it: its circles drawn within the sag asked
 /// for, a line drawn as its ends, the distance from the axis to its seam, points on it and off
 /// its ends, and a ray from the axis meeting it at its radius.

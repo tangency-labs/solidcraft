@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Groove weld: V</title>
+  <path d="M6 14L14 14L31 50L6 50Z" fill="#b8c3cf"/>
+  <path d="M6 14L14 14L31 50L6 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58 14L50 14L33 50L58 50Z" fill="#b8c3cf"/>
+  <path d="M58 14L50 14L33 50L58 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 14L50 14L33 50L31 50Z" fill="#328bd3"/>
+  <path d="M14 14L50 14L33 50L31 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

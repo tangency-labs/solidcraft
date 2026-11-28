@@ -11,13 +11,13 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_doc::drawing::thread_lines::ThreadStroke;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, Source, Visibility};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
+use solidcraft_kernel::hlr::{self, Source, Visibility};
 
 use super::ShownSet;
 use super::exact::{self, Fallback, PreparedBodies};
@@ -215,7 +215,7 @@ fn lines_with(
     let threads = threads(shown, frame, &out, model_chord_mm);
     let pieces = out.iter().map(|line| line.pieces.len()).chain(threads.iter().map(|thread| thread.pieces.len()));
     if pieces.fold(0usize, usize::saturating_add) > MAX_RECORDS {
-        return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
+        return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: {SIMPLIFY_VIEW}")));
     }
     Ok(Lines { lines: out, threads, covered, model_chord_mm, stats, made })
 }
@@ -274,7 +274,7 @@ fn meshed(
     let join = 2.0 * drawing.eps;
     let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
     let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
-    let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
+    let sampled = hlr::accuracy_on_paper(frame, CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
     let near = |radius: f64| near(model_chord_mm, radius);
     let mut out = Vec::with_capacity(runs.len());
     for (owner, runs) in runs {
@@ -343,6 +343,9 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
 pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<Option<usize>>) {
     let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
+        if omit_short_stroke(&piece.path, &path) {
+            return None;
+        }
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
@@ -372,6 +375,52 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
     let visible = painted(true, Visibility::Visible, thin_mm).chain(painted(false, Visibility::Visible, LineKind::Visible.width_mm(group)));
     let (items, drew) = hidden.chain(visible).unzip();
     (Group { object, kind: ObjectKind::View, items }, drew)
+}
+
+/// ISO 128-20's narrow long-dashed dotted lines in line `group`, with its Table 3 lengths: a long dash
+/// of 24 widths of the narrow line, then `dots` dots of half a width, each after a gap of 3, and a gap
+/// of 3 to end. One dot is ISO 128 type 04; two, type 05.
+pub(super) fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
+    let d = LineKind::Thin.width_mm(group);
+    let mut lengths = vec![24.0 * d, 3.0 * d];
+    for _ in 0..dots {
+        lengths.extend([0.5 * d, 3.0 * d]);
+    }
+    lengths
+}
+
+/// A chain line `length_mm` long with `dots` dots in line `group` ([`chain_dashes_mm`]), its pattern
+/// started so the first long dash is centred on the line's middle.
+pub(super) fn chain_line(dots: usize, group: LineGroup, length_mm: f64) -> Dashes {
+    centred(chain_dashes_mm(dots, group), length_mm)
+}
+
+/// Paper length below which a whole stroke is a crossing spur, not an edge. The spurs seen are
+/// single lines of about 1e-6 mm; ISO 128's thinnest line is 0.13 mm wide.
+const MIN_PAPER_STROKE_MM: f64 = 1e-4;
+
+/// Whether a stroke is under [`MIN_PAPER_STROKE_MM`] long and so left out. Segments of a longer path
+/// stay. An arc too short to sweep is still its chord, which the line tests keep.
+fn omit_short_stroke(raw: &[Seg2], path: &[Seg2]) -> bool {
+    let len: f64 = path.iter().map(Seg2::length).sum();
+    if len.is_finite() && len >= MIN_PAPER_STROKE_MM {
+        return false;
+    }
+    !matches!(
+        raw,
+        [Seg2::Arc { radius, sweep, .. }] if radius.is_finite() && sweep.is_finite() && (radius.abs() < EPS || sweep.abs() < EPS)
+    )
+}
+
+/// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle. A
+/// length that isn't a finite number of 0 or more is taken as a line with no length.
+fn centred(lengths_mm: Vec<f64>, length_mm: f64) -> Dashes {
+    let period: f64 = lengths_mm.iter().sum();
+    let long = lengths_mm.first().copied().unwrap_or_default();
+    let length = if length_mm.is_finite() { length_mm.max(0.0) } else { 0.0 };
+    let phase = (long / 2.0 - length / 2.0).rem_euclid(period);
+    // Rounding can land on the period itself, which a pattern's phase stays below.
+    Dashes { lengths_mm, phase_mm: if phase < period { phase } else { 0.0 } }
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
@@ -441,17 +490,48 @@ fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
         if !continues((center, radius, start, sweep), next) {
             return None;
         }
-        sweep += next.3;
+        sweep = joined_sweep(sweep, next.3)?;
     }
     Some(Seg2::Arc { center, radius, start, sweep })
 }
 
-/// Whether the arc `next` goes on along the circle of the arc `last` from where it ends, each
-/// `(center, radius, start, sweep)`: centre and radius to 1e-9 of the radius, the start to 1e-9.
-pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (c, r, s, _): (Vec2, f64, f64, f64)) -> bool {
+/// Whether the arc `next` goes on along the circle of the arc `last` from where it ends, in the same
+/// sweep direction. Each is `(center, radius, start, sweep)`: centre and radius to 1e-9 of the
+/// radius, the start to 1e-9. Both sweeps are finite and `sweep * turn > 0`; a product, not `signum`:
+/// `0.0_f64.signum()` is `1.0`, so a zero sweep would look positive. Opposite signs, zero, NaN or
+/// infinity do not continue.
+pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (c, r, s, turn): (Vec2, f64, f64, f64)) -> bool {
     let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
     let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
-    c.dist(center) <= radius * 1e-9 && (r - radius).abs() <= radius * 1e-9 && on_from_last <= 1e-9
+    sweep.is_finite()
+        && turn.is_finite()
+        && sweep * turn > 0.0
+        && c.dist(center) <= radius * 1e-9
+        && (r - radius).abs() <= radius * 1e-9
+        && on_from_last <= 1e-9
+}
+
+/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined. `None` when
+/// either sweep is not finite, they oppose or either is zero (`sweep * turn <= 0`), the sum is not
+/// finite, or it is past a whole turn. Each joint is only within 1e-9 of the last arc's end, so the
+/// rounded sum of the pieces' sweeps can fall either side of a whole turn when they close the circle;
+/// a sum within 1e-9 of one is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+/// `(2π ± 1e-9) - 2π` rounds just past 1e-9, so the window allows one ulp of 2π.
+pub(super) fn joined_sweep(sweep: f64, turn: f64) -> Option<f64> {
+    if !(sweep.is_finite() && turn.is_finite() && sweep * turn > 0.0) {
+        return None;
+    }
+    let full = std::f64::consts::TAU;
+    let sum = sweep + turn;
+    if !sum.is_finite() {
+        return None;
+    }
+    // `(full ± 1e-9) - full` is 1e-9 plus about 8e-17; one ulp of a full turn covers it, 1e-8 does not.
+    let near_full = 1e-9 + (full.next_up() - full);
+    if (sum.abs() - full).abs() <= near_full {
+        return Some(full.copysign(sum));
+    }
+    (sum.abs() < full).then_some(sum)
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.
@@ -550,11 +630,15 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
     runs
 }
 
+const SIMPLIFY_VIEW: &str = "show fewer parts in the view or use a simpler model";
+
 /// What a refusal of a view's lines says on a drawing, with what to do about it there.
 fn refused(e: Refused) -> String {
     match e {
         Refused::Cancelled => "drawing the view was cancelled".into(),
-        Refused::Work | Refused::Memory => format!("{e}: raise chord_mm, or choose a smaller scale"),
+        Refused::Work | Refused::MeshBuffers(_) | Refused::MeshTriangles(_) | Refused::ViewNodes(_) | Refused::SketchPoints(_) => {
+            format!("{e}: {SIMPLIFY_VIEW}")
+        }
         Refused::EyePlane | Refused::Invalid(_) => e.to_string(),
     }
 }
@@ -566,11 +650,18 @@ mod tests {
     /// A view's lines refused say what happened and what to do on a drawing, never in a DXF's terms.
     #[test]
     fn a_views_refused_lines_say_what_to_do_on_a_drawing() {
-        for e in [Refused::Cancelled, Refused::Work, Refused::Memory, Refused::EyePlane, Refused::Invalid("the model contains invalid coordinates")] {
-            let says = refused(e);
-            assert!(!["DXF", "export", "tolerance", "zoom", "bodies"].iter().any(|word| says.contains(word)), "{says}");
+        for (error, reason) in [
+            (Refused::Work, "the lines take more work than the limit allows"),
+            (Refused::MeshBuffers(512), "the mesh buffers exceed the 512 MiB limit"),
+            (Refused::MeshTriangles(2_000_000), "the meshes contain more than 2000000 triangles before placement"),
+            (Refused::ViewNodes(256), "the projected mesh index exceeds the 256 MiB limit"),
+        ] {
+            assert_eq!(refused(error), format!("{reason}: show fewer parts in the view or use a simpler model"));
         }
-        assert_eq!(refused(Refused::Memory), "the meshes take more memory than the limit allows: raise chord_mm, or choose a smaller scale");
+        assert_eq!(refused(Refused::Cancelled), "drawing the view was cancelled");
+        assert_eq!(refused(Refused::EyePlane), Refused::EyePlane.to_string());
+        let invalid = Refused::Invalid("the model contains invalid coordinates");
+        assert_eq!(refused(invalid), invalid.to_string());
     }
 
     fn lines_of(pieces: Vec<Piece>) -> Lines {
@@ -1018,5 +1109,32 @@ mod tests {
         let long = &runs[2].1;
         let ends = [long[0], long[3]];
         assert!(ends.contains(&p(0.0, 0.0)) && ends.contains(&p(3.0, 1.0)), "{long:?}");
+    }
+
+    /// A chain line's pattern is Table 3's lengths, started so its first long dash is centred on the
+    /// line however long it is: shorter than the dash, one dash, a whole number of periods. A length
+    /// that isn't a finite number of 0 or more is taken as a line with no length.
+    #[test]
+    fn a_chain_line_centres_its_long_dash_on_the_line() {
+        for group in [LineGroup::DEFAULT, LineGroup::Mm0_25] {
+            for dots in [1, 2] {
+                let lengths = chain_dashes_mm(dots, group);
+                let (long, period) = (lengths[0], lengths.iter().sum::<f64>());
+                for length in [0.0, 0.5 * long, long, 100.0, 7.0 * period, -3.0, f64::NAN] {
+                    let dashes = chain_line(dots, group, length);
+                    let case = format!("{group:?}, {dots} dots, {length} mm: {dashes:?}");
+                    assert_eq!(dashes.lengths_mm, lengths, "{case}");
+                    assert!((0.0..period).contains(&dashes.phase_mm), "{case}");
+                    // At the line's middle the pattern is halfway along its long dash.
+                    let drawn = if length.is_finite() { length.max(0.0) } else { 0.0 };
+                    let off = ((dashes.phase_mm + drawn / 2.0).rem_euclid(period) - long / 2.0).abs();
+                    assert!(off.min(period - off) < 1e-9, "{case}");
+                    let path = vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::new(100.0, 0.0) }];
+                    let stroke = Item::Stroke { path, closed: false, width_mm: LineKind::Thin.width_mm(group), pattern: Some(dashes) };
+                    let group = Group { object: 1, kind: ObjectKind::View, items: vec![stroke] };
+                    solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap_or_else(|e| panic!("{case}: {e}"));
+                }
+            }
+        }
     }
 }

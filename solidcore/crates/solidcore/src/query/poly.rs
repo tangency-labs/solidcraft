@@ -162,6 +162,7 @@
 //!   adapter; the key-only API still defers. Surface evaluation errors propagate;
 //!   upstream ignores their statuses.
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -1065,10 +1066,7 @@ impl PolyBrep {
         } else {
             let l = slot(&self.loop_slots, lp.0, OP)?;
             if l.last_end_point.distance(start) > zt * 100.0 {
-                return Err(SolidError::query_failed(
-                    OP,
-                    "the poly edge does not start where the loop's last edge ends",
-                ));
+                return Err(SolidError::query(OP, QueryFailure::PolyEdgeNotContinuing));
             }
             let v = l.last_end_vertex.unwrap_or(start_vertex);
             if !slot(&self.vertex_slots, v.0, OP)?.listed {
@@ -1113,15 +1111,12 @@ impl PolyBrep {
         let l = slot(&self.loop_slots, lp.0, OP)?;
         let first = l
             .head
-            .ok_or_else(|| SolidError::query_failed(OP, "the loop has no first edge"))?;
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::PolyLoopEmpty))?;
         let last_end = l.last_end_point;
         let v = self.edge_vertex(first, OP)?;
         let vx = slot(&self.vertex_slots, v.0, OP)?;
         if vx.point.distance(last_end) > vx.tolerance {
-            return Err(SolidError::query_failed(
-                OP,
-                "the loop's last edge does not end at its first vertex",
-            ));
+            return Err(SolidError::query(OP, QueryFailure::PolyLoopNotClosed));
         }
         let l = slot_mut(&mut self.loop_slots, lp.0, OP)?;
         l.closed = true;
@@ -1345,7 +1340,7 @@ impl PolyBrep {
     fn edge_vertex(&self, e: PolyEdgeId, op: &'static str) -> Result<PolyVertexId> {
         self.edge(e)?
             .vertex
-            .ok_or_else(|| SolidError::query_missing(op, "the poly edge's vertex"))
+            .ok_or_else(|| SolidError::query(op, QueryFailure::PolyEdgeWithoutVertex))
     }
 
     /// The poly vertex record `v`.
@@ -1646,10 +1641,7 @@ impl PolyBrep {
         };
         // error - bad back pointers
         if start != v {
-            return Err(SolidError::query_failed(
-                OP,
-                "the poly edge does not start at the vertex",
-            ));
+            return Err(SolidError::query(OP, QueryFailure::PolyEdgeNotAtVertex));
         }
         let (prev, next) = (e.prev_at_v, e.next_at_v);
         {
@@ -1664,10 +1656,7 @@ impl PolyBrep {
         }
         if prev == Some(edge) {
             if next != prev {
-                return Err(SolidError::query_failed(
-                    OP,
-                    "the vertex's edge ring is broken",
-                ));
+                return Err(SolidError::query(OP, QueryFailure::Defect { why: "the edges at a vertex are linked only by the poly B-rep's own add and remove methods, which keep an edge that is its own previous edge its own next edge too" }));
             }
             // Only one element in the list - just remove it.
             x.edge_list = None;
@@ -1693,10 +1682,7 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::query_failed(
-                    op,
-                    "the vertex's edge ring does not close",
-                ));
+                return Err(SolidError::query(op, QueryFailure::Defect { why: "the edges at a vertex are linked only by the poly B-rep's own add and remove methods, which keep the ring closed within the edges it has" }));
             }
             e = self.edge(e)?.next_at_v.ok_or_else(|| dead(op))?;
             if e == h {
@@ -1710,7 +1696,7 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for unknown ids or a broken ring.
+    /// [`SolidError::InvalidInput`] for unknown ids; a defect for a broken ring.
     pub fn vertex_starting_poly_edges(&self, v: PolyVertexId) -> Result<Vec<PolyEdgeId>> {
         self.ring_at_v(
             self.vertex(v)?.edge_list,
@@ -1723,7 +1709,7 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for unknown ids or a broken ring.
+    /// [`SolidError::InvalidInput`] for unknown ids; a defect for a broken ring.
     pub fn vertex_poly_edges(&self, v: PolyVertexId) -> Result<Vec<PolyEdgeId>> {
         let mut out = Vec::new();
         for e in self.vertex_starting_poly_edges(v)? {
@@ -1834,7 +1820,8 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for unknown ids or a broken ring.
+    /// [`SolidError::InvalidInput`] for unknown ids, and with
+    /// [`QueryFailure::PolyRadialRingNotClosed`] for a ring that does not lead back to `e`.
     pub fn edge_all_radials(&self, e: PolyEdgeId) -> Result<Vec<PolyEdgeId>> {
         const OP: &str = "query::poly::PolyBrep::edge_all_radials";
         let mut out = Vec::new();
@@ -1842,10 +1829,7 @@ impl PolyBrep {
         loop {
             out.push(cur);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::query_failed(
-                    OP,
-                    "the radial ring does not close",
-                ));
+                return Err(SolidError::query(OP, QueryFailure::PolyRadialRingNotClosed));
             }
             match self.edge_radial(cur)? {
                 None => break,
@@ -1901,14 +1885,24 @@ impl PolyBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for an edge outside any loop (upstream dereferences its
-    /// null `m_pNext`); [`SolidError::InvalidInput`] for unknown ids.
+    /// `SM_ERR_NULL_POINTER` (a defect) for an edge outside any loop, which the poly
+    /// B-rep's methods never leave (upstream dereferences its null `m_pNext`);
+    /// [`SolidError::InvalidInput`] for unknown ids.
     pub fn edge_end_poly_vertex(&self, e: PolyEdgeId) -> Result<Option<PolyVertexId>> {
         const OP: &str = "query::poly::PolyBrep::edge_end_poly_vertex";
         let x = self.edge(e)?;
-        let next = x
-            .next
-            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's next edge"))?;
+        let next = x.next.ok_or_else(|| {
+            crate::error::Failure::new(
+                OP,
+                QueryFailure::Defect {
+                    why: "a live poly edge is always in a loop: add_poly_edge and the copy \
+                              insert every edge they make into its loop at once, and only \
+                              delete_edge takes it out, just before freeing it",
+                },
+            )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let last_edge = match x.owner {
             Some(l) => self.lp(l)?.head == Some(next),
             None => false,
@@ -1934,9 +1928,9 @@ impl PolyBrep {
     /// [`PolyBrep::edge_end_poly_vertex`].
     pub fn edge_end_point(&self, e: PolyEdgeId) -> Result<Point3> {
         let v = self.edge_end_poly_vertex(e)?.ok_or_else(|| {
-            SolidError::query_missing(
+            SolidError::query(
                 "query::poly::PolyBrep::edge_end_point",
-                "the poly edge's end vertex",
+                QueryFailure::PolyEdgeWithoutVertex,
             )
         })?;
         Ok(self.vertex(v)?.point)
@@ -1993,7 +1987,7 @@ impl PolyBrep {
         let s = self.edge_vertex(e, OP)?;
         let end = self
             .edge_end_poly_vertex(e)?
-            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's end vertex"))?;
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::PolyEdgeWithoutVertex))?;
         let b = self.vertex_bounding_box(s)?;
         let bv = self.vertex_bounding_box(end)?;
         Ok(b.union(&bv))
@@ -2209,10 +2203,7 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > x.size {
-                return Err(SolidError::query_failed(
-                    OP,
-                    "the loop's edge ring is longer than its size",
-                ));
+                return Err(SolidError::query(OP, QueryFailure::Defect { why: "a loop's edge ring and its size are kept together by the poly B-rep's own add and remove methods" }));
             }
             match self.edge(e)?.next {
                 Some(n) if n != h => e = n,
@@ -3329,10 +3320,7 @@ impl PolyBrep {
         }
 
         if scale.is_some_and(Vec3::is_undef) {
-            return Err(SolidError::query_invalid_value(
-                OP,
-                "the scale is undefined",
-            ));
+            return Err(SolidError::query(OP, QueryFailure::UndefinedScale));
         }
 
         // we're starting - inform the public
@@ -3485,6 +3473,63 @@ mod tests {
         }
         b.finish_poly_edge_loop(l).unwrap();
         (b, f, l, es)
+    }
+
+    /// The caller's poly B-rep and arguments, named at their sites with upstream's status.
+    #[test]
+    fn the_callers_poly_brep_is_named_at_its_sites() {
+        use crate::error::query::QueryFailure as F;
+        use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
+        let named = |e: SolidError, cause: F, status: i32| {
+            assert_eq!(e.query_failure(), Some(&cause), "{e}");
+            assert_eq!(e.sm_status(), Some(status), "{e}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+        };
+        let k = Kernel::default();
+        let (mut b, f, _, es) = square(&k);
+        // a loop finished without an edge
+        let empty = b.start_poly_edge_loop(f).unwrap();
+        named(
+            b.finish_poly_edge_loop(empty).unwrap_err(),
+            F::PolyLoopEmpty,
+            SM_ERR,
+        );
+        // an edge that does not start where the loop's last edge ends
+        let open = b.start_poly_edge_loop(f).unwrap();
+        let (p, q, far) = (
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(5.0, 5.0, 0.0),
+        );
+        let v = b.add_vertex(&k, p, 1.0e-5).unwrap();
+        let w = b.add_vertex(&k, far, 1.0e-5).unwrap();
+        b.add_poly_edge(&k, open, 1.0e-5, p, q, v).unwrap();
+        let e = b.add_poly_edge(&k, open, 1.0e-5, far, p, w).unwrap_err();
+        named(e, F::PolyEdgeNotContinuing, SM_ERR);
+        // a loop finished while its last edge ends away from its first vertex
+        let short = b.start_poly_edge_loop(f).unwrap();
+        b.add_poly_edge(&k, short, 1.0e-5, p, q, v).unwrap();
+        named(
+            b.finish_poly_edge_loop(short).unwrap_err(),
+            F::PolyLoopNotClosed,
+            SM_ERR,
+        );
+        // an edge taken off a vertex it does not start at, then off its own
+        let start = b.edge_start_poly_vertex(es[0]).unwrap().unwrap();
+        let other = b.edge_start_poly_vertex(es[1]).unwrap().unwrap();
+        let e = b.vertex_remove_poly_edge(other, es[0]).unwrap_err();
+        named(e, F::PolyEdgeNotAtVertex, SM_ERR);
+        b.vertex_remove_poly_edge(start, es[0]).unwrap();
+        let e = b.edge_bounding_box(es[0]).unwrap_err();
+        named(e, F::PolyEdgeWithoutVertex, SM_ERR_NULL_POINTER);
+        // an edge linked into a second ring leaves its first ring's other edge outside it
+        b.link_radials(&[es[0], es[1]]).unwrap();
+        b.link_radials(&[es[0], es[2]]).unwrap();
+        named(
+            b.edge_all_radials(es[1]).unwrap_err(),
+            F::PolyRadialRingNotClosed,
+            SM_ERR,
+        );
     }
 
     #[test]
@@ -3902,6 +3947,9 @@ mod tests {
             matches!(&r, Err(e) if e.upstream_status() == Some(1007)),
             "{r:?}"
         );
+        let e = r.unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::UndefinedScale));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

@@ -28,7 +28,7 @@ use crate::boolean::merge::p4::{BooleanKernels, ManifoldIntersector, ManifoldSta
 use crate::boolean::merge::p4::{
     KernelManifoldIntersector, ManifoldKernelAdapter, ManifoldNotificationKeys,
 };
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{sweep::SweepFailure, EntityRef, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use crate::geom::context::MarkLock;
@@ -41,6 +41,18 @@ use crate::topology::edge::NotifyEnv;
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, FaceId};
 use std::collections::BTreeMap;
+
+/// Why the merge's primary operand missing at a merge call is the kernel's fault (a
+/// reviewed defect).
+const NO_PRIMARY: &str = "the merge session holds its primary body from its setup to its end; set_operands restores it after each call";
+/// Why the merge's other operand missing at a Boolean of the merge is the kernel's fault:
+/// the session check every store call on the merge makes first
+/// ([`SweepFailure::MergeOtherBodyConsumed`]) has already refused a consumed other body.
+const NO_OTHER: &str = "every store call on a merge first refuses a session whose other body was consumed, and with the sweep's default merge options only a final Merge or Union consumes it";
+/// What a store call on a merge whose other body was consumed says
+/// ([`SweepFailure::MergeOtherBodyConsumed`]).
+#[cfg(test)]
+use crate::error::sweep::MERGE_OTHER_CONSUMED as CONSUMED_OTHER;
 
 #[derive(Debug)]
 pub(super) struct Session {
@@ -90,9 +102,9 @@ impl Session {
     pub(super) fn operands(&self) -> Result<(BrepId, BrepId)> {
         Ok((
             self.primary
-                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?,
+                .ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?,
             self.other
-                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?,
+                .ok_or_else(|| SolidError::sweep(OP, SweepFailure::MergeOtherBodyConsumed))?,
         ))
     }
 }
@@ -303,7 +315,12 @@ impl Driver<'_, '_> {
             None,
         );
         self.set_operands(primary, other);
-        result?.ok_or_else(|| SolidError::sweep_missing(OP, "the union's result"))
+        result?.ok_or_else(|| {
+            SolidError::sweep_null_defect(
+                OP,
+                "the manifold union keeps its result in the primary operand, which it was given",
+            )
+        })
     }
 
     fn surface_face(&self, surface: ObjectRef) -> Result<(BrepId, FaceId)> {
@@ -506,8 +523,7 @@ impl BooleanDriver for Driver<'_, '_> {
         angle: f64,
         options: Option<&MergeOptions>,
     ) -> Result<()> {
-        let id =
-            primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
+        let id = primary.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?;
         let source = other
             .map(|id| self.body(id).map(|body| (body, MergeOperand::Other)))
             .transpose()?;
@@ -536,8 +552,8 @@ impl BooleanDriver for Driver<'_, '_> {
         operation: BooleanOperation,
         lock: Option<&mut MarkLock>,
     ) -> Result<Option<BrepId>> {
-        let a = primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
-        let b = other.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?;
+        let a = primary.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?;
+        let b = other.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_OTHER))?;
         let (source, destination) = body_pair_mut(self.bodies, b, a)?;
         // `SmMerge::ManifoldBoolean` edits its operands in place: an owned body or a
         // caller-borrowed one (`DoSweep`'s merge into `pBrepToSweepInto`), never a
@@ -1352,6 +1368,31 @@ mod tests {
             .is_some());
         assert_eq!(store.merge_operands(merge).unwrap(), (dest, source));
         assert!(store.take_cleanup_errors().is_empty());
+        store.delete_merge(merge);
+    }
+
+    #[test]
+    fn a_merge_whose_other_body_was_consumed_refuses_further_calls_as_input() {
+        use crate::boolean::merge::p3::PiecewiseAccess;
+        use crate::error::{ErrorKind, SM_ERR_NULL_POINTER};
+        let (mut store, source, dest, _, _) = models(true);
+        let merge = store.new_merge(dest, dest, source, 0.1, 0.2).unwrap();
+        // what a successful union leaves: the other body is gone from the session
+        store
+            .run_merge(merge, |_, driver| {
+                driver.set_operands(Some(dest), None);
+                Ok(())
+            })
+            .unwrap();
+        for e in [
+            store.merge_operands(merge).unwrap_err(),
+            store.union(merge).unwrap_err(),
+        ] {
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert!(!e.is_defect(), "{e}");
+            assert!(e.to_string().contains(CONSUMED_OTHER), "{e}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        }
         store.delete_merge(merge);
     }
 

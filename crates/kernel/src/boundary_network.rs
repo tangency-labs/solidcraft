@@ -1,5 +1,5 @@
 //! Boundary surfaces (Surface › Boundary): one B-spline face through curves in one or two
-//! directions (`solidcraft_geom::network`: a loft between curves, a Coons patch inside four, a
+//! directions (`crate::network`: a loft between curves, a Coons patch inside four, a
 //! Gordon surface through a network), made from sketch curves, 3D sketch curves or a body's
 //! edges. A boundary curve that is a chain of open edges of a surface may carry a continuity
 //! condition with the face beside it: G1 (tangent) or G2 (curvature).
@@ -11,11 +11,11 @@
 //! The two-curve bridge with G0–G3 against a sketch's plane is [`crate::boundary`]; this is the
 //! general case: three or four sides, interior curves, 3D curves and edges.
 
+use crate::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
 use solidcore_record::brep::Brep;
 use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, NurbsSurface, SplineError};
-use solidcraft_geom::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;

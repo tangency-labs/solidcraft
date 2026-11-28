@@ -64,7 +64,8 @@ use crate::curve::curve::p4::filter_solution;
 use crate::curve::curve::p5::{find_additional_cc_tangent_guess, make_curve_cache};
 use crate::curve::curve_cache::BezierSpan;
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::curve::CurveFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -118,9 +119,9 @@ fn at_most(c: ContinuityType, limit: ContinuityType) -> bool {
 /// The leaf span of `node` in `tree` (`(SmBezierSpan*)pNode->m_pData`, `NER`).
 fn leaf_span<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<BezierSpan> {
     if matches!(node.data, NodeData::None) {
-        return Err(SolidError::curve_stage_failed(
+        return Err(SolidError::curve(
             OP_CCI,
-            crate::error::SM_ERR_NULL_POINTER,
+            CurveFailure::CurveNodeWithoutData,
         ));
     }
     Ok(*tree.curve_span(node)?)
@@ -1141,17 +1142,21 @@ impl Curve {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(e) => {
-                return Err(crate::error::Failure::new(
-                    OP_GPA,
-                    crate::error::curve::CurveFailure::StageFailed,
-                )
-                .with_status(crate::error::SM_ERR_NULL_POINTER)
-                .caused_by(e)
-                .into_error())
+                return Err(Failure::new(OP_GPA, CurveFailure::CacheNotBuilt)
+                    .caused_by(e)
+                    .into_error())
             }
         };
         let curve_tree = cache.tree().ok_or_else(|| {
-            SolidError::curve_stage_failed(OP_GPA, crate::error::SM_ERR_NULL_POINTER)
+            Failure::new(
+                OP_GPA,
+                CurveFailure::Defect {
+                    why: "the curve's cache, just built by make_curve_cache, has a tree: \
+                          the build sets it whenever it succeeds",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
         })?;
 
         // special case SM_CP_PERPENDICULAR_TO_VECTOR
@@ -1626,15 +1631,15 @@ mod tests {
     }
 
     #[test]
-    fn a_leaf_without_a_span_is_a_stage_failure() {
+    fn a_leaf_without_a_span_is_the_callers_tree() {
+        // a cache's tree has a span at every node it builds, so a node without one comes
+        // from a tree the caller built
         let tree: Tree<()> = Tree::from_point(Vec3::ZERO, 1.0, false);
         let e = leaf_span(&tree, &TreeNode::new()).unwrap_err();
-        assert_eq!(
-            e.curve_failure(),
-            Some(&crate::error::curve::CurveFailure::StageFailed)
-        );
-        assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.curve_failure(), Some(&CurveFailure::CurveNodeWithoutData));
+        assert!(!e.is_defect());
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -1733,11 +1738,8 @@ mod tests {
                 &opts,
             )
             .unwrap_err();
-        assert_eq!(
-            e.curve_failure(),
-            Some(&crate::error::curve::CurveFailure::StageFailed)
-        );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.curve_failure(), Some(&CurveFailure::CacheNotBuilt));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 }

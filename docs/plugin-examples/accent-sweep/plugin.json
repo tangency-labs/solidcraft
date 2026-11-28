@@ -1,0 +1,20 @@
+{
+  "id": "accent-sweep",
+  "name": "Accent sweep",
+  "version": "1.0.0",
+  "description": "A soft band of the theme's accent sweeps across the ribbon's icons and buttons.",
+  "capabilities": ["shaders@0.2"],
+  "shaders": [
+    {
+      "id": "accent-sweep",
+      "name": "Accent sweep",
+      "kind": "tint",
+      "source": "accent-sweep.wgsl",
+      "animated": true,
+      "settings": [
+        { "id": "width", "name": "Band width (pt)", "min": 40, "max": 600, "default": 200 },
+        { "id": "period", "name": "Seconds per sweep", "min": 1, "max": 20, "default": 6 }
+      ]
+    }
+  ]
+}

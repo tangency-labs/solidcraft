@@ -93,6 +93,7 @@ pub(crate) fn error(call: &'static str, e: solidcore_ops::Error, detail: Option<
         Ops::Empty => Error::Empty,
         Ops::NotSolid => Error::NotSolid,
         Ops::Exception => Error::Exception,
+        Ops::NotOneFoot { found } => Error::NotOneFoot { found },
         Ops::Cancelled => Error::Cancelled(call),
         Ops::Internal(what) => Error::Internal(what),
         e => Error::Solidcore(match detail {

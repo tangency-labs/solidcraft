@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let keys = ["cache", "compression", "format", "overwrite", "path", "preview", "sign", "signing_key"];
+    let keys = ["cache", "compression", "format", "linked_bodies", "overwrite", "path", "preview", "sign", "signing_key"];
     assert_keys(input_schema_for::<SaveParams>(), &keys);
     assert_keys(input_schema_for::<SaveAsParams>(), &keys);
 }

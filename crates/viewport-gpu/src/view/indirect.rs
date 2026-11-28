@@ -211,6 +211,9 @@ pub(super) struct Indirect {
     triangles: Vec<u64>,
     /// Which of the scene's instanced draws are drawn here (the others on their own).
     batched: Vec<bool>,
+    /// The GPU culls the placements ([`super::gpu_cull`]): `args` and `instances` are its, and
+    /// `triangles` are what it last reported, so a group is drawn even when they say none.
+    on_gpu: bool,
 }
 
 impl Indirect {
@@ -245,14 +248,73 @@ impl Indirect {
         let entries: Vec<Entry> = entries.into_iter().map(|(_, e)| e).collect();
         // Until the first cull (and in a scene never culled: a moving layer, the product
         // preview), every placement is drawn in full, as each mesh's own draws were.
-        let mut out = Indirect { arena, entries, groups, args: None, instances: None, triangles: Vec::new(), batched };
+        let mut out = Indirect { arena, entries, groups, args: None, instances: None, triangles: Vec::new(), batched, on_gpu: false };
         let (instances, args) = out.contents(draws);
-        out.args = Some(super::buffer_init(device, "sc_indirect_args", &args, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST)?);
+        out.args = Some(super::buffer_init(device, "sc_indirect_args", &args, Self::args_usage())?);
         if !instances.is_empty() {
             let usage = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
             out.instances = Some((super::buffer_init(device, "sc_indirect_instances", &instances, usage)?, instances.len() as u64));
         }
         Some(out)
+    }
+
+    /// Each entry: its draw, level, index count, first index and base vertex, in the order of the
+    /// arguments (grouped by look, opaque first).
+    pub(super) fn entry_list(&self) -> Vec<(usize, usize, u32, u32, i32)> {
+        self.entries.iter().map(|e| (e.draw, e.level, e.span.count, e.span.first_index, e.span.base_vertex)).collect()
+    }
+
+    /// Draw from the arguments (from 0) and placements a GPU cull fills ([`super::gpu_cull`]).
+    pub(super) fn cull_on_gpu(&mut self, args: wgpu::Buffer, instances: wgpu::Buffer, size: u64) {
+        self.args = Some(args);
+        self.instances = Some((instances, size));
+        self.on_gpu = true;
+    }
+
+    /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
+    pub(super) fn culls_on_gpu(&self) -> bool {
+        self.on_gpu
+    }
+
+    fn args_usage() -> wgpu::BufferUsages {
+        let base = wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST;
+        if cfg!(test) { base | wgpu::BufferUsages::COPY_SRC } else { base }
+    }
+
+    /// Whether the draw-argument buffer is missing (for example after a refused allocation) and
+    /// needs another [`Self::write`] even when the shown placements did not change.
+    pub(super) fn args_missing(&self) -> bool {
+        self.args.is_none()
+    }
+
+    /// The buffer the draw arguments are drawn from (for tests).
+    #[cfg(test)]
+    pub(super) fn args(&self) -> Option<wgpu::Buffer> {
+        self.args.clone()
+    }
+
+    /// Drop the argument buffer to simulate a refused allocation (for tests).
+    #[cfg(test)]
+    pub(super) fn clear_args(&mut self) {
+        self.args = None;
+    }
+
+    /// The buffer the placements are drawn from.
+    pub(super) fn instances(&self) -> Option<wgpu::Buffer> {
+        self.instances.as_ref().map(|(b, _)| b.clone())
+    }
+
+    /// The placements each entry drew (a GPU cull's, read back): each group's triangles.
+    pub(super) fn counted(&mut self, counts: &[u32]) {
+        self.triangles = vec![0; self.groups.len()];
+        for (n, (e, count)) in self.entries.iter().zip(counts).enumerate() {
+            let n = u32::try_from(n).unwrap_or(u32::MAX);
+            if let Some(g) = self.groups.iter().position(|g| (g.first..g.first + g.len).contains(&n))
+                && let Some(t) = self.triangles.get_mut(g)
+            {
+                *t += u64::from(e.span.count / 3) * u64::from(*count);
+            }
+        }
     }
 
     /// Whether the scene's instanced draw `i` is drawn here.
@@ -299,17 +361,27 @@ impl Indirect {
         (instances, args)
     }
 
-    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]).
+    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]): the CPU
+    /// culled this frame, so it draws from these again (`on_gpu` off).
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, draws: &[InstancedDraw]) {
+        let was_on_gpu = self.on_gpu;
+        self.on_gpu = false;
         let (instances, args) = self.contents(draws);
-        if let Some(buffer) = &self.args {
+        if was_on_gpu || self.args.is_none() {
+            // Leaving a GPU cull (or retrying after a refused allocation): allocate a private
+            // argument buffer instead of writing into the shared GPU-cull buffer.
+            self.args = crate::buffer_init(device, "sc_indirect_args", &args, Self::args_usage()).ok();
+        } else if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
         }
         if instances.is_empty() {
+            if was_on_gpu {
+                self.instances = None;
+            }
             return;
         }
         let need = instances.len() as u64;
-        if self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
+        if was_on_gpu || self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
             // Room to grow, so a camera move that brings a few more placements into view does
             // not make a buffer each frame.
             let size = need.saturating_mul(3) / 2;
@@ -340,7 +412,7 @@ impl Indirect {
         let (Some((instances, _)), Some(args)) = (&self.instances, &self.args) else { return };
         let mut bound = false;
         for (g, triangles) in self.groups.iter().zip(&self.triangles).filter(|(g, _)| g.look == look && (g.closed || !closed_only)) {
-            if *triangles == 0 {
+            if *triangles == 0 && !self.on_gpu {
                 continue;
             }
             if !bound {

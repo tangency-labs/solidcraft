@@ -528,7 +528,7 @@ fn round_trip(
         surface_key: &|_: FaceId| ObjectKey(0),
     };
     let mut all = Vec::new();
-    let mut data = BrepData::from_brep(b, &env, &mut all).map_err(describe)?;
+    let mut data = BrepData::from_brep(k, b, &env, &mut all).map_err(describe)?;
     let bytes = data
         .write_to_file_with_nurbs(k, FileType::Ascii)
         .map_err(describe)?;

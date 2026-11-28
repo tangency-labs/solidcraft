@@ -54,6 +54,42 @@ pub fn parse(path: &str) -> Option<(&str, &str)> {
     (!id.is_empty() && !name.is_empty() && !name.contains('/')).then_some((id, name))
 }
 
+/// The pairs of recent designs on the computer that may be one file: the browser hands out a new
+/// handle (and so a new id) each time a file is picked, so only the handles can tell. Two
+/// entries can only be one file when they have the same name; the earlier entry comes first.
+pub fn same_name_pairs(recent: &[String]) -> Vec<(String, String)> {
+    let disk: Vec<(&str, &str)> = recent.iter().filter_map(|p| parse(p)).collect();
+    let mut pairs = Vec::new();
+    for (i, (first, name)) in disk.iter().enumerate() {
+        for (second, other) in &disk[i + 1..] {
+            if name == other && first != second {
+                pairs.push((first.to_string(), second.to_string()));
+            }
+        }
+    }
+    pairs
+}
+
+/// The recent designs to drop because an earlier (newer) entry names the same file on the
+/// computer (#23033), each with the entry that stays: (kept, repeat). `same` says whether two
+/// handle ids (as [`same_name_pairs`] gives them) are one file.
+pub fn same_file_repeats(recent: &[String], same: impl Fn(&str, &str) -> bool) -> Vec<(String, String)> {
+    let mut kept: Vec<(&str, &String)> = Vec::new();
+    let mut repeats = Vec::new();
+    for p in recent {
+        let Some((id, _)) = parse(p) else { continue };
+        if kept.iter().any(|(k, _)| *k == id) {
+            // The same path twice: the list itself never keeps a path twice.
+            continue;
+        }
+        match kept.iter().find(|(k, _)| same(k, id)) {
+            Some((_, first)) => repeats.push(((*first).clone(), p.clone())),
+            None => kept.push((id, p)),
+        }
+    }
+    repeats
+}
+
 /// A handle id from the time and a random number.
 pub fn make_id(ms: u64, random: u64) -> String {
     format!("{ms:x}-{random:x}")
@@ -201,17 +237,17 @@ pub use web::*;
 
 #[cfg(target_arch = "wasm32")]
 mod web {
-    use std::cell::{Cell, RefCell};
-    use std::collections::{HashMap, VecDeque};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::rc::Rc;
 
     use js_sys::{Array, Function, Object, Promise, Reflect};
     use solidcraft_engine::io::vfs;
     use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
     use wasm_bindgen_futures::{JsFuture, spawn_local};
-    use web_sys::{FileSystemFileHandle, IdbDatabase, IdbObjectStore, IdbOpenDbRequest, IdbRequest, IdbTransactionMode};
+    use web_sys::{FileSystemFileHandle, FileSystemHandle, IdbDatabase, IdbObjectStore, IdbOpenDbRequest, IdbRequest, IdbTransactionMode};
 
-    use super::{HANDLE_MAX_AGE_MS, is_abort, make_id, parse, path, picker_extensions, plan_prune, save_type};
+    use super::{HANDLE_MAX_AGE_MS, is_abort, make_id, parse, path, picker_extensions, plan_prune, same_file_repeats, same_name_pairs, save_type};
     use crate::files::{Files, err, read_handle};
 
     const DB: &str = "solidcraft-disk-handles";
@@ -220,9 +256,6 @@ mod web {
     thread_local! {
         /// Handles picked or looked up in this session, by id.
         static HANDLES: RefCell<HashMap<String, FileSystemFileHandle>> = RefCell::new(HashMap::new());
-        /// Writes waiting for their turn (a file takes one writer at a time), latest per id.
-        static QUEUE: RefCell<VecDeque<(String, Vec<u8>)>> = const { RefCell::new(VecDeque::new()) };
-        static BUSY: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Why a dialog gave no file.
@@ -388,29 +421,7 @@ mod web {
 
     // ---- writing ------------------------------------------------------------------------
 
-    /// Queue what a command wrote to a disk path. Writes go one at a time; a newer write of the
-    /// same file replaces one still waiting.
-    pub fn enqueue(files: &Rc<Files>, path: &str, bytes: Vec<u8>) {
-        QUEUE.with(|q| {
-            let mut q = q.borrow_mut();
-            q.retain(|(p, _)| p != path);
-            q.push_back((path.to_string(), bytes));
-        });
-        if BUSY.with(|b| b.replace(true)) {
-            return;
-        }
-        let files = files.clone();
-        spawn_local(async move {
-            while let Some((path, bytes)) = QUEUE.with(|q| q.borrow_mut().pop_front()) {
-                if let Err(e) = write(&path, &bytes).await {
-                    files.failed_disk(&path, &e);
-                }
-            }
-            BUSY.with(|b| b.set(false));
-        });
-    }
-
-    async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
+    pub async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
         let (id, name) = parse(path).ok_or("not a file on the computer")?;
         let handle = handle_for(id).await.map_err(|e| format!("{name}: {e}"))?;
         write_handle(&handle, bytes).await.map_err(|e| format!("{name}: {e}"))
@@ -418,11 +429,7 @@ mod web {
 
     async fn write_handle(handle: &FileSystemFileHandle, bytes: &[u8]) -> Result<(), String> {
         ensure_readwrite(handle).await?;
-        let w: web_sys::FileSystemWritableFileStream =
-            JsFuture::from(handle.create_writable()).await.map_err(err)?.dyn_into().map_err(|_| "no writable stream".to_string())?;
-        JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
-        JsFuture::from(w.close()).await.map_err(err)?;
-        Ok(())
+        crate::files::write_handle(handle, bytes).await
     }
 
     async fn handle_for(id: &str) -> Result<FileSystemFileHandle, String> {
@@ -596,6 +603,32 @@ mod web {
         });
     }
 
+    /// Find the recent designs that are a newer entry's file on the computer (the same file picked
+    /// twice gets two handles) and queue them to drop from the list (#23033). Only entries with the
+    /// same name are compared; a handle the browser no longer has counts as another file.
+    pub fn find_same_files(files: &Rc<Files>, recent: Vec<String>) {
+        let pairs = same_name_pairs(&recent);
+        if pairs.is_empty() {
+            return;
+        }
+        let files = files.clone();
+        spawn_local(async move {
+            let mut same = std::collections::HashSet::new();
+            for (a, b) in pairs {
+                let (Ok(first), Ok(second)) = (handle_for(&a).await, handle_for(&b).await) else { continue };
+                let first: &FileSystemHandle = first.as_ref();
+                if JsFuture::from(first.is_same_entry(second.as_ref())).await.is_ok_and(|v| v.as_bool() == Some(true)) {
+                    same.insert((a, b));
+                }
+            }
+            let repeats = same_file_repeats(&recent, |a, b| same.contains(&(a.to_string(), b.to_string())));
+            if !repeats.is_empty() {
+                files.same_file.borrow_mut().extend(repeats);
+                files.wake();
+            }
+        });
+    }
+
     async fn recall(id: &str) -> Result<Option<JsValue>, String> {
         let db = open_db().await?;
         let req = store(&db, IdbTransactionMode::Readonly)?.get(&id.into()).map_err(err)?;
@@ -606,6 +639,24 @@ mod web {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_picked_twice_is_listed_once_under_its_newest_entry() {
+        // #23033: the same file opened twice from the computer has two handles, so two paths.
+        let recent: Vec<String> = ["/disk/b/Flute key.sc", "/opfs/Flute key.sc", "/disk/a/Flute key.sc", "/disk/c/Other.sc", "/disk/d/Flute key.sc"]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            same_name_pairs(&recent),
+            [("b", "a"), ("b", "d"), ("a", "d")].map(|(x, y)| (x.to_string(), y.to_string())),
+            "only disk entries with the same name are compared"
+        );
+        // b and a are one file; d is another file of that name somewhere else.
+        let same = |x: &str, y: &str| (x, y) == ("b", "a");
+        assert_eq!(same_file_repeats(&recent, same), [("/disk/b/Flute key.sc".to_string(), "/disk/a/Flute key.sc".to_string())]);
+        // Nothing is one file when the handles say no.
+        assert!(same_file_repeats(&recent, |_, _| false).is_empty());
+    }
 
     #[test]
     fn a_disk_path_round_trips_its_handle_id_and_name() {

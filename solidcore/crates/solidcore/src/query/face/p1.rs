@@ -48,11 +48,12 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::ignored;
+use crate::error::query::QueryFailure;
 use crate::geom::certified::{above, gamma};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
+use crate::geom::tol::{coincidence_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::{ClassGeometry, PointClassType, PointClassification};
@@ -192,8 +193,19 @@ const PLANE_GAP_HALVINGS: usize = 1024;
 const PLANE_GAP_DEPTH: usize = 40;
 
 /// Not upstream: whether the planar faces `face` (on `face_plane`) and `other_face` (on
-/// `other_plane`) part by more than the band of their two zone tolerances: a point of either
-/// face is proved to lie farther than the band from the other's plane. The gap to a plane is
+/// `other_plane`) part by more than their coincidence tolerance (the coincidence rule,
+/// [`coincidence_tol_3d`]: the larger of their two zone tolerances and the contact tolerance):
+/// a point of either face is proved to lie farther than that band from the other's plane.
+/// The band was the sum of the two zone tolerances, the intersection tolerance: an insert's
+/// side 5.6e-6 rad off a chamfered block's facet, 1.1e-5 outside it at the insert's corner
+/// (#21687), stood within that sum, so the sector took the two walls for one while the
+/// intersector, whose plane check reads the tolerance, had made no curve where the side
+/// leaves the chamfer: the intersect lost both chamfer wedges. Two planes whose gap cannot
+/// change by the coincidence tolerance over the two faces (the sine of their angle times the
+/// diagonal of the faces' box) stand at an offset, not an angle, and keep the sum: the edge
+/// the sector turns about was placed on both faces at the intersection tolerance
+/// (`edge_solutions`), and read apart within it, two boxes whose bottoms lie 1.98e-5 apart
+/// lost their intersection (goldens `boolean.api_brep` `more0080`). The gap to a plane is
 /// affine, so over a planar face it is largest on the face's boundary, the exact edges. An
 /// exact edge lies on the face's plane, within the edge's tolerance `τ_e` of its curve (the
 /// tube, validity invariant 6), not on the curve: the curve may stand `τ_e + τ_f` off the
@@ -215,8 +227,23 @@ fn planes_part(
     other_face: FaceId,
     face_plane: &crate::surface::plane::Plane,
 ) -> Result<bool> {
-    let band = zone_tol3d(k, fp2::tolerance(brep, face)?)
-        + zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    let zone = zone_tol3d(k, fp2::tolerance(brep, face)?);
+    let other_zone = zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    let coincidence = coincidence_tol_3d(k, zone, other_zone);
+    // planes whose gap cannot change by the coincidence tolerance over the two faces stand at
+    // an offset, not at an angle: their common edge was placed on both at the intersection
+    // tolerance (`edge_solutions`), so they part only past it
+    let region = calculate_bounding_box(k, brep, face, false)?
+        .union(&calculate_bounding_box(k, other, other_face, false)?);
+    let size = region.size();
+    let diagonal = (size.x * size.x + size.y * size.y + size.z * size.z).sqrt();
+    let offset = PlaneLevel::new(face_plane, other_plane)
+        .is_some_and(|level| level.sin_phi * diagonal <= coincidence);
+    let band = if offset {
+        xsect_tol_3d_from_zones(k, zone, other_zone)
+    } else {
+        coincidence
+    };
     Ok(plane_gap(k, brep, face, face_plane, other_plane, band)?
         || plane_gap(k, other, other_face, other_plane, face_plane, band)?)
 }
@@ -641,6 +668,219 @@ pub fn calculate_bounding_box_in(
     Ok(face_box)
 }
 
+/// (not upstream) The value of a step of a proof that is only ever a saving (a box that rules a
+/// pair out): `Some` on success, `None` on any failure but a cancellation, which gives up the
+/// proof rather than the operation ([`proved_bounding_box`], `boolean::apart`).
+///
+/// # Errors
+/// A cancellation.
+pub(crate) fn probe<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Not upstream: a box that provably holds every point of the face within its zone
+/// tolerance, or `None` when none is known; for ruling out pairs of faces that cannot meet
+/// (the boolean's face pairs). [`calculate_bounding_box`]'s box of a curved face is its
+/// surface's whole control net whatever the face's domain, so a sliver of a whole turn of a
+/// revolution is boxed as the whole ring.
+///
+/// The box is the certified box of the surface ([`Surface::certified_bounding_box`]) over
+/// the face's UV domain R, grown by the zone tolerance of twice the largest face, edge and vertex
+/// tolerance (a point within an edge's tolerance of the face is on it). R is narrowed to
+/// R ∩ D, D the certified box of the face's UV trim curves
+/// ([`crate::topology::face::p1::certified_uv_trim_domain`]; those missing made on the copy,
+/// below), when that is proved to hold the
+/// face: every loop lies in D, so whether a point is on the face cannot change across a strip
+/// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
+/// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
+/// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
+/// or whose strip classifies any other way, keeps R. A face's missing UV trims are made on
+/// `scratch`, a copy standing for `b` with its own trimmed-surface caches
+/// ([`Brep::clone_for_trial`]), made at its first need; the caller keeps one `scratch` per
+/// B-rep, and passes each face of that B-rep with it. Nothing is written on `b`, but the
+/// surface's NURB is made where it is missing (as every evaluation of it makes it).
+///
+/// # Errors
+///
+/// Cancellation only: any other failure gives `None` or keeps R.
+pub fn proved_bounding_box(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    scratch: &mut Option<Brep>,
+) -> Result<Option<Extent3d>> {
+    // a box is only ever a saving: every failure but a cancellation gives none
+    let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
+        return Ok(None);
+    };
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        // a plane has no certified box here; its loose box is its edges' already
+        return Ok(None);
+    }
+    let Some(stored) = probe(fp2::uv_domain(b, f))? else {
+        return Ok(None);
+    };
+    // the face's trims as they are, or, where an edge use lacks one, on `scratch`, a copy
+    // standing for `b` (same ids) on which the missing ones are made as a classification
+    // makes them (`GetOrCreateUVTrimCurve`): `b` is never written
+    let complete = probe(crate::topology::trimming_tools::face_uv_curves_present(
+        b, f,
+    ))? == Some(true);
+    let trims_on: &Brep = if complete {
+        b
+    } else {
+        if scratch.is_none() {
+            // its own trimmed-surface caches, so nothing built on it reaches `b`'s faces
+            *scratch = probe(b.clone_for_trial())?;
+        }
+        match scratch.as_mut() {
+            Some(copy) => {
+                make_missing_uv_trims(k, copy, f)?;
+                copy
+            }
+            None => b,
+        }
+    };
+    let mut domain = stored;
+    if let (Some(Some(trims)), Some(natural)) = (
+        probe(crate::topology::face::p1::certified_uv_trim_domain(
+            k, trims_on, f,
+        ))?,
+        probe(surface.natural_uv_domain_with_nurb(k))?,
+    ) {
+        // a margin far below any face's size, so a strip a rounding wide is no strip
+        let margin = 1e-9 * natural.max_dimension().max(1.0);
+        let mut grown = trims;
+        grown.expand_absolute(margin);
+        if trims.is_contained_by(&natural, margin) && trims.is_contained_by(&stored, margin) {
+            if let Ok(narrowed) = grown.intersect(&stored) {
+                if trim_strips_outside(k, trims_on, f, &stored, &narrowed)? {
+                    domain = narrowed;
+                }
+            }
+        }
+    }
+    let Some(Some(mut bx)) = probe(surface.certified_bounding_box(k, &domain))? else {
+        return Ok(None);
+    };
+    // the largest tolerance of the face, its edges and vertices, on `b` and where the trims
+    // were read (a trim made there can have raised its edge's tolerance to cover it)
+    let mut tol: f64 = 0.0;
+    for on in [b, trims_on] {
+        let Some(t) = probe(fp2::tolerance(on, f))? else {
+            return Ok(None);
+        };
+        tol = tol.max(t);
+        let Some(edges) = probe(topology_traverser::face_edges(on, f))? else {
+            return Ok(None);
+        };
+        for e in edges {
+            let Some(t) = probe(edge::tolerance(on, e))? else {
+                return Ok(None);
+            };
+            tol = tol.max(t);
+        }
+        let Some(vertices) = probe(super::p2::face_vertices(on, f, false, None))? else {
+            return Ok(None);
+        };
+        for v in vertices {
+            let Some(t) = probe(vertex::tolerance(on, v))? else {
+                return Ok(None);
+            };
+            tol = tol.max(t);
+        }
+    }
+    // twice it: the trims the intersections make on `b` later, which may differ from those
+    // made on the copy by up to their own raise of that tolerance, are covered too
+    bx.expand_absolute(zone_tol3d(k, 2.0 * tol));
+    Ok(Some(bx))
+}
+
+/// The UV trim curve of every edge use of face `f` of `b` that has none (nor its mate), made
+/// by `GetOrCreateUVTrimCurve` as a classification against the face makes it (`uv_space_ok`;
+/// it may raise the edge's tolerance to cover the trim). A trim that cannot be made is left
+/// unmade: only a cancellation fails.
+fn make_missing_uv_trims(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    fn only_cancelled<T>(r: Result<T>) -> Result<Option<T>> {
+        match r {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.is_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+    let Some(loopuses) = only_cancelled(crate::topology::face::p4::upward_loopuses(
+        b, f, false, None,
+    ))?
+    else {
+        return Ok(());
+    };
+    for lu in loopuses {
+        let Some(edgeuses) = only_cancelled(eu1::loopuse_edgeuses(b, lu))? else {
+            continue;
+        };
+        for eu in edgeuses {
+            let missing =
+                only_cancelled(eu1::uv_trim_curve(b, eu))?.is_some_and(|(c, _)| c.is_none());
+            if missing {
+                only_cancelled(crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                    k, b, eu, false, false, true,
+                ))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether every strip of `stored` outside `inner` (left, right, below and above it, each a
+/// rectangle no loop of face `f` crosses when every loop lies in `inner`) classifies outside
+/// the face at its centre; `true` when there is no strip.
+fn trim_strips_outside(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    stored: &crate::geom::extent2d::Extent2d,
+    inner: &crate::geom::extent2d::Extent2d,
+) -> Result<bool> {
+    let (s0, s1, i0, i1) = (stored.min(), stored.max(), inner.min(), inner.max());
+    let mid_v = 0.5 * (s0.y + s1.y);
+    let mut centres = Vec::new();
+    if i0.x > s0.x {
+        centres.push(Point2::new(0.5 * (s0.x + i0.x), mid_v));
+    }
+    if i1.x < s1.x {
+        centres.push(Point2::new(0.5 * (i1.x + s1.x), mid_v));
+    }
+    // below and above, across the inner box's width (the side strips cover the rest)
+    let mid_u = 0.5 * (i0.x + i1.x);
+    if i0.y > s0.y {
+        centres.push(Point2::new(mid_u, 0.5 * (s0.y + i0.y)));
+    }
+    if i1.y < s1.y {
+        centres.push(Point2::new(mid_u, 0.5 * (i1.y + s1.y)));
+    }
+    for uv in centres {
+        let mut pc = PointClassification::new(0.0);
+        let r = super::p2::point_classify_prepared(
+            k,
+            b,
+            f,
+            uv,
+            &mut pc,
+            super::p2::PointClassifyOptions::default(),
+        );
+        match r {
+            Ok(()) if pc.point_class() == PointClassType::Unknown => {}
+            Err(e) if e.is_cancelled() => return Err(e),
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 /// `pSurface->CalculateBoundingBox(GetUVDomain(), &box)` of a face's surface (expanded by
 /// the zone tolerance, the default): the B-spline override (also that of planes, cones,
 /// spheres, tori and surfaces of revolution) expands its normal box by the face tolerance as its last
@@ -752,7 +992,7 @@ pub fn calculate_shell_bounding_box(
 /// # Errors
 ///
 /// `SM_ERR`
-/// ([`QueryFailure::Failed`](crate::error::query::QueryFailure::Failed)) for a region without shells; those of the shell
+/// ([`QueryFailure::RegionWithoutShells`]) for a region without shells; those of the shell
 /// boxes. `output` then holds the union of the shells before the failing one.
 pub fn calculate_region_bounding_box_into(
     k: &mut Kernel,
@@ -765,9 +1005,9 @@ pub fn calculate_region_bounding_box_into(
 
     let shells = b.region(id)?.get_shells(None, |_, _| Ok(false))?;
     if shells.is_empty() {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP_REGION_BOX,
-            "the region has no shells",
+            QueryFailure::RegionWithoutShells,
         ));
     }
     let mut this_box = Extent3d::new();
@@ -1259,7 +1499,7 @@ pub fn edge_curve_on_classify(
     curve: &Curve,
     opts: &EdgeCurveOnOptions,
 ) -> Result<CurveOnClassification> {
-    let edge = edge.ok_or_else(|| SolidError::query_missing(OP_EDGE_CURVE, "the edge"))?;
+    let edge = edge.ok_or_else(|| SolidError::query(OP_EDGE_CURVE, QueryFailure::NoEdgeGiven))?;
 
     // init outputs
     let mut out = CurveOnClassification::default();
@@ -1401,6 +1641,7 @@ mod tests {
         let mut out = Extent3d::from_point(Vec3::new(1., 2., 3.));
         let e = calculate_region_bounding_box_into(&mut k, &b, r, false, &mut out).unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(e.query_failure(), Some(&QueryFailure::RegionWithoutShells));
         assert_eq!(out, Extent3d::new());
     }
 

@@ -50,7 +50,9 @@ mod tests {
                 Some("surface")
             } else if c.panel == "CONSTRAINTS" {
                 Some("constraint")
-            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") || c.id.starts_with("sketch.construction_line") {
+            } else if matches!(c.id, "sketch.construction" | "sketch.centerline" | "sketch.crosshairs")
+                || c.id.starts_with("sketch.construction_line")
+            {
                 Some("construction")
             } else if c.id.starts_with("sketch.") && matches!(c.panel, "CREATE" | "MODIFY" | "PATTERN" | "FINISH SKETCH") {
                 Some("sketch")
@@ -118,7 +120,7 @@ mod tests {
         }
         let construction: Vec<_> = specs.iter().filter(|c| c.panel == "CONSTRUCT").collect();
         let distinct: std::collections::HashSet<_> = construction.iter().map(|c| c.icon).collect();
-        assert_eq!(construction.len(), 24);
+        assert_eq!(construction.len(), 25);
         assert_eq!(construction.iter().find(|c| c.id == "construct.plane.axis_point").unwrap().icon, "plane_axis_point");
         assert_eq!(distinct.len(), construction.len(), "construction methods need distinct visual identities");
     }

@@ -326,26 +326,40 @@ fn assert_records_round_trip(k: &Kernel, b: &Brep) -> usize {
     n
 }
 
-/// `a` and `b` evaluate alike over a 9 x 9 grid of `a`'s natural domain, to the rounding of
-/// the part (64 ulps of its size, 25).
+/// `a` and `b` evaluate alike over a 9 x 9 grid of `a`'s natural domain, to 64 ulps of the
+/// larger point, and at least of a 25 mm part.
 fn assert_same_points(
     k: &Kernel,
     a: &solidcore::surface::surface::Surface,
     b: &solidcore::surface::surface::Surface,
     what: &str,
 ) {
+    assert_points_within(k, a, b, 0.0, what);
+}
+
+/// As [`assert_same_points`], and also within `allow` millimetres. A short sweep's
+/// trigonometric point can sit about `R ε / θ²` off the original, which is past 64 ulps.
+fn assert_points_within(
+    k: &Kernel,
+    a: &solidcore::surface::surface::Surface,
+    b: &solidcore::surface::surface::Surface,
+    allow: f64,
+    what: &str,
+) {
     let d = a.natural_uv_domain_with_nurb(k).unwrap();
-    let tol = 64.0 * f64::EPSILON * 25.0;
     for i in 0..=8 {
         for j in 0..=8 {
             let uv = solidcore::geom::vector2d::Point2::new(
                 d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0,
                 d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0,
             );
-            let off =
-                (a.evaluate_point(k, uv).unwrap() - b.evaluate_point(k, uv).unwrap()).length();
+            let pa = a.evaluate_point(k, uv).unwrap();
+            let pb = b.evaluate_point(k, uv).unwrap();
+            let size = pa.length().max(pb.length()).max(25.0);
+            let off = (pa - pb).length();
+            let bound = (64.0 * f64::EPSILON * size).max(allow);
             assert!(
-                off <= tol,
+                off <= bound,
                 "{what} rebuilt from its record is {off:e} off at {uv:?}"
             );
         }
@@ -714,12 +728,13 @@ fn short_rib_round_per_radian() -> f64 {
 }
 
 /// #19724, on stabler's construction from #19859: a round between the frustum's cone and a
-/// rib's cone a few degrees wide. The rib's cone is one short arc span, and the cone read off
-/// its form's control rows (`AnalyticSupport::derive`) does not prove that form (`build`:
-/// "a support's analytic kind disagrees with its NURBS form"). The record labelled it a cone
-/// all the same, and reading the round back refused it. A support is now labelled only where
-/// reading derives it back, so the rib's goes as its form and the frustum's keeps its label;
-/// both rounds read back as themselves, Circle rounds of radius 1 certified again.
+/// rib's cone a few degrees wide. The rib is one short rational arc. Rebuilding its centre
+/// from that arc does not meet the evaluation bound, so the record keeps the cone the round
+/// was built on, and a reader uses it only where the form lies on it. Both supports stay
+/// cones, and both rounds read back as Circle rounds of radius 1. Placing the recognised
+/// sweep on that axis leaves the recognised angular zero, so a trigonometric point moves by
+/// about the radius times machine epsilon over the square of the sweep: about 8×10⁻¹² mm at
+/// 1° and radius 30 mm. The round trip is the record and the re-certification.
 #[test]
 fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
     use solidcore::surface::procedural_blend::record::SupportKindRecord;
@@ -748,32 +763,55 @@ fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
             vec![ExactClass::Circle; 2],
             "{sweep} degrees"
         );
-        assert_eq!(assert_records_round_trip(&k, &b), 2, "{sweep} degrees");
+        let mut rounds = 0;
         for (f, _) in exact_rounds(&b) {
             let s = face::surface(&b, f).unwrap().unwrap();
             let round = s.procedural_blend().unwrap().exact().unwrap();
             assert!((round.radius() - 1.0).abs() <= 1e-12, "{}", round.radius());
             let rec = exact_to_record(&k, s).unwrap();
+            let json = serde_json::to_string(&rec).unwrap();
+            let rebuilt = exact_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+            assert_eq!(
+                exact_to_record(&k, &rebuilt).unwrap(),
+                rec,
+                "{sweep} degrees"
+            );
+            // R ε / θ² at 1° and radius 30 mm is about 8×10⁻¹² mm. A hundred times that
+            // still rejects a centre a micrometre off.
+            let near = 1e-9;
+            let (round, again) = (
+                s.procedural_blend().unwrap(),
+                rebuilt.procedural_blend().unwrap(),
+            );
+            assert_points_within(&k, s, &rebuilt, near, "the round");
+            for i in 0..2 {
+                assert_points_within(
+                    &k,
+                    round.support(i).unwrap(),
+                    again.support(i).unwrap(),
+                    near,
+                    "a support",
+                );
+            }
+            rounds += 1;
             for (i, support) in rec.supports.iter().enumerate() {
-                let SupportRecord::Nurbs { kind, .. } = support else {
+                let SupportRecord::Nurbs {
+                    kind, revolution, ..
+                } = support
+                else {
                     panic!("{sweep} degrees: support {i} is a blend");
                 };
-                // the frustum's side runs to rho 24 + x / 4; the rib's leaves it
-                let d = support_middle(&k, round.support(i).unwrap());
-                let on_frustum = (d.y.hypot(d.z) - (24.0 + d.x / 4.0)).abs() <= 1e-6;
-                let want = if on_frustum {
-                    SupportKindRecord::Cone
-                } else {
-                    SupportKindRecord::Free
-                };
-                assert_eq!(*kind, want, "{sweep} degrees: support {i} at {d:?}");
+                assert_eq!(
+                    *kind,
+                    SupportKindRecord::Cone,
+                    "{sweep} degrees: support {i}"
+                );
+                assert!(
+                    revolution.is_some(),
+                    "{sweep} degrees: support {i} has no cone"
+                );
             }
         }
+        assert_eq!(rounds, 2, "{sweep} degrees");
     }
-}
-
-/// A surface's point at the middle of its natural domain.
-fn support_middle(k: &Kernel, s: &solidcore::surface::surface::Surface) -> Point3 {
-    let d = s.natural_uv_domain_with_nurb(k).unwrap();
-    s.evaluate_point(k, d.evaluate(0.5, 0.5)).unwrap()
 }

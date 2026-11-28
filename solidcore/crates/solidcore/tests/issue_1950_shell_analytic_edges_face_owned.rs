@@ -1,6 +1,6 @@
 //! Regression test for tangency-labs/solidcore#1950: WR-545's
-//! `shell_edges_on_analytics_exact` (the fork's tangency-labs/smlib@cd85d34) on
-//! face-owned surfaces. `MakeEdgesOnAnalyticsExact`
+//! `make_edges_on_analytics_exact` (the fork's tangency-labs/smlib@cd85d34; once the
+//! `shell_edges_on_analytics_exact` flag, now the end of every shell) on face-owned surfaces. `MakeEdgesOnAnalyticsExact`
 //! intersects the surfaces of the two faces of each marched edge. Upstream those are the
 //! faces' own surfaces, whose caches resolve through their faces. Before #1963 (tdamsma)
 //! the port intersected them without the B-rep's face services and stopped on `Unported`
@@ -100,7 +100,7 @@ fn shelled_volume(fixes: &UpstreamFixes, was: f64) -> f64 {
     v
 }
 
-fn check(v: f64, want: f64, without_flag: f64) {
+fn check(v: f64, want: f64) {
     assert!(
         (v - RIG_VOLUME).abs() <= 1e-6 * RIG_VOLUME,
         "{v} vs the rig's"
@@ -111,15 +111,12 @@ fn check(v: f64, want: f64, without_flag: f64) {
         (v - CLOSED_FORM).abs() <= 1e-6 * CLOSED_FORM,
         "{v} vs {CLOSED_FORM}"
     );
-    // the exact edges move the volume by under 1e-7 relative
-    assert!(
-        (v - without_flag).abs() <= 1e-7 * without_flag,
-        "{v} vs {without_flag}"
-    );
 }
 
 /// With SolidCraft's fixes (the reported configuration; the trimmed cache stub before).
-/// Pinned since #2890 (precise properties integrate from the trims' base): against the
+/// The shell runs `make_edges_on_analytics_exact` through the face-owned surfaces; "with
+/// the flag" below is that path, the only one since the flag was retired (WR-545), and
+/// "without" the marched edges it replaced. Pinned since #2890 (precise properties integrate from the trims' base): against the
 /// closed form, without the flag +4.26e-4 (it was 10400.212787697543, +4.14e-4), with it
 /// +4.26e-4, within the volume's accuracy. With the flag it was 10400.212354107192
 /// (-1.97e-5) before the certified offset became the default (#13827): the shell's
@@ -136,19 +133,14 @@ fn shelled_plate_with_solidcraft_fixes() {
     // (its shell measures 10400.213233570486, +8.6e-4 against the closed form, 8.3e-8
     // relative, within the volume's 1e-6).
     fixes.linear_sweep_arc_is_cylinder = false;
-    // The preset has the flag on; this first volume is the one without it.
-    fixes.shell_edges_on_analytics_exact = false;
-    let without_flag = shelled_volume(&fixes, 10400.212799740975);
-    assert!((without_flag - 10400.212434834208).abs() <= 1e-9 * without_flag);
-    fixes.shell_edges_on_analytics_exact = true;
     check(
         shelled_volume(&fixes, 10400.212799756418),
         10400.212434834219,
-        without_flag,
     );
 }
 
-/// With only the flag on. Pinned since #2890: against the closed form, without the flag
+/// With the kernel's defaults ("with the flag" is the only path now, as above). Pinned
+/// since #2890: against the closed form, without the flag
 /// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +4.80e-4, each within the
 /// volume's accuracy. With the flag it was 10400.212413698822 (+3.99e-5) before the
 /// certified offset became the default (#13827), as above; the flag now moves the volume
@@ -156,14 +148,9 @@ fn shelled_plate_with_solidcraft_fixes() {
 /// and +6.4e-5 (it was 10400.212857439197 and 10400.212854198868), each move checked
 /// within the old integrator's leak bound on the body ([`shelled_volume`]).
 #[test]
-fn shelled_plate_with_the_flag_alone() {
-    let mut fixes = UpstreamFixes::default();
-    let without_flag = shelled_volume(&fixes, 10400.212857439197);
-    assert!((without_flag - 10400.212432293585).abs() <= 1e-9 * without_flag);
-    fixes.shell_edges_on_analytics_exact = true;
+fn shelled_plate_with_the_defaults() {
     check(
-        shelled_volume(&fixes, 10400.212854198868),
+        shelled_volume(&UpstreamFixes::default(), 10400.212854198868),
         10400.212438244882,
-        without_flag,
     );
 }

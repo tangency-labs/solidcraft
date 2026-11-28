@@ -1,6 +1,6 @@
 # Start the Windows app and check its resize border (#1381): as soon as the window exists (before
 # the first frame), Windows' hit test reports a resize edge or corner within the resize-border
-# width of every side and the client area inside it; a maximized window has none; and a real
+# width of every side and the client area (or the title bar) inside it; a maximized window has none; and a real
 # press-and-drag on the bottom edge (SetCursorPos + mouse input) resizes the window.
 #
 # What this can't check on a CI runner (one monitor at 100 %): moving the window between monitors
@@ -54,7 +54,7 @@ public static class Win {
 }
 '@
 
-$HT = @{ 1 = 'client'; 10 = 'left'; 11 = 'right'; 12 = 'top'; 13 = 'top-left'; 14 = 'top-right'; 15 = 'bottom'; 16 = 'bottom-left'; 17 = 'bottom-right' }
+$HT = @{ 1 = 'client'; 2 = 'caption'; 10 = 'left'; 11 = 'right'; 12 = 'top'; 13 = 'top-left'; 14 = 'top-right'; 15 = 'bottom'; 16 = 'bottom-left'; 17 = 'bottom-right' }
 $failures = New-Object System.Collections.Generic.List[string]
 function Check([bool]$ok, [string]$what) {
     if ($ok) { Write-Host "ok: $what" } else { Write-Host "FAIL: $what"; $failures.Add($what) }
@@ -62,6 +62,8 @@ function Check([bool]$ok, [string]$what) {
 function Rect($h) { $r = New-Object Win+RECT; [void][Win]::GetWindowRect($h, [ref]$r); $r }
 
 # Every side and corner, `in` px inside the window's outer pixel, and points just past the border.
+# Just past the top border, in the middle, is the title bar: client area until the app has drawn
+# it, and from then on its bare part is the system's caption (#13996), so both are right there.
 function CheckBorder($h, [string]$when) {
     $r = Rect $h
     if ($when -eq 'first sight') {
@@ -85,7 +87,7 @@ function CheckBorder($h, [string]$when) {
         $cases = @(
             @($l, $cy, 10), @(($l + $b - 1), $cy, 10), @(($l + $b), $cy, 1),
             @($rt, $cy, 11), @(($rt - $b + 1), $cy, 11), @(($rt - $b), $cy, 1),
-            @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), 1),
+            @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), @(1, 2)),
             @($cx, $bt, 15), @($cx, ($bt - $b + 1), 15), @($cx, ($bt - $b), 1),
             @($l, $t, 13), @($rt, $t, 14), @($l, $bt, 16), @($rt, $bt, 17),
             @(($l + 2 * $b - 1), $t, 13), @($rt, ($bt - 2 * $b + 1), 17),
@@ -94,7 +96,8 @@ function CheckBorder($h, [string]$when) {
         # Record failures only after confirming these points used a stable window rect.
         $results = foreach ($c in $cases) {
             $got = [Win]::HitTest($h, $c[0], $c[1])
-            @{ ok = ($got -eq $c[2]); what = "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $($HT[$c[2]])" }
+            $want = @($c[2])
+            @{ ok = ($want -contains $got); what = "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $(($want | ForEach-Object { $HT[$_] }) -join ' or ')" }
         }
         $after = Rect $h
         if (-not $r.Equals($after)) {

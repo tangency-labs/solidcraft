@@ -3,10 +3,10 @@
 //! Admission precedes recognition and fitting. A failed conversion returns no partial path;
 //! piece errors always refer to the original input, including after arc splitting or fitting.
 
-use solidcore_ops::path_export as geometry;
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_geom::MAX_FIT_PIECES;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::dxf::export as geometry;
 
 use super::DxfShape;
 use crate::{IoError, Result};
@@ -24,7 +24,7 @@ pub enum DxfPath<'a> {
 }
 
 /// How a path's curves are represented in the DXF file.
-pub use geometry::DxfPathStyle;
+pub use geometry::PathStyle as DxfPathStyle;
 
 /// A polyline vertex. `bulge` describes the edge leaving `at`: `tan(sweep / 4)`.
 /// The terminal vertex of an open polyline has zero bulge.
@@ -81,7 +81,8 @@ pub fn admit_path(path: DxfPath<'_>, style: DxfPathStyle) -> Result<()> {
     geometry::admit_path(parts(path).0, style).map_err(refusal)
 }
 
-/// Convert a bounded path without dropping, reordering or modifying its pieces.
+/// Convert a bounded path without dropping, reordering or modifying its pieces, except that the
+/// polyline style merges a piece written as one point on the 1e-9 grid into its neighbours.
 /// The kernel owns exact geometry; the existing bounded fitter is the one arc fitter.
 pub fn path_shapes(path: DxfPath<'_>, style: DxfPathStyle) -> Result<Vec<DxfShape>> {
     admit_path(path, style)?;

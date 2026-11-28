@@ -14,6 +14,8 @@ plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
+# Solidcore's own profiler, dumped as JSON Lines through `kernel::write_kernel_profiles`.
+solidcore-profile = ["solidcraft-kernel/solidcore-profile"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
@@ -44,8 +46,9 @@ solidcraft-viewport = { workspace = true }
 # The printed look of an inserted circuit board (src/cmd/board_layers.rs): its layers drawn
 # into an image; both already in the tree (ui-egui, render).
 tiny-skia = { workspace = true }
+# The checksum of the chunk a design's picture keeps its footprint in.
+crc32fast = { workspace = true }
 png = { workspace = true }
-solidcore-ops = { workspace = true }
 solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
@@ -56,6 +59,8 @@ solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-dynamics = { workspace = true }
 solidcraft-io = { workspace = true }
+# Palette-role SVG validation shared with the UI icon renderer.
+solidcraft-icon-svg = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcraft-ui-text = { workspace = true }
@@ -76,7 +81,6 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
-solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
@@ -84,10 +88,16 @@ solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "tr
 solidcraft-sketch = { workspace = true, features = ["solver-profiling", "test-font-gate"] }
 # Sheet metal tests read the joints of a sheet made from surfaces.
 solidcraft-develop = { workspace = true }
+# Render-job tests that check exact native RAM-ledger totals own their ledger.
+solidcraft-render = { workspace = true, features = ["test-support"] }
 # Sheet PDF tests inflate the pages' content to read them back.
 flate2 = { workspace = true }
+# The URDF tests read the written file back with a general XML reader.
+quick-xml = { workspace = true }
 # Writes a KiCad `.stpZ` (a zipped STEP) for the board-import tests.
 zip = { workspace = true }
+# A temporary folder per test, removed when the test ends, a failure included.
+tempfile = "3.27"
 
 [[example]]
 name = "render_resource_workflow"

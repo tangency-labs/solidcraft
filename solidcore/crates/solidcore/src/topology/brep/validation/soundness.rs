@@ -27,15 +27,28 @@ pub struct Soundness {
     pub manifold: bool,
     /// Its volume's sign, when it is a manifold solid ([`volume_sign`]).
     pub volume: Option<VolumeSign>,
+    /// Whether the body has no face: a solid offset to nothing (#2092), which is an
+    /// answer, not a defect.
+    pub empty: bool,
 }
 
 impl Soundness {
-    /// Whether the check is clean and, when the body is a manifold solid, its volume is
-    /// proved positive (an undecided sign is not).
+    /// Whether the body is sound as the result of an operation on an input that was a
+    /// manifold solid (`input_solid`) or not: the check is clean, and the body is a manifold
+    /// solid whose volume is proved positive (an undecided sign is not), as it must be where
+    /// the input was one; where the input was not, a body that is no manifold solid passes on
+    /// its check alone (a sheet's offset is a sheet). A solid's offset that comes back as
+    /// loose sheets is not sound (#13685); one that comes back with no face at all is: the
+    /// solid offset to nothing (#2092), returned as an empty body by design.
     #[must_use]
-    pub fn sound(&self) -> bool {
+    pub fn sound(&self, input_solid: bool) -> bool {
+        let positive = matches!(self.volume, Some(VolumeSign::Positive(_)));
         self.check.is_valid()
-            && (!self.manifold || matches!(self.volume, Some(VolumeSign::Positive(_))))
+            && if input_solid {
+                self.empty || (self.manifold && positive)
+            } else {
+                !self.manifold || positive
+            }
     }
 }
 
@@ -97,6 +110,7 @@ pub fn soundness(k: &mut Kernel, b: &mut Brep) -> Result<Soundness> {
     };
     let check = check_brep_with_keys(k, b, CheckLevel::Level2, &keys)?;
     let manifold = crate::topology::brep::p2::is_manifold_solid(b)?;
+    let empty = crate::topology::brep::p1::num_faces(b) == 0;
     let volume = if manifold {
         Some(volume_sign(k, b)?)
     } else {
@@ -106,6 +120,7 @@ pub fn soundness(k: &mut Kernel, b: &mut Brep) -> Result<Soundness> {
         check,
         manifold,
         volume,
+        empty,
     })
 }
 

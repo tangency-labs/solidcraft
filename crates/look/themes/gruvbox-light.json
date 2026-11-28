@@ -4,6 +4,7 @@
   "format": "solidcraft-theme/1",
   "name": "Gruvbox Light",
   "base": "light",
+  "accepts_accent": true,
   "colors": {
     "app_bar": "#3c3836",
     "toolbar": "#fbf1c7",

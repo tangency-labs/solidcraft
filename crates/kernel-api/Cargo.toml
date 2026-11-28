@@ -1,0 +1,20 @@
+[package]
+name = "solidcraft-kernel-api"
+description = "SolidCraft's kernel interface: the Backend trait a kernel's adapter implements, the operations it is asked for, their inputs and its typed errors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The record's data types only (points, planes, regions, the body record and its history): the body format.
+solidcore-record = { workspace = true }
+# CADIR, cadmpeg's neutral CAD model: what the exchange family reads records from and writes them into.
+cadmpeg-ir = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

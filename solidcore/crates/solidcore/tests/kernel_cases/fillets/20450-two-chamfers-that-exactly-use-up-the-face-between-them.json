@@ -1,0 +1,961 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b33": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b34": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b42": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 8.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                5.0,
+                -20.0,
+                0.0
+              ],
+              "start": [
+                -5.0,
+                -20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                20.0,
+                0.0
+              ],
+              "start": [
+                5.0,
+                -20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                20.0,
+                0.0
+              ],
+              "start": [
+                5.0,
+                20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                -20.0,
+                0.0
+              ],
+              "start": [
+                -5.0,
+                20.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 4.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -3.0,
+                -20.0,
+                2.0
+              ],
+              "start": [
+                -5.0,
+                -20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -3.0,
+                20.0,
+                2.0
+              ],
+              "start": [
+                -3.0,
+                -20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                20.0,
+                2.0
+              ],
+              "start": [
+                -3.0,
+                20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                -20.0,
+                2.0
+              ],
+              "start": [
+                -5.0,
+                20.0,
+                2.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 4.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                5.0,
+                -20.0,
+                2.0
+              ],
+              "start": [
+                3.0,
+                -20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                20.0,
+                2.0
+              ],
+              "start": [
+                5.0,
+                -20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                3.0,
+                20.0,
+                2.0
+              ],
+              "start": [
+                5.0,
+                20.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                3.0,
+                -20.0,
+                2.0
+              ],
+              "start": [
+                3.0,
+                20.0,
+                2.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                5.0,
+                -20.0,
+                0.0
+              ],
+              "start": [
+                4.9,
+                -20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                20.0,
+                0.0
+              ],
+              "start": [
+                5.0,
+                -20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4.9,
+                20.0,
+                0.0
+              ],
+              "start": [
+                5.0,
+                20.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4.9,
+                -20.0,
+                0.0
+              ],
+              "start": [
+                4.9,
+                20.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b29",
+        "b30"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                5.0,
+                -20.0,
+                6.0
+              ],
+              "start": [
+                4.9,
+                -20.0,
+                6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                20.0,
+                6.0
+              ],
+              "start": [
+                5.0,
+                -20.0,
+                6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4.9,
+                20.0,
+                6.0
+              ],
+              "start": [
+                5.0,
+                20.0,
+                6.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4.9,
+                -20.0,
+                6.0
+              ],
+              "start": [
+                4.9,
+                20.0,
+                6.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b37"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b39"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b39",
+        "b40"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b41"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b45"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b46"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  4.9,
+                  20.0,
+                  8.0
+                ],
+                [
+                  4.9,
+                  -20.0,
+                  8.0
+                ]
+              ],
+              "index": 28
+            },
+            {
+              "at": [
+                [
+                  4.899999999999999,
+                  20.0,
+                  6.0
+                ],
+                [
+                  4.900000000000001,
+                  -20.0,
+                  6.0
+                ]
+              ],
+              "index": 33
+            },
+            {
+              "at": [
+                [
+                  4.9,
+                  20.0,
+                  2.0
+                ],
+                [
+                  4.9,
+                  -20.0,
+                  2.0
+                ]
+              ],
+              "index": 19
+            },
+            {
+              "at": [
+                [
+                  4.9,
+                  -20.0,
+                  0.0
+                ],
+                [
+                  4.900000000000002,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 23
+            }
+          ],
+          "points": [
+            [
+              4.9,
+              0.0,
+              8.0
+            ],
+            [
+              4.9,
+              0.0,
+              6.0
+            ],
+            [
+              4.9,
+              0.0,
+              2.0
+            ],
+            [
+              4.900000000000001,
+              0.0,
+              0.0
+            ]
+          ],
+          "tolerance": 2.099815141931275
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "20450-two-chamfers-that-exactly-use-up-the-face-between-them",
+  "expected": {
+    "body_count": 1,
+    "faces": 16,
+    "method": "block 10 * 40 * 8 = 3200, less two slots 2 * 40 * 4 = 320 each, less two strips 0.1 * 40 * 2 = 8 each: 2544. Each of the four chamfers takes a right triangle with legs 1 and 1 along 40: 1/2 * 40 = 20. V = 2544 - 80 = 2464. Faces: before the chamfer 14 (top, bottom, the two ends, two pieces of each x side and three faces of each slot); four chamfer faces, and the two rail end faces are used up: 16. Tolerance: the cuts' coordinates are within 1e-14 of the designed ones, which moves the volume by less than 1e-10 mm3; 1e-9 of the volume, 2.5e-6 mm3, is above that and far below a chamfer 1e-6 mm off, which moves it by 1.6e-4 mm3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20450"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 2464.0,
+    "what": "a 10 x 40 x 8 block with a slot in each x side, its two +x rails 2 mm tall and cut back to x = 4.9, each rail's end face chamfered 1 mm on both long edges: the two chamfers of a rail meet exactly in the middle of its end face and use it up. The cuts leave one of those edges at z = 6.000000000000001, so one face is 2 mm tall only to the rounding of its own coordinates; one valid solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 42,
+      "faces": 16,
+      "vertices": 28
+    }
+  },
+  "records": "20450-two-chamfers-that-exactly-use-up-the-face-between-them.bodies.json.gz",
+  "result": [
+    {
+      "body": "B",
+      "made": "b46"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1773.4741699796955,
+      "body_count": 1,
+      "edges": 42,
+      "faces": 16,
+      "vertices": 28,
+      "volume_mm3": 2464.0000000000005
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#20450"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a 10 x 40 x 8 block with a slot in each x side, its two +x rails 2 mm tall and cut back to x = 4.9, each rail's end face chamfered 1 mm on both long edges: the two chamfers of a rail meet exactly in the middle of its end face and use it up. The cuts leave one of those edges at z = 6.000000000000001, so one face is 2 mm tall only to the rounding of its own coordinates; one valid solid",
+  "why_not": []
+}

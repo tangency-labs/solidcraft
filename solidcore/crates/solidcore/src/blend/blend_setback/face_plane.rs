@@ -23,7 +23,8 @@
 //! Deviations: moved out of `spring.rs` unchanged (the frame, `to_plane` and `partials` are
 //! the same operations in the same order); the frame is a value of its own. No recursion.
 
-use super::{bern_elevate, bern_mul, el, sm_err, Face, FaceKind, Hom};
+use super::{bern_elevate, bern_mul, corner_step, el, Face, FaceKind, Hom};
+use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
@@ -99,8 +100,11 @@ impl FacePlane {
     }
 
     /// The parameter-plane point and tangent of a point `x` with a tangent `t` on the face
-    /// (the closure `toPlane`). `SM_ERR` where the point is on a quadric's axis or pole, or
-    /// more than a half turn about a cylinder's or cone's axis.
+    /// (the closure `toPlane`). `SM_ERR` where the point is at a sphere's pole
+    /// ([`CornerStep::SetbackSpringPointAtPole`]) or on a cylinder's or cone's axis
+    /// ([`CornerStep::SetbackSpringPointOnAxis`]), or a quarter turn or more about the axis
+    /// from the frame's radial direction, P and Q a half turn or more apart
+    /// ([`CornerStep::SetbackSpringEndsHalfTurnApart`]).
     pub(crate) fn to_plane(self, x: Point3, t: Vec3) -> Result<([f64; 2], [f64; 2])> {
         let (o, e1, e2, e3) = (self.o, self.e1, self.e2, self.e3);
         let r = self.radius;
@@ -112,7 +116,7 @@ impl FacePlane {
             FaceKind::Sphere => {
                 let den = r + u3;
                 if !(den > EFF_ZERO * r) {
-                    return Err(sm_err());
+                    return Err(corner_step(CornerStep::SetbackSpringPointAtPole));
                 }
                 Ok((
                     [u1 / den, u2 / den],
@@ -125,11 +129,12 @@ impl FacePlane {
             FaceKind::Cylinder | FaceKind::Cone => {
                 let rho = sqrt(u1 * u1 + u2 * u2);
                 if !(rho > EFF_ZERO) {
-                    return Err(sm_err());
+                    return Err(corner_step(CornerStep::SetbackSpringPointOnAxis));
                 }
                 let theta = u2.atan2(u1);
                 if theta.abs() >= 0.5 * PI {
-                    return Err(sm_err()); // more than a half turn between P and Q
+                    // more than a half turn between P and Q
+                    return Err(corner_step(CornerStep::SetbackSpringEndsHalfTurnApart));
                 }
                 let tt = (0.5 * theta).tan();
                 let dtheta = (-theta.sin() * d1 + theta.cos() * d2) / rho;

@@ -102,6 +102,7 @@ pub(super) struct Cache {
     colors: [Color32; 2],
     /// The interface language the defect tips are worded in.
     language: &'static str,
+    project_link_tools: bool,
     components: BTreeMap<u64, Component>,
     ids: BTreeMap<u64, usize>,
     scheduled: usize,
@@ -123,6 +124,7 @@ impl Cache {
             && self.sketch == app.session.active_sketch
             && self.colors == colors
             && self.language == language
+            && self.project_link_tools == app.ui.project_link_tools
         {
             // A Save As can move the design to a new file without changing the document;
             // the top row follows the file's name (#7267).
@@ -157,6 +159,7 @@ impl Cache {
         self.sketch = app.session.active_sketch;
         self.colors = colors;
         self.language = language;
+        self.project_link_tools = app.ui.project_link_tools;
     }
 
     fn children(&self, app: &SolveApp, component: u64, path: &[u64], remaining: usize) -> Vec<Vec<u64>> {

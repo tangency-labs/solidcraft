@@ -646,3 +646,110 @@ fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
         assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }
+
+// Constraints in the browser (#6061): a joint made as a constraint shows its rule, not its kind,
+// and opens Constrain on it, not Edit Joint.
+
+/// The harness's parts with a Mate between A and C (a constraint) beside Hinge and Glue.
+fn with_mate() -> Harness {
+    let mut h = harness();
+    h.app.run("joint.delete", json!({"joint": "Glue"})).unwrap();
+    h.app
+        .run(
+            "assembly.constraint.create",
+            json!({"type": "mate", "name": "Mate1", "a": {"occurrence": "A:1", "face": [10, 10, 10]}, "b": {"occurrence": "C:1", "face": [70, 10, 0]}}),
+        )
+        .unwrap();
+    h.frames(3);
+    h
+}
+
+/// Every rule has its own icon (two of them aliases of the sketch constraints' masters) and its own
+/// tooltip; a plain joint keeps the joint icon and names its kind.
+#[test]
+fn a_constraint_row_shows_its_rule() {
+    use solidcraft_engine::doc::joints::{Constraint, JointKind};
+    let (icon, tip) = crate::dialogs_assembly::joint_look(JointKind::Planar, Some(Constraint::Mate));
+    assert_eq!(icon, "constraint_mate");
+    assert_eq!(tip, solidcraft_ui_text::format("constrain.row_tip", &[("rule", crate::dialogs_constrain::label(Constraint::Mate))]));
+    assert!(!tip.to_lowercase().contains("planar"), "{tip}");
+    assert_eq!(crate::dialogs_assembly::joint_look(JointKind::Planar, None), ("joint", "Planar joint".to_string()));
+    let mut icons = std::collections::BTreeSet::new();
+    for c in Constraint::ALL {
+        let (icon, _) = crate::dialogs_assembly::joint_look(JointKind::Rigid, Some(c));
+        assert!(!solidcraft_look::icons::SET.resolve(icon).placeholder, "{c:?}: no icon {icon}");
+        icons.insert(icon);
+    }
+    assert_eq!(icons.len(), Constraint::ALL.len(), "each rule has its own icon");
+    // A placement's Joints folder carries the rule too.
+    let h = with_mate();
+    let a = h.app.session.doc.occurrences.iter().find(|o| o.name == "A:1").unwrap().id;
+    let listed = crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[a]);
+    let mate = listed.iter().find(|j| j.name == "Mate1").unwrap();
+    assert_eq!((mate.kind, mate.constraint), (JointKind::Planar, Some(Constraint::Mate)));
+    assert_eq!(listed.iter().find(|j| j.name == "Hinge").unwrap().constraint, None);
+}
+
+/// A double-click on a constraint's row opens Constrain loaded on it; on a joint's row, Edit Joint.
+#[test]
+fn a_double_click_on_a_constraint_opens_constrain() {
+    let mut h = with_mate();
+    let mate = id(&h, "Mate1");
+    h.step(&json!({"click": {"handle": "row:Mate1"}, "double": true})).unwrap();
+    h.frames(3);
+    let loaded = match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constrain(f))) => f.editing.as_ref().map(|e| e.0),
+        _ => None,
+    };
+    assert_eq!(loaded, Some(mate), "the double click opens Constrain on the constraint");
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs.iter().take(2).all(|i| i.items.len() == 1), "its references are picked: {:?}", d.inputs);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(3);
+    let hinge = id(&h, "Hinge");
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
+    h.frames(3);
+    let editing = match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Joint(f))) => f.editing,
+        _ => None,
+    };
+    assert_eq!(editing, Some(hinge), "a joint still opens Edit Joint");
+}
+
+/// The menu's Edit opens Constrain on a constraint too.
+#[test]
+fn the_menu_edits_a_constraint_in_constrain() {
+    let mut h = with_mate();
+    let mate = id(&h, "Mate1");
+    let dialog = crate::dialogs_assembly::open_joint(&h.app, mate).expect("a dialog");
+    assert!(matches!(dialog.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constrain(_))));
+    let hinge = id(&h, "Hinge");
+    let dialog = crate::dialogs_assembly::open_joint(&h.app, hinge).expect("a dialog");
+    assert!(matches!(dialog.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Joint(_))));
+    assert!(crate::dialogs_constrain::edit_constraint(&h.app, hinge).is_none(), "a joint isn't a constraint");
+    h.frames(1);
+}
+
+/// The right-click menu names a constraint's Edit as Edit Constraint, under its rule's icon, and
+/// picking it opens Constrain loaded on it; a joint's menu keeps Edit Joint.
+#[test]
+fn the_context_menu_edits_a_constraint_in_constrain() {
+    let mut h = with_mate();
+    let mate = id(&h, "Mate1");
+    let items = context_menu::items(&h.app, &Target::Joint { id: mate });
+    let edit = items.iter().find(|i| i.id == "ui.editJoint").expect("an Edit entry");
+    assert_eq!(edit.label, "Edit Constraint");
+    assert_eq!(edit.icon, "constraint_mate");
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    assert_eq!(items.iter().find(|i| i.id == "ui.editJoint").map(|i| i.label.as_str()), Some("Edit Joint"));
+
+    h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "joint", "id": mate}}));
+    assert_eq!(h.call("ui.menuPick", json!({"item": "ui.editJoint"}))["ok"], true);
+    h.frames(3);
+    let loaded = match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constrain(f))) => f.editing.as_ref().map(|e| e.0),
+        _ => None,
+    };
+    assert_eq!(loaded, Some(mate), "Edit Constraint opens Constrain on the constraint");
+}

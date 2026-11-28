@@ -60,6 +60,7 @@ fn bom_row(id: u64, item: u32, count: u64) -> bom::Row {
         part_number: String::new(),
         description: String::new(),
         revision: String::new(),
+        finish: String::new(),
         properties: Default::default(),
         materials: Vec::new(),
         statics: Vec::new(),
@@ -90,6 +91,7 @@ fn a_rows_values_read_as_a_list_shows_them() {
     row.materials = vec!["Steel".into(), "Zinc".into()];
     row.bom_type = BomType::Purchased;
     row.mass = Mass::Grams(1250.0);
+    row.finish = "Powder coat, RAL 9005".into();
     row.properties.insert("finish".into(), "Black".into());
     row.properties.insert("item".into(), "not the item".into());
     let list = bom_of(vec![row]);
@@ -98,9 +100,19 @@ fn a_rows_values_read_as_a_list_shows_them() {
     let read = |key: &str| fields.get(key).map(String::as_str);
     assert_eq!((read("item"), read("quantity"), read("count"), read("name")), (Some("3"), Some("4"), Some("4"), Some("Bolt; Bolt B")));
     assert_eq!((read("part_number"), read("description"), read("revision")), (Some("B-200"), Some("M8"), Some("C")));
-    assert_eq!((read("material"), read("mass"), read("finish")), (Some("Steel; Zinc"), Some("1.25"), Some("Black")));
+    assert_eq!(
+        (read("material"), read("mass"), read("finish")),
+        (Some("Steel; Zinc"), Some("1.25"), Some("Powder coat, RAL 9005")),
+        "the finish property wins over a free one"
+    );
     assert!(rows[0].purchased);
     assert_eq!(rows[0].kind, table::RowKind::Part);
+    let mut free = bom_row(8, 4, 1);
+    free.properties.insert("finish".into(), "Black".into());
+    let freed = parts_list(MassFormat::default()).rows(&bom_of(vec![free]), "mm");
+    assert_eq!(freed[0].fields.get("finish").map(String::as_str), Some("Black"), "a part with only the free property shows it, as before");
+    let bare = parts_list(MassFormat::default()).rows(&bom_of(vec![bom_row(9, 5, 1)]), "mm");
+    assert_eq!(bare[0].fields.get("finish"), None, "no finish: the cell shows the missing mark");
 
     for (mass, format, shown) in [
         (Mass::Grams(1250.0), MassFormat { unit: MassUnit::G, decimals: 0 }, Some("1250")),
@@ -158,8 +170,8 @@ fn a_lists_rows_lay_out_in_a_table() {
     let measure = |text: &str, cap: f64| text.chars().count() as f64 * cap / 2.0;
     let laid = definition.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &measure).unwrap();
     assert_eq!(laid.rows.len(), 3);
-    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, MASS: letters at 1.75 mm, a 1 mm pad each side;
-    // the outer two also hold half an outline line and half a cell line, the rest two half cell lines.
+    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, MASS: letters at 1.75 mm, a 1 mm pad each
+    // side; the outer two also hold half an outline line and half a cell line, the rest two half cell lines.
     let letters = [4.0, 3.0, 5.0, 11.0, 8.0, 4.0];
     let width: f64 = letters.iter().map(|n: &f64| n * 1.75 + 2.0).sum::<f64>() + 2.0 * 0.35 + 5.0 * 0.35;
     assert!((laid.outline.max.x - 400.0).abs() < 1e-9 && (laid.outline.min.x - (400.0 - width)).abs() < 1e-9, "{:?} {width}", laid.outline);
@@ -169,7 +181,7 @@ fn a_lists_rows_lay_out_in_a_table() {
     assert!((row.rect.max.y - (280.0 - 2.0 * 7.0)).abs() < 1e-9 && (row.rect.min.y - (280.0 - 3.0 * 7.0)).abs() < 1e-9);
     assert_eq!(row.cells[0].lines[0].text, "2.1");
     // Not weighed: its cell shows the missing value (`cell::MISSING`, nothing), so it has no line.
-    assert!(row.cells[5].lines.is_empty(), "not weighed");
+    assert!(row.cells[5].lines.is_empty(), "not weighed (the mass is the sixth column)");
 }
 
 /// A row's key fits at the deepest a list goes: 64 levels under the top, every member its longest,
@@ -210,6 +222,47 @@ fn damaged(d: &Drawing, change: impl Fn(&mut Value)) -> String {
 }
 
 /// A table saves as it is, in any order read back by id, and what a table doesn't set stays out.
+/// A saved parts list keeps its columns, by name and in its own order, whatever a new list starts
+/// with: the saved columns are the table's, `default_table` only gives a new one its start (a new list
+/// has no FINISH column; one a table adds by hand is kept). Its rows still fill every column it has,
+/// and the finish a part has shows in a column only a table that has one.
+#[test]
+fn a_parts_list_saved_before_the_finish_column_keeps_its_columns() {
+    let (d, first) = tabled();
+    let v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    let old = ["item", "quantity", "name", "description", "material", "mass", "ballooned"];
+    // A list saved by an older release, and one whose editor added a FINISH column before the mass.
+    let with_finish = |v: &mut Value| {
+        for table in v["tables"].as_array_mut().unwrap() {
+            if let Some(columns) = table["table"]["columns"].as_array_mut()
+                && let Some(mass) = columns.iter().position(|c| c["name"] == "mass")
+            {
+                let mut finish = columns[mass - 1].clone();
+                finish["name"] = json!("finish");
+                finish["heading"] = json!("FINISH");
+                columns.insert(mass, finish);
+            }
+        }
+    };
+    let mut added = v.clone();
+    with_finish(&mut added);
+    let added = Drawing::from_value(added).unwrap();
+    let names = |d: &Drawing| d.tables.by_id(first).unwrap().table.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&added), ["item", "quantity", "name", "description", "material", "finish", "mass", "ballooned"], "a column added by hand stays");
+    let back = Drawing::from_value(v).unwrap();
+    assert_eq!(names(&back), old, "the same columns in the same order, with no finish");
+    assert_eq!(names(&Drawing::from_json(&back.to_json().unwrap()).unwrap()), old, "and again after a save");
+    let unprinted: Vec<_> = back.tables.by_id(first).unwrap().table.columns.iter().filter(|c| !c.printed).map(|c| c.name.as_str()).collect();
+    assert_eq!(unprinted, ["ballooned"], "the unprinted column is still the one named ballooned");
+    // Its rows fill its columns by name: a row that has a finish and a list without the column lay out.
+    let mut row = bom_row(7, 1, 1);
+    row.finish = "Powder coat, RAL 9005, matt".into();
+    let Kind::PartsList(list) = &back.tables.by_id(first).unwrap().kind else { panic!("a parts list") };
+    let rows = list.rows(&bom_of(vec![row]), "mm");
+    let table = &back.tables.by_id(first).unwrap().table;
+    table.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &|t, cap| t.len() as f64 * cap / 2.0).unwrap();
+}
+
 #[test]
 fn tables_save_and_read_back_by_id() {
     let (d, first) = tabled();

@@ -26,7 +26,7 @@ Development pushes are not application releases. Pushing to `main` or pushing a 
 - Documentation, the browser app and the Flatpak repository publish under project Pages `/solidcraft/`. Add no old-name Pages aliases.
 
 ## Where things live
-- `packaging/` holds the per-platform scripts (`packaging/linux`, `packaging/windows`, `packaging/macos`, `packaging/freebsd`, `packaging/web`); `packaging/tests` checks them.
+- `packaging/` holds the per-platform scripts (`packaging/linux`, `packaging/windows`, `packaging/macos`, `packaging/freebsd`, `packaging/web`, `packaging/python` (wheels; `pypi.yml`)); `packaging/tests` checks them.
 - Nix: `flake.nix` and `docs/nix.md`. Building: `docs/building.md`. Downloads: `docs/downloads.md`.
 - Build with `CARGO_TARGET_DIR=<repo>/target`. Windows from Linux: `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.
 

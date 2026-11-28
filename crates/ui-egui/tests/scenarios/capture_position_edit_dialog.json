@@ -1,0 +1,295 @@
+[
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "parameters.add",
+      "params": {
+        "name": "dx",
+        "expression": "25 mm"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "parameters.add",
+      "params": {
+        "name": "dy",
+        "expression": "10 mm"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.create",
+      "params": {
+        "name": "PartA",
+        "grounded": false
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 10,
+        "width": 10,
+        "height": 10,
+        "body_name": "BoxA"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    }
+  },
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "click": {
+      "handle": "row:occurrence:2"
+    }
+  },
+  {
+    "key": "M"
+  },
+  {
+    "click": {
+      "handle": "dialog:Capture All Positions"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:X Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "dx"
+  },
+  {
+    "key": "Enter"
+  },
+  {
+    "expect": {
+      "dialog": null,
+      "features": 1,
+      "errors": 0,
+      "bbox": {
+        "body": "BoxA",
+        "min": [25, 0, 0],
+        "max": [35, 10, 10]
+      },
+      "query": {
+        "command": "component.list",
+        "path": ["pending_moves"],
+        "value": [2]
+      }
+    }
+  },
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "start": "component.capture_position"
+  },
+  {
+    "expect": {
+      "features": 2,
+      "errors": 0,
+      "shown_handles": ["timeline:CapturePosition1"],
+      "query": {
+        "command": "timeline.inspect",
+        "params": {
+          "feature": "CapturePosition1"
+        },
+        "path": ["definition", "moves", 0, "translate", 0],
+        "value": "dx"
+      }
+    }
+  },
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "call": "ui.editFeature",
+    "params": {
+      "feature": "CapturePosition1"
+    }
+  },
+  {
+    "expect": {
+      "dialog": "CapturePosition"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:X Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "dx * 2"
+  },
+  {
+    "click": {
+      "handle": "dialog:Y Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "dy"
+  },
+  {
+    "click": {
+      "handle": "dialog:OK"
+    }
+  },
+  {
+    "expect": {
+      "dialog": null,
+      "errors": 0,
+      "bbox": {
+        "body": "BoxA",
+        "min": [50, 10, 0],
+        "max": [60, 20, 10]
+      },
+      "query": {
+        "command": "timeline.inspect",
+        "params": {
+          "feature": "CapturePosition1"
+        },
+        "path": ["definition", "moves", 0, "translate", 0],
+        "value": "dx * 2"
+      }
+    }
+  },
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "click": {
+      "handle": "timeline:CapturePosition1"
+    },
+    "button": "right"
+  },
+  {
+    "call": "ui.menuPick",
+    "params": {
+      "item": "Edit Feature"
+    }
+  },
+  {
+    "expect": {
+      "dialog": "CapturePosition"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Z Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "99"
+  },
+  {
+    "key": "Escape"
+  },
+  {
+    "expect": {
+      "dialog": null,
+      "bbox": {
+        "body": "BoxA",
+        "min": [50, 10, 0],
+        "max": [60, 20, 10]
+      }
+    }
+  },
+  {
+    "click": {
+      "handle": "timeline:CapturePosition1"
+    },
+    "button": "right"
+  },
+  {
+    "call": "ui.menuPick",
+    "params": {
+      "item": "Edit Feature"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Z Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "5"
+  },
+  {
+    "click": {
+      "handle": "dialog:OK"
+    }
+  },
+  {
+    "expect": {
+      "dialog": null,
+      "errors": 0,
+      "bbox": {
+        "body": "BoxA",
+        "min": [50, 10, 5],
+        "max": [60, 20, 15]
+      }
+    }
+  },
+  {
+    "note": "Move UI preserves expressions when Capture All Positions is unticked, and Edit Feature UI (via ui.editFeature and timeline chip right-click menu) edits CapturePosition1 expressions with Cancel and OK."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "parameters.change",
+      "params": {
+        "name": "dx",
+        "expression": "30 mm"
+      }
+    }
+  },
+  {
+    "expect": {
+      "errors": 0,
+      "bbox": {
+        "body": "BoxA",
+        "min": [60, 10, 5],
+        "max": [70, 20, 15]
+      }
+    }
+  }
+]

@@ -128,17 +128,18 @@ fn wr_531_drilled_hole_shells_with_a_sphere_cap() {
         let caps = spheres(&b);
         assert_eq!(caps.len(), 1, "{case}: one cap on a sphere");
         let (radius, centre) = caps[0];
-        // The cap is the sphere about the tip vertex's point at the shell's distance
-        // (`BuildOffsetOfVertex`). The radius is that distance, copied, so it agrees to a
-        // few ulps of 2. The centre goes through the sphere's placement arithmetic, so it
-        // need only meet the cap's own validity: within the tip vertex's tolerance of its
-        // point. That point lies within the same tolerance of the exact tip (the seam edge,
-        // a line swept about the axis through its end, ends at the tip exactly), so the
-        // centre is within twice it of the tip.
-        assert!(
-            (radius - 2.0).abs() <= 4.0 * f64::EPSILON * 2.0,
-            "{case}: radius {radius}"
-        );
+        // The cap stands in for the tip vertex (`BuildOffsetOfVertex`): it is the exact
+        // offset of that vertex, the sphere of the shell's distance 2 about the exact tip,
+        // to within the vertex's tolerance, the accuracy the kernel declares there. Its
+        // radius is not the distance copied: `create_sphere_from_arcs` fits it to the rim
+        // arcs, which are evaluated on the offset cone at coordinates of about 30, so no
+        // few-ulps-of-2 bound holds and the vertex's tolerance is the claim. `radius - 2`
+        // is exact (Sterbenz: the radius is within a factor 2 of 2). The centre goes
+        // through the sphere's placement arithmetic: within the vertex's tolerance of the
+        // vertex's point, which lies within the same tolerance of the exact tip (the seam
+        // edge, a line swept about the axis through its end, ends at the tip exactly), so
+        // within twice it of the tip; the level-2 check below confirms the cap meets its rim.
+        assert!((radius - 2.0).abs() <= tip_tol, "{case}: radius {radius}");
         assert!(
             centre.distance(tip_point) <= tip_tol,
             "{case}: centre {centre:?}, tip vertex {tip_point:?}, tolerance {tip_tol}"

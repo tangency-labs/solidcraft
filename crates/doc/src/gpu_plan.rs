@@ -7,7 +7,7 @@ use solidcraft_geom::tess::TessPlan;
 
 /// `plan` in the form the viewport evaluates on the GPU: solidcore-tess's plan, which the kernel's
 /// already is.
-pub fn gpu_plan(plan: &TessPlan) -> solidcore_tess::TessPlan {
+pub fn gpu_plan(plan: &TessPlan) -> solidcraft_kernel::services::tess::TessPlan {
     plan.clone()
 }
 

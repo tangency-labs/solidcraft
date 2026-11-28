@@ -1,5 +1,6 @@
 //! The [`Window`] struct and associated types.
 use std::fmt;
+use std::sync::Arc;
 
 use crate::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 use crate::error::{ExternalError, NotSupportedError};
@@ -123,6 +124,8 @@ pub struct WindowAttributes {
     pub cursor: Cursor,
     #[cfg(feature = "rwh_06")]
     pub(crate) parent_window: Option<SendSyncRawWindowHandle>,
+    #[cfg_attr(not(any(windows_platform, macos_platform, x11_platform, wayland_platform)), allow(dead_code))]
+    pub(crate) owned_by: Option<Arc<Window>>,
     pub fullscreen: Option<Fullscreen>,
     // Platform-specific configuration.
     #[allow(dead_code)]
@@ -154,6 +157,7 @@ impl Default for WindowAttributes {
             cursor: Cursor::default(),
             #[cfg(feature = "rwh_06")]
             parent_window: None,
+            owned_by: None,
             active: true,
             platform_specific: Default::default(),
         }
@@ -452,6 +456,17 @@ impl WindowAttributes {
     #[inline]
     pub fn with_cursor(mut self, cursor: impl Into<Cursor>) -> Self {
         self.cursor = cursor.into();
+        self
+    }
+
+    /// Associate a top-level window with a live owner.
+    ///
+    /// Windows uses a Win32 owner, X11 a transient hint, and Wayland an XDG toplevel parent.
+    /// On macOS the owner puts the window right above itself whenever the owner becomes the
+    /// key window; the window is not a child window, so it can be on any screen.
+    #[inline]
+    pub fn with_owned_by(mut self, owner: Arc<Window>) -> Self {
+        self.owned_by = Some(owner);
         self
     }
 

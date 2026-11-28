@@ -112,7 +112,7 @@ pub fn is_outward_primitive(k: &mut Kernel, b: &mut Brep, t: &Template) -> Resul
         return Ok(false);
     }
     let c = super::validation::check_brep(k, b, super::validation::CheckLevel::Level0)?;
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid != Some(true) {
+    if !c.pointers.is_passed() || c.assert_valid != Some(true) {
         return Ok(false);
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;
@@ -1692,15 +1692,19 @@ mod tests {
                             "box {s:e}: {e:?}"
                         );
                     } else {
+                        // the face construction's failure is kept as the cause, and gives
+                        // the class
+                        let cause = e.cause().expect("the face construction's failure");
                         assert_eq!(
-                            e,
-                            crate::SolidError::topology_failed(
-                                "topology::brep::p8",
-                                "the face with a rectangular trim could not be made"
-                            ),
+                            e.topology_failure(),
+                            Some(&crate::error::topology::TopologyFailure::FaceNotMade {
+                                class: cause.kind()
+                            }),
                             "box {s:e}"
                         );
-                        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "box {s:e}");
+                        assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
+                        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
+                        assert_eq!(e.kind(), cause.kind(), "box {s:e}");
                     }
                 }
             }

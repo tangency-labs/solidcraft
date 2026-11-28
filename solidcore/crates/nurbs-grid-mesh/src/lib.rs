@@ -42,13 +42,18 @@
 mod deviation;
 mod error;
 mod grid;
-mod planar;
 mod surface;
 mod trim;
 
-pub use deviation::{deviation, Deviation};
+pub use deviation::deviation;
+pub use deviation::Deviation;
 pub use error::MeshError;
-pub use grid::{grid_lines, Dir, GridLines};
-pub use planar::triangulate_planar;
-pub use surface::{NurbsSurface, SurfacePoint};
-pub use trim::{mesh_trimmed, LoopPoint, MeshOptions, TrimmedMesh};
+pub use grid::grid_lines;
+pub use grid::Dir;
+pub use grid::GridLines;
+pub use surface::NurbsSurface;
+pub use surface::SurfacePoint;
+pub use trim::mesh_trimmed;
+pub use trim::LoopPoint;
+pub use trim::MeshOptions;
+pub use trim::TrimmedMesh;

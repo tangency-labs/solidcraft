@@ -116,6 +116,15 @@ impl Island {
     }
 }
 
+impl Aperture {
+    /// Vertices kept for its shape: outer contours and holes.
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.islands
+            .iter()
+            .fold(0usize, |n, i| i.holes.iter().fold(n.saturating_add(i.outer.vertex_count()), |n, h| n.saturating_add(h.vertex_count())))
+    }
+}
+
 /// A dark area being built: islands that never overlap.
 #[derive(Default)]
 pub(crate) struct Area {

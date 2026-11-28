@@ -2,8 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::display_units::{DecimalMarker, MAX_DECIMALS, NumberFormat, Shown, format_number, format_value, grouped_digits};
+use crate::display_units::{MAX_DECIMALS, NumberFormat, Shown, format_number, format_value, grouped_digits};
 use crate::{DocError, Result, expr};
+
+/// The largest deviation a tolerance or a general tolerance may give, in internal units.
+const MAX_DEVIATION: f64 = 1e6;
+/// The most rows a general tolerance has, and the largest end a range may have (mm).
+const MAX_ROWS: usize = 64;
+const MAX_SIZE_MM: f64 = 1e12;
 
 /// Deviations are offsets from the unrounded nominal, in internal units (mm or rad).
 #[derive(Clone, Debug, PartialEq)]
@@ -28,10 +34,14 @@ pub enum TolerancePresentation {
     Limits,
 }
 
+/// A dimension's role and its frame. Auxiliary and exact roles refuse tolerances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
+    /// A regular, unframed dimension.
     Normal,
+    /// An auxiliary dimension, shown in parentheses.
     Auxiliary,
+    /// An exact dimension, shown in a box.
     Exact,
 }
 
@@ -89,7 +99,7 @@ impl Tolerance {
         let deviation = |v: f64, name: &str| {
             if !v.is_finite() {
                 Err(DocError::Invalid(format!("{name} deviation must be finite")))
-            } else if v.abs() > 1e6 {
+            } else if v.abs() > MAX_DEVIATION {
                 Err(DocError::Invalid(format!("{name} deviation magnitude must be at most 1e6")))
             } else {
                 Ok(())
@@ -193,9 +203,11 @@ pub struct DimensionValue {
 pub struct DimensionStyle {
     pub unit: String,
     pub number: NumberFormat,
+    /// Decimal places of the displayed unit; for degree/minute angles, places of a minute.
     pub decimals: u8,
-    /// Maximum precision of both stacked values. Trailing-zero suppression removes
-    /// only shared zeros, so their decimal places match (except an unsigned zero deviation).
+    /// Maximum precision of both stacked values, in the displayed unit (minutes for
+    /// degree/minute angles). Trailing-zero suppression removes only shared zeros,
+    /// so their decimal places match (except an unsigned zero deviation).
     pub tolerance_decimals: u8,
     pub repeat: Repeat,
 }
@@ -258,6 +270,14 @@ impl DimensionText {
 }
 
 /// Format a dimension without changing its value or dropping incompatible annotations.
+///
+/// # Errors
+///
+/// Returns [`DocError::Invalid`] for non-finite or out-of-range display values, a precision
+/// over eight places, a count outside 1 to 10,000, an incompatible role and tolerance,
+/// an invalid tolerance or fit code, or an unknown or wrong-kind unit. When limits are
+/// displayed, they are computed from the unrounded nominal and deviations and must also
+/// fit the number formatter's display range.
 pub fn format_dimension(value: &DimensionValue, style: &DimensionStyle) -> Result<DimensionText> {
     if !value.nominal.is_finite() {
         return Err(DocError::Invalid("dimension nominal must be finite".into()));
@@ -354,10 +374,7 @@ fn dimension_deviation(deviation: f64, kind: expr::Kind, style: &DimensionStyle)
 fn dimension_pair(upper: f64, lower: f64, kind: expr::Kind, style: &DimensionStyle) -> Result<(Shown, Shown)> {
     let mut upper = format_value(upper, kind, &style.unit, style.tolerance_decimals, &style.number)?;
     let mut lower = format_value(lower, kind, &style.unit, style.tolerance_decimals, &style.number)?;
-    let marker = match style.number.marker {
-        DecimalMarker::Point => '.',
-        DecimalMarker::Comma => ',',
-    };
+    let marker = style.number.marker.char();
     let places = |text: &str| text.split_once(marker).map_or(0, |(_, fraction)| fraction.chars().filter(char::is_ascii_digit).count());
     let precision = places(&upper.text).max(places(&lower.text));
     for shown in [&mut upper, &mut lower] {
@@ -384,4 +401,135 @@ fn signed_deviation(shown: Shown) -> String {
     } else {
         shown.text
     }
+}
+
+/// A drawing's general tolerance (#4896): the ± a dimension with no tolerance of its own takes,
+/// stated once on the drawing. Deviations are in internal units (mm, rad), as [`Tolerance`]'s
+/// are; `unit` is the length unit the block is stated in.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum GeneralTolerance {
+    #[default]
+    None,
+    /// By the decimals a length is shown with (`25` ±0.5, `25.0` ±0.1), for lengths shown in
+    /// `unit`; angles take `angle`.
+    ByDecimals { unit: String, linear: Vec<DecimalsRow>, angle: Option<f64> },
+    /// By the size a length is shown with, rows going up, their ends in `unit`; angles take `angle`.
+    ByRange { unit: String, ranges: Vec<RangeRow>, angle: Option<f64> },
+}
+
+/// A length shown with `decimals` takes ±`deviation`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecimalsRow {
+    pub decimals: u8,
+    pub deviation: f64,
+}
+
+/// A length shown over the row before's end (from 0 for the first row) and up to `up_to`, in the
+/// block's `unit`, takes ±`deviation` (mm). Only the last row may have no end, for every size
+/// above the one before.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RangeRow {
+    pub up_to: Option<f64>,
+    pub deviation: f64,
+}
+
+impl GeneralTolerance {
+    /// Whether there is no block: a profile with none saves without one.
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+
+    /// What a block may hold, in a profile that writes numbers in `number`.
+    pub(crate) fn validate(&self, number: &NumberFormat) -> Result<()> {
+        let (unit, rows, angle) = match self {
+            Self::None => return Ok(()),
+            Self::ByDecimals { unit, linear, angle } => (unit, linear.len(), angle),
+            Self::ByRange { unit, ranges, angle } => (unit, ranges.len(), angle),
+        };
+        self.readable(number)?;
+        if !matches!(expr::unit_info(unit), Some((expr::Kind::Length, _))) {
+            return Err(invalid("a general tolerance's unit is a length unit"));
+        }
+        if !(1..=MAX_ROWS).contains(&rows) {
+            return Err(invalid("a general tolerance has 1 to 64 rows"));
+        }
+        if angle.is_some_and(|a| a.is_nan() || a <= 0.0 || a > std::f64::consts::PI) {
+            return Err(invalid("a general tolerance's angle is more than 0 and at most π"));
+        }
+        let deviation = |d: f64| {
+            if d > 0.0 && d <= MAX_DEVIATION { Ok(()) } else { Err(invalid("a general tolerance's deviations are more than 0 and at most 1e6")) }
+        };
+        match self {
+            Self::None => {}
+            Self::ByDecimals { linear, .. } => {
+                for (i, row) in linear.iter().enumerate() {
+                    deviation(row.deviation)?;
+                    if row.decimals > MAX_DECIMALS || linear.iter().take(i).any(|before| before.decimals == row.decimals) {
+                        return Err(invalid(&format!("a general tolerance's decimals are 0 to {MAX_DECIMALS}, each once")));
+                    }
+                }
+            }
+            Self::ByRange { ranges, .. } => {
+                let mut below = 0.0;
+                for (i, row) in ranges.iter().enumerate() {
+                    deviation(row.deviation)?;
+                    match row.up_to {
+                        Some(up) if up > below && up <= MAX_SIZE_MM => below = up,
+                        Some(_) => return Err(invalid("a general tolerance's ranges go up: each end is above the one before and at most 1e12")),
+                        None if i + 1 == ranges.len() => {}
+                        None => return Err(invalid("only a general tolerance's last range may have no end")),
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A decimal-places block needs trailing zeros: without them `25` and `25.0` would read the
+    /// same and mean different tolerances.
+    fn readable(&self, number: &NumberFormat) -> Result<()> {
+        if matches!(self, Self::ByDecimals { .. }) && !number.trailing_zeros {
+            return Err(invalid("a general tolerance by decimal places needs trailing zeros: `25` and `25.0` mean different tolerances"));
+        }
+        Ok(())
+    }
+
+    /// The ± (internal units) dimension `value` takes from this block, judged on its nominal as
+    /// `style` shows it, the number the drawing states. None for a dimension with a tolerance of
+    /// its own (a fit code too) or an auxiliary or exact one (ISO 129-1 4.1.4, 4.1.5), and none
+    /// where no row covers it: it is then untoleranced. A decimal-places block holds for lengths
+    /// shown in its own unit only; a range's ends are read in the block's unit. A shown size within
+    /// 1e-9 mm of a range's end is at it, so a unit's conversion never moves it into the next row.
+    /// A block its check refuses is refused here too.
+    pub fn effective(&self, value: &DimensionValue, style: &DimensionStyle) -> Result<Option<f64>> {
+        let (Self::ByDecimals { unit, angle, .. } | Self::ByRange { unit, angle, .. }) = self else { return Ok(None) };
+        self.validate(&style.number)?;
+        if value.role != Role::Normal || value.tolerance != Tolerance::None {
+            return Ok(None);
+        }
+        let shown = format_value(value.nominal, value.kind, &style.unit, style.decimals, &style.number)?;
+        if value.kind == expr::Kind::Angle {
+            return Ok(*angle);
+        }
+        let scale = |unit: &str| expr::unit_info(unit).map(|(_, scale)| scale);
+        let size_mm = scale(&style.unit).map(|scale| shown.value.abs() * scale);
+        Ok(match self {
+            Self::ByDecimals { linear, .. } if scale(unit) == scale(&style.unit) => {
+                linear.iter().find(|row| row.decimals == style.decimals).map(|row| row.deviation)
+            }
+            Self::ByRange { ranges, .. } => {
+                let end_mm = scale(unit);
+                let within = |size: f64, up: f64| end_mm.is_some_and(|scale| size <= up * scale + solidcraft_geom::EPS);
+                size_mm.and_then(|size| ranges.iter().find(|row| row.up_to.is_none_or(|up| within(size, up))).map(|row| row.deviation))
+            }
+            _ => None,
+        })
+    }
+}
+
+fn invalid(message: &str) -> DocError {
+    DocError::Invalid(message.into())
 }

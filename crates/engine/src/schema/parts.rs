@@ -54,6 +54,14 @@ pub struct PartsInsertParams {
     /// out of the face; with `point`, its +Z against `direction` (default false).
     #[serde(default)]
     pub flip: Option<bool>,
+    /// Physical material for the generated solid (default: "Steel").
+    #[serde(default)]
+    pub material: Option<String>,
+    /// For a part with a metric thread: `cosmetic` (default: recorded on the face, the body
+    /// unchanged) or `modeled` (cut into the body over the standard's thread length from the tip,
+    /// the start chamfered; slower, and refused past 80 turns).
+    #[serde(default)]
+    pub thread: Option<String>,
 }
 
 /// Resolve bore picks before placing custom hardware. Each pick names its world body.
@@ -128,6 +136,9 @@ pub struct PartsResizeParams {
     #[serde(default, deserialize_with = "length")]
     #[schemars(schema_with = "length_schema")]
     pub length: Option<f64>,
+    /// `cosmetic` or `modeled`, as `parts.insert` takes it (left out: as the part has it).
+    #[serde(default)]
+    pub thread: Option<String>,
 }
 
 /// The family, with the handler's message for anything that isn't text.
@@ -253,6 +264,10 @@ pub struct PartFamily {
     pub sizes: Vec<Value>,
     /// The standard lengths (mm), for the families that have one; else `null`.
     pub lengths: Option<Vec<f64>>,
+    /// For a family with a metric thread, the ways it can be made, as `thread` takes them
+    /// (`cosmetic`, `modeled`); left out for the others.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<Vec<String>>,
 }
 
 fn sizes_schema(_: &mut SchemaGenerator) -> Schema {
@@ -268,6 +283,9 @@ pub struct InsertedPart {
     pub occurrence: u64,
     /// The component's name.
     pub name: String,
+    /// How its thread was made (`cosmetic` or `modeled`), for a part with a metric thread.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
     /// With `at`: the first hole's joint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub joint: Option<u64>,
@@ -295,6 +313,9 @@ pub struct ResizedPart {
     pub size: String,
     /// Its length (mm), for a part that has one; else `null`.
     pub length: Option<f64>,
+    /// How its thread is made now (`cosmetic` or `modeled`), for a part with a metric thread.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

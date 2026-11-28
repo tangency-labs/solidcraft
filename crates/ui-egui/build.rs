@@ -1,6 +1,9 @@
 //! Build information for Help › About: the git commit and the build date (UTC). Both fall back to
 //! "unknown" when git is missing (a source tarball). Also one test per UI scenario file
-//! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit.
+//! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit, and the built-in keyboard
+//! profiles (`keyboard-profiles/*.json`).
+// A build script reports to cargo on stderr; nothing else reads it (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,9 +43,43 @@ fn main() {
         eprintln!("locales: {e}");
         std::process::exit(1);
     }
+    if let Err(e) = keyboard_profiles() {
+        eprintln!("keyboard profiles: {e}");
+        std::process::exit(1);
+    }
 }
 
-/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` and the shared crates' catalogs
+/// `$OUT_DIR/keyboard_profiles.rs`: `BUILTIN`, `(id, JSON text)` for each file in
+/// `keyboard-profiles/`, sorted by id, so adding a profile needs no Rust edit (#15302). Each file
+/// says where its keys come from on a `"provenance"` line, kept beside its generated entry.
+fn keyboard_profiles() -> Result<(), String> {
+    let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?).join("keyboard-profiles");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut out = String::from("/// The keyboard profiles shipped with SolidCraft.\npub const BUILTIN: &[(&str, &str)] = &[\n");
+    for path in files {
+        let id = path.file_stem().and_then(|s| s.to_str()).ok_or("profile file name is not UTF-8")?;
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let provenance = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("\"provenance\":"))
+            .ok_or_else(|| format!("{}: missing provenance", path.display()))?;
+        out += &format!("    ({id:?}, include_str!({:?})), // {}\n", path.display().to_string(), provenance.trim());
+    }
+    out += "];\n";
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("keyboard_profiles.rs");
+    std::fs::write(dest, out).map_err(|e| e.to_string())
+}
+
+/// `$OUT_DIR/locales/<id>.json.z`, which the app embeds (the JSON deflated: the 38 catalogs are
+/// 17 MB as text and under 5 MB packed, and a run reads one or two of them), and
+/// `$OUT_DIR/locales/<id>.json`, which the tests read: each catalog in `assets/locales` and the shared crates' catalogs
 /// in `crates/ui-text/locales` (the words of the kit's Preferences window and pages), merged per
 /// language, plus the messages of `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`,
 /// one file per change, folded into the catalogs on main), so a pull request's new strings work
@@ -97,13 +134,92 @@ fn merged_locales() -> Result<(), String> {
             }
         }
     }
+    // Serbian in Latin script is not a catalog of its own: it is the Cyrillic catalog (pending
+    // messages included) transliterated letter for letter, so the two scripts never drift apart.
+    if let Some(cyrillic) = catalogs.get("sr") {
+        let latin = cyrillic.iter().map(|(id, text)| (id.clone(), Value::String(serbian_latin(text.as_str().unwrap_or_default())))).collect();
+        catalogs.entry("sr-Latn".to_string()).or_insert(latin);
+    }
     let out = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("locales");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     for (id, catalog) in catalogs {
         let text = serde_json::to_string(&catalog).map_err(|e| e.to_string())?;
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, text.as_bytes()).map_err(|e| e.to_string())?;
+        std::fs::write(out.join(format!("{id}.json.z")), packer.finish().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         std::fs::write(out.join(format!("{id}.json")), text).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Serbian Cyrillic to Serbian Latin (gajica), letter for letter. Anything else (Latin brand
+/// names, units, `{placeholders}`) is kept. Љ, Њ and Џ become Lj, Nj and Dž, or LJ, NJ and DŽ
+/// inside a word written in capitals.
+fn serbian_latin(text: &str) -> String {
+    fn latin(c: char) -> Option<&'static str> {
+        Some(match c {
+            'а' => "a",
+            'б' => "b",
+            'в' => "v",
+            'г' => "g",
+            'д' => "d",
+            'ђ' => "đ",
+            'е' => "e",
+            'ж' => "ž",
+            'з' => "z",
+            'и' => "i",
+            'ј' => "j",
+            'к' => "k",
+            'л' => "l",
+            'љ' => "lj",
+            'м' => "m",
+            'н' => "n",
+            'њ' => "nj",
+            'о' => "o",
+            'п' => "p",
+            'р' => "r",
+            'с' => "s",
+            'т' => "t",
+            'ћ' => "ć",
+            'у' => "u",
+            'ф' => "f",
+            'х' => "h",
+            'ц' => "c",
+            'ч' => "č",
+            'џ' => "dž",
+            'ш' => "š",
+            _ => return None,
+        })
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let lower = c.to_lowercase().next().unwrap_or(c);
+        let Some(letters) = latin(lower) else {
+            out.push(c);
+            continue;
+        };
+        if c == lower {
+            out.push_str(letters);
+        } else if letters.chars().count() == 1 {
+            out.push_str(&letters.to_uppercase());
+        } else {
+            let next = chars.get(i + 1).copied();
+            let previous = i.checked_sub(1).map(|j| chars[j]);
+            let capitals = match next {
+                Some(n) if n.is_alphabetic() => n.is_uppercase(),
+                _ => previous.is_some_and(|p| p.is_alphabetic() && p.is_uppercase()),
+            };
+            let mut rest = letters.chars();
+            out.extend(rest.next().map(|first| first.to_ascii_uppercase()));
+            if capitals {
+                out.push_str(&rest.as_str().to_uppercase());
+            } else {
+                out.push_str(rest.as_str());
+            }
+        }
+    }
+    out
 }
 
 /// `$OUT_DIR/scenario_tests.rs`: a `#[test]` per scenario file, named after it; a scenario with

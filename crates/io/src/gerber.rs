@@ -53,6 +53,10 @@ pub struct GerberLayer {
 
 /// Most aperture macros one file may define.
 const MAX_MACROS: usize = 10_000;
+/// Most aperture definitions one file may have, redefinitions included: each one runs its macro.
+const MAX_APERTURE_DEFINITIONS: usize = 10_000;
+/// Most vertices the shapes of an image's apertures may keep together.
+const MAX_APERTURE_VERTICES: usize = 1_000_000;
 
 /// Farthest a coordinate may be from the origin, in millimetres (a kilometre).
 const MAX_COORD_MM: f64 = 1e6;
@@ -266,6 +270,10 @@ struct Reader {
     /// Aperture macros by name: their primitives, `*` between them.
     macros: HashMap<String, String>,
     apertures: HashMap<i32, Aperture>,
+    /// Aperture definitions read so far, redefinitions included.
+    aperture_definitions: usize,
+    /// Vertices the shapes in `apertures` keep.
+    aperture_vertices: usize,
     aperture: Option<i32>,
     /// Clear polarity (`%LPC%`) is loaded.
     clear: bool,
@@ -456,7 +464,7 @@ impl Reader {
                 "TF" => self.attribute(cmd),
                 // Other attributes, and the deprecated layer name, say nothing about geometry.
                 "TA" | "TO" | "TD" | "LN" => {}
-                "AD" if self.image => lines.extend(self.aperture_definition(cmd)),
+                "AD" if self.image => lines.extend(self.aperture_definition(cmd)?),
                 "AD" | "AB" | "LP" | "LM" | "LR" | "LS" | "SR" | "IP" | "IN" | "OF" | "SF" | "MI" | "IR" | "AS" => {
                     lines.push(format!("%{cmd}*%"));
                 }
@@ -524,15 +532,29 @@ impl Reader {
     }
 
     /// An image's aperture definition, read here; the parser gets a stand-in with its number.
-    fn aperture_definition(&mut self, cmd: &str) -> Option<String> {
+    /// Refuses the file once its definitions, or the shapes they keep, pass their limits.
+    fn aperture_definition(&mut self, cmd: &str) -> Result<Option<String>> {
+        if self.aperture_definitions >= MAX_APERTURE_DEFINITIONS {
+            return Err(IoError::Invalid(format!("the Gerber file defines more than {MAX_APERTURE_DEFINITIONS} apertures")));
+        }
+        self.aperture_definitions += 1;
         match gerber_area::aperture(cmd.get(2..).unwrap_or(""), &self.macros) {
             Ok((code, ap)) => {
+                let added = ap.vertex_count();
+                let replaced = self.apertures.get(&code).map_or(0, Aperture::vertex_count);
+                let total = self.aperture_vertices.saturating_sub(replaced).saturating_add(added);
+                if total > MAX_APERTURE_VERTICES {
+                    return Err(IoError::Invalid(format!(
+                        "the Gerber file's aperture shapes have more than {MAX_APERTURE_VERTICES} corners together"
+                    )));
+                }
+                self.aperture_vertices = total;
                 self.apertures.insert(code, ap);
-                Some(format!("%ADD{code}C,0*%"))
+                Ok(Some(format!("%ADD{code}C,0*%")))
             }
             Err(e) => {
                 self.warn(format!("Skipped an aperture: {e}."));
-                None
+                Ok(None)
             }
         }
     }

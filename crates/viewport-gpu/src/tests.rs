@@ -42,6 +42,45 @@ fn out_of_memory_is_reported_before_secondary_validation_errors() {
     assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
 }
 
+/// [`buffer_write`]'s buffer holds what it was given, padded with zeros to whole words as
+/// [`buffer_init`]'s is, in the command buffers submitted after it.
+#[test]
+fn a_buffer_written_through_the_queue_holds_its_contents_padded() {
+    let Ok((_, device, queue)) = open_headless(test_env::policy()) else { return };
+    for contents in [&[][..], &[7][..], &[1, 2, 3, 4][..], &[1, 2, 3, 4, 5, 6][..]] {
+        let buffer = ok(buffer_write(&device, &queue, "test", contents, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_SRC));
+        let mut want = contents.to_vec();
+        want.resize(contents.len().div_ceil(4).max(1) * 4, 0);
+        assert_eq!(buffer.size(), want.len() as u64);
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: buffer.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(&buffer, 0, &read, 0, buffer.size());
+        queue.submit([encoder.finish()]);
+        read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert_eq!(ok(read.slice(..).get_mapped_range()).to_vec(), want, "{contents:?}");
+    }
+}
+
+/// A buffer the device does not make is an error, as [`buffer_init`]'s is, whatever it was to hold:
+/// the scene upload then keeps the previous picture.
+#[test]
+fn a_buffer_the_device_refuses_is_an_error_when_written() {
+    let Ok((_, device, queue)) = open_headless(test_env::policy()) else { return };
+    let limit = device.limits().max_buffer_size;
+    // Only where asking for too much takes little memory here.
+    let Some(size) = usize::try_from(limit).ok().filter(|l| *l <= 512 << 20).and_then(|l| l.checked_add(4)) else { return };
+    let contents = vec![0; size];
+    assert!(buffer_write(&device, &queue, "test", &contents, wgpu::BufferUsages::VERTEX).is_err());
+    // The device goes on making buffers.
+    assert!(buffer_write(&device, &queue, "test", &[1, 2, 3, 4], wgpu::BufferUsages::VERTEX).is_ok());
+}
+
 #[test]
 fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     use naga::back::hlsl;
@@ -145,4 +184,28 @@ fn plan_validation_matches_the_packing_refusals() {
             _ => assert!(matches!(check, GpuError::Failed(_))),
         }
     }
+}
+
+/// The window device's request (`window_device_request`) on top of egui-wgpu's stock one: an
+/// adapter that meets the stock limits gets them unchanged, the request never asks for more than
+/// the adapter offers, and the device opens with it.
+#[test]
+fn the_window_device_request_fits_the_adapter_and_opens() {
+    let Ok((adapter, _, _)) = open_headless(test_env::policy()) else { return };
+    let offered = adapter.limits();
+    // egui-wgpu 0.37's own default request for this adapter.
+    let base_limits =
+        if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+    let stock = wgpu::Limits { max_texture_dimension_2d: 8192, ..base_limits };
+    let base = wgpu::DeviceDescriptor { label: Some("egui wgpu device"), required_limits: stock.clone(), ..Default::default() };
+    let request = window_device_request(&adapter, base);
+    assert!(request.required_limits.check_limits(&offered), "asks for no more than the adapter offers");
+    if stock.check_limits(&offered) {
+        assert_eq!(request.required_limits, stock, "an adapter that meets the stock limits gets them as they are");
+    }
+    assert_eq!(
+        request.required_features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+        adapter.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+    );
+    ok(pollster::block_on(adapter.request_device(&request)));
 }

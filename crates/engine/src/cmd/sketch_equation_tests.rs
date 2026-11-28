@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::CurveKind;
+use solidcraft_sketch::{CurveKind, VariableUnit};
 
 use crate::Session;
 
@@ -41,12 +41,12 @@ fn curve_points(s: &Session, id: &str) -> Vec<Vec2> {
     c.kind.point_ids().iter().map(|i| sk.points[*i].pos).collect()
 }
 
-/// A wave over a strip: y = h + 5 sin(2 pi x / 100) over x from 0 to 100, closed by three
+/// A wave over a strip: y = h + 5 sin(360 deg x / 100) over x from 0 to 100, closed by three
 /// lines down to the x axis. Its area is 100 h (the sine adds as much as it takes away).
 fn wave(s: &mut Session) -> String {
     run(s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
     run(s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    let r = run(s, "sketch.equation_curve", json!({"explicit": true, "y": "h + 5 * sin(2 * pi * x / 100)", "start": 0, "end": "100 mm"}));
+    let r = run(s, "sketch.equation_curve", json!({"explicit": true, "y": "h + 5 * sin(360 * x / 100)", "start": 0, "end": "100 mm"}));
     let id = r["curve"].as_str().unwrap().to_string();
     assert_eq!(r["closed"], false, "{r}");
     assert!(r["deviation"].as_f64().unwrap() <= 0.01, "{r}");
@@ -76,7 +76,7 @@ fn a_wave_from_a_formula_extrudes_and_follows_its_parameter() {
     assert!(users.to_string().contains("Curve Y"), "{users}");
     run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "height"}));
     let f = s.doc.find_feature("S").unwrap().id;
-    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().y, "height + 5 * sin(2 * pi * x / 100)");
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().y, "height + 5 * sin(360 * x / 100)");
     no_trouble(&s);
     near(volume(&mut s), 100.0 * 20.0 * 10.0, 1e-4);
     // The design file keeps the formulas, and a reopened design follows them.
@@ -107,7 +107,7 @@ fn the_variable_hides_a_parameter_of_its_name_and_a_rename_leaves_it_alone() {
 fn a_full_turn_closes_smoothly_and_extrudes_as_a_disc() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    let r = run(&mut s, "sketch.equation_curve", json!({"x": "20 * cos(t)", "y": "20 * sin(t)", "start": 0, "end": "360 deg"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "20 * cos(t rad)", "y": "20 * sin(t rad)", "start": 0, "end": "360 deg"}));
     assert_eq!(r["closed"], true, "{r}");
     let id = r["curve"].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
@@ -130,7 +130,7 @@ fn a_profile_under_a_curve_revolves() {
     let want = std::f64::consts::PI * (750.0 + 100.0 * (1.0 - 6f64.cos()) + 4.0 * (15.0 - 1.25 * 12f64.sin()));
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    let r = run(&mut s, "sketch.equation_curve", json!({"explicit": true, "y": "5 + 2 * sin(x / 5)", "start": 0, "end": 30}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"explicit": true, "y": "5 + 2 * sin((x / 5) rad)", "start": 0, "end": 30}));
     let id = r["curve"].as_str().unwrap().to_string();
     run(&mut s, "sketch.line", json!({"points": [format!("{id}.end"), [30, 0], [0, 0], format!("{id}.start")]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -152,7 +152,7 @@ fn an_edit_changes_the_formulas_and_keeps_the_joined_ends() {
         (sk.points[a].id.clone(), sk.points[b].id.clone())
     };
     // A tighter tolerance and a bigger wave: more points, the same ends.
-    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "y": "h + 8 * sin(2 * pi * x / 100)", "tolerance": 0.002}));
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "y": "h + 8 * sin(360 * x / 100)", "tolerance": 0.002}));
     assert!(r["deviation"].as_f64().unwrap() <= 0.002, "{r}");
     let after = s.doc.sketch(f).unwrap().clone();
     assert_eq!(ends(&before), ends(&after));
@@ -160,7 +160,7 @@ fn an_edit_changes_the_formulas_and_keeps_the_joined_ends() {
     assert!(count(&after) > count(&before), "{} vs {}", count(&after), count(&before));
     assert_eq!(r["points"].as_u64(), Some(count(&after) as u64));
     let eq = after.equation_of(&id).unwrap();
-    assert_eq!((eq.y.as_str(), eq.start.as_str(), eq.tolerance), ("h + 8 * sin(2 * pi * x / 100)", "0", 0.002));
+    assert_eq!((eq.y.as_str(), eq.start.as_str(), eq.tolerance), ("h + 8 * sin(360 * x / 100)", "0", 0.002));
     // No points left behind: the old in-between points went.
     assert_eq!(after.points.len(), before.points.len() - count(&before) + count(&after));
     run(&mut s, "sketch.finish", json!({}));
@@ -171,7 +171,7 @@ fn an_edit_changes_the_formulas_and_keeps_the_joined_ends() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().y, "h + 5 * sin(2 * pi * x / 100)");
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().y, "h + 5 * sin(360 * x / 100)");
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn an_edit_can_switch_between_the_two_forms() {
     let r = run(&mut s, "sketch.equation_curve", json!({"explicit": true, "y": "x / 2", "start": 0, "end": 10}));
     let id = r["curve"].as_str().unwrap().to_string();
     // To a closed parametric curve: the old end point goes, the start stays.
-    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "x": "10 * cos(t)", "y": "10 * sin(t)", "start": 0, "end": "2 * pi"}));
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "x": "10 * cos(t)", "y": "10 * sin(t)", "start": 0, "end": 360}));
     assert_eq!(r["closed"], true, "{r}");
     let f = s.doc.find_feature("S").unwrap().id;
     let sk = s.doc.sketch(f).unwrap();
@@ -256,6 +256,21 @@ fn a_curve_its_parameters_break_is_an_error_not_a_crash() {
     no_trouble(&s);
 }
 
+#[test]
+fn an_angle_parameter_bound_matches_explicit_radian_division_after_an_edit() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "limit", "unit": "deg", "expression": "29"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "sqrt(limit / (1 rad) - t)^2", "start": 0, "end": "limit"}));
+    let id = r["curve"].as_str().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    run(&mut s, "parameters.change", json!({"name": "limit", "expression": "30"}));
+    no_trouble(&s);
+    let end = *curve_points(&s, id).last().unwrap();
+    assert!((end.x - std::f64::consts::FRAC_PI_6).abs() < 1e-12 && end.y == 0.0, "{end:?}");
+}
+
 /// The issue's curve (#9333): `a = 10 mm`, y = a^2 / (4 t) over t from a to 3a. Each point is on
 /// y = a^2 / (4 x), from (a, a / 4) to (3a, a / 12).
 fn assert_parabola(s: &Session, id: &str, a: f64) {
@@ -284,7 +299,7 @@ fn a_variable_in_its_ranges_unit_follows_the_parameter_and_the_design_unit() {
     run(&mut s, "parameters.add", json!({"name": "b", "expression": "10 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Off"}));
     let why = s.execute("sketch.equation_curve", &json!({"x": "t", "y": "b ^ 2 / (4 * t)", "start": "b", "end": "3 * b"})).unwrap_err().to_string();
-    assert!(why.contains("length^2"), "{why}");
+    assert!(why.contains("an area"), "{why}");
     run(&mut s, "sketch.finish", json!({}));
 
     let id = range_unit_curve(&mut s);
@@ -356,7 +371,6 @@ fn a_hostile_saved_flag_or_range_is_an_error_not_a_crash() {
 
 #[test]
 fn an_edit_keeps_the_flag_until_told_and_a_saved_design_keeps_it() {
-    use solidcraft_sketch::VariableUnit;
     let mut s = Session::default();
     let id = range_unit_curve(&mut s);
     let f = s.doc.find_feature("S").unwrap().id;
@@ -394,13 +408,80 @@ fn a_design_saved_without_the_flag_reopens_the_same() {
     assert!(!saved.contains("variable_unit"), "a curve without the flag writes no new key");
     let want = curve_points(&s, &id);
     assert!((*want.last().unwrap() - Vec2::new(40.0, 80.0)).len() < 1e-9);
-    // The format before this change, as the last release wrote it.
+    // An old file used a flat equation record without a variable-unit flag.
     let mut old: Value = serde_json::from_str(&saved).unwrap();
-    old["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT - 1));
-    if let Some(o) = old.as_object_mut() {
-        o.remove("format_pending");
-    }
+    old["format"] = json!("solidcraft/66");
+    old.as_object_mut().unwrap().remove("format_pending");
+    let record = &mut old["features"][0]["sketch"]["equations"][0];
+    *record = record.as_object_mut().unwrap().remove("degrees").unwrap();
     let r = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
     no_trouble(&r);
+    let eq = r.doc.sketch(1).unwrap().equation_of(&id).unwrap();
+    assert_eq!(eq.variable_unit, VariableUnit::Number);
+    assert!(eq.radians_trig);
     assert_eq!(curve_points(&r, &id), want);
+}
+
+/// Exercise the design reader and a cold timeline rebuild, not just the saved spline points.
+/// Before the change `sin(90)` is sin(90 radians), the same geometry as `sin(90 rad)` today.
+#[test]
+fn new_and_migrated_equation_curves_keep_their_own_angle_convention() {
+    let mut before = Session::default();
+    run(&mut before, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let legacy = run(&mut before, "sketch.equation_curve", json!({"x": "t", "y": "sin(90 rad)", "start": 0, "end": 10}));
+    let legacy = legacy["curve"].as_str().unwrap();
+    run(&mut before, "sketch.finish", json!({}));
+    let original = curve_points(&before, legacy);
+    let mut saved: Value = serde_json::from_str(&before.doc.to_json()).unwrap();
+    // Format 66 predates the change, including after pending changes are folded.
+    saved["format"] = json!("solidcraft/66");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let sketch = &mut saved["features"][0]["sketch"];
+    let mut flat = sketch["equations"][0].as_object_mut().unwrap().remove("degrees").expect("new curves have a degrees record");
+    flat["y"] = json!("sin(90)");
+    sketch["equations"][0] = flat;
+    // Leave stale cached positions in the file: a proper rebuild must restore the geometry.
+    for point in sketch["points"].as_array_mut().unwrap().iter_mut().skip(1) {
+        point["pos"][1] = json!(0.0);
+    }
+    let open = |file: &Value| {
+        let session = Session::new(solidcraft_doc::Document::from_json(&file.to_string()).unwrap());
+        no_trouble(&session);
+        assert!(session.doc.sketch(1).unwrap().equation_of(legacy).unwrap().radians_trig);
+        assert_eq!(curve_points(&session, legacy), original);
+        session
+    };
+    let mut opened = open(&saved);
+    // Nightlies already used 67, but had not applied the degree convention.
+    saved["format"] = json!("solidcraft/67");
+    saved["format_pending"] = json!([
+        "body-collision-shape",
+        "component-pattern-history",
+        "component-physical-override",
+        "frame-continuous-paths",
+        "frame-gussets",
+        "frame-trims",
+        "joint-dynamics",
+        "joint-origin-frame",
+        "linked-bodies-left-out",
+        "point-at-average-of-points",
+        "sketch-point-construction",
+        "step-source-links"
+    ]);
+    open(&saved);
+    run(&mut opened, "sketch.edit", json!({"sketch": "S"}));
+    run(&mut opened, "sketch.equation_curve.edit", json!({"curve": legacy, "y": "1 + sin(90)"}));
+    let new = run(&mut opened, "sketch.equation_curve", json!({"x": "t", "y": "sin(90)", "start": 0, "end": 10}));
+    let new = new["curve"].as_str().unwrap();
+    run(&mut opened, "sketch.finish", json!({}));
+    let saved: Value = serde_json::from_str(&opened.doc.to_json()).unwrap();
+    let records = saved["features"][0]["sketch"]["equations"].as_array().unwrap();
+    assert_eq!(records[0]["radians_trig"], true);
+    assert_eq!(records[0]["curve"], legacy);
+    assert_eq!(records[1]["degrees"]["curve"], new);
+    assert!(records[1].get("curve").is_none(), "an old reader must not interpret this as its flat record");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    no_trouble(&reopened);
+    assert!(curve_points(&reopened, legacy).iter().all(|p| (p.y - (1.0 + 90.0_f64.sin())).abs() < 1e-12));
+    assert!(curve_points(&reopened, new).iter().all(|p| (p.y - 1.0).abs() < 1e-12));
 }

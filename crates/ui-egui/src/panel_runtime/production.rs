@@ -33,6 +33,8 @@ enum Product {
     Bom,
     DrawingSheets,
     DrawingInspector,
+    Timeline2d,
+    PartsLibrary,
 }
 impl Product {
     const ALL: &[Self] = &[
@@ -47,6 +49,8 @@ impl Product {
         Self::Bom,
         Self::DrawingSheets,
         Self::DrawingInspector,
+        Self::Timeline2d,
+        Self::PartsLibrary,
     ];
     const NEW_RENDER: [Self; 3] = [Self::RenderLibrary, Self::RenderInspector, Self::RenderShots];
 
@@ -68,6 +72,8 @@ impl Product {
             Self::Bom => 8,
             Self::DrawingSheets => 9,
             Self::DrawingInspector => 10,
+            Self::Timeline2d => 11,
+            Self::PartsLibrary => 12,
         }
     }
     fn visible(self, app: &crate::SolveApp) -> bool {
@@ -75,6 +81,7 @@ impl Product {
             Self::Browser => app.ui.show_browser,
             Self::RenderBrowser => app.render_workspace.view.browser_open,
             Self::History => app.ui.show_timeline,
+            Self::Timeline2d => false,
             Self::Assistant => app.agent_chat.open,
             Self::RenderLibrary => true,
             Self::RenderInspector => crate::render_workspace::inspector_visible(app),
@@ -83,6 +90,7 @@ impl Product {
             Self::Bom => crate::bom_panel::available(app),
             Self::DrawingSheets => crate::drawing_workspace::sheets_visible(app),
             Self::DrawingInspector => crate::drawing_workspace::inspector_visible(app),
+            Self::PartsLibrary => app.preferences.library_open,
         }
     }
     fn set_visible(self, app: &mut crate::SolveApp, open: bool) {
@@ -90,6 +98,7 @@ impl Product {
             Self::Browser => app.ui.show_browser = open,
             Self::RenderBrowser => app.render_workspace.view.browser_open = open,
             Self::History => app.ui.show_timeline = open,
+            Self::Timeline2d => {}
             Self::Assistant => app.agent_chat.open = open,
             Self::RenderLibrary => {}
             Self::RenderInspector => crate::render_workspace::set_inspector_visible(app, open),
@@ -100,6 +109,7 @@ impl Product {
             }
             Self::DrawingInspector => {}
             Self::Bom if !open => app.bom = None,
+            Self::PartsLibrary => app.preferences.library_open = open,
             Self::Bom | Self::SketchOptions => {}
         }
     }
@@ -117,6 +127,8 @@ impl Product {
             Self::Bom => "bom",
             Self::DrawingSheets => "drawing-sheets",
             Self::DrawingInspector => "drawing-inspector",
+            Self::Timeline2d => "timeline-2d",
+            Self::PartsLibrary => "parts-library",
         }
     }
     fn kind(self) -> &'static str {
@@ -132,12 +144,14 @@ impl Product {
             Self::Bom => "solidcraft.bom",
             Self::DrawingSheets => "solidcraft.drawing_sheets",
             Self::DrawingInspector => "solidcraft.drawing_inspector",
+            Self::Timeline2d => "solidcraft.timeline_2d",
+            Self::PartsLibrary => "solidcraft.parts_library",
         }
     }
     fn title_key(self) -> &'static str {
         match self {
             Self::Browser => "ui.browser_title",
-            Self::History => "ui.history_title",
+            Self::History | Self::Timeline2d => "ui.history_title",
             Self::Assistant => "ui.assistant",
             Self::RenderBrowser => "render.page_scene",
             Self::RenderLibrary => "render.library_title",
@@ -147,6 +161,7 @@ impl Product {
             Self::Bom => crate::bom_panel::TITLE_KEY,
             Self::DrawingSheets => "ui.drawing_sheets.title",
             Self::DrawingInspector => "ui.drawing_sheets.settings",
+            Self::PartsLibrary => "parts_library.title",
         }
     }
     fn icon(self) -> &'static str {
@@ -155,6 +170,7 @@ impl Product {
             Self::Bom => "bom",
             Self::DrawingSheets => "ws_drawing",
             Self::DrawingInspector => "settings",
+            Self::PartsLibrary => "folder",
             _ => "list",
         }
     }
@@ -163,10 +179,14 @@ impl Product {
         Self::ALL.iter().copied().find(|product| product.id() == instance.0).ok_or_else(|| error(Rule::MissingTarget, "unknown application panel"))
     }
     fn available(self, app: &crate::SolveApp) -> bool {
+        if !crate::plugin_workspaces::builtin_available(app, self.id()) {
+            return false;
+        }
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
             Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
+            Self::Timeline2d => false,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
             Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
@@ -177,6 +197,7 @@ impl Product {
                     && app.session.drawing("drawing.inspect").is_ok()
             }
             Self::DrawingInspector => crate::drawing_workspace::inspector_visible(app),
+            Self::PartsLibrary => !render && !crate::render_ui::focused(app),
         }
     }
     fn default_zone(self, placement: &crate::prefs::Prefs) -> Zone {
@@ -184,7 +205,7 @@ impl Product {
             Self::History if !placement.timeline_left => Zone::Bottom,
             Self::Assistant if placement.agent_chat_side == "right" => Zone::Right,
             Self::RenderBrowser | Self::RenderLibrary if placement.render_browser_side == "right" => Zone::Right,
-            Self::RenderShots => Zone::Bottom,
+            Self::RenderShots | Self::Timeline2d => Zone::Bottom,
             Self::RenderInspector if placement.render_inspector_side != "left" => Zone::Right,
             Self::SketchOptions | Self::Bom => Zone::Right,
             Self::DrawingInspector if placement.drawing_panel_side != "left" => Zone::Right,
@@ -203,14 +224,28 @@ impl Product {
 
     fn header_actions(self) -> Vec<HeaderActionSpec> {
         let entries: Vec<(&str, &str, &str)> = match self {
-            Self::History => vec![
-                ("first", "ui.history_first", "timeline_first"),
-                ("back", "ui.history_back", "timeline_back"),
-                ("play", "cmd.timeline_play", "timeline_play"),
-                ("forward", "ui.history_forward", "timeline_forward"),
-                ("last", "ui.history_last", "timeline_last"),
+            Self::History | Self::Timeline2d => {
+                let mut entries = vec![
+                    ("first", "ui.history_first", "timeline_first"),
+                    ("back", "ui.history_back", "timeline_back"),
+                    ("play", "cmd.timeline_play", "timeline_play"),
+                    ("forward", "ui.history_forward", "timeline_forward"),
+                    ("last", "ui.history_last", "timeline_last"),
+                ];
+                // At the header's right end: the 2D options, then the view icon that raises the row to the 2D timeline or lowers it to the 1D strip.
+                // The app shows the one that fits the height (`sync_timeline_header`).
+                entries.extend([
+                    (TIMELINE_SETTINGS, "ui.timeline_2d_settings", "display"),
+                    (TIMELINE_EXPAND, "ui.timeline_2d_show", "timeline_2d"),
+                    (TIMELINE_COLLAPSE, "ui.timeline_2d_hide", "timeline_1d"),
+                ]);
+                entries
+            }
+            Self::Assistant => vec![
+                ("new-chat", "ui.agent_chat_new", "new"),
+                #[cfg(not(target_arch = "wasm32"))]
+                ("export-chat", "ui.agent_chat_export", "export"),
             ],
-            Self::Assistant => vec![("new-chat", "ui.agent_chat_new", "new")],
             Self::RenderBrowser => vec![
                 ("by-object", "render.tree_by_object", "list"),
                 ("by-look", "render.tree_by_look", "list"),
@@ -224,6 +259,11 @@ impl Product {
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
             Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
             Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
+            Self::PartsLibrary => vec![
+                ("refresh", "parts_library.refresh", "update"),
+                ("choose-folder", "parts_library.choose_another", "folder"),
+                ("design-folder", "parts_library.design_folder", "open"),
+            ],
             Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
@@ -251,7 +291,7 @@ impl Product {
             presentation.status = Some(app.tr("ui.drawing_browser_one_drawing").into());
         }
         presentation.actions = match self {
-            Self::History => crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
+            Self::History | Self::Timeline2d => crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
                 .iter()
                 .map(|control| {
                     let availability = crate::timeline::transport_availability(app, *control);
@@ -263,14 +303,36 @@ impl Product {
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
                     }
                 })
+                .chain(
+                    self.header_actions()
+                        .into_iter()
+                        .filter(|spec| [TIMELINE_SETTINGS, TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&spec.id.0.as_str()))
+                        .map(|spec| RuntimeAction {
+                            id: spec.id,
+                            label: solidcraft_ui_text::tr(&spec.label_key).into(),
+                            enabled: true,
+                            disabled_reason: None,
+                            pressed: None,
+                        }),
+                )
                 .collect(),
-            Self::Assistant => vec![RuntimeAction {
-                id: ControlId("new-chat".into()),
-                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
-                enabled: true,
-                disabled_reason: None,
-                pressed: None,
-            }],
+            Self::Assistant => self
+                .header_actions()
+                .into_iter()
+                .map(|action| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let enabled = action.id.0 != "export-chat" || app.agent_chat.can_export_conversation();
+                    #[cfg(target_arch = "wasm32")]
+                    let enabled = true;
+                    RuntimeAction {
+                        id: action.id,
+                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        enabled,
+                        disabled_reason: (!enabled).then(|| solidcraft_ui_text::tr("ui.agent_chat_export_empty").into()),
+                        pressed: None,
+                    }
+                })
+                .collect(),
             Self::RenderBrowser => [
                 ("by-object", "render.tree_by_object", !app.render_workspace.view.by_look),
                 ("by-look", "render.tree_by_look", app.render_workspace.view.by_look),
@@ -341,6 +403,22 @@ impl Product {
                     pressed: Some(crate::browser_search::bar_shown(app)),
                 }]
             }
+            Self::PartsLibrary => {
+                presentation.status = crate::parts_library::status(app);
+                self.header_actions()
+                    .into_iter()
+                    .map(|action| {
+                        let enabled = action.id.0 != "design-folder" || app.session.path.is_some();
+                        RuntimeAction {
+                            id: action.id,
+                            label: solidcraft_ui_text::tr(&action.label_key).into(),
+                            enabled,
+                            disabled_reason: (!enabled).then(|| solidcraft_ui_text::tr("parts_library.design_folder").into()),
+                            pressed: None,
+                        }
+                    })
+                    .collect()
+            }
             Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
@@ -410,6 +488,7 @@ struct ProductionSnapshot {
     visibility: [Option<VisibilityIntent>; Product::ALL.len()],
     panels: [PanelSnapshot; Product::ALL.len()],
     actions: VecDeque<QueuedAction>,
+    dispatching_widget_actions: bool,
 }
 struct VisibilityIntent {
     document: DocumentId,
@@ -444,7 +523,18 @@ impl ProductionState {
                 extent: None,
             }),
             actions: VecDeque::new(),
+            dispatching_widget_actions: false,
         }))))
+    }
+
+    pub(super) fn with_widget_actions(&self, dispatch: impl FnOnce() -> PanelResult<()>) -> PanelResult<()> {
+        let previous = {
+            let mut snapshot = self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+            std::mem::replace(&mut snapshot.dispatching_widget_actions, true)
+        };
+        let result = dispatch();
+        self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?.dispatching_widget_actions = previous;
+        result
     }
 }
 
@@ -462,8 +552,14 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     if app.panel_runtime.is_some() {
         return Err(error(Rule::Lifecycle, "application panel runtime is already enabled"));
     }
+    // Register inert plugin declarations before decoding saved workspace layouts.
+    // Otherwise their placements would be quarantined as unknown at every startup.
+    crate::plugins::sync_policy(app);
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
+    let plugins = super::plugin::PluginState::initial(&app.session)?;
     let state = ProductionState::new(app)?;
-    let registry = registry()?;
+    let mut registry = registry()?;
+    plugins.register_specs(&mut registry)?;
     let workspace = WorkspaceId::new(WORKSPACES[0].0)?;
     let defaults = crate::prefs::Prefs::default();
     let settings = pop_out.unwrap_or(&app.panel_layout_preferences);
@@ -498,6 +594,7 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
             },
         )?;
     }
+    plugins.register_controllers(&mut runtime)?;
     let services = ProductionServices {
         models: ProductionModels,
         commands: ProductionCommands,
@@ -510,6 +607,7 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     };
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.production = Some(state);
+    integration.plugins = plugins;
     integration.tick(&app.session)?;
     let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
     options.geometry.default_opaque = false;
@@ -598,12 +696,19 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
             continue;
         }
         match action.product {
-            Product::History => {
-                if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|control| control.id() == action.action.0) {
+            Product::History | Product::Timeline2d => {
+                if [TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&action.action.0.as_str()) {
+                    set_timeline_tall(app, action.action.0 == TIMELINE_EXPAND)?;
+                } else if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|control| control.id() == action.action.0) {
                     crate::timeline::run_transport(app, control);
                 }
             }
-            Product::Assistant => crate::agent_chat::request_new_chat(app),
+            Product::Assistant => match action.action.0.as_str() {
+                "new-chat" => crate::agent_chat::request_new_chat(app),
+                #[cfg(not(target_arch = "wasm32"))]
+                "export-chat" => crate::agent_chat::request_export(&mut app.agent_chat),
+                _ => {}
+            },
             Product::RenderBrowser => {
                 let params = match action.action.0.as_str() {
                     "by-object" => json!({"by_look":false}),
@@ -629,6 +734,7 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 }
             }
             Product::Browser => crate::browser::magnifier(app),
+            Product::PartsLibrary => crate::parts_library::header_action(app, &action.action.0),
             Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
@@ -798,7 +904,8 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
         let id = InstanceId::new(product.id())?;
         let instance = layout.instance(&id).ok();
         if instance.is_none()
-            && (Product::NEW_RENDER.contains(&product) || matches!(product, Product::DrawingSheets | Product::DrawingInspector))
+            && (Product::NEW_RENDER.contains(&product)
+                || matches!(product, Product::DrawingSheets | Product::DrawingInspector | Product::Timeline2d | Product::PartsLibrary))
             && visible
             && product.available(app)
             && adding.is_none()
@@ -821,7 +928,26 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
                 .ok()
                 .filter(|section| section.location.zone() == zone)
                 .or_else(|| layout.sections.iter().find(|section| section.location.zone() == zone));
-            let destination = if let Some(anchor) = anchor.filter(|_| zone.side()) {
+            // The parts library takes its own column at the window's outer edge, inside a pinned
+            // Assistant.
+            let outer = (product == Product::PartsLibrary)
+                .then(|| {
+                    layout.sections.iter().find(|section| {
+                        section.location.zone() == zone
+                            && section.column.is_some()
+                            && !section.tabs.iter().any(|tab| tab.0 == Product::Assistant.id())
+                    })
+                })
+                .flatten();
+            let destination = if let Some(anchor) = outer {
+                Destination::Relative {
+                    section: anchor.id.clone(),
+                    placement: RelativePlacement::BeforeColumn,
+                    new_section: section,
+                    new_column: Some(next_column_id_with_reservations(layout, &integration.placement_reservations()?.columns)?),
+                    size,
+                }
+            } else if let Some(anchor) = anchor.filter(|_| zone.side() && product != Product::PartsLibrary) {
                 Destination::Relative {
                     section: anchor.id.clone(),
                     placement: if product == Product::DrawingSheets { RelativePlacement::Above } else { RelativePlacement::Below },
@@ -845,6 +971,14 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
                 if inspector_visibility == Some(false) && instance.requested_open {
                     mutations.push(Mutation::Close { instance: id });
                 }
+            } else if product == Product::History
+                && visible
+                && !instance.requested_open
+                && layout.instance(&InstanceId::new(Product::Timeline2d.id())?).is_ok_and(|panel| panel.requested_open)
+            {
+                // A layout saved when the 2D Timeline was its own panel: the History takes its place, taller (`sync_timeline_view`).
+                mutations.push(Mutation::Close { instance: InstanceId::new(Product::Timeline2d.id())? });
+                mutations.push(Mutation::Open { kind: instance.kind.clone(), instance: id, destination: None });
             } else if snapshot.visible.get(product.index()).copied() != Some(visible)
                 && instance.requested_open != visible
                 && (!visible || product.available(app))
@@ -865,6 +999,8 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
             [product.index()] = addition;
     }
     if !mutations.is_empty() {
+        // Closes first: History and the 2D Timeline swap places in the one bottom row.
+        mutations.sort_by_key(|mutation| !matches!(mutation, Mutation::Close { .. }));
         refresh_production(app)?;
         app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations })?;
     }
@@ -879,6 +1015,9 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
 }
 
 fn sync_bom(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::Bom.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "BOM focus is borrowed"))?;
@@ -928,6 +1067,9 @@ fn open_bom(integration: &AppPanelRuntime, layout: &Layout, instance: InstanceId
 }
 
 fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::SketchOptions.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel visibility is borrowed"))?;
@@ -1021,21 +1163,111 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     }
 }
 
+/// The History header's view icon that raises the bottom row to the 2D Timeline's standard height (the 2D icon).
+pub(crate) const TIMELINE_EXPAND: &str = "timeline-expand";
+/// The view icon that lowers the row back to the one-row strip (the 1D icon).
+pub(crate) const TIMELINE_COLLAPSE: &str = "timeline-collapse";
+/// The 2D Timeline's header button that opens its options.
+pub(crate) const TIMELINE_SETTINGS: &str = "settings";
+
+/// The bottom History as a one-row strip: a 28-point chip and six-point inset on each side, plus the
+/// shared content slot's own symmetric two-point inset.
+fn strip_height() -> f32 {
+    let tokens = solidcraft_theme::Tokens::get();
+    tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2)
+}
+
+/// The 2D Timeline's grid heights plus the host's header and content inset above and below it.
+fn chrome_2d() -> f32 {
+    super::HostMetrics::default().header_height + 2.0 * solidcraft_theme::Tokens::get().space_2
+}
+
+/// The smallest bottom height that shows the 2D Timeline: History's own panel, tall.
+pub(crate) fn tall_min_height() -> f32 {
+    crate::timeline_2d::canvas::MIN_DOCK_HEIGHT + chrome_2d()
+}
+
+/// The height the 2D icon raises the bottom History to.
+fn tall_standard_height() -> f32 {
+    crate::timeline_2d::canvas::DOCK_TOTAL_HEIGHT + chrome_2d()
+}
+
+/// Whether a bottom row of this height shows the 2D Timeline. Heights between the strip and the 2D
+/// minimum do not occur: the layout snaps a resize to the nearer side of that gap.
+pub(crate) fn tall_height(height: f32) -> bool {
+    height >= tall_min_height() - 0.5
+}
+
+/// Whether the History sits in the bottom row (where it can be raised), and whether that row is tall
+/// enough to be the 2D Timeline. The layout decides, as it does for the side History's names and strip.
+pub(super) fn history_row(integration: &AppPanelRuntime) -> (bool, bool) {
+    integration.runtime().layout().layout().containing(&InstanceId(Product::History.id().into())).ok().map_or((false, false), |section| {
+        let bottom = section.location.zone() == Zone::Bottom;
+        (bottom, bottom && !section.collapsed && tall_height(section.size.height))
+    })
+}
+
+/// Whether the History is a bottom row tall enough to be the 2D Timeline.
+#[cfg(test)]
+pub(crate) fn timeline_tall(app: &crate::SolveApp) -> bool {
+    app.panel_runtime.as_ref().is_some_and(|integration| history_row(integration).1)
+}
+
+/// Keep the `timeline_2d` preference and the bottom History's height in step. Setting the preference
+/// (the control channel, a script) raises or lowers the row; a resize or the icon shows in the preference.
+pub(crate) fn sync_timeline_view(app: &mut crate::SolveApp) -> PanelResult<()> {
+    let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
+    let (bottom, tall) = history_row(integration);
+    if !bottom {
+        return Ok(());
+    }
+    let wanted = app.preferences.timeline_2d;
+    let asked = integration.timeline_2d_seen != Some(wanted) && wanted != tall;
+    if let Some(integration) = app.panel_runtime.as_mut() {
+        integration.timeline_2d_seen = Some(if asked { wanted } else { tall });
+    }
+    if asked {
+        set_timeline_tall(app, wanted)
+    } else {
+        app.preferences.timeline_2d = tall;
+        Ok(())
+    }
+}
+
+/// Raise the bottom History to the 2D Timeline's standard height, or lower it to the strip.
+pub(crate) fn set_timeline_tall(app: &mut crate::SolveApp, tall: bool) -> PanelResult<()> {
+    let integration = app.panel_runtime.as_ref().ok_or_else(|| error(Rule::Lifecycle, "application panel runtime unavailable"))?;
+    let section = integration.runtime().layout().layout().containing(&InstanceId::new(Product::History.id())?)?;
+    if section.location.zone() != Zone::Bottom {
+        return Ok(());
+    }
+    let section = section.id.clone();
+    let height = if tall { tall_standard_height() } else { strip_height() };
+    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::SetBottomHeight { section, height }] })
+        .map(drop)
+}
+
 fn registry() -> PanelResult<PanelRegistry> {
+    use crate::timeline_2d::canvas::{DOCK_TOTAL_HEIGHT, MIN_DOCK_HEIGHT};
     let mut registry = PanelRegistry::default();
     let tokens = solidcraft_theme::Tokens::get();
-    // The existing strip has a 28-point chip and six-point inset on each side;
-    // the shared content slot adds its own symmetric two-point inset.
-    let bottom_height = tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2);
+    let chrome_2d = chrome_2d();
+    let bottom_height = strip_height();
     for product in Product::ALL.iter().copied() {
         let history = product == Product::History;
         let assistant = product == Product::Assistant;
         let sketch = product == Product::SketchOptions;
         let bom = product == Product::Bom;
+        let library = product == Product::PartsLibrary;
         let mut allowed_zones = [Zone::Left, Zone::Right, Zone::Floating].into_iter().collect::<std::collections::BTreeSet<_>>();
         let shots = product == Product::RenderShots;
-        if history || shots {
+        let two_d = product == Product::Timeline2d;
+        if history || shots || two_d {
             allowed_zones.insert(Zone::Bottom);
+        }
+        if two_d {
+            // Its grid is a bottom strip of rows; a side column is too narrow for it.
+            allowed_zones.retain(|zone| !zone.side());
         }
         allowed_zones.insert(Zone::Window);
         registry.register(PanelSpec {
@@ -1044,7 +1276,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             icon: product.icon().into(),
             allowed_zones,
             default_zone: match product {
-                Product::History | Product::RenderShots => Zone::Bottom,
+                Product::History | Product::RenderShots | Product::Timeline2d => Zone::Bottom,
                 Product::RenderInspector | Product::SketchOptions | Product::Bom | Product::DrawingInspector => Zone::Right,
                 _ => Zone::Left,
             },
@@ -1053,31 +1285,51 @@ fn registry() -> PanelResult<PanelRegistry> {
                 height: match product {
                     Product::RenderLibrary => 180.0,
                     Product::Bom => 200.0,
+                    Product::PartsLibrary => 180.0,
                     Product::SketchOptions => 150.0,
                     Product::RenderInspector => 160.0,
                     Product::Assistant => 120.0,
                     Product::RenderShots => bottom_height,
+                    Product::Timeline2d => MIN_DOCK_HEIGHT + chrome_2d,
                     _ => tokens.control_height,
                 },
             },
-            default_size: Size { width: crate::prefs::DEFAULT_BROWSER_WIDTH, height: if history || shots { bottom_height } else { 320.0 } },
+            default_size: Size {
+                width: if product == Product::PartsLibrary { crate::parts_library::CARD_WIDTH } else { crate::prefs::DEFAULT_BROWSER_WIDTH },
+                height: if two_d {
+                    DOCK_TOTAL_HEIGHT + chrome_2d
+                } else if history || shots {
+                    bottom_height
+                } else {
+                    320.0
+                },
+            },
             max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
             edge_rule: if assistant { EdgeRule::PinOuter } else { EdgeRule::None },
             surface: PanelSurface::Translucent,
+            // The 2D Timeline needs the full width and its own height; a tab beside the Browser cramps it.
             features: PanelFeatures {
-                popout: true,
-                hot_closable: assistant || bom || product == Product::DrawingInspector,
+                popout: !library,
+                hot_closable: assistant || bom || library || product == Product::DrawingInspector,
                 closable: !sketch,
+                tabbable: !two_d,
+                collapse_keeps_bottom: two_d,
                 ..Default::default()
             },
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
-            fixed_bottom_height: (history || shots).then_some(bottom_height),
+            fixed_bottom_height: shots.then_some(bottom_height),
+            bottom_always_open: history,
             header_actions: product.header_actions(),
             text_heavy: assistant || bom || sketch,
         })?;
         if history {
             let strip = crate::ui_kit::history_width(false);
             registry.set_side_widths(&PanelKind::new(product.kind())?, vec![(strip, strip), (crate::ui_kit::history_width(true), MAX_LOGICAL)])?;
+            // At the bottom: the one-row strip, or from the 2D Timeline's minimum up; between is a deadzone.
+            registry.set_bottom_heights(
+                &PanelKind::new(product.kind())?,
+                vec![(bottom_height, bottom_height), (MIN_DOCK_HEIGHT + chrome_2d, MAX_LOGICAL)],
+            )?;
         }
     }
     Ok(registry)
@@ -1104,6 +1356,7 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
             Product::RenderBrowser | Product::RenderLibrary => placement.render_browser_width,
             Product::RenderInspector => placement.render_inspector_width,
             Product::RenderShots => spec.default_size.width,
+            Product::PartsLibrary => crate::parts_library::CARD_WIDTH,
             _ => spec.default_size.width,
         };
         let width = if (1.0..=1200.0).contains(&width) { width.max(spec.min_size.width) } else { spec.default_size.width };
@@ -1135,8 +1388,9 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
             Product::History if stacked => 1.0 - share,
             _ => 1.0,
         };
-        let section_index =
-            if product == Product::DrawingSheets || (product == Product::Assistant && !requested_open) { 0 } else { layout.sections.len() };
+        // The Assistant and the parts library return at the window's outer edge.
+        let outer = matches!(product, Product::Assistant | Product::PartsLibrary);
+        let section_index = if product == Product::DrawingSheets || (outer && !requested_open) { 0 } else { layout.sections.len() };
         if requested_open {
             layout.sections.push(Section {
                 id: section.clone(),
@@ -1151,7 +1405,7 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
                 collapsed,
             });
         }
-        let column_index = if product == Product::Assistant && !requested_open {
+        let column_index = if outer && !requested_open {
             0
         } else {
             layout
@@ -1181,8 +1435,11 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
             },
         });
     }
-    // A pinned Assistant precedes ordinary columns on its chosen logical side.
-    layout.columns.sort_by_key(|column| (column.zone != Zone::Left, column.id.0 != "panel-column-assistant"));
+    // A pinned Assistant precedes ordinary columns on its chosen logical side; the parts library
+    // comes next, at the window's edge outside the Browser.
+    layout
+        .columns
+        .sort_by_key(|column| (column.zone != Zone::Left, column.id.0 != "panel-column-assistant", column.id.0 != "panel-column-parts-library"));
     layout.sections.sort_by_key(|section| {
         section.column.as_ref().and_then(|id| layout.columns.iter().position(|column| column.id == *id)).unwrap_or(MAX_SECTIONS)
     });
@@ -1267,6 +1524,11 @@ impl PanelController for ProductionController {
         self.availability(owner, services.models).require()?;
         self.prepare_action(owner, action, services.models)?;
         let mut snapshot = self.state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+        // The in-app host commits header and overflow clicks through the same action.
+        // Programmatic calls must not open the export dialog.
+        if self.product == Product::Assistant && action.0 == "export-chat" && !snapshot.dispatching_widget_actions {
+            return Ok(());
+        }
         if snapshot.actions.len() >= MAX_ACTIONS {
             return Err(error(Rule::CollectionLimit, "application panel action queue is full"));
         }
@@ -1333,7 +1595,7 @@ struct ProductionServices {
 }
 impl AppPanelServices for ProductionServices {
     fn refresh_workspace(&mut self, workspace: &WorkspaceId) -> PanelResult<()> {
-        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) {
+        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) && !workspace.0.starts_with("plugin:") {
             return Err(error(Rule::Placement, "unregistered application layout workspace"));
         }
         self.local.workspace = workspace.clone();
@@ -1360,7 +1622,9 @@ struct ProductionLocal {
 impl ProductionLocal {
     fn validate(&self, scope: &LocalScope, instance: &InstanceId) -> PanelResult<()> {
         scope.validate()?;
-        Product::from_instance(instance)?;
+        if Product::from_instance(instance).is_err() && !instance.0.starts_with("plugin.") {
+            return Err(error(Rule::MissingTarget, "unknown application panel"));
+        }
         if scope.workspace != self.workspace || scope.document.as_ref() != Some(&self.document) || scope.viewport != self.viewport {
             return Err(error(Rule::Placement, "application panel service has a different owner scope"));
         }
@@ -1472,10 +1736,30 @@ pub(crate) struct ProductionFrame<'a> {
     pub app: &'a mut crate::SolveApp,
     pub(super) state: ProductionState,
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ProductionFrame<'_> {
+    pub(super) fn finish_native_window(&mut self, active: &InstanceId, action: Option<&super::NativeWindowAction>, ctx: &egui::Context) {
+        if active.0 != Product::Assistant.id() {
+            return;
+        }
+        if matches!(action, Some(super::NativeWindowAction::Content(_, action)) if action.0 == "export-chat") {
+            crate::agent_chat::request_export(&mut self.app.agent_chat);
+        }
+        crate::agent_chat::finish_native_window(self.app, ctx);
+    }
+}
+
 impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_context_menu(&mut self, instance: &InstanceId, at: egui::Pos2) {
         if instance.0 == Product::History.id() {
             crate::context_menu::open_for(self.app, at, crate::context_menu::Target::HistoryControls);
+        }
+    }
+
+    fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
+        if instance.0 == Product::History.id() && action.0 == TIMELINE_SETTINGS {
+            crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
         }
     }
 
@@ -1484,9 +1768,12 @@ impl FramePanelContent for ProductionFrame<'_> {
         slot: ContentSlot,
         ui: &mut egui::Ui,
         context: &PanelContext,
-        _content: &mut dyn PanelController,
+        content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if context.instance.0.starts_with(super::plugin::PREFIX) {
+            return content.render(slot, ui, context, services);
+        }
         if slot == ContentSlot::Title {
             // Only the Browser asks for the title's place (`set_header_content`): its search field.
             if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {
@@ -1506,13 +1793,16 @@ impl FramePanelContent for ProductionFrame<'_> {
         }
         match product {
             Product::RenderLibrary | Product::RenderInspector | Product::RenderShots if !context.preview_geometry => {
-                let rect = super::workspace::egui_rect(context.outer);
+                let rect = super::egui_rect(context.outer);
                 let id = match product {
                     Product::RenderLibrary => "render:appearances",
                     Product::RenderInspector => "render:inspector",
                     _ => "render:shots_strip",
                 };
                 crate::scenario::publish_rect(id, rect);
+            }
+            Product::PartsLibrary => {
+                crate::scenario::publish_rect("library:card", super::egui_rect(context.outer));
             }
             _ => {}
         }
@@ -1543,11 +1833,17 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::DrawingSheets => crate::drawing_workspace::sheets_section(self.app, ui),
             Product::DrawingInspector => crate::drawing_workspace::inspector_contents(self.app, ui),
             Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
+            // A bottom row tall enough for the 2D Timeline shows it in place of the strip.
+            Product::History if context.flow == Flow::Wide && tall_height(context.outer.size.height) => {
+                crate::timeline_2d::panel_contents(self.app, ui)
+            }
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
+            Product::Timeline2d => crate::timeline_2d::panel_contents(self.app, ui),
             Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
             Product::SketchOptions => crate::sketch_palette::shared_body(self.app, ui),
             Product::Bom => crate::bom_panel::shared_content(self.app, ui),
+            Product::PartsLibrary => crate::parts_library::shared_content(self.app, ui),
             Product::RenderLibrary => crate::render_workspace::library::shared_library(self.app, ui),
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_body(self.app, ui),
             Product::RenderShots => crate::render_workspace::shots::shared_shots(self.app, ui, context.flow, slot == ContentSlot::Inline),

@@ -8,11 +8,12 @@
 
 use solidcore::cell_grid as kernel;
 use solidcore_convert as convert;
-use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell};
+use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
 use solidcore_record::{Loop2, Region2, Vec2};
 
 pub use solidcore::cell_grid::{
-    CellGridError, FLATTEN_TOL, MAX_CELLS, MAX_COORD, MAX_SIDES, MAX_SNAP_INSET, MIN_SIZE,
+    CellGridError, FLATTEN_TOL, MAX_CELLS, MAX_CELL_REACH, MAX_CELL_SEGMENTS, MAX_COORD, MAX_SIDES,
+    MAX_SNAP_INSET, MIN_SIZE,
 };
 
 /// The grid a new cell grid starts from (the kernel's defaults).
@@ -34,6 +35,47 @@ pub fn plan_cell_grid(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPl
         &convert::cell_grid::spec(spec),
     )?;
     Ok(convert::cell_grid::record_plan(&plan))
+}
+
+/// The cells of the sketched cell `cell` on its lattice over `field` (see [`plan_cell_grid`] for
+/// the field). `spec` gives `web`, `angle`, `anchor`, `clip` (`whole` or `free`; `snap` is
+/// refused), `keepout_clip` and `margin`.
+///
+/// # Errors
+///
+/// [`CellGridError`]: a parameter, the profile or the field is refused, a cell overlaps a neighbour
+/// or comes nearer than the web, or the field reaches more than [`MAX_CELLS`] lattice cells.
+pub fn plan_sketch_cell_grid(
+    field: &[Loop2],
+    cell: &SketchCell,
+    spec: &CellGridSpec,
+) -> Result<CellGridPlan, CellGridError> {
+    let plan = kernel::plan_sketch(
+        &convert::cell_grid::field(field),
+        &convert::cell_grid::sketch_cell(cell),
+        &convert::cell_grid::spec(spec),
+    )?;
+    Ok(convert::cell_grid::record_plan(&plan))
+}
+
+/// The origin, in the sketch plane, of lattice cell `(i, j)` of the sketched cell `cell`.
+///
+/// # Errors
+///
+/// [`CellGridError`] when a parameter is refused.
+pub fn sketch_cell_center(
+    spec: &CellGridSpec,
+    cell: &SketchCell,
+    i: i64,
+    j: i64,
+) -> Result<Vec2, CellGridError> {
+    kernel::sketch_cell_center(
+        &convert::cell_grid::spec(spec),
+        &convert::cell_grid::sketch_cell(cell),
+        i,
+        j,
+    )
+    .map(convert::record_vec2)
 }
 
 /// The opening of `cell` as regions: each counter-clockwise loop an outer loop, each clockwise
@@ -94,6 +136,38 @@ mod tests {
             Err(CellGridError::Parameter(_))
         ));
         assert!(cell_center(&spec, 0, 0).is_err());
+    }
+
+    #[test]
+    fn a_sketched_cell_is_planned_in_record_types_and_snap_is_refused() {
+        let cell = SketchCell {
+            profile: square(10.0),
+            origin: None,
+            pitch_x: 12.0,
+            pitch_y: 12.0,
+            stagger: 0.0,
+            cell_angle: 0.0,
+            flip: false,
+        };
+        let spec = CellGridSpec {
+            clip: solidcore_record::cell_grid::Clip::Whole,
+            web: 2.0,
+            anchor: Vec2::new(5.0, 5.0),
+            ..default_spec()
+        };
+        // Cell i covers [12 i, 12 i + 10]: i = 0..=2 fit in [0, 40] (the last ends at 34).
+        let plan = plan_sketch_cell_grid(&[square(40.0)], &cell, &spec).unwrap();
+        assert_eq!((plan.whole, plan.partial), (9, 0));
+        let snap = CellGridSpec {
+            clip: solidcore_record::cell_grid::Clip::Snap,
+            ..spec
+        };
+        assert!(matches!(
+            plan_sketch_cell_grid(&[square(40.0)], &cell, &snap),
+            Err(CellGridError::Parameter(_))
+        ));
+        let c = sketch_cell_center(&spec, &cell, 2, 1).unwrap();
+        assert_eq!((c.x, c.y), (29.0, 17.0));
     }
 
     #[test]

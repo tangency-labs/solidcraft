@@ -125,8 +125,10 @@ use crate::intersect::point_class::{
     PointClassification, Precedence,
 };
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::math::gamma;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::{edge as topo_edge, vertex as topo_vertex, VertexId};
 
@@ -142,6 +144,7 @@ const OP_SQUEEZE: &str = "intersect::curve_class::p3::fix_problems_by_squeezing"
 const OP_EDGE_INTERVAL: &str =
     "intersect::curve_class::p3::CurveClassification::classify_edge_interval";
 
+use super::p1::{missing_defect, EDGE_NO_VERTEX, PC_NO_OBJECT};
 use crate::error::intersect::IntersectFailure;
 
 /// The index `FindInterval` leaves in `rlIndex` until it finds an interval.
@@ -193,8 +196,7 @@ pub(super) fn edge_vertices<O: ClassObject>(
     let v1 = topo_edge::vertex(b, e)?;
     let v2 = topo_edge::other_vertex(b, e, v1)?;
     let handle = |v: Option<VertexId>| {
-        let v =
-            v.ok_or_else(|| SolidError::intersect_missing(OP_NEAR_VERTEX, "the edge's vertex"))?;
+        let v = v.ok_or_else(|| missing_defect(OP_NEAR_VERTEX, EDGE_NO_VERTEX))?;
         geometry
             .topology_handle_in(b, EntityRef::Vertex(v))
             .ok_or_else(|| SolidError::invalid_input(OP_NEAR_VERTEX, "vertex without handle"))
@@ -505,9 +507,9 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// [`IntersectFailure::OutsideDomain`] (status `SM_ERR_OUTSIDE_OF_DOMAIN`) for a
-    /// parameter off either end that does not snap;
-    /// `SM_ERR` when no interval is found; the errors of the curve evaluations;
+    /// [`IntersectFailure::ParameterOffClassifiedCurve`] (status `SM_ERR_OUTSIDE_OF_DOMAIN`)
+    /// for a parameter off either end that does not snap;
+    /// a defect (`SM_ERR`) when no interval is found; the errors of the curve evaluations;
     /// [`SolidError::InvalidInput`] without intervals or curve (upstream reads past them);
     /// [`SolidError::Unported`] from the zone tolerances of topology objects and the
     /// 2D tolerance mapping.
@@ -588,9 +590,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 if line_dist_3d < -tol_2d_or_3d {
                     return Err(SolidError::intersect(
                         OP_FIND,
-                        IntersectFailure::OutsideDomain(
-                            "the parameter is before the start of the classified curve",
-                        ),
+                        IntersectFailure::ParameterOffClassifiedCurve {
+                            past_end: false,
+                            distance: -line_dist_3d,
+                            tolerance: tol_2d_or_3d,
+                        },
                     ));
                 }
                 // snap to the beginning of the 1st interval
@@ -632,9 +636,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 if line_dist_3d > tol_2d_or_3d {
                     return Err(SolidError::intersect(
                         OP_FIND,
-                        IntersectFailure::OutsideDomain(
-                            "the parameter is past the end of the classified curve",
-                        ),
+                        IntersectFailure::ParameterOffClassifiedCurve {
+                            past_end: true,
+                            distance: line_dist_3d,
+                            tolerance: tol_2d_or_3d,
+                        },
                     ));
                 }
                 // snap to the end of the last interval
@@ -782,11 +788,19 @@ impl<O: ClassObject> CurveClassification<O> {
             return Ok(());
         }
 
-        // If make it here interval not found - have an error of some sort
-        Err(SolidError::intersect_failed(
+        // If make it here interval not found - have an error of some sort (not reached: a
+        // parameter past the last interval returned above, and the last interval takes
+        // every other one)
+        Err(crate::error::Failure::new(
             OP_FIND,
-            "no interval holds the parameter",
-        ))
+            IntersectFailure::Defect {
+                why: "no interval took the parameter, though a parameter past the last \
+                      interval's end returns before the search and the last interval takes \
+                      every other one",
+            },
+        )
+        .with_status(crate::error::SM_ERR)
+        .into_error())
     }
 
     /// Whether `param`, which `FindInterval` would snap to the `end` (start or end) of
@@ -1166,19 +1180,14 @@ impl<O: ClassObject> CurveClassification<O> {
                 // Gather CurvePtClass and IvlEndPt_PtClass local information
                 let ivl_end_pt_point = vertex_point(
                     geometry,
-                    ivl_end_pt_object.ok_or_else(|| {
-                        SolidError::intersect_missing(OP_INSERT, "the interval end's vertex")
-                    })?,
+                    ivl_end_pt_object.ok_or_else(|| missing_defect(OP_INSERT, PC_NO_OBJECT))?,
                 )?;
                 // (the second vertex's point is only read by the SE_MSG test below)
                 let _pt_class_point = vertex_point(
                     geometry,
-                    point_class.object().ok_or_else(|| {
-                        SolidError::intersect_missing(
-                            OP_INSERT,
-                            "the point classification's vertex",
-                        )
-                    })?,
+                    point_class
+                        .object()
+                        .ok_or_else(|| missing_defect(OP_INSERT, PC_NO_OBJECT))?,
                 )?;
 
                 let scaled_zero = ivl_end_pt_point.scaled_zero();
@@ -1375,9 +1384,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
             // when an EDGE/VERTEX conflict exists
             if let Some((vertex, edge)) = adjacency {
-                let edge = edge.ok_or_else(|| {
-                    SolidError::intersect_missing(OP_INSERT, "the conflicting edge")
-                })?;
+                let edge = edge.ok_or_else(|| missing_defect(OP_INSERT, PC_NO_OBJECT))?;
                 let (test_v, other_test_v) = edge_vertices(geometry, edge)?;
 
                 // when the edge is not connected to the vertex and parameters are not
@@ -1511,22 +1518,26 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a position other than start or end or an interval index past the
-    /// end; those of [`CurveClassification::connect_intervals`].
+    /// [`IntersectFailure::PositionNotAnEnd`] for a position other than start or end and
+    /// [`IntersectFailure::IntervalIndexPastEnd`] for an interval index past the end (both
+    /// `SM_ERR`); those of [`CurveClassification::connect_intervals`].
     pub fn remove_point_class(&mut self, index: usize, position: IntervalPosition) -> Result<()> {
         // check input - eIPos an allowed value
         if position != IntervalPosition::Start && position != IntervalPosition::End {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_REMOVE,
-                "the position is neither the start nor the end of an interval",
+                IntersectFailure::PositionNotAnEnd,
             ));
         }
 
         // check input - valid lIndex
         if index >= self.size() {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_REMOVE,
-                "the interval index is past the end of the classification",
+                IntersectFailure::IntervalIndexPastEnd {
+                    index,
+                    size: self.size(),
+                },
             ));
         }
 
@@ -1693,9 +1704,9 @@ impl<O: ClassObject> CurveClassification<O> {
                             .start
                             .set_class_object(PointClassType::Edge, Some(new_e2));
                     } else {
-                        return Err(SolidError::intersect_failed(
+                        return Err(SolidError::intersect(
                             OP_MERGE,
-                            "the interval start lies on neither of the edges the split made",
+                            IntersectFailure::NotOnSplitEdges { parameter: t },
                         ));
                     }
                 }
@@ -1712,9 +1723,9 @@ impl<O: ClassObject> CurveClassification<O> {
                             .end
                             .set_class_object(PointClassType::Edge, Some(new_e2));
                     } else {
-                        return Err(SolidError::intersect_failed(
+                        return Err(SolidError::intersect(
                             OP_MERGE,
-                            "the interval end lies on neither of the edges the split made",
+                            IntersectFailure::NotOnSplitEdges { parameter: t },
                         ));
                     }
                 }
@@ -1740,10 +1751,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         // stop short Ivls classifying to neighbor Ivl EndPts
                         let drop1 = edge_curve(geometry, new_e1)?
                             .ok_or_else(|| {
-                                SolidError::intersect_missing(
-                                    OP_MERGE,
-                                    "the first split edge's curve",
-                                )
+                                SolidError::intersect(OP_MERGE, IntersectFailure::EdgeWithoutCurve)
                             })?
                             .drop_point(
                                 k,
@@ -1766,10 +1774,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         // drop interval midPoint to NewE2
                         let drop2 = edge_curve(geometry, new_e2)?
                             .ok_or_else(|| {
-                                SolidError::intersect_missing(
-                                    OP_MERGE,
-                                    "the second split edge's curve",
-                                )
+                                SolidError::intersect(OP_MERGE, IntersectFailure::EdgeWithoutCurve)
                             })?
                             .drop_point(
                                 k,
@@ -1820,7 +1825,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when `AreCoincidentMaybe` is unsure; [`SolidError::InvalidInput`] when
+    /// [`IntersectFailure::NoClassObject`] (`SM_ERR`) when `AreCoincidentMaybe` is unsure; [`SolidError::InvalidInput`] when
     /// `other` has fewer intervals; those of
     /// [`CurveClassification::are_coincident_maybe`] and
     /// [`CurveClassification::connect_intervals`].
@@ -1843,11 +1848,15 @@ impl<O: ClassObject> CurveClassification<O> {
                 // if interval passes AreCoincidentMaybe() test
                 let (mut coin, mut end_of_cm) = are_coincident_maybe(k, geometry, self, other, ii)?;
                 if coin == Coincident::Unsure {
-                    // This signals an unrecoverable error.
-                    return Err(SolidError::intersect_failed(
+                    // This signals an unrecoverable error: unsure only for an end classified
+                    // to an edge whose object is not an edge, the classification's object
+                    // (rule 9)
+                    return Err(crate::error::Failure::new(
                         OP_CLEANUP,
-                        "whether the intervals coincide could not be decided",
-                    ));
+                        IntersectFailure::NoClassObject,
+                    )
+                    .with_status(crate::error::SM_ERR)
+                    .into_error());
                 }
 
                 // Another check: degenerate intervals.
@@ -1935,9 +1944,9 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
 
     // more locals
     let pc = *cc.pc_at(loc)?;
-    let edge = pc.object().ok_or_else(|| {
-        SolidError::intersect_missing(OP_NEAR_VERTEX, "the point classification's edge")
-    })?;
+    let edge = pc
+        .object()
+        .ok_or_else(|| missing_defect(OP_NEAR_VERTEX, PC_NO_OBJECT))?;
     let (edge_vertex1, edge_vertex2) = edge_vertices(geometry, edge)?;
     let dist1 = vertex_point(geometry, edge_vertex1)?.distance(classify_point);
     let dist2 = vertex_point(geometry, edge_vertex2)?.distance(classify_point);
@@ -1957,8 +1966,33 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         object_zone_tol_3d(k, geometry, Some(edge_vertex2))?,
     );
 
+    let accepts_native_vertex = |vertex| -> Result<bool> {
+        if !cc.native_material_contacts() {
+            return Ok(true);
+        }
+        let Some(marker) =
+            crate::intersect::point_class::periodic_trim_witness(k, geometry, vertex)?
+        else {
+            return Ok(true);
+        };
+        let Some(curve) = cc.curve().and_then(|curve| geometry.curve(curve)) else {
+            return Ok(true);
+        };
+        let Some(support) = crate::curve::contact::NativeSupport::curve(curve, &cc.interval())
+        else {
+            return Ok(true);
+        };
+        let zone = object_zone_tol_3d(k, geometry, Some(vertex))?.max(edge_zone_tol_3d);
+        Ok(!marker.excluded_by(
+            k,
+            &support,
+            src_zone_tol_3d,
+            zone,
+            cc.native_foreign_support(),
+        ))
+    };
     // when target_point is closer to pEdgeVertex1 and within tolerance
-    if dist1 < dist2 && dist1 < xsect_tol_3d1 {
+    if dist1 < dist2 && dist1 < xsect_tol_3d1 && accepts_native_vertex(edge_vertex1)? {
         // inform the public that the classification was modified
         changed_to_vertex = true;
 
@@ -1973,7 +2007,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         }
     }
     // when target_point is closer to pEdgeVertex2 and within tolerance
-    else if dist2 <= dist1 && dist2 < xsect_tol_3d2 {
+    else if dist2 <= dist1 && dist2 < xsect_tol_3d2 && accepts_native_vertex(edge_vertex2)? {
         // inform the public that the classification was modified
         changed_to_vertex = true;
 
@@ -2100,7 +2134,8 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
     // intervals in the same order
     // Bound (see the Deviations line): every squeeze of `cc` removes an interval, so more
     // restarts than it had intervals mean upstream would recurse without end.
-    let mut restarts_left = cc.size().saturating_add(1);
+    let allowed = cc.size().saturating_add(1);
+    let mut restarts_left = allowed;
     'restart: loop {
         // for every CurveClass Interval
         for ii in 0..cc.size() {
@@ -2186,9 +2221,9 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
 
                 // after modifying ThisCurve - start over
                 restarts_left = restarts_left.checked_sub(1).ok_or_else(|| {
-                    SolidError::intersect_failed(
+                    SolidError::intersect(
                         OP_SQUEEZE,
-                        "squeezing out zero-length intervals did not settle",
+                        IntersectFailure::RepairDidNotSettle { restarts: allowed },
                     )
                 })?;
                 continue 'restart;
@@ -2319,12 +2354,13 @@ impl<O: ClassObject> CurveClassification<O> {
 
         let mut first_raise = None;
         for edge in candidates {
-            // an edge with no 3D curve proves nothing: no interval runs along it (checked
-            // before any lookup below that needs the curve and would fail without it)
-            if edge_curve(geometry, edge)?.is_none() {
+            // an edge with no 3D curve proves nothing: no interval runs along it (the curve
+            // found here is the one every test below uses)
+            let Some(target) = edge_curve(geometry, edge)? else {
                 continue;
-            }
-            let Some(unclassified) = self.ends_on_edge(k, geometry, edge, &ivl)? else {
+            };
+            let Some(unclassified) = self.ends_on_edge(k, geometry, (edge, target), index, &ivl)?
+            else {
                 continue;
             };
             let xsect_tol_3d = xsect_tol_3d_from_zones(
@@ -2337,9 +2373,6 @@ impl<O: ClassObject> CurveClassification<O> {
             // when both its ends lie within the intersection tolerance of the edge's line
             // ([`straight_run_on_line`], a certificate, not a sample).
             let curve = cc_curve(self, geometry, OP_EDGE_INTERVAL)?;
-            let target = edge_curve(geometry, edge)?.ok_or_else(|| {
-                SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve")
-            })?;
             let straight = matches!(curve.kind(), CurveKind::Line(_))
                 && matches!(target.kind(), CurveKind::Line(_));
             let on_edge = if straight {
@@ -2427,19 +2460,22 @@ impl<O: ClassObject> CurveClassification<O> {
         Ok(())
     }
 
-    /// Whether both ends of interval `ivl` lie on `edge` (see
+    /// Whether both ends of interval `ivl` (at `index`) lie on `edge` (see
     /// [`Self::classify_edge_interval`]), and for each of them, start and end, that was
     /// unclassified and lies on it its parameter on `edge`. `None` when an end is elsewhere,
     /// when neither end is classified, when an unclassified end is within the intersection
-    /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
-    /// when with an unclassified end the curve is not tangent to `edge` at both ends of the
-    /// interval ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a
-    /// whole ([`piece_within_band`]).
+    /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), when
+    /// an unclassified curve end only stopped because it exited the classifying face's own UV
+    /// domain strictly past `edge` ([`Self::end_exits_face_domain`]), or when with an
+    /// unclassified end the curve is not tangent to `edge` at both ends of the interval
+    /// ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a whole
+    /// ([`piece_within_band`]). `edge_crv` is the curve of `edge`.
     fn ends_on_edge(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
-        edge: O,
+        (edge, edge_crv): (O, &Curve),
+        index: usize,
         ivl: &CurveInterval<O>,
     ) -> Result<Option<[Option<f64>; 2]>> {
         let (eb, e) = edge_of(geometry, edge, "SmEdge::GetStartVertex")?;
@@ -2475,7 +2511,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 return Ok(None);
             }
             let p = curve.evaluate_point(k, t)?;
-            let Some((d, param)) = drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)? else {
+            let Some((d, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+            else {
                 return Ok(None);
             };
             if d.is_nan() || d >= xsect_tol_3d {
@@ -2490,24 +2527,36 @@ impl<O: ClassObject> CurveClassification<O> {
             *flag = Some(param);
         }
         let (t0, t1) = (ivl.interval.min(), ivl.interval.max());
-        let params = match unclassified {
+        let (params, uncl_end) = match unclassified {
             [None, None] => return Ok(Some(unclassified)),
             [Some(_), Some(_)] => return Ok(None),
             // the classified end's parameter on the edge, for the proof over the interval
             [Some(s0), None] => {
                 let p = curve.evaluate_point(k, t1)?;
-                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s1)| [s0, s1])
+                let Some((_, s1)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                else {
+                    return Ok(None);
+                };
+                ([s0, s1], (t0, s0, false))
             }
             [None, Some(s1)] => {
                 let p = curve.evaluate_point(k, t0)?;
-                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s0)| [s0, s1])
+                let Some((_, s0)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                else {
+                    return Ok(None);
+                };
+                ([s0, s1], (t1, s1, true))
             }
         };
-        let edge_crv = edge_curve(geometry, edge)?
-            .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
-        let Some(params) = params else {
+        let (t_uncl, s_uncl, at_max) = uncl_end;
+        if self.end_exits_face_domain(
+            k,
+            geometry,
+            (curve, index, t_uncl, at_max),
+            (edge_crv, s_uncl),
+        )? {
             return Ok(None);
-        };
+        }
         // A curve that crosses the edge at one end of a short interval keeps the whole piece
         // within the band too, so the piece runs along the edge only when it leaves neither
         // end across it: tangent to the edge at both
@@ -2517,6 +2566,163 @@ impl<O: ClassObject> CurveClassification<O> {
         let proved = piece_within_band(k, curve, &ivl.interval, edge_crv, params, xsect_tol_3d)?;
         Ok(proved.then_some(unclassified))
     }
+
+    /// Not upstream (#22137): whether the unclassified end `t_uncl` (`at_max` true at the upper
+    /// end of interval `index`) of `curve` only stopped there because `curve` exited the
+    /// classifying face's own UV domain across a side strictly past `edge_crv` at `s_uncl`.
+    ///
+    /// A surface-surface intersection curve is clipped to each face's UV domain, which may be
+    /// padded past the face's trim loop (for instance by STEP import). When a curve meets a
+    /// boundary edge tangentially and curves out of the face, clipping at a padded side within
+    /// the intersection tolerance leaves a short arc whose whole clipped length stays inside the
+    /// band and angle tolerance of the edge. Its unclassified end lies on that domain side
+    /// strictly past the edge while the curve's outward tangent crosses out of the domain;
+    /// promoting such an end onto the edge imprints a dangling spur into the partner face.
+    fn end_exits_face_domain(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        (curve, index, t_uncl, at_max): (&Curve, usize, f64, bool),
+        (edge_crv, s_uncl): (&Curve, f64),
+    ) -> Result<bool> {
+        let at_curve_end = if at_max {
+            index + 1 == self.size()
+        } else {
+            index == 0
+        };
+        if !at_curve_end {
+            return Ok(false);
+        }
+        let Some((fb, EntityRef::Face(f))) =
+            self.face().and_then(|face| geometry.topology_entity(face))
+        else {
+            return Ok(false);
+        };
+        let face_rec = fb.face(f)?;
+        let Some(raw_surface) = face_rec.surface.as_ref() else {
+            return Ok(false);
+        };
+        let domain = face_rec.uv_domain;
+        if domain.is_init() || domain.has_negative_area() {
+            return Ok(false);
+        }
+        let p = curve.evaluate_point(k, t_uncl)?;
+        let q = edge_crv.evaluate_point(k, s_uncl)?;
+        let d_edge = p.distance(q);
+        if !(d_edge.is_finite() && d_edge > 0.0) {
+            return Ok(false);
+        }
+        let eval = curve.evaluate(k, t_uncl, 1, !at_max, true)?;
+        let Some(&deriv) = eval.get(1) else {
+            return Ok(false);
+        };
+        let t_out = if at_max { deriv } else { -deriv };
+        if !(t_out.x.is_finite() && t_out.y.is_finite() && t_out.z.is_finite()) {
+            return Ok(false);
+        }
+        let mut surface = raw_surface.clone_for_evaluation()?;
+        let _ = surface.set_owner(None);
+        point_exits_surface_domain(k, &surface, &domain, (p, q, d_edge), t_out)
+    }
+}
+
+/// Drops `point` onto `surface` over `domain` with optional `guess_uv`, returning `None` on
+/// ordinary drop failures while propagating unported and cancellation errors.
+fn drop_uv_on_domain(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    point: Point3,
+    guess_uv: Option<crate::math::Point2>,
+) -> Result<Option<crate::math::Point2>> {
+    let opts = DropPointOptions {
+        guess_uv,
+        ..DropPointOptions::default()
+    };
+    match surface.drop_point::<NoObject>(k, point, domain, &opts) {
+        Ok(d) if d.success && d.result_uv.x.is_finite() && d.result_uv.y.is_finite() => {
+            Ok(Some(d.result_uv))
+        }
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(_) | Err(_) => Ok(None),
+    }
+}
+
+/// Not upstream (#22137): whether `p` lies on a boundary side of `domain` strictly past `q`
+/// (distance `d_edge` apart) while the 3D outward tangent `t_out` crosses out of `domain`
+/// across that side.
+fn point_exits_surface_domain(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    (p, q, d_edge): (Point3, Point3, f64),
+    t_out: Vec3,
+) -> Result<bool> {
+    let Some(uv_p) = drop_uv_on_domain(k, surface, domain, p, None)? else {
+        return Ok(false);
+    };
+    let Some(uv_q) = drop_uv_on_domain(k, surface, domain, q, Some(uv_p))? else {
+        return Ok(false);
+    };
+    let u_left = (uv_p.x - domain.min().x).abs() <= (domain.max().x - uv_p.x).abs();
+    let v_left = (uv_p.y - domain.min().y).abs() <= (domain.max().y - uv_p.y).abs();
+    let (_, su, sv) = match surface.evaluate_1st_derivatives(k, uv_p, u_left, v_left) {
+        Ok(v) => v,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(false),
+    };
+    let (g_uu, g_uv, g_vv) = (su.dot(su), su.dot(sv), sv.dot(sv));
+    let det = g_uu * g_vv - g_uv * g_uv;
+    let t_len = t_out.length();
+    if !(det.is_finite() && det > 0.0 && t_len.is_finite() && t_len > 0.0) {
+        return Ok(false);
+    }
+    let (rhs_u, rhs_v) = (t_out.dot(su), t_out.dot(sv));
+    let du_out = (g_vv * rhs_u - g_uv * rhs_v) / det;
+    let dv_out = (g_uu * rhs_v - g_uv * rhs_u) / det;
+    if !(du_out.is_finite() && dv_out.is_finite()) {
+        return Ok(false);
+    }
+    let side_tol = k.tolerances.approx_tol_3d.min(0.25 * d_edge);
+    let dir_floor = EFF_ZERO * t_len;
+    let axes = [
+        (
+            uv_p.x,
+            uv_q.x,
+            domain.min().x,
+            domain.max().x,
+            du_out,
+            su.length(),
+        ),
+        (
+            uv_p.y,
+            uv_q.y,
+            domain.min().y,
+            domain.max().y,
+            dv_out,
+            sv.length(),
+        ),
+    ];
+    for (coord_p, coord_q, lo, hi, dir_out, deriv_len) in axes {
+        if !(deriv_len.is_finite() && deriv_len > 0.0) {
+            continue;
+        }
+        // At a periodic seam `uv_q` can sit on the opposite side of the domain; require `coord_q`
+        // to stay clear of the opposite boundary so a seam wrap is never mistaken for an interior
+        // edge.
+        let exits_lo = (coord_p - lo) * deriv_len <= side_tol
+            && (coord_q - coord_p) * deriv_len > side_tol
+            && (hi - coord_q) * deriv_len > side_tol
+            && dir_out * deriv_len < -dir_floor;
+        let exits_hi = (hi - coord_p) * deriv_len <= side_tol
+            && (coord_p - coord_q) * deriv_len > side_tol
+            && (coord_q - lo) * deriv_len > side_tol
+            && dir_out * deriv_len > dir_floor;
+        if exits_lo || exits_hi {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Not upstream: whether `curve` at both ends `[t0, t1]` (`t0 < t1`) of a piece runs
@@ -2825,12 +3031,16 @@ pub(crate) fn curve_runs_along(
     let (s0, s1) = if reversed { (u1, u0) } else { (u0, u1) };
     let mut pending = vec![(t0, t1, s0, s1)];
     let mut bounded = 0_usize;
+    let mut circle_pair: Option<Option<CoplanarCircles>> = None;
     while let Some((t0, t1, s0, s1)) = pending.pop() {
         let piece = Extent1d::from_min_max(t0, t1);
         // written so that a NaN bound refuses; two coplanar circles' arcs are proved in closed
         // form when their chords' enclosures are not tight enough
         if pieces_apart_bound(k, curve, &piece, other, [s0, s1], tol)?.is_some_and(|d| d < tol)
-            || circle_arcs_within(curve, &piece, other, [s0, s1], tol)
+            || circle_pair
+                .get_or_insert_with(|| CoplanarCircles::prepare(curve, other, tol))
+                .as_mut()
+                .is_some_and(|pair| pair.arcs_within(curve, &piece, other, [s0, s1], tol))
         {
             continue;
         }
@@ -3074,12 +3284,11 @@ fn wrap_angle(d: f64) -> f64 {
 
 /// `e f` as an expansion.
 fn expansion_mul(e: &[f64], f: &[f64]) -> Option<Vec<f64>> {
-    f.iter().try_fold(vec![0.0], |acc, &c| {
-        Some(crate::geom::expansion::add(
-            &acc,
-            &crate::geom::expansion::scale(e, c)?,
-        ))
-    })
+    let mut acc = Vec::new();
+    acc.try_reserve(e.len().saturating_mul(f.len()).saturating_mul(2))
+        .ok()?;
+    crate::geom::expansion::add_mul_into(&mut acc, e, f)?;
+    Some(acc)
 }
 
 /// An expansion's value bounded below and above by doubles: its rounded sum widened by the
@@ -3139,157 +3348,268 @@ fn bernstein_range(n: usize, k: usize, [a, b]: [f64; 2]) -> (f64, f64) {
 /// and `|C - c|² - r²` is that over `W²` (by `W`'s lower or upper bound as the sign needs).
 /// Outward, `|C - c| - r` is that over `|C - c| + r ≥ 2 r`; inward, `r - |C - c| = d` has
 /// `r² - |C - c|² = d (2 r - d) ≥ d r` (as `d ≤ r`), so `d` is at most that over `r`.
+/// Cached exact Bernstein bounds for one quadratic Bézier segment of a rational circle NURB.
+#[derive(Clone, Copy)]
+enum SegmentCoeffBounds {
+    Pending,
+    OutOfRange,
+    Bounds([(f64, f64); 5]),
+}
+
+/// One quadratic Bézier segment of a rational circle NURB, with its exact Bernstein bounds
+/// computed lazily on first overlap with a queried parameter range.
+struct CircleNurbSegment {
+    ka: f64,
+    kb: f64,
+    seg: [([f64; 3], f64); 3],
+    coeff_bounds: SegmentCoeffBounds,
+}
+
+/// Validated, coplanar rational quadratic circle NURB segments for repeated
+/// [`CircleNurbSegments::radial_deviation`] queries across subdivisions of the same curve
+/// (hoisted out of `curve_runs_along`).
+struct CircleNurbSegments {
+    c: Point3,
+    r: f64,
+    r2: Vec<f64>,
+    segments: Vec<CircleNurbSegment>,
+}
+
+impl CircleNurbSegments {
+    /// Validates clamping, weights, knot multiplicities, and exact control-point planarity once
+    /// per circle curve.
+    fn prepare(curve: &Curve, (c, r): (Point3, f64), (px, py): (Vec3, Vec3)) -> Option<Self> {
+        use crate::geom::expansion::{add_scaled_into, det3, is_zero, product, sub_into};
+        use crate::nurbs::math::{NOW, NOZ};
+        let nurb = match curve.kind() {
+            CurveKind::Ellipse(e) => e.base().nurb_ref().ok()?,
+            _ => return None,
+        };
+        let (knots, cpts) = (nurb.knots(), nurb.cpts());
+        let n = cpts.len();
+        let at = |i: usize| knots.get(i).copied();
+        let clamped = n >= 3
+            && (n & 1) == 1
+            && knots.len() == n + 3
+            && at(0) == at(2)
+            && at(1) == at(2)
+            && at(n) == at(n + 2)
+            && at(n + 1) == at(n + 2);
+        if nurb.degree() != 2 || !clamped {
+            return None;
+        }
+        let plane_c = det3(px, py, c)?;
+        let mut hw = Vec::new();
+        hw.try_reserve(n).ok()?;
+        let mut diff = Vec::new();
+        diff.try_reserve(16).ok()?;
+        for p in cpts {
+            let w = if p.w == NOW { 1.0 } else { p.w };
+            let z = if p.z == NOZ { 0.0 } else { p.z };
+            if !(w.is_finite() && w > 0.0 && p.x.is_finite() && p.y.is_finite() && z.is_finite()) {
+                return None;
+            }
+            let d = det3(px, py, Vec3::new(p.x, p.y, z))?;
+            diff.clear();
+            add_scaled_into(&mut diff, &plane_c, w)?;
+            let mut rem = d;
+            sub_into(&mut rem, &diff);
+            if !is_zero(&rem) {
+                return None;
+            }
+            hw.push(([p.x, p.y, z], w));
+        }
+        let r2 = product(r, r)?;
+        let seg_count = (n - 1) >> 1;
+        let mut segments = Vec::new();
+        segments.try_reserve(seg_count).ok()?;
+        for j in 0..seg_count {
+            let (Some(ka), Some(kb)) = (at(2 * j + 2), at(2 * j + 3)) else {
+                return None;
+            };
+            if j + 1 < seg_count && at(2 * j + 3) != at(2 * j + 4) {
+                return None;
+            }
+            if ka.partial_cmp(&kb) != Some(core::cmp::Ordering::Less) {
+                return None;
+            }
+            let &[s0, s1, s2] = hw.get(2 * j..2 * j + 3)? else {
+                return None;
+            };
+            segments.push(CircleNurbSegment {
+                ka,
+                kb,
+                seg: [s0, s1, s2],
+                coeff_bounds: SegmentCoeffBounds::Pending,
+            });
+        }
+        Some(Self { c, r, r2, segments })
+    }
+
+    fn compute_segment_bounds(
+        c: Point3,
+        r2: &[f64],
+        seg: &[([f64; 3], f64); 3],
+    ) -> Option<[(f64, f64); 5]> {
+        use crate::geom::expansion::{
+            add_mul_into, add_scaled_into, grow_into, product_pair, sub_into,
+        };
+        // `Q_i = H_i - c w_i`, exactly
+        let mut q: [([Vec<f64>; 3], f64); 3] = [
+            ([Vec::new(), Vec::new(), Vec::new()], 0.0),
+            ([Vec::new(), Vec::new(), Vec::new()], 0.0),
+            ([Vec::new(), Vec::new(), Vec::new()], 0.0),
+        ];
+        for (dst, &(h, w)) in q.iter_mut().zip(seg.iter()) {
+            dst.1 = w;
+            for ((out, hc), cc) in dst.0.iter_mut().zip(h).zip([c.x, c.y, c.z]) {
+                let (err, prod) = product_pair(cc, w)?;
+                grow_into(out, hc);
+                grow_into(out, -err);
+                grow_into(out, -prod);
+            }
+        }
+        let term = |i: usize, k: usize| -> Option<Vec<f64>> {
+            let ((qi, wi), (qk, wk)) = (q.get(i)?, q.get(k)?);
+            let mut d = Vec::new();
+            d.try_reserve(16).ok()?;
+            for (a, b) in qi.iter().zip(qk.iter()) {
+                add_mul_into(&mut d, a, b)?;
+            }
+            let mut rw = Vec::new();
+            rw.try_reserve(4).ok()?;
+            add_scaled_into(&mut rw, r2, *wi)?;
+            let mut rww = Vec::new();
+            rww.try_reserve(8).ok()?;
+            add_scaled_into(&mut rww, &rw, *wk)?;
+            sub_into(&mut d, &rww);
+            Some(d)
+        };
+        // `6 N`'s Bernstein coefficients using symmetry `term(i, k) == term(k, i)`:
+        // c0 = 6*T00, c1 = 6*T01, c2 = 2*T02 + 4*T11, c3 = 6*T12, c4 = 6*T22.
+        let t00 = term(0, 0)?;
+        let t01 = term(0, 1)?;
+        let t02 = term(0, 2)?;
+        let t11 = term(1, 1)?;
+        let t12 = term(1, 2)?;
+        let t22 = term(2, 2)?;
+
+        let scaled_bounds = |t: &[f64], factor: f64| -> Option<(f64, f64)> {
+            let mut e = Vec::new();
+            e.try_reserve(t.len().saturating_mul(2)).ok()?;
+            add_scaled_into(&mut e, t, factor)?;
+            expansion_bounds(&e)
+        };
+        let mut c2 = Vec::new();
+        c2.try_reserve(t02.len().saturating_add(t11.len()).saturating_mul(2))
+            .ok()?;
+        add_scaled_into(&mut c2, &t02, 2.0)?;
+        add_scaled_into(&mut c2, &t11, 4.0)?;
+
+        Some([
+            scaled_bounds(&t00, 6.0)?,
+            scaled_bounds(&t01, 6.0)?,
+            expansion_bounds(&c2)?,
+            scaled_bounds(&t12, 6.0)?,
+            scaled_bounds(&t22, 6.0)?,
+        ])
+    }
+
+    /// Evaluates `(inward, outward)` radial deviation bounds over `[lo, hi]` using cached
+    /// per-segment Bernstein coefficient bounds.
+    #[allow(clippy::manual_clamp)]
+    fn radial_deviation(&mut self, [lo, hi]: [f64; 2]) -> Option<(f64, f64)> {
+        if lo
+            .partial_cmp(&hi)
+            .is_none_or(|o| o == core::cmp::Ordering::Greater)
+        {
+            return None;
+        }
+        let (mut inward, mut outward) = (0.0_f64, 0.0_f64);
+        for seg in &mut self.segments {
+            if hi < seg.ka || seg.kb < lo {
+                continue;
+            }
+            let bounds = match seg.coeff_bounds {
+                SegmentCoeffBounds::Bounds(b) => b,
+                SegmentCoeffBounds::OutOfRange => return None,
+                SegmentCoeffBounds::Pending => {
+                    let Some(b) = Self::compute_segment_bounds(self.c, &self.r2, &seg.seg) else {
+                        seg.coeff_bounds = SegmentCoeffBounds::OutOfRange;
+                        return None;
+                    };
+                    seg.coeff_bounds = SegmentCoeffBounds::Bounds(b);
+                    b
+                }
+            };
+            // the segment's local parameters of the range, widened by their rounding
+            let len = seg.kb - seg.ka;
+            if !(len.is_finite() && len > 0.0) {
+                return None;
+            }
+            let local = |t: f64| (t.max(seg.ka).min(seg.kb) - seg.ka) / len;
+            let slack = 8.0 * ROUNDOFF * (seg.ka.abs().max(seg.kb.abs()) / len + 1.0);
+            let span = [(local(lo) - slack).max(0.0), (local(hi) + slack).min(1.0)];
+            let (mut n_lo, mut n_hi, mut mag) = (0.0_f64, 0.0_f64, 0.0_f64);
+            for (k, &(c_lo, c_hi)) in bounds.iter().enumerate() {
+                let (b_lo, b_hi) = bernstein_range(4, k, span);
+                n_hi += if c_hi >= 0.0 {
+                    c_hi * b_hi
+                } else {
+                    c_hi * b_lo
+                };
+                n_lo += if c_lo >= 0.0 {
+                    c_lo * b_lo
+                } else {
+                    c_lo * b_hi
+                };
+                mag += c_lo.abs().max(c_hi.abs()) * b_hi;
+            }
+            let pad = 16.0 * ROUNDOFF * mag;
+            let (n_lo, n_hi) = ((n_lo - pad) / 6.0, (n_hi + pad) / 6.0);
+            let (mut wmin, mut wmax) = (0.0_f64, 0.0_f64);
+            for (i, &(_, w)) in seg.seg.iter().enumerate() {
+                let (b_lo, b_hi) = bernstein_range(2, i, span);
+                wmin += w * b_lo;
+                wmax += w * b_hi;
+            }
+            let (wmin, wmax) = (wmin * (1.0 - 8.0 * ROUNDOFF), wmax * (1.0 + 8.0 * ROUNDOFF));
+            if wmin.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                return None;
+            }
+            let (wmin2, wmax2) = (wmin * wmin, wmax * wmax);
+            if !(wmin2.is_normal() && wmax2.is_normal()) {
+                return None;
+            }
+            let up = if n_hi >= 0.0 {
+                n_hi / wmin2
+            } else {
+                n_hi / wmax2
+            };
+            let down = if n_lo >= 0.0 {
+                n_lo / wmax2
+            } else {
+                n_lo / wmin2
+            };
+            if !(up.is_finite() && down.is_finite()) {
+                return None;
+            }
+            outward = outward.max(up / (2.0 * self.r) * (1.0 + 8.0 * ROUNDOFF));
+            inward = inward.max(-down / self.r * (1.0 + 8.0 * ROUNDOFF));
+        }
+        (inward.is_finite() && outward.is_finite()).then_some((inward, outward))
+    }
+}
+
+#[cfg(test)]
 fn radial_deviation(
     curve: &Curve,
     (c, r): (Point3, f64),
     (px, py): (Vec3, Vec3),
     [lo, hi]: [f64; 2],
 ) -> Option<(f64, f64)> {
-    use crate::geom::expansion::{add, det3, is_zero, product, scale, sub};
-    use crate::nurbs::math::{NOW, NOZ};
-    let nurb = match curve.kind() {
-        CurveKind::Ellipse(e) => e.base().nurb_ref().ok()?,
-        _ => return None,
-    };
-    let (knots, cpts) = (nurb.knots(), nurb.cpts());
-    let n = cpts.len();
-    let at = |i: usize| knots.get(i).copied();
-    let clamped = n >= 3
-        && n % 2 == 1
-        && knots.len() == n + 3
-        && at(0) == at(2)
-        && at(1) == at(2)
-        && at(n) == at(n + 2)
-        && at(n + 1) == at(n + 2);
-    if nurb.degree() != 2
-        || !clamped
-        || lo
-            .partial_cmp(&hi)
-            .is_none_or(|o| o == core::cmp::Ordering::Greater)
-    {
-        return None;
-    }
-    // homogeneous points and weights; a non-rational point has weight 1, a 2D one `z = 0`;
-    // each point in the plane through `c` of axes `px`, `py`, exactly: `n·H_i = w_i n·c`
-    let plane_c = det3(px, py, c)?;
-    let mut hw = Vec::new();
-    for p in cpts {
-        let w = if p.w == NOW { 1.0 } else { p.w };
-        let z = if p.z == NOZ { 0.0 } else { p.z };
-        if !(w.is_finite() && w > 0.0 && p.x.is_finite() && p.y.is_finite() && z.is_finite()) {
-            return None;
-        }
-        if !is_zero(&sub(
-            &det3(px, py, Vec3::new(p.x, p.y, z))?,
-            &scale(&plane_c, w)?,
-        )) {
-            return None;
-        }
-        hw.push(([p.x, p.y, z], w));
-    }
-    let r2 = product(r, r)?;
-    let (mut inward, mut outward) = (0.0_f64, 0.0_f64);
-    for j in 0..(n - 1) / 2 {
-        let (Some(ka), Some(kb)) = (at(2 * j + 2), at(2 * j + 3)) else {
-            return None;
-        };
-        if j + 1 < (n - 1) / 2 && at(2 * j + 3) != at(2 * j + 4) {
-            return None;
-        }
-        if ka.partial_cmp(&kb) != Some(core::cmp::Ordering::Less) {
-            return None;
-        }
-        if hi < ka || kb < lo {
-            continue;
-        }
-        let seg = hw.get(2 * j..2 * j + 3)?;
-        // `Q_i = H_i - c w_i`, exactly (a non-rational point's `H_i` is its point, `w_i = 1`)
-        let mut q = Vec::new();
-        for &(h, w) in seg {
-            let mut qi = Vec::new();
-            for (hc, cc) in h.into_iter().zip([c.x, c.y, c.z]) {
-                qi.push(sub(&[hc], &product(cc, w)?));
-            }
-            q.push((qi, w));
-        }
-        let term = |i: usize, k: usize| -> Option<Vec<f64>> {
-            let ((qi, wi), (qk, wk)) = (q.get(i)?, q.get(k)?);
-            let mut d = vec![0.0];
-            for (a, b) in qi.iter().zip(qk) {
-                d = add(&d, &expansion_mul(a, b)?);
-            }
-            Some(sub(&d, &scale(&scale(&r2, *wi)?, *wk)?))
-        };
-        // `6 N`'s Bernstein coefficients
-        let coeff = [
-            scale(&term(0, 0)?, 6.0)?,
-            scale(&add(&term(0, 1)?, &term(1, 0)?), 3.0)?,
-            add(&add(&term(0, 2)?, &term(2, 0)?), &scale(&term(1, 1)?, 4.0)?),
-            scale(&add(&term(1, 2)?, &term(2, 1)?), 3.0)?,
-            scale(&term(2, 2)?, 6.0)?,
-        ];
-        // the segment's local parameters of the range, widened by their rounding
-        let len = kb - ka;
-        let local = |t: f64| (t.clamp(ka, kb) - ka) / len;
-        let slack = 8.0 * ROUNDOFF * (ka.abs().max(kb.abs()) / len + 1.0);
-        let span = [(local(lo) - slack).max(0.0), (local(hi) + slack).min(1.0)];
-        let (mut n_lo, mut n_hi, mut mag) = (0.0_f64, 0.0_f64, 0.0_f64);
-        for (k, e) in coeff.iter().enumerate() {
-            let (c_lo, c_hi) = expansion_bounds(e)?;
-            let (b_lo, b_hi) = bernstein_range(4, k, span);
-            n_hi += if c_hi >= 0.0 {
-                c_hi * b_hi
-            } else {
-                c_hi * b_lo
-            };
-            n_lo += if c_lo >= 0.0 {
-                c_lo * b_lo
-            } else {
-                c_lo * b_hi
-            };
-            mag += c_lo.abs().max(c_hi.abs()) * b_hi;
-        }
-        // `/ 6` and the sums' rounding: each of the five products rounded once and summed in
-        // four roundings, so each sum is within `8 u` of the sum of the magnitudes `mag`
-        // (itself within `8 u` of its value), padded by `16 u mag`
-        let pad = 16.0 * ROUNDOFF * mag;
-        let (n_lo, n_hi) = ((n_lo - pad) / 6.0, (n_hi + pad) / 6.0);
-        // `W` over the span, from below and above (positive terms, each within `4 u`)
-        let (mut wmin, mut wmax) = (0.0_f64, 0.0_f64);
-        for (i, &(_, w)) in seg.iter().enumerate() {
-            let (b_lo, b_hi) = bernstein_range(2, i, span);
-            wmin += w * b_lo;
-            wmax += w * b_hi;
-        }
-        let (wmin, wmax) = (wmin * (1.0 - 8.0 * ROUNDOFF), wmax * (1.0 + 8.0 * ROUNDOFF));
-        if wmin.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-            return None;
-        }
-        // `W²`'s bounds, each within `u` of itself only when normal: an overflow (weights
-        // near `1e155`) would make a quotient `0`, an underflow lose its relative bound. (A
-        // quotient that itself underflows is off by at most `2^-1075`, far inside the `8 u`
-        // pads on the radii in [`circle_arcs_within`].)
-        let (wmin2, wmax2) = (wmin * wmin, wmax * wmax);
-        if !(wmin2.is_normal() && wmax2.is_normal()) {
-            return None;
-        }
-        let up = if n_hi >= 0.0 {
-            n_hi / wmin2
-        } else {
-            n_hi / wmax2
-        };
-        let down = if n_lo >= 0.0 {
-            n_lo / wmax2
-        } else {
-            n_lo / wmin2
-        };
-        if !(up.is_finite() && down.is_finite()) {
-            return None;
-        }
-        outward = outward.max(up / (2.0 * r) * (1.0 + 8.0 * ROUNDOFF));
-        inward = inward.max(-down / r * (1.0 + 8.0 * ROUNDOFF));
-    }
-    (inward.is_finite() && outward.is_finite()).then_some((inward, outward))
+    let mut prepared = CircleNurbSegments::prepare(curve, (c, r), (px, py))?;
+    prepared.radial_deviation([lo, hi])
 }
 
 /// The angles about `centre`, measured in `frame`, of points each within its slack of a
@@ -3358,6 +3678,187 @@ fn hull_angles(
 /// per NURB segment.
 ///
 /// An evaluation that cannot be bounded proves nothing (`false`).
+/// Precomputed per-pair coplanar-circle state hoisted out of [`curve_runs_along`]'s subdivision
+/// loop so exact planarity, frame, offset squared, and per-segment radial Bernstein bounds are
+/// computed at most once per curve pair.
+struct CoplanarCircles {
+    a0: Point3,
+    ra: f64,
+    e0: Point3,
+    re: f64,
+    frame: PlaneFrame,
+    allowance: f64,
+    concentric: bool,
+    offset_len: f64,
+    offset2: Vec<f64>,
+    a_segs: CircleNurbSegments,
+    e_segs: CircleNurbSegments,
+}
+
+impl CoplanarCircles {
+    fn prepare(curve: &Curve, other: &Curve, tol: f64) -> Option<Self> {
+        use crate::geom::expansion::{add_mul_into, cross, det3, is_zero, sub};
+        let (a0, ra, xa, ya) = circle_of(curve)?;
+        let (e0, re, xe, ye) = circle_of(other)?;
+        if !(tol > 0.0 && tol.is_finite()) {
+            return None;
+        }
+        let in_plane = |v: Vec3| det3(xe, ye, v).is_some_and(|d| is_zero(&d));
+        let spans = cross(xe, ye).is_some_and(|c| c.iter().any(|e| !is_zero(e)));
+        let offset_in_plane = match (det3(xe, ye, a0), det3(xe, ye, e0)) {
+            (Some(p), Some(q)) => is_zero(&sub(&p, &q)),
+            _ => false,
+        };
+        let frame = PlaneFrame::new(xe, ye)?;
+        if !(spans && in_plane(xa) && in_plane(ya) && offset_in_plane) {
+            return None;
+        }
+        let a_segs = CircleNurbSegments::prepare(curve, (a0, ra), (xe, ye))?;
+        let e_segs = CircleNurbSegments::prepare(other, (e0, re), (xe, ye))?;
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let allowance = coordinate_resolution(next_up(size(a0) + ra).max(next_up(size(e0) + re)))?;
+        let concentric = a0 == e0;
+        let offset_len = (a0 - e0).length();
+        let mut offset2 = Vec::new();
+        offset2.try_reserve(12).ok()?;
+        for (p, q) in [(a0.x, e0.x), (a0.y, e0.y), (a0.z, e0.z)] {
+            let d = sub(&[p], &[q]);
+            add_mul_into(&mut offset2, &d, &d)?;
+        }
+        Some(Self {
+            a0,
+            ra,
+            e0,
+            re,
+            frame,
+            allowance,
+            concentric,
+            offset_len,
+            offset2,
+            a_segs,
+            e_segs,
+        })
+    }
+
+    fn arcs_within(
+        &mut self,
+        curve: &Curve,
+        piece: &Extent1d,
+        other: &Curve,
+        [s0, s1]: [f64; 2],
+        tol: f64,
+    ) -> bool {
+        use crate::geom::expansion::{add, sign, sub};
+        use core::f64::consts::{FRAC_PI_2, PI};
+        let (t0, t1) = (piece.min(), piece.max());
+        let (u0, u1) = (s0.min(s1), s0.max(s1));
+        if !(t0 < t1 && u0 < u1) {
+            return false;
+        }
+        let (Some((in_a, out_a)), Some((in_e, out_e))) = (
+            self.a_segs.radial_deviation([t0, t1]),
+            self.e_segs.radial_deviation([u0, u1]),
+        ) else {
+            return false;
+        };
+        let (Some(hp), Some(hq)) = (
+            curve.piece_hull_points(piece),
+            other.piece_hull_points(&Extent1d::from_min_max(u0, u1)),
+        ) else {
+            return false;
+        };
+        let (Some(&(p_first, _)), Some(_), Some(_)) = (hp.first(), hp.last(), hq.last()) else {
+            return false;
+        };
+        let Some(reference) = self.frame.polar(p_first, self.e0).map(|p| p.angle) else {
+            return false;
+        };
+        let (Some((ap, err_p)), Some((aq, err_q))) = (
+            hull_angles(&self.frame, &hp, self.e0, reference),
+            hull_angles(&self.frame, &hq, self.e0, reference),
+        ) else {
+            return false;
+        };
+        let err = err_p.max(err_q);
+        if err.partial_cmp(&(1.0 / 1_048_576.0)) != Some(core::cmp::Ordering::Less) {
+            return false;
+        }
+        let range = |a: &[f64]| {
+            a.iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| {
+                    (l.min(x), h.max(x))
+                })
+        };
+        let ends = |a: &[f64]| match (a.first(), a.last()) {
+            (Some(&f), Some(&l)) => (f.min(l), f.max(l)),
+            _ => (f64::NAN, f64::NAN),
+        };
+        let ((pl, ph), (ql, qh)) = (range(&ap), range(&aq));
+        let ((pel, peh), (qel, qeh)) = (ends(&ap), ends(&aq));
+        if !(pl.min(ql) > -PI && ph.max(qh) - pl.min(ql) < PI - 8.0 * err) {
+            return false;
+        }
+        let excess = |(l, h): (f64, f64), (el, eh): (f64, f64)| (el - l).max(h - eh).max(0.0);
+        let gap = excess((pl, ph), (qel, qeh)).max(excess((ql, qh), (pel, peh)));
+        let delta = (gap + 2.0 * err + 64.0 * ROUNDOFF) * (1.0 + 4.0 * ROUNDOFF);
+        if delta.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
+            return false;
+        }
+        let s_lo = (self.ra - in_a) * (1.0 - 2.0 * ROUNDOFF);
+        if s_lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return false;
+        }
+        let rho_lo = if self.concentric {
+            s_lo
+        } else {
+            let Some(pd) = self.frame.polar(self.a0, self.e0) else {
+                return false;
+            };
+            let mut widest = 0.0_f64;
+            for &(p, slack) in &hp {
+                let Some(polar) = self.frame.polar(p, self.a0) else {
+                    return false;
+                };
+                if polar.radius.partial_cmp(&(4.0 * slack)) != Some(core::cmp::Ordering::Greater) {
+                    return false;
+                }
+                let e = polar.angle_err + 2.0 * slack / polar.radius + pd.angle_err;
+                let gamma = wrap_angle(polar.angle - pd.angle).abs() + e + 16.0 * ROUNDOFF;
+                if gamma.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
+                    return false;
+                }
+                widest = widest.max(gamma);
+            }
+            let Some(cos_lo) = cos_lower(widest) else {
+                return false;
+            };
+            let d_lo = self.offset_len * (1.0 - 4.0 * ROUNDOFF);
+            let sq =
+                (d_lo * d_lo + s_lo * s_lo + 2.0 * s_lo * d_lo * cos_lo) * (1.0 - 8.0 * ROUNDOFF);
+            sq.sqrt() * (1.0 - 4.0 * ROUNDOFF)
+        };
+        let rho_hi = (self.offset_len + self.ra + out_a) * (1.0 + 8.0 * ROUNDOFF);
+        let re_hi = (self.re + out_e) * (1.0 + 2.0 * ROUNDOFF);
+        let x = rho_hi * re_hi * delta * delta * (1.0 + 8.0 * ROUNDOFF);
+        let y = x / tol * (1.0 + 4.0 * ROUNDOFF);
+        if !(y < tol && y.is_finite() && rho_lo.is_finite()) {
+            return false;
+        }
+        let band = add(&add(&[tol], &[self.allowance]), &[-y]);
+        let w = add(
+            &sub(&sub(&sub(&[self.re], &[in_e]), &[self.ra]), &[out_a]),
+            &band,
+        );
+        let Some(w2) = expansion_mul(&w, &w) else {
+            return false;
+        };
+        let apex_within = sign(&w) >= 0 && sign(&sub(&w2, &self.offset2)) >= 0;
+        let ends_within = sign(&sub(&sub(&add(&[self.re], &[out_e]), &[rho_lo]), &band)) <= 0;
+        apex_within && ends_within
+    }
+}
+
+#[cfg(test)]
 fn circle_arcs_within(
     curve: &Curve,
     piece: &Extent1d,
@@ -3365,159 +3866,10 @@ fn circle_arcs_within(
     [s0, s1]: [f64; 2],
     tol: f64,
 ) -> bool {
-    use crate::geom::expansion::{add, cross, det3, is_zero, sign, sub};
-    use core::f64::consts::{FRAC_PI_2, PI};
-    let (Some((a0, ra, xa, ya)), Some((e0, re, xe, ye))) = (circle_of(curve), circle_of(other))
-    else {
+    let Some(mut pair) = CoplanarCircles::prepare(curve, other, tol) else {
         return false;
     };
-    if !(tol > 0.0 && tol.is_finite()) {
-        return false;
-    }
-    // one plane, exactly: `E`'s axes span it (their cross product is not zero), `A`'s axes and
-    // the offset of `A`'s centre from `E`'s lie in it
-    let in_plane = |v: Vec3| det3(xe, ye, v).is_some_and(|d| is_zero(&d));
-    let spans = cross(xe, ye).is_some_and(|c| c.iter().any(|e| !is_zero(e)));
-    let offset_in_plane = match (det3(xe, ye, a0), det3(xe, ye, e0)) {
-        (Some(p), Some(q)) => is_zero(&sub(&p, &q)),
-        _ => false,
-    };
-    let Some(frame) = PlaneFrame::new(xe, ye) else {
-        return false;
-    };
-    if !(spans && in_plane(xa) && in_plane(ya) && offset_in_plane) {
-        return false;
-    }
-    let (t0, t1) = (piece.min(), piece.max());
-    let (u0, u1) = (s0.min(s1), s0.max(s1));
-    if !(t0 < t1 && u0 < u1) {
-        return false;
-    }
-    // the NURBs' annuli about their circles
-    let (Some((in_a, out_a)), Some((in_e, out_e))) = (
-        radial_deviation(curve, (a0, ra), (xe, ye), [t0, t1]),
-        radial_deviation(other, (e0, re), (xe, ye), [u0, u1]),
-    ) else {
-        return false;
-    };
-    // the pieces' hulls; their first and last points are the pieces' ends
-    let (Some(hp), Some(hq)) = (
-        curve.piece_hull_points(piece),
-        other.piece_hull_points(&Extent1d::from_min_max(u0, u1)),
-    ) else {
-        return false;
-    };
-    let (Some(&(p_first, _)), Some(_), Some(_)) = (hp.first(), hp.last(), hq.last()) else {
-        return false;
-    };
-    let Some(reference) = frame.polar(p_first, e0).map(|p| p.angle) else {
-        return false;
-    };
-    let (Some((ap, err_p)), Some((aq, err_q))) = (
-        hull_angles(&frame, &hp, e0, reference),
-        hull_angles(&frame, &hq, e0, reference),
-    ) else {
-        return false;
-    };
-    let err = err_p.max(err_q);
-    if err.partial_cmp(&(1.0 / 1_048_576.0)) != Some(core::cmp::Ordering::Less) {
-        return false;
-    }
-    let range = |a: &[f64]| {
-        a.iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| {
-                (l.min(x), h.max(x))
-            })
-    };
-    let ends = |a: &[f64]| match (a.first(), a.last()) {
-        (Some(&f), Some(&l)) => (f.min(l), f.max(l)),
-        _ => (f64::NAN, f64::NAN),
-    };
-    let ((pl, ph), (ql, qh)) = (range(&ap), range(&aq));
-    let ((pel, peh), (qel, qeh)) = (ends(&ap), ends(&aq));
-    // one cone narrower than `π`: the lifts are consistent
-    if !(pl.min(ql) > -PI && ph.max(qh) - pl.min(ql) < PI - 8.0 * err) {
-        return false;
-    }
-    let excess = |(l, h): (f64, f64), (el, eh): (f64, f64)| (el - l).max(h - eh).max(0.0);
-    let gap = excess((pl, ph), (qel, qeh)).max(excess((ql, qh), (pel, peh)));
-    // each of the four angles in an excess within `err`, the differences rounded
-    let delta = (gap + 2.0 * err + 64.0 * ROUNDOFF) * (1.0 + 4.0 * ROUNDOFF);
-    if delta.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
-        return false;
-    }
-    let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
-    let Some(allowance) = coordinate_resolution(next_up(size(a0) + ra).max(next_up(size(e0) + re)))
-    else {
-        return false;
-    };
-    let concentric = a0 == e0;
-    let offset = a0 - e0;
-    let offset_len = offset.length();
-    // `ρ` over the first piece from below
-    let s_lo = (ra - in_a) * (1.0 - 2.0 * ROUNDOFF);
-    if s_lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-        return false;
-    }
-    let rho_lo = if concentric {
-        s_lo
-    } else {
-        let Some(pd) = frame.polar(a0, e0) else {
-            return false;
-        };
-        let mut widest = 0.0_f64;
-        for &(p, slack) in &hp {
-            let Some(polar) = frame.polar(p, a0) else {
-                return false;
-            };
-            if polar.radius.partial_cmp(&(4.0 * slack)) != Some(core::cmp::Ordering::Greater) {
-                return false;
-            }
-            let e = polar.angle_err + 2.0 * slack / polar.radius + pd.angle_err;
-            // the difference (below `2π`) rounded, `6.3 u`; its wrap, `2π` as a double, `4 u`
-            // (the subtraction is exact, Sterbenz); the two additions below `π/2`, `3.1 u`
-            let gamma = wrap_angle(polar.angle - pd.angle).abs() + e + 16.0 * ROUNDOFF;
-            if gamma.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
-                return false;
-            }
-            widest = widest.max(gamma);
-        }
-        // `cos` bounded from below ([`cos_lower`], no libm) and decreasing on `[0, π/2]`;
-        // `|δ|` within `4 u`
-        let Some(cos_lo) = cos_lower(widest) else {
-            return false;
-        };
-        let d_lo = offset_len * (1.0 - 4.0 * ROUNDOFF);
-        let sq = (d_lo * d_lo + s_lo * s_lo + 2.0 * s_lo * d_lo * cos_lo) * (1.0 - 8.0 * ROUNDOFF);
-        sq.sqrt() * (1.0 - 4.0 * ROUNDOFF)
-    };
-    let rho_hi = (offset_len + ra + out_a) * (1.0 + 8.0 * ROUNDOFF);
-    let re_hi = (re + out_e) * (1.0 + 2.0 * ROUNDOFF);
-    let x = rho_hi * re_hi * delta * delta * (1.0 + 8.0 * ROUNDOFF);
-    let y = x / tol * (1.0 + 4.0 * ROUNDOFF);
-    if !(y < tol && y.is_finite() && rho_lo.is_finite()) {
-        return false;
-    }
-    // `T - y` exactly
-    let band = add(&add(&[tol], &[allowance]), &[-y]);
-    // apex: `|δ| ≤ re - in_E - ra - out_A + T - y`, both sides squared (the right one not
-    // negative)
-    let w = add(&sub(&sub(&sub(&[re], &[in_e]), &[ra]), &[out_a]), &band);
-    let mut offset2 = vec![0.0];
-    for (p, q) in [(a0.x, e0.x), (a0.y, e0.y), (a0.z, e0.z)] {
-        let d = sub(&[p], &[q]);
-        let Some(s) = expansion_mul(&d, &d) else {
-            return false;
-        };
-        offset2 = add(&offset2, &s);
-    }
-    let Some(w2) = expansion_mul(&w, &w) else {
-        return false;
-    };
-    let apex_within = sign(&w) >= 0 && sign(&sub(&w2, &offset2)) >= 0;
-    // the other side: `re + out_E - ρ_lo ≤ T - y`
-    let ends_within = sign(&sub(&sub(&add(&[re], &[out_e]), &[rho_lo]), &band)) <= 0;
-    apex_within && ends_within
+    pair.arcs_within(curve, piece, other, [s0, s1], tol)
 }
 
 /// Not upstream (#18065): a certified upper bound of the distance between `curve` over
@@ -3618,26 +3970,24 @@ fn segment_distance_bound(q: Point3, a: Point3, b: Point3) -> f64 {
     ((q - (a + s * ab)).length() + gamma(16) * scale) * (1.0 + gamma(4))
 }
 
-/// The distance from `p` to the curve of edge handle `edge` over the edge's interval and
-/// the edge parameter of the closest point; `None` when the drop fails.
+/// The distance from `p` to `edge_crv`, the curve of edge handle `edge`, over the edge's
+/// interval and the edge parameter of the closest point; `None` when the drop fails.
 fn drop_onto_edge<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
-    edge: O,
+    (edge, edge_crv): (O, &Curve),
     p: Point3,
     tol: f64,
 ) -> Result<Option<(f64, f64)>> {
-    let dropped = edge_curve(geometry, edge)?
-        .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?
-        .drop_point(
-            k,
-            &edge_interval(geometry, edge)?,
-            p,
-            None,
-            tol,
-            None,
-            SolverOperation::Minimize,
-        )?;
+    let dropped = edge_crv.drop_point(
+        k,
+        &edge_interval(geometry, edge)?,
+        p,
+        None,
+        tol,
+        None,
+        SolverOperation::Minimize,
+    )?;
     Ok(dropped
         .success
         .then_some((dropped.distance, dropped.parameter)))
@@ -3710,7 +4060,7 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
     }
     let mut params = [0.0; 2];
     for (p, s) in ends.into_iter().zip(params.iter_mut()) {
-        let Some((_, param)) = drop_onto_edge(k, geometry, edge, p, tol)? else {
+        let Some((_, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, tol)? else {
             return Ok(false);
         };
         *s = param;
@@ -3791,7 +4141,7 @@ fn tail_gap_within_vertex_ball<O: ClassObject>(
     }
     let mut params = [0.0; 2];
     for (p, s) in ends.into_iter().zip(params.iter_mut()) {
-        let Some((_, param)) = drop_onto_edge(k, geometry, edge, p, tol)? else {
+        let Some((_, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, tol)? else {
             return Ok(None);
         };
         *s = param;
@@ -4138,8 +4488,50 @@ mod tests {
             cc.at(0).expect("ivl").start.point_class(),
             PointClassType::Unknown
         );
-        assert!(cc.remove_point_class(0, IntervalPosition::Inside).is_err());
-        assert!(cc.remove_point_class(3, IntervalPosition::Start).is_err());
+        let e = cc
+            .remove_point_class(0, IntervalPosition::Inside)
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::PositionNotAnEnd)
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        let e = cc
+            .remove_point_class(3, IntervalPosition::Start)
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::IntervalIndexPastEnd { index: 3, size: 1 })
+        );
+    }
+
+    /// A parameter off an end of the classified curve, whose end point (a surf/surf/surf
+    /// point) lies a unit beyond it, is refused with the distance and the tolerance it would
+    /// snap within.
+    #[test]
+    fn a_parameter_off_the_curve_names_the_end_and_its_distance() {
+        let k = Kernel::default();
+        let (geo, mut cc) = setup(&k, &[0.0, 1.0]);
+        let ivl = cc.at_mut(0).expect("ivl");
+        ivl.start.set_sss_point(Point3::new(-3.0, 0.0, 0.0));
+        ivl.end.set_sss_point(Point3::new(3.0, 0.0, 0.0));
+        for (param, past_end) in [(-2.0, false), (2.0, true)] {
+            let e = cc
+                .find_interval(&k, &geo, param, BIG_DOUBLE, 1e-6)
+                .unwrap_err();
+            let Some(&IntersectFailure::ParameterOffClassifiedCurve {
+                past_end: end,
+                distance,
+                tolerance,
+            }) = e.intersect_failure()
+            else {
+                panic!("{e}");
+            };
+            assert_eq!(end, past_end);
+            assert!((distance - 1.0).abs() < 1e-9, "{distance}");
+            assert!(tolerance > 0.0 && tolerance < distance, "{tolerance}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN));
+        }
     }
 
     #[test]
@@ -4403,6 +4795,25 @@ mod tests {
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
         assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+    }
+
+    #[test]
+    fn an_edge_without_a_curve_is_skipped_not_an_error() {
+        // the start 1e-11 off the edge runs along it (as in
+        // `an_unclassified_end_along_an_edge_is_on_that_edge`), but the caller's edge has no
+        // curve: it proves nothing, the other edge at the corner does not take the interval,
+        // and nothing fails for want of the curve
+        let (k, mut geo, mut cc, edge) = along_top_edge(Point3::new(0.5, 1e-11, 1.0));
+        let Some(&EntityRef::Edge(e)) = geo.entities.get(edge.0) else {
+            panic!("not an edge handle");
+        };
+        geo.brep.edge_mut(e).expect("edge").curve = None;
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert!(raise.is_none());
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.end.point_class(), PointClassType::Vertex);
     }
 
     #[test]
@@ -5022,5 +5433,103 @@ mod tests {
         assert_eq!(cos_lower(0.0), Some(1.0 - 3.0 * ROUNDOFF));
         assert_eq!(cos_lower(FRAC_PI_2), None);
         assert_eq!(cos_lower(-1.0), None);
+    }
+
+    /// #22137: a circular arc tangent to a planar face's boundary edge, curving outside the face
+    /// and clipped at a padded UV domain side within the intersection tolerance, stays
+    /// unclassified rather than being promoted onto the edge.
+    #[test]
+    fn a_tangent_arc_clipped_at_a_padded_face_domain_is_left_alone() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let mut k = Kernel::default();
+        let mut brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, -60.0, -56.0),
+            32.0,
+            120.0,
+            112.0,
+        )
+        .expect("box");
+        let mut entities = Vec::new();
+        for v in crate::topology::brep::p1::vertices(&brep, None).expect("vertices") {
+            entities.push(EntityRef::Vertex(v));
+        }
+        for e in crate::topology::brep::p1::edges(&brep, None).expect("edges") {
+            entities.push(EntityRef::Edge(e));
+        }
+        for f in crate::topology::brep::p1::faces(&brep, None).expect("faces") {
+            entities.push(EntityRef::Face(f));
+        }
+        let find_v = |b: &crate::topology::Brep, p: Point3| {
+            crate::topology::brep::p1::vertices(b, None)
+                .expect("vertices")
+                .into_iter()
+                .find(|&v| topo_vertex::point(b, v).expect("pt").distance(p) < 1e-9)
+                .expect("vertex")
+        };
+        let v_bot = find_v(&brep, Point3::new(0.0, -60.0, -56.0));
+        let v_top = find_v(&brep, Point3::new(0.0, -60.0, 56.0));
+        let v_far = find_v(&brep, Point3::new(32.0, -60.0, -56.0));
+        let faces_of = |b: &crate::topology::Brep, v| topo_vertex::faces(b, v).expect("faces");
+        let side_face = faces_of(&brep, v_bot)
+            .into_iter()
+            .find(|f| faces_of(&brep, v_top).contains(f) && faces_of(&brep, v_far).contains(f))
+            .expect("y = -60 face");
+        let edge_id = topo_vertex::edges(&brep, v_bot, Some(side_face))
+            .expect("edges")
+            .into_iter()
+            .find(|&e| {
+                [
+                    topo_edge::start_vertex(&brep, e),
+                    topo_edge::end_vertex(&brep, e),
+                ]
+                .into_iter()
+                .any(|v| v.expect("vertex") == Some(v_top))
+            })
+            .expect("x = 0 edge");
+        let pad = 3.3032e-5;
+        let mut padded = brep.face(side_face).expect("face").uv_domain;
+        padded.set_u_min(padded.min().x - pad).expect("u_min");
+        padded.set_u_max(padded.max().x + pad).expect("u_max");
+        padded.set_v_min(padded.min().y - pad).expect("v_min");
+        padded.set_v_max(padded.max().y + pad).expect("v_max");
+        brep.face_mut(side_face).expect("face").uv_domain = padded;
+        topo_edge::set_tolerance(&mut brep, edge_id, 2e-5, true, true).expect("edge tol");
+
+        let radius = 4.5_f64;
+        let sweep_deg = ((radius - pad) / radius).acos().to_degrees();
+        let arc = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Point3::new(-radius, -60.0, 45.5),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Extent1d::from_raw(0.0, sweep_deg),
+                radius,
+                &EllipseOptions::default(),
+            )
+            .expect("arc"),
+        );
+        let arc_ivl = arc.natural_interval();
+        let geo = BoxGeo {
+            brep,
+            entities,
+            curves: vec![arc],
+        };
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_curve(Some(H(geo.entities.len(), ClassObjectKind::Curve)), false);
+        cc.set_face(Some(geo.handle(EntityRef::Face(side_face))));
+        cc.set_src_zone_tol_3d(4e-5);
+        cc.set_size(&k, 1).expect("size");
+        let edge_h = geo.handle(EntityRef::Edge(edge_id));
+        let ivl = cc.at_mut(0).expect("interval");
+        ivl.interval = arc_ivl;
+        ivl.start
+            .set_class_object(PointClassType::Edge, Some(edge_h));
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert_eq!(raise, None);
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.end.point_class(), PointClassType::Unknown);
     }
 }

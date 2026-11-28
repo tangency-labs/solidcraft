@@ -781,3 +781,10 @@ impl IconExtWindows for Icon {
 pub fn set_quiet_window_move(on: bool) {
     crate::platform_impl::set_quiet_window_move(on);
 }
+
+/// SolidCraft (#15353): with `true`, a touchpad's wheel messages are reported as
+/// [`MouseScrollDelta::PixelDelta`](crate::event::MouseScrollDelta::PixelDelta), as on macOS.
+/// Call it before the [`EventLoop`](crate::event_loop::EventLoop) is built.
+pub fn set_touchpad_wheels(on: bool) {
+    crate::platform_impl::set_touchpad_wheels(on);
+}

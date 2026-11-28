@@ -27,6 +27,95 @@ pub fn whole_profile_selection_from_value(value: &Value) -> Result<ProfileSel> {
     serde_json::from_value(value.clone()).map_err(|_| invalid())
 }
 
+/// Validate a text profile reference (`text_regions`: the letters of whole sketch texts) before
+/// decoding it.
+pub fn text_regions_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_text_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_text_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "links"])?;
+    if value.get("type").and_then(Value::as_str) != Some("text_regions") {
+        return Err(invalid());
+    }
+    let links = value.get("links").and_then(Value::as_array).ok_or_else(invalid)?;
+    if links.is_empty() || links.len() > 128 {
+        return Err(invalid());
+    }
+    let mut seen = BTreeSet::new();
+    for link in links {
+        if !seen.insert(id(link)?) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
+/// Validate a sided profile reference (`sided_curves`: each profile's curves with the side of each
+/// it lies on) before decoding it.
+pub fn sided_curves_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_sided_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_sided_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "loops"])?;
+    if value.get("type").and_then(Value::as_str) != Some("sided_curves") {
+        return Err(invalid());
+    }
+    let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
+    if loops.is_empty() || loops.len() > 128 {
+        return Err(invalid());
+    }
+    for sided in loops {
+        let curves = sided.as_array().ok_or_else(invalid)?;
+        if curves.is_empty() || curves.len() > 512 {
+            return Err(invalid());
+        }
+        let mut seen = BTreeSet::new();
+        for curve in curves {
+            exact_keys(curve, &["curve", "side"])?;
+            if !seen.insert(id(curve.get("curve").ok_or_else(invalid)?)?)
+                || !matches!(curve.get("side").and_then(Value::as_str), Some("inside" | "outside" | "left" | "right"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate the sides saved with a curve pick (`curves` with `sides`, #23291): one list per loop,
+/// empty for a loop saved by its curves alone, the others as a `sided_curves` loop is written.
+fn validate_curve_sides(value: &Value, sides: &Value) -> Result<()> {
+    let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
+    let sides = sides.as_array().ok_or_else(invalid)?;
+    if sides.len() != loops.len() || sides.len() > 128 {
+        return Err(invalid());
+    }
+    let sided: Vec<&Value> = sides.iter().filter(|loop_sides| loop_sides.as_array().is_none_or(|curves| !curves.is_empty())).collect();
+    if sided.is_empty() {
+        return Ok(());
+    }
+    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sided}))?;
+    // Each loop's sides name exactly the curves of that loop, so they can't pick a region the
+    // loop's curves don't bound.
+    for (curves, loop_sides) in loops.iter().zip(sides) {
+        let named = loop_sides.as_array().ok_or_else(invalid)?;
+        if named.is_empty() {
+            continue;
+        }
+        let curves =
+            curves.as_array().ok_or_else(invalid)?.iter().map(|curve| curve.as_str().ok_or_else(invalid)).collect::<Result<BTreeSet<_>>>()?;
+        let named = named.iter().map(|sided| sided.get("curve").and_then(Value::as_str).ok_or_else(invalid)).collect::<Result<BTreeSet<_>>>()?;
+        if curves != named {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
 fn validate_whole_reference(value: &Value) -> Result<()> {
     exact_keys(value, &["type", "profiles"])?;
     if value.get("type").and_then(Value::as_str) != Some("whole_boundaries") {
@@ -186,6 +275,17 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
         if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
             return validate_whole_reference(value);
         }
+        if value.get("type").and_then(Value::as_str) == Some("text_regions") {
+            return validate_text_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("sided_curves") {
+            return validate_sided_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("curves")
+            && let Some(sides) = value.get("sides")
+        {
+            return validate_curve_sides(value, sides);
+        }
         if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
             exact_keys(value, &["type", "associations"])?;
             let ids = value.get("associations").and_then(Value::as_array).ok_or_else(invalid)?;
@@ -314,6 +414,27 @@ mod tests {
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_ok());
         aggregate.push(json!({"outer":["one more"],"holes":[]}));
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_err());
+    }
+
+    #[test]
+    fn curve_pick_sides_are_one_list_per_loop_and_a_loop_may_have_none() {
+        let pick = |sides: Value| json!({"features":[{"type":"extrude","profiles":{"type":"curves","loops":[["c1"],["l1","l2"]],"sides":sides}}]});
+        assert!(validate_raw(&pick(json!([[{"curve":"c1","side":"inside"}],[{"curve":"l1","side":"left"},{"curve":"l2","side":"right"}]]))).is_ok());
+        // A loop of offset curves, or one whose sides can't be told, is read by its curves alone
+        // (#23291).
+        assert!(validate_raw(&pick(json!([[{"curve":"c1","side":"inside"}],[]]))).is_ok());
+        for bad in [
+            json!([[{"curve":"c1","side":"inside"}]]),
+            json!([[{"curve":"c1","side":"up"}],[]]),
+            json!([[{"curve":"c1","side":"inside"},{"curve":"c1","side":"outside"}],[]]),
+            json!([[], 3]),
+            json!("inside"),
+            // Sides that name curves the loop doesn't have, or miss one of its curves.
+            json!([[{"curve":"other","side":"inside"}],[]]),
+            json!([[{"curve":"c1","side":"inside"}],[{"curve":"l1","side":"left"}]]),
+        ] {
+            assert!(validate_raw(&pick(bad.clone())).is_err(), "accepted {bad}");
+        }
     }
 
     #[test]
@@ -484,9 +605,15 @@ mod tests {
                             to_offset: None,
                             from: None,
                             to_body_apart: false,
+                            through_all2: false,
+                            to2: None,
+                            to_offset2: None,
                             from_level: false,
                             picked_placements: Vec::new(),
                             one_sided_direction: None,
+                            to_ref: None,
+                            from_ref: None,
+                            extend_to_face: false,
                         },
                         operation: crate::Operation::NewBody,
                         targets: vec![],

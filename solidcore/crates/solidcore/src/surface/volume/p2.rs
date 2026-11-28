@@ -1640,6 +1640,7 @@ pub(crate) fn ignore_read<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::Unsupported { .. }),
         ) => Err(e),
         Err(e)

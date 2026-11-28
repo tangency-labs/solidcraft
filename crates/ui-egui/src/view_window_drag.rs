@@ -208,6 +208,13 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
             .strips
             .retain(|strip| strip.viewport != viewport && input.raw.viewports.get(&strip.viewport).is_some_and(|info| info.minimized != Some(true)));
     });
+    // A minimised window paints no tab strip, so nothing else would ever clear the highlight it set.
+    if let Some((source, _, _)) = state.hovered
+        && ctx.input(|input| input.raw.viewports.get(&source).is_some_and(|info| info.minimized == Some(true)))
+    {
+        state.hovered = None;
+        repaint_viewports(ctx);
+    }
     let screen = native.unwrap_or(Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 });
     state.strips.extend(zones.into_iter().map(|(tab, count, zone)| Strip { viewport, tab, window, screen, zone, count, name: name.clone() }));
     if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag.header && !drag_continues)
@@ -238,6 +245,144 @@ pub(crate) fn hover(app: &mut SolveApp, ctx: &Context, view: Option<u64>) {
     if (next.is_some() || state.hovered.is_some_and(|(source, _, _)| source == viewport)) && state.hovered != next {
         state.hovered = next;
         repaint_viewports(ctx);
+    }
+}
+
+/// How long the pointer rests on a view tab before its view's outline starts, so sweeping along
+/// the strip flashes nothing.
+const OUTLINE_REST: f32 = 0.07;
+/// How long the outline and tint take to fade in, and to fade out once the tab is left.
+const OUTLINE_IN: f32 = 0.12;
+const OUTLINE_OUT: f32 = 0.15;
+/// After it shows at half strength, the outline comes to full over this long, from this soon.
+const OUTLINE_RISE_FROM: f32 = 0.05;
+const OUTLINE_RISE: f32 = 0.45;
+/// Its corner radius, and the tint inside it as a fraction of the accent.
+const OUTLINE_RADIUS: u8 = 11;
+const OUTLINE_TINT: f32 = 0.035;
+
+fn smooth(x: f32) -> f32 {
+    let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// One view's outline, fading in while its tab is hovered and out after.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Outline {
+    pub view: u64,
+    /// How long its tab has been hovered before the outline started.
+    pub held: f32,
+    /// Seconds since the current fade (in or out) began.
+    pub t: f32,
+    /// Seconds since the outline last started fading in; its strength rises with it.
+    pub age: f32,
+    pub leaving: bool,
+    /// How far in the outline was when the current fade began.
+    pub from: f32,
+}
+
+impl Outline {
+    fn started(&self) -> bool {
+        self.held >= OUTLINE_REST
+    }
+
+    /// How far in the outline and tint are: 0 gone, 1 shown.
+    pub(crate) fn shown(&self) -> f32 {
+        if !self.started() {
+            0.0
+        } else if self.leaving {
+            self.from * (1.0 - smooth(self.t / OUTLINE_OUT))
+        } else {
+            self.from + (1.0 - self.from) * smooth(self.t / OUTLINE_IN)
+        }
+    }
+
+    /// The outline's strength: it shows at half and comes to full.
+    pub(crate) fn strength(&self) -> f32 {
+        self.shown() * (0.5 + 0.5 * smooth((self.age - OUTLINE_RISE_FROM) / OUTLINE_RISE))
+    }
+}
+
+/// Move each outline one frame of `dt` seconds towards shown (the hovered view's) or gone,
+/// dropping the gone ones. `animate` false (reduced motion) shows and hides at once. Returns
+/// whether any outline is still changing.
+pub(crate) fn step_outlines(outlines: &mut Vec<Outline>, hovered: Option<u64>, dt: f32, animate: bool) -> bool {
+    let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
+    let settled = OUTLINE_RISE_FROM + OUTLINE_RISE;
+    if let Some(view) = hovered
+        && !outlines.iter().any(|outline| outline.view == view)
+    {
+        outlines.push(Outline { view, held: 0.0, t: 0.0, age: 0.0, leaving: false, from: 0.0 });
+    }
+    let mut changing = false;
+    for outline in outlines.iter_mut() {
+        outline.age += dt;
+        if hovered == Some(outline.view) {
+            if !animate {
+                *outline = Outline { held: OUTLINE_REST, t: 2.0 * settled, age: 2.0 * settled, leaving: false, from: 1.0, ..*outline };
+            } else if outline.leaving {
+                // Back on the tab while it fades: it comes back from where it is.
+                *outline = Outline { t: 0.0, leaving: false, from: outline.shown(), ..*outline };
+            } else if outline.started() {
+                outline.t += dt;
+            } else {
+                outline.held += dt;
+                // The part of this frame past the rest already counts.
+                outline.t = (outline.held - OUTLINE_REST).max(0.0);
+                outline.age = outline.t;
+            }
+            changing |= !outline.started() || outline.age < settled;
+        } else if outline.started() && animate {
+            if outline.leaving {
+                outline.t += dt;
+            } else {
+                *outline = Outline { t: 0.0, leaving: true, from: outline.shown(), ..*outline };
+            }
+            changing |= outline.t < OUTLINE_OUT;
+        }
+    }
+    outlines.retain(|outline| hovered == Some(outline.view) || (animate && outline.started() && outline.t < OUTLINE_OUT));
+    changing
+}
+
+/// Outline and tint the part of the window the hovered view tab's view fills, fading in after a
+/// short rest and out when the pointer leaves. A view no longer hovered fades while the next
+/// fades in.
+pub(crate) fn paint_hover_outline(app: &SolveApp, ui: &egui::Ui) {
+    let ctx = ui.ctx();
+    let key = Id::unique("view_hover_outline").with(ctx.viewport_id());
+    let hovered = hovered_view(app);
+    let mut outlines = ctx.data(|data| data.get_temp::<Vec<Outline>>(key)).unwrap_or_default();
+    if outlines.is_empty() && hovered.is_none() {
+        return;
+    }
+    let animate = solidcraft_theme::panel_motion_duration(ctx, false) > 0.0;
+    let changing = step_outlines(&mut outlines, hovered, ctx.input(|input| input.stable_dt), animate);
+    let t = Tokens::get();
+    for outline in &outlines {
+        let rect = if outline.view == app.docs.views.active().id {
+            app.viewport.rect
+        } else {
+            app.viewport.cards.iter().find(|(id, _)| *id == outline.view).map(|(_, rect)| *rect)
+        };
+        let Some(rect) = rect.filter(|rect| rect.is_positive()).map(|rect| rect.shrink(2.0)) else { continue };
+        ui.painter().rect_filled(rect, OUTLINE_RADIUS, t.accent.gamma_multiply(OUTLINE_TINT * outline.shown().clamp(0.0, 1.0)));
+        ui.painter().rect_stroke(
+            rect,
+            OUTLINE_RADIUS,
+            Stroke::new(2.0, t.accent.gamma_multiply(outline.strength().clamp(0.0, 1.0))),
+            StrokeKind::Inside,
+        );
+    }
+    ctx.data_mut(|data| {
+        if outlines.is_empty() {
+            data.remove::<Vec<Outline>>(key);
+        } else {
+            data.insert_temp(key, outlines);
+        }
+    });
+    if changing {
+        ctx.request_repaint();
     }
 }
 
@@ -620,8 +765,10 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
     if let Some(target) = &drag.target {
         ctx.request_repaint_of(target.viewport(drag.viewport));
     }
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let morph = morph_id(ctx, drag.view.id);
     if ctx.global_style().animation_time > 0.0
-        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
+        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph))
     {
         state.flight = Some(Flight { view: drag.view, viewport: drag.viewport, from: morph.rect, origin: drag.origin, start: ctx.input(|i| i.time) });
         ctx.request_repaint();
@@ -648,6 +795,18 @@ fn native_preview_scale(ctx: &Context) -> Option<f32> {
     })
 }
 
+fn native_preview_builder(position: Pos2, size: egui::Vec2, visible: bool, owner: egui::ViewportId) -> egui::ViewportBuilder {
+    crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner)
+        .with_title("SolidCraft")
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_active(false)
+        .with_taskbar(false)
+        .with_position(position)
+        .with_inner_size(size)
+        .with_visible(visible)
+}
+
 /// The source retains pointer capture. The preview is a top-level surface with no controls
 /// or focus, sized and positioned from the same desktop rectangle as the drop command.
 pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
@@ -660,16 +819,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
     let position = (window.outline.min.to_vec2() / pixels_per_point).to_pos2();
     let size = window.outline.size() / pixels_per_point;
     let ready = native_scale.is_some();
-    let builder = egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
-        .with_decorations(false)
-        .with_resizable(false)
-        .with_active(false)
-        .with_taskbar(false)
-        .with_always_on_top()
-        .with_position(position)
-        .with_inner_size(size)
-        .with_visible(ready);
+    let builder = native_preview_builder(position, size, ready, drag.viewport);
     if !ready {
         // Negotiate the native surface in a hidden deferred viewport first. Keep
         // the source-window preview if the integration cannot make this window.
@@ -873,7 +1023,7 @@ fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: R
     }
     let body = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
     if body.is_positive() && detail > 0.03 {
-        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_middle, t.viewport_bottom);
         paint_kind(painter, body.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(body.height()));
         if form == Form::Window && body.height() > 65.0 {
             let name = painter.layout_no_wrap(view.name.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text);
@@ -1053,6 +1203,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_view_drag_preview_uses_its_owner_for_stacking() {
+        let owner = egui::ViewportId::from_hash_of("drag owner");
+        let builder = native_preview_builder(Pos2::ZERO, vec2(320.0, 240.0), true, owner);
+        assert_eq!(builder.native_owner, Some(owner));
+        assert_eq!(builder.window_level, None);
+        assert_eq!(builder.active, Some(false));
+    }
+
+    #[test]
     fn starting_a_view_drag_draws_immediately_without_requesting_a_screenshot() {
         for keyboard in [false, true] {
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -1068,10 +1227,8 @@ mod tests {
                     assert!(keyboard_active(&app, ui.ctx()));
                 } else {
                     route(&mut app, ui.ctx(), view, origin, pos2(230.0, 80.0), false);
-                    assert!(
-                        ui.ctx().data(|data| data.get_temp::<Morph>(morph_id(ui.ctx(), view))).is_some(),
-                        "the preview paints in the first drag frame"
-                    );
+                    let morph = morph_id(ui.ctx(), view);
+                    assert!(ui.ctx().data(|data| data.get_temp::<Morph>(morph)).is_some(), "the preview paints in the first drag frame");
                 }
                 assert!(app.view_window_drag.drag.is_some());
             });
@@ -1108,6 +1265,33 @@ mod tests {
             "dragging must not read back the viewport image"
         );
         output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_minimised_window_leaves_no_view_highlight() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.active().id;
+        let ctx = Context::default();
+        ctx.set_embed_viewports(true);
+        let child = egui::ViewportId::from_hash_of("minimised window");
+        let frame = |app: &mut SolveApp, minimized: bool| {
+            let mut raw = egui::RawInput::default();
+            raw.viewports.insert(child, egui::ViewportInfo { minimized: Some(minimized), ..Default::default() });
+            let output = ctx.run_ui(raw, |ui| {
+                if !minimized {
+                    let tab = app.docs.current_tab();
+                    app.view_window_drag.hovered = Some((child, tab, view));
+                }
+                record(app, ui.ctx(), vec![], false);
+            });
+            output.drop_without_applying_deltas();
+        };
+        frame(&mut app, false);
+        assert_eq!(hovered_view(&app), Some(view), "a hovered view is highlighted");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "minimising its window clears the highlight");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "it stays cleared until hovered again");
     }
 
     #[test]
@@ -1318,5 +1502,72 @@ mod tests {
         assert_eq!(strip.drop_at(pos2(145.0, 45.0), Some(first)).unwrap().index, 0);
         assert_eq!(strip.drop_at(pos2(147.0, 45.0), Some(first)).unwrap().index, 1);
         assert!(strip.drop_at(pos2(147.0, 47.0), None).is_none());
+    }
+
+    /// Run `frames` frames of `dt` seconds with `hovered` hovered.
+    fn run(outlines: &mut Vec<Outline>, hovered: Option<u64>, frames: usize, dt: f32) {
+        for _ in 0..frames {
+            step_outlines(outlines, hovered, dt, true);
+        }
+    }
+
+    fn shown(outlines: &[Outline], view: u64) -> f32 {
+        outlines.iter().find(|outline| outline.view == view).map_or(-1.0, Outline::shown)
+    }
+
+    /// A view tab's outline waits for the pointer to rest, fades in at half strength and comes to
+    /// full, fades once the pointer leaves, then is gone.
+    #[test]
+    fn a_hovered_view_tab_fades_its_views_outline_in_and_out() {
+        let mut outlines = Vec::new();
+        run(&mut outlines, Some(7), 3, 0.016);
+        assert_eq!(shown(&outlines, 7), 0.0, "a pointer passing over the tab starts nothing");
+        run(&mut outlines, None, 1, 0.016);
+        assert!(outlines.is_empty(), "nothing had started, so nothing is left to fade");
+
+        run(&mut outlines, Some(7), 5, 0.016);
+        assert!(shown(&outlines, 7) > 0.0);
+        run(&mut outlines, Some(7), 10, 0.016);
+        assert_eq!(shown(&outlines, 7), 1.0, "faded in after {OUTLINE_IN} s");
+        assert!((outlines[0].strength() - 0.5).abs() < 0.15, "the outline is still near half strength: {}", outlines[0].strength());
+        run(&mut outlines, Some(7), 30, 0.016);
+        assert_eq!(outlines[0].strength(), 1.0);
+        assert!(!step_outlines(&mut outlines, Some(7), 0.016, true), "a settled outline does not ask for frames");
+
+        assert!(step_outlines(&mut outlines, None, 0.016, true));
+        run(&mut outlines, None, 5, OUTLINE_OUT * 0.25);
+        assert!(outlines.is_empty(), "{outlines:?}");
+    }
+
+    /// Moving straight to another view's tab fades the first outline while the second fades in,
+    /// and returning mid-way picks up from where the outline is.
+    #[test]
+    fn moving_between_view_tabs_hands_the_outline_over_without_a_jump() {
+        let mut outlines = Vec::new();
+        run(&mut outlines, Some(1), 60, 0.016);
+        run(&mut outlines, Some(2), 6, 0.016);
+        let (first, second) = (shown(&outlines, 1), shown(&outlines, 2));
+        assert!(first > 0.0 && first < 1.0, "{first}");
+        assert!(second > 0.0 && second < 1.0, "{second}");
+        run(&mut outlines, Some(1), 1, 0.0);
+        let back = shown(&outlines, 1);
+        assert!((back - first).abs() < 1e-4, "{first} then {back}: no wait, no jump");
+    }
+
+    /// With motion turned down the outline shows and hides at once; a broken clock moves nothing.
+    #[test]
+    fn view_tab_outlines_respect_reduced_motion_and_a_broken_clock() {
+        let mut outlines = Vec::new();
+        assert!(!step_outlines(&mut outlines, Some(3), 0.016, false));
+        assert_eq!((shown(&outlines, 3), outlines[0].strength()), (1.0, 1.0));
+        step_outlines(&mut outlines, None, 0.016, false);
+        assert!(outlines.is_empty());
+        for dt in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            let mut outlines = Vec::new();
+            step_outlines(&mut outlines, Some(3), dt, true);
+            step_outlines(&mut outlines, Some(3), dt, true);
+            assert_eq!(outlines.len(), 1, "{dt}");
+            assert!(outlines[0].shown().is_finite() && outlines[0].strength().is_finite(), "{dt}: {outlines:?}");
+        }
     }
 }

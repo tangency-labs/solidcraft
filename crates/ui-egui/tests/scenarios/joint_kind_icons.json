@@ -1,0 +1,56 @@
+[
+ {
+  "start": "joint.create"
+ },
+ {
+  "frames": 1
+ },
+ {
+  "expect": {
+   "dialog": "kind: 0",
+   "shown_handles": [
+    "joint-kind:rigid",
+    "joint-kind:revolute",
+    "joint-kind:slider",
+    "joint-kind:cylindrical",
+    "joint-kind:pin_slot",
+    "joint-kind:planar",
+    "joint-kind:ball",
+    "joint-kind:parallel",
+    "joint-kind:perpendicular",
+    "joint-kind:angle",
+    "joint-kind:point_on_plane",
+    "joint-kind:point_on_line",
+    "joint-kind:line_on_plane"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "joint-kind:slider"
+  }
+ },
+ {
+  "frames": 1
+ },
+ {
+  "expect": {
+   "dialog": "kind: 2",
+   "shown": "Slider"
+  }
+ },
+ {
+  "click": {
+   "handle": "joint-kind:revolute"
+  }
+ },
+ {
+  "frames": 1
+ },
+ {
+  "expect": {
+   "dialog": "kind: 1",
+   "shown": "Revolute"
+  }
+ }
+]

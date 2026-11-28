@@ -472,7 +472,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut b = match build(&mut k, &i)? {
             Ok(b) => b,
             Err(e) => {
@@ -885,7 +885,7 @@ mod section_certificate {
         for (name, count) in MOVED {
             let case = cases.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("case {name}"));
             let i: Inputs = case.parse().unwrap();
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let mut b = build(&mut k, &i).unwrap().unwrap();
             assert!(i.translate.is_none() && i.plane_walk.is_none(), "{name}: not covered");
             println!(

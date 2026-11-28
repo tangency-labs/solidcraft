@@ -146,7 +146,7 @@ fn circular_pattern_and_angle_plane_keep_a_cylinder_wall() {
     let mut h = shaft();
     let (wall, ..) = picks(&h);
     let params = command_with(&mut h, "solid.pattern.circular", 1, &wall, |d| d.inputs[0].items = vec![Sel::Body { name: "Shaft".into() }]);
-    assert!(params["axis"].get("face").is_some(), "{params}");
+    assert_eq!((params["axis"]["type"].as_str(), params["axis"]["name"].is_string()), (Some("face"), true), "the clicked wall by name: {params}");
     h.app.run("solid.pattern.circular", params).unwrap();
     assert!(
         h.app
@@ -157,7 +157,7 @@ fn circular_pattern_and_angle_plane_keep_a_cylinder_wall() {
             .any(|f| matches!(f.kind, FeatureKind::Pattern { pattern: PatternKind::Circular { axis_ref: Some(_), .. }, .. }))
     );
     let params = command_with(&mut h, "construct.plane.at_angle", 1, &wall, |d| d.inputs[0].items = vec![Sel::Plane { name: "XZ".into() }]);
-    assert!(params["axis"].get("face").is_some(), "{params}");
+    assert_eq!((params["axis"]["type"].as_str(), params["axis"]["name"].is_string()), (Some("face"), true), "the clicked wall by name: {params}");
     h.app.run("construct.plane.at_angle", params).unwrap();
     assert!(
         h.app

@@ -656,7 +656,7 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "step values with arrows and wheel" => &["step values with the arrow keys and the wheel"],
         "show values beside their handles" => &["show values beside their handles in the view"],
         "files from unknown programs" => &["for files from unknown programs"],
-        "hide the origin folder in new designs" => &["hide origin by default"],
+        "origin visibility" => &["hide origin by default", "hide the origin folder in new designs"],
         "update changed links when a tab comes back" => &["update changed linked designs when a tab comes back"],
         "double-click a component to activate it" => &["double-click a component to activate it, or to edit a linked one in place"],
         "insert design lists open designs first" => &["insert design lists the designs open in other tabs first"],

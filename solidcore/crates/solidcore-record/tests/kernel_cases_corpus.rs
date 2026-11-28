@@ -137,19 +137,66 @@ fn replay_identity_uses_arguments_and_records_not_case_metadata() {
     );
 }
 
-fn validate_counts(root: &Path, files: &[PathBuf], manifest: &Value) {
-    let listed: std::collections::BTreeMap<_, _> = manifest["areas"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(area, a)| (PathBuf::from(area), a["cases"].as_u64().unwrap()))
-        .collect();
-    let mut actual = std::collections::BTreeMap::new();
-    for file in files {
-        let area = file.strip_prefix(root).unwrap().parent().unwrap();
-        *actual.entry(area.to_path_buf()).or_insert(0_u64) += 1;
+/// The manifest is the export's record: the SolidCraft and solidcore commits it was made at
+/// (`solidcraft`, `solidcore`) and every case that isn't expressible with its reasons
+/// (`not_expressible`). It stores no per-area totals: those are counts of the case files, and a
+/// stored copy only made every pull request that adds a case edit the same lines. Every case it
+/// names must be a case file of the corpus, and one the kernel alone does not account for.
+fn validate_manifest(root: &Path, files: &[PathBuf], manifest: &Value) {
+    let m = manifest.as_object().expect("manifest.json: an object");
+    for k in m.keys() {
+        assert!(
+            ["solidcraft", "solidcore", "not_expressible"].contains(&k.as_str()),
+            "manifest.json: `{k}` is not a manifest field (per-area totals are counted from the \
+             case files, never stored)"
+        );
     }
-    assert_eq!(actual, listed, "the manifest counts entries per area");
+    for k in ["solidcraft", "solidcore"] {
+        assert!(
+            m.get(k).is_some_and(|v| v.is_string() || v.is_null()),
+            "manifest.json: `{k}` must be the commit the cases were exported at"
+        );
+    }
+    let cases: std::collections::BTreeMap<String, &PathBuf> = files
+        .iter()
+        .map(|f| {
+            let name = f
+                .strip_prefix(root)
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            (name, f)
+        })
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for n in m["not_expressible"]
+        .as_array()
+        .expect("manifest.json: `not_expressible` is a list")
+    {
+        let case = n["case"]
+            .as_str()
+            .unwrap_or_else(|| panic!("manifest.json: not_expressible entry {n} has no `case`"));
+        assert!(
+            seen.insert(case),
+            "manifest.json: not_expressible lists {case} twice"
+        );
+        let file = cases.get(case).unwrap_or_else(|| {
+            panic!(
+                "manifest.json: not_expressible lists {case}, which has no file \
+                 ({case}.json under kernel_cases/): remove it from the manifest"
+            )
+        });
+        if let Ok(text) = std::fs::read_to_string(file) {
+            let e: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(
+                e["operation_expressible"].as_bool(),
+                Some(true),
+                "manifest.json: not_expressible lists {case}, which {} marks operation_expressible",
+                file.display()
+            );
+        }
+    }
 }
 
 fn validate_results(e: &Value, bodies: &serde_json::Map<String, Value>, made: &[&str], f: &Path) {
@@ -260,7 +307,7 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(corpus().join("manifest.json")).unwrap())
             .unwrap();
-    validate_counts(&corpus(), &files, &manifest);
+    validate_manifest(&corpus(), &files, &manifest);
     let mut records = 0;
     for f in &files {
         let e: Value = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
@@ -464,21 +511,35 @@ fn analytic_volume_check_skips_unavailable_comparisons() {
 }
 
 #[test]
-fn regression_area_counts() {
+fn regression_manifest_names_only_case_files() {
     let root = Path::new("corpus");
     let files: Vec<PathBuf> = ["a/one.json", "a/two.json", "ladder/tier/one.json"]
         .iter()
         .map(|p| root.join(p))
         .collect();
-    let valid = serde_json::json!({"areas": {"a": {"cases": 2}, "ladder/tier": {"cases": 1}}});
-    validate_counts(root, &files, &valid);
+    let pins = |not: Value| serde_json::json!({"solidcraft": "c1", "solidcore": "c2", "not_expressible": not});
+    let valid = pins(
+        serde_json::json!([{"case": "a/two", "why": ["x"]}, {"case": "ladder/tier/one", "why": []}]),
+    );
+    validate_manifest(root, &files, &valid);
+    validate_manifest(root, &files, &pins(serde_json::json!([])));
+    let mut totals = pins(serde_json::json!([]));
+    totals["areas"] = serde_json::json!({"a": {"cases": 2}});
     for invalid in [
-        serde_json::json!({"areas": {"a": {"cases": 1}, "ladder/tier": {"cases": 2}}}),
-        serde_json::json!({"areas": {"a": {"cases": 3}}}),
-        serde_json::json!({"areas": {"a": {"cases": 2}, "ladder/other": {"cases": 1}}}),
+        // a case with no file
+        pins(serde_json::json!([{"case": "a/three", "why": []}])),
+        pins(serde_json::json!([{"case": "ladder/other/one", "why": []}])),
+        // listed twice
+        pins(serde_json::json!([{"case": "a/one", "why": []}, {"case": "a/one", "why": []}])),
+        // no case name
+        pins(serde_json::json!([{"why": []}])),
+        // stored totals
+        totals,
+        // no pins
+        serde_json::json!({"not_expressible": []}),
     ] {
         assert!(
-            std::panic::catch_unwind(|| validate_counts(root, &files, &invalid)).is_err(),
+            std::panic::catch_unwind(|| validate_manifest(root, &files, &invalid)).is_err(),
             "accepted {invalid}"
         );
     }

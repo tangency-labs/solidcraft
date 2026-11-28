@@ -277,7 +277,9 @@ fn join_of_a_profile_sketched_on_a_face_leaves_a_neighbour_it_lies_on() {
 }
 
 /// #6424: an extrude that runs to another body and joins it makes one body of the tool, the
-/// body it was sketched on and the body it runs to.
+/// body it was sketched on and the body it runs to. The body it runs to is the scope the app
+/// picks when the call names none; a call that names its targets keeps that body apart
+/// (#19671).
 #[test]
 fn join_extrude_to_another_body_joins_that_body() {
     let mut s = Session::default();
@@ -292,14 +294,104 @@ fn join_extrude_to_another_body_joins_that_body() {
     };
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
     run(&mut s, "sketch.finish", json!({}));
-    // The join names the body the profile was sketched on; the body it runs to joins too.
-    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}));
+    // The join takes the body the profile was sketched on; the body it runs to joins too.
+    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join"}));
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let state = s.model.state();
     let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
     assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
     assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
     assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
+}
+
+/// A base with a target above it, and a profile on the base's top face: the extrude runs to the
+/// target's bottom face.
+fn base_and_target() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        let p = plane.to_local(Vec3::new(x, y, 10.0));
+        json!([p.x, p.y])
+    };
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
+    run(&mut s, "sketch.finish", json!({}));
+    (s, sketch)
+}
+
+/// #19671: a Join To Object that names its Target Bodies joins only those: the body it runs to
+/// stays its own body, and the design keeps two bodies.
+#[test]
+fn join_extrude_to_another_body_keeps_that_body_apart() {
+    let (mut s, sketch) = base_and_target();
+    // The face to run to is on the target body: the join takes the profile into the base and
+    // stops there, leaving the target its own body.
+    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+        assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+        assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+    };
+    check(&s);
+    // The design saves the choice and opens with it again.
+    check(&Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap()));
+}
+
+/// #19671: `to_body_apart: false` joins the body the extrusion runs to even when the call names
+/// its targets, which is what every Join To Object did before (#6424).
+#[test]
+fn join_extrude_to_another_body_joins_that_body_on_request() {
+    let (mut s, sketch) = base_and_target();
+    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+    assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
+    assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
+}
+
+/// #19671: an edit that makes a Join To Object out of an extrude that had none takes the new
+/// rule: what the old extent had to say about the body it runs to was about nothing, so the
+/// bodies the edit names are the ones it joins.
+#[test]
+fn a_redefine_that_adds_the_to_object_keeps_the_body_it_runs_to_apart() {
+    let (mut s, sketch) = base_and_target();
+    // The plain extrude: a distance, no object to run to.
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"distance":10,"operation":"join","targets":["Base"]}))["feature"].clone();
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // The edit gives it the object to run to: the body it runs to stays its own body.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":extrude,"command":"solid.extrude","params":{"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+    assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+    assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+    assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+}
+
+/// #19671: `to_body_apart` is about a Join that runs to another body: a Join without one, or an
+/// operation that never joins that body, is refused with the reason.
+#[test]
+fn to_body_apart_needs_a_join_to_an_object() {
+    let (mut s, sketch) = base_and_target();
+    // No To Object: nothing to keep apart.
+    let error = s
+        .execute("solid.extrude", &json!({"sketch":sketch,"distance":10,"operation":"join","targets":["Base"],"to_body_apart":true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("to_body_apart"), "{error}");
+    // A Cut never joins the body it runs to.
+    let error = s.execute("solid.extrude", &json!({"sketch":sketch,"to":[20,20,20],"operation":"cut","to_body_apart":true})).unwrap_err().to_string();
+    assert!(error.contains("to_body_apart"), "{error}");
 }
 
 /// #8151: a design saved before a Join To Object also joined the body it runs to (format 39 and
@@ -319,9 +411,13 @@ fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
     run(&mut s, "sketch.finish", json!({}));
     // A feature after the extrude names the body it runs to, as the lid's sketch and moves did.
-    // Today's join leaves no such body to name, so the move is made first and put last below.
+    // The join leaves no such body to name, so the move is made first and put last below.
     let moved = run(&mut s, "solid.move", json!({"bodies":["Target"],"translate":[0,0,5]}))["feature"].clone();
-    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}))["feature"].clone();
+    // The extrude joins the body it runs to, as every Join To Object did until the call named
+    // its targets (#19671); a design saved before that keeps the body apart.
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false}))
+        ["feature"]
+        .clone();
     let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let features = saved["features"].as_array_mut().unwrap();
     let at_move = features.iter().position(|f| f["id"] == moved).unwrap();

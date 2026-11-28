@@ -168,12 +168,12 @@ pub(super) fn clear_of_kept_face(
     vertex: Point3,
     tol: f64,
 ) -> Result<bool> {
-    let n = nets.len().checked_div(2).ok_or_else(super::sm_err)?;
+    let n = nets.len() / 2;
     if n < 3 || nets.len() != 2 * n || m >= n {
         return Ok(false);
     }
     // the round before face m in the cycle (n >= 3)
-    let prev = (m + n - 1).checked_rem(n).ok_or_else(super::sm_err)?;
+    let prev = if m == 0 { n - 1 } else { m - 1 };
     let after = el_ref(nets, m)?;
     let before = el_ref(nets, prev)?;
     let nrm = face.normal;
@@ -268,7 +268,7 @@ pub(super) fn clear_of_kept_face(
                     let mut parts = parts.into_iter();
                     let (Some(a), Some(b), Some(c)) = (parts.next(), parts.next(), parts.next())
                     else {
-                        return Err(super::sm_err());
+                        return Err(super::past_table());
                     };
                     let cross = parts.next();
                     stack.push(Piece {
@@ -287,7 +287,7 @@ pub(super) fn clear_of_kept_face(
 
 /// The vector at `i` of a pair, mutably.
 fn el_mut_vec(v: &mut [Vec<Tensor>; 2], i: usize) -> Result<&mut Vec<Tensor>> {
-    v.get_mut(i).ok_or_else(super::sm_err)
+    v.get_mut(i).ok_or_else(super::past_table)
 }
 
 #[cfg(test)]

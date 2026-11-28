@@ -1,0 +1,9 @@
+Updates: WR-459
+
+#### WR-459 (update, 2026-11-23). `fillet_cleanup_keeps_target_faces` is removed
+
+`DoFilleting`'s clean-up (`boolean_post_process`, `boolean/merge/p1.rs`) now always keeps the target's edges (except slits, WR-602) and every edge between two of the target's faces. That is the only path now, and the flag is gone (tangency-labs/solidcraft#17169).
+
+- **Which path went:** the pinned upstream clean-up, which merges the faces of the filleted body across any edge it judges redundant, the target's own included. SolidCraft already ran with the keep on (`UpstreamFixes::all()`), so the app's results do not change by the retirement; the goldens, run on the default kernel, do (see the retiring PR's table).
+- **Identity fix:** the keep named the target's faces by arena id. The trim of a split face keeps whichever piece the cut's direction gives, and that may be the piece with the new id, so a face of the target could leave the kept set. `Fillet/sphere_diff_3cylinders.smb` rounded r 0.1 on edge 1 (28/44/10: the two sphere patches merged) and on its mirror image, edge 4 (29/46/11: both patches kept), showed it. The session now marks the target's faces with a copied attribute (`ids::FILLET_TARGET_FACE`) as filleting starts, which a split's pieces and a merge's result carry, reads the kept faces from the marks, and removes the marks when filleting ends. Edges are still kept by arena id (an arena never reuses an id, #1176).
+- **Tests:** `issue_1176_fillet_cleanup_keeps_by_identity.rs` adds `issue_17169_mirror_rounds_keep_both_sphere_patches`. The flag-off halves of `issue_15059_fillet_cleanup_keeps_a_coplanar_split.rs` and `issue_423_sphere_cut_round_edge_check.rs` are deleted. `issue_423_fillet_cleanup_keeps_faces.rs` no longer compares with the flag off; it asserts the counts and a closed-form volume (the cylinder less the round's spandrel swept about the axis). Every other test that set the flag drops the line.

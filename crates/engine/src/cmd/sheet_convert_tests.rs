@@ -426,9 +426,10 @@ fn designs_from_before_bend_edges_open_as_recognize_of_the_plate() {
     assert!(!older.to_string().contains("\"bends\""), "{older}");
     older["format"] = json!("solidcraft/16");
     let doc = solidcraft_doc::Document::from_json(&older.to_string()).unwrap();
-    // An older design keeps the numbering of the pieces it was saved with (#3902).
+    // An older design keeps the numbering of the pieces it was saved with (#3902), and the order
+    // of the pieces it splits bodies into (#21552).
     let mut same = solidcraft_doc::Document::clone(&s.doc);
-    same.features.iter_mut().for_each(|f| f.kernel_piece_order = true);
+    same.features.iter_mut().for_each(|f| (f.kernel_piece_order, f.least_face_piece_order) = (true, true));
     // Its rules' hem gaps were inner radii: doubled, they are the same hems (format pending
     // sheet-hem-gap).
     same.sheet.rules.iter_mut().for_each(|r| r.hem_gap = format!("2 * ({})", r.hem_gap));
@@ -1989,6 +1990,8 @@ fn disc_in_box(r: f64, (u0, u1): (f64, f64), (v0, v1): (f64, f64)) -> f64 {
         .sum()
 }
 
+#[path = "sheet_surface_bead_tests.rs"]
+mod beads;
 #[path = "sheet_surface_cut_tests.rs"]
 mod cuts;
 #[path = "sheet_recognize_tests.rs"]

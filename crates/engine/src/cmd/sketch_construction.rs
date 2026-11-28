@@ -9,11 +9,13 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 use super::sketch::{CONNECT_TOL, add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, expr, num, str_, vec2};
-use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult};
+use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult, CrosshairsParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CONTRACT: TypedContract<ConstructionLineParams> = TypedContract::new();
+const CROSSHAIRS_CONTRACT: TypedContract<CrosshairsParams> = TypedContract::new();
+const CROSSHAIRS: &str = "sketch.crosshairs";
 const CMD: &str = "sketch.construction_line";
 
 macro_rules! variant {
@@ -41,7 +43,41 @@ pub static COMMANDS: &[CommandSpec] = &[
     variant!("sketch.construction_line.tangent_at", "Tangent at Curve Point", "tangent_at").icon("construction_line_tangent_at"),
     variant!("sketch.construction_line.tangent_two", "Common Tangent", "tangent_two").icon("construction_line_tangent_two"),
     variant!("sketch.construction_line.bisector", "Angle Bisector", "bisector").icon("construction_line_bisector"),
+    CommandSpec::new(CROSSHAIRS, "Coordinate Crosshairs", crate::checked!("sketch.crosshairs", crosshairs))
+        .at("SKETCH", "CREATE")
+        .enabled(in_sketch)
+        .icon("construction_line")
+        .contract(&CROSSHAIRS_CONTRACT)
+        .output(output_schema_for::<ConstructionLineResult>)
+        .params(concat!(
+            "sketch?: the sketch (default: the one being edited). Adds an infinite horizontal and an infinite vertical construction line              through the sketch's origin, both fixed, so they add no degrees of freedom: references to dimension and constrain to",
+            created_doc!()
+        )),
 ];
+
+/// Coordinate Crosshairs (#22234): an infinite horizontal and vertical construction line through
+/// the sketch's origin, in one edit. Each starts on the origin point and is fixed, as Fix/Unfix
+/// fixes a curve, so the two add no degrees of freedom.
+fn crosshairs(s: &mut Session, p: &Value) -> Result<Value> {
+    let (out, info) = edit(s, p, CROSSHAIRS, true, |sk, _doc| {
+        let first_new = sk.points.len();
+        let origin = sk.point_index("origin").ok_or_else(|| bad(CROSSHAIRS, "the sketch has no origin"))?;
+        let at = sk.point(origin).ok_or_else(|| bad(CROSSHAIRS, "the sketch has no origin"))?;
+        let mut lines = Vec::new();
+        for direction in [Vec2::X, Vec2::Y] {
+            let l = sk.add_line(at, at + direction * 10.0, Some(origin), None, None)?;
+            if let Some(c) = sk.curves.get_mut(l) {
+                c.infinite = true;
+                c.construction = true;
+                c.fixed = true;
+            }
+            lines.push(l);
+        }
+        super::sketch_create::solve_new_only(sk, first_new);
+        Ok((ids_of(sk, &lines), Vec::new()))
+    })?;
+    Ok(result(out, info))
+}
 
 /// One mathematical solution, before adding any sketch entities.
 #[derive(Clone, Copy, Debug)]
@@ -167,7 +203,7 @@ fn typed_offset(doc: &mut solidcraft_doc::Document, p: &Value, mode: &str) -> Re
     } else {
         rhs
     };
-    Ok(Some((doc.new_model_param(&stored, &unit), mm)))
+    Ok(Some((doc.new_model_param(&stored, &unit)?, mm)))
 }
 
 /// All valid solutions in deterministic order. This reads the sketch and never changes it.
@@ -428,12 +464,12 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
             _ => None,
         };
         if let Some(k) = kind {
-            let parameter = angle_expression.map(|e| doc.new_model_param(&e, "deg"));
+            let parameter = angle_expression.map(|e| doc.new_model_param(&e, "deg")).transpose()?;
             cons.push(sk.add_constraint(k, parameter)?);
         }
         if let Some((e, value)) = &length {
             let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let parameter = doc.new_model_param(e, &unit);
+            let parameter = doc.new_model_param(e, &unit)?;
             cons.push(sk.add_constraint(ConstraintKind::Length { l, value: *value }, Some(parameter))?);
         }
         if let ("tangent_two", Some(b)) = (mode, second) {

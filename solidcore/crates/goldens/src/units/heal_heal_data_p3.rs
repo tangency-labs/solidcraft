@@ -196,4 +196,45 @@ mod tests {
             assert!(gaps.iter().all(|g| g.gap < 1e-11 && g.enclosure.hi < 1e-11), "{name}: {gaps:?}");
         }
     }
+
+    /// Regression (#18923): splitting a cone face at its seam moves edge uses whose trims run
+    /// past the source surface's natural domain (to `u = 1.125` on `[0, 1]`) onto the new
+    /// face, whose analytic copy keeps the source's parameterisation on that domain only (it
+    /// clamps there; 0.765 off the edge). The split drops such trims, so each trim the new
+    /// face's edges 3 and 4 hold when the healer writes its B-rep is one made again on the
+    /// copy, certified within the edge's tolerance over the whole edge.
+    #[test]
+    fn seam_cone_split_drops_trims_off_the_domain() {
+        let k = solidcore::kernel::Kernel::default();
+        let case = crate::case::regression_case(&Runner, "split_face_seam_cone_r1_1_h1_s90_q0");
+        crate::certify::watch_written();
+        Runner.run_rust(&case).expect("the seam cone case runs");
+        let written = crate::certify::take_written();
+        let b = written.first().expect("the healed B-rep");
+        let edges = solidcore::topology::brep::p1::edges(b, None).expect("edges");
+        let mut checked = 0;
+        for &e in edges.iter().filter(|e| [3, 4].contains(&e.index())) {
+            let tol = b.edge(e).expect("edge").tolerance;
+            // Without the fix the kept trim is 0.765 off its edge: a tolerance below that is
+            // what makes this test fail then, so a later raise of it cannot hide the trim.
+            assert!(
+                tol < 0.765,
+                "edge {}: tolerance {tol:e} would cover the kept trim's gap",
+                e.index()
+            );
+            for (eu, bound) in crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e) {
+                let bound = bound
+                    .unwrap_or_else(|| panic!("edge {} use {}: not enclosed", e.index(), eu.index()));
+                assert!(
+                    bound <= tol,
+                    "edge {} use {}: B {bound:e} > tolerance {tol:e}",
+                    e.index(),
+                    eu.index()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "edges 3 and 4 of the healed B-rep hold no trim");
+        eprintln!("seam_cone_split_drops_trims_off_the_domain: {checked} trims certified");
+    }
 }

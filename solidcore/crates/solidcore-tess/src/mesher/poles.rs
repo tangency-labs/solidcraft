@@ -159,7 +159,7 @@ pub(crate) fn kernel_form(s: &EvalSurface) -> solidcore::eval::EvalSurface {
     use solidcore::eval::{EvalCurve, EvalSurface as K};
     match s {
         EvalSurface::Plane { origin, du, dv } => K::Plane { origin: *origin, du: *du, dv: *dv },
-        EvalSurface::Nurbs { degree, knots, count, ctrl, .. } => K::nurbs(*degree, knots.clone(), *count, ctrl.clone()),
+        EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => K::nurbs_closed(*degree, knots.clone(), *count, ctrl.clone(), *closed),
         EvalSurface::Revolved { profile, origin, axis, transform, swap } => K::Revolved {
             profile: EvalCurve::new(profile.degree, profile.knots.clone(), profile.ctrl.clone()),
             origin: *origin,

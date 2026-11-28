@@ -14,7 +14,9 @@
 //! `SM_FILERR_VERTEX_PROBLEM` (3), "Unable to Make Topology". It then returned the fork's
 //! refusal: `SM_FILERR_NO_ROOM` (8), fit 0.
 //!
-//! Since #2953 the Mixed corner takes this vertex's four edges, so the round builds.
+//! Since #2953 the Mixed corner takes this vertex's four edges. Since #22151 the session
+//! refuses that corner for rounds, at the vertex, with its reason: its faces are Coons
+//! patches of their sides, not a rolling ball's surface, until the Roll-over build takes it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,7 +24,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::blend_corner::mixed::MIXED_ROUNDS_NOT_BUILT;
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::{Kernel, UpstreamFixes};
@@ -30,7 +34,6 @@ use solidcore::math::Point3;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::api_files::read_brep_from_file;
 use solidcore::topology::brep::p10::TopologyEnv;
-use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{loopuse, EdgeId};
 use solidcore::Brep;
@@ -75,45 +78,44 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
     best.1.unwrap()
 }
 
-/// The two edges rounded r 2 together as SolidCraft drives the session: the kernel and the
-/// body, or the error info's code, comment and fit on failure.
-fn round() -> Result<(Kernel, Brep), (i32, String, Option<f64>)> {
+/// The vertex the front top edge runs tangentially into the concave arc at, before the
+/// draft: (40, 0, 10) moved in by the 5 degree taper over the 10 mm height.
+const V: [f64; 3] = [40.0, 0.874_886_635_259_24, 10.0];
+
+/// What the session noted when the two edges, rounded r 2 together as SolidCraft drives
+/// it, were refused: its code, comment and location.
+fn refusal() -> (i32, String, Option<Point3>) {
     let mut k = kernel();
     let mut b = read(&mut k, INPUT);
     let edges = [
         pick(&k, &b, [20.0, 0.874_89, 10.0]),
         pick(&k, &b, [32.874_89, 8.0, 10.0]),
     ];
-    let done = {
-        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.prepare_per_edge_constant_radius(
-            &mut k,
-            &edges,
-            &[2.0, 2.0],
-            &[FilletSurfaceGeneratorType::Circular],
-            1,
-            1.0,
-        )
-        .unwrap();
-        s.create_corners(&k, None).unwrap();
-        s.do_filleting(&mut k, None).map_err(|_| {
-            let info = s.error_info();
-            (
-                info.code,
-                info.comment.clone(),
-                s.fit_size().map(|f| f.size),
-            )
-        })
-    };
-    done.map(|()| (k, b))
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_per_edge_constant_radius(
+        &mut k,
+        &edges,
+        &[2.0, 2.0],
+        &[FilletSurfaceGeneratorType::Circular],
+        1,
+        1.0,
+    )
+    .unwrap();
+    let made = s
+        .create_corners(&k, None)
+        .and_then(|()| s.do_filleting(&mut k, None));
+    assert!(made.is_err(), "the round built");
+    let info = s.error_info();
+    (info.code, info.comment.clone(), info.location)
 }
 
-/// The round builds one sound solid: the refusal this test pinned before #2953 held the body
-/// to the fork's answer, so the body it now builds is held to being valid.
+/// The round is refused at V as a corner not supported yet, with the Mixed corner's reason.
 #[test]
-fn the_mixed_corner_builds_the_round() {
-    let (mut k, mut b) = round().unwrap();
-    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
-    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    assert!(report.lines().is_empty(), "{report:?}");
+fn the_mixed_corner_of_rounds_is_refused_at_its_vertex() {
+    let (code, comment, at) = refusal();
+    assert_eq!(code, FilletErrorType::CornerUnsupported as i32);
+    assert_eq!(comment, MIXED_ROUNDS_NOT_BUILT);
+    let at = at.unwrap();
+    let v = Point3::new(V[0], V[1], V[2]);
+    assert!(at.distance(v) <= 1e-6, "refused at {at:?}");
 }

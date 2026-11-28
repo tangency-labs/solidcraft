@@ -248,6 +248,16 @@ pub struct TabViewMoveParams {
 #[schemars(deny_unknown_fields)]
 pub struct TabViewNoParams {}
 
+/// `tab.view.collapse`: fold the sub-tabs of the shown design into its tab, or show them again.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabViewCollapseParams {
+    /// True folds the views into the design's tab (its name and how many views it has), false
+    /// shows them as sub-tabs again. Default: the other way round from now.
+    #[serde(default)]
+    pub collapsed: Option<bool>,
+}
+
 /// One view in a `tab.view.list` reply.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TabViewInfo {
@@ -267,6 +277,10 @@ pub struct TabViewInfo {
 /// for `tab.view.list`, `views`. The design is not changed and nothing is added to undo.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct TabViewReply {
+    /// Whether the shown design's views are folded into its tab: asked for (`tab.view.collapse`),
+    /// then (from the window) as they are after the call; `tab.view.list` says it too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
     /// The kind asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<TabViewKind>,

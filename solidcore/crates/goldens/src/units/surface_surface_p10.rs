@@ -64,6 +64,7 @@ use solidcore::SolidError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::contact_codes;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -434,9 +435,11 @@ fn put_sol(o: &mut Vec<f64>, s: &Solution<H>) {
     }
 }
 
-fn finish(r: solidcore::Result<Vec<f64>>) -> Output {
+/// The record and, exact, its solutions' contact codes (`0` unclassified, `1`
+/// crossing, `2` touching, `3` undecided: [`contact_codes`]).
+fn finish(r: solidcore::Result<(Vec<f64>, Vec<i64>)>) -> Output {
     match r {
-        Ok(rec) => Output::new().values("rec", rec),
+        Ok((rec, contact)) => Output::new().values("rec", rec).ints("contact", contact),
         Err(e) => Output::unported(&e)
             .unwrap_or_else(|| Output::new().values("rec", vec![status(&e)])),
     }
@@ -493,7 +496,7 @@ fn rust_lsi(
         for s in solver.base.solutions.as_slice() {
             put_sol(&mut o, s);
         }
-        o
+        (o, contact_codes(solver.base.solutions.as_slice()))
     });
     Ok(finish(r))
 }
@@ -571,7 +574,7 @@ fn rust_combine(
         for s in solutions.as_slice() {
             put_sol(&mut o, s);
         }
-        o
+        (o, contact_codes(solutions.as_slice()))
     });
     Ok(finish(r))
 }

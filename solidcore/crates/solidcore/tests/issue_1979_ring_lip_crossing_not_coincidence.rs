@@ -8,8 +8,9 @@
 //! and gives no solid (volume 0) at e = 1e-3. `GlobalCurveIntersect` now takes a merged
 //! range that ends where the circles part on both sides, and across which they change
 //! sides, for their crossing, so every offset is a valid manifold solid of the analytic
-//! volume, by default and with `Kernel::fixes.simple_coincidence_crossing_is_point`
-//! (whose crossing half this retired; its nearest-point half stays behind it).
+//! volume (this retired the crossing half of the fork's per-span-pair rule; its
+//! nearest-point half, `simple_coincidence_crossing_is_point`, is retired too, WR-647
+//! part D).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -72,9 +73,8 @@ fn ring_and_lip(k: &mut Kernel, e: f64) -> solidcore::Result<Brep> {
 
 /// Whether the union is a manifold solid, its level-2 check failures and its volume; or
 /// the union's refusal.
-fn union_at(e: f64, fix: bool) -> solidcore::Result<(bool, Vec<String>, f64)> {
+fn union_at(e: f64) -> solidcore::Result<(bool, Vec<String>, f64)> {
     let mut k = Kernel::default();
-    k.fixes.simple_coincidence_crossing_is_point = fix;
     let mut b = ring_and_lip(&mut k, e)?;
     let manifold = is_manifold_solid(&b).unwrap();
     let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
@@ -87,19 +87,6 @@ fn want() -> f64 {
     pi * 16.0 * 2.0 + 0.5 * pi * 9.0 * 18.0
 }
 
-#[test]
-fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
-    let mut report = Vec::new();
-    for e in [0.0, 1e-4, 1e-3, 1e-2] {
-        let got = union_at(e, true).unwrap();
-        let ok = got.0 && got.1.is_empty() && (got.2 - want()).abs() <= 1e-5 * want();
-        if !ok {
-            report.push(format!("e = {e}: {got:?}"));
-        }
-    }
-    assert!(report.is_empty(), "want {}: {report:#?}", want());
-}
-
 /// The default kernel. Upstream was non-manifold at 1e-4 and left no solid region at 1e-3
 /// (which the union's WR-619 guard refused, `BooleanFailure::SolidLeaks`); the crossing is
 /// now decided on the merged range by default, so every offset is the valid solid too.
@@ -107,7 +94,7 @@ fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
 fn issue_1979_ring_lip_union_is_valid_at_every_offset_by_default() {
     let mut report = Vec::new();
     for e in [0.0, 1e-4, 1e-3, 1e-2] {
-        let got = union_at(e, false).unwrap();
+        let got = union_at(e).unwrap();
         let ok = got.0 && got.1.is_empty() && (got.2 - want()).abs() <= 1e-5 * want();
         if !ok {
             report.push(format!("e = {e}: {got:?}"));

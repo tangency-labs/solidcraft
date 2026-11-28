@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use super::MeshConvertParams;
+use super::{MeshConvertParams, MeshReduceParams, MeshReduceResult, MeshSectionStackParams, MeshSectionStackResult};
 use crate::Sel;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -12,6 +12,7 @@ use crate::tests::mesh_convert::imported_box;
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MeshConvertParams>(), &["body", "name", "participants", "tolerance"]);
+    assert_keys(input_schema_for::<MeshSectionStackParams>(), &["body", "extrude", "from", "max_sections", "name", "plane", "spacing", "to"]);
 }
 
 /// The handler finds the body before it reads the tolerance, so on a design with no mesh body
@@ -26,7 +27,69 @@ fn strict_keeps_todays_errors() {
         ("mesh.convert", json!({"body": "Nope"})),
         ("mesh.convert", json!({"body": "Nope", "tolerance": "nonsense"})),
         ("mesh.convert", json!({"body": "Nope", "tolerance": 0.01, "name": "Rebuilt", "participants": ["*"]})),
+        ("mesh.section_stack", json!({"plane": "XY", "spacing": 5})),
+        ("mesh.section_stack", json!({"body": "Nope", "plane": "XY", "spacing": 5})),
+        ("mesh.section_stack", json!({"body": " ", "plane": "XY", "spacing": 5, "extrude": true})),
+        ("mesh.section_stack", json!({"body": "Nope", "plane": "XY", "spacing": "2 mm", "from": 0, "to": 10, "max_sections": 50, "name": "Cut"})),
     ]);
+}
+
+/// Section Stack's contract takes what its input schema allows; what the handler alone can say
+/// (the body, the numbers' ranges) is left to it.
+#[test]
+fn the_section_stack_check_takes_what_the_schema_allows() {
+    let schema = input_schema_for::<MeshSectionStackParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"plane": "XY", "spacing": 1}), true),
+        (
+            json!({"body": "Mesh", "plane": "XZ", "spacing": "0.5 mm", "from": -3, "to": "w / 2", "max_sections": 40, "extrude": true, "name": "Cut"}),
+            true,
+        ),
+        (json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "spacing": 2}), true),
+        (json!({"plane": "XY", "spacing": 1, "from": null, "to": null, "extrude": null, "max_sections": null, "name": null, "body": null}), true),
+        (json!({"spacing": 1}), false),
+        (json!({"plane": "XY"}), false),
+        (json!({"plane": "XY", "spacing": true}), false),
+        (json!({"plane": "XY", "spacing": ""}), false),
+        (json!({"plane": "XY", "spacing": 1, "extrude": "yes"}), false),
+        (json!({"plane": "XY", "spacing": 1, "max_sections": -1}), false),
+        (json!({"plane": "XY", "spacing": 1, "max_sections": 2.5}), false),
+        (json!({"plane": "XY", "spacing": 1, "body": 5}), false),
+        (json!({"plane": "XY", "spacing": 1, "offset": 3}), false),
+        (json!({"plane": 5.5, "spacing": 1}), false),
+    ] {
+        let issues = crate::schema::issues("mesh.section_stack", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+/// Section Stack replies with `MeshSectionStackResult`, with and without slabs, naming the body or
+/// taking the selected one; in Warn, without warnings, so its contract takes each call. A
+/// misspelt key in Warn still runs and its reply, warnings and all, still matches.
+#[test]
+fn section_stack_replies_with_its_result() {
+    let schema = output_schema_for::<MeshSectionStackResult>();
+    let schema = schema.as_value();
+    for p in [
+        json!({"body": "Mesh", "plane": "XY", "spacing": 10}),
+        json!({"plane": "XY", "spacing": "10 mm", "from": 5, "to": 25}),
+        json!({"body": "Mesh", "plane": "YZ", "spacing": 4, "from": 1, "to": 9, "extrude": true, "name": "Slice", "max_sections": 10}),
+    ] {
+        let mut s = imported_box();
+        s.param_check = ParamCheck::Warn;
+        s.selection = vec![Sel::Body { name: "Mesh".into() }];
+        let r = s.execute("mesh.section_stack", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        assert!(!r["sketches"].as_array().unwrap().is_empty(), "{r}");
+    }
+    let mut s = imported_box();
+    s.param_check = ParamCheck::Warn;
+    let r = s.execute("mesh.section_stack", &json!({"body": "Mesh", "plane": "XY", "spacing": 10, "extrud": true})).unwrap();
+    assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
 }
 
 /// The error a call gets on the imported box with a solid box `Solid` beside it, at `level`.
@@ -66,6 +129,11 @@ fn the_check_takes_what_the_schema_allows() {
     for (p, takes) in [
         (json!({}), true),
         (json!({"body": "Mesh"}), true),
+        (json!({"legacy_names": true}), false),
+        (json!({"legacy_names": false}), false),
+        (json!({"legacy_names": null}), false),
+        (json!({"legacy_names": "true"}), false),
+        (json!({"legacy_names": 1}), false),
         (json!({"body": "Mesh", "tolerance": "0.01 mm", "name": "Rebuilt", "participants": ["Mesh"]}), true),
         (json!({"body": "", "tolerance": 0.02, "participants": "*"}), true),
         (json!({"body": null, "tolerance": null, "name": null, "participants": null}), true),
@@ -113,4 +181,18 @@ fn convert_mesh_replies_with_feature_result() {
         assert_eq!(lists, (&json!(["Mesh"]), &json!([]), &json!([])), "{p}: {r}");
         assert!(s.model.state().body("Mesh").is_some_and(|b| !b.body.is_mesh()), "{p}: still a mesh");
     }
+}
+
+#[test]
+fn reduction_schema_and_reply() {
+    assert_keys(input_schema_for::<MeshReduceParams>(), &["body", "name", "participants", "percentage", "triangle_count"]);
+    let mut s = crate::tests::mesh_convert::subdivided_box();
+    s.param_check = ParamCheck::Warn;
+    let reply = s.execute("mesh.reduce", &json!({"body":"Mesh", "triangle_count":1})).unwrap();
+    let schema = output_schema_for::<MeshReduceResult>();
+    let schema = schema.as_value();
+    assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+    assert!(reply.get("param_warnings").is_none());
+    assert!(reply["achieved_triangles"].as_u64().unwrap() < reply["original_triangles"].as_u64().unwrap());
+    assert!(!crate::schema::issues("mesh.reduce", &json!({"body":"Mesh","percentage":50,"unknown":1})).is_empty());
 }

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tab</title>
+  <path d="M7.86 29.41L27.5 40.75L27.5 44.52L7.86 33.19Z" fill="#b8c3cf"/>
+  <path d="M50.41 27.52L27.5 40.75L27.5 44.52L50.41 31.3Z" fill="#8e9faf"/>
+  <path d="M30.77 16.18L50.41 27.52L27.5 40.75L7.86 29.41Z" fill="#e2e8ef"/>
+  <path d="M30.77 16.18L50.41 27.52L50.41 31.3L27.5 44.52L7.86 33.19L7.86 29.41Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7.86 29.41L27.5 40.75L50.41 27.52" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M27.5 40.75L27.5 44.52" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.22 37.44L44.69 44.05L44.69 47.83L33.22 41.22Z" fill="#328bd3"/>
+  <path d="M56.14 37.44L44.69 44.05L44.69 47.83L56.14 41.22Z" fill="#236ead"/>
+  <path d="M44.69 30.83L56.14 37.44L44.69 44.05L33.22 37.44Z" fill="#b9ddf8"/>
+  <path d="M44.69 30.83L56.14 37.44L56.14 41.22L44.69 47.83L33.22 41.22L33.22 37.44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.22 37.44L44.69 44.05L56.14 37.44" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.69 44.05L44.69 47.83" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -94,6 +94,7 @@
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
+use crate::error::curve::CurveFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -925,7 +926,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         let span_count = self.spans.len();
         if span_count == 0 {
             self.tree = Some(tree);
-            return Err(SolidError::curve_failed(OP_TREE, "the curve has no spans"));
+            return Err(SolidError::curve(OP_TREE, CurveFailure::NoSpans));
         }
 
         // decomposition control parameters
@@ -1270,23 +1271,20 @@ pub fn compute_constants(
 
     // the Euclidean control polygon
     let CurveKind::BSpline(bsp) = bez.kind() else {
-        return Err(SolidError::curve_failed(
-            OP_CONST,
-            "the span is not a B-spline",
-        ));
+        return Err(SolidError::curve(OP_CONST, CurveFailure::SpanNotBSpline));
     };
     let polygon = bsp.polygon(&bsp.natural_interval())?;
     let poly_size = polygon.len();
     let (Some(&line_pnt), Some(&last_point)) = (polygon.first(), polygon.last()) else {
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_CONST,
-            "the control polygon is empty",
+            CurveFailure::ControlPolygonTooShort { points: 0 },
         ));
     };
     if poly_size < 2 {
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_CONST,
-            "the control polygon has fewer than two points",
+            CurveFailure::ControlPolygonTooShort { points: poly_size },
         ));
     }
 
@@ -1483,9 +1481,9 @@ pub fn compute_constants(
 /// evaluations (whose other failures upstream ignores).
 pub fn build_bezier_spans(k: &Kernel, curve: &Curve, knots: &[f64]) -> Result<Vec<Nurb>> {
     if knots.len() < 2 {
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_BUILD,
-            "there are fewer than two knots",
+            CurveFailure::TooFewKnots { knots: knots.len() },
         ));
     }
     let mut out = Vec::new();
@@ -1533,16 +1531,16 @@ pub fn create_bezier_segment_block(
     if let Some(n) = nurb {
         let span_count = n.knot_vector().map_or(0, |k| k.span_count(n.degree()));
         if span_count < 1 {
-            return Err(SolidError::curve_failed(OP_BLOCK, "the NURB has no spans"));
+            return Err(SolidError::curve(OP_BLOCK, CurveFailure::NoSpans));
         }
         create_bez_segments(n).map_err(SolidError::nurbs_routine(OP_BLOCK))
     } else {
         // the knot vector matches CalculateContinuities (status ignored)
         let (knots, _) = knots_ignoring_status(curve.knots_with_status(k, None))?;
         if knots.len() < 2 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_BLOCK,
-                "there are fewer than two knots",
+                CurveFailure::TooFewKnots { knots: knots.len() },
             ));
         }
         build_bezier_spans(k, curve, &knots)
@@ -1807,5 +1805,34 @@ mod tests {
         let poly = bezier_polygon(&segs, 0, 1).unwrap();
         assert_eq!(poly.len(), 7);
         assert!(bezier_polygon(&segs, 0, 2).is_err());
+        // one knot spans nothing
+        let err = build_bezier_spans(k, &h, &[0.5]).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::TooFewKnots { knots: 1 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        // the span measure takes a B-spline span only
+        let err = compute_constants(
+            k,
+            &h,
+            &h,
+            Extent1d::from_min_max(0.0, 1.0),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            true,
+        )
+        .unwrap_err();
+        assert_eq!(err.curve_failure(), Some(&CurveFailure::SpanNotBSpline));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
     }
 }

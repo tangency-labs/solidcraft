@@ -1,0 +1,4 @@
+{
+  "issue": "tangency-labs/solidcore#2697",
+  "reason": "step 6 (solid.fillet): the open setback corner is not a closed solid, as on SMLib d01d7b0"
+}

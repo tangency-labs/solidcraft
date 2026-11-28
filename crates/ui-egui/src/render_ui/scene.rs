@@ -407,7 +407,7 @@ fn wear(app: &mut SolveApp, rows: &mut Rows<'_>) {
 
 /// Returns true when the object section is closed or the By look lens drew its objects.
 pub(crate) fn objects(app: &mut SolveApp, rows: &mut Rows<'_>, hover_bodies: &mut Vec<String>, hovered: &mut bool) -> bool {
-    if app.tree.reveal.is_some() {
+    if app.tree.reveal.is_some() || (app.tree.reveal_occurrence.is_some() && !app.render_workspace.view.by_look) {
         app.tree.collapsed.remove("render:tree:objects");
     }
     if !section(app, rows, "objects") {

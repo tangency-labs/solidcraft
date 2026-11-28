@@ -3,6 +3,10 @@ frame_end_cap
   remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
 frame_member_turn
   remap_refs: member.feature
+dogbone
+  remap_bodies: body
+frame_gusset
+  remap_refs: supports[0].member.feature, supports[0].plane.base.base.feature, supports[1].plane.base.base.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch
@@ -40,6 +44,8 @@ torus
 cone
 combine
   remap_bodies: target, tools[0]
+finger_joint
+  remap_bodies: bodies[1]
 pattern_rectangular
   remap_refs: features[0]
   remap_bodies: bodies[0]
@@ -66,7 +72,9 @@ hole_countersink
   sketches: [3]
   remap_refs: points.sketch
 hole_references
+hole_hardware
 thread
+shaft_spline
 loft
   sketches: [4, 5, 6]
   remap_refs: rails[0].sketch, sections[0].sketch, sections[1].sketch
@@ -80,6 +88,8 @@ sweep_options
   remap_refs: path_sketch, sketch
   remap_bodies: targets[0]
 shell
+  remap_bodies: body
+dome
   remap_bodies: body
 draft
   remap_refs: neutral.base.base.feature
@@ -121,6 +131,12 @@ frame_member
 frame_member_sketch
   sketches: [1, 2]
   remap_refs: path_sketch, profile.sketch
+frame_cope
+  remap_bodies: member, tools[0]
+frame_trim
+  remap_refs: members[0].feature, to[0].member.feature, to[1].plane.base.base.feature
+frame_plate
+  remap_refs: member.feature, plane.base.base.feature
 emboss
   sketches: [1]
   remap_refs: sketch
@@ -150,6 +166,12 @@ sheet_contour
   remap_refs: sketch
 sheet_flange
   remap_bodies: body
+sheet_flange_with_corners
+  remap_refs: corners[0].covered, corners[0].covering, corners[1].covering
+  remap_bodies: body
+sheet_corner_join
+  remap_refs: covered, covering
+  remap_bodies: body
 sheet_hem
   remap_bodies: body
 sheet_cross_break
@@ -163,6 +185,14 @@ sheet_fold
   remap_refs: sketch
   remap_bodies: body
 sheet_path
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: body
+sheet_tab
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: body
+sheet_bead
   sketches: [1]
   remap_refs: sketch
   remap_bodies: body
@@ -213,6 +243,8 @@ surface_blend
   remap_bodies: from.body
 surface_offset
   remap_bodies: body
+surface_midsurface
+  remap_bodies: body
 surface_blend
   remap_bodies: from.body
 surface_boundary
@@ -239,6 +271,8 @@ surface_extend_to_plane
   remap_bodies: body
 surface_extend_to_face
   remap_bodies: body, up_to.face.body
+surface_extend_law
+  remap_bodies: body
 surface_ruled
   remap_bodies: body
 surface_trim
@@ -253,8 +287,11 @@ surface_trim_mutual
   remap_bodies: body, with
 move
   remap_bodies: bodies[0]
+capture_position
 import
 mesh_convert
+  remap_bodies: body
+mesh_reduce
   remap_bodies: body
 mesh_import
 repair

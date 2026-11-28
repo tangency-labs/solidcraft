@@ -126,7 +126,8 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::curve::CurveFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
@@ -335,9 +336,9 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         let curve_node1 = self.base.branch_node(branch, 0)?;
         let curve_node2 = self.base.branch_node(branch, 1)?;
         if !has_data(curve_node1) || !has_data(curve_node2) {
-            return Err(SolidError::curve_missing(
+            return Err(SolidError::curve(
                 OP_LOCAL,
-                "the branch's curve node data",
+                CurveFailure::CurveNodeWithoutData,
             ));
         }
         let tree1: &Tree<O> = self.base.tree(0)?;
@@ -933,9 +934,11 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         guesses2.push(s.start.parameters[0]);
                     }
                     if guesses1.len() == NUM_PARAM_GUESS {
-                        return Err(SolidError::curve_failed(
+                        return Err(SolidError::curve(
                             OP_LOCAL,
-                            "the parameter guesses are full",
+                            CurveFailure::ParameterGuessCap {
+                                limit: NUM_PARAM_GUESS,
+                            },
                         ));
                     }
                 }
@@ -1215,15 +1218,27 @@ fn build_cache<O: SolutionObject>(
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::curve_missing(OP_GCS, "the curve's cache")),
+        Err(e) => Err(Failure::new(OP_GCS, CurveFailure::CacheNotBuilt)
+            .caused_by(e)
+            .into_error()),
     }
 }
 
-/// The cache tree (`GetTree`, `NER`).
+/// The cache tree (`GetTree`, `NER`). Every cache here comes from [`build_cache`], whose
+/// build sets the tree whenever it succeeds, so a cache without one is the kernel's
+/// defect.
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache
-        .tree()
-        .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the curve cache's tree"))
+    cache.tree().ok_or_else(|| {
+        Failure::new(
+            OP_GCS,
+            CurveFailure::Defect {
+                why: "the curve's cache, built by build_cache, has a tree: the build sets \
+                      it whenever it succeeds",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
@@ -1600,9 +1615,9 @@ impl Curve {
         let mut best_answer_so_far_sq = BIG_DOUBLE;
         match op {
             Op::AtDistance => {
-                let target = opts
-                    .target_distance
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the target distance"))?;
+                let target = opts.target_distance.ok_or_else(|| {
+                    SolidError::curve(OP_GCS, CurveFailure::TargetDistanceMissing)
+                })?;
                 gs.base.set_at_distance(target);
             }
             Op::SignedDirectedMinimize | Op::Signed3dDirectedMinimize => {

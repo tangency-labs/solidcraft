@@ -778,7 +778,7 @@ fn check(k: &mut Kernel, b: &mut Brep, level: u8) -> Result<Vec<i64>, Stop> {
         _ => return Err(Stop::Harness(harness(format!("check level {level}")))),
     };
     let c = check_brep(k, b, level).map_err(|e| stop("check_brep", &e))?;
-    let mut o = vec![i64::from(c.pointers_status)];
+    let mut o = vec![i64::from(crate::output::pointer_check_status(c.pointers))];
     failed_tests(&mut o, &c.pointer_reports)?;
     o.push(c.assert_valid.map_or(-1, i64::from));
     failed_tests(&mut o, &c.reports)?;
@@ -816,7 +816,7 @@ fn arc_lengths(k: &Kernel, b: &Brep, fraction: f64) -> Result<Vec<f64>, Stop> {
                 match c.find_parameter_at_arc_length(k, ivl.min(), fraction * length) {
                     Err(err) => row[2] = fail(&err)?,
                     Ok(found) => {
-                        row[2] = f64::from(found.status());
+                        row[2] = f64::from(crate::output::arc_length_status(&found));
                         match c.evaluate_point(k, found.end_param) {
                             Ok(p) => {
                                 row[3] = p.x;
@@ -1177,59 +1177,6 @@ fn two_ints(out: &api::BooleanOutcome, kept: bool) -> Result<Vec<i64>, Stop> {
         put_brep(&mut o, other)?;
     }
     Ok(o)
-}
-
-/// A `rotational_sweep` case's kernel and its swept B-rep, swept as the runner sweeps it
-/// (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` for any other case, an
-/// attributed one or a failed sweep.
-///
-/// # Errors
-///
-/// A case that does not parse, or an operand the runner cannot build.
-pub fn rotational_sweep_scene(case: &Case) -> Result<Option<(Kernel, Brep)>, HarnessError> {
-    let i: Inputs = case.parse()?;
-    let Inputs::RotationalSweep {
-        brep,
-        base,
-        axis,
-        angle_deg,
-        stitch,
-        merge,
-        region,
-        selection: sel,
-        attributed: None,
-    } = &i
-    else {
-        return Ok(None);
-    };
-    let of = |s: Stop| match s {
-        Stop::Harness(e) => e,
-        Stop::Deferred(_) | Stop::Torus(_) => harness("the sweep's operand deferred"),
-    };
-    let mut kernel = Kernel::default();
-    let k = &mut kernel;
-    let mut b = build(k, brep).map_err(of)?;
-    let (f, e, v) = picked(&b, sel).map_err(of)?;
-    let other = region_other(k, *region).map_err(of)?;
-    let selection = SweepSelection {
-        faces: f.as_deref(),
-        edges: e.as_deref(),
-        vertices: v.as_deref(),
-    };
-    let axis = Vec3::new(axis[0], axis[1], axis[2]);
-    let region = region_arg(*region, other.as_ref());
-    let r = non_manifold_rotational_sweep(
-        k,
-        &mut b,
-        region,
-        p3(*base),
-        axis,
-        *angle_deg,
-        *stitch,
-        *merge,
-        selection,
-    );
-    Ok(r.ok().map(|()| (kernel, b)))
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {

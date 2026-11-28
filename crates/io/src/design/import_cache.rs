@@ -67,6 +67,10 @@ impl ImportCache {
 
     /// Exact source bytes, file name (which affects component names and format detection),
     /// and import options, plus the same producer identity as the saved-design cache.
+    ///
+    /// Known limitation: the key doesn't record the active kernel backend. That is fine for the
+    /// builds we ship, but the opt-in `backend-occt` build can share cached imports with a
+    /// normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
     pub fn key(bytes: &[u8], file: &str, options: &Value) -> String {
         digest(
             json!([digest(bytes), Path::new(file).file_name().map(|f| f.to_string_lossy()), options, native_cache::identity()])

@@ -38,6 +38,11 @@
 //!   a [`Direction`] (anything but [`Direction::U`] is the v direction, as upstream's
 //!   `else` branch), `end` a [`CurveEnd`] and `cont` an [`ExtendContinuity`] (the
 //!   values upstream handles; other `NL_*` flags fall through to its G1 code).
+//! - Not upstream (#21383): where the boundary weight ratios of a rational surface vary
+//!   along a side, a G1R extension's far row is `ruled_far_row`'s homogeneous point,
+//!   which is G1 across the old boundary; upstream's row, on the space line with the
+//!   inner row's weight, is G1 only when the ratios are equal, and is kept there and for
+//!   non-rational surfaces.
 //! - `N_SrfExtendByParamDist` splits extensions longer than `0.9313` of the knot range
 //!   (G1, G2) by recursion without a bound; the Rust function stops after
 //!   [`MAX_EXTEND_DEPTH`] nested calls with [`SolidError::NotConverged`] instead of
@@ -73,7 +78,7 @@ use crate::nurbs::crv_tool::p2::make_compatible_knot_tol;
 use crate::nurbs::geom::{cpt_reflect, normalize, pt_along_vector, Plane};
 use crate::nurbs::index::{get, oob, set, storage, sx, ux};
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{blend_pt, CPoint, MatrixType, RealMatrix, MODEL_TOL, NOW};
+use crate::nurbs::math::{blend_pt, CPoint, MatrixType, RealMatrix, MODEL_TOL, NOW, NOZ};
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 use crate::nurbs::srf_fit::param_values;
 use crate::nurbs::srf_tool::p1::insert_knot;
@@ -339,6 +344,78 @@ impl ExtendContinuity {
     }
 }
 
+/// Not upstream (#21383): the far control point `Q = cb (1 + t) B - t I` of a G1R
+/// extension of a rational surface whose boundary weight ratios vary along the side,
+/// in homogeneous coordinates, with `B` the boundary row's point, `I` the next row in,
+/// `t > 0` upstream's step (`du` at the end, `-du` at the start: positive whenever `par`
+/// lies outside the surface) and `cb` from [`mixed_ratio`]. A step with `t <= 0` (an
+/// inward `par`) keeps upstream's row, because the weight bound below needs `t >= 0`;
+/// upstream's knot removal then refuses such a step anyway (its knots run backwards).
+///
+/// Upstream puts the far point on the space line through `I` and `B`, `du` times
+/// `B - I` past `B`, with `I`'s weight. With `c = w_I / w_B` the same in every column
+/// that is the homogeneous point above for `cb = c`, and the extension is G1 across the
+/// old boundary. When `c` varies it is not: the cross derivative picks up a part that
+/// leaves the tangent plane (normals jumping by up to 87 deg on generated surfaces), so
+/// upstream's row is kept only where every ratio is equal (`mixed_ratio` is `None`).
+///
+/// The proof for this row. The ruled span's rows interpolate `B` and `Q` linearly, so at
+/// the old boundary its homogeneous cross derivative is a fixed positive multiple `k`
+/// of `sum_j N_j (Q_j - B_j) = t sum_j N_j (B_j - I_j) + s sum_j N_j B_j`, with
+/// `s = cb (1 + t) - 1 - t` one constant: that is `t D + s A`, with `A` the boundary
+/// curve's homogeneous point and `D` the base's own cross derivative up to its positive
+/// factor `p / (knot span)`. The space derivative is `(X' - w' S) / w` for `X`, `w` the
+/// homogeneous point and weight and `S = X / w`, and `A`'s part of it is
+/// `(s A_xyz - s w S) / w = 0`, so the extension's space cross derivative is a positive
+/// multiple of the base's at every point of the side: the tangent planes agree (G1).
+/// The far weight is `w_B (cb + t (cb - c))`, at least `cb w_B > 0` because `cb` is the
+/// largest ratio, and the span's weights interpolate it with `w_B`, so the span has no
+/// pole. The column with the largest ratio keeps upstream's far point; the others reach
+/// `c / (cb + t (cb - c)) <= 1` of upstream's distance, on upstream's line. That reach
+/// is bounded: as `t` grows, the far point of a column with `c < cb` tends to
+/// `c / (cb - c)` times `|B - I|` past `B`, however far `par` is, where upstream's goes
+/// `t |B - I|`. Any ruled G1 row with one constant `s` has this trade-off.
+fn ruled_far_row(b: CPoint, i: CPoint, t: f64, cb: f64) -> CPoint {
+    let k = cb * (1.0 + t);
+    let z = if b.z != NOZ && i.z != NOZ {
+        k * b.z - t * i.z
+    } else {
+        NOZ
+    };
+    // (the weight in its factored form: `k w_B - t w_I` cancels for a large `t` in the
+    // column with the largest ratio, down to zero or below, where this form keeps it at
+    // least `cb w_B`: `cb - c` rounds to zero or more, `c` rounded as `mixed_ratio` does)
+    let c = i.w / b.w;
+    let w = b.w * (cb + t * (cb - c));
+    CPoint::new(k * b.x - t * i.x, k * b.y - t * i.y, z, w)
+}
+
+/// Not upstream (#21383): the largest weight ratio `w_I / w_B` along a side of a
+/// rational surface (row `bi` the boundary, `ii` the next row in), or `None` when the
+/// ratio is the same in every column, where upstream's G1R row is already G1 and is kept
+/// (see [`ruled_far_row`]).
+fn mixed_ratio(
+    pw: &[Vec<CPoint>],
+    bi: isize,
+    ii: isize,
+    m: isize,
+    op: &'static str,
+) -> Result<Option<f64>> {
+    let first = g2(pw, ii, 0, op)?.w / g2(pw, bi, 0, op)?.w;
+    let mut cb = first;
+    let mut mixed = false;
+    for jj in 1..=m {
+        let c = g2(pw, ii, jj, op)?.w / g2(pw, bi, jj, op)?.w;
+        if c != first {
+            mixed = true;
+        }
+        if c > cb {
+            cb = c;
+        }
+    }
+    Ok(if mixed { Some(cb) } else { None })
+}
+
 /// The surface with u and v exchanged when `udir` is false (an involution).
 fn reorient(mut s: Surface, udir: bool) -> Surface {
     if !udir {
@@ -552,13 +629,26 @@ fn extend_rec(
             // Compute new Qw[0][jj], i.e. boundary control points.
             let du = -d2 * ((u0 - uu) / (get(&up, p + 1, OP)? - u0));
             uu = u0;
-            for jj in 0..=m {
-                let p1 = g2(&pw, 0, jj, OP)?.to_euclid();
-                let p2 = g2(&pw, 1, jj, OP)?.to_euclid();
-                let v = p2 - p1;
-                let p3 = pt_along_vector(p1, du, v);
-                let w = g2(&pw, 1, jj, OP)?.w;
-                s2(&mut qw, 0, jj, CPoint::weighted(p3, w), OP)?;
+            // Not upstream (#21383): see `ruled_far_row`.
+            let cb = if rat && -du > 0.0 {
+                mixed_ratio(&pw, 0, 1, m, OP)?
+            } else {
+                None
+            };
+            if let Some(cb) = cb {
+                for jj in 0..=m {
+                    let far = ruled_far_row(g2(&pw, 0, jj, OP)?, g2(&pw, 1, jj, OP)?, -du, cb);
+                    s2(&mut qw, 0, jj, far, OP)?;
+                }
+            } else {
+                for jj in 0..=m {
+                    let p1 = g2(&pw, 0, jj, OP)?.to_euclid();
+                    let p2 = g2(&pw, 1, jj, OP)?.to_euclid();
+                    let v = p2 - p1;
+                    let p3 = pt_along_vector(p1, du, v);
+                    let w = g2(&pw, 1, jj, OP)?.w;
+                    s2(&mut qw, 0, jj, CPoint::weighted(p3, w), OP)?;
+                }
             }
             // Compute Qw[1][jj],...,Qw[p-1][jj] (degree elevation).
             for jj in 0..=m {
@@ -584,13 +674,26 @@ fn extend_rec(
             // Compute new Qw[nq][jj], i.e. boundary control points.
             let du = d2 * ((uu - ur) / (ur - get(&up, r - p - 1, OP)?));
             uu = ur;
-            for jj in 0..=m {
-                let p1 = g2(&pw, n - 1, jj, OP)?.to_euclid();
-                let p2 = g2(&pw, n, jj, OP)?.to_euclid();
-                let v = p2 - p1;
-                let p3 = pt_along_vector(p2, du, v);
-                let w = g2(&pw, n - 1, jj, OP)?.w;
-                s2(&mut qw, nq, jj, CPoint::weighted(p3, w), OP)?;
+            // Not upstream (#21383): see `ruled_far_row`.
+            let cb = if rat && du > 0.0 {
+                mixed_ratio(&pw, n, n - 1, m, OP)?
+            } else {
+                None
+            };
+            if let Some(cb) = cb {
+                for jj in 0..=m {
+                    let far = ruled_far_row(g2(&pw, n, jj, OP)?, g2(&pw, n - 1, jj, OP)?, du, cb);
+                    s2(&mut qw, nq, jj, far, OP)?;
+                }
+            } else {
+                for jj in 0..=m {
+                    let p1 = g2(&pw, n - 1, jj, OP)?.to_euclid();
+                    let p2 = g2(&pw, n, jj, OP)?.to_euclid();
+                    let v = p2 - p1;
+                    let p3 = pt_along_vector(p2, du, v);
+                    let w = g2(&pw, n - 1, jj, OP)?.w;
+                    s2(&mut qw, nq, jj, CPoint::weighted(p3, w), OP)?;
+                }
             }
             // Compute Qw[n+1][jj],...,Qw[nq-1][jj] (degree elevation).
             for jj in 0..=m {
@@ -1630,5 +1733,127 @@ mod tests {
         // zero fill then commits terabytes.
         assert!(net::<f64>(1 << 61, 0, "t").is_err());
         assert!(net::<f64>(0, 1 << 61, "t").is_err());
+    }
+
+    /// A degree-2 rational patch (the plane net of `plane_srf`) with weights `w(i, j)`.
+    fn weighted_srf(w: impl Fn(usize, usize) -> f64) -> Surface {
+        let net: Net = (0..4)
+            .map(|i| {
+                (0..3)
+                    .map(|j| {
+                        let (x, y, z) = (i as f64, j as f64, 0.1 * (i * j) as f64);
+                        let w = w(i, j);
+                        CPoint::new(x * w, y * w, z * w, w)
+                    })
+                    .collect()
+            })
+            .collect();
+        Surface::new(
+            net,
+            2,
+            2,
+            vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap()
+    }
+
+    fn g1r_end(s: &Surface, par: f64) -> Surface {
+        extend_by_param_dist(s, par, Direction::U, CurveEnd::End, ExtendContinuity::G1R).unwrap()
+    }
+
+    fn same(a: CPoint, b: CPoint) -> bool {
+        a.x.to_bits() == b.x.to_bits()
+            && a.y.to_bits() == b.y.to_bits()
+            && a.z.to_bits() == b.z.to_bits()
+            && a.w.to_bits() == b.w.to_bits()
+    }
+
+    /// #21383: with weight ratios `w_I / w_B` that vary along the side, the far row is
+    /// `Q = cb (1 + t) B - t I` (`t = 2 (1.5 - 1) / (1 - 0.5) = 2`, exact), its weights
+    /// are at least `cb w_B > 0`, and the next row out is `(Q + B) / 2` (degree 2).
+    #[test]
+    fn g1r_mixed_ratios_build_the_homogeneous_ruled_row() {
+        let s = weighted_srf(|i, j| 1.0 + 0.25 * (i * j) as f64);
+        let (pw, e) = (s.cpts(), g1r_end(&s, 1.5));
+        let q = e.cpts();
+        // The far row is the last whether or not upstream's conditional knot removal then
+        // takes one multiplicity of u = 1 (which moves only the rows next to it).
+        let last = q.len() - 1;
+        let cb = (0..3)
+            .map(|j| pw[2][j].w / pw[3][j].w)
+            .fold(f64::MIN, f64::max);
+        for j in 0..3 {
+            let far = ruled_far_row(pw[3][j], pw[2][j], 2.0, cb);
+            assert!(same(q[last][j], far), "column {j}");
+            assert!(q[last][j].w >= cb * pw[3][j].w);
+            if q.len() == 6 {
+                assert!(same(q[3][j], pw[3][j]));
+                assert!(same(q[4][j], CPoint::combine2(0.5, far, 0.5, pw[3][j])));
+            }
+        }
+    }
+
+    /// #21383 review: a far `par` (here `t = 4 (par - 1) = 2^54`) cancels `k w_B - t w_I`
+    /// to zero in the column with the largest ratio; the factored weight
+    /// `w_B (cb + t (cb - c))` keeps every far weight at least `cb w_B > 0`, as the
+    /// derivation at `ruled_far_row` requires.
+    #[test]
+    fn g1r_far_step_keeps_far_weights_positive() {
+        let s = weighted_srf(|i, j| 1.0 + 0.25 * (i * j) as f64);
+        let pw = s.cpts();
+        let e = g1r_end(&s, 4_503_599_627_370_497.0);
+        let q = e.cpts();
+        let cb = (0..3)
+            .map(|j| pw[2][j].w / pw[3][j].w)
+            .fold(f64::MIN, f64::max);
+        let last = q.len() - 1;
+        for j in 0..3 {
+            assert!(
+                q[last][j].w >= cb * pw[3][j].w,
+                "column {j}: {}",
+                q[last][j].w
+            );
+        }
+        assert!(q.iter().flatten().all(|c| c.w > 0.0));
+    }
+
+    /// #21383: equal ratios (`w = a_i b_j`, with `b_j` powers of two so the rounded
+    /// ratios are equal) keep upstream's row: `B + t (B - I)` in space, weight `w_I`.
+    #[test]
+    fn g1r_equal_ratios_keep_upstream_row() {
+        let a = [1.0, 1.3, 0.7, 1.9];
+        let s = weighted_srf(|i, j| a[i] * [1.0, 2.0, 0.5][j]);
+        let (pw, e) = (s.cpts(), g1r_end(&s, 1.5));
+        let q = e.cpts();
+        for j in 0..3 {
+            let (p1, p2) = (pw[2][j].to_euclid(), pw[3][j].to_euclid());
+            let up = CPoint::weighted(pt_along_vector(p2, 2.0, p2 - p1), pw[2][j].w);
+            assert!(same(q[q.len() - 1][j], up), "column {j}");
+        }
+    }
+
+    /// #21383 review: an inward `par` gives `t < 0`, where the homogeneous row's weight
+    /// bound fails (`cb (1 + t) - t c` can reach 0 for `t < -1`), so G1R keeps upstream's
+    /// row there. Upstream then refuses the step anyway: the appended knots run backwards,
+    /// and the conditional knot removal rejects them (`Parameter`). The
+    /// guard keeps that refusal, mixed ratios or not, as upstream's.
+    #[test]
+    fn g1r_inward_par_is_refused_as_upstream() {
+        for w in [
+            |i: usize, j: usize| 1.0 + 3.0 * (i * j) as f64,
+            |_: usize, _: usize| 1.0,
+        ] {
+            let s = weighted_srf(w);
+            let r =
+                extend_by_param_dist(&s, 0.25, Direction::U, CurveEnd::End, ExtendContinuity::G1R);
+            assert_eq!(
+                r.unwrap_err(),
+                SolidError::nurbs(
+                    "nurbs::srf_tool::p2::remove_knot_conditional",
+                    NurbsFailure::Parameter
+                )
+            );
+        }
     }
 }

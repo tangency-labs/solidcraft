@@ -93,7 +93,7 @@ fn sample() -> Harness {
     let mut h = Harness::new();
     let mut session = Session::default();
     session.run_script(&solidcraft_engine::sample::script()).unwrap();
-    h.app = SolveApp::new(session, Services::default());
+    *h.app = SolveApp::new(session, Services::default());
     h.app.home.open = false;
     h.frames(3);
     h

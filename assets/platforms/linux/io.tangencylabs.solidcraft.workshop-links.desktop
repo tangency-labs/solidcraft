@@ -1,0 +1,16 @@
+# solidcraft:// links only (a Workshop page's Open in SolidCraft button, docs/workshop-links.md).
+# Hidden from menus; the visible entry, io.tangencylabs.solidcraft.desktop, opens files as before.
+# The link is the one argument the app reads after --open-url; it looks the item up in the signed
+# Workshop index and asks before it opens or installs anything.
+[Desktop Entry]
+Type=Application
+Name=SolidCraft
+Comment=Opens Workshop links in SolidCraft
+Exec=solidcraft --open-url %u
+TryExec=solidcraft
+Icon=io.tangencylabs.solidcraft
+Terminal=false
+NoDisplay=true
+StartupNotify=true
+StartupWMClass=io.tangencylabs.solidcraft
+MimeType=x-scheme-handler/solidcraft;

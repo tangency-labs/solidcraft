@@ -56,6 +56,7 @@
 //! | [`certificate::SpanAt`], [`certificate::gn_enclose_over`], [`certificate::face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`definition_box`] | `sm_GnDefPiece`, `sm_GnDefFace`, `sm_GnDefs`, `sm_DefinitionEnclosable`, `sm_GnDefFaceOf`, `sm_DefPieceAt`, `sm_BernTaylorOver`, `sm_DefinitionPartialsNaive`, `sm_DefinitionPartialsOverBox` (c5b6bb7) |
 //! | [`station::feet_on_knots`] | `sm_FeetOnKnots` (c5b6bb7) |
+//! | [`setback_station`] | (not the fork's: the station of a chamfer of setbacks held at every station) |
 //!
 //! Deviations:
 //! - **The equal area thumbweight.** Resolved at every station (the fork's 7102bc5), so
@@ -119,6 +120,7 @@ pub mod offset_box;
 pub mod recertify;
 pub mod section;
 pub mod series;
+pub mod setback_station;
 pub mod smooth_interior;
 pub mod smooth_interior_plan;
 pub mod station;

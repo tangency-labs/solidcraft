@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
-    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
+    TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewCollapseParams, TabViewIdParams, TabViewLayoutParams,
+    TabViewLinkParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::Session;
 use crate::schema::tab_windows::{
@@ -23,6 +23,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TabViewRenameParams>(), &["id", "name"]);
     assert_keys(input_schema_for::<TabViewMoveParams>(), &["from", "to"]);
     assert_keys(input_schema_for::<TabViewNoParams>(), &[]);
+    assert_keys(input_schema_for::<TabViewCollapseParams>(), &["collapsed"]);
 }
 
 #[test]
@@ -65,6 +66,8 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
             json!({"id": 2, "placement": {"kind":"split", "target":1, "edge":"bottom"}}),
         ),
         ("tab.view.list", json!({}), json!({})),
+        ("tab.view.collapse", json!({}), json!({})),
+        ("tab.view.collapse", json!({"collapsed": true}), json!({"collapsed": true})),
         ("tab.view.pop_out", json!({"id": 2}), json!({"id": 2})),
     ] {
         let r = s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
@@ -123,6 +126,8 @@ fn bad_view_requests_are_refused() {
         ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": -1}})),
         ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": 0, "target": 1}})),
         ("tab.view.list", json!({"all": true})),
+        ("tab.view.collapse", json!({"collapsed": "yes"})),
+        ("tab.view.collapse", json!({"fold": true})),
         ("tab.view.pop_out", json!({"id": "2"})),
         ("tab.view.open", json!({"window": -1})),
         ("tab.view.layout", json!({"layout": "grid", "window": 4_294_967_296_u64})),

@@ -653,6 +653,11 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
             }
         }
     }
+    for side in 0..2i8 {
+        if let Some(b) = two.brep_mut(brep_h(side)) {
+            crate::trim_hook::observe(b);
+        }
+    }
     put_state(&mut o, &two, &Walk::of(&two), &ti)?;
     Ok(o)
 }

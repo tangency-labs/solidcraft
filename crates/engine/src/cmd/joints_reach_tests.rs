@@ -766,3 +766,93 @@ fn body_centre_uses_exact_body_bounds() {
     let c = super::body_centre(&s, 0);
     assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
 }
+
+#[test]
+fn reach_with_from_and_joint_exprs_preserves_baselines_across_capture_position_and_suppress() {
+    // 1. Fully-expressed single-DOF joint snaps back via reexpress and adds no pending_joint_bases entry.
+    let mut s = Session::default();
+    part(&mut s, "Base", [-1.0, -1.0, -1.0]);
+    part(&mut s, "Upper", [30.0, -1.0, -1.0]);
+    part(&mut s, "Fore", [80.0, -1.0, -1.0]);
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "a0", "expression": "10 deg"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "name": "Shoulder",
+            "a": {"occurrence": "Base", "point": [0, 0, 0], "z": [0, 0, 1]},
+            "b": {"occurrence": "Upper", "point": [0, 0, 0], "z": [0, 0, 1]},
+            "flip": true,
+            "values": ["a0"]
+        }),
+    );
+    pin(&mut s, "revolute", "Elbow", "Upper", "Fore", Vec3::new(60.0, 0.0, 0.0), Vec3::Z);
+    let shoulder_id = s.doc.assembly.joints.iter().find(|j| j.name == "Shoulder").unwrap().id;
+    let tip = Vec3::new(100.0, 0.0, 0.0);
+    let _ = reach(&mut s, "Fore", tip, json!({"point": [50, 50, 0], "from": [{"joint": "Shoulder", "values": [40]}]}));
+    assert!(close(value(&mut s, "Shoulder"), 10.0), "got {}", value(&mut s, "Shoulder"));
+    assert!(!s.pending_joint_bases.contains_key(&shoulder_id));
+
+    // 2. Multi-DOF cylindrical joint with DOF 0 expressed ("ang0") and DOF 1 unexpressed:
+    //    joint.reach(from:) moves DOF 1 while preserving "ang0" and recording pre-reach baseline.
+    let mut s2 = Session::default();
+    part(&mut s2, "A", [0.0, 0.0, 0.0]);
+    part(&mut s2, "B", [20.0, 0.0, 0.0]);
+    let a = occ(&s2, "A");
+    run(&mut s2, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s2, "parameters.add", json!({"name": "ang0", "expression": "15 deg"}));
+    run(
+        &mut s2,
+        "joint.create",
+        json!({
+            "type": "cylindrical",
+            "a": {"occurrence": "A", "point": [10, 5, 5], "z": [1, 0, 0]},
+            "b": {"occurrence": "B", "point": [20, 5, 5], "z": [1, 0, 0]},
+            "flip": true,
+            "values": ["ang0", 0],
+            "name": "Cyl"
+        }),
+    );
+    let p0 = place(&s2, "B", Vec3::new(20.0, 5.0, 5.0));
+    let r =
+        reach(&mut s2, "B", Vec3::new(20.0, 5.0, 5.0), json!({"point": [p0.x + 12.0, p0.y, p0.z], "from": [{"joint": "Cyl", "values": [15, 5]}]}));
+    assert_eq!(r["reached"], true, "{r}");
+    assert!((s2.doc.assembly.joints[0].values[0] - 15.0_f64.to_radians()).abs() < 1e-6);
+    assert!((s2.doc.assembly.joints[0].values[1] - 12.0).abs() < 1e-6);
+    assert_eq!(s2.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+
+    let cp_id = run(&mut s2, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s2.doc.assembly.joints[0].base_exprs, vec![Some("ang0".to_string())]);
+    assert!(s2.doc.assembly.joints[0].base_values.as_ref().unwrap()[1].abs() < 1e-9);
+
+    run(&mut s2, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert!((s2.doc.assembly.joints[0].values[0] - 15.0_f64.to_radians()).abs() < 1e-6);
+    assert!(s2.doc.assembly.joints[0].values[1].abs() < 1e-9);
+    assert_eq!(s2.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+}
+
+fn close(got: f64, want: f64) -> bool {
+    (got - want).abs() < 1e-6
+}
+
+/// An assembly with >100 total loop-closing joints split into small unrelated groups (such as a
+/// large machine with many multi-jointed parts) must still let `joint.reach` move an arm whose own
+/// chain and loops stay within the per-reach cap.
+#[test]
+fn reach_works_when_design_has_more_than_max_loops_in_unrelated_groups() {
+    let mut s = arm(false, 30.0);
+    // Add 105 closing joints on an unrelated fixed pair (Base <-> Anchor), exceeding MAX_LOOPS=100
+    // across the whole design while the arm's own chain has 0 loops.
+    part(&mut s, "Anchor", [-20.0, -20.0, -1.0]);
+    for k in 0..106 {
+        pin(&mut s, "rigid", &format!("Tie_{k}"), "Base", "Anchor", Vec3::new(-10.0, -10.0, 0.0), Vec3::Z);
+    }
+    let tip = Vec3::new(100.0, 0.0, 0.0);
+    let to = Vec3::new(50.0, 50.0, 0.0);
+    let r = reach(&mut s, "Fore", tip, json!({"point": pt(to)}));
+    assert_eq!(r["reached"], true, "{r}");
+    assert!(place(&s, "Fore", tip).dist(to) < 1e-6, "{:?}", place(&s, "Fore", tip));
+}

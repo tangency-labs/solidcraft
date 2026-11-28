@@ -3,17 +3,26 @@ import json
 import csv
 import pathlib
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
-import urllib.error
 import urllib.request
+
+# The shared server helper sits next to this file, which is on the path only under discovery.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from test_icon_review import REQUEST_TIMEOUT, start_review_server, stop_review_server  # noqa: E402
 
 
 class IconExportTest(unittest.TestCase):
+    def test_the_export_tests_load_when_selected_by_dotted_name(self):
+        # Discovery runs them from tests/tools; a dotted name from the repository root must work too.
+        root = pathlib.Path(__file__).resolve().parents[2]
+        result = subprocess.run([sys.executable, '-B', '-m', 'unittest',
+                                 'tests.tools.test_icon_export.IconExportTest.test_inventory_includes_nested_and_helper_icon_uses'],
+                                cwd=root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_inventory_includes_nested_and_helper_icon_uses(self):
         source = pathlib.Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,30 +86,14 @@ class IconExportTest(unittest.TestCase):
             # An accepted icon's note must never be exported, even if it still has text.
             original = {'final': {'box': ''}, 'notes': {'box': 'Keep it', 'joint': 'Round the corners\nUse related icons'}}
             (design / 'review.json').write_text(json.dumps(original), encoding='utf-8')
-            with socket.socket() as port_socket:
-                port_socket.bind(('127.0.0.1', 0))
-                port = port_socket.getsockname()[1]
-            proc = subprocess.Popen([sys.executable, str(tools / 'icon_status.py'), '--serve', str(port)],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            proc, url = start_review_server(tools / 'icon_status.py')
             try:
-                url = 'http://127.0.0.1:%d' % port
-                # Up to a minute: CI machines can be busy enough that the server starts slowly.
-                deadline = time.monotonic() + 60
-                while time.monotonic() < deadline:
-                    try:
-                        with urllib.request.urlopen(url + '/api/review', timeout=1) as response:
-                            base = json.load(response)
-                        break
-                    except urllib.error.URLError:
-                        if proc.poll() is not None:
-                            self.fail(proc.stderr.read().decode())
-                        time.sleep(0.02)
-                else:
-                    self.fail('review server did not start')
+                with urllib.request.urlopen(url + '/api/review', timeout=REQUEST_TIMEOUT) as response:
+                    base = json.load(response)
 
                 def post(endpoint, state):
                     data = json.dumps({'base': base, **state}).encode()
-                    with urllib.request.urlopen(urllib.request.Request(url + endpoint, data=data), timeout=2) as response:
+                    with urllib.request.urlopen(urllib.request.Request(url + endpoint, data=data), timeout=REQUEST_TIMEOUT) as response:
                         return json.load(response)
 
                 state = {'final': base['final'], 'notes': base['notes']}
@@ -117,7 +110,7 @@ class IconExportTest(unittest.TestCase):
                 self.assertEqual(request['notes'], {'joint': original['notes']['joint']})
                 self.assertFalse(list(inbox.glob('*.tmp')))
                 self.assertFalse((root / 'target/review-requests.log').exists())
-                with urllib.request.urlopen(url, timeout=2) as response:
+                with urllib.request.urlopen(url, timeout=REQUEST_TIMEOUT) as response:
                     page = response.read().decode()
                 self.assertIn('local review inbox', page)
                 self.assertNotIn('Claude', page)
@@ -125,7 +118,7 @@ class IconExportTest(unittest.TestCase):
                 # Existing tabs also reload when the server's page implementation changes.
                 with open(tools / 'icon_status.py', 'a', encoding='utf-8') as f:
                     f.write('\n# page update\n')
-                with urllib.request.urlopen(url + '/api/review', timeout=2) as response:
+                with urllib.request.urlopen(url + '/api/review', timeout=REQUEST_TIMEOUT) as response:
                     self.assertNotEqual(json.load(response)['rev'], base['rev'])
                 # A note resolved on disk cannot be resurrected by an unchanged stale page.
                 saved = json.loads((design / 'review.json').read_text(encoding='utf-8'))
@@ -135,9 +128,7 @@ class IconExportTest(unittest.TestCase):
                 self.assertEqual(empty['sent'], 0)
                 self.assertEqual(len(list(inbox.glob('*.json'))), 1)
             finally:
-                proc.terminate()
-                proc.wait(timeout=5)
-                proc.stderr.close()
+                stop_review_server(proc)
 
 
 if __name__ == '__main__':

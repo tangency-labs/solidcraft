@@ -129,8 +129,32 @@ pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
     }
     // Chords this far inside the curves: two loops whose chords stay farther apart than twice
     // that and `CLEAR` are clear of each other.
-    let sag = 1e-4;
-    let ring = cut.outer.polyline(sag);
+    let sag: f64 = 1e-4;
+    let ring = std::cell::OnceCell::new();
+    // Exact upper bound on the chord deviation of `Seg2::polyline(sag)` for lines and arcs;
+    // `None` for other curve kinds or degenerate arcs, which fall back to the polyline check.
+    let seg_sag = |s: &Seg2| -> Option<f64> {
+        match *s {
+            Seg2::Line { .. } => Some(0.0),
+            Seg2::Arc { radius, sweep, .. } => {
+                if !(radius.is_finite() && radius > 0.0 && sweep.is_finite()) {
+                    return None;
+                }
+                let tol = sag.max(radius.abs() * 1e-6).max(1e-9);
+                let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { std::f64::consts::TAU / 8.0 };
+                let n = ((sweep.abs() / step).ceil() as usize).clamp(2, 4096);
+                let half = sweep.abs() / (2.0 * n as f64);
+                if half > std::f64::consts::FRAC_PI_2 {
+                    return None;
+                }
+                Some(radius * (1.0 - half.cos()))
+            }
+            _ => None,
+        }
+    };
+    let loop_joint_gap = |l: &Loop2| l.joints().map(|(a, b)| a.end().dist(b.start())).fold(0.0_f64, f64::max);
+    let cut_max_sag = cut.outer.segs.iter().try_fold(0.0_f64, |m, s| Some(m.max(seg_sag(s)?)));
+    let cut_gap = loop_joint_gap(&cut.outer);
     // Boxes that hold the loops' curves (see [`loop_box`]): a loop whose box stays farther than
     // `CLEAR` from the cut's is clear of it.
     let reach = loop_box(&cut.outer);
@@ -139,11 +163,27 @@ pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
         a.iter().map(|p| b.edges().map(|(q0, q1)| segment_distance(*p, *q0, *q1)).fold(f64::INFINITY, f64::min)).fold(f64::INFINITY, f64::min)
     };
     std::iter::once(&region.outer).chain(&region.holes).all(|l| {
+        if !near(&crate::sheet_surface_cuts::loop_box(l)) {
+            return true;
+        }
+        if l.segs.first().is_some_and(|s| holds(&cut.outer, s.start())) {
+            return false;
+        }
+        if let (Some(c_sag), Some(l_sag)) = (cut_max_sag, l.segs.iter().try_fold(0.0_f64, |m, s| Some(m.max(seg_sag(s)?)))) {
+            let joint_gap = cut_gap.max(loop_joint_gap(l));
+            if joint_gap.is_finite() {
+                let margin = 2.0 * sag + CLEAR + c_sag.max(l_sag) + joint_gap + 1e-12;
+                if cut.outer.segs.iter().all(|s| l.segs.iter().all(|e| matches!(near_each_other(s, e, margin), Ok(false)))) {
+                    return true;
+                }
+            }
+        }
+        if !crossings(&cut.outer.segs, &l.segs).is_empty() {
+            return false;
+        }
+        let ring = ring.get_or_init(|| cut.outer.polyline(sag));
         let other = l.polyline(sag);
-        !near(&crate::sheet_surface_cuts::loop_box(l))
-            || (l.segs.first().is_none_or(|s| !holds(&cut.outer, s.start()))
-                && crossings(&cut.outer.segs, &l.segs).is_empty()
-                && gap(&ring, &other).min(gap(&other, &ring)) > 2.0 * sag + CLEAR)
+        gap(ring, &other).min(gap(&other, ring)) > 2.0 * sag + CLEAR
     })
 }
 
@@ -240,20 +280,79 @@ fn loops_apart((h, hb): (&Loop2, Aabb2), (l, lb): (&Loop2, Aabb2)) -> bool {
 /// a hole that meets the outline at that corner. Such a hole is not a hole of the region as it
 /// is: a boolean of the region takes it with the outline, never past it (see [`put_back`]).
 fn holes_apart(region: &Region2) -> Vec<bool> {
-    let loops: Vec<(&Loop2, Aabb2)> = std::iter::once(&region.outer).chain(&region.holes).map(|l| (l, loop_box(l))).collect();
-    loops.iter().enumerate().skip(1).map(|(k, h)| loops.iter().enumerate().all(|(j, l)| j == k || loops_apart(*h, *l))).collect()
+    let n = region.holes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let outer = (&region.outer, loop_box(&region.outer));
+    let hole_boxes: Vec<Aabb2> = region.holes.iter().map(loop_box).collect();
+    let mut apart: Vec<bool> = region.holes.iter().zip(&hole_boxes).map(|(h, &hb)| loops_apart((h, hb), outer)).collect();
+    // Sweep holes sorted by min.x: two holes whose inflated boxes overlap in x must satisfy
+    // later.min.x <= earlier.max.x, so the inner loop breaks once min.x passes max.x.
+    let mut finite: Vec<(usize, &Loop2, Aabb2)> = Vec::with_capacity(n);
+    let mut other: Vec<(usize, &Loop2, Aabb2)> = Vec::new();
+    for (i, (h, &hb)) in region.holes.iter().zip(&hole_boxes).enumerate() {
+        if hb.min.x.is_finite() && hb.max.x.is_finite() {
+            finite.push((i, h, hb));
+        } else {
+            other.push((i, h, hb));
+        }
+    }
+    finite.sort_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x));
+    for (pos, &(i, hi, bi)) in finite.iter().enumerate() {
+        for &(j, hj, bj) in finite.get(pos + 1..).unwrap_or(&[]) {
+            if bj.min.x > bi.max.x {
+                break;
+            }
+            if !apart.get(i).copied().unwrap_or(false) && !apart.get(j).copied().unwrap_or(false) {
+                continue;
+            }
+            if bi.max.y < bj.min.y || bj.max.y < bi.min.y {
+                continue;
+            }
+            if !loops_apart((hi, bi), (hj, bj)) {
+                if let Some(slot) = apart.get_mut(i) {
+                    *slot = false;
+                }
+                if let Some(slot) = apart.get_mut(j) {
+                    *slot = false;
+                }
+            }
+        }
+    }
+    for &(i, hi, bi) in &other {
+        for (j, (hj, &bj)) in region.holes.iter().zip(&hole_boxes).enumerate() {
+            if i == j || (!apart.get(i).copied().unwrap_or(false) && !apart.get(j).copied().unwrap_or(false)) {
+                continue;
+            }
+            if !loops_apart((hi, bi), (hj, bj)) {
+                if let Some(slot) = apart.get_mut(i) {
+                    *slot = false;
+                }
+                if let Some(slot) = apart.get_mut(j) {
+                    *slot = false;
+                }
+            }
+        }
+    }
+    apart
 }
 
 /// The holes `carried` back in the regions of `out` that hold them: each kept clear of every
 /// other loop (see [`holes_apart`] and [`loop_clear_of`]), so that the region holding a point of
 /// it holds it all, read exactly (see [`holds`]).
 fn put_back(mut out: Vec<Region2>, carried: Vec<Loop2>) -> Result<Vec<Region2>> {
+    let mut boxes: Vec<(Aabb2, Vec<Aabb2>)> = out.iter().map(|r| (loop_box(&r.outer), r.holes.iter().map(loop_box).collect())).collect();
     for h in carried {
         let Some(at) = h.segs.first().map(Seg2::start) else { continue };
-        let r = out
+        let (r, (_, hole_boxes)) = out
             .iter_mut()
-            .find(|r| holds(&r.outer, at) && !r.holes.iter().any(|k| holds(k, at)))
+            .zip(&mut boxes)
+            .find(|(r, (outer_box, hole_boxes))| {
+                outer_box.contains(at) && holds(&r.outer, at) && !r.holes.iter().zip(hole_boxes.iter()).any(|(k, kb)| kb.contains(at) && holds(k, at))
+            })
             .ok_or_else(|| DocError::Invalid("a cut-out of the flat lost its piece".into()))?;
+        hole_boxes.push(loop_box(&h));
         r.holes.push(h);
     }
     Ok(out)
@@ -361,4 +460,145 @@ fn on_grid(r: &Region2) -> Region2 {
 /// Names the step of making the flat an error came from.
 fn stage<T>(what: &str, r: Result<T>) -> Result<T> {
     r.map_err(|e| DocError::Invalid(format!("{what}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect_loop(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop2 {
+        Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)])
+    }
+
+    fn ref_holds_clear(region: &Region2, cut: &Region2) -> bool {
+        let Some(start) = cut.outer.segs.first().map(Seg2::start) else { return false };
+        if !cut.holes.is_empty() || !region_holds(region, start) {
+            return false;
+        }
+        let sag: f64 = 1e-4;
+        let ring = cut.outer.polyline(sag);
+        let reach = loop_box(&cut.outer);
+        let near = |b: &Aabb2| b.min.x <= reach.max.x && reach.min.x <= b.max.x && b.min.y <= reach.max.y && reach.min.y <= b.max.y;
+        let gap = |a: &Ring<Vec2>, b: &Ring<Vec2>| {
+            a.iter().map(|p| b.edges().map(|(q0, q1)| segment_distance(*p, *q0, *q1)).fold(f64::INFINITY, f64::min)).fold(f64::INFINITY, f64::min)
+        };
+        std::iter::once(&region.outer).chain(&region.holes).all(|l| {
+            let other = l.polyline(sag);
+            !near(&crate::sheet_surface_cuts::loop_box(l))
+                || (l.segs.first().is_none_or(|s| !holds(&cut.outer, s.start()))
+                    && crossings(&cut.outer.segs, &l.segs).is_empty()
+                    && gap(&ring, &other).min(gap(&other, &ring)) > 2.0 * sag + CLEAR)
+        })
+    }
+
+    fn ref_holes_apart(region: &Region2) -> Vec<bool> {
+        let loops: Vec<(&Loop2, Aabb2)> = std::iter::once(&region.outer).chain(&region.holes).map(|l| (l, loop_box(l))).collect();
+        loops.iter().enumerate().skip(1).map(|(k, h)| loops.iter().enumerate().all(|(j, l)| j == k || loops_apart(*h, *l))).collect()
+    }
+
+    fn ref_put_back(mut out: Vec<Region2>, carried: Vec<Loop2>) -> Result<Vec<Region2>> {
+        for h in carried {
+            let Some(at) = h.segs.first().map(Seg2::start) else { continue };
+            let r = out
+                .iter_mut()
+                .find(|r| holds(&r.outer, at) && !r.holes.iter().any(|k| holds(k, at)))
+                .ok_or_else(|| DocError::Invalid("a cut-out of the flat lost its piece".into()))?;
+            r.holes.push(h);
+        }
+        Ok(out)
+    }
+
+    #[test]
+    fn holds_clear_matches_reference_across_many_holes_and_near_boundaries() {
+        let mut holes = Vec::with_capacity(144);
+        for row in 0..12 {
+            for col in 0..12 {
+                let c = Vec2::new(15.0 + col as f64 * 15.0, 15.0 + row as f64 * 15.0);
+                holes.push(Loop2::circle(c, 3.0).reversed());
+            }
+        }
+        let region = Region2 { outer: rect_loop(0.0, 0.0, 200.0, 200.0), holes };
+
+        // Well-separated circle and polygon in an open slot between grid holes.
+        let clear_circle = Region2 { outer: Loop2::circle(Vec2::new(22.5, 22.5), 2.5), holes: Vec::new() };
+        let clear_rect = Region2 { outer: rect_loop(20.0, 20.0, 25.0, 25.0), holes: Vec::new() };
+        assert!(holds_clear(&region, &clear_circle));
+        assert_eq!(holds_clear(&region, &clear_circle), ref_holds_clear(&region, &clear_circle));
+        assert!(holds_clear(&region, &clear_rect));
+        assert_eq!(holds_clear(&region, &clear_rect), ref_holds_clear(&region, &clear_rect));
+
+        // Near-boundary circles against both the outer edge (x = 0) and an existing hole at (15, 15), r = 3.
+        for gap in [0.5 * CLEAR, 2.0 * CLEAR, 1.5e-4, 2.0e-4 + CLEAR, 2.5e-4, 3.5e-4, 5.0e-4, 1.0e-3] {
+            let near_outer = Region2 { outer: Loop2::circle(Vec2::new(2.0 + gap, 7.5), 2.0), holes: Vec::new() };
+            assert_eq!(holds_clear(&region, &near_outer), ref_holds_clear(&region, &near_outer), "outer gap={gap:e}");
+            let near_hole = Region2 { outer: Loop2::circle(Vec2::new(15.0 + 3.0 + 2.0 + gap, 15.0), 2.0), holes: Vec::new() };
+            assert_eq!(holds_clear(&region, &near_hole), ref_holds_clear(&region, &near_hole), "hole gap={gap:e}");
+        }
+
+        // Crossing, enclosing an existing hole, outside, inside an existing hole, and non-arc cubic loop.
+        let crossing = Region2 { outer: Loop2::circle(Vec2::new(15.0, 15.0), 3.0), holes: Vec::new() };
+        let enclosing = Region2 { outer: Loop2::circle(Vec2::new(15.0, 15.0), 4.5), holes: Vec::new() };
+        let outside = Region2 { outer: Loop2::circle(Vec2::new(250.0, 100.0), 2.0), holes: Vec::new() };
+        let inside_hole = Region2 { outer: Loop2::circle(Vec2::new(15.0, 15.0), 1.0), holes: Vec::new() };
+        let cubic = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Cubic { p0: Vec2::new(20.0, 20.0), p1: Vec2::new(21.0, 24.0), p2: Vec2::new(24.0, 24.0), p3: Vec2::new(25.0, 20.0) },
+                    Seg2::Line { a: Vec2::new(25.0, 20.0), b: Vec2::new(20.0, 20.0) },
+                ],
+            },
+            holes: Vec::new(),
+        };
+        for (name, cut) in [("crossing", crossing), ("enclosing", enclosing), ("outside", outside), ("inside_hole", inside_hole), ("cubic", cubic)] {
+            assert_eq!(holds_clear(&region, &cut), ref_holds_clear(&region, &cut), "{name}");
+        }
+    }
+
+    #[test]
+    fn holes_apart_and_put_back_match_reference_for_many_holes() {
+        let mut holes = Vec::with_capacity(155);
+        for row in 0..10 {
+            for col in 0..15 {
+                let c = Vec2::new(15.0 + col as f64 * 15.0, 15.0 + row as f64 * 20.0);
+                holes.push(Loop2::circle(c, 3.0).reversed());
+            }
+        }
+        // Pair of touching holes (distance 0), hole grazing outer edge within CLEAR, and a clear hole
+        // sharing the same x-column as others.
+        holes.push(Loop2::circle(Vec2::new(240.0, 50.0), 3.0).reversed());
+        holes.push(Loop2::circle(Vec2::new(240.0, 56.0), 3.0).reversed());
+        holes.push(Loop2::circle(Vec2::new(3.0 + 0.5 * CLEAR, 100.0), 3.0).reversed());
+        holes.push(Loop2::circle(Vec2::new(240.0, 150.0), 3.0).reversed());
+
+        let region = Region2 { outer: rect_loop(0.0, 0.0, 260.0, 220.0), holes };
+        let got = holes_apart(&region);
+        let expected = ref_holes_apart(&region);
+        assert_eq!(got, expected);
+        assert!(got[..150].iter().all(|&ok| ok));
+        assert!(!got[150] && !got[151], "touching holes must not be apart");
+        assert!(!got[152], "hole within CLEAR of outer edge must not be apart");
+        assert!(got[153], "disjoint hole in same x-column must remain apart");
+
+        // Carry 120 holes back into two disjoint regions (one already containing a pre-existing hole).
+        let base = vec![
+            Region2 { outer: rect_loop(0.0, 0.0, 120.0, 120.0), holes: vec![Loop2::circle(Vec2::new(10.0, 10.0), 2.0).reversed()] },
+            Region2 { outer: rect_loop(200.0, 0.0, 320.0, 120.0), holes: Vec::new() },
+        ];
+        let mut carried = Vec::with_capacity(120);
+        for row in 0..6 {
+            for col in 0..10 {
+                carried.push(Loop2::circle(Vec2::new(20.0 + col as f64 * 10.0, 20.0 + row as f64 * 16.0), 2.0).reversed());
+                carried.push(Loop2::circle(Vec2::new(210.0 + col as f64 * 10.0, 20.0 + row as f64 * 16.0), 2.0).reversed());
+            }
+        }
+        let placed = put_back(base.clone(), carried.clone()).unwrap();
+        let expected_placed = ref_put_back(base.clone(), carried).unwrap();
+        assert_eq!(placed, expected_placed);
+        assert_eq!(placed[0].holes.len(), 61);
+        assert_eq!(placed[1].holes.len(), 60);
+
+        // A hole inside an existing hole or outside all regions must fail identically to reference.
+        assert!(put_back(base.clone(), vec![Loop2::circle(Vec2::new(10.0, 10.0), 0.5).reversed()]).is_err());
+        assert!(put_back(base, vec![Loop2::circle(Vec2::new(160.0, 60.0), 2.0).reversed()]).is_err());
+    }
 }

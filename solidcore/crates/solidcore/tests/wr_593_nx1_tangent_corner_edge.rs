@@ -137,9 +137,15 @@ fn exact_round_builds() {
     // this 1e-6 it was 3581.9837215948937, 5.4e-10 low. Before #16735 this integrator gave
     // 3581.9837295899465, the figure the move is checked from. It was 3581.9837235113127, one
     // ulp higher, until each trim point's iso-curve integral took the 15-point Gauss-Kronrod
-    // rule in place of the 7-point one (the same accuracy and error scale).
+    // rule in place of the 7-point one (the same accuracy and error scale). It was
+    // 3581.9837235113123, 22 ulps higher, until the boolean's cover test fitted the trims it
+    // builds tightly where a loose fit would raise their edges (tangency-labs/solidcore#3399):
+    // two edges of the union whose first trims lay 3.08e-5 and 2.72e-5 from them (raising them
+    // past their 4e-5) have trims 3.5e-6 and 2.5e-6 from them, and the volume integrates over
+    // the trims. Each body's volume is the same bits at accuracy 1e-6, 1e-11 and 1e-12
+    // (MEASURED: 3581.9837235113123 before, 3581.9837235113023 after).
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_723_511_312_3_f64;
+    let pinned = 3_581.983_723_511_302_3_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let (k, mut body) = filleted(0.0).unwrap();
     volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_729_589_946_5, v, 1e-6);

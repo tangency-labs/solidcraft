@@ -1010,7 +1010,7 @@ fn own_brep(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),

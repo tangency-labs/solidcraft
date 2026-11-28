@@ -662,8 +662,9 @@ mod tests {
         }
     }
 
-    /// Only `SmBrep` test 21 of list 0 is a warning (#2013): the labels whose text says
-    /// "Warning" are failures, and another list's test 21 is not the warning.
+    /// Only `SmBrep` test 21 of list 0 (#2013) and test 147 of list 1 (#21105) are
+    /// warnings: the labels whose text says "Warning" are failures, and another list's
+    /// test 21 is not the warning.
     #[test]
     fn warnings_are_classified_by_label_not_text() {
         let warning = |t, list, i| {
@@ -682,10 +683,13 @@ mod tests {
             );
         }
         assert!(!warning(labels::EDGEUSE_TYPE, 0, 9));
-        for &(t, list, i) in labels::WARNINGS {
-            let label = assert_label_list(t, list).get(i as usize).unwrap();
-            assert_eq!(label.name, "Suspicious Shell Count");
-        }
+        assert!(warning(labels::BREP_TYPE, 1, 147));
+        assert!(!warning(labels::BREP_TYPE, 1, 146));
+        let names: Vec<_> = labels::WARNINGS
+            .iter()
+            .map(|&(t, list, i)| assert_label_list(t, list).get(i as usize).unwrap().name)
+            .collect();
+        assert_eq!(names, ["Suspicious Shell Count", "Warn Reversed End"]);
     }
 
     #[test]

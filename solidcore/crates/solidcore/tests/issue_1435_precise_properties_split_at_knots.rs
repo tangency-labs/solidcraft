@@ -605,22 +605,25 @@ mod box_w_slot {
         // The row, pinned. With the gap-closure strips also split at the knot crossings,
         // the volume and second moments are within 1.5e-14 relative of the same call at
         // 1e-12 (MEASURED); with the strips across the crossings they were up to 3.8e-12
-        // relative off it.
+        // relative off it. With the WR-450 retirement (#18923) the faces whose recognised
+        // analytic is not their B-spline's parameterisation keep an exact copy: area, cy,
+        // Ix, Pyz, Pzx and Pxy moved by 1 to 6 ulps (at most 7.1e-16 relative), within the
+        // 1e-11 reference check above, which holds them as it held main's.
         assert_eq!(
             row,
             [
-                5.914390008549578,
+                5.9143900085495815,
                 0.6807481066067114,
                 0.6807481066067114,
                 1.9999999999999853,
-                -0.21949084150622125,
+                -0.21949084150622133,
                 0.19830878452084488,
-                0.31582474680321304,
+                0.315824746803213,
                 2.796768143646739,
                 3.0415735197486984,
-                -0.029630896962770808,
-                0.26999665917208526,
-                -0.298835949545732,
+                -0.02963089696277083,
+                0.2699966591720852,
+                -0.2988359495457321,
             ]
         );
     }

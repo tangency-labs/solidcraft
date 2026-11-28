@@ -396,7 +396,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
             let [s0, s1, a0, a1, ang] = *args;
             if let Some(r) = st(
                 o,
-                PolarConversion::angle_param_to_nurb_param(s0, s1, a0, a1, ang),
+                PolarConversion::angle_param_to_nurb_param(s0, s1, a0, a1, ang, (1.0, 1.0)),
             )? {
                 o.push(r);
             }

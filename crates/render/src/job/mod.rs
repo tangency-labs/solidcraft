@@ -51,31 +51,85 @@ pub mod textures;
 pub mod volume;
 
 pub use caustics::CausticOptions;
-pub use cpu_budget::{CpuBudget, CpuBudgetLimits, MAX_CPU_BODIES, MAX_CPU_SAMPLES_PER_PIXEL, MAX_CPU_TRIANGLES, MAX_CPU_WORK, NATIVE_CPU_POOL_BYTES};
+pub use cpu_budget::CpuBudget;
+pub use cpu_budget::CpuBudgetLimits;
+pub use cpu_budget::MAX_CPU_BODIES;
+pub use cpu_budget::MAX_CPU_SAMPLES_PER_PIXEL;
+pub use cpu_budget::MAX_CPU_TRIANGLES;
+pub use cpu_budget::MAX_CPU_WORK;
+pub use cpu_budget::NATIVE_CPU_POOL_BYTES;
 pub use cpu_path::CpuPathOptions;
 pub use cpu_sky::CpuSky;
-pub use denoise_diagnostics::{DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
+pub use denoise_diagnostics::DenoiseDiagnostics;
+pub use denoise_diagnostics::DenoiseGuideClass;
+pub use denoise_diagnostics::resolve_denoise_class;
+pub use host::CaptureLease;
+pub use host::CaptureProfile;
+pub use host::CpuHost;
+pub use host::DenoiseMaskInfo;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) use host::FRAME_METADATA_BYTES;
+pub use host::HostKind;
+pub use host::ImageHost;
+pub use host::JobEnvironmentInfo;
+pub use host::JobHandle;
+pub use host::JobStatus;
+pub use host::LinearAlphaConvention;
+pub use host::LinearColourEncoding;
+pub use host::LinearMasterInfo;
+pub use host::PreparedSubmission;
+pub use host::PreviewInfo;
+pub use host::RenderFrame;
+pub use host::RenderPreview;
 pub(crate) use host::Reservation;
-pub use host::{
-    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
-    LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
-};
-pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
-pub use image::{
-    Admission, BodyRole, ImageTask, MAX_PICTURE_PIXEL_TESTS, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow,
-    Projection, Supersample, TaskPoll, admit, admit_geometry, admit_geometry_with_limits, admit_picture,
-};
+pub use host::RetainedMetadata;
+pub use host_memory::HostMemoryAdmission;
+pub use host_memory::HostMemorySource;
+pub use host_memory::NativeMemoryPolicy;
+pub use image::Admission;
+pub use image::BodyRole;
+pub use image::ImageTask;
+pub use image::MAX_PICTURE_PIXEL_TESTS;
+pub use image::MAX_TILES;
+pub use image::OrthoFrame;
+pub use image::PicturePoll;
+pub use image::PictureRequest;
+pub use image::PictureTask;
+pub use image::PixelWindow;
+pub use image::Projection;
+pub use image::Supersample;
+pub use image::TaskPoll;
+pub use image::admit;
+pub use image::admit_geometry;
+pub use image::admit_geometry_with_limits;
+pub use image::admit_picture;
 pub use lens::ThinLens;
-pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
+pub use lighting::AreaLight;
+pub use lighting::AreaLights;
+pub use lighting::DirectionalLights;
+pub use lighting::MAX_AREA_LIGHTS;
+pub use lighting::MAX_DIRECTIONAL_LIGHTS;
+pub use lighting::StudioLighting;
+pub use lighting::Sun;
+pub use lighting::ToneMap;
 pub use png::PngTask;
 pub use presentation::OutputOptions;
-pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
-pub use quality::{
-    DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
-    resolve_supersampling, single_supersample, supersampled_dimensions,
-};
+pub use punctual::MAX_PUNCTUAL_LIGHTS;
+pub use punctual::MIN_GPU_SPOT_COSINE_GAP;
+pub use punctual::PunctualDiagnostics;
+pub use punctual::PunctualLightOptions;
+pub use punctual::PunctualLights;
+pub use punctual::SpotConeOptions;
+pub use quality::DenoiseSettings;
+pub use quality::MAX_CPU_THREADS;
+pub use quality::MAX_OUTPUT_DIMENSION;
+pub use quality::MAX_OUTPUT_PIXELS;
+pub use quality::MAX_TRACE_DIMENSION;
+pub use quality::MAX_TRACE_PIXELS;
+pub use quality::MAX_UI_SAMPLES;
+pub use quality::resolve_supersampling;
+pub use quality::single_supersample;
+pub use quality::supersampled_dimensions;
 
 /// Native path-tracing ceilings, further restricted by the actual device.
 /// Kept in the device-independent layer so saved intent and UI agree with execution.

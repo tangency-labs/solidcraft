@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -83,7 +83,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
         .unwrap()
         .with_color(Some([0.2, 0.6, 0.8]))
-        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new(), name: None }));
+        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new(), name: None, layer: None }));
     let step =
         kernel::step_export_bodies(&[kernel::ExportBody { name: "Imported glass".into(), body: &body, color: body.color() }], &Default::default())
             .unwrap();
@@ -157,6 +157,9 @@ fn selection_does_not_rebuild_the_model_scene() {
     h.app.home.open = false;
     h.app.ui.ground_shadow = false;
     h.app.set_origin_shown(false);
+    // Refinement follows the wall clock and changes the scene once the camera has rested
+    // (`camera_rested`): this checks what a selection changes, against fixed display geometry.
+    h.app.viewport.suspend_refinement = true;
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
         Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
@@ -167,10 +170,85 @@ fn selection_does_not_rebuild_the_model_scene() {
     let _ = h.app.viewport.slot.lock().unwrap().take();
     let name = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name }];
+    camera_rested(&mut h.app);
     h.frame();
     assert_eq!(h.app.viewport.key, key, "a selection does not change the model scene key");
     assert!(h.app.viewport.slot.lock().unwrap().is_none(), "and does not rebuild it");
     assert_ne!(h.app.viewport.hl_key, highlight, "the highlight scene does rebuild");
+}
+
+/// What a busy test run does between two frames: the camera has stood still for longer than
+/// display refinement waits ([`super::REFINE_STILL_MS`] of wall time), so the next frame chooses
+/// the bodies' refinements and edge steps, which change the model scene's key.
+fn camera_rested(app: &mut SolveApp) {
+    app.viewport.lod_rest.moved_at -= super::REFINE_STILL_MS + 1.0;
+}
+
+/// The model and highlight scenes follow the display quality this window draws at, not the
+/// process-wide level: another window in the process (every other test's, on a busy test run)
+/// setting its own level inside this window's frame rebuilt the scenes with nothing changed here.
+#[test]
+fn scene_keys_follow_this_windows_display_quality_while_another_window_draws_at_its_own() {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.ground_shadow = false;
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
+    h.app.viewport.gpu =
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false, edges: false });
+    // Only the display quality changes the keys here, not the wall clock (see `camera_rested`).
+    h.app.viewport.suspend_refinement = true;
+    h.frame();
+    let keys = |h: &crate::scenario::Harness| (h.app.viewport.key, h.app.viewport.hl_key);
+    let before = keys(&h);
+    let _ = h.app.viewport.slot.lock().unwrap().take();
+    {
+        let _other = crate::dialogs::other_window_draws_at(DisplayQuality::Fine);
+        h.frame();
+    }
+    assert_eq!(keys(&h), before, "another window's display quality does not change this window's scene keys");
+    assert!(h.app.viewport.slot.lock().unwrap().is_none(), "and does not rebuild the model scene");
+    // This window's own quality still does.
+    h.app.preferences.display_quality = "fine".into();
+    {
+        let _other = crate::dialogs::other_window_draws_at(DisplayQuality::Normal);
+        h.frame();
+    }
+    assert_ne!(keys(&h).0, before.0, "this window's display quality rebuilds its model scene");
+    assert_ne!(keys(&h).1, before.1, "and its highlight scene");
+}
+
+/// Isocurve Analysis draws its curves at the display quality this window draws at, as the scene
+/// key says (#152): another window in the process setting its own level changed how finely the
+/// curves were drawn with the key unchanged, so a cached scene and a rebuilt one disagreed.
+#[test]
+fn isocurves_are_drawn_at_this_windows_display_quality_while_another_window_draws_at_its_own() {
+    use solidcraft_engine::doc::display_quality::{DisplayQuality, current, set_current};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.viewport.suspend_refinement = true;
+    h.app.preferences.display_quality = "coarse".into();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
+    h.app.run("inspect.isocurve", json!({"faces": [[10, 0, 15]]})).unwrap();
+    h.frame();
+    assert_eq!(crate::prefs::drawn_quality(&h.app), DisplayQuality::Coarse);
+    let segments = |app: &SolveApp| {
+        let mut scene = crate::gpu::GpuScene::default();
+        super::isocurves(&mut scene, app);
+        scene.lines.len() / crate::gpu::LINE_SIZE
+    };
+    let (before, key) = (segments(&h.app), super::scene_key(&h.app));
+    assert!(before > 0, "the cylinder's side shows its isocurves");
+    let level = current();
+    let other = crate::dialogs::other_window_draws_at(DisplayQuality::Ultra);
+    crate::dialogs::another_window_sets_quality();
+    let after = segments(&h.app);
+    let key_after = super::scene_key(&h.app);
+    drop(other);
+    set_current(level);
+    assert_eq!(key_after, key, "another window's display quality does not change this window's scene key");
+    assert_eq!(after, before, "nor how finely this window draws its isocurves");
 }
 
 #[test]
@@ -440,6 +518,9 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.home.open = false;
     h.app.ui.ground_shadow = false;
     h.app.set_origin_shown(false);
+    // Refinement follows the wall clock and changes the scene once the camera has rested
+    // (`camera_rested`): this checks what a theme changes, against fixed display geometry.
+    h.app.viewport.suspend_refinement = true;
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
         Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
@@ -467,6 +548,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
         assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
+        camera_rested(&mut h.app);
         h.frame();
         assert_eq!((h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key), keys);
         assert!(h.app.viewport.slot.lock().unwrap().is_none(), "an unchanged theme reuses its scene");
@@ -562,6 +644,56 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
         }
     }
     shapes.iter().map(|s| walk(&s.shape, colour)).sum()
+}
+
+#[test]
+fn projected_and_lost_point_colours_require_the_project_option() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_lost":"#ef1256","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    let source = h.app.session.doc.features.last().unwrap().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for lost in [false, true] {
+        if lost {
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("timeline.suppress", json!({"feature":source,"suppressed":true})).unwrap();
+            h.app.edit_sketch(sketch);
+        }
+        for enhanced in [false, true, false] {
+            h.call("ui.set", json!({"projectLinkTools":enhanced}));
+            h.settle();
+            let projected = egui::Color32::from_rgb(0x12, 0xab, 0x34);
+            let missing = egui::Color32::from_rgb(0xef, 0x12, 0x56);
+            if enhanced {
+                let expected = if lost { missing } else { projected };
+                assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}: projected corners show their reference status");
+            } else {
+                assert_eq!(points_in(&h.shapes, projected), 0, "projected point colours are opt-in");
+                assert_eq!(points_in(&h.shapes, missing), 0, "lost point colours are opt-in");
+                let determined = egui::Color32::from_rgb(0xab, 0x34, 0x12);
+                let free = egui::Color32::from_rgb(0x34, 0x12, 0xab);
+                assert!(points_in(&h.shapes, determined) + points_in(&h.shapes, free) >= 4, "lost={lost}: main's point colours remain visible");
+            }
+        }
+    }
 }
 
 #[test]
@@ -927,6 +1059,40 @@ fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
     }
     assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "still drawn");
     assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
+}
+
+/// A camera move asks which sketches failed many times a frame. Only a sketch that lost a
+/// projection is looked up among the model's sketches: looking up every feature's took most of
+/// each frame in a design of thousands of features.
+#[test]
+fn a_camera_move_looks_up_only_the_sketches_that_lost_a_projection() {
+    let orbit = |h: &mut crate::scenario::Harness| {
+        let before = super::failed_sketches_asked(&h.app);
+        for _ in 0..3 {
+            h.app.cam.yaw += 0.1;
+            h.frame();
+        }
+        super::failed_sketches_asked(&h.app) - before
+    };
+    let mut h = crate::scenario::Harness::new();
+    for i in 0..4 {
+        h.app.run("sketch.create", json!({"plane":"XY","offset":10 * i,"name":format!("Sound{i}")})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.frames(3);
+    assert!(h.app.session.model.results.len() >= 4);
+    assert_eq!(orbit(&mut h), 0, "no sketch lost a projection: none is looked up");
+
+    // One that did, among sound ones: it alone is looked up, as often as it is asked for.
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let asked = orbit(&mut h);
+    let once = super::failed_sketches_asked(&h.app);
+    let (shown, _) = super::failed_sketches(&h.app);
+    assert_eq!(shown.iter().map(|ss| ss.feature).collect::<Vec<_>>(), sketches, "still found");
+    assert_eq!(super::failed_sketches_asked(&h.app) - once, 1, "one answer looks up one sketch");
+    assert!(asked > 0);
+    assert!(h.app.session.model.results.len() > 1, "there are others it could have looked up");
 }
 
 /// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn

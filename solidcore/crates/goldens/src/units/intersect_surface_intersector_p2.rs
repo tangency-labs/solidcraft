@@ -352,9 +352,41 @@ fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
             if let Some(d) = Output::unported(&e) {
                 return Err(Fail::Deferred(Box::new(d)));
             }
+            #[cfg(test)]
+            witness::error(&e);
             o.push(status(&e));
             Ok(None)
         }
+    }
+}
+
+/// The errors the run's ops returned, for the proof test of the statuses passed on
+/// (WR-662, #18927). Off unless a test calls [`witness::start`] on its thread.
+#[cfg(test)]
+pub(super) mod witness {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static LOG: RefCell<Option<Vec<solidcore::SolidError>>> = const { RefCell::new(None) };
+    }
+
+    /// Starts recording on this thread.
+    pub fn start() {
+        LOG.with(|l| *l.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// Stops recording and returns the errors recorded, in order.
+    pub fn take() -> Vec<solidcore::SolidError> {
+        LOG.with(|l| l.borrow_mut().take()).unwrap_or_default()
+    }
+
+    /// Records an op's error when recording.
+    pub fn error(e: &solidcore::SolidError) {
+        LOG.with(|l| {
+            if let Some(v) = l.borrow_mut().as_mut() {
+                v.push(e.clone());
+            }
+        });
     }
 }
 
@@ -1634,3 +1666,7 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+#[path = "intersect_surface_intersector_p2/status_proof.rs"]
+mod status_proof;

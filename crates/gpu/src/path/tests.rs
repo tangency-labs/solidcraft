@@ -8174,3 +8174,60 @@ fn gpu_paged_optical_scratch_and_refreshed_photons_keep_global_sample_identity()
     }
     println!("paged rough optical/photon parity: indexed records and masks exact; maximum independent-gather difference={maximum_difference}");
 }
+
+#[test]
+fn gpu_scene_preparation_cache_reuses_buffers_and_preserves_bit_identical_output() {
+    let Some(executor) = executor() else { return };
+    let scene = sphere_grid(white(), 16, 32);
+    let image = request(8);
+    let options = JobOptions { samples: 2, max_depth: 3, seed: 19, ..Default::default() };
+
+    // Preflight on a cold cache validates without populating GPU cache state.
+    executor.validate_prepared(&scene, &image, options, &CancelToken::default()).unwrap();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty(), "preflight must not retain GPU buffers on a miss");
+
+    // First job misses and populates the single-entry cache.
+    let mut cold = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(!cold.scene_cache_hit);
+    assert!(cold.metrics.1 > 0);
+    for _ in 0..options.samples {
+        cold.complete_sample().unwrap();
+    }
+    let cold_linear = cold.read_linear().unwrap();
+
+    // Second job with identical scene, camera target, and nested_media hits the cache and renders bit-identically.
+    let mut warm = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(warm.scene_cache_hit);
+    assert!(warm.metrics.1 < cold.metrics.1, "cached job must skip geometry and BVH VRAM upload");
+    for _ in 0..options.samples {
+        warm.complete_sample().unwrap();
+    }
+    let warm_linear = warm.read_linear().unwrap();
+    assert_eq!(warm_linear.len(), cold_linear.len());
+    for (a, b) in cold_linear.iter().zip(&warm_linear) {
+        assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits), "cached preparation must produce bit-identical pixels");
+    }
+
+    // Orbiting around the same camera.target hits the cache too.
+    let mut orbited = image.clone();
+    orbited.camera.yaw += 0.5;
+    orbited.camera.distance *= 1.25;
+    let orbited_task = Task::new(executor.context.clone(), scene.clone(), orbited, options, CancelToken::default()).unwrap();
+    assert!(orbited_task.scene_cache_hit);
+
+    // Moving camera.target changes the rebase origin -> miss and evict.
+    let mut panned = image.clone();
+    panned.camera.target += Vec3::new(0.25, 0.0, 0.0);
+    let panned_task = Task::new(executor.context.clone(), scene.clone(), panned.clone(), options, CancelToken::default()).unwrap();
+    assert!(!panned_task.scene_cache_hit);
+
+    // Changing surface appearance invalidates the cache too.
+    let mut repainted = scene;
+    repainted.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.2, 0.5, 0.8), 0.1, 0.4, 1.5).unwrap());
+    let repainted_task = Task::new(executor.context.clone(), repainted, panned, options, CancelToken::default()).unwrap();
+    assert!(!repainted_task.scene_cache_hit);
+
+    // Explicit eviction clears the single-entry cache cleanly.
+    executor.context.clear_scene_cache();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty());
+}

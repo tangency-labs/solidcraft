@@ -805,6 +805,39 @@ impl Curve {
     }
 }
 
+impl crate::eval::Curve2 {
+    /// Knot boundaries and the ends of the isolated U and V turning ranges, in parameter order.
+    /// Between these stations each coordinate is monotone up to the rounding of its extrema.
+    /// The isolator is the same one that supplies spline extrema to the tight bounding box.
+    ///
+    /// # Errors
+    /// Invalid spline data or a turning range that exceeds the isolation budget.
+    pub fn monotone_breaks(&self, k: &Kernel) -> Result<Vec<f64>> {
+        let invalid = || SolidError::invalid_input(OP, "invalid trim curve");
+        let nl = crate::eval::spline::nl_curve2(self).ok_or_else(invalid)?;
+        let [lo, hi] = self.interval().ok_or_else(invalid)?;
+        let mut breaks: Vec<_> = nl
+            .knots()
+            .iter()
+            .copied()
+            .filter(|t| *t >= lo && *t <= hi)
+            .collect();
+        if nl.degree() > 1 {
+            let mut ranges = Vec::new();
+            for axis in 0..2 {
+                let mut nodes = 0;
+                for piece in bspline_pieces(&nl, axis, None)?.iter().flatten() {
+                    isolate(k, piece, lo, hi, &mut nodes, &mut ranges)?;
+                }
+            }
+            breaks.extend(ranges.into_iter().flat_map(|(a, b)| [a, b]));
+        }
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup();
+        Ok(breaks)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

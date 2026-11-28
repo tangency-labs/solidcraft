@@ -68,4 +68,7 @@ pub struct ViewPickResult {
     pub frame: String,
     /// One entry per ray.
     pub hits: Vec<Value>,
+    /// Bodies skipped because ray casting failed on them (at most one entry per body).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }

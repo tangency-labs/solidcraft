@@ -56,6 +56,29 @@ fn a_rectangle_makes_a_ring_wall_on_either_side() {
     }
 }
 
+/// A thin extrude goes To Object (a point at a plane's height) and From Object as a solid one
+/// does: the Extrude dialog sends these for a picked plane (#21033).
+#[test]
+fn a_thin_wall_runs_to_and_from_an_object() {
+    // fixed references: the 2 mm inside wall of the 40 x 20 outline (224 mm^2) over 17 and 14 mm
+    for (extent, low, high, expected) in
+        [(json!({"to": [0, 0, 17]}), 0.0, 17.0, 3808.0), (json!({"from": [0, 0, 3], "to": [0, 0, 17]}), 3.0, 17.0, 3136.0)]
+    {
+        let mut s = Session::default();
+        rectangle(&mut s);
+        let mut p = json!({"sketch": "Outline", "thin": true, "thickness": 2, "side": "inside", "operation": "new"});
+        if let (Some(p), Some(extent)) = (p.as_object_mut(), extent.as_object()) {
+            p.extend(extent.clone());
+        }
+        run(&mut s, "solid.extrude", p);
+        close(volume(&mut s), expected);
+        assert_eq!(body_count(&mut s), 1, "{extent}");
+        let bbox = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+        close(bbox["min"][2].as_f64().unwrap_or(f64::NAN), low);
+        close(bbox["max"][2].as_f64().unwrap_or(f64::NAN), high);
+    }
+}
+
 #[test]
 fn the_thickness_is_a_parameter_and_the_wall_survives_reopening() {
     let mut s = Session::default();

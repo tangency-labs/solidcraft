@@ -20,6 +20,7 @@ use super::{active_sheet, edit_object, open_sheet_menu, select_sheet};
 pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let t = Tokens::get();
     rows.ui().add_space(t.space_4);
+    picker(app, rows.ui());
     if let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() {
         let key = format!("drawing:browser:{}", encode(drawing.id));
         if branch(app, rows, &key, Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() }, true) {
@@ -46,6 +47,49 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
         }
     }
     rows.ui().add_space(t.space_4);
+}
+
+/// The design's drawings as a drop-down above the tree, once it has one: the open drawing's
+/// name (New drawing… while the setup page shows), listing every drawing to open in its place,
+/// and New drawing… to make another from the setup page.
+fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.session.doc.drawings.is_empty() {
+        return;
+    }
+    let t = Tokens::get();
+    let drawings: Vec<(u64, String)> = app.session.doc.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
+    let open = app.session.open_drawing;
+    let new = app.tr_label("ui.drawing_picker.new").to_string();
+    let current = drawings.iter().find(|(id, _)| Some(*id) == open).map_or(new.as_str(), |(_, name)| name.as_str()).to_string();
+    let mut picked = None;
+    let mut make = false;
+    let combo = ui
+        .horizontal(|ui| {
+            ui.add_space(t.space_8);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            crate::ui_kit::dropdown_menu(ui, "drawing_picker", &current, |ui| {
+                for (id, name) in &drawings {
+                    let key = encode(*id);
+                    let choice = crate::ui_kit::list_picker(ui, &key, name, open == Some(*id));
+                    crate::scenario::publish_target(&format!("drawing:picker:{key}"), choice.rect);
+                    if choice.clicked() {
+                        picked = Some(*id);
+                    }
+                }
+                ui.separator();
+                let choice = crate::ui_kit::list_picker(ui, "new", &new, false);
+                crate::scenario::publish_target("drawing:picker:new", choice.rect);
+                make |= choice.clicked();
+            })
+        })
+        .inner;
+    crate::scenario::publish_target("drawing:picker", combo.rect);
+    ui.add_space(t.space_4);
+    if let Some(id) = picked {
+        super::open_drawing(app, id);
+    } else if make {
+        super::new_drawing(app);
+    }
 }
 
 /// Whether `object` of `drawing` is part of the selection: its row is drawn selected, as a

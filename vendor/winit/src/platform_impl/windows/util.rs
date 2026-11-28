@@ -20,8 +20,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     ClipCursor, GetClientRect, GetClipCursor, GetCursorPos, GetSystemMetrics, GetWindowPlacement,
     GetWindowRect, IsIconic, ShowCursor, IDC_APPSTARTING, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_HELP,
     IDC_IBEAM, IDC_NO, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IDC_WAIT,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_MAXIMIZE,
-    WINDOWPLACEMENT,
+    POINTER_INPUT_TYPE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, SW_MAXIMIZE, WINDOWPLACEMENT,
 };
 
 use crate::window::CursorIcon;
@@ -254,6 +254,11 @@ pub type GetPointerTouchInfo =
 pub type GetPointerPenInfo =
     unsafe extern "system" fn(point_id: u32, pen_info: *mut POINTER_PEN_INFO) -> BOOL;
 
+pub type GetPointerType =
+    unsafe extern "system" fn(pointer_id: u32, pointer_type: *mut POINTER_INPUT_TYPE) -> BOOL;
+
+pub type RegisterTouchpadCapableThread = unsafe extern "system" fn(enable: BOOL) -> BOOL;
+
 pub(crate) static GET_DPI_FOR_WINDOW: Lazy<Option<GetDpiForWindow>> =
     Lazy::new(|| get_function!("user32.dll", GetDpiForWindow));
 pub(crate) static ADJUST_WINDOW_RECT_EX_FOR_DPI: Lazy<Option<AdjustWindowRectExForDpi>> =
@@ -278,3 +283,8 @@ pub(crate) static GET_POINTER_TOUCH_INFO: Lazy<Option<GetPointerTouchInfo>> =
     Lazy::new(|| get_function!("user32.dll", GetPointerTouchInfo));
 pub(crate) static GET_POINTER_PEN_INFO: Lazy<Option<GetPointerPenInfo>> =
     Lazy::new(|| get_function!("user32.dll", GetPointerPenInfo));
+// SolidCraft: absent on older Windows, which keeps winit's own wheel behaviour (#15353).
+pub(crate) static GET_POINTER_TYPE: Lazy<Option<GetPointerType>> =
+    Lazy::new(|| get_function!("user32.dll", GetPointerType));
+pub(crate) static REGISTER_TOUCHPAD_CAPABLE_THREAD: Lazy<Option<RegisterTouchpadCapableThread>> =
+    Lazy::new(|| get_function!("user32.dll", RegisterTouchpadCapableThread));

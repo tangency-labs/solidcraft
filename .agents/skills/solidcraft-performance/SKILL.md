@@ -21,5 +21,5 @@ description: "Use when a SolidCraft change is slow, blocks the window, runs long
 ## The browser build
 - Everything below the apps must build for `wasm32-unknown-unknown`: `cargo xtask wasm` checks every library crate and the web app, and is part of `cargo xtask ci`. Do not add a dependency that cannot.
 - Application code is Rust only. The browser requires two pieces of JavaScript: the service worker `apps/solidcraft-web/sw.js` and the small inline scripts in `apps/solidcraft-web/index.html`. Keep them minimal; `cargo xtask web-offline-test` covers the service worker.
-- Python 3.11+ is allowed only for asset authoring, lint and review tools (`assets/AGENTS.md`), never as an application dependency.
+- Python 3.11+ is allowed only for asset authoring, lint and review tools (`assets/AGENTS.md`), never as an application dependency. The one other exception is the Python client in `python/` (docs/python-api.md): standard library only, it runs in the user's own Python and drives `solidcraft-cli mcp`; the app never ships or imports Python.
 - Design notes for the browser runtime: `docs/browser-api.md`.

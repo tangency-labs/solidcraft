@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+# The CRC-32 a part copied from another container must carry.
+crc32fast = { workspace = true }
 serde_json = { workspace = true }
 # The container: content-addressed blobs (SHA-256) in a ZIP package.
 sha2 = { workspace = true }

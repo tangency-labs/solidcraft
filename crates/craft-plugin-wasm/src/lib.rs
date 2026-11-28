@@ -12,10 +12,30 @@ mod native;
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeOptions {
     pub stack_bytes: usize,
+    /// How long a long job (an entry with `"job": true`) may run.
+    pub job_deadline_ms: u64,
 }
 impl Default for RuntimeOptions {
     fn default() -> Self {
-        Self { stack_bytes: 512 * 1024 }
+        Self { stack_bytes: 512 * 1024, job_deadline_ms: craft_plugin::JOB_DEADLINE_SECONDS * 1000 }
+    }
+}
+
+/// Keeps compiled components in `dir` between sessions, with Wasmtime's own compilation cache, so
+/// a large plugin compiles once rather than in every session. Trusted app configuration: the folder
+/// is the app's per-user cache, never a plugin's or a project's. Set it once, before the first
+/// call; `None`, or never calling this, keeps compiled code in memory only. Returns `false` when
+/// it was already set. Anyone who can write to `dir` can change the machine code a plugin call
+/// runs, so it must be a folder only the user can write.
+pub fn set_compile_cache_dir(dir: Option<PathBuf>) -> bool {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::set_compile_cache_dir(dir)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = dir;
+        false
     }
 }
 
@@ -35,7 +55,9 @@ pub fn run_with_options<H: PluginHost + 'static>(
 ) -> (H, Result<Value>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run(host, manifest, component, entry, params, options)
+        let ran = native::run(host, manifest, component, entry, params, options);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -55,7 +77,9 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 ) -> (H, Result<String>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::dialog_fields(host, manifest, component, entry, values, ceilings)
+        let ran = native::dialog_fields(host, manifest, component, entry, values, ceilings);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -67,8 +91,9 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
-/// and exports the entry interface of its world (`command-plugin`, or `importer-plugin` for an
-/// importer). The error names what is wrong; `plugin check` adds how to fix it.
+/// and exports the interfaces of its world (`command-plugin`, `panel-plugin`, `importer-plugin`, or
+/// the additive `importer-plugin-with-storage`). The error names what is wrong; `plugin check` adds
+/// how to fix it.
 pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
@@ -98,9 +123,11 @@ pub struct Imported {
     pub report: LossReport,
 }
 
-/// Runs an importer entry on one file in a fresh instance. It touches no app state, so there is
-/// no transaction: the app opens the design as a new one only when the whole call succeeds.
-/// A trap fails this call alone.
+/// Runs an importer entry on one file in a fresh instance. The app opens the design as a new
+/// one only when the whole call succeeds. An importer requesting `user-storage@0.1` starts a
+/// host transaction: on success the app must commit it after validating and accepting the design,
+/// or roll it back if acceptance fails. Execution failures roll it back before returning.
+/// Importers without user storage keep the host's transaction lifecycle unchanged.
 pub fn run_import<H: PluginHost + 'static>(
     host: H,
     manifest: &Manifest,
@@ -111,11 +138,69 @@ pub fn run_import<H: PluginHost + 'static>(
 ) -> (H, Result<Imported>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default())
+        let ran = native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = (manifest, component, entry, options, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// A dialog hook runs in a fresh importer instance, with no design writes or evaluation and
+/// no sibling-file access. Its source is a snapshot of at most the first 64 KiB.
+pub fn update_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    context: &Value,
+    request: &ImportRequest,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::update_fields(host, manifest, component, entry, context, request)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, context, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "dialog hooks require a native build".into() }))
+    }
+}
+
+/// Read and validate a panel plugin's static declarations with command and file authority disabled.
+/// The caller retains the host on failure as well as success.
+pub fn describe_ui<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8]) -> (H, Result<craft_plugin::ui::Declarations>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::ui::describe(host, manifest, component, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Deliver a validated panel action and execute its declared entry in one ordinary command transaction.
+/// `params` obeys the entry's usual command schema; the typed event is delivered separately.
+pub fn run_ui_event<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    params: &Value,
+    event: &craft_plugin::ui::UiEvent,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_call(host, manifest, component, entry, params, Some(event), RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, params, event);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
@@ -127,7 +212,9 @@ pub fn run_import<H: PluginHost + 'static>(
 pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+        let ran = native::run_export(host, manifest, component, slot, options, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {

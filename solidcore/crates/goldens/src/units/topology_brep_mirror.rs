@@ -216,7 +216,7 @@ impl Runner {
         #[cfg(test)] log: &mut CertificateLog,
     ) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
         // Rust reader (no C++ export or owner reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
@@ -653,7 +653,7 @@ mod tests {
             }
         };
         let read = || {
-            let mut kernel = Kernel::default();
+            let mut kernel = crate::runner_kernel();
             let body = crate::own_reader::read_file_rebuild(&mut kernel, &file, input.rebuild)
                 .unwrap()
                 .unwrap();

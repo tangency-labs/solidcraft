@@ -81,6 +81,9 @@ pub struct DetailSetting {
     pub label: String,
     pub value: DetailValue,
     pub enabled: bool,
+    /// The label on its own line above the control, which then takes the card's whole width: for
+    /// a label longer than the label column.
+    pub stacked: bool,
 }
 
 pub struct DetailKey {
@@ -151,9 +154,19 @@ pub fn patterned_swatch(ui: &mut Ui, colour: egui::Color32, pattern: bool, patte
 }
 
 pub fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEvent> {
+    if field.stacked {
+        let t = Tokens::get();
+        ui.add(egui::Label::new(RichText::new(&field.label).size(t.font_label).color(t.form_ink)).wrap());
+        // No label column: the control takes the whole width under its label.
+        return super::settings_form(ui, 0.0, |ui| setting_row(ui, field, "", focus));
+    }
+    setting_row(ui, field, &field.label, focus)
+}
+
+fn setting_row(ui: &mut Ui, field: &DetailSetting, label: &str, focus: bool) -> Option<DetailEvent> {
     let mut value = field.value.clone();
     let mut changed = false;
-    super::row(ui, &field.label, |ui| {
+    super::row(ui, label, |ui| {
         ui.add_enabled_ui(field.enabled, |ui| {
             ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
             let response = match &mut value {

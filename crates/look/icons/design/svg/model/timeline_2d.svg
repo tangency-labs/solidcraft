@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Timeline 2D</title>
+  <circle cx="9.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="24.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="54.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="39.5" cy="44" r="2.8" fill="currentColor"/>
+  <path d="M35 15.5 L44 15.5 L44 24.5 L35 24.5 Z M5 39.5 L14 39.5 L14 48.5 L5 48.5 Z M20 39.5 L29 39.5 L29 48.5 L20 48.5 Z M50 39.5 L59 39.5 L59 48.5 L50 48.5 Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

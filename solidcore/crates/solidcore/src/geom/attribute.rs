@@ -199,6 +199,12 @@ pub mod ids {
     /// Its own id below the applications' (`USER_1` and up), so no application's data is read
     /// as it.
     pub const OPS_HISTORY: u64 = 140;
+    /// Not upstream (WR-459, #17169): a face of a fillet's target as filleting starts, set by
+    /// the fillet session on each with `Behavior::Copy`, so the pieces a split leaves and the
+    /// face a merge leaves carry it, read by the clean-up after filleting (which leaves the
+    /// target's own faces) and removed when filleting ends. Its own id: the attribute carried
+    /// to a replacement face is an entity's first of its id.
+    pub const FILLET_TARGET_FACE: u64 = 142;
     /// `SM_AI_METRIC_BASE`: first of the ids used by metric attributes (150-199).
     pub const METRIC_BASE: u64 = 150;
     /// `SM_AI_MASS_PROPERTIES`.

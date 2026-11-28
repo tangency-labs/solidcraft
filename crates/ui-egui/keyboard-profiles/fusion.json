@@ -1,0 +1,9 @@
+{
+  "label": "Fusion",
+  "provenance": "Written for SolidCraft. The keys are the defaults in the keyboard shortcuts reference of Autodesk's public Fusion help.",
+  "keys": {
+    "inspect.colored_components": "Shift+N",
+    "view.browser": "Ctrl+Alt+B",
+    "view.navigation_bar": "Ctrl+Alt+N"
+  }
+}

@@ -33,7 +33,8 @@ const POLL: usize = 256;
 /// F's other parameter that the boundary pieces over it give.
 const CELLS: u32 = 64;
 
-/// The pieces each knot span of F's boundary edges (or each line or conic) is enclosed in
+/// The pieces each knot span of F's boundary edges (or each line, conic, Hermite or
+/// composite curve) is enclosed in
 /// ([`crate::heal::stitch::bounds::curve_cover`]).
 const PIECES: u32 = 8;
 

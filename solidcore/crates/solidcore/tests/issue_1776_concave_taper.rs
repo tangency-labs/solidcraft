@@ -1,6 +1,7 @@
-//! Issue #1776: a plus profile's reflex corners reverse `ComputeCrvsNormal`, so
-//! outward and inward drafts are exchanged. The opt-in area normal gives each
-//! corner rule the requested direction, checked against closed-form volumes.
+//! Issue #1776: a plus profile's reflex corners reversed upstream's weighted-turns
+//! `ComputeCrvsNormal`, so outward and inward drafts were exchanged. The area
+//! normal gives each corner rule the requested direction, checked against
+//! closed-form volumes.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use solidcore::curve::curve::Curve;
@@ -56,9 +57,8 @@ fn expected_volume(outward: bool, round: bool) -> f64 {
     10.0 * (1300.0 + sign * 140.0 * offset + quadratic * offset * offset / 3.0)
 }
 
-fn drafted_volume(fixed: bool, outward: bool, corner: OffsetCornerType) -> f64 {
+fn drafted_volume(outward: bool, corner: OffsetCornerType) -> f64 {
     let mut kernel = Kernel::default();
-    kernel.fixes.curve_loop_normal_from_area = fixed;
     let curves = plus();
     let refs: Vec<_> = curves.iter().map(Some).collect();
     let draft = if outward { -10.0 } else { 10.0 };
@@ -85,16 +85,6 @@ fn assert_volume(actual: f64, expected: f64) {
 }
 
 #[test]
-fn default_plus_draft_exchanges_inward_and_outward() {
-    for outward in [false, true] {
-        assert_volume(
-            drafted_volume(false, outward, OffsetCornerType::LinearExtension),
-            expected_volume(!outward, false),
-        );
-    }
-}
-
-#[test]
 fn area_normal_gives_both_mitred_rules_the_requested_draft() {
     for corner in [
         OffsetCornerType::LinearExtension,
@@ -102,7 +92,7 @@ fn area_normal_gives_both_mitred_rules_the_requested_draft() {
     ] {
         for outward in [false, true] {
             assert_volume(
-                drafted_volume(true, outward, corner),
+                drafted_volume(outward, corner),
                 expected_volume(outward, false),
             );
         }
@@ -113,7 +103,7 @@ fn area_normal_gives_both_mitred_rules_the_requested_draft() {
 fn area_normal_gives_round_corners_the_requested_draft() {
     for outward in [false, true] {
         assert_volume(
-            drafted_volume(true, outward, OffsetCornerType::FilletCorner),
+            drafted_volume(outward, OffsetCornerType::FilletCorner),
             expected_volume(outward, true),
         );
     }

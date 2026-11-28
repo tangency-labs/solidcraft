@@ -329,7 +329,7 @@ fn face_near(r: &b::Brep, picks: &[Vec3], reach: f64) -> Result<usize> {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .filter(|(d, _)| *d <= reach)
             .map(|(_, f)| f)
-            .ok_or_else(|| KernelError::Invalid(format!("no face of the body passes through {p:?}")))?;
+            .ok_or_else(|| KernelError::Invalid(format!("no face of the body passes through {p}")))?;
         if found.is_some_and(|f| f != hit) {
             return Err(KernelError::Invalid("the picks are on different faces: match one face".into()));
         }

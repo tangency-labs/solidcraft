@@ -24,9 +24,9 @@ use std::f64::consts::{PI, TAU};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::UnitVec3;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::Visibility;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::validate_plane;
+use solidcraft_kernel::hlr::Visibility;
 
 use crate::ThreadInfo;
 
@@ -64,13 +64,17 @@ pub struct ThreadLines {
 impl Thread {
     /// A cosmetic thread as a view draws it: its crest is the threaded face's own radius; its root
     /// is the major radius for a tapped hole, and for a screw the minor radius a modelled thread is
-    /// cut to ([`crate::thread_forms::ThreadForm::groove`]), so the two draw alike. A taper thread
+    /// cut to ([`crate::thread_forms::ThreadForm::groove_of`]), so the two draw alike. A taper thread
     /// draws none: its lines are not parallel to its axis. No limit lines: [`on_paper`] finds them.
     pub fn of(info: &ThreadInfo) -> Option<Thread> {
         if info.form.is_taper() {
             return None;
         }
-        let root_radius = if info.internal { info.major_diameter / 2.0 } else { info.form.groove(info.major_diameter, info.pitch, false).root_r };
+        let root_radius = if info.internal {
+            info.major_diameter / 2.0
+        } else {
+            info.form.groove_of(&info.designation, info.major_diameter, info.pitch, false).ok()?.root_r
+        };
         Some(Thread {
             axis_point: info.axis_point,
             axis: info.axis,

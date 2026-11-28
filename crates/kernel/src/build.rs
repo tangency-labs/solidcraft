@@ -96,6 +96,32 @@ fn free_form_degree(s: &Seg2) -> Option<u8> {
 }
 
 fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>) -> Result<Vec<Body>> {
+    extrusion_plans(plane, regions, start, end, one_curve, |x| {
+        crate::smlib_sweeps::extrude(plane, &x.pieces, Some(x.region), x.from, x.distance, 1.0, None)
+    })
+}
+
+/// One region of an extrusion as the kernel sweeps it: its pieces (lines continuing one another
+/// joined and runs of one curve marked where the caller asks), from `from` along the plane's
+/// normal for `distance`.
+pub(crate) struct ExtrusionPlan<'a> {
+    pub pieces: Vec<crate::smlib_sweeps::Piece>,
+    pub region: &'a Region2,
+    pub from: f64,
+    pub distance: f64,
+}
+
+/// The extrusion of `regions` from `start` to `end`, checked and planned region by region as
+/// [`extrude`] and [`extrude_whole_sides`] build it, each plan handed to `each` as soon as it is
+/// made: what another kernel builds the same solids from, and what names them after.
+pub(crate) fn extrusion_plans<'a, T>(
+    plane: &Plane,
+    regions: &'a [Region2],
+    start: f64,
+    end: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+    mut each: impl FnMut(ExtrusionPlan<'a>) -> Result<T>,
+) -> Result<Vec<T>> {
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
     }
@@ -112,8 +138,9 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_cu
         .map(|r| {
             region_ok(r)?;
             let pieces = oriented(r)?;
+            let plan = |pieces| ExtrusionPlan { pieces, region: r, from: lo, distance: hi - lo };
             let Some(one_curve) = one_curve else {
-                return crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&pieces, &pieces), Some(r), lo, hi - lo, 1.0, None);
+                return each(plan(crate::smlib_sweeps::region_pieces(&pieces, &pieces)));
             };
             // Pieces of one curve: free-form segments of one degree that the caller says are one
             // curve. Each loop starts where such a run starts, so no run wraps round its end.
@@ -131,7 +158,7 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_cu
                 }
                 k += l.lp.segs.len();
             }
-            crate::smlib_sweeps::extrude(plane, &swept, Some(r), lo, hi - lo, 1.0, None)
+            each(plan(swept))
         })
         .collect()
 }
@@ -165,7 +192,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -173,7 +200,28 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
+}
+
+/// Revolve with contiguous pieces of the same circle joined before turning each profile.
+pub fn revolve_joining_arcs(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_joining_arcs");
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinArcs)
+}
+
+/// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
+/// (a spline's spans) turned as that one curve into one face, as [`extrude_whole_sides`] sweeps them into one wall.
+/// For tools whose faces must not multiply with the spans of the curves they are drawn with (#17693).
+pub fn revolve_whole_sides(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
+) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinFreeForm(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -182,8 +230,67 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
 /// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
 const AXIS_SNAP: f64 = 1e-4;
 
+enum RevolveProfile<'a> {
+    AsDrawn,
+    JoinArcs,
+    JoinFreeForm(&'a dyn Fn(&Seg2, &Seg2) -> bool),
+}
+
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
-fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+fn revolve_regions(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    profile: RevolveProfile<'_>,
+) -> Result<Vec<Body>> {
+    let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
+    revolved(plane, regions, axis_origin, axis_dir, angle, profile, |x| {
+        crate::smlib_sweeps::revolve(plane, &x.pieces, x.origin, x.axis, x.angle, join_arcs)
+    })
+}
+
+/// One region of a revolution as the kernel turns it: its pieces (on-axis points snapped, runs
+/// of one curve marked where the caller asks), turned by `angle` about the axis through `origin`
+/// along `axis` (world coordinates; the angle's sign turns it toward the sketch normal).
+pub(crate) struct RevolutionPlan {
+    pub pieces: Vec<crate::smlib_sweeps::Piece>,
+    pub origin: Vec3,
+    pub axis: Vec3,
+    pub angle: f64,
+}
+
+/// [`revolve`], [`revolve_whole`] and [`revolve_whole_sides`]'s revolution of `regions`, checked
+/// and planned region by region (for [`revolve_joining_arcs`], the pieces before the arcs join):
+/// what another kernel builds the same solids from, and what names them after.
+#[cfg(feature = "backend-occt")]
+pub(crate) fn revolution_plans_of(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+) -> Result<Vec<RevolutionPlan>> {
+    let profile = match one_curve {
+        Some(f) => RevolveProfile::JoinFreeForm(f),
+        None => RevolveProfile::AsDrawn,
+    };
+    revolved(plane, regions, axis_origin, axis_dir, angle, profile, Ok)
+}
+
+/// The plans of [`revolution_plans_of`], each handed to `each` as soon as it is made: the
+/// checks, on-axis snapping and side of the axis every revolve shares.
+fn revolved<T>(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    profile: RevolveProfile<'_>,
+    mut each: impl FnMut(RevolutionPlan) -> Result<T>,
+) -> Result<Vec<T>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -248,7 +355,28 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-        out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+        let RevolveProfile::JoinFreeForm(one_curve) = profile else {
+            let pieces = crate::smlib_sweeps::pieces(given.oriented().loops());
+            out.push(each(RevolutionPlan { pieces, origin: o, axis, angle })?);
+            continue;
+        };
+        // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
+        // starts where such a run starts, so no run wraps round its end.
+        let joins = |s: &Seg2, t: &Seg2| free_form_degree(s).is_some_and(|d| free_form_degree(t) == Some(d)) && one_curve(s, t);
+        let numbered = given.oriented().map_loops(|l| l.starting_a_run(joins));
+        let mut swept = crate::smlib_sweeps::pieces(numbered.loops());
+        let mut k = 0;
+        for l in numbered.loops() {
+            for i in 1..l.lp.segs.len() {
+                if let (Some(s), Some(t)) = (l.lp.segs.get(i - 1), l.lp.segs.get(i))
+                    && let Some(x) = swept.get_mut(k + i)
+                {
+                    x.joins_previous = joins(s, t);
+                }
+            }
+            k += l.lp.segs.len();
+        }
+        out.push(each(RevolutionPlan { pieces: swept, origin: o, axis, angle })?);
     }
     Ok(out)
 }
@@ -304,16 +432,41 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 /// Cylinder with base centre `base`, axis direction `axis`, radius and height.
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "cylinder");
+    let c = cylinder_plan(base, axis, radius, height)?;
+    crate::smlib_sweeps::cylinder(&c.plane, c.radius, c.lo, c.hi, &c.region)
+}
+
+/// A cylinder as [`cylinder`] builds it: its base plane, radius, the span along the axis and the
+/// circle it extrudes (its seam at an odd angle), checked.
+pub(crate) struct CylinderPlan {
+    pub plane: Plane,
+    pub radius: f64,
+    pub lo: f64,
+    pub hi: f64,
+    pub region: Region2,
+}
+
+/// [`cylinder`]'s checks and plan: what another kernel builds the same cylinder from, and what
+/// names it after.
+pub(crate) fn cylinder_plan(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<CylinderPlan> {
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
+    if !frame_ok(&plane) {
+        return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
+    }
     let radius = finite(radius, "radius")?;
     if radius <= 1e-6 {
         return Err(KernelError::Invalid("radius must be positive".into()));
     }
+    let height = finite(height, "height")?;
+    let (lo, hi) = if height >= 0.0 { (0.0, height) } else { (height, 0.0) };
+    if hi - lo < 1e-6 {
+        return Err(KernelError::Invalid("extrude distance is zero".into()));
+    }
     // The seams at an odd angle: on the frame's axes they would lie exactly where faces placed
     // on a grid cut the cylinder (along a seam edge, which booleans don't survive).
-    let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
-    let mut v = extrude(&plane, &[r], 0.0, finite(height, "height")?)?;
-    v.pop().ok_or_else(|| KernelError::Failed("cylinder".into()))
+    let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
+    region_ok(&region)?;
+    Ok(CylinderPlan { plane, radius, lo, hi, region })
 }
 
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
@@ -331,13 +484,13 @@ pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
 pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "torus");
     let (major, minor) = (finite(major, "major radius")?, finite(minor, "minor radius")?);
+    if !center.is_finite() {
+        return Err(KernelError::Invalid("torus center must be finite".into()));
+    }
     if !(minor > 1e-6 && major > minor) {
         return Err(KernelError::Invalid("torus needs major > minor > 0".into()));
     }
-    let plane = Plane { origin: center, ..Plane::XZ };
-    let r = Region2 { outer: Loop2::circle(Vec2::new(major, 0.0), minor), holes: vec![] };
-    let mut v = revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
-    v.pop().ok_or_else(|| KernelError::Failed("torus".into()))
+    crate::smlib_sweeps::torus(center, major, minor)
 }
 
 /// Offset every segment of a loop to its right by `d` (outward for a region's outer loop and
@@ -812,15 +965,9 @@ fn with_start(s: &Seg2, x: Vec2) -> Seg2 {
 /// Points a free curve is sampled at by [`meet`].
 const MEET_SAMPLES: usize = 48;
 
-/// Extrude one region by `length` along `dir_sign` × the plane normal with a taper angle
-/// (radians; positive grows the profile), its sharp corners closed by `corner`
-/// ([`crate::draft_corners`] says what each rule gives at each corner).
-pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64, corner: DraftCorner) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "extrude_tapered");
-    extrude_tapered_between(plane, region, 0.0, length, 0.0, dir_sign, taper, corner)
-}
-
-/// [`extrude_tapered`] from `from` to `to` along `dir_sign` × the plane normal, the region
+/// One region extruded with a taper angle (radians; positive grows the profile), its sharp
+/// corners closed by `corner` ([`crate::draft_corners`] says what each rule gives at each corner),
+/// from `from` to `to` along `dir_sign` × the plane normal, the region
 /// being the section at 0: its sides run on through it, so `from` below 0 starts the solid
 /// that far before the profile (into a face the profile lies on), at the profile shrunk or
 /// grown by the taper. With a `foot` (a height, less than `to - from`), the sides stand
@@ -1022,36 +1169,66 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record
 /// knot between them is a point of the wall, so a rectangle lofted to a circle has its x-sides'
 /// middles at the circle's 0 and 180 degree points (pinned by
 /// `loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter`, #19478).
+///
+/// The spans of one spline keep that pairing, but where every section agrees on how their
+/// speeds change from one span to the next they go to the skin as one curve, so the wall's first
+/// derivative does not jump where two spans of different lengths meet (`smlib_sweeps::loft`,
+/// #22319). Sections of one outline at different sizes always agree; sections of different
+/// shapes agree where their spans divide their curves alike. The kernel decides it
+/// (`solidcore_ops::sweep::loft_one_curve_runs`).
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft");
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
-/// [`loft`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
-/// sections between. Without rails, the plain loft.
-pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
+type LoftPieces = Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)>;
+
+/// A loft's sections as the kernel lofts them: whether they run reversed, numbered, matched
+/// into loops, and the index of the section given first.
+#[allow(clippy::type_complexity)]
+fn loft_start(sections: &[(Plane, Loop2)]) -> Result<(bool, Vec<(Plane, NumberedLoop)>, Vec<(Plane, NumberedLoop)>, usize)> {
     let reversed = loft_reversed(sections)?;
     let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
     let loops = loft_numbered_loops(&numbered, reversed)?;
     let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
-    let pieces_of = |loops: &[(Plane, NumberedLoop)]| -> Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> {
-        loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
-    };
-    let mut pieces = pieces_of(&loops);
+    Ok((reversed, numbered, loops, first))
+}
+
+fn loft_pieces_of(loops: &[(Plane, NumberedLoop)]) -> LoftPieces {
+    loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
+}
+
+/// [`loft`]'s sections as its skin takes them, and the index of the section given first: what
+/// another kernel lofts, and what names it after.
+pub(crate) fn loft_plan(sections: &[(Plane, Loop2)]) -> Result<(LoftPieces, usize)> {
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
     // The smlib wrapper's `MAX_CURVES` bounds the curves in all its sections (and stations): matching
     // can give each section more segments than the largest has, so past that bound the sections
     // are re-split instead, to no more than the largest has.
+    if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+    }
+    Ok((pieces, first))
+}
+
+/// sections between. Without rails, the plain loft.
+pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
     if rails.is_empty() {
-        if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-            pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
-        }
+        let (pieces, first) = loft_plan(sections)?;
         return crate::smlib_sweeps::loft(&pieces, first);
+    }
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
+    if rails.len() > 2 {
+        return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-        pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     }
     crate::smlib_sweeps::loft_curves(&pieces, first, &all)
@@ -1491,6 +1668,54 @@ impl PathSeg {
             .collect()
     }
 
+    /// The unit normal of a plane the whole path lies in, within `tol` radians: the axis of its
+    /// first arc, or else the turn between its first two directions of travel that are not
+    /// parallel, checked against every segment over its whole length: a line's direction, an
+    /// arc's axis, and a free-form segment's control points ([`PathSeg::control_points`]). A
+    /// straight path lies in many planes and gets one of them. `None` for a path that leaves
+    /// every plane, or has no direction. Solidcore decides it
+    /// ([`solidcore_ops::path_plane::plane_normal`]); this reads the segments for it.
+    pub fn plane_normal(path: &[PathSeg], tol: f64) -> Option<Vec3> {
+        use solidcore_ops::path_plane::{PathPlanePiece, PieceFit};
+        let directions = |s: &PathSeg| -> Vec<[f64; 3]> {
+            match s {
+                PathSeg::Line { .. } | PathSeg::Arc { .. } => s.tangents().map(|(a, b)| vec![point3(a), point3(b)]).unwrap_or_default(),
+                _ => (0..=8).filter_map(|i| s.along(f64::from(i) / 8.0).map(|(_, d)| point3(d))).collect(),
+            }
+        };
+        let fit = |s: &PathSeg| match *s {
+            PathSeg::Arc { axis, .. } => PieceFit::Axis(point3(axis)),
+            PathSeg::Line { .. } => PieceFit::Directions(directions(s)),
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => s.control_points(),
+        };
+        let pieces: Vec<PathPlanePiece> = path
+            .iter()
+            .map(|s| PathPlanePiece {
+                directions: directions(s),
+                arc_axis: if let PathSeg::Arc { axis, .. } = *s { Some(point3(axis)) } else { None },
+                // A sketch line or arc carried as a curve is checked as the line or arc it is.
+                fit: match *s {
+                    PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => fit(&PathSeg::of_sketch(&plane, &seg)),
+                    _ => fit(s),
+                },
+            })
+            .collect();
+        let [x, y, z] = solidcore_ops::path_plane::plane_normal(&pieces, tol)?;
+        Some(Vec3::new(x, y, z))
+    }
+
+    /// A free-form segment as [`PathSeg::plane_normal`] checks it against a plane: its start and
+    /// its control points in space (a rational Bézier span with positive weights lies in their
+    /// hull, so they decide the whole span). A segment that is no free-form span, or a control
+    /// point with no point in space, gives no points, which fit no plane.
+    fn control_points(&self) -> solidcore_ops::path_plane::PieceFit {
+        let Some(b) = self.space_bezier() else {
+            return solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(self.start()), points: None };
+        };
+        let points = b.ctrl().iter().map(|q| q.project().map(point3)).collect();
+        solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(b.start()), points }
+    }
+
     /// Points along the segment (an arc within `tol` of its chords), without its start.
     pub(crate) fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
         match *self {
@@ -1506,6 +1731,11 @@ impl PathSeg {
             }
         }
     }
+}
+
+/// A point or a direction as the plain numbers solidcore-ops takes.
+fn point3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
 /// `p` turned by `angle` about the unit axis `k` through `center` (right hand).
@@ -1548,16 +1778,39 @@ pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
     Ok(pts)
 }
 
-/// [`sweep`] with sweep options. The default options are exactly [`sweep`]; a twist, an end
+/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
+/// the path (at sharp corners the walls meet in mitres), with sweep options: a twist, an end
 /// scale, guide rails or an orientation direction place the profile at stations along the path.
 pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep_with");
     smlib_sweep(plane, region, path, ctl)
 }
 
-/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
-/// the path; at sharp corners the walls meet in mitres.
-pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "sweep");
-    smlib_sweep(plane, region, path, &crate::SweepControl::default())
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal ([`solidcore_ops::prism::level_on_plane`]).
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    solidcore_ops::prism::level_on_plane(sketch, point, plane).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most level of `plane` above `sketch` over the profiles' outer loops
+/// ([`solidcore_ops::prism::plane_rise`]).
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_rise(sketch, plane, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the profiles' outer
+/// loops ([`solidcore_ops::prism::plane_gap`]).
+pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// `plane` moved by `by` along `sketch`'s normal ([`solidcore_ops::prism::plane_raised`]).
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    solidcore_ops::prism::plane_raised(sketch, plane, by).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// Which side of `from` and of `to` holds what lies between them along `travel`, `true` for the
+/// side each plane's normal points to ([`solidcore_ops::prism::slab_sides`]).
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    solidcore_ops::prism::slab_sides(travel, from, to).map_err(|e| KernelError::Invalid(e.to_string()))
 }

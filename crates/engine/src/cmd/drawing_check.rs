@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Drawing",
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<CheckResult>)
-    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|sketch|fill|dimension|balloon|note|table|image|title_block|view_label|revision_tag, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view, a dimension, balloon or note on a view, or a sketch or fill on the sheet, that a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, balloon, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
+    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|sketch|fill|dimension|centre_line|centre_mark|balloon|note|table|image|title_block|view_label|revision_tag, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view or centre annotation that can't be drawn; an automatic centre mark failure names its view), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view, a dimension, balloon or note on a view, or a sketch or fill on the sheet, that a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, centre annotation, balloon, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
 
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let request: CheckParams = crate::schema::read(CHECK, p)?;
@@ -94,10 +94,22 @@ fn object(kind: CheckedKind, id: u64) -> CheckedObject {
 /// What sheet `sheet` shows (`shown`): its views that draw nothing, its dimensions that don't stand
 /// with the model, what it shows as it last was, and what lies outside it.
 fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> {
+    let outside = outside_sheet(d, sheet, &shown, CHECK)?;
     let mut out: Vec<Finding> = shown.views.iter().filter_map(|view| view_finding(sheet, view)).collect();
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
     out.extend(dimensions);
+    // These failures belong to the accepted sheet, including a deferred sheet's held frame.
+    // Automatic marks belong to the view; manual annotations name their own records.
+    out.extend(shown.annotation_failures.into_iter().filter_map(|failure| {
+        let kind = match failure.kind {
+            ObjectKind::CentreLine => CheckedKind::CentreLine,
+            ObjectKind::CentreMark if failure.object == failure.view => CheckedKind::View,
+            ObjectKind::CentreMark => CheckedKind::CentreMark,
+            _ => return None,
+        };
+        Some(finding(FindingKind::Failed, sheet, object(kind, failure.object), failure.reason))
+    }));
     // Out of date as a deferred drawing shows it as it last was, by the kind the scene listed it as.
     let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
     for (id, kind) in shown.out_of_date {
@@ -105,12 +117,21 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
         }
     }
+    out.extend(outside);
+    Ok(out)
+}
+
+/// What lies outside sheet `sheet` as it is shown (`shown`), in the order of the records named: the
+/// one rule for `drawing.check` and for what `drawing.export` and `drawing.print` say of the sheets
+/// they write. `cmd` is the command an error names.
+pub(super) fn outside_sheet(d: &Drawing, sheet: u64, shown: &SheetScene, cmd: &str) -> Result<Vec<Finding>> {
+    let mut out = Vec::new();
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
     // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
     // nothing in the model.
-    let record = crate::drawing_view::sheet(d, sheet, CHECK)?;
-    let room = Room::on(record, CHECK)?;
-    let size = record.sheet.size_mm().map_err(|e| bad(CHECK, e.to_string()))?;
+    let record = crate::drawing_view::sheet(d, sheet, cmd)?;
+    let room = Room::on(record, cmd)?;
+    let size = record.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
     let paper = Aabb2 { min: Vec2::ZERO, max: size }.inflated(EPS);
     let off = |bounds: Aabb2| !(paper.contains(bounds.min) && paper.contains(bounds.max));
     let off_paper = |kind, id| finding(FindingKind::OutsideSheet, sheet, object(kind, id), "it lies off the paper".into());
@@ -128,12 +149,31 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             out.push(off_paper(kind, placed.object));
         }
     }
+    // Automatic marks are not selectable objects. Check their accepted scene groups directly,
+    // naming their owning view once even if several marks cross the paper edge.
+    let views: HashSet<_> = shown.views.iter().map(|view| view.view).collect();
+    let mut off_marks = HashSet::new();
+    for group in &shown.scene.groups {
+        if group.kind == ObjectKind::CentreMark && views.contains(&group.object) {
+            let bounds = crate::drawing_scene::group_bounds(group, &shown.scene.fonts);
+            if !bounds.is_empty() && off(bounds) && off_marks.insert(group.object) {
+                out.push(finding(
+                    FindingKind::OutsideSheet,
+                    sheet,
+                    object(CheckedKind::View, group.object),
+                    "its automatic centre marks lie off the paper".into(),
+                ));
+            }
+        }
+    }
     // Each image's box is the picture the sheet paints for it.
     for group in crate::drawing_pictures::groups(d, sheet) {
         if group.items.iter().any(|item| matches!(item, Item::Picture(picture) if off(picture.rect))) {
             out.push(off_paper(CheckedKind::Image, group.object));
         }
     }
+    // By the record each names, as the check lists them; a view's two findings keep their order.
+    out.sort_by_cached_key(|f| ids::decode(&f.object.id));
     Ok(out)
 }
 
@@ -145,6 +185,8 @@ fn checked_kind(kind: ObjectKind) -> Option<CheckedKind> {
     match kind {
         ObjectKind::View => Some(CheckedKind::View),
         ObjectKind::Dimension => Some(CheckedKind::Dimension),
+        ObjectKind::CentreLine => Some(CheckedKind::CentreLine),
+        ObjectKind::CentreMark => Some(CheckedKind::CentreMark),
         ObjectKind::Sketch => Some(CheckedKind::Sketch),
         ObjectKind::Fill => Some(CheckedKind::Fill),
         ObjectKind::Note => Some(CheckedKind::Note),

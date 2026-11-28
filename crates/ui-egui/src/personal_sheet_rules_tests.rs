@@ -123,7 +123,7 @@ fn a_personal_rule_saved_in_one_design_is_added_to_another_by_ok() {
             "sheet.manage_rules".to_string(),
             json!({"name":"CRS 1.6","active":true,"thickness":"1.6 mm","k_factor":"0.42","bend_radius":"1.6 mm","relief_width":"Thickness",
                 "relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness",
-                "corner_relief_shape":"notch","angle_display":"bend"})
+                "corner_relief_shape":"notch","bend_relief_shape":"rectangular","angle_display":"bend","unfold_method":"k_factor"})
         )]
     );
     other.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -132,6 +132,41 @@ fn a_personal_rule_saved_in_one_design_is_added_to_another_by_ok() {
     assert_eq!(doc.sheet.active.as_deref(), Some("CRS 1.6"));
     let rule = doc.sheet.rules.iter().find(|r| r.name == "CRS 1.6").expect("OK adds the rule to the design");
     assert_eq!((rule.thickness.as_str(), rule.k_factor.as_str(), rule.bend_radius.as_str()), ("1.6 mm", "0.42", "1.6 mm"));
+}
+
+#[test]
+fn a_personal_rule_keeps_its_bend_deduction_and_its_unit() {
+    let mut h = manager("in");
+    // 16 gauge: T 0.0625 in, R 0.0625 in, a chart's BD90 0.11 in.
+    type_values(&mut h, ["0.0625", "0.44", "Thickness", "Thickness", "Thickness * 0.5", "Thickness * 4.0", "0.01", "Thickness"]);
+    if let Sm::Rules { unfold, values, .. } = sm(&mut h) {
+        *unfold = 1;
+        values.push("0.11".into());
+    }
+    h.frames(2);
+    save_personal(&mut h, "16 ga chart");
+    let saved = library_json(&h);
+    assert_eq!((&saved[0]["unfold_method"], &saved[0]["unfold_value"]), (&json!("deduction"), &json!("0.11 in")), "{saved}");
+    // A K-factor rule is saved as before the setting existed, so an older version recalls it.
+    assert!(row("Old").get("unfold_method").is_none());
+    let old: Rule = serde_json::from_value(row("Old")).unwrap();
+    assert_eq!((old.unfold_method.as_str(), old.unfold_value.as_str()), ("k_factor", ""));
+    assert!(serde_json::to_value(&old).unwrap().get("unfold_method").is_none());
+
+    let mut mm = manager_with("mm", &h.app.preferences.personal_sheet_rules);
+    choose_personal(&mut mm, "16 ga chart");
+    match sm(&mut mm) {
+        Sm::Rules { unfold, values, .. } => assert_eq!((*unfold, values.last().map(String::as_str)), (1, Some("0.11 in"))),
+        _ => panic!(),
+    }
+    mm.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    mm.frames(4);
+    let doc = &mm.app.session.doc;
+    let (vals, _) = doc.param_values();
+    let values = doc.rule_values(&vals, &doc.sheet_rule(Some("16 ga chart"))).unwrap();
+    // In mm: T = R = 1.5875, BD90 = 2.794, BA90 = 2·3.175 − 2.794 = 3.556, K = (3.556/(π/2) − 1.5875)/1.5875.
+    let k = (3.556 / std::f64::consts::FRAC_PI_2 - 1.5875) / 1.5875;
+    assert!((values.k_factor - k).abs() < 1e-9, "K {} vs {k}", values.k_factor);
 }
 
 #[test]

@@ -691,7 +691,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
             if let Some(icon) = group.icon {
                 let icon_rect = Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0));
-                crate::icons::paint_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
+                crate::tint::button(&painter, br, t.radius_sm, t.toolbar, group.enabled);
+                crate::tint::icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
             }
             dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
             if fresp.backing_on_hover_text(group.tip).clicked() && group.enabled {
@@ -710,6 +711,16 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     br.max.x -= 14.0;
                 }
             }
+            let (br_radius, ar_radius) = if b.split.is_some() {
+                let r = t.radius_sm;
+                if labels {
+                    (egui::CornerRadius { nw: r, ne: r, sw: 0, se: 0 }, egui::CornerRadius { nw: 0, ne: 0, sw: r, se: r })
+                } else {
+                    (egui::CornerRadius { nw: r, ne: 0, sw: r, se: 0 }, egui::CornerRadius { nw: 0, ne: r, sw: 0, se: r })
+                }
+            } else {
+                (egui::CornerRadius::same(t.radius_sm), egui::CornerRadius::same(t.radius_sm))
+            };
             let resp = ui.interact(br, ui.scope_id().with(("cmd", b.id)), Sense::click_and_drag());
             for prefix in h.button {
                 solidcraft_ui_registry::publish_handle(&handle(prefix, b.id), br.center());
@@ -724,16 +735,11 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let background = painter.add(egui::Shape::Noop);
             let split_id = b.split.map(|s| ui.scope_id().with(("family", s.key)));
             let split_open = split_id.is_some_and(|id| egui::Popup::is_id_open(ui.ctx(), id.with("popup")));
-            let neutral = if !b.exit && (resp.is_pointer_button_down_on() || b.pressed || split_open) {
-                egui::Shape::Rect(egui::epaint::RectShape::new(
-                    whole,
-                    t.radius_sm,
-                    accent.soft,
-                    Stroke::new(1.0, accent.color),
-                    egui::StrokeKind::Inside,
-                ))
+            let br_active = !b.exit && (resp.is_pointer_button_down_on() || b.pressed);
+            let neutral = if br_active {
+                egui::Shape::Rect(egui::epaint::RectShape::new(br, br_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside))
             } else if resp.hovered() && b.enabled {
-                egui::Shape::rect_filled(whole, t.radius_sm, t.hover)
+                egui::Shape::rect_filled(br, br_radius, t.hover)
             } else {
                 egui::Shape::Noop
             };
@@ -747,7 +753,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
+            crate::tint::button(&painter, whole, t.radius_sm, t.toolbar, b.enabled);
+            crate::tint::icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -767,21 +774,37 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 });
             } else if let (Some(s), Some(split_id)) = (b.split, split_id) {
                 let ar = if labels {
-                    Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
+                    Rect::from_min_max(pos2(whole.left(), br.bottom() + 1.0), pos2(whole.right(), whole.top() + 49.0))
                 } else {
-                    Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
+                    Rect::from_min_max(pos2(br.right() + 1.0, whole.top()), whole.right_bottom())
                 };
                 let arrow = ui.interact(ar, split_id, Sense::click());
                 solidcraft_ui_registry::publish_handle(&handle(h.split, s.key), ar.center());
-                if arrow.hovered() {
-                    painter.rect_filled(ar, t.radius_sm, t.hover);
+                let ar_active = arrow.is_pointer_button_down_on() || split_open;
+                if ar_active {
+                    painter.rect(ar, ar_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                } else if arrow.hovered() {
+                    painter.rect_filled(ar, ar_radius, t.hover);
                 }
-                // The title sits on the same line as the other buttons' labels.
+                if (drawn_button.response.hovered() && b.enabled) || arrow.hovered() {
+                    if !br_active && !ar_active {
+                        painter.rect_stroke(br.union(ar), t.radius_sm, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        let divider = if labels {
+                            [pos2(whole.left() + 1.0, br.bottom() + 0.5), pos2(whole.right() - 1.0, br.bottom() + 0.5)]
+                        } else {
+                            [pos2(br.right() + 0.5, whole.top() + 1.0), pos2(br.right() + 0.5, whole.bottom() - 1.0)]
+                        };
+                        painter.line_segment(divider, Stroke::new(1.0, t.border));
+                    } else if br_active && !ar_active {
+                        painter.rect_stroke(ar, ar_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    } else if ar_active && !br_active {
+                        painter.rect_stroke(br, br_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    }
+                }
                 if labels {
-                    let title_y = whole.top() + 39.0;
                     let galley = button_galley(&painter, s.title, ar.width() - 16.0, t.text);
-                    painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
-                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
+                    painter.galley(pos2(ar.center().x - 4.0, label_top(whole, galley.size().y)), galley, t.text);
+                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, ar.center().y), t.text_dim);
                 } else {
                     dropdown_arrow(&painter, ar.center(), t.text_dim);
                 }
@@ -829,12 +852,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     paint_reveal(&painter, cell, &accent, r.strength, true);
                     solidcraft_ui_registry::publish_rect(h.reveal, cell);
                 }
-                crate::icons::paint_icon(
-                    &painter,
-                    Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
-                    c.icon,
-                    if c.enabled { 1.0 } else { 0.35 },
-                );
+                crate::tint::button(&painter, cell, t.radius_sm, fill, c.enabled);
+                crate::tint::icon(&painter, Rect::from_center_size(cell.center(), vec2(15.0, 15.0)), c.icon, if c.enabled { 1.0 } else { 0.35 });
                 for prefix in h.cell {
                     solidcraft_ui_registry::publish_target(&handle(prefix, c.id), cell);
                 }
@@ -1190,6 +1209,12 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
 /// A group menu's row height.
 pub const ROW_H: f32 = 30.0;
 
+/// The centre of a list row's ⋯, in from the row's right edge.
+const MORE_INSET: f32 = 13.0;
+const ROW_BUTTON: f32 = 20.0;
+/// What a list row keeps clear at its end for its ⋯.
+const ROW_END: f32 = MORE_INSET + ROW_BUTTON / 2.0 + 4.0;
+
 /// What a click on a group menu's row or grid icon asks for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuAction {
@@ -1197,6 +1222,8 @@ pub enum MenuAction {
     Run(Rect),
     /// Its menu, at the point.
     Menu(Pos2),
+    /// Its menu from the row's ⋯, at the point; the drop-down stays open under it.
+    More(Pos2),
     /// Pin it on the ribbon, or take it off.
     TogglePin,
 }
@@ -1241,8 +1268,11 @@ pub struct MenuStyle<'a> {
     pub focus: egui::Id,
     /// Each entry's centre, under each of these prefixes followed by its id.
     pub entry: &'a [&'a str],
-    /// An entry's pin, a hot grid icon, and what the search points out.
+    /// A grid icon's pin, a hot grid icon, and what the search points out.
     pub pin: &'a str,
+    /// A list row's ⋯ (opens the row's menu, as a right-click does) and its hover text.
+    pub more: &'a str,
+    pub more_tip: &'a str,
     pub hot: &'a str,
     pub reveal: &'a str,
 }
@@ -1271,8 +1301,8 @@ pub fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
 /// The note under a menu (how pinning works), translated.
 pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     let t = Tokens::get();
-    ui.separator();
-    ui.add_space(4.0);
+    crate::Menu::separator(ui);
+    ui.add_space(2.0);
     ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_small).color(t.text_dim)).wrap());
     ui.add_space(4.0);
 }
@@ -1291,7 +1321,7 @@ pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str,
                 ui.painter().layout_no_wrap(shortcut.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0
             };
             let check = crate::MenuItem::trailing_check_width(icon.into(), checkable);
-            6.0 + 20.0 + 8.0 + label + key + 30.0 + check
+            6.0 + 20.0 + 8.0 + label + key + ROW_END + 4.0 + check
         })
         .fold(200.0, f32::max)
 }
@@ -1348,7 +1378,7 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
 }
 
 /// One command row of a group's menu: icon, label and shortcut, with the hover background under
-/// the pointer or keyboard focus (like every menu), and a pin at its end. `revealed` is the pulse
+/// the pointer or keyboard focus (like every menu), and a ⋯ at its end. `revealed` is the pulse
 /// strength when the search points this row out (#7287). Returns what was chosen, with the row's
 /// response (for the app's drags and tips).
 pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Option<f32>, style: &MenuStyle) -> (Option<MenuAction>, egui::Response) {
@@ -1365,10 +1395,11 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     if resp.drag_started() {
         resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
     }
-    // The pin at the row's end (above the row, so it takes its own clicks).
-    let pr = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(20.0, 20.0));
-    let pin = ui.interact(pr, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click());
-    let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
+    // The ⋯ at the row's end (above the row, so it takes its own clicks): the entry's menu, as a
+    // right-click on the row opens it. Pinning is there, in place of a pin button (#11853).
+    let mr = Rect::from_center_size(pos2(rect.right() - MORE_INSET, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
+    let more = ui.interact(mr, ui.scope_id().with(("dropdown_more", entry.id)), Sense::click());
+    let pointer_on = (resp.hovered() || more.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     // A checkable row announces its on/off state, since its label no longer says it.
     resp.widget_info(|| match entry.checked {
         Some(on) => egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && entry.enabled, on, entry.label),
@@ -1383,7 +1414,7 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     row.checked = entry.checked;
     row.highlighted = hot || revealed.is_some();
     row.shortcut = entry.shortcut;
-    row.paint(ui, rect, &resp, 26.0);
+    row.paint(ui, rect, &resp, ROW_END);
     if let Some(strength) = revealed {
         paint_reveal(ui.painter(), rect, &style.accent, strength, false);
         solidcraft_ui_registry::publish_rect(style.reveal, rect);
@@ -1396,21 +1427,22 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     }
     let p = ui.painter();
     if pointer_on || resp.has_focus() {
-        if pin.hovered() {
-            p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
+        if more.hovered() {
+            p.rect_filled(mr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
         }
-        crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
-        solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
+        for dx in [-5.0, 0.0, 5.0] {
+            p.circle_filled(pos2(mr.center().x + dx, mr.center().y), 1.6, if more.hovered() { t.text } else { t.text_dim });
+        }
+        solidcraft_ui_registry::publish_handle(&handle(style.more, entry.id), mr.center());
     }
-    let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
     // The menu's rect from the last pass: tips sit beside it, never over its rows (#10481).
     let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(rect);
-    if pin.clicked() {
-        return (Some(MenuAction::TogglePin), resp);
-    }
-    menu_tip(ui, menu, &pin, |ui| {
-        ui.label(tip);
+    menu_tip(ui, menu, &more, |ui| {
+        ui.label(style.more_tip);
     });
+    if more.clicked() {
+        return (Some(MenuAction::More(mr.left_bottom())), resp);
+    }
     match entry.tip {
         Some(RowTip::Plain(text)) => {
             menu_tip(ui, menu, &resp, move |ui| {
@@ -1714,7 +1746,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
         // A line between groups side by side, as between the ribbon's groups.
         for x in &layout.separators {
             let x = origin.x + x;
-            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], crate::Menu::separator_stroke(&t));
         }
         for (index, (entry, (rect, _))) in plain.iter().zip(&layout.cells).enumerate() {
             let rect = rect.translate(origin.to_vec2());
@@ -1740,7 +1772,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
     if resp.drag_started() {
         resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
     }
-    // The pin in the corner, as at a list row's end. It takes clicks (above the cell) only once
+    // The pin in the corner. It takes clicks (above the cell) only once
     // the pointer has rested on the icon for PIN_DELAY: until then a click anywhere runs the
     // command, so a quick click near the corner never pins or unpins it by accident.
     let pr = Rect::from_min_size(pos2(rect.right() - 15.0, rect.top()), vec2(15.0, 15.0));
@@ -1775,12 +1807,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         painter.add(neutral);
         None
     };
-    crate::icons::paint_icon(
-        &painter,
-        Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)),
-        entry.icon,
-        if entry.enabled { 1.0 } else { 0.4 },
-    );
+    crate::tint::icon(&painter, Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)), entry.icon, if entry.enabled { 1.0 } else { 0.4 });
     // A pinned entry always shows its pin, clear of the icon's own artwork; any other shows one
     // to pin it once it can be clicked.
     if entry.pinned || armed {

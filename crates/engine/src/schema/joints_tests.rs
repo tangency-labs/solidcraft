@@ -17,11 +17,27 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<EditJointParams>(),
-        &["a", "angle", "b", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
+        &["a", "a_alignment", "angle", "b", "b_alignment", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
     );
     assert_keys(
         input_schema_for::<CreateJointParams>(),
-        &["a", "angle", "b", "flip", "limits", "name", "offset", "offset_x", "offset_y", "quiet", "type", "value", "values"],
+        &[
+            "a",
+            "a_alignment",
+            "angle",
+            "b",
+            "b_alignment",
+            "flip",
+            "limits",
+            "name",
+            "offset",
+            "offset_x",
+            "offset_y",
+            "quiet",
+            "type",
+            "value",
+            "values",
+        ],
     );
     assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
     assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
@@ -37,7 +53,28 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SolveJointsParams>(), &["dof_free_only", "quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
-        &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
+        &[
+            "axis",
+            "body",
+            "circle",
+            "corner",
+            "curve",
+            "edge",
+            "end",
+            "export_frame",
+            "face",
+            "faces",
+            "frame",
+            "name",
+            "occurrence",
+            "on",
+            "path",
+            "plane",
+            "point",
+            "sketch",
+            "x",
+            "z",
+        ],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "from", "joints", "occurrence", "point", "quiet", "z"]);
@@ -46,6 +83,114 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
     assert_keys(input_schema_for::<CamParams>(), &["a", "b", "flip", "follower", "link", "profile", "quiet", "radius", "tip"]);
+}
+
+#[test]
+fn center_rule_wall_pairs_have_two_world_points_in_both_schemas() {
+    let named = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let constraint = serde_json::to_value(input_schema_for::<CreateConstraintParams>()).unwrap();
+    for (faces, valid) in [
+        (json!([[1, 2, 3], {"x": 4, "y": 5, "z": 6}]), true),
+        (json!([[1, 2, 3]]), false),
+        (json!([[1, 2, 3], [4, 5, 6], [7, 8, 9]]), false),
+        (json!([[1, 2, 3], "F1:+x"]), false),
+        (json!(null), false),
+    ] {
+        let origin = json!({"occurrence": "Slot:1", "faces": faces});
+        let center = json!({"type": "center", "a": origin, "b": {"plane": "YZ"}});
+        assert_eq!(conforms(&named, &named, &origin), valid, "{origin}");
+        assert_eq!(conforms(&constraint, &constraint, &center), valid, "{center}");
+        assert_eq!(serde_json::from_value::<MakeJointOriginParams>(origin).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
+    }
+}
+
+#[test]
+fn between_faces_schema_treats_null_axes_as_omitted() {
+    let named = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let joint = serde_json::to_value(input_schema_for::<CreateJointParams>()).unwrap();
+    let constraint = serde_json::to_value(input_schema_for::<CreateConstraintParams>()).unwrap();
+    let faces = json!([[1, 2, 3], [4, 5, 6]]);
+    for (axes, valid) in [
+        (json!({"x": null}), true),
+        (json!({"z": null}), true),
+        (json!({"x": null, "z": null}), true),
+        (json!({"x": [1, 0, 0]}), false),
+        (json!({"z": [0, 0, 1]}), false),
+        (json!({"face": [1, 2, 3]}), false),
+    ] {
+        let mut origin = json!({"occurrence": "Slot:1", "faces": faces});
+        origin.as_object_mut().unwrap().extend(axes.as_object().unwrap().clone());
+        let paired = |kind| json!({"type": kind, "a": origin, "b": {"plane": "YZ"}});
+        let planar = paired("planar");
+        let center = paired("center");
+        assert_eq!(conforms(&named, &named, &origin), valid, "{origin}");
+        assert_eq!(conforms(&joint, &joint, &planar), valid, "{planar}");
+        assert_eq!(conforms(&constraint, &constraint, &center), valid, "{center}");
+        assert_eq!(serde_json::from_value::<MakeJointOriginParams>(origin).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateJointParams>(planar).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
+    }
+}
+
+#[test]
+fn secondary_construction_axis_x_is_in_the_origin_contract() {
+    let p = json!({"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}});
+    assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_ok());
+    let schema = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    assert!(conforms(&schema, &schema, &p));
+    for x in [
+        json!({"reference": {"type": "construction", "feature": 0}}),
+        json!({"reference": {"type": "construction", "feature": 17}, "face": "F1"}),
+        json!({"reference": {"type": "construction", "feature": 17, "extra": true}}),
+    ] {
+        let bad = json!({"occurrence": 0, "plane": "XY", "x": x});
+        assert!(serde_json::from_value::<MakeJointOriginParams>(bad.clone()).is_err());
+        assert!(!conforms(&schema, &schema, &bad));
+    }
+}
+
+#[test]
+fn secondary_alignment_edit_contract_distinguishes_omission_reference_and_clear() {
+    let omitted: EditJointParams = serde_json::from_value(json!({"joint":1})).unwrap();
+    assert!(omitted.a_alignment.is_none());
+    for value in [Value::Null, json!({"face":"F1:+x","reverse":true}), json!({"reference":{"type":"construction","feature":17},"occurrence":2})] {
+        let wire = json!({"joint":1,"a_alignment":value});
+        let parsed: EditJointParams = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(parsed.a_alignment.unwrap().0, value);
+        let schema = serde_json::to_value(input_schema_for::<EditJointParams>()).unwrap();
+        assert!(conforms(&schema, &schema, &wire), "{wire}");
+    }
+    for value in [
+        json!({"reference":{"type":"construction","feature":0}}),
+        json!({"face":"F1","reference":{"type":"origin_axis","axis":"X"}}),
+        json!({"face":"F1","reverse":1}),
+    ] {
+        let wire = json!({"joint":1,"a_alignment":value});
+        assert!(serde_json::from_value::<EditJointParams>(wire.clone()).is_err());
+        let schema = serde_json::to_value(input_schema_for::<EditJointParams>()).unwrap();
+        assert!(!conforms(&schema, &schema, &wire), "{wire}");
+    }
+}
+
+#[test]
+fn secondary_construction_axis_contract_refuses_unsupported_primaries() {
+    let schema = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": 17}});
+    for mut p in [json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}), json!({"edge": [1, 2, 3], "z": [0, 0, 1]}), json!({"edge": [1, 2, 3]})] {
+        p["occurrence"] = json!(0);
+        p["x"] = x.clone();
+        assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_err(), "{p}");
+        assert!(!conforms(&schema, &schema, &p), "{p}");
+        assert!(serde_json::from_value::<CreateJointParams>(json!({"type": "rigid", "a": p, "b": {"occurrence": 2, "plane": "XY"}})).is_err());
+        assert!(serde_json::from_value::<EditJointParams>(json!({"joint": 1, "a": p})).is_err());
+    }
+    let p = json!({"occurrence": 0, "point": [0, 0, 0],
+        "x": {"x": 1, "y": 0, "z": 0, "reference": {"type": "construction", "feature": 17}}});
+    assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_err());
+    assert!(!conforms(&schema, &schema, &p));
+    assert!(serde_json::from_value::<CreateJointParams>(json!({"type": "rigid", "a": p, "b": {"occurrence": 2, "plane": "XY"}})).is_err());
+    assert!(serde_json::from_value::<EditJointParams>(json!({"joint": 1, "a": p})).is_err());
 }
 
 #[test]
@@ -1395,6 +1540,7 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"circle": [1, 2, 3], "z": [0, 0, 1], "x": null}), true),
             (json!({"edge": [1, 2, 3], "on": [0, 0, 0], "corner": {"x": 1, "y": 2, "z": 3}, "z": [1, 0, 0]}), true),
             (json!({"point": [1, 2, 3], "z": [0, 0, 1], "x": [1, 0, 0]}), true),
+            (json!({"face": [1, 2, 3], "export_frame": true}), true),
             (json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}), true),
             (json!({"plane": "XY"}), true),
             (json!({"plane": "o:2/origin/XY"}), true),
@@ -1413,6 +1559,7 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"face": [1, 2, 3], "path": null}), true),
             (json!({"face": [1, 2, 3], "path": []}), false),
             (json!({"face": [1, 2, 3], "path": (0..65).collect::<Vec<u64>>()}), false),
+            (json!({"face": [1, 2, 3], "export_frame": "yes"}), false),
         ],
     );
     takes(
@@ -1513,8 +1660,15 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    // face, circle, edge, point, plane, axis and frame: the forms the handler reads.
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(7));
+    // The eight existing origin forms and the new pair of distinct parallel faces.
+    assert_eq!(
+        input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"],
+        json!([
+            {"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]},
+            {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]},
+            {"required": ["axis"]}, {"required": ["frame"]}, {"required": ["faces"]}
+        ])
+    );
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by

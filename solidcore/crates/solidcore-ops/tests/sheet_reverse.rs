@@ -175,6 +175,92 @@ fn turned_over_twice_a_sheet_is_itself() {
     }
 }
 
+/// `r` with every face of its open shells used backward, as a record from before the side
+/// lived in the surface writes a turned sheet (Reverse Normal's `forward: false`).
+fn used_backward(r: &Brep) -> Brep {
+    let mut loose = r.clone();
+    for s in &mut loose.shells {
+        if let Shell::Faces { faces, .. } = s {
+            for f in faces {
+                f.forward = false;
+            }
+        }
+    }
+    for e in &mut loose.edges {
+        e.uses.clear();
+    }
+    loose.canonical().unwrap().brep
+}
+
+/// A sheet whose face its record uses backward (`forward: false` in its open shell, #13640)
+/// comes back from the kernel with its side: the face used forward on its surface turned over,
+/// the same point of it with the same normal in its shell (the backward one). Its edges and
+/// vertices are where they were. Turned over by ops, it faces as the record did not.
+#[test]
+fn a_face_used_backward_keeps_its_side_through_the_kernel() {
+    let front = sheet();
+    let back = used_backward(&front);
+    back.validate_built().unwrap();
+    assert_eq!(sides(&back), vec![(0, false)]);
+    let (body, _) = Body::from_record(&back, true).unwrap();
+    let (again, _) = body.to_record().unwrap();
+    again.validate_built().unwrap();
+    assert_eq!(
+        sides(&again),
+        vec![(0, true)],
+        "every face of an open shell used forward"
+    );
+    let d = back.faces[0].domain;
+    for (s, t) in [(0.3, 0.6), (0.5, 0.5), (0.8, 0.1)] {
+        let u = (1.0 - s) * d[0][0] + s * d[0][1];
+        let v = (1.0 - t) * d[1][0] + t * d[1][1];
+        // the surface turned over: its u and v swapped
+        let (pb, pa) = (point(&back, 0, [u, v]), point(&again, 0, [v, u]));
+        let (nb, na) = (
+            shell_normal(&back, 0, [u, v]),
+            shell_normal(&again, 0, [v, u]),
+        );
+        let nf = shell_normal(&front, 0, [u, v]);
+        for k in 0..3 {
+            assert!((pb[k] - pa[k]).abs() < 1e-9, "{pb:?} {pa:?}");
+            assert!(
+                (nb[k] - na[k]).abs() < 1e-12,
+                "the side kept at {pb:?}: {nb:?} then {na:?}"
+            );
+            assert!(
+                (nf[k] + na[k]).abs() < 1e-12,
+                "the other side from the front's: {nf:?}, {na:?}"
+            );
+        }
+    }
+    // numbered as the record numbers them: each vertex where it was, each edge between the
+    // same vertices along the same curve
+    let points = |r: &Brep| r.vertices.iter().map(|v| v.point).collect::<Vec<_>>();
+    assert_eq!(points(&again), points(&back));
+    let ends = |r: &Brep| {
+        r.edges
+            .iter()
+            .map(|e| (e.vertices, e.curve.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ends(&again), ends(&back));
+    // turned over by ops, the record's front again
+    let (turned, _) = reverse_sheet(&back).unwrap();
+    let n = shell_normal(
+        &turned,
+        0,
+        [d[0][0] * 0.5 + d[0][1] * 0.5, d[1][0] * 0.5 + d[1][1] * 0.5],
+    );
+    let f = shell_normal(
+        &front,
+        0,
+        [d[0][0] * 0.5 + d[0][1] * 0.5, d[1][0] * 0.5 + d[1][1] * 0.5],
+    );
+    for k in 0..3 {
+        assert!((n[k] - f[k]).abs() < 1e-12, "{n:?} vs {f:?}");
+    }
+}
+
 #[test]
 fn a_closed_body_is_refused() {
     let (cube, _) = make_box([0.0; 3], [10.0; 3]).unwrap().to_record().unwrap();

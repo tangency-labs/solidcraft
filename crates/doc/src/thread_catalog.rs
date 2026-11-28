@@ -456,6 +456,36 @@ fn metric_size(major_diameter: f64, pitch: f64) -> TappedThread {
 /// The rule an ISO metric tapped hole's tolerance class follows (ISO 965-1's internal classes).
 const METRIC_CLASS: &str = "an ISO metric tapped hole's class is a grade 4 to 8 and G or H, such as 6H, or a pitch diameter class then a minor diameter class such as 5H6H (ISO 965-1)";
 
+/// Which side an ISO metric tolerance class is for, as ISO 965-1 (1998 and 2013 editions) writes
+/// it: `Some(true)` an internal thread's, `Some(false)` an external thread's, `None` neither.
+///
+/// A class is a tolerance grade (a digit) then a tolerance position (a letter): G or H for an
+/// internal thread, e, f, g or h for an external one. ISO 965-1 grades the pitch diameter and the
+/// crest diameter separately: an internal thread's pitch diameter D2 and minor diameter D1 take
+/// grades 4 to 8, an external thread's pitch diameter d2 grades 3 to 9 and its major diameter d
+/// grades 4, 6 and 8. The pitch-diameter class is written first, then the crest-diameter class
+/// (`5g6g`, `5H6H`); both take the thread's one position (its one fundamental deviation). Where
+/// the two classes are the same the standard finds repeating it unnecessary and writes it once
+/// (`6g`), so a lone class needs a grade both diameters take: `5g` alone is no class. Writing a
+/// repeated class (`6g6g`) is refused here by choice, as tapped holes always have, so each class
+/// has one spelling. A class a later edition adds (ISO 965-1:2026 adds tolerances on an
+/// external thread's minor diameter) may be refused. Two or four bytes only: a hostile string is
+/// refused by its length, never scanned.
+pub(crate) fn iso_965_class(class: &str) -> Option<bool> {
+    let pitch = |internal: bool, g: u8| if internal { (b'4'..=b'8').contains(&g) } else { (b'3'..=b'9').contains(&g) };
+    let crest = |internal: bool, g: u8| if internal { (b'4'..=b'8').contains(&g) } else { matches!(g, b'4' | b'6' | b'8') };
+    let side = |p: u8| match p {
+        b'G' | b'H' => Some(true),
+        b'e' | b'f' | b'g' | b'h' => Some(false),
+        _ => None,
+    };
+    match *class.as_bytes() {
+        [g, p] => side(p).filter(|&i| pitch(i, g) && crest(i, g)),
+        [g1, p1, g2, p2] if p1 == p2 && g1 != g2 => side(p1).filter(|&i| pitch(i, g1) && crest(i, g2)),
+        _ => None,
+    }
+}
+
 /// How much larger than the tap maker's drill a tapped hole may be drilled: 5%.
 pub const DRILL_ALLOWANCE: f64 = 0.05;
 
@@ -489,20 +519,15 @@ impl TappedThread {
     }
 
     /// Whether a tapped hole of this size takes `class` as its tolerance class, as written: ISO 965-1's
-    /// internal classes for ISO metric (a grade 4 to 8 and position G or H, `6H`; a pitch-diameter
-    /// class then a minor-diameter class of the same position and another grade, `5H6H`), ASME
+    /// internal classes for ISO metric ([`iso_965_class`]: a grade 4 to 8 and position G or H, `6H`;
+    /// a pitch-diameter class then a minor-diameter class of the same position and another grade,
+    /// `5H6H`), ASME
     /// B1.1's `1B`, `2B` and `3B` for Unified. G (ISO 228-1 gives an internal G thread one
     /// tolerance), Rp and Rc (ISO 7-1) and NPT (ASME B1.20.1) take none. The error names the rule.
     pub fn check_class(&self, class: &str) -> Result<(), String> {
-        // A grade and a position: the slice patterns below match two or four bytes only, so a
-        // hostile string is refused by its length, never scanned.
-        let metric = |grade: u8, position: u8| (b'4'..=b'8').contains(&grade) && matches!(position, b'G' | b'H');
         match self.family {
-            TappedThreadFamily::Metric => match *class.as_bytes() {
-                [g, p] if metric(g, p) => Ok(()),
-                [g1, p1, g2, p2] if metric(g1, p1) && metric(g2, p2) && p1 == p2 && g1 != g2 => Ok(()),
-                _ => Err(METRIC_CLASS.into()),
-            },
+            TappedThreadFamily::Metric if iso_965_class(class) == Some(true) => Ok(()),
+            TappedThreadFamily::Metric => Err(METRIC_CLASS.into()),
             TappedThreadFamily::Unc | TappedThreadFamily::Unf if matches!(class, "1B" | "2B" | "3B") => Ok(()),
             TappedThreadFamily::Unc | TappedThreadFamily::Unf => Err("a Unified tapped hole's class is 1B, 2B or 3B (ASME B1.1)".into()),
             TappedThreadFamily::G | TappedThreadFamily::Rp | TappedThreadFamily::Rc | TappedThreadFamily::Npt => {
@@ -760,6 +785,49 @@ mod tests {
                 assert!(e.contains(&format!("a {} tapped hole has no tolerance class", pipe.designation)), "{name} {class}: {e}");
             }
         }
+    }
+
+    /// ISO 965-1's classes from its grades (1998 and 2013 editions): an internal thread's pitch
+    /// diameter D2 and minor diameter D1 grades 4 to 8, positions G and H; an external thread's
+    /// pitch diameter d2 grades 3 to 9 and major diameter d grades 4, 6 and 8, positions e, f, g
+    /// and h. A class is written once for both diameters, so a lone grade must be one both take,
+    /// and a pair is the pitch class then a different crest class of the same position. Counts:
+    /// external 3 x 4 = 12 lone, (7 x 3 - 3 equal pairs) x 4 = 72 pairs; internal 5 x 2 = 10 lone,
+    /// (5 x 5 - 5) x 2 = 40 pairs. Every string of the class's shape over these digits and the
+    /// letters around the positions (d to i, D to I, so wrong letters are tried) is counted.
+    #[test]
+    fn iso_965_classes_follow_the_grades_of_each_diameter() {
+        let digits: Vec<u8> = (b'0'..=b'9').collect();
+        let letters: Vec<u8> = (b'd'..=b'i').chain(b'D'..=b'I').collect();
+        let (mut external, mut internal) = (0, 0);
+        let mut count = |text: &[u8]| match iso_965_class(std::str::from_utf8(text).unwrap()) {
+            Some(true) => internal += 1,
+            Some(false) => external += 1,
+            None => {}
+        };
+        for &g in &digits {
+            for &p in &letters {
+                count(&[g, p]);
+                for &g2 in &digits {
+                    for &p2 in &letters {
+                        count(&[g, p, g2, p2]);
+                    }
+                }
+            }
+        }
+        assert_eq!((external, internal), (12 + 72, 10 + 40));
+        for class in ["4g", "6g", "8g", "4h", "6e", "6f", "5g6g", "3h4h", "7g6g", "9g8g", "5g4g", "9e8e"] {
+            assert_eq!(iso_965_class(class), Some(false), "{class}");
+        }
+        for class in ["4H", "8H", "6G", "5H6H", "7G6G", "4H8H"] {
+            assert_eq!(iso_965_class(class), Some(true), "{class}");
+        }
+        // No crest grade 3, 5, 7 or 9 on a shaft; grade 2, position d; a repeated or mixed class;
+        // grades 3 and 9 in a hole; position E is a shaft's letter in the wrong case.
+        for class in ["3g", "5g", "7g", "9g", "2g", "6d", "6g6g", "5g6h", "5g7g", "6G6g", "3H", "9H", "6H6H", "5H6G", "6E", "g6", "", "6g ", "6"] {
+            assert_eq!(iso_965_class(class), None, "{class}");
+        }
+        assert_eq!(iso_965_class(&"6g".repeat(5000)), None);
     }
 
     #[test]

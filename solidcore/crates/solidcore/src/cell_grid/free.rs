@@ -22,7 +22,12 @@ const MIN_AREA: f64 = 1e-9;
 /// The cell to clip.
 pub(crate) enum Cell<'a> {
     Polygon(&'a Convex),
-    Circle { c: Vec2, r: f64 },
+    Circle {
+        c: Vec2,
+        r: f64,
+    },
+    /// Any closed loop of lines and arcs (a sketched cell, convex or not).
+    General(&'a Loop),
 }
 
 impl Cell<'_> {
@@ -35,6 +40,7 @@ impl Cell<'_> {
                 x1: c.x + r,
                 y1: c.y + r,
             },
+            Cell::General(lp) => lp.bounds(),
         }
     }
 
@@ -57,6 +63,7 @@ impl Cell<'_> {
                     p1: start,
                 }]
             }
+            Cell::General(lp) => lp.prims.clone(),
         }
     }
 
@@ -64,6 +71,7 @@ impl Cell<'_> {
         match self {
             Cell::Polygon(poly) => poly.contains(p, 0.0),
             Cell::Circle { c, r } => p.distance(*c) < *r,
+            Cell::General(lp) => lp.contains(p),
         }
     }
 }
@@ -97,7 +105,7 @@ fn fraction(p: &Prim, x: Vec2) -> f64 {
 }
 
 /// Up to four points where two pieces meet (the ends of the overlap where they run along each other).
-fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
+pub(super) fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
     let mut out = Vec::new();
     match (*a, *b) {
         (Prim::Line { a: p, b: q, .. }, Prim::Line { a: r, b: s, .. }) => {

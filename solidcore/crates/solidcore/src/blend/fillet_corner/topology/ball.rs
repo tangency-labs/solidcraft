@@ -14,7 +14,7 @@
 //! (`GetFilletSolverOfEdgeuse` of each ring edge use, else of its mate), and passed in
 //! [`BallTopologyEnv`] (WR-697). There is no recursion.
 
-use super::{new_corner_vertex, OP_NX2};
+use super::{defect, missing_defect, new_corner_vertex, NO_PRIMARY_EU, OP_NX2};
 use crate::blend::blend_corner::ball::BallCorner;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
@@ -22,7 +22,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -44,6 +44,11 @@ pub(crate) struct BallTopologyEnv<'a> {
     pub(crate) solvers: Vec<&'a FilletSolver>,
 }
 
+/// Why a missing face of the ball corner's ring is the kernel's fault.
+const NO_RING_FACE: &str = "two edge uses next to each other in the ball corner's ring share \
+     no face, though the ball's classification makes a ball only of a ring with a face between \
+     each two";
+
 impl FilletCorner {
     /// The fork's `SmBlendCorner::MakeBallTopology` (WR-697, 79d4763): vertex `i` where
     /// the rails of rounds `i - 1` and `i` cross on their common face `i`
@@ -53,8 +58,9 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a corner that is not a Ball of three or more ring edge uses (one solver each);
-    /// `SM_ERR_NULL_POINTER` where the fork dereferences missing topology (`NER`);
+    /// Reviewed `Defect`s: `SM_ERR` for a corner that is not a Ball of three or more ring
+    /// edge uses (one solver each); `SM_ERR_NULL_POINTER` where the fork dereferences
+    /// missing topology (`NER`);
     /// those of the solver and pseudo-topology operations.
     pub(crate) fn make_ball_topology(&mut self, env: BallTopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
@@ -70,11 +76,13 @@ impl FilletCorner {
             corner,
             solvers,
         } = env;
-        let nul = |what: &'static str| SolidError::blend_missing(OP_NX2, what);
-        let all = self
-            .all_eus
-            .clone()
-            .ok_or_else(|| nul("the corner's outward edge uses"))?;
+        let all = self.all_eus.clone().ok_or_else(|| {
+            missing_defect(
+                OP_NX2,
+                "the ball corner has no ring of edge uses, though the corner's create walks \
+                 the ring before the corner is classified a ball",
+            )
+        })?;
         let n = all.len();
         if !self
             .blend
@@ -82,9 +90,11 @@ impl FilletCorner {
             || n < 3
             || solvers.len() != n
         {
-            return Err(SolidError::blend_failed(
+            return Err(defect(
                 OP_NX2,
-                "the corner is not a ball corner of a round on each of its three or more edges",
+                "the corner is not a ball corner of a round on each of its three or more edges, \
+                 though its classification makes a ball only of three or more rounded edges \
+                 and the caller passes one solver per edge",
             ));
         }
         self.ball = Some(BallCorner::default());
@@ -98,7 +108,7 @@ impl FilletCorner {
         }
         for (fs, face) in solvers.iter().zip(&faces) {
             geoms.push(fs.first_fillet_geom()?);
-            face.ok_or_else(|| nul("the face between two of the corner's edge uses"))?;
+            face.ok_or_else(|| missing_defect(OP_NX2, NO_RING_FACE))?;
         }
 
         // the contacts: rounds i - 1 and i's rails on face i
@@ -107,7 +117,7 @@ impl FilletCorner {
                 .get(ii)
                 .copied()
                 .flatten()
-                .ok_or_else(|| nul("the face between two of the corner's edge uses"))?;
+                .ok_or_else(|| missing_defect(OP_NX2, NO_RING_FACE))?;
             let fv = new_corner_vertex(k, pseudo, corner)?;
             {
                 let v = pseudo.fillet_vertex_mut(fv)?;
@@ -117,7 +127,11 @@ impl FilletCorner {
             let prev = (ii + n - 1) % n;
             for round in [prev, ii] {
                 let (Some(&g), Some(&fs)) = (geoms.get(round), solvers.get(round)) else {
-                    return Err(nul("a round's geometry or solver"));
+                    return Err(missing_defect(
+                        OP_NX2,
+                        "a round of the ball corner has no geometry or solver, though the loop \
+                         above takes one geometry from each of the corner's solvers, one per edge",
+                    ));
                 };
                 let rail = fs.find_index_of_rail_on_face(target, Some(face))?;
                 pseudo.make_rail_edgeuse_on(
@@ -144,14 +158,18 @@ impl FilletCorner {
                 self.vertices.get((ii + 1) % n),
                 geoms.get(ii),
             ) else {
-                return Err(nul("a contact vertex or a round's geometry"));
+                return Err(missing_defect(
+                    OP_NX2,
+                    "the ball corner has no contact vertex or round geometry at an index, though \
+                     the loops above make one contact and take one geometry per edge",
+                ));
             };
             let e = pseudo.make_fillet_edge(Some(from), Some(to), Some(corner))?;
             pseudo
                 .fillet_edge_mut(e)?
                 .set_fillet_edge_type(FilletEdgeType::CrossSection);
             let primary = eu1::primary_edgeuse(pseudo.brep(), e)?
-                .ok_or_else(|| nul("the corner edge's primary edge use"))?;
+                .ok_or_else(|| missing_defect(OP_NX2, NO_PRIMARY_EU))?;
             pseudo.set_edgeuse_fillet_geom(primary, Some(g))?;
             self.edges.push(e);
         }

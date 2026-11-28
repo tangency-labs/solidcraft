@@ -1798,6 +1798,7 @@ fn run_rust_op_in(
                 wrap_in_offsets(k, b, &faces, d)?;
             }
             let (s, _) = status(bp3::turn_to_nurbs(k, b, &mut env))?;
+            crate::dump::body(k, "uv_trims", b);
             out.push(s);
             for e in edges {
                 put_curve(&mut out, must(b.edge(e))?.curve.as_ref())?;
@@ -1828,7 +1829,7 @@ fn put_vertex_points(o: &mut Vec<f64>, b: &Brep, vertices: &[VertexId]) -> Resul
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     if standalone(&i.op) {
         let Some((op, args)) = op_args(&i.op, &[0; 10])? else {
             return Ok(Output::err("no target"));
@@ -2181,7 +2182,7 @@ mod tests {
             let OpIn::TurnNurbsOffset { offset } = i.op else {
                 continue;
             };
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let Ok(Ok((mut b, c))) = own_brep(&mut k, &i) else {
                 continue;
             };

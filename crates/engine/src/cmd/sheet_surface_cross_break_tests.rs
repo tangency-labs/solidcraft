@@ -137,6 +137,10 @@ fn cross_break_marks_the_diagonals_in_the_flat_pattern_and_dxf() {
     let creases = dxf_lines_on(&d, "CROSS_BREAK_DOWN");
     assert!(creases.len() == 2 && want.iter().all(|w| creases.iter().any(|l| close(l, w))), "{creases:?}");
     assert!(dxf_lines_on(&d, "CROSS_BREAK_UP").is_empty());
+    // An inches drawing has the creases in inches, as every other line of it.
+    let inches = dxf_lines_on(&dxf(&mut s, json!({"units": "inches"})), "CROSS_BREAK_DOWN");
+    let want_in = want.map(|w| w.map(|v| v / 25.4));
+    assert!(inches.len() == 2 && want_in.iter().all(|w| inches.iter().any(|l| close(l, w))), "{inches:?}");
     // A marking only: the same faces, volume and outline.
     assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["faces"], before["bodies"][0]["faces"]);
     assert!(rel(volume(&mut s), volume_before) < 1e-12);

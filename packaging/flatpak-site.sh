@@ -40,10 +40,24 @@ base_url="${PAGES_BASE_URL%/}"
 # HTTPS (the remote URL is stored by every client that adds it).
 base_url="https://${base_url#*://}"
 previous_url="$base_url/flatpak/repo"
-if curl --fail --silent --location --output /dev/null "$previous_url/summary"; then
+if curl --fail --silent --location --retry 3 --retry-delay 2 --retry-connrefused --output /dev/null "$previous_url/summary"; then
   ostree --repo="$repo_dir" remote add --no-gpg-verify previous "$previous_url"
-  ostree --repo="$repo_dir" pull --mirror previous
+  # Transient server errors (such as intermittent HTTP 503s from the Pages host) must not fail
+  # the whole deployment; retry up to 5 times (#22154).
+  pulled=0
+  for attempt in 1 2 3 4 5; do
+    if ostree --repo="$repo_dir" pull --network-retries=5 --mirror previous; then
+      pulled=1
+      break
+    fi
+    echo "warning: ostree pull failed (attempt $attempt/5); retrying in $((attempt * 3))s..." >&2
+    sleep $((attempt * 3))
+  done
   ostree --repo="$repo_dir" remote delete previous
+  if [ "$pulled" -eq 0 ]; then
+    echo "error: failed to mirror previous repository from $previous_url after 5 attempts" >&2
+    exit 1
+  fi
 fi
 for arch in x86_64 aarch64; do
   asset="solidcraft-$version-linux-$arch.flatpak"

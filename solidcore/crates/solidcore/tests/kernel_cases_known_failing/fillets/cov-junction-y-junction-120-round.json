@@ -1,0 +1,4 @@
+{
+  "issue": "tangency-labs/solidcore#2361",
+  "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"
+}

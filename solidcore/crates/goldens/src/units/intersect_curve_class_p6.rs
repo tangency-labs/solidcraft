@@ -838,6 +838,7 @@ mod tests {
     use super::*;
     use solidcore::geom::tol::scaled_zero_of_curve;
     use solidcore::intersect::curve_class::p1::xsect_tol_2d_or_3d_for_classify_pair;
+    use solidcore::curve::curve::p2::CurveKind;
     use solidcore::math::EFF_ZERO_PARAM;
 
     /// #18342: `scale_k3_5_0_0.000000000001` and `scale_k3_5_0.999999999999_1` insert a
@@ -886,5 +887,214 @@ mod tests {
             }
             assert_eq!(short, 1, "{bounds:?}");
         }
+    }
+
+    /// WR-469 (tangency-labs/solidcraft#17985): `imprint_face_split_f0` and `_f2` place the
+    /// line from the origin along (1, 2, 0)/sqrt 5, of length 1, and end its new edge at a
+    /// new vertex 0.059 past the line's end. `MakeEdgeInFaceWithVU`'s step makes that
+    /// vertex's tolerance exactly twice its gap (0.11804298874989479), so the end lies within
+    /// half of it; without the step `RefreshTolerance(FALSE)` left 0.059022494374947436,
+    /// 1e-6 over the gap and under twice it (MEASURED, before the step became the only
+    /// path). The row's two moved values are the new vertex's tolerance: in the sorted
+    /// vertex tolerances (`out[159]`, the only one past 1e-5) and after its point
+    /// (`out[177]`). Replays both rows.
+    #[test]
+    fn imprint_face_split_new_vertex_tolerance_is_twice_its_gap() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        // the placed line's end, as the case builds it
+        let k = Kernel::default();
+        let g = geometry(&k, 5, 1.0, [0, 11, 2, 0]).unwrap();
+        let end = g.curve.evaluate_point(&k, 1.0).unwrap();
+        // the allowances are relative 1e-12: the values are unit-scale distances, which
+        // rounding moves by a few ulp (about 1e-16 relative), and doubling is exact; a
+        // missing step moves the tolerance by half (0.059 against 0.118)
+        assert!(end.distance(Vec3::new(1.0, 2.0, 0.0) * (1.0 / 5f64.sqrt())) <= 1e-12);
+        for name in ["imprint_face_split_f0", "imprint_face_split_f2"] {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let out = &Runner.run_rust(case).unwrap().values["out"];
+            assert_eq!(out.len(), 181, "{name}");
+            let vertex = Vec3::new(out[174], out[175], out[176]);
+            let gap = vertex.distance(end);
+            assert!(gap > 0.059 && gap < 0.0591, "{name}: gap {gap:e}");
+            assert!(
+                (out[177] - 2.0 * gap).abs() <= 1e-12 * out[177],
+                "{name}: {} {gap:e}",
+                out[177]
+            );
+            assert_eq!(out[159], out[177], "{name}");
+            let others = out[151..159].iter().chain(&out[160..174]);
+            assert!(others.copied().all(|t| t == 1e-5), "{name}: {out:?}");
+        }
+    }
+
+    /// The ends of line edge `e` (asserting it is a line).
+    fn line_ends(k: &Kernel, br: &Brep, e: solidcore::topology::EdgeId) -> (Vec3, Vec3) {
+        let c = topo_edge::curve(br, e).unwrap().unwrap();
+        assert!(matches!(c.kind(), CurveKind::Line(_)), "{e:?}");
+        let iv = topo_edge::interval(br, e).unwrap();
+        (
+            c.evaluate_point(k, iv.min()).unwrap(),
+            c.evaluate_point(k, iv.max()).unwrap(),
+        )
+    }
+
+    /// The distance from `p` to the segment `a`-`b`: the clamped projection.
+    fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
+        let d = b - a;
+        let t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+        p.distance(a + d * t)
+    }
+
+    /// The distance from `p` to the convex planar polygon `poly`: the height over its plane
+    /// when the foot falls inside, else the distance to its nearest side.
+    fn polygon_distance(p: Vec3, poly: &[Vec3]) -> f64 {
+        let n = (poly[1] - poly[0]).cross(poly[2] - poly[0]).unitize().unwrap();
+        let h = (p - poly[0]).dot(n);
+        let foot = p - n * h;
+        let sides = poly.iter().zip(poly.iter().cycle().skip(1));
+        let inside = sides
+            .clone()
+            .all(|(a, b)| (*b - *a).cross(foot - *a).dot(n) >= 0.0)
+            || sides.clone().all(|(a, b)| (*b - *a).cross(foot - *a).dot(n) <= 0.0);
+        if inside {
+            h.abs()
+        } else {
+            sides
+                .map(|(a, b)| segment_distance(p, *a, *b))
+                .fold(f64::INFINITY, f64::min)
+        }
+    }
+
+    /// WR-469 at a gap the validity rules accept (the companion of
+    /// `imprint_face_split_new_vertex_tolerance_is_twice_its_gap`, whose made-up 0.059 gap is
+    /// 5900 times the box's tolerance, past the 2000 times that §5.1 of
+    /// `docs/validity-and-tolerances.md` refuses whatever the clearance, on main as with the
+    /// step). The same `imprint_face_split_f0` imprint with the line shortened to
+    /// `sqrt(1.25) - 4e-5`: its end lies on the ray through the edge point (0.5, 1, 0), 4e-5
+    /// short of it, and the new vertex lands between the two. Asserts, from the body:
+    ///
+    /// - the step: the vertex tolerance `t` is twice `d`, the farthest end of an edge at the
+    ///   vertex (so every end lies within `t/2`, `AssertValid`'s limit), and `d` is at least
+    ///   half the 4e-5 span (the vertex lies between the ends) and at most all of it;
+    /// - §5.1: `t` is under 1000 times the body's tolerance (the ratio test passes), and
+    ///   `validate_pointers` reports no Test #82;
+    /// - §8 / §9 invariant 7: the exact clearance from the vertex to every vertex, edge and face
+    ///   it does not bound (the box's edges are lines and its faces planar polygons, so the
+    ///   distances are closed form) is greater than `t`, and `vertex_ball_reaches` agrees.
+    ///
+    /// Allowances: the ends and the vertex are unit-scale coordinates (ulp 2.2e-16), so `d`
+    /// (about 2.45e-5) carries an absolute error of a few ulp of 1; 1e-14 on `t - 2d` is
+    /// about 45 such ulp and two orders below the 2.45e-5 a missing step would move it by.
+    /// MEASURED: t = 4.9e-5, clearance 0.49999 (the face x = 0 and the edge (0, y, 0)).
+    /// The box's edges fail `ValidateGeometry` (Test #61) before the imprint as on main (12
+    /// of 12), a property of the case's box, so only Test #61 on edges may be reported.
+    #[test]
+    fn imprint_face_split_at_a_valid_gap_keeps_clear_of_the_box() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let case = cases
+            .iter()
+            .find(|c| c.name == "imprint_face_split_f0")
+            .unwrap();
+        let mut i: Fixture = case.parse().unwrap();
+        i.scale = 1.25f64.sqrt() - 4e-5;
+        let mut k = Kernel::default();
+        let mut g = geometry(&k, i.kind, i.scale, i.pick).unwrap();
+        g.brep.set_editing_enabled(true);
+        let mut a = classification(&k, &i.a, i.tol, &g.first).unwrap();
+        let b = classification(&k, &i.b, i.tol, &g.first).unwrap();
+        a.set_fillet_data(None, false);
+        a.merge_interval_mut(&mut k, &mut g, i.index, false, Some(&b))
+            .unwrap();
+        let br = &g.brep;
+        let body = br.tolerance();
+        assert_eq!(body, 1e-5);
+        let vertices = brep_p1::vertices(br, None).unwrap();
+        let wide: Vec<_> = vertices
+            .iter()
+            .copied()
+            .filter(|v| topo_vertex::tolerance(br, *v).unwrap() > body)
+            .collect();
+        assert_eq!(wide.len(), 1, "{wide:?}");
+        let v = wide[0];
+        let p = topo_vertex::point(br, v).unwrap();
+        let t = topo_vertex::tolerance(br, v).unwrap();
+
+        // the step: t = 2d, d the farthest edge end at the vertex
+        let at_v = topo_vertex::edges(br, v, None).unwrap();
+        let mut d: f64 = 0.0;
+        for e in &at_v {
+            let vs = topo_vertex::edge_vertices(br, *e).unwrap();
+            let (s0, s1) = line_ends(&k, br, *e);
+            for (end, ev) in [(s0, vs[0]), (s1, vs[1])] {
+                if ev == Some(v) {
+                    d = d.max(p.distance(end));
+                }
+            }
+        }
+        assert!((2e-5..=4e-5).contains(&d), "d {d:e}");
+        assert!((t - 2.0 * d).abs() <= 1e-14, "t {t:e} d {d:e}");
+
+        // §5.1: under the ratio limit, and no Test #82
+        assert!(t < solidcore::geom::tol::LARGE_SMALL_SIZE_RATIO * body, "t {t:e}");
+        let mut reports = solidcore::geom::assert_array::AssertArray::new();
+        solidcore::topology::brep::validation::validate_pointers(
+            &k,
+            &mut g.brep,
+            Some(&mut reports),
+            0,
+            false,
+            &crate::own_reader::read_key_of,
+        )
+        .unwrap();
+        let br = &g.brep;
+        let edges = brep_p1::edges(br, None).unwrap();
+        for r in reports.reports() {
+            assert!(r.test_index == 61 && r.owner_type_string == Some("SmEdge"), "{r:?}");
+        }
+        assert!(reports.len() <= edges.len());
+
+        // §8: the exact clearance to everything the vertex does not bound
+        let faces_at_v = topo_vertex::faces(br, v).unwrap();
+        let mut bound = vec![v];
+        for e in &at_v {
+            bound.extend(topo_vertex::edge_vertices(br, *e).unwrap().into_iter().flatten());
+        }
+        let mut clearance = f64::INFINITY;
+        for w in vertices.iter().filter(|w| !bound.contains(w)) {
+            clearance = clearance.min(p.distance(topo_vertex::point(br, *w).unwrap()));
+        }
+        for e in edges.iter().filter(|e| !at_v.contains(e)) {
+            let (s0, s1) = line_ends(&k, br, *e);
+            clearance = clearance.min(segment_distance(p, s0, s1));
+        }
+        for f in brep_p1::faces(br, None).unwrap() {
+            if faces_at_v.contains(&f) {
+                continue;
+            }
+            let loops = topo_face::loops(br, f, false, None).unwrap();
+            assert_eq!(loops.len(), 1, "{f:?}");
+            // its sides are edges, all lines (`line_ends` asserted it for every edge above)
+            let poly: Vec<Vec3> = topo_vertex::loop_vertices(br, loops[0])
+                .unwrap()
+                .into_iter()
+                .map(|w| topo_vertex::point(br, w.unwrap()).unwrap())
+                .collect();
+            let n = (poly[1] - poly[0]).cross(poly[2] - poly[0]).unitize().unwrap();
+            assert!(poly.iter().all(|q| (*q - poly[0]).dot(n).abs() <= 1e-15), "{f:?}");
+            clearance = clearance.min(polygon_distance(p, &poly));
+        }
+        assert!(clearance > t, "clearance {clearance:e} t {t:e}");
+        assert!(
+            !solidcore::topology::brep::validation::vertex_ball_reaches(&k, &mut g.brep, v)
+                .unwrap()
+        );
     }
 }

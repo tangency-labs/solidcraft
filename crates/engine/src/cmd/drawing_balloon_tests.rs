@@ -41,7 +41,16 @@ fn placed() -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id, bracket)
@@ -80,6 +89,25 @@ fn a_balloon_points_at_a_placed_part_and_is_saved_by_name() {
     assert_eq!(saved(&s), before);
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(saved(&s), one);
+}
+
+/// With `at_edge: picked` the arrow ends where the edge was picked, not on its middle, saved as a
+/// part of the edge's length (#22195); a pick by index has no point to keep and is refused.
+#[test]
+fn a_balloon_can_end_its_arrow_where_its_edge_was_picked() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = json!(ids::encode(view));
+    let reply = run(&mut s, ADD, json!({"view": v, "edge": {"point": [7.5, 0, 0], "path": [bracket]}, "at": [0, 0], "at_edge": "picked"}));
+    assert_eq!(reply["status"].as_str(), Some("ok"), "{reply}");
+    ends_at(&reply, [7.5, 0.0, 0.0]);
+    let along = reply["record"]["along"].as_f64().unwrap();
+    assert!(along > 0.0 && along < 1.0 && (along - 0.5).abs() > 0.3, "{reply}");
+    let middle = run(&mut s, ADD, json!({"view": v, "edge": {"point": [7.5, 0, 0], "path": [bracket]}, "at": [0, 0], "at_edge": "middle"}));
+    ends_at(&middle, [40.0, 0.0, 0.0]);
+    assert!(middle["record"].get("along").is_none(), "a middle saves nothing: {middle}");
+    let body = reply["record"]["edge"]["body"].as_str().unwrap().to_string();
+    let e = refused(&mut s, ADD, json!({"view": v, "edge": {"body": body, "index": 0, "path": [bracket]}, "at": [0, 0], "at_edge": "picked"}));
+    assert!(e.contains("pick the edge by a point"), "{e}");
 }
 
 /// What a balloon can't point at is refused with its reason, and the drawing is left as it was: a
@@ -865,6 +893,52 @@ fn the_provider_keeps_a_balloon_until_what_it_reads_changes() {
     assert_eq!(*moved.scene, built(&s, sheet));
 }
 
+/// Centre annotations, balloons and their table share the one-shot and retained sheet without
+/// losing one another when either annotation changes.
+#[test]
+fn a_centre_line_and_balloon_keep_their_groups_and_table_in_the_cached_sheet() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_owned();
+    let table = list(&mut s, json!({}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(view), "a": {"point": [0, 0, 0], "path": [occurrence]},
+               "b": {"point": [80, 0, 0], "path": [occurrence]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (balloon_id, line_id, table_id) = (ids::decode(&balloon).unwrap(), ids::decode(&line).unwrap(), ids::decode(&table).unwrap());
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let group = |scene: &solidcraft_geom::paper::Scene, id| scene.groups.iter().find(|group| group.object == id).unwrap().clone();
+    let first = settled(&mut s, sheet);
+    assert_eq!(*first.scene, built(&s, sheet));
+    assert!(first.balloons.iter().any(|b| b.balloon == balloon_id && b.drawn && b.row.item() == Some("1")));
+    assert!(first.tables.iter().any(|t| t.table == table_id && t.drawn));
+    let centre = group(&first.scene, line_id);
+    let _ = group(&first.scene, balloon_id);
+    let _ = group(&first.scene, table_id);
+
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"at": [70, 50]}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(*moved.scene, built(&s, sheet));
+    assert_eq!(group(&moved.scene, line_id), centre);
+    assert_ne!(group(&moved.scene, balloon_id), group(&first.scene, balloon_id));
+    assert!(moved.tables.iter().any(|t| t.table == table_id && t.drawn));
+
+    run(&mut s, "drawing.center_line.edit", json!({"line": line, "overshoot_mm": 4.0}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(*edited.scene, built(&s, sheet));
+    assert_ne!(group(&edited.scene, line_id), centre);
+    assert_eq!(group(&edited.scene, balloon_id), group(&moved.scene, balloon_id));
+    let exported = s.execute("drawing.export", &json!({"sheet": ids::encode(sheet)})).unwrap();
+    let svg = exported["svg"].as_str().unwrap();
+    assert!(svg.contains("data-kind=\"balloon\"") && svg.contains("data-kind=\"centre_line\"") && svg.contains("data-kind=\"parts_list\""));
+    assert!(exported["balloons"].as_array().unwrap().iter().any(|b| b["balloon"] == json!(balloon) && b["drawn"] == json!(true)));
+    assert!(exported["tables"].as_array().unwrap().iter().any(|t| t["table"] == json!(table) && t["drawn"] == json!(true)));
+}
+
 /// A held deferred drawing keeps a balloon as it keeps its dimensions: closed during a model change
 /// and opened again, it shows the balloon as it was and lists it out of date, and a background
 /// export writes the same; updated, the balloon is read again.
@@ -897,4 +971,32 @@ fn a_held_drawing_keeps_its_balloons_and_exports_them_from_a_scratch_copy() {
     assert_eq!(*now.scene, built(&s, sheet));
     let listed = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert!(!listed["out_of_date"].as_array().into_iter().flatten().any(|v| *v == json!(ids::encode(id))), "{listed}");
+}
+
+/// A view's `hide_bodies` leaves out one body of a part (#22107): a balloon on it is refused in words
+/// that name the body and its path, on the view and on a view projected from it (naming the parent),
+/// and the drawing is left as it was; one added before warns until the edit is undone. Hiding another
+/// body refuses nothing.
+#[test]
+fn a_balloon_is_refused_on_a_body_its_view_leaves_out() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = ids::encode(view);
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"body": "Base"}]}}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null(), "another body is hidden");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"path": [bracket], "body": "Box"}]}}));
+    let words = format!("its hide leaves out body `Box` at occurrence path [{bracket}]");
+    let warned = run(&mut s, INSPECT, json!({"balloon": id}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let projected = run(&mut s, "drawing.view.projected", json!({"parent": v, "side": "right"}))["view"].as_str().unwrap().to_string();
+    let before = saved(&s);
+    let on = |view: &str| json!({"view": view, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [60, 40]});
+    let e = refused(&mut s, ADD, on(&v));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    let e = refused(&mut s, ADD, on(&projected));
+    assert!(e.contains(&format!("view {projected} doesn't draw that part: {words} (set on view {v})")), "{e}");
+    assert_eq!(saved(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
 }

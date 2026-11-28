@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use solidcore_record::Seg2;
 use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
 use solidcraft_doc::drawing::view::{Beside, Diagonal, QuarterTurn, ViewPlace};
-use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
+use solidcraft_doc::drawing_view::{HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, Shows, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
 use solidcraft_geom::paper::line::LineGroup;
@@ -70,6 +70,10 @@ pub struct SnapshotParams {
     pub source: Option<SourceParam>,
     /// Occurrence paths left out of this view, with everything under them (none when not given).
     pub hide: Vec<Vec<u64>>,
+    /// Bodies of its parts left out of this view, each on its own (none when not given).
+    pub hide_bodies: Vec<HiddenBodyParam>,
+    /// Which bodies it draws: `all` (the default), or `design`, only those the design shows.
+    pub shows: ShowsParam,
     /// Values to read on the view, as it shows them, with their labels: at most 100.
     pub measure: Vec<MeasureParam>,
     /// The length unit of the labels, `mm`, `cm`, `m`, `in` or `ft` (the design's when not given).
@@ -127,6 +131,30 @@ pub enum ViewLineParam {
 #[schemars(deny_unknown_fields)]
 pub struct SourceParam {
     pub occurrences: Vec<Vec<u64>>,
+}
+
+/// One body of a part a view leaves out (#22107): the occurrences that place it, from the design's root
+/// (`[]`, the default, for the design's own bodies), and its definition's body name, as
+/// `drawing.view.inspect` lists the bodies a view draws.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct HiddenBodyParam {
+    #[serde(default)]
+    pub path: Vec<u64>,
+    pub body: String,
+}
+
+impl From<&HiddenBodyParam> for HiddenBody {
+    fn from(b: &HiddenBodyParam) -> HiddenBody {
+        HiddenBody { path: b.path.clone(), body: b.body.clone() }
+    }
+}
+
+impl From<&HiddenBody> for HiddenBodyParam {
+    fn from(b: &HiddenBody) -> HiddenBodyParam {
+        HiddenBodyParam { path: b.path.clone(), body: b.body.clone() }
+    }
 }
 
 impl SnapshotParams {
@@ -217,6 +245,24 @@ impl JsonSchema for TangentEdgesParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "Edges where faces meet smoothly: hide (the default) or show.", "type": "string", "enum": ["hide", "show"]})
+    }
+}
+
+/// Which bodies a view draws (#22107).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct ShowsParam(pub Shows);
+
+impl JsonSchema for ShowsParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Shows".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which bodies the view draws: all (the default, whatever the browser shows) or design (only those the design shows: the browser's eyes on bodies, placements, folders and groups).",
+            "type": "string",
+            "enum": ["all", "design"]
+        })
     }
 }
 
@@ -545,7 +591,7 @@ pub struct EditParams {
     pub set: ViewSet,
 }
 
-/// The settings `drawing.view.edit` changes, each only when given. For the eight that can follow
+/// The settings `drawing.view.edit` changes, each only when given. For those that can follow
 /// the view's parent, `null` means follow it (a base view's scale can't: it has no parent; a base
 /// view's line group follows its sheet's, then its drawing's).
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -571,6 +617,12 @@ pub struct ViewSet {
     /// Occurrence paths it leaves out, with everything under them.
     #[serde(deserialize_with = "super::present")]
     pub hide: Option<Option<Vec<Vec<u64>>>>,
+    /// Bodies of its parts it leaves out, each on its own.
+    #[serde(deserialize_with = "super::present")]
+    pub hide_bodies: Option<Option<Vec<HiddenBodyParam>>>,
+    /// Which bodies it draws: every one, or only those the design shows.
+    #[serde(deserialize_with = "super::present")]
+    pub shows: Option<Option<ShowsParam>>,
     /// The state of the assembly it draws.
     #[serde(deserialize_with = "super::present")]
     pub exploded: Option<Option<ExplodedParam>>,
@@ -700,6 +752,10 @@ pub struct SettingsResult {
     pub occurrences: SettingResult<Option<Vec<Vec<u64>>>>,
     /// Occurrence paths it leaves out, with everything under them: none when null.
     pub hide: SettingResult<Option<Vec<Vec<u64>>>>,
+    /// Bodies of its parts it leaves out, each on its own: none when null.
+    pub hide_bodies: SettingResult<Option<Vec<HiddenBodyParam>>>,
+    /// Which bodies it draws: `all`, or `design` for only those the design shows.
+    pub shows: SettingResult<String>,
     /// The state of the assembly it draws: `"assembled"`, or `{"view": id}` for an exploded view.
     pub exploded: SettingResult<Value>,
     /// The position of its assembly it draws: `"designed"`, `{"joints": [...]}` as saved (radians
@@ -774,6 +830,18 @@ pub struct ChoicesResult {
     pub scale: Vec<String>,
 }
 
+/// One body a view's design places, as `drawing.view.inspect` lists it (#22107).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewBodyResult {
+    /// The occurrences that place it, from the design's root: `[]` for the design's own bodies.
+    pub path: Vec<u64>,
+    /// Its definition's body name.
+    pub body: String,
+    /// Whether the view draws it: false when its source doesn't choose it, a `hide` path covers it,
+    /// or `hide_bodies` names it.
+    pub drawn: bool,
+}
+
 /// What `drawing.view.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectResult {
@@ -795,6 +863,15 @@ pub struct InspectResult {
     pub direction: ViewResult,
     pub place: PlaceParam,
     pub settings: SettingsResult,
+    /// The entries of its `hide_bodies` that name no body its design places there: a body renamed or
+    /// deleted since, which the view draws again if it comes back under its old name. Left out when
+    /// every entry matches.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unmatched: Vec<HiddenBodyParam>,
+    /// Every body its design places, in the order the design places them, before its source, `hide` and
+    /// `hide_bodies` leave any out, each by the key `hide_bodies` names it by, with whether it draws it
+    /// now. Empty when the design places nothing it can read (`extents.provenance` says why).
+    pub bodies: Vec<ViewBodyResult>,
     pub reference_shown_percent: f64,
     /// Where it sits on its sheet: its extents grown by `reference_shown_percent`, at its scale,
     /// with the model's middle on its centre; a placeholder 20 mm each way when there's nothing to measure.
@@ -810,6 +887,12 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its manual centre marks, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_marks: Vec<String>,
+    /// Its manual centre lines, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_lines: Vec<String>,
     /// Its label, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<LabelResult>,
@@ -999,6 +1082,14 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Vec<Vec<u64>>")]
     pub hide: Option<Vec<Vec<u64>>>,
+    /// Bodies of its parts it leaves out, each on its own (none when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<HiddenBodyParam>")]
+    pub hide_bodies: Option<Vec<HiddenBodyParam>>,
+    /// Which bodies it draws: `all` (the default) or `design`, only those the design shows.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ShowsParam")]
+    pub shows: Option<ShowsParam>,
     /// The state of the assembly it draws (assembled when not given).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ExplodedParam")]
@@ -1235,7 +1326,7 @@ impl JsonSchema for SectionKindParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let names: Vec<Value> = SectionKind::ALL.iter().filter_map(|k| serde_json::to_value(k).ok()).collect();
         json_schema!({
-            "description": "full: one straight cut; half: to the middle, then a square turn away from the arrows; offset: legs the first one's way joined by square steps; aligned: two arms about the middle point.",
+            "description": "full: one straight cut (the only kind supported so far); half, offset and aligned are refused as not supported yet.",
             "type": "string",
             "enum": names
         })
@@ -1411,11 +1502,11 @@ pub enum LineSourceResult {
     Silhouette { face: usize },
 }
 
-impl From<solidcraft_geom::hlr::Source> for LineSourceResult {
-    fn from(source: solidcraft_geom::hlr::Source) -> Self {
+impl From<solidcraft_kernel::hlr::Source> for LineSourceResult {
+    fn from(source: solidcraft_kernel::hlr::Source) -> Self {
         match source {
-            solidcraft_geom::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
-            solidcraft_geom::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+            solidcraft_kernel::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+            solidcraft_kernel::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
         }
     }
 }

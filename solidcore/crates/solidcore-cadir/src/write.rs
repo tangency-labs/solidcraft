@@ -584,7 +584,15 @@ impl Writer<'_> {
                 // with.
                 match geometry::surface(&face.surface) {
                     Ok(Some((c, chart))) => {
-                        match form_map(&face.surface, form, face.domain, Map { m: chart.m }) {
+                        match form_map(
+                            &face.surface,
+                            form,
+                            face.domain,
+                            Map {
+                                m: chart.m,
+                                t: [0.0, 0.0],
+                            },
+                        ) {
                             Some(map) => Ok((c, map.keeps_normal(), None)),
                             None => as_nurbs(),
                         }

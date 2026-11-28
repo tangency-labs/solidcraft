@@ -2,6 +2,7 @@
   "order": 240,
   "provenance": "Original warm paper and charcoal palette",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "accent": "#e8845e",
     "accent_soft": "#44281d",

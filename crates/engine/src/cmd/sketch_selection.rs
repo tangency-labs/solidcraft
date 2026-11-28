@@ -19,6 +19,15 @@ const MOST: usize = 200;
 /// `None` when the selection is not exactly what it takes.
 pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketch>) -> Option<Value> {
     use Sel::{SketchCurve, SketchPoint};
+    // Horizontal and Vertical on their own take what Horizontal/Vertical takes; the command, not
+    // a `mode`, says which way.
+    if matches!(command, "sketch.constraint.horizontal" | "sketch.constraint.vertical") {
+        let mut params = constraint_params("sketch.constraint.horizontal_vertical", selection, sketch)?;
+        if let Some(keys) = params.as_object_mut() {
+            keys.remove("mode");
+        }
+        return Some(params);
+    }
     let selected_ids = |curves_only: bool, minimum: usize| -> Option<Vec<&str>> {
         if !(minimum..=MOST).contains(&selection.len()) {
             return None;
@@ -158,8 +167,15 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
         "tangent" => n == 2 && p == 0 && l < 2,
         "concentric" => n == 2 && (r == 2 || (r == 1 && p == 1)),
         "curvature" => n == 2 && p == 0 && c >= 1,
-        "horizontal_vertical" => n != 1 || l == 1,
-        "midpoint" => p == n || l == n - p,
+        "horizontal_vertical" | "horizontal" | "vertical" => n != 1 || l == 1,
+        // A point with a line, or with an arc (#16860: it sits halfway along it; a circle has no ends).
+        "midpoint" => {
+            let arc = selection.iter().any(|s| {
+                matches!(s, Sel::SketchCurve { id, .. }
+                    if sketch.curve_index(id).and_then(|i| sketch.curves.get(i)).is_some_and(|c| matches!(c.kind, crate::sketch::CurveKind::Arc { .. })))
+            });
+            p == n || l == n - p || (n == 2 && p == 1 && r == 1 && arc)
+        }
         // As the command takes them: two points, two lines, two circles or arcs, or a point with
         // any curve (a spline or ellipse too).
         "coincident" => n == 2 && (p == 2 || l == 2 || r == 2 || (p == 1 && (l == 1 || r == 1 || c == 1))),
@@ -205,6 +221,7 @@ takes! {
     curvature => "sketch.constraint.curvature",
     equal => "sketch.constraint.equal",
     fix => "sketch.constraint.fix",
+    horizontal => "sketch.constraint.horizontal",
     horizontal_vertical => "sketch.constraint.horizontal_vertical",
     midpoint => "sketch.constraint.midpoint",
     parallel => "sketch.constraint.parallel",
@@ -212,6 +229,7 @@ takes! {
     polygon => "sketch.constraint.polygon",
     symmetry => "sketch.constraint.symmetry",
     tangent => "sketch.constraint.tangent",
+    vertical => "sketch.constraint.vertical",
 }
 
 /// Two distinct point intents for the alignment command, without creating sketch points.

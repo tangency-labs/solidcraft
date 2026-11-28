@@ -47,13 +47,18 @@ pub struct InstallApp {
     pub prompt: Box<dyn Fn()>,
 }
 
-/// Safari's steps for this browser, from its `navigator.userAgent`, `navigator.vendor` and
-/// `navigator.maxTouchPoints`; None: not Safari, or a Safari that can't install web apps.
-/// Other iOS browsers are WebKit too (vendor Apple) but have no `Version/` and name themselves.
-pub fn safari_steps(user_agent: &str, vendor: &str, touch_points: i32) -> Option<Steps> {
+/// Whether the browser is Safari, from its `navigator.userAgent` and `navigator.vendor`. Other
+/// iOS browsers are WebKit too (vendor Apple) but name themselves.
+pub fn is_safari(user_agent: &str, vendor: &str) -> bool {
     let other = ["CriOS/", "FxiOS/", "EdgiOS/", "OPiOS/", "OPT/"];
-    let safari = vendor.starts_with("Apple") && user_agent.contains("Safari/") && !other.iter().any(|o| user_agent.contains(o));
-    if !safari {
+    vendor.starts_with("Apple") && user_agent.contains("Safari/") && !other.iter().any(|o| user_agent.contains(o))
+}
+
+/// Safari's steps for this browser, from its `navigator.userAgent`, `navigator.vendor` and
+/// `navigator.maxTouchPoints`; None: not Safari ([`is_safari`]), or a Safari that can't install
+/// web apps. Other iOS browsers have no `Version/`.
+pub fn safari_steps(user_agent: &str, vendor: &str, touch_points: i32) -> Option<Steps> {
+    if !is_safari(user_agent, vendor) {
         return None;
     }
     let version = user_agent.split("Version/").nth(1)?;
@@ -131,6 +136,8 @@ mod tests {
         let offer = Rc::new(Cell::new(None));
         let prompts = Rc::new(Cell::new(0));
         let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.frames(3);
         host(&mut h, offer.clone(), prompts.clone());
         assert!(!file_menu_item(&mut h), "no offer, no menu item");
 
@@ -157,6 +164,8 @@ mod tests {
     fn safari_shows_its_steps() {
         let prompts = Rc::new(Cell::new(0));
         let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.frames(3);
         host(&mut h, Rc::new(Cell::new(Some(Offer::Steps(Steps::Dock)))), prompts.clone());
         assert!(file_menu_item(&mut h));
         assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));
@@ -185,6 +194,7 @@ mod tests {
         assert_eq!(safari_steps(&mac("18.5"), APPLE, 0), Some(Steps::Dock));
         assert_eq!(safari_steps(&mac("17.0"), APPLE, 0), Some(Steps::Dock));
         assert_eq!(safari_steps(&mac("16.6"), APPLE, 0), None, "Add to Dock came with Safari 17");
+        assert!(is_safari(&mac("16.6"), APPLE), "still Safari, for the two-finger twist");
         let chrome_ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/138.0.7204.156 Mobile/15E148 Safari/604.1";
         assert_eq!(safari_steps(chrome_ios, APPLE, 5), None, "Chrome on iOS isn't Safari");
         let chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";

@@ -204,11 +204,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut b = sheets(n)?;
         let mut reports = AssertArray::new();
         let start = Instant::now();
-        let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key)?;
+        let check = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key)?;
         let pointer_seconds = start.elapsed().as_secs_f64();
-        if status != 1000 || !reports.is_empty() {
+        if !check.is_passed() || !reports.is_empty() {
             return Err(format!(
-                "invalid scaling fixture: status={status}, reports={}, first={:?}",
+                "invalid scaling fixture: pointers={check:?}, reports={}, first={:?}",
                 reports.len(),
                 reports.reports().first()
             )

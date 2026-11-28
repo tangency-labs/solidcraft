@@ -10,10 +10,9 @@
 //! coincident skins of tangency-labs/solidcore#1036.) A crossing of two distinct curves
 //! or touch seen through the tolerance is decided on the merged range in
 //! `GlobalCurveIntersect` (`issue_1979_ring_lip_crossing_not_coincidence.rs`, and the
-//! crossing and touch tests below), with or without
-//! `Kernel::fixes.simple_coincidence_crossing_is_point`. That flag keeps only 04b42b4's
-//! case 3e: with it, a span pair whose separation keeps one side without vanishing is the
-//! one point where the curves come nearest (the `..._are_their_nearest_point` test).
+//! crossing and touch tests below). The flag that kept 04b42b4's case 3e,
+//! `simple_coincidence_crossing_is_point`, is retired (WR-647 part D): a face/face contact
+//! at an edge's end vertex is made one point by the tangency witness, from the surfaces.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -45,10 +44,8 @@ impl SolutionObject for H {
     }
 }
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.simple_coincidence_crossing_is_point = fix;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn arc(r: f64) -> Curve {
@@ -57,8 +54,8 @@ fn arc(r: f64) -> Curve {
 
 /// `SimpleCoincidenceChecker` of the arc r 5 against the arc r 5 + `gap`, over their natural
 /// intervals.
-fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
-    let k = kernel(fix);
+fn check(gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
+    let k = kernel();
     let a = arc(5.0);
     let b = arc(5.0 + gap);
     let (ia, ib) = (a.natural_interval(), b.natural_interval());
@@ -73,7 +70,7 @@ fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
 fn wr_647_concentric_arcs_within_tolerance_are_a_range() {
     let k = Kernel::default();
     for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(false, gap);
+        let (a, b, sols) = check(gap);
         assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
         let s = &sols[0];
         assert_eq!(s.solution_type, SolutionType::RangeOfValues, "gap {gap}");
@@ -134,125 +131,19 @@ fn wr_647_concentric_arcs_intersect_in_one_range() {
     }
 }
 
-#[test]
-fn wr_647_crossing_is_point_is_off_by_default() {
-    assert!(!Kernel::default().fixes.simple_coincidence_crossing_is_point);
-}
-
-/// Upstream: one coincidence range over the whole arcs.
-#[test]
-fn wr_647_concentric_arcs_within_tolerance_are_a_range_by_default() {
-    for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(false, gap);
-        assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
-        let s = &sols[0];
-        assert_eq!(s.solution_type, SolutionType::RangeOfValues, "gap {gap}");
-        let (ia, ib) = (a.natural_interval(), b.natural_interval());
-        assert!(
-            (s.start.parameters[0] - ia.min()).abs() < 1e-9,
-            "gap {gap}: {s:?}"
-        );
-        assert!(
-            (s.end.parameters[0] - ia.max()).abs() < 1e-9,
-            "gap {gap}: {s:?}"
-        );
-        assert!(
-            (s.start.parameters[1] - ib.min()).abs() < 1e-9,
-            "gap {gap}: {s:?}"
-        );
-        assert!(
-            (s.end.parameters[1] - ib.max()).abs() < 1e-9,
-            "gap {gap}: {s:?}"
-        );
-    }
-}
-
-/// With the fix (04b42b4's case 3e): one point, where the arcs are `gap` apart.
-#[test]
-fn wr_647_concentric_arcs_within_tolerance_are_their_nearest_point() {
-    let k = Kernel::default();
-    for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(true, gap);
-        eprintln!("WR647 3e gap {gap}: {sols:?}");
-        assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
-        let s = &sols[0];
-        assert_eq!(s.solution_type, SolutionType::SingleValue, "gap {gap}");
-        let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
-        let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
-        assert!(
-            (p.distance(q) - gap).abs() <= 1e-12,
-            "gap {gap}: the points are {} apart",
-            p.distance(q)
-        );
-    }
-}
-
-/// The same arc twice: the separation vanishes, so it stays a range in both settings.
+/// The same arc twice: the separation vanishes, so it stays a range.
 #[test]
 fn wr_647_the_same_arc_twice_stays_a_range() {
-    for fix in [false, true] {
-        let (_, _, sols) = check(fix, 0.0);
-        assert_eq!(sols.len(), 1, "fix {fix}: {sols:?}");
-        assert_eq!(
-            sols[0].solution_type,
-            SolutionType::RangeOfValues,
-            "fix {fix}"
-        );
-    }
-}
-
-/// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
-/// its coincident copy in a body cut by itself): the curves lie on each other, yet the end
-/// pairs' separations run along the curves, forward at one end and back at the other. With
-/// `simple_coincidence_crossing_is_point` upstream read that as a crossing: one point (where
-/// the curves cannot cross, they lie on each other), or a failure where no crossing is
-/// found. The side is taken across the curve, nothing changes sides, and the answer is the
-/// coincidence range over the shorter arc.
-#[test]
-fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
-    let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
-    let k = kernel(true);
-    let a = arc(5.0);
-    let b = Curve::from(
-        create_arc(
-            Point3::new(0.0, 0.0, 0.0),
-            5.0,
-            shortfall_deg,
-            90.0 - shortfall_deg,
-        )
-        .unwrap(),
-    );
-    let (ia, ib) = (a.natural_interval(), b.natural_interval());
-    let sols = a
-        .simple_coincidence_checker(&k, &ia, &b, &ib, TOL, None, None, [Some(0u8), Some(1u8)])
-        .unwrap();
+    let (_, _, sols) = check(0.0);
     assert_eq!(sols.len(), 1, "{sols:?}");
-    let s = &sols[0];
-    assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
-    // the range covers the copy, end to end
-    assert!((s.start.parameters[1] - ib.min()).abs() < 1e-9, "{s:?}");
-    assert!((s.end.parameters[1] - ib.max()).abs() < 1e-9, "{s:?}");
-    for (t, u) in [
-        (s.start.parameters[0], ib.min()),
-        (s.end.parameters[0], ib.max()),
-    ] {
-        let gap = a
-            .evaluate_point(&k, t)
-            .unwrap()
-            .distance(b.evaluate_point(&k, u).unwrap());
-        // the range's ends pair points within the tolerance (the shortfall, 4.8e-6)
-        assert!(
-            gap <= 4.8e-6 + 1e-12,
-            "the range's ends lie on each other: {gap}"
-        );
-    }
+    assert_eq!(sols[0].solution_type, SolutionType::RangeOfValues);
 }
 
 /// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
 /// its coincident copy in a body cut by itself): the curves lie on each other, and the answer
 /// is the coincidence range over the shorter arc.
 #[test]
-fn an_arc_and_its_shorter_copy_coincide_over_the_copy_by_default() {
+fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
     let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
     let k = Kernel::default();
     let a = arc(5.0);
@@ -1145,9 +1036,9 @@ fn wr_647_near_overlaps_within_the_zero_stay_ranges() {
     }
 }
 
-/// `GlobalCurveIntersect` of `a` against `b` at `tol` with the flag set to `fix`.
-fn intersect_with(fix: bool, a: &Curve, b: &Curve, tol: f64) -> Vec<Solution<H>> {
-    let k = kernel(fix);
+/// `GlobalCurveIntersect` of `a` against `b` at `tol`.
+fn intersect_with(a: &Curve, b: &Curve, tol: f64) -> Vec<Solution<H>> {
+    let k = kernel();
     let (ia, ib) = (a.natural_interval(), b.natural_interval());
     a.global_curve_intersect(&k, &ia, b, &ib, tol, &CurveIntersectOptions::<H>::default())
         .unwrap()
@@ -1160,8 +1051,7 @@ fn intersect_with(fix: bool, a: &Curve, b: &Curve, tol: f64) -> Vec<Solution<H>>
 /// below a tenth of the spline's natural interval (1/21 at `L` = 10, 1/61 at `L` = 30) and
 /// the 10 and 5 degree arcs below a tenth of the circle's. Each is still a run of
 /// meetings, not one: a range must cover s in [`L`, `L` + 1] (main's answer), both ways
-/// round, at tolerance 1e-2, with `simple_coincidence_crossing_is_point` off and on (its
-/// nearest point needs the largest distance past the scaled zero, which these are within).
+/// round, at tolerance 1e-2.
 /// A zero-run cut at a tenth of both curves collapsed 11 of these rows at `L` = 10 to one
 /// point at the end of the overlap.
 #[test]
@@ -1185,20 +1075,18 @@ fn wr_647_sub_tenth_near_overlaps_with_a_conic_stay_ranges() {
     for l in [10.0, 30.0] {
         for &(theta, ell, dr, dz) in &rows {
             let s = arc_spline_stretched(theta, ell, 1e-3, dr, dz, 1.0, l);
-            for fix in [false, true] {
-                let tag = format!("L {l}, {theta} degrees, dr {dr:e}, dz {dz:e}, flag {fix}");
-                for (all, side) in [
-                    (intersect_with(fix, &circle, &s, 1e-2), 1),
-                    (intersect_with(fix, &s, &circle, 1e-2), 0),
-                ] {
-                    let covered = all.iter().any(|x| {
-                        x.solution_type == SolutionType::RangeOfValues && {
-                            let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
-                            a.min(b) <= l + 1e-9 && l + 1.0 - 1e-9 <= a.max(b)
-                        }
-                    });
-                    assert!(covered, "{tag}: the run s in [L, L + 1] is lost: {all:?}");
-                }
+            let tag = format!("L {l}, {theta} degrees, dr {dr:e}, dz {dz:e}");
+            for (all, side) in [
+                (intersect_with(&circle, &s, 1e-2), 1),
+                (intersect_with(&s, &circle, 1e-2), 0),
+            ] {
+                let covered = all.iter().any(|x| {
+                    x.solution_type == SolutionType::RangeOfValues && {
+                        let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
+                        a.min(b) <= l + 1e-9 && l + 1.0 - 1e-9 <= a.max(b)
+                    }
+                });
+                assert!(covered, "{tag}: the run s in [L, L + 1] is lost: {all:?}");
             }
         }
     }
@@ -1334,7 +1222,7 @@ fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
         let h = 2.5e-5;
         let c = (0.85e-12 - dr) / (h * h);
         let curve = flat_then_bending(h, dr, c, 2.2e-2, &[0.2, 0.5 - h, 0.5 + h, 0.8]);
-        let k = kernel(false);
+        let k = kernel();
         for (order, all, on_curve, first, second) in [
             (
                 "line, curve",

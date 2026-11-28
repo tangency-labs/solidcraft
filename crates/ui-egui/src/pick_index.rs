@@ -3,8 +3,9 @@
 //! prepares the largest visible imported mesh during open. Other indexes start on first use.
 //! Imported outlines have their own index, requested only by Measure. The picker asks for the nearest triangle along the
 //! cursor's ray and for the edge segments near that ray, then runs its exact screen tests on
-//! those alone. A large mesh's index is made on a worker thread. While it builds, explicit picks
-//! can scan the mesh. Hover and origin feedback defer the scan for very large meshes.
+//! those alone. A mesh over [`AT_ONCE`] elements gets its index on a worker thread. While it
+//! builds, explicit picks can scan the mesh. Hover and origin feedback defer the scan for very
+//! large meshes.
 
 use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
@@ -52,10 +53,15 @@ enum Kind {
 
 type Indexes = HashMap<(usize, Kind), (Arc<Mesh>, Option<Arc<MeshIndex>>)>;
 
-/// Meshes up to this many triangles and edge points get their index at once (it takes well under
-/// a millisecond); larger ones on a worker.
+/// Meshes up to this many triangles and edge points get their index at once; larger ones on a
+/// worker. A build costs about a microsecond an element (measured on imported parts: 400 in
+/// 0.44 ms, 1,088 in 1.02 ms, 2,242 in 2.35 ms, 7,148 in 9.48 ms), so only a near-trivial mesh
+/// is worth building in a frame: the old 20,000 bound was up to ~24 ms of the window thread, paid
+/// on the first hover of a part. A mesh this small still answers at once rather than start a
+/// thread a hover. A larger one without its index yet is picked by scanning, which is cheaper
+/// than building it (a 7,000-triangle scan is tens of microseconds).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-const AT_ONCE: usize = 20_000;
+const AT_ONCE: usize = 512;
 
 impl PickIndexes {
     /// The index of `mesh`, or `None` while it is being made.

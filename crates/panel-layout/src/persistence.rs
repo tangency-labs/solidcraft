@@ -975,9 +975,25 @@ fn record_section_projections(envelope: &mut LayoutEnvelope) {
     }
 }
 
+/// Whether a saved record still holds in quarantine (saved by a build without its kind) a panel
+/// the live layout shows again. Its dormant identity would refuse every later edit of that
+/// panel, so callers restore the quarantine before staging against the record.
+pub fn holds_live_quarantine(envelope: &LayoutEnvelope, live: &Layout, registry: &PanelRegistry) -> bool {
+    envelope.quarantine.iter().any(|item| live.instance(&item.instance).is_ok() && registry.get(&item.kind).is_ok())
+}
+
 /// Stage live edits without losing dormant order, projected activation or opaque
 /// fields. The caller publishes only after its guarded layout dispatch succeeds.
 pub fn with_live_layout(envelope: &LayoutEnvelope, mut layout: Layout, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    let restored;
+    let envelope = if holds_live_quarantine(envelope, &layout, registry) {
+        let mut copy = envelope.clone();
+        restore_quarantine(&mut copy, registry)?;
+        restored = copy;
+        &restored
+    } else {
+        envelope
+    };
     encode(envelope, registry)?;
     validate(&layout, registry)?;
     let full = preparation_context(envelope)?;
@@ -1704,7 +1720,7 @@ pub fn decode_retained_record(bytes: &[u8], registry: &PanelRegistry) -> PanelRe
 /// Read a retained record in its workspace without consuming a reappearance
 /// obligation or materializing absent order/projection metadata.
 pub fn decode_retained(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId) -> PanelResult<LayoutEnvelope> {
-    valid_id(&workspace.0)?;
+    valid_workspace_id(&workspace.0)?;
     let envelope = decode_retained_record(bytes, registry)?;
     if envelope.layout.workspace != *workspace {
         return Err(error(Rule::Schema, "panel envelope workspace mismatch"));
@@ -1985,7 +2001,7 @@ fn validate_wire_structure(layout: &Layout) -> PanelResult<()> {
     if layout.version != LAYOUT_VERSION {
         return Err(error(Rule::Version, "unsupported layout version"));
     }
-    valid_id(&layout.workspace.0)?;
+    valid_workspace_id(&layout.workspace.0)?;
     if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
         return Err(error(Rule::CollectionLimit, "layout collection limit"));
     }

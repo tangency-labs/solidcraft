@@ -19,7 +19,7 @@ fn square(lo: f64, hi: f64) -> Vec<Region2> {
 fn placer(segments: &[(String, Vec3, Vec3)], anchor: Vec2) -> impl Fn(usize, Vec3) -> Plane + '_ {
     move |m, at| {
         let (_, a, b) = &segments[m];
-        let (x, y) = frame::member_axes(*b - *a, 0.0).unwrap();
+        let (x, y) = frame::member_axes(*b - *a, 0.0, frame::UpAxis::Z).unwrap();
         Plane::new(at - x * anchor.x - y * anchor.y, x, y).unwrap()
     }
 }

@@ -130,6 +130,9 @@ impl FaceQueries<Object> for Contexts<'_> {
     fn face_zone_tol_3d(&self, face: Object) -> Result<f64> {
         self.queries(face)?.face_zone_tol_3d(face.1)
     }
+    fn face_has_loopuses(&self, face: Object) -> Result<bool> {
+        self.queries(face)?.face_has_loopuses(face.1)
+    }
     fn face_point_classify(
         &self,
         k: &Kernel,

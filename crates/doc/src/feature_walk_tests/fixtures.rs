@@ -36,6 +36,15 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "dogbone",
+            json!({"type": "dogbone", "edges": [o], "faces": [o], "diameter": "dogbone.diameter", "style": "minimal", "gap": "dogbone.gap",
+                "max_angle": "dogbone.max_angle", "along": [0, 0, 1]}),
+        ),
+        (
+            "frame_gusset",
+            json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),
@@ -75,6 +84,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
         (
+            "finger_joint",
+            json!({"type": "finger_joint", "bodies": ["A", "B"], "count": 4, "clearance": "joint.clearance",
+                "inverted": true, "edge_offset": "joint.edge_offset"}),
+        ),
+        (
             "pattern_rectangular",
             pattern(
                 json!({"type": "rectangular", "dir1": [1, 0, 0], "count1": "rect.count1", "spacing1": "rect.spacing1", "dir2": [0, 1, 0], "count2": "rect.count2", "spacing2": "rect.spacing2"}),
@@ -92,7 +106,30 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             h["references"] = json!([{"edge": o, "distance": "hole.reference1"}, {"edge": o, "distance": "hole.reference2"}]);
             h
         }),
+        ("hole_hardware", {
+            let mut h = hole(json!({"type": "simple"}));
+            h["hardware"] = json!({"kind": "stud", "thread": "M3", "length": "hole.hardware_length", "part": "stud.m3"});
+            h
+        }),
         ("thread", json!({"type": "thread", "face": o, "length": "thread.length"})),
+        (
+            "shaft_spline",
+            json!({"type": "shaft_spline", "shaft": o, "shaft_start": o, "bore": o, "bore_start": o, "form": "involute",
+                "teeth": "shaft_spline.teeth", "length": "shaft_spline.length",
+                "module": "shaft_spline.module", "pressure_angle": "shaft_spline.pressure_angle", "addendum": "shaft_spline.addendum",
+                "dedendum": "shaft_spline.dedendum", "root_fillet": "shaft_spline.root_fillet", "profile_shift": "shaft_spline.profile_shift",
+                "thinning": "shaft_spline.thinning", "hub_addendum": "shaft_spline.hub_addendum", "tip_clearance": "shaft_spline.tip_clearance",
+                "form_clearance": "shaft_spline.form_clearance", "major_diameter": "shaft_spline.major_diameter",
+                "minor_diameter": "shaft_spline.minor_diameter", "tooth_width": "shaft_spline.tooth_width", "flank_angle": "shaft_spline.flank_angle",
+                "root_round": "shaft_spline.root_round", "tip_size": "shaft_spline.tip_size", "major_clearance": "shaft_spline.major_clearance",
+                "minor_clearance": "shaft_spline.minor_clearance", "hub_tip_round": "shaft_spline.hub_tip_round",
+                "side_clearance": "shaft_spline.side_clearance", "hub_root_round": "shaft_spline.hub_root_round",
+                "hub_diameter": "shaft_spline.hub_diameter", "master_angle": "shaft_spline.master_angle",
+                "cutter_diameter": "shaft_spline.cutter_diameter", "end_chamfer": "shaft_spline.end_chamfer",
+                "entry_chamfer": "shaft_spline.entry_chamfer", "end_chamfer_distance2": "shaft_spline.end_chamfer_distance2",
+                "end_chamfer_angle": "shaft_spline.end_chamfer_angle", "entry_chamfer_distance2": "shaft_spline.entry_chamfer_distance2",
+                "entry_chamfer_angle": "shaft_spline.entry_chamfer_angle"}),
+        ),
         ("loft", json!({"type": "loft", "sections": []})),
         ("sweep", json!({"type": "sweep", "sketch": 1, "profiles": {"type": "all"}, "path_sketch": 2, "path": ["l1"]})),
         (
@@ -101,6 +138,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
                 "orientation": {"direction": [0, 1, 0]}, "twist": "sweep.twist", "scale": "sweep.scale"}),
         ),
         ("shell", json!({"type": "shell", "faces": [o], "thickness": "shell.thickness"})),
+        ("dome", json!({"type": "dome", "face": o, "height": "dome.height"})),
         ("draft", json!({"type": "draft", "faces": [o], "angle": "draft.angle", "neutral": plane("draft_neutral"), "pull": [0, 0, 1]})),
         ("construction_plane", json!({"type": "construction_plane", "plane": plane("cplane")})),
         (
@@ -139,6 +177,17 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "frame_member", "path_sketch": 1, "profile": {"source": "sketch", "sketch": 2, "profiles": {"type": "all"}},
                 "anchor": "bottom_left", "mirror": true}),
         ),
+        ("frame_cope", json!({"type": "frame_cope", "member": "B", "tools": ["B"], "end": "start"})),
+        (
+            "frame_trim",
+            json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],
+                "to": [{"type": "member", "member": {"feature": "F", "line": "l2"}, "side": "left"}, {"type": "plane", "plane": plane("frame_trim")}],
+                "end": "start", "gap": "frame_trim.gap"}),
+        ),
+        (
+            "frame_plate",
+            json!({"type":"frame_plate","member":{"feature":7,"line":"line1"},"plane":plane("plate"),"shape":{"shape":"rectangle","width":"plate.width","height":"plate.height"},"holes":{"pattern":"circle","diameter":"plate.hole","pitch_diameter":"plate.pitch","count":6,"angle":"plate.hole_angle"},"thickness":"plate.thickness","offset":"plate.offset","x_offset":"plate.x","y_offset":"plate.y","angle":"plate.angle"}),
+        ),
         ("emboss", json!({"type": "emboss", "sketch": 1, "profiles": {"type": "all"}, "depth": "emboss.depth"})),
         ("rib", json!({"type": "rib", "sketch": 1, "curves": ["l1"], "thickness": "rib.thickness", "depth": "rib.depth"})),
         ("replace_face", json!({"type": "replace_face", "faces": [o], "target": plane("replace_face")})),
@@ -161,6 +210,19 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "sheet_flange",
             json!({"type": "sheet_flange", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief"}),
         ),
+        (
+            "sheet_flange_with_corners",
+            json!({"type": "sheet_flange", "body": "B", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief",
+            "corners": [
+                {"covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner", "kind": "partial_overlap", "overlap": "flange.corner_overlap", "gap": "flange.corner_gap"},
+                {"covering": "F12:tab(F7:cap.surface)|F12:bend.inner", "covered": "F9:cap.surface|F9:bend.inner", "kind": "full_overlap", "overlap": "flange.inactive_overlap", "gap": "flange.second_corner_gap"}
+            ]}),
+        ),
+        (
+            "sheet_corner_join",
+            json!({"type": "sheet_corner_join", "body": "B", "covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner",
+                "kind": "partial_overlap", "overlap": "corner.overlap", "gap": "corner.gap"}),
+        ),
         ("sheet_hem", json!({"type": "sheet_hem", "edges": [o], "length": "hem.length", "gap": "hem.gap"})),
         (
             "sheet_cross_break",
@@ -178,6 +240,14 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "sheet_fold", "a": o, "b": [1, 0, 0], "angle": "fold.angle", "radius": "fold.radius", "position": "centerline"}),
         ),
         ("sheet_path", json!({"type": "sheet_path", "edge": o, "sketch": 1, "curves": ["l1"], "radius": "path.radius"})),
+        ("sheet_tab", json!({"type": "sheet_tab", "sketch": 1, "profiles": {"type": "all"}})),
+        (
+            "sheet_bead",
+            json!({
+                "type": "sheet_bead", "sketch": 1, "curves": ["l1"], "depth": "bead.depth", "width": "bead.width", "angle": "bead.angle",
+                "crown_width": "bead.crown", "base_radius": "bead.rb", "crown_radius": "bead.rc", "end_length": "bead.end", "margin": "bead.margin"
+            }),
+        ),
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
         ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o, "engrave": [o]})),
         ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o], "engrave": [o]})),
@@ -218,6 +288,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_blend", "from": {"body": "B", "edges": [o]}, "to": {"body": "C", "edges": [o]}, "align": [o, o], "seam": [o, o]}),
         ),
         ("surface_offset", json!({"type": "surface_offset", "faces": [o], "distance": "soff.distance", "tolerance": "soff.tolerance"})),
+        (
+            "surface_midsurface",
+            json!({"type": "surface_midsurface", "faces": [o, o], "max_thickness": "smid.max_thickness", "min_thickness": "smid.min_thickness",
+                "suppress_holes_below": "smid.suppress_holes_below"}),
+        ),
         // The Class-A surface family (surface.blend/boundary/match/fair).
         (
             "surface_blend",
@@ -243,6 +318,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "up_to": {"face": {"body": "B", "point": o}}, "neighbours": false}),
         ),
         (
+            "surface_extend_law",
+            json!({"type": "surface_extend", "body": "B", "edges": [o], "distance": "extend.distance", "mode": "law", "angle": "extend.law_angle"}),
+        ),
+        (
             "surface_ruled",
             json!({"type": "surface_ruled", "body": "B", "edges": [o], "distance": "ruled.distance", "mode": "angle", "angle": "ruled.angle",
                 "direction": [0, 0, 1], "face": [1, 0, 0]}),
@@ -258,8 +337,24 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_trim", "body": "B", "plane": plane("trim"), "keep": o, "with": "B", "keep_with": [o, o], "stitch": true, "extend": true}),
         ),
         ("move", json!({"type": "move", "bodies": ["B"], "translate": ["move.x", "move.y", "move.z"], "angle": "move.angle"})),
+        (
+            "capture_position",
+            json!({
+                "type": "capture_position",
+                "moves": [{
+                    "occurrence": 1,
+                    "space": "local",
+                    "translate": ["capture.x", "capture.y", "capture.z"],
+                    "origin": ["capture.ox", "capture.oy", "capture.oz"],
+                    "rotate_axis": [0.0, 1.0, 0.0],
+                    "angle": "capture.angle"
+                }],
+                "joints": [{"joint": 2, "values": [0.5]}]
+            }),
+        ),
         ("import", json!({"type": "import", "file": "a.step", "step": ""})),
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
+        ("mesh_reduce", json!({"type": "mesh_reduce", "body": "B", "triangle_count": 10})),
         ("mesh_import", json!({"type": "mesh_import", "file": "a.stl", "meshes": []})),
         ("repair", json!({"type": "repair", "body": "B", "gap": "repair.gap", "patch_holes": true})),
     ]
@@ -273,11 +368,12 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let tool = json!({"body": "B", "point": o});
     let extra = match name {
         "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
-        "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
+        "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "dome" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_cross_break" | "sheet_perforate" | "sheet_path"
-        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
+        | "sheet_tab" | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" | "surface_midsurface" => {
             json!({"body": "B"})
         }
+        "sheet_bead" => json!({"body": "B"}),
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),
@@ -290,6 +386,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
         "sheet_fold" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
+        "dogbone" => json!({"body": "B"}),
         _ => json!({}),
     };
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {

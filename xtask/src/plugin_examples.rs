@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 /// The examples: the package folder and the crate that builds its component.
-const EXAMPLES: &[(&str, &str)] = &[("plate-maker", "plate-maker-src"), ("box-importer", "box-importer-src")];
+const EXAMPLES: &[(&str, &str)] = &[("plate-maker", "plate-maker-src"), ("box-importer", "box-importer-src"), ("job-list", "job-list-src")];
 
 /// The files the guide shows whole, each as one fenced block of its language.
 const SHOWN: &[(&str, &str)] = &[
@@ -19,6 +19,9 @@ const SHOWN: &[(&str, &str)] = &[
     ("box-importer/plugin.json", "json"),
     ("box-importer/tests/small.json", "json"),
     ("box-importer-src/src/lib.rs", "rust"),
+    ("job-list/plugin.json", "json"),
+    ("job-list/tests/add-job.json", "json"),
+    ("job-list-src/src/lib.rs", "rust"),
 ];
 
 const GUIDE: &str = "docs/book/src/dev/plugins.md";

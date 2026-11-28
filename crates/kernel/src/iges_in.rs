@@ -8,11 +8,27 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod assembly;
 
-/// Largest IGES file we read.
+/// Largest IGES file we read by default.
 pub const MAX_IGES_BYTES: usize = 512 << 20;
+
+/// The largest IGES text [`translate`] reads, in bytes; `solidcraft_io::limits` keeps it at the
+/// limit in force (Preferences › General › Largest file to open, or `--max-file-size`), so
+/// the reader reads every file the size check let through (#20304).
+static MAX_BYTES: AtomicUsize = AtomicUsize::new(MAX_IGES_BYTES);
+
+/// Read IGES texts of up to `bytes` from now on (never less than the default).
+pub fn set_max_bytes(bytes: usize) {
+    MAX_BYTES.store(bytes.max(MAX_IGES_BYTES), Ordering::Relaxed);
+}
+
+/// The largest IGES text [`translate`] reads now.
+pub fn max_bytes() -> usize {
+    MAX_BYTES.load(Ordering::Relaxed)
+}
 const MAX_ENTITIES: usize = 2_000_000;
 const MAX_DEPTH: usize = 32;
 const MAX_LIST: usize = 1_000_000;
@@ -167,6 +183,55 @@ fn int(s: &str) -> Option<i64> {
     t.parse::<i64>().ok().or_else(|| num(t).filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(|x| x as i64))
 }
 
+/// The global section's parameter and record delimiters (`,` and `;` unless it names others) and
+/// its fields from field 3 on (field k, 1-based, is `[k - 3]`), from its text (columns 1–72 of
+/// its lines run on).
+fn global_fields(g: &str) -> (char, char, Vec<String>) {
+    let gc: Vec<char> = g.chars().collect();
+    let (mut delim, mut rdelim, mut pos) = (',', ';', 0usize);
+    if gc.len() >= 3 && gc[0] == '1' && (gc[1] == 'H' || gc[1] == 'h') {
+        delim = gc[2];
+        pos = 3;
+    }
+    if gc.get(pos) == Some(&delim) {
+        pos += 1;
+    }
+    if gc.len() >= pos + 3 && gc[pos] == '1' && (gc[pos + 1] == 'H' || gc[pos + 1] == 'h') {
+        rdelim = gc[pos + 2];
+        pos += 3;
+    }
+    if gc.get(pos) == Some(&delim) {
+        pos += 1;
+    }
+    let rest: String = gc.get(pos..).map(|x| x.iter().collect()).unwrap_or_default();
+    (delim, rdelim, tokens(&rest, delim, rdelim))
+}
+
+/// The global section's native system ID (field 5) as the restated STEP header names it: ASCII
+/// without control characters, a backslash (a STEP string's escape) as a space.
+fn header_system(native: &str) -> String {
+    native.chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).map(|c| if c == '\\' { ' ' } else { c }).collect()
+}
+
+/// The program that wrote an IGES file (`text`): its global section's native system ID (field 5)
+/// as an import of the file names it. [`iges_to_step`] writes it as the STEP header's originating
+/// system, where the STEP import reads it: ASCII without control characters, a backslash as a
+/// space, trimmed. Only the global section's lines (`G` in column 73, up to the terminate line)
+/// are read, so the text may be those lines alone. Empty when the file does not say.
+pub fn iges_native_system(text: &str) -> String {
+    let mut g = String::new();
+    for raw in text.lines() {
+        let chars: Vec<char> = raw.trim_end_matches(['\r', '\n']).chars().collect();
+        match chars.get(72) {
+            Some('G') => g.extend(chars.iter().take(72)),
+            Some('T') => break,
+            _ => {}
+        }
+    }
+    let (_, _, gf) = global_fields(&g);
+    header_system(gf.get(2).map_or("", |s| s.trim())).trim().to_string()
+}
+
 fn parse(text: &str) -> R<Iges> {
     let mut g = String::new();
     let mut d_lines: Vec<String> = Vec::new();
@@ -199,25 +264,7 @@ fn parse(text: &str) -> R<Iges> {
             return Err("too many entities".into());
         }
     }
-    // Global section: parameter and record delimiters, then fields from 3 on.
-    let gc: Vec<char> = g.chars().collect();
-    let (mut delim, mut rdelim, mut pos) = (',', ';', 0usize);
-    if gc.len() >= 3 && gc[0] == '1' && (gc[1] == 'H' || gc[1] == 'h') {
-        delim = gc[2];
-        pos = 3;
-    }
-    if gc.get(pos) == Some(&delim) {
-        pos += 1;
-    }
-    if gc.len() >= pos + 3 && gc[pos] == '1' && (gc[pos + 1] == 'H' || gc[pos + 1] == 'h') {
-        rdelim = gc[pos + 2];
-        pos += 3;
-    }
-    if gc.get(pos) == Some(&delim) {
-        pos += 1;
-    }
-    let rest: String = gc.get(pos..).map(|x| x.iter().collect()).unwrap_or_default();
-    let gf = tokens(&rest, delim, rdelim);
+    let (delim, rdelim, gf) = global_fields(&g);
     // Field k (1-based) is gf[k - 3].
     let field = |k: usize| gf.get(k.wrapping_sub(3)).map(String::as_str).unwrap_or("");
     let unit = match int(field(14)).unwrap_or(2) {
@@ -1320,7 +1367,7 @@ pub fn iges_to_step(text: &str) -> std::result::Result<(String, Vec<String>), St
 }
 
 fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
-    if text.len() > MAX_IGES_BYTES {
+    if text.len() > max_bytes() {
         return Err("IGES file too large".into());
     }
     let f = solidcraft_profile::scope("import", "iges.parse", || parse(text))?;
@@ -1395,13 +1442,7 @@ fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
         t.o.add(format!("STYLED_ITEM('color',(#{psa}),#{item})"));
     }
     // The global section's native system ID (field 5) is the file's originating system.
-    let native: String = f
-        .native_system
-        .chars()
-        .filter(|c| c.is_ascii() && !c.is_ascii_control())
-        .map(|c| if c == '\\' { ' ' } else { c })
-        .collect::<String>()
-        .replace('\'', "''");
+    let native = header_system(&f.native_system).replace('\'', "''");
     let mut s = format!(
         "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('IGES import'),'2;1');\nFILE_NAME('','',(''),(''),'SolidCraft IGES','{}','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n",
         native.trim()

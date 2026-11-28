@@ -91,6 +91,20 @@ impl Lock {
         now.saturating_sub(self.refreshed) > STALE_SECS || self.refreshed.saturating_sub(now) > STALE_SECS
     }
 
+    /// Written on this computer by a process that is no longer running (a crash, `kill -9`), so
+    /// waiting for it to go stale would only block the design. Our own process is running, so it
+    /// is never gone. If the process can't be looked up (the browser, an unsupported system), this
+    /// is `false`, which keeps the lock held until it goes stale.
+    ///
+    /// A different live process may have taken over a dead one's pid; that lock is still treated
+    /// as held, the safe side: the wait ends when the lock goes stale.
+    ///
+    /// Only a lock of this user counts: a system may hide other users' processes (Linux with
+    /// `hidepid`), so another user's process that can't be seen may still be running.
+    pub fn owner_is_gone(&self) -> bool {
+        self.host == host_name() && self.user == user_name() && self.pid != std::process::id() && process_running(self.pid) == Some(false)
+    }
+
     /// Written by this process.
     pub fn is_mine(&self) -> bool {
         self.pid == std::process::id() && self.host == host_name()
@@ -104,6 +118,26 @@ pub fn host_name() -> String {
     #[cfg(target_arch = "wasm32")]
     let name = String::new();
     if name.is_empty() { "this computer".into() } else { name }
+}
+
+/// Whether a process with this id is running: `None` when that can't be told (the browser, a
+/// system the lookup doesn't support, a pid of 0).
+#[cfg(not(target_arch = "wasm32"))]
+fn process_running(pid: u32) -> Option<bool> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
+    if pid == 0 {
+        return None;
+    }
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new().ok()?;
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
+    // A zombie has exited and only waits to be collected.
+    Some(system.process(pid).is_some_and(|p| p.status() != ProcessStatus::Zombie))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn process_running(_pid: u32) -> Option<bool> {
+    None
 }
 
 fn user_name() -> String {
@@ -135,9 +169,10 @@ pub fn read(path: &Path) -> Option<Lock> {
     serde_json::from_slice(&bytes).ok()
 }
 
-/// Another app's fresh lock on the design at `path` at `now`: it is open elsewhere.
+/// Another app's fresh lock on the design at `path` at `now`: it is open elsewhere. A lock this
+/// computer wrote for a process that has since ended counts as stale at once.
 pub fn held_elsewhere(path: &Path, now: u64) -> Option<Lock> {
-    read(path).filter(|l| !l.is_mine() && !l.is_stale(now))
+    read(path).filter(|l| !l.is_mine() && !l.is_stale(now) && !l.owner_is_gone())
 }
 
 /// Write `lock` next to the design at `path`, replacing whatever lock is there. A symbolic link

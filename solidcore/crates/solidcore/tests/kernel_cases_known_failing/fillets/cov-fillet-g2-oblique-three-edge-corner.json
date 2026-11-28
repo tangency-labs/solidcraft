@@ -1,0 +1,4 @@
+{
+  "issue": "tangency-labs/solidcore#2697",
+  "reason": "not run here: the corner is a blend_setback_open call, which the rig has not ported yet; it waits on that port and on the certified G2 corner fill"
+}

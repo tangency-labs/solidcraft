@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Repository-owned icon review tool (Python 3.11+, standard library only).
 
---serve [PORT]  Loopback review app, default http://127.0.0.1:8770/
+--serve [PORT]  Loopback review app, default http://127.0.0.1:8770/; PORT 0 picks a free port
 --summary       Discovery counts, no generated source files
 --csv           Write target/icon-inventory.csv
 --notes         Open artwork feedback
@@ -325,7 +325,8 @@ if '--serve' in args:
             except Exception as e:
                 self._send(400, json.dumps({'ok': False, 'error': str(e)}), 'application/json')
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', port), H)
-    print('review page: http://127.0.0.1:%d  (saves %s; Ctrl-C to stop)' % (port, os.path.relpath(REVIEW, ROOT)))
+    # The bound port (PORT 0 picks a free one), flushed so a script reading a pipe can wait for it.
+    print('review page: http://127.0.0.1:%d  (saves %s; Ctrl-C to stop)' % (srv.server_address[1], os.path.relpath(REVIEW, ROOT)), flush=True)
     try: srv.serve_forever()
     except KeyboardInterrupt: pass
     sys.exit(0)

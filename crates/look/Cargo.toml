@@ -3,7 +3,9 @@ name = "solidcraft-look"
 description = "SolidCraft's look, ready to install into the UI kit: its icon masters and colour roles, code-drawn glyphs, IBM Plex interface faces and built-in themes"
 version.workspace = true
 edition.workspace = true
-license-file = "LICENSE"
+# The code is MIT OR Apache-2.0; the crate also ships the interface icon artwork (icons/design/svg,
+# LICENSE-BRAND) and the IBM Plex faces (fonts/, SIL OFL 1.1). See README.md and ATTRIBUTION.md.
+license = "(MIT OR Apache-2.0) AND LicenseRef-SolidCraft-Brand AND OFL-1.1"
 
 [lints]
 workspace = true

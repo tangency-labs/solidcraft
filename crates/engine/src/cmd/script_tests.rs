@@ -7,6 +7,36 @@ use serde_json::{Value, json};
 
 use crate::Session;
 
+#[test]
+fn secondary_alignment_script_replays_persistent_axis_and_planar_references() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        run(&mut s, "component.create", json!({"name":name}));
+        run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[x,0,0]}));
+    }
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    let axis = run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[20,0,0]},"name":"Clocking"}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid","name":"Aligned","angle":0,
+        "a":{"occurrence":"A:1","face":[10,10,10]},"b":{"occurrence":"B:1","face":[40,10,0]},
+        "a_alignment":{"reference":{"type":"construction","feature":axis},"reverse":true}}),
+    );
+    let t = replay(&script(&mut s));
+    assert_eq!(t.doc.assembly.joints[0].a.snap, s.doc.assembly.joints[0].a.snap);
+    let st = s.model.state();
+    let a = s.doc.find_component("A").unwrap();
+    let face = solidcraft_doc::joints::face_name_at(&s.doc, &st, a, solidcore_record::Vec3::new(20.0, 10.0, 5.0), false).unwrap();
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"face":face,"reverse":true}}));
+    let t = replay(&script(&mut s));
+    assert_eq!(t.doc.assembly.joints[0].a.snap, s.doc.assembly.joints[0].a.snap);
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
@@ -729,6 +759,25 @@ fn a_standard_part_replays_with_its_seat_joint() {
     assert!(insert["params"].get("at").is_none(), "the seat joint travels through the joint pass, not as picks: {insert}");
     let mut t = replay(&script);
     same(&mut s, &mut t);
+}
+
+#[test]
+fn a_component_name_split_replays_with_its_authored_properties() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C2600101::Housing", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 4}));
+    run(
+        &mut s,
+        "component.metadata.set",
+        json!({
+            "component": "C2600101::Housing",
+            "properties": {"Num": "manual"},
+            "name_split": {"separator": "::", "left_property": "Num", "right_property": "Name"}
+        }),
+    );
+    let script = script(&mut s);
+    let mut back = replay(&script);
+    same(&mut s, &mut back);
 }
 
 /// A standard part whose builder output someone changed is refused with its

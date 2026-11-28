@@ -14,6 +14,8 @@ pub const MAX_PASSES: usize = 16;
 const STAMP: u64 = 8;
 /// Frames whose timestamps can wait to be read back at once.
 const RING: usize = 3;
+/// Frames timed once more, at most, each time timing is asked for: see [`Again`].
+const AGAIN: u8 = 2;
 
 /// A read-back buffer's state.
 const FREE: u8 = 0;
@@ -52,6 +54,37 @@ impl PassTimes {
     }
 }
 
+/// Whether to time one more frame after a frame whose timestamps were read back without one valid
+/// pass. A still view times a single frame when timing is asked for, and a new query set's first
+/// frame reads back as zeros on Apple's GPUs (seen on an M6): without another frame the times would
+/// wait for the view to change. At most [`AGAIN`] frames each time timing is asked for, so a device
+/// that never gives a timestamp draws a still view a few times, not for ever.
+#[derive(Default)]
+struct Again {
+    asked: bool,
+    left: u8,
+}
+
+impl Again {
+    /// Start a frame: `on` while timing is asked for. Asking anew allows [`AGAIN`] more frames.
+    fn frame(&mut self, on: bool) {
+        if on && !self.asked {
+            self.left = AGAIN;
+        }
+        self.asked = on;
+    }
+
+    /// A frame's read-back gave no times, and `known` says whether an earlier frame's are there:
+    /// whether to time one more frame.
+    fn after_empty(&mut self, known: bool) -> bool {
+        let again = self.asked && !known && self.left > 0;
+        if again {
+            self.left -= 1;
+        }
+        again
+    }
+}
+
 struct Readback {
     buffer: wgpu::Buffer,
     state: Arc<AtomicU8>,
@@ -71,6 +104,7 @@ pub(crate) struct PassTimer {
     period: f64,
     /// The last frame read back.
     pub last: Option<PassTimes>,
+    again: Again,
 }
 
 impl PassTimer {
@@ -100,14 +134,27 @@ impl PassTimer {
                 labels: Vec::new(),
             })
             .collect();
-        Some(PassTimer { set, resolve, ring, labels: Mutex::new(Vec::new()), on: false, period: f64::from(queue.get_timestamp_period()), last: None })
+        Some(PassTimer {
+            set,
+            resolve,
+            ring,
+            labels: Mutex::new(Vec::new()),
+            on: false,
+            period: f64::from(queue.get_timestamp_period()),
+            last: None,
+            again: Again::default(),
+        })
     }
 
     /// Start a frame: read back what earlier frames' timestamps finished, map the buffers the
     /// last frame filled (it has been submitted since), and time this frame's passes when `on`.
-    pub fn begin(&mut self, device: &wgpu::Device, on: bool) {
+    /// Returns whether this frame should be drawn, not shown from a picture already drawn: a
+    /// frame's timestamps came back without times and none are known yet ([`Again`]).
+    pub fn begin(&mut self, device: &wgpu::Device, on: bool) -> bool {
         // Runs the map callbacks of finished copies; never waits.
         let _ = device.poll(wgpu::PollType::Poll);
+        self.again.frame(on);
+        let mut empty = false;
         for r in &mut self.ring {
             match r.state.load(Ordering::Acquire) {
                 COPIED => {
@@ -124,12 +171,16 @@ impl PassTimer {
                         Err(_) => Vec::new(),
                     };
                     r.buffer.unmap();
-                    if let Some(times) = times(&r.labels, &stamps, self.period) {
-                        self.last = Some(times);
+                    match times(&r.labels, &stamps, self.period) {
+                        Some(times) => self.last = Some(times),
+                        None => empty = true,
                     }
                     r.state.store(FREE, Ordering::Release);
                 }
-                FAILED => r.state.store(FREE, Ordering::Release),
+                FAILED => {
+                    empty = true;
+                    r.state.store(FREE, Ordering::Release);
+                }
                 _ => {}
             }
         }
@@ -141,6 +192,7 @@ impl PassTimer {
         if let Ok(mut labels) = self.labels.lock() {
             labels.clear();
         }
+        empty && self.again.after_empty(self.last.is_some())
     }
 
     /// The timestamp writes of the next pass, `label`; `None` while nothing is timed or the
@@ -212,7 +264,28 @@ pub(crate) fn times(labels: &[&'static str], stamps: &[u64], period: f64) -> Opt
 
 #[cfg(test)]
 mod tests {
-    use super::times;
+    use super::{AGAIN, Again, times};
+
+    /// A still view times one frame when timing is asked for; when that frame's timestamps come
+    /// back empty (a new query set's first frame on Apple's GPUs), another frame is timed, a few
+    /// times at most, and never once times are known or timing is no longer asked for.
+    #[test]
+    fn a_frame_read_back_without_times_is_timed_again_a_few_times_at_most() {
+        let mut again = Again::default();
+        assert!(!again.after_empty(false), "nothing is timed again before timing is asked for");
+        again.frame(true);
+        assert!(!again.after_empty(true), "an empty frame is left alone while earlier times are known");
+        for _ in 0..AGAIN {
+            again.frame(true);
+            assert!(again.after_empty(false), "an empty frame with no times known is timed again");
+        }
+        again.frame(true);
+        assert!(!again.after_empty(false), "a device that gives no timestamps is not drawn for ever");
+        again.frame(false);
+        assert!(!again.after_empty(false), "nothing is timed again once timing is no longer asked for");
+        again.frame(true);
+        assert!(again.after_empty(false), "asking anew allows more frames");
+    }
 
     #[test]
     fn the_span_runs_from_the_first_start_to_the_last_end_and_names_the_slowest_pass() {

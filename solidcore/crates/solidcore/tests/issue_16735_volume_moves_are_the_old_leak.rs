@@ -12,9 +12,14 @@
 mod volume_leak;
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::object::ObjectRef;
-use solidcore::math::Point3;
+use solidcore::mass::integrator::properties::{
+    brep_mass_properties, MassProperties, PropertyAttributes,
+};
+use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p7::read_from_file;
@@ -38,6 +43,154 @@ fn a_box_has_no_leak() {
         l.old_bound <= 1e-9 && l.worst_gap_over_tolerance <= 1.0,
         "{l:?}"
     );
+}
+
+/// The closure strips' integrand evaluations and the mass properties of `b` about the
+/// world origin, at the integrator's accuracy 1e-9.
+fn closure_work(k: &Kernel, b: &mut Brep) -> (u64, MassProperties) {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    k.work_counters.reset();
+    let m = brep_mass_properties(k, b, 1e-9, 1.0, Point3::new(0.0, 0.0, 0.0), &attrs).unwrap();
+    (k.work_counters.mass_closure_evaluations(), m)
+}
+
+/// The 20 mm cube at the origin's closed forms: volume, centroid, the axial inertia
+/// `int (y^2 + z^2) dV = 2 a^5 / 3` and the product `int y z dV = a^5 / 4`.
+fn assert_cube_20(m: &MassProperties, rel: f64) {
+    let a: f64 = 20.0;
+    let close = |got: f64, want: f64| (got - want).abs() <= rel * want.abs();
+    assert!(close(m.properties.volume, a.powi(3)), "{m:?}");
+    for c in [m.centroid.x, m.centroid.y, m.centroid.z] {
+        assert!(close(c, a / 2.0), "{m:?}");
+    }
+    for i in [m.inertia.x, m.inertia.y, m.inertia.z] {
+        assert!(close(i, 2.0 * a.powi(5) / 3.0), "{m:?}");
+    }
+    for p in [m.products.x, m.products.y, m.products.z] {
+        assert!(close(p, a.powi(5) / 4.0), "{m:?}");
+    }
+}
+
+/// A cube's faces are planes, its trims lines in their uv and its edges lines, so every
+/// strip is polynomial; its trims lie on its edges and run along them at the edges' rate,
+/// so every strip's correspondence is a line, and each of the 12 edges' 2 uses is closed
+/// in one piece of 7 integrand evaluations (the 7-point Kronrod rule, accepted at once:
+/// the strip has no width), 24 x 7 = 168, where a grid of 64 pieces per use took
+/// 24 x 64 x 7 = 10,752; the mass properties are the closed forms to rounding.
+#[test]
+fn a_cubes_strips_close_in_one_piece_per_edge_use() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+    let (evaluations, m) = closure_work(&k, &mut b);
+    assert_eq!(evaluations, 24 * 7, "{m:?}");
+    assert_cube_20(&m, 1e-14);
+}
+
+/// The cube with its top front edge (y = 0, z = 20) replaced, the faces' trims kept (their
+/// images the old straight edge), two ways. By the same segment parametrised as the
+/// quadratic `x(t) = 0.6 t + 0.4 t^2` along it: no width, but its parameter runs along the
+/// trims at a rate from 0.6 to 1.4 of theirs, so the nearest points bend at every grid
+/// point and both uses of that edge keep their 64 pieces, the other 22 close in one:
+/// 2 x 64 x 7 + 22 x 7 = 1,050 evaluations. And by the segment moved 1e-5 off the cube,
+/// outward: a strip 1e-5 wide, but between two lines, whose nearest points do not bend,
+/// so it is one piece too (24 x 7 = 168), its integrand a polynomial the rule integrates
+/// exactly. The faces are the cube's and both faces at the edge close onto the same curve
+/// from the same line, so the closed forms hold within the tube about the edge the solid
+/// is defined up to (pi tol^2 L = 2.5e-8 of volume for tol 2e-5, L 20: under 1e-11 of it).
+#[test]
+fn an_edge_off_its_trims_keeps_its_pieces_where_its_nearest_points_bend() {
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    let out = Vec3::new(0.0, -1.0, 1.0) * (1e-5 / 2f64.sqrt());
+    for (moved, pieces) in [(false, 2 * 64 + 22), (true, 24)] {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        // measured once first, which makes the edge uses' trims on the straight edges
+        let _ = closure_work(&k, &mut b);
+        let e = b
+            .edges()
+            .ids()
+            .find(|&e| {
+                edge_closest_point(&k, &b, e, Point3::new(10.0, 0.0, 20.0))
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-9
+            })
+            .unwrap();
+        let interval = b.edge(e).unwrap().interval;
+        let line = b.edge(e).unwrap().curve.clone().unwrap();
+        let a0 = line.evaluate_point(&k, interval.min()).unwrap();
+        let a1 = line.evaluate_point(&k, interval.max()).unwrap();
+        let (points, degree) = if moved {
+            (vec![a0 + out, a1 + out], 1)
+        } else {
+            (vec![a0, a0 + (a1 - a0) * 0.3, a1], 2)
+        };
+        let curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree,
+            control_points: &points,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[degree + 1, degree + 1],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let edge = b.edge_mut(e).unwrap();
+        edge.curve = Some(curve.into());
+        edge.interval = Extent1d::from_min_max(0.0, 1.0);
+        edge.tolerance = 2e-5;
+        let (evaluations, m) = closure_work(&k, &mut b);
+        assert_eq!(evaluations, pieces * 7, "moved {moved}: {m:?}");
+        assert_cube_20(&m, 1e-11);
+    }
+}
+
+/// A cylinder's strips are not polynomial (its circles are rational): each keeps the
+/// grid's 64 pieces, and its 4 circle uses also break at the 3 inner knots of their trims
+/// (the caps' circles) or of the surface their trims cross (the side's), so
+/// (2 x 64 + 4 x 67) x 7 = 2,772 evaluations, as before; the mass properties are the
+/// closed forms of the r 5, h 20 cylinder on the z axis (`V = 500 pi`, the axial inertia
+/// about the base's centre `V (r^2 / 4 + h^2 / 3)` and `V r^2 / 2`, no products).
+#[test]
+fn a_cylinders_strips_keep_the_grid() {
+    let mut k = Kernel::default();
+    let mut b = solidcore::primitive::api_primitives::create_cylinder(
+        &mut k,
+        Point3::new(0.0, 0.0, 0.0),
+        5.0,
+        20.0,
+    )
+    .unwrap();
+    let (evaluations, m) = closure_work(&k, &mut b);
+    assert_eq!(evaluations, (2 * 64 + 4 * 67) * 7, "{m:?}");
+    let (r, h) = (5.0_f64, 20.0_f64);
+    let v = PI * r * r * h;
+    let close = |got: f64, want: f64, scale: f64| (got - want).abs() <= 1e-13 * scale;
+    let moment = v * h * h;
+    assert!(close(m.properties.volume, v, v), "{m:?}");
+    assert!(
+        close(m.centroid.x, 0.0, h) && close(m.centroid.y, 0.0, h),
+        "{m:?}"
+    );
+    assert!(close(m.centroid.z, h / 2.0, h), "{m:?}");
+    let side = v * (r * r / 4.0 + h * h / 3.0);
+    assert!(
+        close(m.inertia.x, side, moment) && close(m.inertia.y, side, moment),
+        "{m:?}"
+    );
+    assert!(close(m.inertia.z, v * r * r / 2.0, moment), "{m:?}");
+    for p in [m.products.x, m.products.y, m.products.z] {
+        assert!(close(p, 0.0, moment), "{m:?}");
+    }
 }
 
 // ---- corpus.parity ----------------------------------------------------------------------
@@ -1050,7 +1203,7 @@ fn round_trip(
         surface_key: &|_: FaceId| ObjectKey(0),
     };
     let mut all = Vec::new();
-    let bytes = BrepData::from_brep(&breps[i], &env, &mut all)
+    let bytes = BrepData::from_brep(k, &breps[i], &env, &mut all)
         .and_then(|mut data| data.write_to_file_with_nurbs(k, FileType::Ascii))
         .unwrap();
     read_breps(k, bytes).0.remove(0)

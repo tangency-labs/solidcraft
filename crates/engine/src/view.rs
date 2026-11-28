@@ -59,6 +59,8 @@ pub mod colors {
 pub struct Palette {
     /// The background gradient, top and bottom.
     pub background: (Rgb, Rgb),
+    /// A colour halfway down the background gradient (the user's own, #9230), or `None`.
+    pub background_middle: Option<Rgb>,
     pub grid: Rgb,
     pub grid_major: Rgb,
     /// Body edges, and the outline where the section cuts a body.
@@ -92,6 +94,7 @@ impl Palette {
     /// [`colors`].
     pub const DEFAULT: Palette = Palette {
         background: (colors::BG_TOP, colors::BG_BOTTOM),
+        background_middle: None,
         grid: colors::GRID,
         grid_major: colors::GRID_MAJOR,
         edge: colors::EDGE,
@@ -119,12 +122,57 @@ impl Default for Palette {
     }
 }
 
+/// Pre-warms the display meshes of unmeshed visible bodies in parallel so framing a large assembly
+/// does not tessellate serially on one thread. Rigid placements of one definition share one lazy
+/// source mesh, so each definition is warmed once.
+fn warm_mesh_in_place(bodies: &[&solidcraft_doc::ModelBody]) {
+    let mut seen = std::collections::HashSet::new();
+    let cold: Vec<&solidcraft_doc::ModelBody> = bodies
+        .iter()
+        .copied()
+        .filter(|b| {
+            !b.mesh_bounds_made()
+                && b.cached_mesh().is_none()
+                && seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize))
+        })
+        .collect();
+    if cold.len() > 1 {
+        solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+}
+
+/// Pre-warms the placed display meshes of unmeshed visible bodies in parallel before building a
+/// headless scene: unique definitions first (avoiding `OnceLock` contention across shared
+/// placements), then each body's placed mesh.
+fn warm_visible_meshes(bodies: &[&solidcraft_doc::ModelBody]) {
+    let cold: Vec<&solidcraft_doc::ModelBody> = bodies.iter().copied().filter(|b| b.cached_mesh().is_none()).collect();
+    if cold.len() <= 1 {
+        return;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let defs: Vec<&solidcraft_doc::ModelBody> = cold
+        .iter()
+        .copied()
+        .filter(|b| seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize)))
+        .collect();
+    if defs.len() > 1 {
+        solidcraft_kernel::map_on_threads(&defs, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+    solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+        let _ = b.mesh();
+    });
+}
+
 /// Bounds of everything visible now, in world space: shown bodies where their occurrences,
 /// joints and moves place them, and the sketches the view draws (not ones used by a feature,
 /// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame. A model
 /// that cannot be placed is the error.
 pub fn bounds(s: &Session) -> Result<Aabb3> {
-    bounds_by(s, |body| body.mesh_bounds())
+    bounds_by(s, true, |body| body.mesh_bounds())
 }
 
 /// The Point Clouds folder's tree key (`Visibility::hidden_folders`).
@@ -140,13 +188,17 @@ pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::
 /// ([`solidcraft_kernel::Body::outline_bounds`]), which a face curving out past all of its edges
 /// can exceed. Frames a design whose bodies are still being meshed.
 pub fn unmeshed_bounds(s: &Session) -> Result<Aabb3> {
-    bounds_by(s, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
+    bounds_by(s, false, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
 }
 
-fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
+fn bounds_by(s: &Session, warm: bool, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
     let st = s.world_state()?;
+    let visible: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|x| s.body_visible(&x.name)).collect();
+    if warm {
+        warm_mesh_in_place(&visible);
+    }
     let mut b = Aabb3::EMPTY;
-    for body in st.bodies.iter().filter(|x| s.body_visible(&x.name)) {
+    for body in visible {
         b = b.union(&of(body));
     }
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
@@ -587,20 +639,17 @@ impl GridFade {
         ((self.end - d) / (self.end - self.start)) as f32
     }
 
-    /// The pieces the grid's line at the given offset from the middle is drawn in: each with the
-    /// alpha the fade gives it at the distance where it lies. The line runs along the grid's other
-    /// axis; it is drawn whole where the grid is at full strength, and in pieces that fade
-    /// towards its ends.
-    pub fn pieces(&self, offset: f64) -> Vec<(f64, f64, f32)> {
-        let mut out = Vec::new();
+    /// Visit each piece the grid's line at the given offset from the middle is drawn in, without
+    /// allocating a vector per line: `(s0, s1, alpha)` along the grid's other axis.
+    pub fn for_each_piece(&self, offset: f64, mut f: impl FnMut(f64, f64, f32)) {
         let off = offset.abs();
         if !(self.end > 0.0) || off >= self.end {
-            return out;
+            return;
         }
         // Where the grid is still at full strength.
         let solid = if off < self.start { (self.start * self.start - off * off).max(0.0).sqrt() } else { 0.0 };
         if solid > 0.0 {
-            out.push((-solid, solid, 1.0));
+            f(-solid, solid, 1.0);
         }
         // The fading ends, in pieces whose distance from the middle grows evenly, so that the
         // grid dims evenly too.
@@ -611,10 +660,19 @@ impl GridFade {
             let (s0, s1) = ((d0 * d0 - off * off).max(0.0).sqrt(), (d1 * d1 - off * off).max(0.0).sqrt());
             let alpha = self.alpha((d0 + d1) * 0.5);
             if alpha > 0.0 {
-                out.push((s0, s1, alpha));
-                out.push((-s1, -s0, alpha));
+                f(s0, s1, alpha);
+                f(-s1, -s0, alpha);
             }
         }
+    }
+
+    /// The pieces the grid's line at the given offset from the middle is drawn in: each with the
+    /// alpha the fade gives it at the distance where it lies. The line runs along the grid's other
+    /// axis; it is drawn whole where the grid is at full strength, and in pieces that fade
+    /// towards its ends.
+    pub fn pieces(&self, offset: f64) -> Vec<(f64, f64, f32)> {
+        let mut out = Vec::new();
+        self.for_each_piece(offset, |s0, s1, alpha| out.push((s0, s1, alpha)));
         out
     }
 }
@@ -682,9 +740,6 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.spline_handle_of.is_some() {
-            continue;
-        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -715,7 +770,8 @@ fn sketch_lines_in(
         }
     }
     // 3D curves are in world coordinates already.
-    for w in sk.wires.iter().filter(|w| !w.fit.is_empty() || !sk.view.hide_projected) {
+    let hidden_link = |w: &solidcraft_sketch::Wire| w.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
+    for w in sk.wires.iter().filter(|w| (!w.fit.is_empty() || !sk.view.hide_projected) && !hidden_link(w)) {
         // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
         let col = if w.fit.is_empty() {
             p.sketch_projected
@@ -741,11 +797,12 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() {
+    if c.spline_handle_of.is_some() || (c.spline_control_polygon_of.is_some() && sk.view.hide_control_polygons) {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
-        return !sk.view.hide_projected;
+        // A hidden link is left out of the view only (it still bounds profiles).
+        return !sk.view.hide_projected && !c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
     }
     !(c.construction && sk.view.hide_construction)
 }
@@ -815,8 +872,14 @@ impl<'a> SketchPointVisibility<'a> {
             .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
             .map(|l| l.id.as_str())
             .collect();
-        let mut hidden: std::collections::HashSet<&str> =
-            sk.points.iter().filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l))).map(|p| p.id.as_str()).collect();
+        // Points of hidden links are not shown or picked either.
+        let concealed: std::collections::HashSet<&str> = sk.links.iter().filter(|l| l.hidden).map(|l| l.id.as_str()).collect();
+        let mut hidden: std::collections::HashSet<&str> = sk
+            .points
+            .iter()
+            .filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l) || concealed.contains(l)))
+            .map(|p| p.id.as_str())
+            .collect();
         for curve in sk.curves.iter().filter(|c| outputs.contains(c.id.as_str())) {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
@@ -967,6 +1030,7 @@ fn build_scene(
         section.iter().filter(|c| c.origin.is_finite() && c.normal.is_finite() && c.normal.len() > 1e-9).take(MAX_SECTION_PLANES).copied().collect();
     let mut sc = Scene {
         background: Some(p.background),
+        background_middle: p.background_middle,
         clip: section.iter().map(|c| c.clip()).collect(),
         clip_hatch: section.iter().map(SectionPlane::hatch).collect(),
         cap: Some(p.cap),
@@ -1048,7 +1112,9 @@ fn build_scene(
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
     // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
     let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
-    for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+    let visible: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
+    warm_visible_meshes(&visible);
+    for body in visible {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
         // The body's appearance (or imported colour) and faces with looks of their own, as in
@@ -1121,7 +1187,7 @@ fn build_scene(
         }
     }
     // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
-    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+    for line in s.isocurve_lines(solidcraft_doc::display_quality::current()).iter().flat_map(|lines| lines.iter()) {
         sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for (_, a, b) in sheet_markings(s) {
@@ -1464,11 +1530,27 @@ impl SectionIndex {
 /// shown only when shown on their own. The user's own hide wins over the marker (#12125): the
 /// browser shows the eye off, and hiding the sketch again must take it away.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
+    sketch_shown_in(s, id, None)
+}
+
+/// Is a component sketch drawn at another placement of its component ([`solidcraft_doc::SketchCopy`])?
+/// As [`sketch_shown`] says for the placement it is drawn at, with that placement's own eye and
+/// Sketches folder in place of those of the drawn one.
+pub fn sketch_shown_at(s: &Session, id: u64, path: &[u64]) -> bool {
+    sketch_shown_in(s, id, Some(path))
+}
+
+fn sketch_shown_in(s: &Session, id: u64, path: Option<&[u64]>) -> bool {
     let v = &s.visibility;
+    let placement_hidden = match path {
+        None => !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches"),
+        Some(path) => !s.occurrence_visible(path) || s.feature_folder_hidden_at(id, path, "sketches"),
+    };
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
-        return true;
+        // The open sketch is drawn where it is edited, its copies where their parts are shown.
+        return path.is_none() || !placement_hidden;
     }
-    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") || v.hidden_sketches.contains(&id) {
+    if placement_hidden || v.hidden_sketches.contains(&id) {
         return false;
     }
     if s.doc
@@ -1518,6 +1600,8 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
+        | FeatureKind::SheetBead { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
         | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
@@ -1544,6 +1628,12 @@ pub(crate) mod sketch_work {
         #[cfg(not(test))]
         let _ = walked;
     }
+}
+
+/// The camera the design's own Home view goes to, when it keeps one (`view.set_home`, #19972).
+/// Without one, Home frames the model from the iso view ([`home_camera`]).
+pub fn home_view(s: &Session) -> Option<Camera> {
+    s.doc.home_view.as_ref().map(crate::cmd::browser::camera_of)
 }
 
 /// Camera framing the model (iso view).
@@ -1610,6 +1700,18 @@ fn plane_face_anchor<'a>(
         },
         _ => None,
     }
+}
+
+/// Parse a typed axis reference for the primitive Coil marker as the command reads it.
+/// Numeric directions leave the marker at the Coil base.
+pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<solidcraft_doc::AxisRef> {
+    if crate::cmd::axis_dir_form(axis).is_ok() {
+        return None;
+    }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
+    crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
@@ -2109,6 +2211,32 @@ mod tests {
         let (minor, fine) = sketch_grid_step(110.0);
         assert_eq!(minor, 5.0, "the finer level's lines are still drawn");
         assert_eq!(sketch_grid_point(Vec2::new(5.7, 10.0), minor, fine), Vec2::new(5.0, 10.0));
+    }
+
+    /// Parallel display-mesh pre-warming in `bounds` and `scene` preserves exact bounds, mesh
+    /// order and line output across multi-body models.
+    #[test]
+    fn bounds_and_scene_prewarm_unmeshed_bodies_deterministically() {
+        let mut s = Session::default();
+        for i in 0..12 {
+            s.execute(
+                "solid.box",
+                &json!({"length": 10, "width": 12, "height": 8, "corner": [20 * i, 0, 0], "body_name": format!("B{i}"), "operation": "new"}),
+            )
+            .unwrap();
+        }
+        let b = bounds(&s).unwrap();
+        assert!((b.min.x - 0.0).abs() < 1e-6 && (b.max.x - 230.0).abs() < 1e-6, "{b:?}");
+        assert!((b.min.y - 0.0).abs() < 1e-6 && (b.max.y - 12.0).abs() < 1e-6, "{b:?}");
+        assert!((b.min.z - 0.0).abs() < 1e-6 && (b.max.z - 8.0).abs() < 1e-6, "{b:?}");
+
+        let cam = home_camera(&s).unwrap();
+        let sc1 = scene(&s, &cam).unwrap();
+        let sc2 = scene(&s, &cam).unwrap();
+        assert_eq!(sc1.meshes.len(), 12);
+        assert_eq!(sc1.meshes.len(), sc2.meshes.len());
+        assert_eq!(sc1.lines.len(), sc2.lines.len());
+        assert!(s.world_state().unwrap().bodies.iter().all(|body| body.cached_mesh().is_some()));
     }
 }
 

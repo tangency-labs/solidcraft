@@ -47,10 +47,15 @@ pub enum DxfRole {
     Perforation,
     /// Where a roll starts and ends, and its middle.
     Roll,
+    /// A formed bead's centreline and footprint, standing up out of the side the flat is drawn
+    /// from.
+    FormUp,
+    /// A formed bead's centreline and footprint, standing down.
+    FormDown,
 }
 
 impl DxfRole {
-    pub const ALL: [DxfRole; 10] = [
+    pub const ALL: &[DxfRole] = &[
         DxfRole::Outline,
         DxfRole::Cut,
         DxfRole::CutText,
@@ -61,6 +66,8 @@ impl DxfRole {
         DxfRole::Pockets,
         DxfRole::Perforation,
         DxfRole::Roll,
+        DxfRole::FormUp,
+        DxfRole::FormDown,
     ];
 
     /// The role's name in a profile file.
@@ -76,6 +83,8 @@ impl DxfRole {
             DxfRole::Pockets => "pockets",
             DxfRole::Perforation => "perforation",
             DxfRole::Roll => "roll",
+            DxfRole::FormUp => "form_up",
+            DxfRole::FormDown => "form_down",
         }
     }
 
@@ -93,6 +102,8 @@ impl DxfRole {
             DxfRole::Pockets => (POCKET, 3, DxfLinetype::Continuous),
             DxfRole::Perforation => ("PERFORATION", 3, DxfLinetype::Continuous),
             DxfRole::Roll => ("ROLL", 3, DxfLinetype::Continuous),
+            DxfRole::FormUp => ("FORM_UP", 1, DxfLinetype::Dashed),
+            DxfRole::FormDown => ("FORM_DOWN", 5, DxfLinetype::Dashed),
         }
     }
 
@@ -103,7 +114,7 @@ impl DxfRole {
         if let Some(rest) = name.strip_prefix(POCKET) {
             return rest.starts_with('_').then_some((DxfRole::Pockets, rest));
         }
-        DxfRole::ALL.into_iter().find(|role| role.standard().0 == name).map(|role| (role, ""))
+        DxfRole::ALL.iter().copied().find(|role| role.standard().0 == name).map(|role| (role, ""))
     }
 }
 
@@ -134,7 +145,7 @@ fn refused(message: impl std::fmt::Display) -> IoError {
 }
 
 fn role_keys() -> String {
-    DxfRole::ALL.map(DxfRole::key).join(", ")
+    DxfRole::ALL.iter().map(|role| role.key()).collect::<Vec<_>>().join(", ")
 }
 
 fn linetype_key(linetype: DxfLinetype) -> &'static str {
@@ -199,8 +210,8 @@ impl DxfExportProfile {
     /// The built-in profile: every role on, with the standard layer, colour and linetype.
     pub fn neutral() -> DxfExportProfile {
         let roles = DxfRole::ALL
-            .into_iter()
-            .map(|role| {
+            .iter()
+            .map(|&role| {
                 let (layer, color, linetype) = role.standard();
                 (role, DxfRoleStyle { on: true, layer: layer.to_string(), color, linetype })
             })

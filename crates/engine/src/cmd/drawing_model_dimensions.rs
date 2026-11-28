@@ -17,8 +17,8 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::coverage::{is_cap, made_by};
 use solidcraft_doc::drawing::dimension::{CornerPick, Dimension, DimensionKind, EdgePick, ModelDimension, ModelFace, Status};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SolvedSketch, ids, naming};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Constraint, ConstraintKind, CurveKind};
 

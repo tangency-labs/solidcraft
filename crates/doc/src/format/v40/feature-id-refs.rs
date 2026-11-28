@@ -8,104 +8,139 @@
 //! longer has to rewrite anything. The last release refuses a design that has them (it refuses
 //! the newer format number).
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::Value;
 
-use crate::Result;
+use crate::{DocError, Result};
 
-/// A design's features as `(id, name, type)`, for resolving names the way `replay()` did.
-type Features<'a> = &'a [(u64, String, String)];
+/// Maximum total pattern/mirror seed entries resolved across one legacy design.
+const MAX_SEEDS: usize = 1_000_000;
+/// Maximum JSON recursion depth when rewriting construction plane references.
+const MAX_DEPTH: usize = 128;
 
-/// `Document::find_feature` at the JSON level: an id written as a number, then a
-/// case-insensitive name match.
-fn find_feature(feats: Features, name: &str) -> Option<u64> {
-    name.parse::<u64>()
-        .ok()
-        .and_then(|id| feats.iter().find(|(i, ..)| *i == id))
-        .or_else(|| feats.iter().find(|(_, n, _)| n.eq_ignore_ascii_case(name)))
-    .map(|(i, ..)| *i)
+/// Indexed lookup over a design's features, matching `replay()`'s linear-scan resolution order.
+struct FeatureIndex {
+    ids: HashSet<u64>,
+    by_exact_non_sketch: HashMap<String, u64>,
+    by_ascii_lower: HashMap<String, u64>,
 }
 
-/// The feature a pattern or mirror seed named: an exact name match on a feature that is not a
-/// sketch or a construction plane (a sketch and its extrude often share a name; the feature
-/// that makes geometry wins), else [`find_feature`]; nothing is id 0, which dangles at
-/// evaluation as the missing name did.
-fn resolve_seed(feats: Features, name: &str) -> u64 {
-    feats
-        .iter()
-        .find(|(_, n, t)| n == name && !matches!(t.as_str(), "sketch" | "construction_plane"))
-        .map(|(i, ..)| *i)
-        .or_else(|| find_feature(feats, name))
-        .unwrap_or(0)
-}
+impl FeatureIndex {
+    fn build(features: &[Value]) -> Self {
+        let mut ids = HashSet::with_capacity(features.len());
+        let mut by_exact_non_sketch = HashMap::with_capacity(features.len());
+        let mut by_ascii_lower = HashMap::with_capacity(features.len());
+        for f in features {
+            let Some(o) = f.as_object() else { continue };
+            let (Some(id), Some(name), Some(kind)) =
+                (o.get("id").and_then(Value::as_u64), o.get("name").and_then(Value::as_str), o.get("type").and_then(Value::as_str))
+            else {
+                continue;
+            };
+            ids.insert(id);
+            if !matches!(kind, "sketch" | "construction_plane") {
+                by_exact_non_sketch.entry(name.to_string()).or_insert(id);
+            }
+            by_ascii_lower.entry(name.to_ascii_lowercase()).or_insert(id);
+        }
+        Self { ids, by_exact_non_sketch, by_ascii_lower }
+    }
 
-/// The feature a construction plane reference named ([`find_feature`]); nothing is id 0.
-fn resolve_plane(feats: Features, name: &str) -> u64 {
-    find_feature(feats, name).unwrap_or(0)
+    /// `Document::find_feature` at the JSON level: an id written as a number, then a
+    /// case-insensitive name match.
+    fn find_feature(&self, name: &str) -> Option<u64> {
+        if let Ok(id) = name.parse::<u64>()
+            && self.ids.contains(&id)
+        {
+            return Some(id);
+        }
+        self.by_ascii_lower.get(&name.to_ascii_lowercase()).copied()
+    }
+
+    /// The feature a pattern or mirror seed named: an exact name match on a feature that is not a
+    /// sketch or a construction plane (a sketch and its extrude often share a name; the feature
+    /// that makes geometry wins), else [`Self::find_feature`]; nothing is id 0, which dangles at
+    /// evaluation as the missing name did.
+    fn resolve_seed(&self, name: &str) -> u64 {
+        self.by_exact_non_sketch.get(name).copied().or_else(|| self.find_feature(name)).unwrap_or(0)
+    }
+
+    /// The feature a construction plane reference named ([`Self::find_feature`]); nothing is id 0.
+    fn resolve_plane(&self, name: &str) -> u64 {
+        self.find_feature(name).unwrap_or(0)
+    }
 }
 
 /// Rewrite every `{"type": "construction", "name": …}` plane reference in `v` to carry the
 /// feature's id. `skip_axis` leaves a revolve's `axis` alone: an `AxisRef::Construction` has
 /// the same shape but names a construction axis, which is still keyed by name.
-fn rewrite(v: &mut Value, feats: Features, skip_axis: bool) {
+fn rewrite(v: &mut Value, index: &FeatureIndex, skip_axis: bool, depth: usize) -> Result<()> {
+    if depth > MAX_DEPTH {
+        return Err(DocError::Invalid("damaged design: nested too deeply".into()));
+    }
     match v {
         Value::Object(o) => {
             if o.get("type").and_then(Value::as_str) == Some("construction") {
                 if let Some(Value::String(name)) = o.get("name") {
-                    let id = resolve_plane(feats, name);
+                    let id = index.resolve_plane(name);
                     o.remove("name");
                     o.insert("feature".into(), Value::from(id));
                 }
-                return;
+                return Ok(());
             }
             for (key, x) in o.iter_mut() {
                 if !(skip_axis && key == "axis") {
-                    rewrite(x, feats, false);
+                    rewrite(x, index, false, depth + 1)?;
                 }
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(|x| rewrite(x, feats, false)),
+        Value::Array(a) => {
+            for x in a.iter_mut() {
+                rewrite(x, index, false, depth + 1)?;
+            }
+        }
         _ => {}
     }
+    Ok(())
 }
 
 pub fn step(v: &mut Value) -> Result<()> {
-    let feats: Vec<(u64, String, String)> = v
-        .get("features")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_object)
-        .filter_map(|f| {
-            let id = f.get("id")?.as_u64()?;
-            let name = f.get("name")?.as_str()?.to_string();
-            let kind = f.get("type")?.as_str()?.to_string();
-            Some((id, name, kind))
-        })
-        .collect();
+    let feature_slice = v.get("features").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    if feature_slice.len() > crate::document::MAX_FEATURES {
+        return Err(DocError::Invalid("document too large".into()));
+    }
+    let index = FeatureIndex::build(feature_slice);
+    let mut total_seeds = 0usize;
     if let Some(Value::Array(features)) = v.get_mut("features") {
         for f in features.iter_mut() {
-            let kind = f.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+            let is_seed_owner = matches!(f.get("type").and_then(Value::as_str), Some("pattern" | "mirror"));
+            let skip_axis = matches!(f.get("type").and_then(Value::as_str), Some("revolve" | "surface_revolve"));
             // A pattern's or mirror's seeds: each name becomes the feature's id.
-            if matches!(kind.as_str(), "pattern" | "mirror")
-                && let Some(Value::Array(seeds)) = f.get_mut("features")
-            {
+            if is_seed_owner && let Some(Value::Array(seeds)) = f.get_mut("features") {
+                if seeds.len() > crate::document::MAX_FEATURES {
+                    return Err(DocError::Invalid("too many pattern or mirror seeds".into()));
+                }
+                total_seeds = total_seeds.saturating_add(seeds.len());
+                if total_seeds > MAX_SEEDS {
+                    return Err(DocError::Invalid("too many pattern or mirror seeds".into()));
+                }
                 for s in seeds.iter_mut() {
                     if let Value::String(name) = s {
-                        let id = resolve_seed(&feats, name);
+                        let id = index.resolve_seed(name);
                         *s = Value::from(id);
                     }
                 }
             }
             // Construction plane references, everywhere but a revolve's axis.
-            let skip_axis = matches!(kind.as_str(), "revolve" | "surface_revolve");
-            rewrite(f, &feats, skip_axis);
+            rewrite(f, &index, skip_axis, 0)?;
         }
     }
     // References outside the features: canvases placed on a construction plane and the like.
     if let Some(o) = v.as_object_mut() {
         for (key, x) in o.iter_mut() {
             if key != "features" {
-                rewrite(x, &feats, false);
+                rewrite(x, &index, false, 0)?;
             }
         }
     }
@@ -176,5 +211,22 @@ mod tests {
         d["canvases"] = json!([{"id": 1, "plane": {"type": "construction", "name": "Mid"}}]);
         let out = migrated(d);
         assert_eq!(out["canvases"][0]["plane"], json!({"type": "construction", "feature": 3}));
+    }
+
+    #[test]
+    fn large_feature_lists_resolve_in_linear_time_and_oversized_inputs_error() {
+        let mut feats: Vec<Value> = (1..=5_000u64).map(|i| json!({"id": i, "name": format!("Box{i}"), "type": "extrude"})).collect();
+        let seeds: Vec<Value> = (1..=5_000u64).map(|i| json!(format!("Box{i}"))).collect();
+        feats.push(json!({"id": 5_001, "name": "Pat", "type": "pattern", "features": seeds}));
+        let out = migrated(design(feats));
+        assert_eq!(out["features"][5_000]["features"][0], json!(1));
+        assert_eq!(out["features"][5_000]["features"][4_999], json!(5_000));
+
+        let too_many_features: Vec<Value> = vec![json!({"id": 1, "name": "A", "type": "extrude"}); crate::document::MAX_FEATURES + 1];
+        assert!(step(&mut design(too_many_features)).is_err());
+
+        let too_many_seeds = vec![json!("Boss"); crate::document::MAX_FEATURES + 1];
+        let mut bad_seeds = design(vec![json!({"id": 1, "name": "P", "type": "pattern", "features": too_many_seeds})]);
+        assert!(step(&mut bad_seeds).is_err());
     }
 }

@@ -195,6 +195,17 @@ fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     Ok((adapter, device, queue))
 }
 
+#[derive(Clone)]
+struct PreparedScene {
+    triangles: wgpu::Buffer,
+    nodes: wgpu::Buffer,
+    root_node: [u8; 32],
+    epsilon: f32,
+    active_glass_model: bool,
+    photon_guide: Option<[f32; 4]>,
+    photon_bounds: Option<[f32; 6]>,
+}
+
 struct Context {
     healthy: Arc<AtomicBool>,
     device: wgpu::Device,
@@ -216,13 +227,48 @@ struct Context {
     // The same two with the indirect clamp compiled in, built by the first clamped job needing one.
     clamped_glass: std::sync::OnceLock<GlassPipelines>,
     clamped_photon_glass: std::sync::OnceLock<GlassPipelines>,
+    // Single-entry immutable geometry + BVH preparation cache, evicted on mismatch, error, or device loss.
+    scene_cache: Arc<std::sync::Mutex<scene::PreparedSceneCache<PreparedScene>>>,
     layout: wgpu::BindGroupLayout,
 }
 impl Context {
+    fn clear_scene_cache(&self) {
+        let evicted = self.scene_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        drop(evicted);
+    }
+    fn peek_prepared_metadata(&self, key: &scene::PreparedKey) -> Option<(f32, [u8; 32], Option<[f32; 4]>)> {
+        if !self.healthy.load(Ordering::Acquire) {
+            self.clear_scene_cache();
+            return None;
+        }
+        let guard = self.scene_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.peek(key).map(|prepared| (prepared.epsilon, prepared.root_node, prepared.photon_guide))
+    }
+    fn lookup_or_evict_prepared_scene(&self, key: &scene::PreparedKey) -> Option<PreparedScene> {
+        if !self.healthy.load(Ordering::Acquire) {
+            self.clear_scene_cache();
+            return None;
+        }
+        let (hit, evicted) = self.scene_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).lookup_or_take_mismatch(key);
+        drop(evicted);
+        hit
+    }
+    fn store_prepared_scene(&self, key: scene::PreparedKey, prepared: PreparedScene) {
+        if !self.healthy.load(Ordering::Acquire) {
+            self.clear_scene_cache();
+            return;
+        }
+        let evicted = self.scene_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).replace(key, prepared);
+        drop(evicted);
+        if !self.healthy.load(Ordering::Acquire) {
+            self.clear_scene_cache();
+        }
+    }
     fn ensure_available(&self) -> Result<()> {
         if self.healthy.load(Ordering::Acquire) {
             Ok(())
         } else {
+            self.clear_scene_cache();
             Err(JobError::new(
                 ErrorCode::HostUnavailable,
                 "GPU path device was lost or failed to complete work; restart the renderer before retrying",
@@ -230,7 +276,11 @@ impl Context {
         }
     }
     fn wait(&self, submission: wgpu::SubmissionIndex, timeout: Duration) -> Result<()> {
-        wait_device(&self.device, &self.healthy, submission, timeout)
+        let result = wait_device(&self.device, &self.healthy, submission, timeout);
+        if result.is_err() {
+            self.clear_scene_cache();
+        }
+        result
     }
     // A job with an indirect clamp (JobOptions::clamp_indirect) uses its scene's program with
     // the clamp compiled in; every other job keeps the programs without it.
@@ -317,14 +367,25 @@ impl Executor {
     fn new(device: wgpu::Device, queue: wgpu::Queue) -> Result<Self> {
         device_limits(device.limits())?;
         let healthy = Arc::new(AtomicBool::new(true));
+        let scene_cache = Arc::new(std::sync::Mutex::new(scene::PreparedSceneCache::<PreparedScene>::default()));
         let uncaptured = healthy.clone();
+        let uncaptured_cache = Arc::downgrade(&scene_cache);
         device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
             uncaptured.store(false, Ordering::Release);
+            if let Some(cache) = uncaptured_cache.upgrade() {
+                let evicted = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                drop(evicted);
+            }
             log::error!("gpu-path executor retired after uncaptured error: {e}");
         }));
         let lost = healthy.clone();
+        let lost_cache = Arc::downgrade(&scene_cache);
         device.set_device_lost_callback(move |reason, message| {
             lost.store(false, Ordering::Release);
+            if let Some(cache) = lost_cache.upgrade() {
+                let evicted = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                drop(evicted);
+            }
             log::warn!("gpu-path device lost ({reason:?}); executor unavailable: {message}");
         });
         let compiling = one_compile_at_a_time();
@@ -378,6 +439,7 @@ impl Executor {
             photon_glass: std::sync::OnceLock::new(),
             clamped_glass: std::sync::OnceLock::new(),
             clamped_photon_glass: std::sync::OnceLock::new(),
+            scene_cache,
             scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
             clamped_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
         });
@@ -877,6 +939,7 @@ impl ImageExecutor for Executor {
     fn descriptor(&self) -> Result<ExecutorDescriptor> {
         let mut value = descriptor()?;
         if !self.context.healthy.load(Ordering::Acquire) {
+            self.context.clear_scene_cache();
             value.availability = Availability::Unavailable { reason: "GPU path device was lost or failed to complete work; restart renderer".into() };
         }
         Ok(value)
@@ -902,13 +965,22 @@ impl ImageExecutor for Executor {
         }
         // Reuse the production conversions and certificates, including retained-f32
         // contacts, exact medium containment, map decoding and environment PDFs.
-        // Begin currently rebuilds these immutable uploads; no GPU work is queued.
+        // Read-only cache hits skip rebuilding identical immutable scene uploads;
+        // misses validate without populating GPU buffers or queueing GPU work.
         let texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, cancel)?;
-        let upload = scene::flatten_with_media(scene, request.camera.target, cancel, options.nested_media)?;
-        photons::validate_punctual_origins(scene, request.camera.target, options, upload.epsilon, cancel)?;
-        let environment = prepare_environment(request, cancel)?;
-        photons::source_distribution(options, request, &upload.nodes, upload.photon_guide, environment.1)?;
-        drop((texture_upload, upload, environment));
+        let key = scene::PreparedKey::from_scene(scene, request.camera.target, options.nested_media, cancel)?;
+        if let Some((epsilon, root_node, photon_guide)) = self.context.peek_prepared_metadata(&key) {
+            photons::validate_punctual_origins(scene, request.camera.target, options, epsilon, cancel)?;
+            let environment = prepare_environment(request, cancel)?;
+            photons::source_distribution(options, request, &root_node, photon_guide, environment.1)?;
+            drop((texture_upload, environment));
+        } else {
+            let upload = scene::flatten_with_media(scene, request.camera.target, cancel, options.nested_media)?;
+            photons::validate_punctual_origins(scene, request.camera.target, options, upload.epsilon, cancel)?;
+            let environment = prepare_environment(request, cancel)?;
+            photons::source_distribution(options, request, &upload.nodes, upload.photon_guide, environment.1)?;
+            drop((texture_upload, upload, environment));
+        }
         cancel.check()
     }
     fn begin(&self, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
@@ -1029,6 +1101,8 @@ struct Task {
     studio: f32,
     #[cfg(test)]
     metrics: (f64, u64, f64),
+    #[cfg(test)]
+    scene_cache_hit: bool,
 }
 impl Task {
     fn new(context: Arc<Context>, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Self> {
@@ -1067,30 +1141,30 @@ impl Task {
         }
         let texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, &cancel)?;
         request.textures = None; // GPU upload owns decoded pixels; release captured source bytes.
-        let upload = scene::flatten_with_media(&scene, request.camera.target, &cancel, options.nested_media)?;
+        let cache_key = scene::PreparedKey::from_scene(&scene, request.camera.target, options.nested_media, &cancel)?;
+        let cached_scene = context.lookup_or_evict_prepared_scene(&cache_key);
+        let (fresh_upload, active_glass_model, epsilon, root_node, photon_guide, photon_bounds) = if let Some(prepared) = &cached_scene {
+            (None, prepared.active_glass_model, prepared.epsilon, prepared.root_node, prepared.photon_guide, prepared.photon_bounds)
+        } else {
+            let upload = scene::flatten_with_media(&scene, request.camera.target, &cancel, options.nested_media)?;
+            let root_node: [u8; 32] =
+                upload.nodes.get(..32).and_then(|bytes| bytes.try_into().ok()).ok_or_else(|| gpu("prepared BVH is missing its root node"))?;
+            let meta = (upload.active_glass_model, upload.epsilon, root_node, upload.photon_guide, upload.photon_bounds);
+            (Some(upload), meta.0, meta.1, meta.2, meta.3, meta.4)
+        };
         // This uniform lane was spare. Keep the material offset mask that the
         // mapped opaque shader has qualified on RADV.
-        volume[2][3] = if upload.active_glass_model { 1.0 } else { 0.0 };
-        photons::validate_punctual_origins(&scene, request.camera.target, options, upload.epsilon, &cancel)?;
+        volume[2][3] = if active_glass_model { 1.0 } else { 0.0 };
+        photons::validate_punctual_origins(&scene, request.camera.target, options, epsilon, &cancel)?;
         let bvh_ms = start.elapsed().as_secs_f64() * 1000.0;
         let (environment_bytes, environment_power) = prepare_environment(&request, &cancel)?;
-        let source_distribution = photons::source_distribution(options, &request, &upload.nodes, upload.photon_guide, environment_power)?;
+        let source_distribution = photons::source_distribution(options, &request, &root_node, photon_guide, environment_power)?;
         // A job with an indirect clamp (JobOptions::clamp_indirect) uses the program for its scene
         // with the clamp compiled in, built once per device; every other job keeps the ordinary ones.
         let clamp = options.clamp_indirect.is_some();
         let photons = options
             .caustics
-            .map(|options| {
-                photons::Resources::new(
-                    &context,
-                    options,
-                    &upload.nodes,
-                    upload.photon_guide,
-                    upload.photon_bounds,
-                    source_distribution.as_ref(),
-                    clamp,
-                )
-            })
+            .map(|options| photons::Resources::new(&context, options, &root_node, photon_guide, photon_bounds, source_distribution.as_ref(), clamp))
             .transpose()?;
         cancel.check()?;
         let glass_lighting = needs_glass_lighting(&scene);
@@ -1118,18 +1192,35 @@ impl Task {
         };
         let optical_resolve = optical_pipelines.map(|pipelines| pipelines.resolve);
         cancel.check()?;
-        let mut upload_bytes = (upload.geometry.len() + upload.nodes.len() + texture_upload.len()) as u64;
+        let cache_hit = cached_scene.is_some();
+        let mut upload_bytes = (fresh_upload.as_ref().map_or(0, |upload| upload.geometry.len() + upload.nodes.len()) + texture_upload.len()) as u64;
         cancel.check()?;
         let uploading = Instant::now();
         drop(scene);
         let device = &context.device;
-        let (uniform, accumulation, pages, failures, readback, bind, denoiser) = checked_creation(device, || {
+        let created = checked_creation(device, || {
             let make = |label, bytes: &[u8], usage| solidcraft_viewport_gpu::buffer_init(device, label, bytes, usage).map_err(gpu);
             upload_bytes += environment_bytes.len() as u64;
             let environment = make("path environment", &environment_bytes, wgpu::BufferUsages::STORAGE)?;
             drop(environment_bytes);
-            let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE)?;
-            let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE)?;
+            let (triangles, nodes, newly_prepared) = if let Some(prepared) = cached_scene {
+                (prepared.triangles, prepared.nodes, None)
+            } else {
+                let upload = fresh_upload.ok_or_else(|| gpu("missing prepared scene upload"))?;
+                let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE)?;
+                let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE)?;
+                drop(upload);
+                let prepared = PreparedScene {
+                    triangles: triangles.clone(),
+                    nodes: nodes.clone(),
+                    root_node,
+                    epsilon,
+                    active_glass_model,
+                    photon_guide,
+                    photon_bounds,
+                };
+                (triangles, nodes, Some(prepared))
+            };
             let texture_buffer = make("path opaque textures", &texture_upload, wgpu::BufferUsages::STORAGE)?;
             let uniform = make("path parameters", &[0; PARAMETER_BYTES], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)?;
             // Inconsistent-medium path count and the first such path's location (see read_linear).
@@ -1186,12 +1277,22 @@ impl Task {
             } else {
                 None
             };
-            Ok((uniform, accumulation, pages, failures, readback, bind, denoiser))
-        })?;
+            Ok((uniform, accumulation, pages, failures, readback, bind, denoiser, newly_prepared))
+        });
+        let (uniform, accumulation, pages, failures, readback, bind, denoiser, newly_prepared) = match created {
+            Ok(resources) => resources,
+            Err(error) => {
+                context.clear_scene_cache();
+                return Err(error);
+            }
+        };
         let submission = context.queue.submit([]);
         context.wait(submission, TIMEOUT)?;
+        if let Some(prepared) = newly_prepared {
+            context.store_prepared_scene(cache_key, prepared);
+        }
         let upload_ms = uploading.elapsed().as_secs_f64() * 1000.0;
-        log::info!("gpu-path BVH {bvh_ms:.3} ms, upload {upload_bytes} bytes in {upload_ms:.3} ms");
+        log::info!("gpu-path BVH {bvh_ms:.3} ms (cached={cache_hit}), upload {upload_bytes} bytes in {upload_ms:.3} ms");
         cancel.check()?;
         if let Some(resources) = &photons {
             resources.warm_up_actual(&context, &uniform, &bind, &cancel)?;
@@ -1243,7 +1344,7 @@ impl Task {
             aging,
             photographic: None,
             offset: 0,
-            epsilon: upload.epsilon,
+            epsilon,
             png: None,
             encoding_preview: false,
             preview_enabled: false,
@@ -1257,6 +1358,8 @@ impl Task {
             studio: 1.0,
             #[cfg(test)]
             metrics: (bvh_ms, upload_bytes, upload_ms),
+            #[cfg(test)]
+            scene_cache_hit: cache_hit,
         })
     }
     fn parameters(&self, count: u32) -> Result<Vec<u8>> {

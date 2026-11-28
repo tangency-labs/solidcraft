@@ -4,9 +4,9 @@
 //! edges' ends up to the whole gap away; the tolerance update then grows the vertex's tolerance
 //! to twice that gap, past [`LARGE_SMALL_SIZE_RATIO`] times the B-rep's, and the check refuses
 //! the result. [`update_tolerances_after_boolean`] first centres such a vertex on its edges'
-//! ends where that fits, then runs [`validate_and_update_tolerances`] as before.
+//! ends where that fits, then runs [`super::assert_valid::validate_and_update_tolerances`] as before.
 
-use super::assert_valid::{validate_and_update_tolerances, CheckLevel, ToleranceGaps};
+use super::assert_valid::{CheckLevel, ToleranceGaps};
 use crate::error::{Result, SolidError};
 use crate::geom::tol::LARGE_SMALL_SIZE_RATIO;
 use crate::kernel::Kernel;
@@ -18,10 +18,11 @@ use crate::Point3;
 /// tolerances only grown), after [`centre_wide_vertices`].
 ///
 /// # Errors
-/// Those of [`centre_wide_vertices`] and [`validate_and_update_tolerances`].
+/// Those of [`centre_wide_vertices`] and [`super::assert_valid::validate_and_update_tolerances`].
 pub fn update_tolerances_after_boolean(k: &mut Kernel, b: &mut Brep) -> Result<ToleranceGaps> {
     centre_wide_vertices(k, b)?;
-    validate_and_update_tolerances(k, b, false, None, CheckLevel::Level2 as u8)
+    // (not upstream) the faces the update found clean on a body before are skipped
+    super::assert_valid::update_tolerances_remembering(k, b, CheckLevel::Level2 as u8)
 }
 
 /// Moves each vertex of `b` whose tolerance SMLib's check refuses (not under
@@ -59,6 +60,7 @@ pub(crate) fn centre_wide_vertices(k: &mut Kernel, b: &mut Brep) -> Result<()> {
             Ok(true) => {}
             Err(
                 e @ (SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::Unported { .. }
                 | SolidError::FaceTrimsUnavailable { .. }),
             ) => {

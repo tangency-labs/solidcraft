@@ -6,6 +6,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`radius_clears_on_surface`] | none |
+//! | [`speed_clears_on_surface`] (tangency-labs/solidcraft#23062) | none |
 //!
 //! **The bound.** Take a piece `[a, b]` of the trim inside one of its knot spans, with
 //! `t = m + h s`, `s` in `[-1, 1]`, `m` the piece's middle and `h` half its length rounded
@@ -29,7 +30,16 @@
 //! - the radius `|g'|^3 / |g' x g''|` (the same in every parameter) is at least the
 //!   quotient of those bounds.
 //!
-//! The piece clears the tolerance where that lower bound is at least it. The bounds are
+//! The piece clears the tolerance where that lower bound is at least it.
+//!
+//! **The speed** (test 11, [`speed_clears_on_surface`]) is bounded from the same
+//! composition: `|g'| >= (N . n)_lo / (|n| W_hi^2)` in `s`, and in the trim's own
+//! parameter `t = m + h s` the speed is that over `h` (rounded up, so the quotient is a
+//! lower bound). A piece clears the speed tolerance where that is at least it. A corner
+//! at a knot changes no speed on either side, so a C0 knot does not refuse it (each
+//! piece lies inside one knot span, and both sides are bounded).
+//!
+//! The bounds are
 //! taken from the composed coefficients, never from enclosures of the surface's partials
 //! over a box: near a pole the partials are large and cancel to a small image speed, and an
 //! interval enclosure over a box loses that cancellation (its width grows with the box,
@@ -130,9 +140,64 @@ pub(crate) fn radius_clears_on_surface(
     hi: f64,
     tol: f64,
 ) -> Result<bool> {
+    image_clears(k, trim, surface, lo, hi, ImageBound::Radius(tol))
+}
+
+/// Whether the image of the UV trim `trim` on `surface`, the 3D curve `S(c(t))`, moves at
+/// a speed `|d/dt S(c(t))|` of at least `tol` at every parameter of `[lo, hi]` (from
+/// either side of a knot of the trim or of the surface): certified as the module docs
+/// describe ("The speed").
+///
+/// `false` (not certified: the caller reports as before) in the cases
+/// [`radius_clears_on_surface`] lists, but for a C0 knot of the trim, which a speed bound
+/// does not need to refuse.
+///
+/// # Errors
+///
+/// [`crate::error::SolidError::Unported`] and cancellation.
+pub(crate) fn speed_clears_on_surface(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    surface: &Surface,
+    lo: f64,
+    hi: f64,
+    tol: f64,
+) -> Result<bool> {
+    image_clears(k, trim, surface, lo, hi, ImageBound::Speed(tol))
+}
+
+/// What a trim's image must clear on every piece: a radius of curvature or a speed in the
+/// trim's parameter, at least the tolerance given.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ImageBound {
+    /// `|g'|^3 / |g' x g''| >= tol` (test 13).
+    Radius(f64),
+    /// `|d/dt g| >= tol` (test 11).
+    Speed(f64),
+}
+
+impl ImageBound {
+    /// The tolerance.
+    fn tol(self) -> f64 {
+        match self {
+            Self::Radius(t) | Self::Speed(t) => t,
+        }
+    }
+}
+
+/// [`radius_clears_on_surface`] and [`speed_clears_on_surface`]: the pieces, halved breadth
+/// first, each enclosed on every surface piece it meets ([`piece_clears`]).
+fn image_clears(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    surface: &Surface,
+    lo: f64,
+    hi: f64,
+    bound: ImageBound,
+) -> Result<bool> {
     // (written to accept: a NaN fails)
     let ordered = lo <= hi;
-    if !ordered || !tol.is_finite() {
+    if !ordered || !bound.tol().is_finite() {
         return Ok(false);
     }
     let curve = match NurbsCurve::of(trim) {
@@ -146,8 +211,9 @@ pub(crate) fn radius_clears_on_surface(
     }
     // a knot of full multiplicity inside the trim can carry a tangent jump (a C0 corner)
     // that the pieces, cut at the knots, never see: not certified unless its two tangents
-    // are certified parallel
-    if has_corner_knot(&curve, lo, hi) {
+    // are certified parallel (a corner has a radius of 0; its speed on either side is
+    // bounded by the pieces)
+    if matches!(bound, ImageBound::Radius(_)) && has_corner_knot(&curve, lo, hi) {
         return Ok(false);
     }
     // a procedural blend's net only approximates its positions: a bound on the net is no
@@ -187,7 +253,7 @@ pub(crate) fn radius_clears_on_surface(
         }
         // a piece whose rounded (u, v) range runs off the surface's knots (easy near a pole
         // on the domain's boundary) is halved like one that does not clear
-        if piece_clears(&curve, &net, a, b, tol) == Some(true) {
+        if piece_clears(&curve, &net, a, b, bound) == Some(true) {
             continue;
         }
         let m = 0.5 * (a + b);
@@ -453,10 +519,16 @@ fn jacobian_over(net: &Nurbs, ur: Ivl, vr: Ivl) -> Option<f64> {
 }
 
 /// One piece `[a, b]` of the trim (inside one of its knot spans): `Some(true)` where the
-/// bound clears `tol` on every surface piece the trim's points can lie on, `Some(false)`
-/// where it does not (or the piece meets too many surface pieces), `None` where the piece's
-/// parameter range runs off the surface's knots.
-fn piece_clears(curve: &NurbsCurve, net: &Nurbs, a: f64, b: f64, tol: f64) -> Option<bool> {
+/// bound clears its tolerance on every surface piece the trim's points can lie on,
+/// `Some(false)` where it does not (or the piece meets too many surface pieces), `None`
+/// where the piece's parameter range runs off the surface's knots.
+fn piece_clears(
+    curve: &NurbsCurve,
+    net: &Nurbs,
+    a: f64,
+    b: f64,
+    bound: ImageBound,
+) -> Option<bool> {
     let m = 0.5 * (a + b);
     let gap = if b - m > m - a { b - m } else { m - a };
     let h = Ivl::from(round_up(gap));
@@ -484,7 +556,7 @@ fn piece_clears(curve: &NurbsCurve, net: &Nurbs, a: f64, b: f64, tol: f64) -> Op
     }
     for &ku in &us {
         for &kv in &vs {
-            if !patch_clears(net, ku, kv, &cu, &cv, ur, vr, tol) {
+            if !patch_clears(net, ku, kv, &cu, &cv, ur, vr, bound, h) {
                 return Some(false);
             }
         }
@@ -554,8 +626,9 @@ fn spans_met(knots: &[f64], p: usize, n: usize, x: Ivl) -> Option<Vec<usize>> {
     (!out.is_empty()).then_some(out)
 }
 
-/// Whether the bound clears `tol` with the surface's polynomial piece `(ku, kv)` composed
-/// with the trim piece `(cu, cv)` (power coefficients in `s`; `ur`, `vr` their ranges).
+/// Whether the bound clears its tolerance with the surface's polynomial piece `(ku, kv)`
+/// composed with the trim piece `(cu, cv)` (power coefficients in `s`; `ur`, `vr` their
+/// ranges; `h` the piece's half-length rounded up, `t = m + h s`).
 #[allow(clippy::too_many_arguments)]
 fn patch_clears(
     net: &Nurbs,
@@ -565,7 +638,8 @@ fn patch_clears(
     cv: &Poly,
     ur: Ivl,
     vr: Ivl,
-    tol: f64,
+    bound: ImageBound,
+    h: Ivl,
 ) -> bool {
     let clamp = |x: f64, lo: f64, hi: f64| {
         if x < lo {
@@ -670,27 +744,10 @@ fn patch_clears(
         add_into(&mut ne, &mul(&qe, &wd), Ivl::from(-1.0));
         ne
     });
-    let nd: [Poly; 3] = n.clone().map(|ne| deriv(&ne));
-    // N x N': g' x g'' = (N x N') / W^4, the tangential part cancelled in the coefficients
-    let cross_of = |i: usize, j: usize| {
-        let (Some(ni), Some(nj), Some(ndi), Some(ndj)) = (n.get(i), n.get(j), nd.get(i), nd.get(j))
-        else {
-            return vec![Ivl::whole()];
-        };
-        let mut c = mul(ni, ndj);
-        add_into(&mut c, &mul(nj, ndi), Ivl::from(-1.0));
-        c
-    };
-    let cross = [cross_of(1, 2), cross_of(2, 0), cross_of(0, 1)];
 
     // the bounds over s in [-1, 1]
     let w_lo = lower_bound(&w);
     let w_hi = upper_magnitude(&w);
-    let norm_hi = |p: &[Poly; 3]| {
-        let [x, y, z] = p.clone().map(|c| Ivl::from(upper_magnitude(&c)));
-        (x * x + y * y + z * z).sqrt().hi
-    };
-    let cross_hi = norm_hi(&cross);
     let dir = n.clone().map(|c| c.first().map_or(f64::NAN, |x| x.mid()));
     let dir_len = dir
         .iter()
@@ -703,17 +760,44 @@ fn patch_clears(
         add_into(&mut along, ne, Ivl::from(de));
     }
     let n_lo = lower_bound(&along);
-    let finite = [w_lo, w_hi, cross_hi, dir_len, n_lo]
-        .iter()
-        .all(|x| x.is_finite());
+    let finite = [w_lo, w_hi, dir_len, n_lo].iter().all(|x| x.is_finite());
     let positive = w_lo > 0.0 && n_lo > 0.0 && dir_len > 0.0;
     if !finite || !positive {
         return false;
     }
-    // radius = |g'|^3 / |g' x g''| >= (|N|_lo / W_hi^2)^3 / (|N x N'|_hi / W_lo^4)
+    // |g'| (in s) = |N| / W^2 >= (N . n)_lo / (|n| W_hi^2)
     let (w_lo, w_hi) = (Ivl::from(w_lo), Ivl::from(w_hi));
     let speed = Ivl::from(n_lo) / (Ivl::from(dir_len) * w_hi * w_hi);
     let speed_lo = Ivl::from(speed.lo);
+    let tol = match bound {
+        ImageBound::Speed(tol) => {
+            // in t = m + h s: d/dt = (d/ds) / h, with h rounded up
+            let in_t = (speed_lo / h).lo;
+            return in_t.is_finite() && in_t >= tol;
+        }
+        ImageBound::Radius(tol) => tol,
+    };
+    let nd: [Poly; 3] = n.clone().map(|ne| deriv(&ne));
+    // N x N': g' x g'' = (N x N') / W^4, the tangential part cancelled in the coefficients
+    let cross_of = |i: usize, j: usize| {
+        let (Some(ni), Some(nj), Some(ndi), Some(ndj)) = (n.get(i), n.get(j), nd.get(i), nd.get(j))
+        else {
+            return vec![Ivl::whole()];
+        };
+        let mut c = mul(ni, ndj);
+        add_into(&mut c, &mul(nj, ndi), Ivl::from(-1.0));
+        c
+    };
+    let cross = [cross_of(1, 2), cross_of(2, 0), cross_of(0, 1)];
+    let norm_hi = |p: &[Poly; 3]| {
+        let [x, y, z] = p.clone().map(|c| Ivl::from(upper_magnitude(&c)));
+        (x * x + y * y + z * z).sqrt().hi
+    };
+    let cross_hi = norm_hi(&cross);
+    if !cross_hi.is_finite() {
+        return false;
+    }
+    // radius = |g'|^3 / |g' x g''| >= (|N|_lo / W_hi^2)^3 / (|N x N'|_hi / W_lo^4)
     let turn = Ivl::from(cross_hi) / (w_lo * w_lo * w_lo * w_lo);
     let lhs = (speed_lo * speed_lo * speed_lo).lo;
     let rhs = (Ivl::from(tol) * Ivl::from(turn.hi)).hi;

@@ -20,7 +20,7 @@
 //!   report.
 
 use solidcore_record::Seg2;
-use solidcraft_geom::paper::{Item, Prepared};
+use solidcraft_geom::paper::{Item, ObjectKind, Prepared};
 
 use crate::dxf_out::{
     DxfEntityWeight as EntityWeight, DxfFile, DxfLayerId as LayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfShape,
@@ -56,12 +56,24 @@ enum Layer {
     Fill,
 }
 
+/// The least width of a wide line on the sheet's own furniture: its border, title block and tables
+/// are drawn in fixed ISO 5457 widths (0.7 mm outlines, 0.35 mm grid and cell lines), whatever
+/// line group the views use, so they are read against this, not against the group's wide line.
+const FURNITURE_WIDE_MM: f64 = 0.5;
+
+/// Whether `kind` is the sheet's own furniture, drawn in fixed widths.
+fn is_furniture(kind: ObjectKind) -> bool {
+    matches!(kind, ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock | ObjectKind::PartsList | ObjectKind::RevisionTable)
+}
+
 /// The layer of a stroke `width_mm` wide, dashed in `pattern` lengths, in a line group whose wide
-/// line is `wide_mm`.
-fn stroke_layer(width_mm: f64, pattern: Option<usize>, wide_mm: f64) -> Layer {
+/// line is `wide_mm`. `furniture` strokes are wide from [`FURNITURE_WIDE_MM`] up.
+fn stroke_layer(width_mm: f64, pattern: Option<usize>, wide_mm: f64, furniture: bool) -> Layer {
     match pattern {
         Some(2) => Layer::Hidden,
         Some(_) => Layer::Dashed,
+        None if furniture && width_mm >= FURNITURE_WIDE_MM => Layer::Visible,
+        None if furniture => Layer::Thin,
         None if width_mm >= 0.75 * wide_mm => Layer::Visible,
         None => Layer::Thin,
     }
@@ -107,7 +119,11 @@ pub fn paper_dxf(scene: &Prepared, wide_mm: &dyn Fn(u64) -> f64) -> Result<(Stri
         for item in &group.items {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
-                    let on = layer(&mut file, stroke_layer(*width_mm, pattern.as_ref().map(|p| p.lengths_mm.len()), wide), wide)?;
+                    let on = layer(
+                        &mut file,
+                        stroke_layer(*width_mm, pattern.as_ref().map(|p| p.lengths_mm.len()), wide, is_furniture(group.kind)),
+                        wide,
+                    )?;
                     let shapes = if *closed {
                         let lp = solidcore_record::Loop2 { segs: path.clone() };
                         path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Polyline)?

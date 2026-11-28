@@ -285,13 +285,194 @@ fn analytic_shells_keep_their_closed_forms() {
     assert!((got - want).abs() <= 1e-8 * want, "torus {got} vs {want}");
 }
 
-/// #18239: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall of 1
-/// the boss's opposite sides' offsets meet (half its width), so its offset vanishes while
-/// the block keeps a cavity: refused as walls meeting across it, naming 1, the largest wall
-/// that fits (not as a radius of curvature, which a flat face has none of). At
-/// 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+/// A planar version of the disappearing rib in SolidCraft #16307: the xz outline
+/// of a 20 mm block cut down to z14 beside a 1 mm rib, chamfered 1 mm at its top.
+/// Its area is 20*14 + 1*5 + 1/2 = 285.5 mm2, swept 20 mm along y.
+fn chamfered_rib(k: &mut Kernel) -> Brep {
+    use solidcore::curve::curve::Curve;
+    use solidcore::math::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+
+    k.fixes = solidcore::kernel::UpstreamFixes::all();
+    let outline = [
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 14.0),
+        (1.0, 14.0),
+        (1.0, 20.0),
+        (0.0, 19.0),
+    ];
+    let curves: Vec<Curve> = outline
+        .iter()
+        .zip(outline.iter().cycle().skip(1))
+        .map(|(&(x0, z0), &(x1, z1))| {
+            Curve::from(
+                create_line_segment(Vec3::new(x0, 0.0, z0), Vec3::new(x1, 0.0, z1)).unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<_> = curves.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 1.0, 0.0), 20.0, true).unwrap()
+}
+
+/// Once t reaches half the rib's width, its cavity has no positive volume.
+/// The remaining mitred cavity is (20-2t) by (20-2t) by (14-t), open at z0.
 #[test]
-fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
+fn shell_removes_a_chamfered_ribs_vanished_cavity() {
+    use offset_fixture::{planar_faces_at, shell};
+    use solidcore::error::EntityRef;
+    use solidcore::geom::attribute::{Attribute, Behavior};
+
+    for t in [0.5_f64, 1.0, 2.0] {
+        let mut k = Kernel::default();
+        let mut body = chamfered_rib(&mut k);
+        assert!((volume(&k, &mut body).unwrap() - 5710.0).abs() < 1e-7);
+        // Source reconstruction must not alias the untouched outer face's metadata.
+        let rights = planar_faces_at(&k, &body, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 before");
+        for &right in &rights {
+            body.add_attribute(
+                EntityRef::Face(right),
+                Attribute::new(30001, Behavior::Copy),
+            )
+            .unwrap();
+        }
+        let open = planar_faces_at(&k, &body, 2, 0.0);
+        assert_eq!(open.len(), 1);
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let rights = planar_faces_at(&k, &made, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 after");
+        for right in rights {
+            assert!(
+                made.find_attribute(EntityRef::Face(right), 30001).is_some(),
+                "t={t}: the outer face keeps its attribute"
+            );
+        }
+        for (axis, at) in [(0, 0.0), (0, 1.0), (2, 14.0)] {
+            for other in planar_faces_at(&k, &made, axis, at) {
+                assert!(made.find_attribute(EntityRef::Face(other), 30001).is_none());
+            }
+        }
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let want = 5710.0 - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let got = volume(&k, &mut made).unwrap();
+        assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
+    }
+}
+
+/// Below the half-width event, the rib's mitred cavity still has positive area.
+#[test]
+fn shell_keeps_a_chamfered_ribs_cavity_below_half_its_width() {
+    use offset_fixture::{planar_faces_at, shell};
+
+    let mut k = Kernel::default();
+    let mut body = chamfered_rib(&mut k);
+    assert!((volume(&k, &mut body).unwrap() - 5710.0).abs() < 1e-7);
+    let open = planar_faces_at(&k, &body, 2, 0.0);
+    assert_eq!(open.len(), 1);
+    let t = 0.4;
+    let mut made = shell(&mut k, body, -t, &open).unwrap();
+    assert!(brep_is_manifold_solid(&made).unwrap());
+    let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+    assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+    let width = 20.0 - 2.0 * t;
+    let rib_area = (1.0 - 2.0 * t) * (5.5 + (1.0 - 2.0_f64.sqrt()) * t);
+    let want = 5710.0 - width * (width * (14.0 - t) + rib_area);
+    let got = volume(&k, &mut made).unwrap();
+    assert!((got - want).abs() < 1e-7, "{got} vs {want}");
+}
+
+/// The same rib with a radius-2 cylindrical round, reproducing the reporter's
+/// collapsed-round refusal as well as the planar rib's disappearing cavity.
+#[test]
+fn shell_removes_a_rounded_ribs_vanished_cavity() {
+    use offset_fixture::{planar_faces_at, shell};
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::boolean::api_brep::boolean;
+    use solidcore::geom::a_object::BooleanOperation;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+
+    for t in [1.0_f64, 2.0] {
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
+        let mut body = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        let edge = body
+            .edges()
+            .iter()
+            .find(|(_, e)| {
+                let c = e.curve.as_ref().unwrap();
+                [e.interval.min(), e.interval.max()].into_iter().all(|u| {
+                    let p = c.evaluate_point(&k, u).unwrap();
+                    p.x.abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9
+                })
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        fillet_edges(&mut k, &mut body, &[edge], 2.0, 1, 1, 1.0).unwrap();
+        let tool = create_box(&mut k, Point3::new(2.0, -1.0, 14.0), 20.0, 22.0, 8.0).unwrap();
+        let mut body = boolean(&mut k, body, tool, BooleanOperation::Difference)
+            .unwrap()
+            .result;
+        // 20 * (20*14 + 2*4 + pi*2^2/4).
+        let input = 5760.0 + 20.0 * std::f64::consts::PI;
+        assert!((volume(&k, &mut body).unwrap() - input).abs() < 1e-7);
+        let open = planar_faces_at(&k, &body, 2, 0.0);
+        assert_eq!(open.len(), 1);
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let want = input - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let got = volume(&k, &mut made).unwrap();
+        assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
+    }
+}
+
+/// An opening does not move inward: a half-width wall does not consume the rib
+/// when either of its opposing faces is open. Both variants keep a finite cavity.
+#[test]
+fn shell_keeps_a_ribs_cavity_when_an_opposing_face_is_open() {
+    use offset_fixture::{planar_faces_at, shell};
+
+    for open_x in [0.0, 1.0] {
+        let mut k = Kernel::default();
+        let body = chamfered_rib(&mut k);
+        let open = planar_faces_at(&k, &body, 0, open_x);
+        assert_eq!(open.len(), 1);
+        let t = 0.5;
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let left = if open_x == 0.0 { 0.0 } else { t };
+        let rib_right = if open_x == 1.0 { 1.0 } else { 1.0 - t };
+        let base_area = (20.0 - t - left) * (14.0 - 2.0 * t);
+        let rib_height = 19.0 + (left + rib_right) / 2.0 - 2.0_f64.sqrt() * t - (14.0 - t);
+        let cavity = (20.0 - 2.0 * t) * (base_area + (rib_right - left) * rib_height);
+        let want = 5710.0 - cavity;
+        let got = volume(&k, &mut made).unwrap();
+        assert!(
+            (got - want).abs() < 1e-7,
+            "open x={open_x}: {got} vs {want}"
+        );
+    }
+}
+
+/// #18239, #22783: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall
+/// of 1 the boss's opposite sides' offsets meet on one plane (half its width): what the boss
+/// would hold of the cavity has no volume, so the boss stays solid and the cavity is the
+/// block's alone, 18 x 18 x 8. A wall 5e-8 thinner leaves the boss a cavity 1e-7 wide, within
+/// the body's tolerance of nothing, which is refused as walls meeting across it, naming 1,
+/// the largest wall that fits (not as a radius of curvature, which a flat face has none of).
+/// At 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+#[test]
+fn square_boss_inset_by_half_its_width_stays_solid() {
     use offset_fixture::shell;
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::math::Point3;
@@ -303,19 +484,27 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     };
     let mut k = Kernel::default();
     let boss = part(&mut k);
-    let err = shell(&mut k, boss, -1.0, &[]).unwrap_err();
+    let mut b = shell(&mut k, boss, -1.0, &[]).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let want = 4008.0 - 18.0 * 18.0 * 8.0;
+    let got = volume(&k, &mut b).unwrap();
+    assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
+    let wall = 1.0 - 5e-8;
+    let mut k = Kernel::default();
+    let boss = part(&mut k);
+    let err = shell(&mut k, boss, -wall, &[]).unwrap_err();
     let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross { face, largest, .. })) =
         err.failure().map(|f| &f.reason)
     else {
-        panic!("wall 1: not walls meeting across the boss: {err}");
+        panic!("wall {wall}: not walls meeting across the boss: {err}");
     };
     assert!((largest - 1.0).abs() <= 1e-9, "{largest}");
     assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
     assert_eq!(
         err.to_string(),
         format!(
-            "{}: the offset of face {} by 1 vanishes: the wall reaches half the width between \
-             two opposite faces (the largest wall that fits is {largest})",
+            "{}: the offset of face {} by {wall} vanishes: the wall reaches half the width \
+             between two opposite faces (the largest wall that fits is {largest})",
             err.operation(),
             face.index()
         )
@@ -328,4 +517,208 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     let want = 4008.0 - (18.2 * 18.2 * 8.2 + 0.2 * 0.2 * 2.0);
     let got = volume(&k, &mut b).unwrap();
     assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
+}
+
+/// A 200 x 200 x 40 block (z -40..0) with a blind hole of radius 25 about (50, 25) from its
+/// top down to z = -29, so an 11 thick floor lies under the hole (tangency-labs/solidcraft#21674,
+/// rebuilt from upstream's `Fillet/box_diff_cyl_big_rad.smb`).
+fn blind_hole_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let hole = create_cylinder(k, Point3::new(50.0, 25.0, -29.0), 25.0, 40.0).unwrap();
+    let mut part = boolean_difference(k, block, hole).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// The block's inset by `wall`, unmerged with extended convex edges (the executive's own
+/// `do_solid_offset`, as the goldens unit `offset.offset_executive_p2` runs it), the planar
+/// face at `open` (axis, value) left in place.
+fn unmerged_inset(wall: f64, open: (usize, f64)) -> solidcore::Result<Brep> {
+    unmerged_inset_of(blind_hole_block, wall, open)
+}
+
+/// [`unmerged_inset`] of the part `build` makes.
+fn unmerged_inset_of(
+    build: fn(&mut Kernel) -> Brep,
+    wall: f64,
+    open: (usize, f64),
+) -> solidcore::Result<Brep> {
+    unmerged_inset_with_steps(build, wall, open, None)
+}
+
+/// [`unmerged_inset_of`], the check for crossed planar insets given `steps` steps where that
+/// is `Some` (its default where `None`).
+fn unmerged_inset_with_steps(
+    build: fn(&mut Kernel) -> Brep,
+    wall: f64,
+    open: (usize, f64),
+    steps: Option<usize>,
+) -> solidcore::Result<Brep> {
+    use offset_fixture::planar_faces_at;
+    use solidcore::offset::offset_executive::p1::OffsetOperation;
+    use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
+    let mut k = Kernel::default();
+    let mut part = build(&mut k);
+    let faces = planar_faces_at(&k, &part, open.0, open.1);
+    assert_eq!(faces.len(), 1, "{open:?}");
+    let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, wall, part.tolerance());
+    executive.set_inset(true);
+    executive.set_extend_convex_edges(true);
+    executive.set_shell_faces(&faces);
+    if let Some(steps) = steps {
+        executive.set_crossing_witness_steps(steps);
+    }
+    let mut notifications = Notifications::new(&mut part);
+    executive.do_solid_offset(
+        &mut k,
+        Some(&mut part),
+        SolidOffsetOptions::default(),
+        &mut notifications.context(),
+    )
+}
+
+/// #21674: the block's unmerged inset by 10 with a side (y = -100) left in place moves the
+/// bottom up to z = -30 and the hole's floor down to z = -39: the two insets cross (the floor
+/// is 11 thick, less than two walls), so the inset has a through-hole there. Unmerged, the
+/// offset keeps the input's topology and returned a body whose hole wall passes through the
+/// inset bottom; it is refused as walls meeting across the floor, naming half the floor,
+/// 5.5, the largest wall at which the insets do not cross. At 5 (the insets 1 apart) and with
+/// the bottom left in place (nothing crosses) it builds as before.
+#[test]
+fn unmerged_inset_whose_floors_cross_is_refused_naming_half_the_floor() {
+    let err = unmerged_inset(10.0, (1, -100.0)).unwrap_err();
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+        distance, largest, ..
+    })) = err.failure().map(|f| &f.reason)
+    else {
+        panic!("wall 10: not walls meeting across the floor: {err}");
+    };
+    assert!((largest - 5.5).abs() <= 1e-9, "{largest}");
+    assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    for (wall, open) in [(5.0, (1, -100.0)), (10.0, (2, -40.0))] {
+        let result = unmerged_inset(wall, open);
+        assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
+    }
+}
+
+/// A 200 x 200 x 40 block (z -40..0) on a boss 130 x 180 x 40 under it (x -90..40,
+/// y -90..90, z -80..-40), with a blind pocket 60 x 60 (x 0..60, y -30..30) from the top
+/// down to z = -29. The pocket's floor lies 11 above the block's bottom over x 40..60 only
+/// (the strip beside the boss) and 51 above the boss's bottom over the rest: the floor and
+/// the bottom overlap, seen from above, in a strip that is a strict part of each.
+fn pocket_over_strip_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let boss = create_box(k, Point3::new(-90.0, -90.0, -80.0), 130.0, 180.0, 40.0).unwrap();
+    let pocket = create_box(k, Point3::new(0.0, -30.0, -29.0), 60.0, 60.0, 40.0).unwrap();
+    let body = boolean_union(k, block, boss).unwrap();
+    let mut part = boolean_difference(k, body, pocket).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// #21674 (review): the unmerged inset by 10 of [`pocket_over_strip_block`] with a side
+/// (y = -100) left in place moves the bottom up to z = -30 and the pocket's floor down to
+/// z = -39 over the strip x 40..70 where the floor is 11 thick, so the insets cross there
+/// though neither offset face's interior point lies over the other face (the floor's is
+/// over the boss, the bottom's away from the pocket): a single interior point per face
+/// misses it. The crossing is found on the faces' boundaries and
+/// refused, naming half the floor. At 5 (the insets 1 apart) and with the bottom left in
+/// place it builds.
+#[test]
+fn unmerged_inset_whose_floor_partly_crosses_the_bottom_is_refused() {
+    let err = unmerged_inset_of(pocket_over_strip_block, 10.0, (1, -100.0)).unwrap_err();
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+        distance, largest, ..
+    })) = err.failure().map(|f| &f.reason)
+    else {
+        panic!("wall 10: not walls meeting across the floor: {err}");
+    };
+    assert!((largest - 5.5).abs() <= 1e-9, "{largest}");
+    assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    for (wall, open) in [(5.0, (1, -100.0)), (10.0, (2, -40.0))] {
+        let result = unmerged_inset_of(pocket_over_strip_block, wall, open);
+        assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
+    }
+}
+
+/// A 200 x 200 x 40 block (z -40..0) with two blind pockets 40 x 40 from its top: one
+/// (x -70..-30, y -20..20) down to z = -29, its floor 11 above the bottom, and one (x 30..70,
+/// y -20..20) down to z = -29.5, its floor 10.5 above the bottom.
+fn two_pocket_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let wide = create_box(k, Point3::new(-70.0, -20.0, -29.0), 40.0, 40.0, 40.0).unwrap();
+    let narrow = create_box(k, Point3::new(30.0, -20.0, -29.5), 40.0, 40.0, 40.0).unwrap();
+    let body = boolean_difference(k, block, wide).unwrap();
+    let mut part = boolean_difference(k, body, narrow).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// The wall named by a refusal of walls meeting across, or `None` where the inset built.
+fn crossing_refusal(result: solidcore::Result<Brep>) -> Option<f64> {
+    match result {
+        Ok(_) => None,
+        Err(err) => {
+            let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+                distance, largest, ..
+            })) = err.failure().map(|f| &f.reason)
+            else {
+                panic!("not walls meeting across a floor: {err}");
+            };
+            assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+            Some(largest)
+        }
+    }
+}
+
+/// #21674 (review): the unmerged inset by 10 of [`two_pocket_block`] with a side (y = -100)
+/// left in place crosses the bottom's inset under both pockets (floors 11 and 10.5 thick,
+/// less than two walls). With its steps the check refuses it naming half the thinner floor,
+/// 5.25. With no steps it finds no crossing and the inset builds, as before the check. With
+/// the fewest steps that find a crossing the scan runs out before the other pair: the
+/// crossing found is real, so the inset is still refused, naming half the floor it found.
+/// The scan judges the 11 thick floor first, so that is 5.5 (and the steps are found by
+/// search, not taken from a count of the scan's work).
+#[test]
+fn unmerged_inset_whose_crossing_check_runs_out_after_a_crossing_is_refused() {
+    let at = |steps: Option<usize>| {
+        crossing_refusal(unmerged_inset_with_steps(
+            two_pocket_block,
+            10.0,
+            (1, -100.0),
+            steps,
+        ))
+    };
+    let full = at(None).expect("wall 10: the crossings are refused");
+    assert!((full - 5.25).abs() <= 1e-9, "{full}");
+    assert_eq!(at(Some(0)), None, "no steps: the inset builds as before");
+    // the fewest steps with a refusal: more steps take the same scan further, so once a
+    // crossing is found it stays found
+    let mut high = 1;
+    while at(Some(high)).is_none() {
+        high *= 2;
+        assert!(high <= 1 << 20, "no refusal within {high} steps");
+    }
+    let mut low = high / 2;
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        if at(Some(mid)).is_some() {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    let first = at(Some(high)).expect("refused at the fewest steps");
+    assert!((first - 5.5).abs() <= 1e-9, "{high} steps: {first}");
 }

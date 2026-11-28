@@ -216,6 +216,72 @@ fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
 }
 
+#[test]
+fn manual_to_object_accepts_a_parallel_plane_when_thin_extrude_is_on() {
+    let mut h = scene();
+    h.step(&json!({"widget": "Thin Extrude"})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
+}
+
+/// A thin wall picked by its curves rather than a profile: To Object still takes a parallel plane
+/// (the curves' sketch plane is the reference), and OK builds the wall down to it. The click was
+/// ignored with no message, as the curves gave no plane (#21033).
+#[test]
+fn thin_extrude_picked_by_curves_takes_a_parallel_plane_as_its_to_object() {
+    let mut h = scene();
+    h.step(&json!({"widget": "Thin Extrude"})).unwrap();
+    h.frames(2);
+    let curves = apply_commands(&h.app, dialog(&h)).unwrap()[0].1["curves"].clone();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    let picks: Vec<Sel> =
+        curves.as_array().unwrap().iter().map(|c| Sel::SketchCurve { id: c.as_str().unwrap().into(), sketch: Some(sketch) }).collect();
+    assert_eq!(picks.len(), 4);
+    h.app.dialog.as_mut().unwrap().inputs[0].items = picks;
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));
+    assert!(matches!(dialog(&h).inputs[0].items.as_slice(), [Sel::SketchCurve { .. }, _, _, _]), "the curves stay the picks");
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["thin"], json!(true));
+    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, -12.345678]));
+
+    h.step(&json!({"widget": "OK"})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+    // The box (8000), the cylinder (750 pi) and a 2 mm wall centred on the 10 x 10 outline,
+    // 12.345678 mm deep ((12^2 - 8^2) x 12.345678): a fixed reference, mm^3.
+    assert!((volume - 11343.848730).abs() < 1.0, "{volume}");
+}
+
+/// #19671: choosing To Object in the Extent Type selects the To Object field, so the next click
+/// in the view picks the face to run to. The field is already there when the extent was To
+/// Object before, and the choice takes the pick back then too.
+#[test]
+fn choosing_to_object_selects_the_to_object_field() {
+    let mut h = scene_with(false);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    // The profiles take the pick, and choosing To Object again gives it back.
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.active = 0;
+    }
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+}
+
 /// A snap point (the end of a sketch line, woken by hovering the line) reaches the dialog as a
 /// vertex of no body. To Object and From Object take it as the place to extrude to or from (#17394).
 #[test]

@@ -216,3 +216,31 @@ fn shell_of_a_box_with_a_lofted_tunnel() {
     let shelled = volume(&s);
     assert!(shelled > 0.0 && shelled < solid, "{shelled} vs {solid}");
 }
+
+/// A cylinder cut through the wall of a closed shell into its void (#20766).
+/// SMLib boolean difference creates cellular decomposition in void space outside
+/// the solid; the export must omit void-void partition faces rather than failing.
+#[test]
+fn cut_into_shelled_spline_extrusion_void() {
+    let mut s = Session::default();
+    s.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    run(&mut s, "sketch.create", json!({"name": "Outline", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(
+        &mut s,
+        "sketch.spline.fit_point",
+        json!({"periodic": true, "points": [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [-0.0, -22.0], [19.7, -13.1]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25.0, "operation": "new", "body_name": "Part"}));
+    run(&mut s, "solid.shell", json!({"faces": [], "thickness": 1.9, "body": "Part"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 1.9, "height": 12.5, "base": [30.073191071849813, 1.8963088922587372, 12.5], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+    );
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+}

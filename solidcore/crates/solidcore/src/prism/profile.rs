@@ -18,6 +18,8 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+pub mod line_family;
+
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -33,6 +35,11 @@ use crate::math::{Point2, Vec2};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
 use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
+
+mod crossing;
+
+pub use crossing::{loop_crosses, near_miss};
+pub(crate) use crossing::{on_arc, on_seg};
 
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
@@ -136,6 +143,9 @@ fn arc_build(radius: f64, sweep: f64, tol: f64) -> std::result::Result<ArcBuild,
         Ok(ArcBuild::Open(deg))
     }
 }
+
+/// The radius an arc of a profile stays below ([`check_regions`]).
+pub const MAX_ARC_RADIUS: f64 = 1e9;
 
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
@@ -282,6 +292,84 @@ fn bezier_points(n: u8, p: &[Point2; MAX_BEZIER_CTRL]) -> Option<&[Point2]> {
 }
 
 impl Seg2 {
+    /// Whether `piece` is the restriction of this cubic Bézier to a nonempty interval of
+    /// `[0, 1]`, in either direction, within control-point roundoff (at most 1e-9 mm).
+    /// A coordinate root only proposes an endpoint: the four controls of the
+    /// restriction must all agree, which bounds the whole curve by the convex hull property.
+    #[must_use]
+    pub fn cubic_contains(&self, piece: &Self) -> bool {
+        let (
+            Self::Cubic { p0, p1, p2, p3 },
+            Self::Cubic {
+                p0: a,
+                p1: b,
+                p2: c,
+                p3: d,
+            },
+        ) = (*self, *piece)
+        else {
+            return false;
+        };
+        let controls = [p0, p1, p2, p3];
+        let mut hull = crate::geom::extent2d::Extent2d::new();
+        for p in controls {
+            hull.add_point(p);
+        }
+        let tol =
+            (128.0 * f64::EPSILON * hull.min.length().max(hull.max.length()).max(1.0)).min(1e-9);
+        if !hull.contains_point(a, tol) || !hull.contains_point(d, tol) {
+            return false;
+        }
+        let params = |p: Point2, tangent: Vec2| {
+            // Invert the coordinate that changes fastest at this end of the restriction.
+            // The wider coordinate of the whole span can turn here and lose the parameter
+            // to rounding while the other coordinate still distinguishes nearby points.
+            let direction = if tangent.x == 0.0 && tangent.y == 0.0 {
+                hull.max - hull.min
+            } else {
+                tangent
+            };
+            let coord = |q: Point2| {
+                if direction.x.abs() >= direction.y.abs() {
+                    q.x
+                } else {
+                    q.y
+                }
+            };
+            // Include the span ends: a crossing there can differ by roundoff in the chosen coordinate.
+            let mut roots = vec![0.0, 1.0];
+            let mut work = 128;
+            crate::query::tangent_edge::bernstein_roots(
+                &controls.map(|v| coord(v) - coord(p)),
+                0.0,
+                1.0,
+                48,
+                &mut work,
+                &mut roots,
+            );
+            roots
+        };
+        let ends = params(d, d - c);
+        // The blossom of the cubic: restricting to [u,v] gives B(u,u,u), B(u,u,v),
+        // B(u,v,v), B(v,v,v), equally for a reversed interval.
+        let blossom = |s, t, u| {
+            let lerp = |p: Point2, q: Point2, f: f64| p + (q - p) * f;
+            let ab = lerp(p0, p1, s);
+            let bc = lerp(p1, p2, s);
+            let cd = lerp(p2, p3, s);
+            lerp(lerp(ab, bc, t), lerp(bc, cd, t), u)
+        };
+        params(a, b - a).into_iter().any(|u| {
+            blossom(u, u, u).distance(a) <= tol
+                && ends.iter().copied().any(|v| {
+                    u != v
+                        && blossom(v, v, v).distance(d) <= tol
+                        && blossom(u, u, v).distance(b) <= tol
+                        && blossom(u, v, v).distance(c) <= tol
+                })
+        })
+    }
+
     /// Where it starts.
     #[must_use]
     pub fn start(&self) -> Point2 {
@@ -311,6 +399,32 @@ impl Seg2 {
             } => center + unit(start + sweep) * radius,
             Seg2::Cubic { p3, .. } => p3,
             Seg2::Bezier { n, p } => p.get(usize::from(n)).copied().unwrap_or(Vec2::UNDEF),
+        }
+    }
+
+    /// Move its control geometry without changing its shape or parameter.
+    pub(crate) fn translate(&mut self, shift: Vec2) {
+        match self {
+            Self::Line { a, b } => {
+                *a += shift;
+                *b += shift;
+            }
+            Self::Arc { center, .. } => *center += shift,
+            Self::Conic { a, apex, b, .. } => {
+                for p in [a, apex, b] {
+                    *p += shift;
+                }
+            }
+            Self::Cubic { p0, p1, p2, p3 } => {
+                for p in [p0, p1, p2, p3] {
+                    *p += shift;
+                }
+            }
+            Self::Bezier { p, .. } => {
+                for q in p {
+                    *q += shift;
+                }
+            }
         }
     }
 
@@ -437,14 +551,64 @@ impl Seg2 {
                 start,
                 sweep,
             } => {
-                // P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t)
+                // Two readings of the term, each with its proved bound; the tighter is kept.
+                // About the centre: P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t).
+                // Its terms are of the size `r |c|`: tight for a small arc far from the origin,
+                // but they cancel for a nearly straight arc of a large radius (its centre far
+                // off, the arc near the origin).
                 let end = start + sweep;
                 let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
                 let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
                 let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
+                // the end's angle `start + sweep` is rounded, by up to gamma(1) |start + sweep|;
+                // sin and cos move by no more than their angle, so `r (c.x s1 - c.y c1)` by up to
+                // `r (|c.x| + |c.y|)` times that (from 2^53 a sweep of 1 rounds away entirely)
+                let turn = gamma(1) * r * end.abs();
                 // libm's sin and cos within two ulps; gamma covers the products and the sums
-                let v = terms.iter().sum::<f64>() * 0.5;
-                Some((v, gamma(16) * size * 0.5))
+                let about_centre = (
+                    terms.iter().sum::<f64>() * 0.5,
+                    (gamma(16) * size + turn * (c.x.abs() + c.y.abs())) * 0.5,
+                );
+                // From the chord: the chord's term from the arc's ends as `start` and `end` give
+                // them, plus the segment between the arc and its chord, `r^2 (θ - sin θ) / 2`
+                // (θ the sweep). Its terms are of the size of the ends' coordinates squared:
+                // tight for that nearly straight arc, loose for a small arc far from the origin.
+                let (a, b) = (self.start(), self.end());
+                let (p, q) = (a.x * b.y, a.y * b.x);
+                // each end within gamma(4) (|c| + r) of the exact one in each coordinate (libm's
+                // sin and cos within two ulps, the product and the sum one each); the end's
+                // angle `start + sweep` is rounded too, by up to gamma(1) |start + sweep|
+                let (ax, ay) = (gamma(4) * (c.x.abs() + r), gamma(4) * (c.y.abs() + r));
+                let (bx, by) = (ax + turn, ay + turn);
+                // (A + dA) x (B + dB) - A x B, the ends' errors dA, dB
+                let ends = ax * b.y.abs()
+                    + ay * b.x.abs()
+                    + bx * a.y.abs()
+                    + by * a.x.abs()
+                    + ax * by
+                    + ay * bx;
+                let (g, direct) = theta_less_sine(sweep);
+                let segment = r * r * g * 0.5;
+                // the segment's rounding: relative for the series, and the sum's own for
+                // `θ - sin θ` read directly
+                let seg_err = gamma(24)
+                    * r
+                    * r
+                    * 0.5
+                    * (g.abs() + if direct { sweep.abs() + 1.0 } else { 0.0 });
+                let value = (p - q) * 0.5 + segment;
+                let from_chord = (
+                    value,
+                    gamma(3) * (p.abs() + q.abs()) * 0.5
+                        + ends * 0.5
+                        + seg_err
+                        + gamma(2) * value.abs(),
+                );
+                Some(if from_chord.1 < about_centre.1 {
+                    from_chord
+                } else {
+                    about_centre
+                })
             }
             Seg2::Conic { a, apex, b, w } => {
                 // Green of a conic arc = the chord's term + T f(w), T the signed area of the
@@ -477,6 +641,22 @@ impl Seg2 {
     }
 }
 
+/// `θ - sin θ`, and whether it was read directly (`false`: by its series, for `|θ| < 1/2`,
+/// where the difference loses the digits the series keeps): `θ³/3! - θ⁵/5! + …` to `θ¹⁵/15!`,
+/// whose next term is below `θ³/6` times `2⁻⁵⁹` there.
+fn theta_less_sine(theta: f64) -> (f64, bool) {
+    if theta.abs() >= 0.5 {
+        return (theta - theta.sin(), true);
+    }
+    let t2 = theta * theta;
+    // θ³/6 (1 - θ²/20 (1 - θ²/42 (1 - θ²/72 (1 - θ²/110 (1 - θ²/156 (1 - θ²/210))))))
+    let mut f = 1.0;
+    for d in [210.0, 156.0, 110.0, 72.0, 42.0, 20.0] {
+        f = 1.0 - t2 / d * f;
+    }
+    (theta * t2 / 6.0 * f, false)
+}
+
 /// `f(w) = 2 w ∫_0^1 t^2 / W(t)^2 dt`, `W = 1 - 2 (1 - w) t (1 - t)`: the area between a
 /// rational quadratic arc of middle weight `w` and its chord, over its control triangle's
 /// (Farin §12.4), with a bound on its error. Near the parabola (`|1 - w| <= 1/2`) by its series
@@ -484,7 +664,7 @@ impl Seg2 {
 /// `B(k + 3, k + 1)`; the tail is bounded by a geometric series. Elsewhere in closed form: with
 /// `w = cos φ` (an ellipse), `w (φ - w s) / s^3`, `s = sin φ`; with `w = cosh ψ` (a hyperbola),
 /// `w (w s - ψ) / s^3`, `s = sinh ψ`.
-fn conic_factor(w: f64) -> Option<(f64, f64)> {
+pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
     if !(w.is_finite() && w > 1e-9 && w < 1e9) {
         return None;
     }
@@ -805,7 +985,7 @@ pub fn check_regions<'a>(
                     finite(center)
                         && radius.is_finite()
                         && radius > 0.0
-                        && radius < 1e9
+                        && radius < MAX_ARC_RADIUS
                         && start.is_finite()
                         && sweep.is_finite()
                         && zone_ok
@@ -1183,15 +1363,4 @@ pub fn rational_curve(knots: &[f64], homogeneous: &[[f64; 4]]) -> Result<Curve> 
         trim: None,
     };
     Ok(Curve::from(BSplineCurve::create_canonical(&data)?))
-}
-
-/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
-/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
-/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
-/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
-/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
-/// non-finite input gives a non-finite answer, never a panic.
-pub fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
-    let change = inside / 2.0 * slope.to_radians().tan();
-    (thickness - change, thickness + change)
 }

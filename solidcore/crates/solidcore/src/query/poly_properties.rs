@@ -29,6 +29,7 @@
 //!   array) is [`SolidError::InvalidInput`]; an edge without start or end vertex
 //!   (a null dereference upstream) is `SM_ERR_NULL_POINTER`.
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::is_valid_double;
 use crate::kernel::Kernel;
@@ -153,13 +154,13 @@ impl PolyBrep {
         let start = |b: &Self, e: PolyEdgeId| -> Result<Point3> {
             let v = b
                 .edge_start_poly_vertex(e)?
-                .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's start vertex"))?;
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::PolyEdgeWithoutVertex))?;
             b.vertex_point(v)
         };
         let end = |b: &Self, e: PolyEdgeId| -> Result<Point3> {
             let v = b
                 .edge_end_poly_vertex(e)?
-                .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's end vertex"))?;
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::PolyEdgeWithoutVertex))?;
             b.vertex_point(v)
         };
         let base_pt0 = start(self, first)?;

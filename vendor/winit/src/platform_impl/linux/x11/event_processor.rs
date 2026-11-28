@@ -512,6 +512,21 @@ impl EventProcessor {
                 return;
             }
 
+            // SolidCraft: say where the drag is over the window, as the pointer: winit 0.30 gives
+            // `HoveredFile` and `DroppedFile` no position, and the drag source's pointer grab
+            // sends this window no motion meanwhile. Root coordinates, `x << 16 | y`.
+            let packed = xev.data.get_long(2);
+            let (root_x, root_y) = (((packed >> 16) & 0xffff) as u16 as i16, (packed & 0xffff) as u16 as i16);
+            if let Ok(origin) = wt.xconn.translate_coords(window, wt.root) {
+                let position = PhysicalPosition::new(
+                    f64::from(root_x) - f64::from(origin.dst_x),
+                    f64::from(root_y) - f64::from(origin.dst_y),
+                );
+                let device_id = mkdid(util::VIRTUAL_CORE_POINTER);
+                let event = Event::WindowEvent { window_id, event: WindowEvent::CursorMoved { device_id, position } };
+                callback(&self.target, event);
+            }
+
             self.dnd.source_window = Some(source_window);
             if self.dnd.result.is_none() {
                 let time = if version >= 1 {

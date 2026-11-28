@@ -1,0 +1,113 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "radixark/daisyrose-27b",
+      "type": "anthropic/messages",
+      "info": {
+        "name": "DaisyRose 27B"
+      },
+      "translatedFrom": "openai/chat-completions"
+    },
+    {
+      "id": "radixark/daisyrose-27b",
+      "type": "openai/chat-completions",
+      "info": {
+        "name": "DaisyRose 27B"
+      }
+    },
+    {
+      "id": "radixark/daisyrose-27b",
+      "type": "openai/responses/submit",
+      "info": {
+        "name": "DaisyRose 27B"
+      },
+      "translatedFrom": "openai/chat-completions"
+    },
+    {
+      "id": "mistralai/pixtral-large-2502",
+      "type": "openai/chat-completions",
+      "info": {
+        "name": "Pixtral Large 2502"
+      }
+    },
+    {
+      "id": "klingai/image-v4-image-to-image",
+      "type": "openai/image-generations",
+      "info": {
+        "name": "Kling Image 4.0 Image to Image"
+      }
+    },
+    {
+      "id": "heygen/avatar-6",
+      "type": "internal/video-generations/submit",
+      "info": {
+        "name": "HeyGen Avatar 6"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "anthropic/batches",
+      "info": {
+        "name": "Claude Fable 5.2"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "anthropic/batches-cancel",
+      "info": {
+        "name": "Claude Fable 5.2"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "anthropic/batches-status",
+      "info": {
+        "name": "Claude Fable 5.2"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "anthropic/messages",
+      "info": {
+        "name": "Claude Fable 5.2"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "openai/chat-completions",
+      "info": {
+        "name": "Claude Fable 5.2"
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "type": "openai/responses/submit",
+      "info": {
+        "name": "Claude Fable 5.2"
+      },
+      "translatedFrom": "openai/chat-completions"
+    },
+    {
+      "id": "heygen/voice-1",
+      "type": "internal/text-to-speech",
+      "info": {
+        "name": "HeyGen Voice 1"
+      }
+    },
+    {
+      "id": "alibaba/qwen-text-embedding-v3",
+      "type": "openai/embeddings",
+      "info": {
+        "name": "Qwen Text Embedding v3"
+      }
+    },
+    {
+      "id": "x-ai/grok-voice-think-fast-2.0",
+      "type": "realtime/openai-realtime",
+      "info": {
+        "name": "Grok Voice Think Fast 2.0"
+      }
+    }
+  ]
+}

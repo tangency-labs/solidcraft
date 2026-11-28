@@ -13,7 +13,7 @@
 //!   drafting tells touching parts apart.
 //! - The base spacing is [`SPACING_LINES`] narrow line widths of the view's line group, so a
 //!   heavier line group hatches more openly.
-//! - **The lines come from the drawing's hatcher** ([`solidcore_ops::hatch::generate`], #7064), one
+//! - **The lines come from the drawing's hatcher** ([`Pattern::marks`], #7064), one
 //!   plain family per body. It takes straight-sided outlines, so each cut face's outline is followed
 //!   to within [`FLATTEN_MM`] on paper as a closed polygon, under the line that draws it. A body the hatcher
 //!   refuses (a budget, an uncertain contact) is drawn unhatched, and the view says which and why.
@@ -23,15 +23,16 @@
 use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_4;
 
-use solidcore_ops::hatch::{Mark, generate};
 use solidcore_record::brep::Loop;
-use solidcore_record::hatch::{Family, Pattern};
+use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_doc::drawing::view::Cut;
 use solidcraft_geom::Similarity2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::hatch::Mark;
 use solidcraft_kernel::history::{FaceOrigin, History};
 use solidcraft_kernel::{Body, PlanarPiece};
 use solidcraft_viewport::hatch::{CutPart, HATCH_COLOURS, hatches as pick, seed};
@@ -115,31 +116,57 @@ pub fn hatches(set: &ShownSet, cut: &Cut, frame: &ViewFrame, group: LineGroup) -
     };
     let (basis, map) = (frame.basis(), frame.paper_map());
     let mut out = Hatching::default();
-    let mut cut_faces: Vec<(usize, &str, Vec<Region2>)> = Vec::new();
-    for (at, shown) in set.bodies.iter().enumerate() {
-        let Some((body, &telling)) = set.body(shown).filter(|_| !shown.reference).zip(set.cut.get(&shown.index)) else { continue };
+    let candidates: Vec<(usize, &solidcraft_doc::ModelBody, CutFaces)> = set
+        .bodies
+        .iter()
+        .enumerate()
+        .filter_map(|(at, shown)| {
+            let (body, &telling) = set.body(shown).filter(|_| !shown.reference).zip(set.cut.get(&shown.index))?;
+            Some((at, body, telling))
+        })
+        .collect();
+    let extracted = solidcraft_kernel::map_on_threads(&candidates, crate::mesh_lines::WORKERS, |&(_, body, telling)| {
         let faces = faces_on(&body.body, telling, &plane, &basis);
         if faces.is_empty() {
-            continue;
+            return (Vec::new(), Vec::new());
         }
+        let regions: Vec<Region2> = faces.iter().map(|r| similar(r, &map)).collect();
+        let segs = outline(&regions);
+        (regions, segs)
+    });
+    let mut cut_faces: Vec<(usize, &str, Vec<Region2>)> = Vec::new();
+    let mut outlines: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
+    for ((at, body, telling), result) in candidates.into_iter().zip(extracted) {
+        let Some((regions, segs)) = result.filter(|(regions, _)| !regions.is_empty()) else { continue };
         if telling == CutFaces::InDoubt {
             out.doubted.push((at, DOUBT.into()));
         }
-        cut_faces.push((at, body.name.as_str(), faces.iter().map(|r| similar(r, &map)).collect()));
+        cut_faces.push((at, body.name.as_str(), regions));
+        outlines.push(segs);
     }
     // The screen's rule picks each hatch from the cut faces' outlines on paper, flat on z = 0.
-    let outlines: Vec<Vec<(Vec3, Vec3)>> = cut_faces.iter().map(|(_, _, regions)| outline(regions)).collect();
     let parts: Vec<CutPart> = cut_faces.iter().zip(&outlines).map(|((_, name, _), segments)| CutPart { seed: seed(name), segments }).collect();
     let picked = pick(&parts, Vec3::Z);
     let base = SPACING_LINES * LineKind::Thin.width_mm(group);
-    for ((shown, _, regions), hatch) in cut_faces.into_iter().zip(picked) {
-        let angle = if hatch.turned() { 3.0 * FRAC_PI_4 } else { FRAC_PI_4 };
-        let spacing_mm = base * SPACINGS.get(hatch.colour()).copied().unwrap_or(1.0);
-        let filled = regions.iter().all(|r| thin(r, spacing_mm));
-        let strokes = if filled { Ok(Vec::new()) } else { lines_across(&regions, angle, spacing_mm) };
-        match strokes {
-            Ok(strokes) => out.bodies.push(BodyHatch { shown, angle, spacing_mm, filled, regions, strokes }),
-            Err(why) => out.refused.push((shown, why)),
+    let jobs: Vec<(usize, Vec<Region2>, f64, f64)> = cut_faces
+        .into_iter()
+        .zip(picked)
+        .map(|((shown, _, regions), hatch)| {
+            let angle = if hatch.turned() { 3.0 * FRAC_PI_4 } else { FRAC_PI_4 };
+            let spacing_mm = base * SPACINGS.get(hatch.colour()).copied().unwrap_or(1.0);
+            (shown, regions, angle, spacing_mm)
+        })
+        .collect();
+    let hatched = solidcraft_kernel::map_on_threads(&jobs, crate::mesh_lines::WORKERS, |(_, regions, angle, spacing_mm)| {
+        let filled = regions.iter().all(|r| thin(r, *spacing_mm));
+        let strokes = if filled { Ok(Vec::new()) } else { lines_across(regions, *angle, *spacing_mm) };
+        (filled, strokes)
+    });
+    for ((shown, regions, angle, spacing_mm), result) in jobs.into_iter().zip(hatched) {
+        match result {
+            Some((filled, Ok(strokes))) => out.bodies.push(BodyHatch { shown, angle, spacing_mm, filled, regions, strokes }),
+            Some((_, Err(why))) => out.refused.push((shown, why)),
+            None => out.refused.push((shown, "hatch worker failed".into())),
         }
     }
     out
@@ -148,11 +175,11 @@ pub fn hatches(set: &ShownSet, cut: &Cut, frame: &ViewFrame, group: LineGroup) -
 /// Plain lines at `angle`, `spacing_mm` apart through the paper's origin, across `regions`, each
 /// followed as a closed polygon; or why the hatcher refused one.
 fn lines_across(regions: &[Region2], angle: f64, spacing_mm: f64) -> std::result::Result<Vec<Seg2>, String> {
-    let family = Family { angle, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing_mm, dashes: Vec::new() };
+    let family = LineFamily { angle, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing_mm, dashes: Vec::new() };
     let pattern = Pattern { name: "SECTION".into(), description: "A section's plain hatch lines".into(), families: vec![family] };
     let mut out = Vec::new();
     for region in regions {
-        let marks = generate(&pattern, &polygonal(region)).map_err(|e| e.to_string())?;
+        let marks = pattern.marks(&polygonal(region)).map_err(|e| e.to_string())?;
         out.extend(marks.into_iter().filter_map(|mark| match mark {
             Mark::Line { a, b } => Some(Seg2::Line { a, b }),
             Mark::Dot { .. } => None,
@@ -371,5 +398,83 @@ mod tests {
         // In doubt, the faces on the plane are hatched as before: the section's face there.
         let faces = faces_on(&untraced, CutFaces::InDoubt, &plane, &plane);
         assert!(faces.len() == 1 && (faces[0].area() - 100.0).abs() < 1e-9, "{faces:?}");
+    }
+
+    /// Parallel hatching across many cut bodies (both hatched and solid-filled thin parts)
+    /// matches serial execution in exact body order, angles, spacings, regions and strokes.
+    #[test]
+    fn parallel_hatches_match_serial_across_many_cut_bodies() {
+        use std::sync::Arc;
+
+        use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+        use solidcraft_doc::{ModelBody, ModelState};
+        use solidcraft_geom::drawing_view::NamedView;
+
+        use crate::drawing_view::Shown;
+
+        let parent = NamedView::Front.basis();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-10.0, 10.0), Vec2::new(320.0, 10.0)], ArrowSide::Left).unwrap();
+        let cut = Cut { parent, line };
+        let plane = cut.line.planes(&cut.parent).unwrap().into_iter().next().unwrap();
+
+        let mut model_bodies = Vec::new();
+        let mut shown_bodies = Vec::new();
+        let mut cut_map = BTreeMap::new();
+        for i in 0..10 {
+            let x0 = (i * 30) as f64;
+            // Make two thin strips (solid-filled) and eight full blocks (line-hatched).
+            let width = if i % 4 == 0 { 0.8 } else { 20.0 };
+            let raw = box_solid(Vec3::new(x0, 0.0, 0.0), Vec3::new(x0 + width, 20.0, 20.0)).unwrap();
+            let (kept, _) = half_space(&raw, &plane, true).unwrap();
+            let section = kept.unwrap();
+            let telling = cut_faces(&raw, &section, &plane).unwrap();
+            let name = format!("Part {i}");
+            model_bodies.push(ModelBody::new(name.clone(), section, i as u64 + 1));
+            shown_bodies.push(Shown { index: i, path: Vec::new(), body: name, reference: false });
+            cut_map.insert(i, telling);
+        }
+        let mut state = ModelState::default();
+        state.bodies = model_bodies;
+        let state = Arc::new(state);
+        let set = ShownSet { state, bodies: shown_bodies, uncut: None, cut: cut_map };
+        let frame = ViewFrame::new(plane, "1:1".parse().unwrap(), Vec2::new(150.0, 10.0), Vec2::new(200.0, 150.0)).unwrap();
+
+        let parallel = hatches(&set, &cut, &frame, LineGroup::DEFAULT);
+
+        // Serial reference matching the exact single-threaded algorithm.
+        let (basis, map) = (frame.basis(), frame.paper_map());
+        let mut serial = Hatching::default();
+        let mut serial_faces: Vec<(usize, &str, Vec<Region2>)> = Vec::new();
+        for (at, shown) in set.bodies.iter().enumerate() {
+            let Some((body, &telling)) = set.body(shown).filter(|_| !shown.reference).zip(set.cut.get(&shown.index)) else { continue };
+            let faces = faces_on(&body.body, telling, &plane, &basis);
+            if faces.is_empty() {
+                continue;
+            }
+            if telling == CutFaces::InDoubt {
+                serial.doubted.push((at, DOUBT.into()));
+            }
+            serial_faces.push((at, body.name.as_str(), faces.iter().map(|r| similar(r, &map)).collect()));
+        }
+        let outlines: Vec<Vec<(Vec3, Vec3)>> = serial_faces.iter().map(|(_, _, regions)| outline(regions)).collect();
+        let parts: Vec<CutPart> = serial_faces.iter().zip(&outlines).map(|((_, name, _), segments)| CutPart { seed: seed(name), segments }).collect();
+        let picked = pick(&parts, Vec3::Z);
+        let base = SPACING_LINES * LineKind::Thin.width_mm(LineGroup::DEFAULT);
+        for ((shown, _, regions), hatch) in serial_faces.into_iter().zip(picked) {
+            let angle = if hatch.turned() { 3.0 * FRAC_PI_4 } else { FRAC_PI_4 };
+            let spacing_mm = base * SPACINGS.get(hatch.colour()).copied().unwrap_or(1.0);
+            let filled = regions.iter().all(|r| thin(r, spacing_mm));
+            let strokes = if filled { Ok(Vec::new()) } else { lines_across(&regions, angle, spacing_mm) };
+            match strokes {
+                Ok(strokes) => serial.bodies.push(BodyHatch { shown, angle, spacing_mm, filled, regions, strokes }),
+                Err(why) => serial.refused.push((shown, why)),
+            }
+        }
+
+        assert_eq!(parallel, serial);
+        assert_eq!(parallel.bodies.len() + parallel.refused.len(), 10);
+        assert!(parallel.bodies.len() >= 8, "refused={:?}", parallel.refused);
+        assert!(parallel.bodies.iter().any(|b| b.filled));
+        assert!(parallel.bodies.iter().any(|b| !b.filled && !b.strokes.is_empty()));
     }
 }

@@ -1,0 +1,5 @@
+{
+  "issue": "tangency-labs/solidcraft#15669",
+  "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+  "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+}

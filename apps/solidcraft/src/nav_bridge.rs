@@ -239,6 +239,12 @@ pub struct NavBridge {
 }
 
 impl NavBridge {
+    /// Headless lifecycle tests do not start the device-app reader.
+    #[cfg(test)]
+    pub fn inactive() -> Self {
+        Self { shared: Arc::new(Mutex::new(Shared::default())) }
+    }
+
     pub fn start(ctx: &Context) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (worker_ctx, worker_state) = (ctx.clone(), Arc::clone(&shared));

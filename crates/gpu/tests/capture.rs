@@ -3,6 +3,9 @@
 //! GPU output differs a little between drivers, so the checks count pixels of a kind rather than
 //! compare bytes. Skipped, with the reason printed, on a machine without a GPU adapter
 //! (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use serde_json::json;
 use solidcore_record::Vec3;
@@ -50,7 +53,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     // emit compute GLSL below 4.30, and request_device fails as Device(Lost). The test draws
     // nothing indirect, so the validation is not needed here.
     desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-    let instance = wgpu::Instance::new(desc);
+    let instance = solidcraft_viewport_gpu::select::start_instance(desc);
     let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
         Ok(adapter) => adapter,
         Err(e) => {
@@ -502,6 +505,71 @@ fn a_body_behind_the_cut_does_not_colour_the_cap() {
             let (a, b) = (picture(&alone), picture(&with));
             let differ = pixels(&a).zip(pixels(&b)).filter(|(p, q)| p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert_eq!(differ, 0, "hatch {hatch}, fov {fov}: the inner body shows through the cap in {differ} pixels");
+        }
+    }
+}
+
+/// #4258: a surface body inside a cut solid hides under the cap from every side, as the cap is
+/// opaque. Its back face used to paint the cap in its own colour where it faced the eye, so the
+/// sheet showed through from one side and not the other. Seen from either side of the sheet,
+/// hatched and plain, orthographic and in perspective, on the GPU and the CPU, the picture is the
+/// solid's alone but for the sheet's cut outline, the line where the section plane meets it.
+#[test]
+fn a_surface_inside_a_cut_solid_hides_under_the_cap() {
+    let Some(c) = capturer() else { return };
+    let solid = [
+        ("solid.box", json!({"length": 40, "width": 40, "height": 30, "body_name": "Block"})),
+        ("appearance.assign", json!({"bodies": ["Block"], "color": [40, 160, 90]})),
+    ];
+    let sheet = [
+        ("sketch.create", json!({"plane": "XY", "name": "L"})),
+        ("sketch.line", json!({"points": [[5, 20], [35, 20]], "ids": ["w"]})),
+        ("sketch.finish", json!({})),
+        ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+        ("appearance.assign", json!({"bodies": ["Sheet"], "color": [220, 30, 30]})),
+    ];
+    let mut alone = session(&solid);
+    let mut with = session(&solid.iter().chain(&sheet).cloned().collect::<Vec<_>>());
+    assert!(with.world_state().unwrap().body("Sheet").is_some_and(|b| b.is_surface()));
+    for hatch in [true, false] {
+        // Cut away x > 20: the sheet runs from the cut face 15 mm into the kept half.
+        for s in [&mut alone, &mut with] {
+            s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "hatch": hatch})).unwrap();
+        }
+        // From the sheet's two sides, looking at the cut face.
+        for from in [Vec3::new(1.0, 0.5, 0.6), Vec3::new(1.0, -0.5, 0.6)] {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&alone).unwrap().looking_from(from);
+                cam.fov = fov;
+                let picture = |s: &Session| {
+                    let sc = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+                    (c.rgba(&sc, &cam, 300, 220).unwrap(), solidcraft_viewport::render(&sc, &cam, 300, 220).rgba, sc.radius)
+                };
+                let ((gpu, cpu, radius), (want_gpu, want_cpu, _)) = (picture(&with), picture(&alone));
+                // The sheet stands at y = 20 from z = 0 to 20, so the plane x = 20 cuts it in this
+                // segment, drawn 1.6 px wide: its antialiased pixels lie within 3 px of it. The
+                // sheet's kept 15 mm reach some 20 px or more to its side.
+                let end = |z: f64| cam.to_screen(Vec3::new(20.0, 20.0, z), 300.0, 220.0, radius).unwrap();
+                let ((ax, ay, _), (bx, by, _)) = (end(0.0), end(20.0));
+                let on_outline = |i: usize| {
+                    let (px, py) = ((i % 300) as f64 + 0.5, (i / 300) as f64 + 0.5);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    (px - ax - t * dx).hypot(py - ay - t * dy) <= 3.0
+                };
+                let differ = |a: &[u8], b: &[u8]| {
+                    pixels(a)
+                        .zip(pixels(b))
+                        .enumerate()
+                        .filter(|(i, (p, q))| !on_outline(*i) && p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count()
+                };
+                assert_eq!(
+                    (differ(&gpu, &want_gpu), differ(&cpu, &want_cpu)),
+                    (0, 0),
+                    "hatch {hatch}, from {from:?}, fov {fov}: pixels where the sheet shows through the cap on the GPU and the CPU"
+                );
+            }
         }
     }
 }

@@ -157,6 +157,47 @@ fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
     assert!((pl.normal().z.abs() - half).abs() < 1e-9, "{pl:?}");
 }
 
+/// #20233: a body edge and an angle are enough. Without `base` the angle is measured from a flat
+/// face along the edge, so the plane goes through the edge, and it follows the edge. An axis that
+/// is not a body edge, or an edge no flat face runs along, still asks for `base`.
+#[test]
+fn plane_at_angle_about_an_edge_needs_no_base() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
+    run(&mut s, "construct.plane.at_angle", json!({"axis": {"edge": [20, 0, 20]}, "angle": "45 deg", "name": "Slanted"}));
+    run(&mut s, "construct.plane.at_angle", json!({"axis": {"edge": [20, 0, 20]}, "angle": "0 deg", "base": null, "name": "Flat"}));
+    let feature = s.doc.find_feature("Slanted").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AtAngle { base, .. } } = &feature.kind else {
+        panic!("at_angle plane: {:?}", feature.kind)
+    };
+    assert!(matches!(base.as_ref(), solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. }), "a face of the box: {base:?}");
+    let plane = |s: &Session, name: &str| construction_planes(s).into_iter().find(|p| p.1 == name).map(|p| p.2).unwrap();
+    let half = 0.5_f64.sqrt();
+    let pl = plane(&s, "Slanted");
+    assert!(pl.height(Vec3::new(20.0, 0.0, 20.0)).abs() < 1e-6 && pl.height(Vec3::new(-20.0, 0.0, 20.0)).abs() < 1e-6, "through the edge: {pl:?}");
+    let n = pl.normal();
+    assert!(n.x.abs() < 1e-9 && (n.y.abs() - half).abs() < 1e-9 && (n.z.abs() - half).abs() < 1e-9, "45° to both faces at the edge: {pl:?}");
+    // At 0° the plane is a face along the edge: the top or the front.
+    let n = plane(&s, "Flat").normal();
+    assert!((n.z.abs() - 1.0).abs() < 1e-9 || (n.y.abs() - 1.0).abs() < 1e-9, "{n:?}");
+    // A taller box: the plane follows the edge up.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "30 mm"}));
+    let pl = plane(&s, "Slanted");
+    assert!(pl.height(Vec3::new(20.0, 0.0, 30.0)).abs() < 1e-6, "follows the edge: {pl:?}");
+    // No body edge: `base` is still needed, and the design is unchanged.
+    let before = s.doc.features.len();
+    for axis in [json!({"origin": [0, 0, 0], "dir": [1, 0, 0]}), json!("X")] {
+        let err = s.execute("construct.plane.at_angle", &json!({"axis": axis, "angle": "30 deg"})).unwrap_err().to_string();
+        assert!(err.contains("`base` is required"), "{axis}: {err}");
+    }
+    // A circular edge: its flat cap is square to its axis, so nothing runs along it.
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [0, 60, 0]}));
+    let err = s.execute("construct.plane.at_angle", &json!({"axis": {"edge": [5, 60, 10]}, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(err.contains("no flat face runs along this edge"), "{err}");
+    assert_eq!(s.doc.features.len(), before + 1, "only the cylinder was added");
+}
+
 /// A box `h` high with a construction axis "Rim" on its top front edge (y = 0, along X), and a
 /// plane "Slanted" turned 45 degrees about that axis, given by the axis's name, from the top
 /// face (which contains the axis, so the plane contains it too).
@@ -269,4 +310,38 @@ fn hostile_model_axes_are_refused_without_panicking() {
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.revolve", &json!({"sketch": "Flat", "axis": {"face": [45, 0, 5]}})).unwrap_err().to_string();
     assert!(e.contains("does not lie in the sketch plane"), "{e}");
+}
+
+/// An edge picked as an axis on a moved component is the edge at the pick, though another moved
+/// component's edge lies at the same point before it is moved (#20492). A is moved 50 along X, B
+/// (whose box starts 50 along X) 100: B's unmoved box is where A's moved one is.
+#[test]
+fn an_axis_picked_on_a_moved_component_is_the_edge_at_the_pick() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name": name, "grounded": false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [base, 0, 0], "body_name": name}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [shift, 0, 0]}));
+    }
+    let boxes = volume(&mut s);
+    // A 2 × 1 section on XZ, x 54…56, z 0…1: its centre 5 from A's edge at x = 50, y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [54, 0], "p1": [56, -1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"edge": [50, 0, 1]}, "operation": "new", "name": "Turn", "body_name": "Turn"}));
+    let turned = volume(&mut s) - boxes;
+    assert!(rel(turned, 2.0 * PI * 5.0 * 2.0) < 1e-4, "turned about A's edge at x = 50, not B's: {turned}");
+    // A circular pattern reads its axis the same way: a half turn about A's edge puts a 1 mm cube
+    // 4 mm from it on the other side, 1 mm from B's moved box rather than 100.
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [54, 0, 0], "body_name": "Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Cube"], "axis": {"edge": [50, 0, 1]}, "count": 2, "name": "Copies"}));
+    let st = s.world_state().unwrap();
+    let copy = st
+        .bodies
+        .iter()
+        .filter(|b| b.name.starts_with("Cube"))
+        .find(|b| b.body.classify_point(Vec3::new(45.5, -0.5, 0.5)).unwrap() == solidcraft_kernel::PointClass::Inside);
+    assert!(copy.is_some(), "the copy is turned about A's edge: {:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
 }

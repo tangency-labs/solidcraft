@@ -10,6 +10,7 @@
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
 
+use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -247,6 +248,12 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// one still within 3.2e-16 relative of its 70-digit reference (`was` is left as it was); the
 /// three that move away from theirs stay within their volume sum's rounding bound
 /// (`transposed_pins_lie_within_their_sums_rounding_of_the_references`).
+/// Closing a plane's straight edges in one piece where their strips' correspondence does
+/// not bend (the strip integrand a polynomial the Kronrod rule integrates exactly on any
+/// piece, so only the sum's rounding changes) moves the r 8 cylinder boss and cone boss
+/// back by their last bit, onto main's figures from before WR-729 (the cone boss onto its
+/// 70-digit reference's nearest double), and the prism boss and r 1.9 cylinder boss by
+/// their last bit.
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -385,7 +392,13 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     let column = column_under_footprint();
-    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.16549340515, 9);
+    let v = assert_pinned(
+        cylinder_boss,
+        8.0,
+        23528.165527389272,
+        23528.165493405155,
+        9,
+    );
     assert_near_closed_form(v, featured_rounded(true, 8.0) + column);
     let v = assert_pinned(
         cylinder_hole,
@@ -399,7 +412,7 @@ fn cylinders_keep_their_pinned_volumes() {
         cylinder_boss,
         1.9,
         24031.843347866372,
-        24031.843347866372,
+        24031.843347866376,
         9,
     );
     assert_near_closed_form(v, featured_rounded(true, 1.9));
@@ -418,7 +431,7 @@ fn cylinders_keep_their_pinned_volumes() {
 fn prisms_keep_their_pinned_volumes() {
     // the boss's walls carried down to the round, the pocket's floor at z 15
     let under = round_over_prism();
-    let v = assert_pinned(prism_boss, 8.0, 23549.89626015013, 23549.89626015013, 12);
+    let v = assert_pinned(prism_boss, 8.0, 23549.89626015013, 23549.896260150133, 12);
     assert_near_closed_form(v, rounded_r8() + 4.0 * (25.0 * 4.0 - under));
     let v = assert_pinned(
         prism_pocket,
@@ -453,7 +466,7 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
     let pins: [(Feature, f64, f64, &str, f64, usize); 3] = [
         (
             cylinder_boss,
-            23528.16549340515,
+            23528.165493405155,
             23528.165493405155,
             "23528.1654934051575356764322355",
             23528.16549340516,
@@ -461,7 +474,7 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
         ),
         (
             cone_boss,
-            23501.98555462524,
+            23501.985554625244,
             23501.985554625244,
             "23501.9855546252425920225768740",
             23501.985554625244,
@@ -502,7 +515,7 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
 fn cones_keep_their_pinned_volumes() {
     // the boss's footprint (radius 2) swept down to the round, as keep features continues a
     // boss's walls along the top's normal
-    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.98555462524, 11);
+    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625244, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 5.0) + column_under_footprint(),
@@ -721,4 +734,144 @@ fn crease_pieces_are_classified_on_one_snapshot_per_copy() {
     k.work_counters.reset();
     fillet_edges(&mut k, &mut b, &[e], 8.0, 1, 1, 1.0).unwrap();
     assert_eq!(k.work_counters.classification_snapshots(), 24);
+}
+
+/// One fillet r 1 on two chains that share no face (#22144): the block's top front edge, clear
+/// of a boss of base r 2 at (20, 15) on the top, and the bottom rim of a blind hole r 1.5 under
+/// that boss. The boss's walls continued down from its footprint pass through the hole's round
+/// (it spans r 1.5 to 2.5 about the hole's axis), which rolls on no face the boss stands on:
+/// the boss is in neither band, and the one fillet is the two fillets one after the other.
+fn boss_over_a_rounded_hole(k: &mut Kernel, boss: fn(&mut Kernel) -> Result<Brep>) -> Brep {
+    let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let boss = boss(k).unwrap();
+    let block = boolean_union(k, block, boss).unwrap();
+    let hole = create_cylinder(k, Point3::new(20.0, 15.0, -1.0), 1.5, 7.0).unwrap();
+    boolean_difference(k, block, hole).unwrap()
+}
+
+/// The faces, edges and vertices of a sound solid, the kinds of its faces' surfaces (sorted) and
+/// its volume.
+fn sound_counts(k: &mut Kernel, b: &mut Brep) -> ((usize, usize, usize), Vec<&'static str>, f64) {
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(b).unwrap());
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let mut kinds: Vec<&'static str> = b
+        .face_list()
+        .iter()
+        .map(|&f| surface_kind_name(b.face(f).unwrap().surface.as_ref().unwrap()))
+        .collect();
+    kinds.sort_unstable();
+    let counts = (
+        b.face_list().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    );
+    (counts, kinds, volume_of(k, b))
+}
+
+/// [`boss_over_a_rounded_hole`] with `boss`, of volume `boss_volume`: one fillet on both chains
+/// against the two fillets one after the other.
+fn assert_two_chains_as_one_after_the_other(
+    boss: fn(&mut Kernel) -> Result<Brep>,
+    boss_volume: f64,
+) {
+    let (front, rim) = (Point3::new(20.0, 0.0, 20.0), Point3::new(20.0, 16.5, 0.0));
+    // the two rounds one after the other
+    let mut k = Kernel::default();
+    let mut apart = boss_over_a_rounded_hole(&mut k, boss);
+    let e = pick(&k, &apart, front);
+    fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
+    let e = pick(&k, &apart, rim);
+    fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
+    let (want_counts, want_kinds, want) = sound_counts(&mut k, &mut apart);
+    // the block's 6 faces, the boss's side and top, the hole's wall and floor and the two rounds
+    assert_eq!(want_counts.0, 12, "{want_kinds:?}");
+    // the closed forms: the front round's spandrel along its 40, and the rim round's revolved
+    // about the hole's axis at its centroid (Pappus)
+    let (a, r) = (1.5, 1.0);
+    let centroid = a + r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let closed =
+        24000.0 + boss_volume - 13.5 * PI - 40.0 * spandrel(r) - 2.0 * PI * centroid * spandrel(r);
+    assert!(
+        (want - closed).abs() <= 1e-9 * closed,
+        "one after the other {want:.12}, closed form {closed:.12}"
+    );
+    // the two rounds in one fillet
+    let mut k = Kernel::default();
+    let mut b = boss_over_a_rounded_hole(&mut k, boss);
+    let edges = [pick(&k, &b, front), pick(&k, &b, rim)];
+    fillet_edges(&mut k, &mut b, &edges, r, 1, 1, 1.0)
+        .expect("two chains clear of each other and of the boss");
+    let (counts, kinds, v) = sound_counts(&mut k, &mut b);
+    println!(
+        "one fillet {counts:?} {kinds:?} {v:.12}; one after the other {want_counts:?} {want:.12}"
+    );
+    assert_eq!(counts, want_counts);
+    assert_eq!(kinds, want_kinds);
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
+}
+
+#[test]
+fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+    assert_two_chains_as_one_after_the_other(
+        |k| create_cylinder(k, Point3::new(20.0, 15.0, 20.0), 2.0, 5.0),
+        20.0 * PI,
+    );
+}
+
+/// The same with a boss leaning 45 degrees, past the angular tolerance (a frustum r 2 to 1, 1
+/// tall, as `lean_45`): its footprint is swept down all the same, to find whether a band takes
+/// the ground under it, and is refused where one does; the hole's round is not one.
+#[test]
+fn a_leaning_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+    assert_two_chains_as_one_after_the_other(
+        |k| create_cone(k, Point3::new(20.0, 15.0, 20.0), 2.0, 1.0, 1.0),
+        frustum(2.0, 1.0, 1.0),
+    );
+}
+
+/// A hole of radius 5 drilled across (along y, clear of the seam) a 20-radius, 60-tall cylinder at mid-height, one of its
+/// two rims rounded 2. The other rim is an inner loop of the outer face the round rolls on,
+/// so keep features takes it for a cut; its wall is the hole, which the round rolls on too:
+/// tangent to it along the rail, crossing it nowhere. Keep features computes no crease
+/// there (it was a tangent surface intersection whose only result was the rail, most of the
+/// fillet's work), and the body is as before: valid, 5 faces, its volume unchanged.
+#[test]
+fn a_cut_whose_wall_the_round_rolls_on_gets_no_crease() {
+    use solidcore::math::Vec3;
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    let mut k = fork_kernel();
+    let body = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 60.0).unwrap();
+    let mut drill = create_cylinder(&mut k, Point3::new(0.0, 0.0, 5.0), 5.0, 50.0).unwrap();
+    let mid = Point3::new(0.0, 0.0, 30.0);
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        mid,
+        Vec3::new(1.0, 0.0, 0.0),
+        90.0,
+    )
+    .unwrap();
+    let mut b = boolean_difference(&mut k, body, drill).unwrap();
+    // the near rim, 45 degrees round from the drill's seam
+    let c = 5.0 * 0.5f64.sqrt();
+    let e = pick(&k, &b, Point3::new(c, (400.0 - c * c).sqrt(), 30.0 + c));
+    k.work_counters.reset();
+    fillet_edges(&mut k, &mut b, &[e], 2.0, 1, 1, 1.0).unwrap();
+    let creases = k.work_counters.keep_feature_creases();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let v = volume_of(&k, &mut b);
+    // SolidCraft's measured volume of the same part before the change, at its accuracy
+    let want = 72235.52478404697;
+    println!(
+        "volume {v:.17}; {} faces; {creases} creases",
+        b.face_list().len()
+    );
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+    assert_eq!(b.face_list().len(), 5);
+    assert_eq!(creases, 0);
 }

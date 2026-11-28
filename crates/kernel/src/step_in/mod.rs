@@ -21,7 +21,9 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
-pub use checks::{HealedBody, ImportChecks, ImportHeals};
+pub use checks::HealedBody;
+pub use checks::ImportChecks;
+pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
@@ -43,8 +45,8 @@ pub const MAX_BODIES: usize = 10_000;
 pub const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
 const MAX_WINDOW: usize = 64;
-/// Most representation entries walked while deciding which items are converted exactly once. A
-/// larger file keeps every conversion instead of paying for the walk.
+/// Work limit for the extra representation walks used to find template products and
+/// items that are converted exactly once. On reaching it, use the ordinary import walk.
 const MAX_CLOSURE_WORK: usize = 1 << 16;
 
 /// A body read from a STEP file.
@@ -56,6 +58,9 @@ pub struct ImportedBody {
     pub face_origin: Vec<u64>,
     /// Solid name (the brep's label), else the product name.
     pub name: String,
+    /// Original face label shared by every imported face, when meaningful and unambiguous.
+    /// Kept separately so callers can still choose the source solid name.
+    pub common_face_name: Option<String>,
     pub body: Body,
     /// Surface colour (linear-ish RGB 0..1) from the file's presentation styles.
     pub color: Option<[f32; 3]>,
@@ -75,6 +80,9 @@ pub struct ImportedBody {
     pub refused: Option<String>,
     /// The file marks the body invisible (`INVISIBILITY`), so the design starts with it hidden.
     pub hidden: bool,
+    /// The presentation layer the file puts the body on (`PRESENTATION_LAYER_ASSIGNMENT`), by
+    /// its name; `None` when it is on none.
+    pub layer: Option<String>,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -358,14 +366,14 @@ fn translation(t: [f64; 3]) -> M4 {
 /// (`Reader::modelling_checked`): every rigid motion is one class (`None`), any other placement
 /// (a transformation operator's scale, shear or mirror) its own, by the matrix's exact bits.
 ///
-/// A rigid placement is applied by [`solidcraft_geom::brep::placement::moved`], which moves
+/// A rigid placement is applied by [`crate::placement::moved`], which moves
 /// every point and direction of the part by the same rotation and translation and keeps every
 /// tolerance; SMLib's check compares distances, lengths and orientations with those tolerances,
 /// which the motion keeps but for the rounding of the coordinates it moves. Any other placement
 /// is mapped without its tolerances, so the check can differ: such a placement is checked as it
 /// is.
 fn check_class(m: &M4) -> Option<[u64; 16]> {
-    if solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some() {
+    if crate::placement::Rigid::of_matrix(m).is_some() {
         return None;
     }
     let mut bits = [0u64; 16];
@@ -401,8 +409,12 @@ fn dress_with(
             Some(crate::FacePaint { face: i, color: *c, opacity: opacity.get(f).copied().unwrap_or(1.0), name: color_names.get(f).cloned() })
         })
         .collect();
-    let paint =
-        crate::Paint { opacity: opacity.get(&item).copied().unwrap_or(1.0), faces, name: color.and_then(|_| color_names.get(&item).cloned()) };
+    let paint = crate::Paint {
+        opacity: opacity.get(&item).copied().unwrap_or(1.0),
+        faces,
+        name: color.and_then(|_| color_names.get(&item).cloned()),
+        layer: None,
+    };
     let body = body.with_color(color).with_paint(Some(paint));
     let identities =
         face_origin.iter().map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None })).collect();
@@ -412,6 +424,12 @@ fn dress_with(
 /// [`dress_with`] the file's colours `paints`.
 fn dress(paints: &checks::Paints, body: Body, item: u64, face_origin: &[u64]) -> Body {
     dress_with(&paints.colors, &paints.color_names, &paints.opacity, body, item, face_origin)
+}
+
+struct MappedItem {
+    rep: u64,
+    origin: u64,
+    target: u64,
 }
 
 struct Reader {
@@ -441,6 +459,12 @@ struct Reader {
     invisible_targets: HashSet<u64>,
     /// Items whose bodies the file marks invisible, after resolving the targets above.
     invisible: HashSet<u64>,
+    /// Layers (`PRESENTATION_LAYER_ASSIGNMENT`) by name, with the items, styled items and
+    /// representations each assigns, in file order.
+    layer_targets: Vec<(String, Vec<u64>)>,
+    /// Item → the layer its body is on (the first layer that names it), after resolving the
+    /// targets above.
+    layers: HashMap<u64, String>,
     /// Items that gave no part: reported once when the file could not be read, else (the
     /// body could not be made) at every instance, as the message says.
     unreadable: HashMap<u64, Option<String>>,
@@ -515,6 +539,8 @@ impl Reader {
             styled_items: HashMap::new(),
             invisible_targets: HashSet::new(),
             invisible: HashSet::new(),
+            layer_targets: Vec::new(),
+            layers: HashMap::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
             shown: HashMap::new(),
@@ -659,6 +685,12 @@ impl Reader {
                         self.invisible_targets.extend(items.iter().filter_map(Param::as_ref_id));
                     }
                 }
+                "PRESENTATION_LAYER_ASSIGNMENT" => {
+                    let name = p.first().and_then(Param::as_str).map(str::trim).unwrap_or_default();
+                    if let (false, Some(items)) = (name.is_empty(), p.get(2).and_then(Param::as_list)) {
+                        self.layer_targets.push((name.to_string(), items.iter().filter_map(Param::as_ref_id).collect()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -689,6 +721,28 @@ impl Reader {
             }
         }
         self.invisible = invisible;
+        // A layer assigns an item, the item a styled item styles, or every item of a
+        // representation and of the representations linked to it; an item on two layers is on
+        // the first.
+        for (name, targets) in std::mem::take(&mut self.layer_targets) {
+            let mut queue: Vec<u64> = targets.iter().map(|t| self.styled_items.get(t).copied().unwrap_or(*t)).collect();
+            let mut seen = HashSet::new();
+            while let Some(target) = queue.pop() {
+                if !seen.insert(target) {
+                    continue;
+                }
+                if let Some((items, _)) = self.reps.get(&target) {
+                    for item in items {
+                        self.layers.entry(*item).or_insert_with(|| name.clone());
+                    }
+                    if let Some(links) = self.rep_links.get(&target) {
+                        queue.extend(links.iter().copied());
+                    }
+                } else {
+                    self.layers.entry(target).or_insert_with(|| name.clone());
+                }
+            }
+        }
         for (d, r) in sdrs {
             if let Some(&pd) = pds.get(&d) {
                 self.pd_reps.entry(pd).or_default().push(r);
@@ -854,19 +908,19 @@ impl Reader {
     }
 
     /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
-    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes, scales and origin (an
-    /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
-    /// first).
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes (derived as the STEP reader
+    /// derives them, `solidcore_step::read::operator_axes`), scales and origin (an omitted scale 1,
+    /// an omitted second or third scale the first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
         let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
-            let p = e.params();
-            let o = reader.point(p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
+            let p = solidcore_record::step::product::operator_attributes(e);
+            let o = reader.point(p.get(2).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            let direction = |i: usize| -> R<Option<[f64; 3]>> {
                 match p.get(i) {
-                    None | Some(Param::Null) => Ok(global),
-                    Some(Param::Ref(id)) => reader.direction(*id),
+                    None | Some(Param::Null) => Ok(None),
+                    Some(Param::Ref(id)) => reader.direction(*id).map(Some),
                     _ => Err("invalid transformation direction".into()),
                 }
             };
@@ -876,9 +930,9 @@ impl Reader {
                     Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
                 }
             };
-            let sx = scale(5, 1.0)?;
-            let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
-            let (x, y, z) = (direction(2, [1.0, 0.0, 0.0])?, direction(3, [0.0, 1.0, 0.0])?, direction(6, [0.0, 0.0, 1.0])?);
+            let sx = scale(3, 1.0)?;
+            let (sy, sz) = (scale(5, sx)?, scale(6, sx)?);
+            let [x, y, z] = solidcore_step::read::operator_axes(direction(0)?, direction(1)?, direction(4)?, "transformation axes")?;
             let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
             let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
             if !m.iter().flatten().all(|x| x.is_finite()) {
@@ -909,17 +963,122 @@ impl Reader {
         seen
     }
 
+    fn mapped_item(&self, item: u64) -> Option<MappedItem> {
+        let e = self.ex.get(item).filter(|e| e.name() == "MAPPED_ITEM")?;
+        let map = self.ex.get(e.params().get(1)?.as_ref_id()?)?;
+        Some(MappedItem {
+            rep: map.params().get(1)?.as_ref_id()?,
+            origin: map.params().first()?.as_ref_id()?,
+            target: e.params().get(2)?.as_ref_id()?,
+        })
+    }
+
     /// Representations a MAPPED_ITEM walks (empty for any other item).
     fn mapped_targets(&self, item: u64) -> Vec<u64> {
-        let Some(e) = self.ex.get(item).filter(|e| e.name() == "MAPPED_ITEM") else { return Vec::new() };
-        let mapped = e
-            .params()
-            .get(1)
-            .and_then(Param::as_ref_id)
-            .and_then(|map| self.ex.get(map))
-            .and_then(|map| map.params().get(1))
-            .and_then(Param::as_ref_id);
-        mapped.map(|rep| self.rep_closure(&[rep])).unwrap_or_default()
+        self.mapped_item(item).map(|map| self.rep_closure(&[map.rep])).unwrap_or_default()
+    }
+
+    fn mapped_placement(&mut self, map: &MappedItem, units: Units, world: &M4) -> R<M4> {
+        let source_units = self.units_of(map.rep);
+        let target = self.placement_matrix(map.target, units);
+        let origin = self.placement_matrix(map.origin, source_units);
+        let placement = mat_mul(world, &mat_mul(&target?, &placement_inverse(&origin?)));
+        if placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("non-finite composed placement".into());
+        }
+        Ok(placement)
+    }
+
+    /// Shapes reached by a usable mapping, starting from product-owned representations.
+    /// Count every visit as the import walk does, even if two mappings place the same
+    /// shape at the same position. The scan may decline to omit a source if the
+    /// remaining walk can reach a visit or body limit.
+    fn mapped_shapes(&mut self, reps: impl Iterator<Item = u64>, work: &mut usize) -> Option<HashSet<u64>> {
+        let mut frontier: Vec<_> = reps.map(|rep| (rep, IDENTITY)).collect();
+        let mut mapped = HashSet::new();
+        let mut closures = HashMap::new();
+        let mut bodies = 0usize;
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        for depth in 0..=MAX_ASSEMBLY_DEPTH {
+            let mut next = Vec::new();
+            for (rep, world) in frontier {
+                let Some((items, _)) = self.reps.get(&rep) else { continue };
+                *work += items.len();
+                if *work > limit {
+                    return None;
+                }
+                let mut maps = Vec::new();
+                for &item in items {
+                    let Some(entity) = self.ex.get(item) else { continue };
+                    match entity.name() {
+                        name if body_item(rep, name) => {
+                            bodies += solidcore_step::topology::items(&self.ex, item).len();
+                            if bodies > MAX_BODIES {
+                                return None;
+                            }
+                        }
+                        "MAPPED_ITEM" if depth < MAX_ASSEMBLY_DEPTH => maps.extend(self.mapped_item(item)),
+                        _ => {}
+                    }
+                }
+                if maps.is_empty() {
+                    continue;
+                }
+                let units = self.units_of(rep);
+                for map in maps {
+                    let Ok(placement) = self.mapped_placement(&map, units, &world) else { continue };
+                    // Only a regular placement covers a shape. A nested operator may
+                    // still undo an ill-conditioned scale, so keep walking the map.
+                    let regular = solidcore_ops::affine::inverse(&placement).is_ok();
+                    let shapes = closures.entry(map.rep).or_insert_with(|| self.rep_closure(&[map.rep]));
+                    *work += shapes.len();
+                    if *work > limit {
+                        return None;
+                    }
+                    for &shape in shapes.iter() {
+                        if regular {
+                            mapped.insert(shape);
+                        }
+                        next.push((shape, placement));
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        Some(mapped)
+    }
+
+    /// A flat file can define its parts as mapped shapes. Omit a template when all of
+    /// its shapes are reached from a root that will be kept. A cycle alone cannot
+    /// hide all its products.
+    fn mapped_template_products(&mut self, roots: &[u64]) -> HashSet<u64> {
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        if !(2..=limit).contains(&roots.len()) || !self.children.is_empty() {
+            return HashSet::new();
+        }
+        let mut products = Vec::new();
+        let mut work = roots.len();
+        for &pd in roots {
+            let Some(reps) = self.pd_reps.get(&pd).filter(|reps| !reps.is_empty()) else { continue };
+            let shapes = self.rep_closure(reps);
+            work += shapes.len();
+            if work > limit {
+                return HashSet::new();
+            }
+            products.push((pd, shapes));
+        }
+        let Some(sources) = self.mapped_shapes(products.iter().flat_map(|(_, shapes)| shapes.iter().copied()), &mut work) else {
+            return HashSet::new();
+        };
+        let (templates, kept): (Vec<_>, Vec<_>) = products.into_iter().partition(|(_, shapes)| shapes.iter().all(|rep| sources.contains(rep)));
+        if templates.is_empty() || kept.is_empty() {
+            return HashSet::new();
+        }
+        let Some(placed) = self.mapped_shapes(kept.iter().flat_map(|(_, shapes)| shapes.iter().copied()), &mut work) else { return HashSet::new() };
+        templates.into_iter().filter(|(_, shapes)| shapes.iter().all(|rep| placed.contains(rep))).map(|(pd, _)| pd).collect()
     }
 
     fn label(&self, item: u64) -> String {
@@ -1007,23 +1166,14 @@ impl Reader {
                     }
                 }
                 "MAPPED_ITEM" => {
-                    let p = e.params();
-                    let (Some(map), Some(target)) = (p.get(1).and_then(Param::as_ref_id), p.get(2).and_then(Param::as_ref_id)) else { continue };
-                    let Some(me) = self.ex.get(map) else { continue };
-                    let (Some(origin), Some(mapped)) =
-                        (me.params().first().and_then(Param::as_ref_id), me.params().get(1).and_then(Param::as_ref_id))
-                    else {
-                        continue;
-                    };
-                    let mu = self.units_of(mapped);
-                    match (self.placement_matrix(target, u), self.placement_matrix(origin, mu)) {
-                        (Ok(t), Ok(o)) => {
-                            let mm = mat_mul(m, &mat_mul(&t, &placement_inverse(&o)));
-                            for r in self.rep_closure(&[mapped]) {
+                    let Some(map) = self.mapped_item(item) else { continue };
+                    match self.mapped_placement(&map, u, m) {
+                        Ok(mm) => {
+                            for r in self.rep_closure(&[map.rep]) {
                                 self.rep_bodies(r, &mm, path, product, instance, out, depth + 1);
                             }
                         }
-                        (Err(e), _) | (_, Err(e)) => self.warn(format!("mapped item #{item}: {e}")),
+                        Err(e) => self.warn(format!("mapped item #{item}: {e}")),
                     }
                 }
                 _ => {}
@@ -1039,6 +1189,10 @@ impl Reader {
     /// Convert the next batch of planned solids into bodies; false once every one is done.
     /// `single`: one solid at a time (the caller wants short steps and has no worker threads).
     fn convert_next(&mut self, single: bool) -> bool {
+        self.convert_window(single, None)
+    }
+
+    fn convert_window(&mut self, single: bool, queue: Option<&mut parallel::Queue>) -> bool {
         if self.converted >= self.plan.len() {
             return false;
         }
@@ -1084,7 +1238,16 @@ impl Reader {
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
         // Reading and orienting new parts is shared out between the workers.
-        let mut prepared: Vec<Option<_>> = parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect();
+        let mut prepared: Vec<Option<_>> = match queue {
+            Some(queue) => jobs
+                .iter()
+                .map(|job| {
+                    queue.fill(self);
+                    Some(queue.take(&ex, job))
+                })
+                .collect(),
+            None => parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect(),
+        };
         for (i, item, placement, job) in sources {
             let made = match job {
                 Some(j) => match prepared.get_mut(j).and_then(Option::take) {
@@ -1141,6 +1304,7 @@ impl Reader {
                     let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
                     let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                     let name = if own.is_empty() { product.clone() } else { own };
+                    let common_face_name = ex.common_face_name(&face_origin).map(str::to_owned);
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
                         self.note(
@@ -1206,6 +1370,7 @@ impl Reader {
                     self.instances.push((item, m));
                     self.bodies.push(ImportedBody {
                         name,
+                        common_face_name,
                         body,
                         color,
                         path: path.clone(),
@@ -1216,6 +1381,7 @@ impl Reader {
                         face_origin,
                         refused: part.refused.clone(),
                         hidden: self.invisible.contains(&item),
+                        layer: self.layers.get(&item).cloned(),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
@@ -1513,12 +1679,19 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// threads, and what it finds is in [`ImportReport::current`] once every check has ended
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
+    step_import_shared_with_workers(text, parallel::workers())
+}
+
+/// [`step_import_shared`] with at most `workers` inner worker threads for solid conversion and
+/// background checks, used when a caller decodes multiple independent imports in parallel so
+/// nested parallelism stays bounded while preserving background check semantics on native targets.
+pub fn step_import_shared_with_workers(text: &str, workers: usize) -> Result<std::sync::Arc<StepImport>> {
     let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
     if let Some(imp) = recent(key, heal) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
-    StepReading::new(text)?.finish_shared()
+    StepReading::with_workers_mode(text, workers.max(1), cfg!(target_arch = "wasm32"))?.finish_shared()
 }
 
 /// The import the recent imports still hold for `key`, read healing its parts or not (`heal`).
@@ -1620,9 +1793,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
 
 fn step_import_with_workers(text: &str, workers: usize) -> Result<StepImport> {
     let _span = solidcraft_profile::span("import", "step.import");
-    let mut reading = StepReading::with_workers(text, workers)?;
-    while reading.step() {}
-    reading.finish()
+    StepReading::with_workers(text, workers)?.finish()
 }
 
 /// A STEP file being read a piece at a time, for a caller that can't wait for the whole read
@@ -1648,6 +1819,10 @@ impl StepReading {
     }
 
     fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+        Self::with_workers_mode(text, workers, workers <= 1)
+    }
+
+    fn with_workers_mode(text: &str, workers: usize, single: bool) -> Result<StepReading> {
         let _span = solidcraft_profile::span("import", "step.read_structure");
         let key = text_key(text);
         let watch = crate::watch::current();
@@ -1668,9 +1843,10 @@ impl StepReading {
         let mut roots: Vec<u64> =
             ex.entities.iter().filter(|(id, e)| e.name() == "PRODUCT_DEFINITION" && !child_pds.contains(id)).map(|(id, _)| *id).collect();
         roots.sort();
+        let templates = rd.mapped_template_products(&roots);
         let identity = IDENTITY;
         let mut tree = Vec::new();
-        for pd in roots {
+        for pd in roots.into_iter().filter(|pd| !templates.contains(pd)) {
             tree.push(rd.node(pd, identity, identity, &[], None, 0, &mut Vec::new()));
         }
         // Solids outside any product structure (bare geometry files).
@@ -1719,7 +1895,6 @@ impl StepReading {
                 });
             }
         }
-        let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single, heal: crate::heals_tolerance_defects() })
     }
 
@@ -1757,6 +1932,23 @@ impl StepReading {
     /// The import, once [`Self::step`] has converted every solid, with SMLib's check of its parts
     /// started (under `over` too, when given): [`ImportReport::checks`].
     fn finish_checking(mut self, over: Option<solidcraft_smlib::stop::Stop>) -> Result<StepImport> {
+        // Explicit frame-by-frame reads keep their original step size. A desktop caller
+        // finishing the whole read can start independent parts across the next window boundary.
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.single && self.rd.plan.len() - self.rd.converted > MAX_WINDOW {
+            let parent = solidcraft_smlib::stop::current();
+            parallel::with_queue(&self.rd.ex.clone(), self.rd.workers, self.rd.converted, |mut queue| {
+                loop {
+                    if parent.as_ref().is_some_and(|token| token.is_stopped()) {
+                        self.rd.cancelled = true;
+                        break;
+                    }
+                    if !solidcraft_profile::scope("import", "step.convert_batch", || self.rd.convert_window(false, queue.as_deref_mut())) {
+                        break;
+                    }
+                }
+            });
+        }
         while self.step() {}
         let _span = solidcraft_profile::span("import", "step.finish");
         let rd = &mut self.rd;

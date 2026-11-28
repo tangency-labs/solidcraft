@@ -78,14 +78,15 @@ use super::graph::{fill_from, GRAPH_DEPTH, P2};
 use super::qp::{dual_qp_source, QpOutcome, QpStats};
 use super::spring::spring_curve;
 use super::{
-    affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
-    least_squares, monomials, over_patch, round_jets, row_middle, second, sm_err, smax, smax_usize,
-    smin, Bern, Face, FaceKind, Fill, FillStats, Hom, Net, Refusal, Round, RoundJets, Tensor, GW,
-    GX, HOM_ZERO,
+    affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, corner_step, defect, el,
+    el_mut, el_ref, fill_not_from_split, least_squares, monomials, over_patch, past_table,
+    round_jets, row_middle, second, smax, smax_usize, smin, Bern, Face, FaceKind, Fill, FillStats,
+    Hom, Net, Refusal, Round, RoundJets, Tensor, GW, GX, HOM_ZERO,
 };
 use crate::blend::fillet_exact::{
     classify_blend_spine, BlendQuadric, BlendSpine, ExactBlend, QuadricKind,
 };
+use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
@@ -120,7 +121,9 @@ pub(super) fn comps(net: &Net) -> Result<[Tensor; 4]> {
     let mk = |c: usize| -> Result<Tensor> {
         let mut t = t_make(net.p, net.q);
         for (i, ti) in t.c.iter_mut().enumerate() {
-            *ti = el(el_ref(&net.pts, i)?, c)?;
+            // fewer points than the net's degrees give: only a caller's fill patch
+            // (`containment_kept`'s saddle test) can be one
+            *ti = el(net.pts.get(i).ok_or_else(fill_not_from_split)?, c)?;
         }
         Ok(t)
     };
@@ -330,7 +333,7 @@ fn net_contained(
 ) -> Result<bool> {
     let side = if convex { 1.0 } else { -1.0 };
     let points: Vec<Point3> = net.pts.iter().map(pt).collect();
-    let first = *points.first().ok_or_else(sm_err)?;
+    let first = *points.first().ok_or_else(past_table)?;
     let (mut lo, mut hi) = (first, first);
     for x in &points {
         lo = Vec3::new(smin(lo.x, x.x), smin(lo.y, x.y), smin(lo.z, x.z));
@@ -789,6 +792,11 @@ fn line_spine(a: &Face, b: &Face, ends: [Point3; 2], row: &[Hom], tol: f64) -> R
     Ok(blend.spine == BlendSpine::Line)
 }
 
+/// A round's end curvature is read from its jets, which every caller takes to second
+/// order or more: `round_end_curvature` calls `round_jets(.., 2)`, and the curved fill takes
+/// them to at least 2.
+const WHY_CURVATURE_JETS: &str = "a round's end curvature is read from its jets, which every caller takes to second order or more (three rows)";
+
 /// `sm_SbRoundRowK`: a round's least normal curvature along its end row (the owner's ruling
 /// (a), the rounds' part of k), II with the unit normal toward e's side, to rounding. `jets`:
 /// its jets there (0 ..= 2), the row a circular arc (a constant round's section about its
@@ -807,10 +815,10 @@ fn round_row_k(
     line: bool,
 ) -> core::result::Result<f64, Refusal> {
     if jets.len() < 3 {
-        return Err(sm_err().into());
+        return Err(defect(WHY_CURVATURE_JETS).into());
     }
     let (j0, j1, j2) = (el_ref(jets, 0)?, el_ref(jets, 1)?, el_ref(jets, 2)?);
-    let q = j0.len().checked_sub(1).ok_or_else(sm_err)?;
+    let q = j0.len().checked_sub(1).ok_or_else(past_table)?;
     let mut pts = vec![HOM_ZERO; 3 * (q + 1)];
     for j in 0..=q {
         let (h, hs, hss) = (el(j0, j)?, el(j1, j)?, el(j2, j)?);
@@ -948,7 +956,8 @@ fn round_row_k(
         lo *= 2.0;
     }
     if !certified(lo)? {
-        return Err(Refusal::sm_err(
+        return Err(Refusal::unbuildable(
+            CornerStep::RoundEndCurvatureUnbounded,
             "SmBlendSetback: a round's least normal curvature at its end cannot be bounded",
         ));
     }
@@ -1061,7 +1070,7 @@ pub(super) fn graph_g1_curved(
             }
         }
         if !(size > 0.0) {
-            return Err(sm_err().into());
+            return Err(corner_step(CornerStep::SetbackRailEndsCoincide).into());
         }
         Strict {
             factor: 1.0 + o.length() / size,
@@ -1255,7 +1264,7 @@ pub(super) fn graph_g1_curved(
                 &spring.from_q
             };
             let patch = if s == 0 { m } else { mp };
-            let ds = half.curve.len().checked_sub(1).ok_or_else(sm_err)?;
+            let ds = half.curve.len().checked_sub(1).ok_or_else(past_table)?;
             let mut sc: Vec<Hom> = half.curve.clone();
             // the round there: its rail end H_r0 and its along-derivative H_r1
             let q = el(&qs, el(cycle_round, patch)?)?;
@@ -1352,7 +1361,7 @@ pub(super) fn graph_g1_curved(
         rho = smax(rho, sqrt(dx * dx + dy * dy));
     }
     if !(rho > 0.0) {
-        return Err(sm_err().into());
+        return Err(corner_step(CornerStep::SetbackBasePointsCoincide).into());
     }
     let bs: Vec<P2> = xi
         .iter()
@@ -1473,8 +1482,8 @@ pub(super) fn graph_g1_curved(
                 *el_mut(el_mut(&mut fixed_height, ee)?, 0)? = [el(&col, nc - 1)?, el(&col, nc)?];
                 // the constructive column: unknowns alpha (Nc - k1 + 1), beta (Nc - k2 + 1),
                 // gamma (4)
-                let k1 = side.t[0].len().checked_sub(1).ok_or_else(sm_err)?;
-                let k2 = side.t[1].len().checked_sub(1).ok_or_else(sm_err)?;
+                let k1 = side.t[0].len().checked_sub(1).ok_or_else(past_table)?;
+                let k2 = side.t[1].len().checked_sub(1).ok_or_else(past_table)?;
                 if k1 > nc || k2 > nc {
                     failed = true;
                     break;
@@ -1897,7 +1906,8 @@ pub(super) fn graph_g1_curved(
             )?;
             *el_mut(&mut signs, p)? = sp;
             if sp == 0.0 {
-                return Err(Refusal::sm_err(
+                return Err(Refusal::unbuildable(
+                    CornerStep::SetbackFillMayFold,
                     "SmBlendSetback: the fill folds (a patch's normal turns across the corner's axis)",
                 ));
             }
@@ -1985,7 +1995,7 @@ pub(super) fn graph_g1_curved(
             };
             let det = ds.x * dt.y - ds.y * dt.x;
             if !(det.abs() > 0.0) {
-                return Err(sm_err().into());
+                return Err(corner_step(CornerStep::SetbackBaseSidesParallel).into());
             }
             let sig = el_ref(&side0, q)?.d;
             let a = (sig.x * dt.y - sig.y * dt.x) / det;
@@ -2139,7 +2149,8 @@ pub(super) fn graph_g1_curved(
         )?);
     }
     stats.uncertified = true;
-    Err(Refusal::sm_err(
+    Err(Refusal::unbuildable(
+        CornerStep::SetbackFillNotCertified,
         "SmBlendSetback: no G1 fill beside a curved face up to degree 9 is certified (ruling (a)) at these setbacks",
     ))
 }
@@ -2158,18 +2169,20 @@ pub(super) fn graph_g1_curved(
 /// be rounding (within `1e-11` of the form's scale; the sign test's slack `1e-12` of it).
 ///
 /// # Errors
-/// `SM_ERR` for a patch with a weight not positive, of more than one span, or of degree
-/// below 2 across a face it lies on.
+/// [`CornerInput::FillNotFromSetbackSplit`](crate::error::blend::CornerInput::FillNotFromSetbackSplit)
+/// (`SM_ERR`) for a patch with a weight not positive, of more than one span, with fewer
+/// control points than a one-span net of its degrees, or of degree below 2 across a face it
+/// lies on: the fill is the caller's ([`super::containment`]).
 pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> Result<f64> {
     let d_side = if convex { 1.0 } else { -1.0 };
     let n = fill.face.len();
     for (i, patch) in fill.patches.iter().enumerate() {
         let canonical = patch.canonical()?;
         if canonical.weights.iter().any(|&w| !(w > 0.0)) {
-            return Err(sm_err()); // a patch with a weight not positive
+            return Err(fill_not_from_split()); // a patch with a weight not positive
         }
         if canonical.u_knots.len() != 2 || canonical.v_knots.len() != 2 {
-            return Err(sm_err()); // Bernstein coefficients only for one span
+            return Err(fill_not_from_split()); // Bernstein coefficients only for one span
         }
         let (p, q) = (canonical.u_degree, canonical.v_degree);
         let pts = &canonical.control_points;
@@ -2177,8 +2190,11 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
         for (f, face) in faces.iter().enumerate() {
             let mut w = t_make(p, q);
             for (k, x) in w.c.iter_mut().enumerate() {
+                // fewer control points than a one-span net of degrees (p, q): the caller's
+                // fill (a NURBS net built as given does not bound a knot's multiplicity by
+                // the degree)
                 *x = if rational {
-                    el(&canonical.weights, k)?
+                    *canonical.weights.get(k).ok_or_else(fill_not_from_split)?
                 } else {
                     1.0
                 };
@@ -2190,7 +2206,7 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
             for (c, uc) in u.iter_mut().enumerate() {
                 *uc = t_make(p, q);
                 for (k, x) in uc.c.iter_mut().enumerate() {
-                    let pt = *pts.get(k).ok_or_else(sm_err)?;
+                    let pt = *pts.get(k).ok_or_else(fill_not_from_split)?;
                     *x = el(&w.c, k)? * (pt.component(c) - el(&origin, c)?);
                 }
                 if face.kind != FaceKind::Sphere {
@@ -2252,7 +2268,8 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
             if let Some(col) = col {
                 let qq = form.q;
                 if qq < 2 {
-                    return Err(sm_err());
+                    // the split's patches are of degree 2 k + 1 >= 3 across
+                    return Err(fill_not_from_split());
                 }
                 let mut r = t_make(form.p, qq - 2);
                 let mut dropped: f64 = 0.0;

@@ -99,6 +99,15 @@ fn listen_on(port: u16) -> Listen {
 /// At launch: install `starter` and open the channel the launch or the settings ask for.
 /// `launch_port`: the port `--control`/`SOLIDCRAFT_CONTROL_PORT` named, which wins.
 pub fn launch(app: &mut SolveApp, starter: Starter, launch_port: Option<u16>) {
+    // An organization that turned agent connections off (policy `AgentControl` = 0) leaves no
+    // port open, not even one the launch names.
+    let launch_port = launch_port.filter(|port| {
+        let refused = app.policy.mandatory.settings.get("agent_control") == Some(&crate::policy::Setting::Switch(false));
+        if refused {
+            log::warn!("control: port {port} not opened: the organization's policy turns agent connections off");
+        }
+        !refused
+    });
     let switch = &mut app.control_switch;
     switch.starter = Some(starter);
     switch.launch_port = launch_port;
@@ -238,6 +247,32 @@ mod tests {
         }
         tick(&mut app, 41.0, None);
         assert_eq!(take(&log), ["stop 7999", "start Exact(8002)"]);
+    }
+
+    /// An organization's policy that turns agent connections off (#10260) opens no port: not the
+    /// settings' one, and not one the launch names.
+    #[test]
+    fn a_policy_that_turns_agent_connections_off_opens_no_port() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.preferences.agent_control = true;
+        app.policy = crate::policy::Policy::from_json(r#"{"AgentControl": 0}"#);
+        crate::policy::enforce(&mut app);
+        let log = Log::default();
+        launch(&mut app, starter(&log, &[]), Some(7400));
+        assert!(take(&log).is_empty(), "the launch's port is refused");
+        assert_eq!(app.control_switch.status(), Status::Off);
+        assert!(app.control_rx.is_none());
+        app.preferences.agent_control = true;
+        crate::policy::enforce(&mut app);
+        tick(&mut app, 10.0, None);
+        tick(&mut app, 10.0 + SETTLE_S + 0.01, None);
+        assert!(take(&log).is_empty(), "the setting stays off");
+        // With connections turned on by the policy, a launch's port still wins.
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.policy = crate::policy::Policy::from_json(r#"{"AgentControl": 1}"#);
+        crate::policy::enforce(&mut app);
+        launch(&mut app, starter(&log, &[]), Some(7400));
+        assert_eq!(take(&log), ["start Exact(7400)"]);
     }
 
     /// Off in the settings: nothing listens at launch; a port below 1024 is raised to 1024.

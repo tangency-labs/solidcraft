@@ -812,6 +812,7 @@ fn a_plane_label_needs_the_plane_s_parametrisation() {
         }
         r.definition.supports[0] = SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
+            revolution: None,
             form: NurbsSurfaceRecord {
                 u_degree: 2,
                 v_degree: 1,
@@ -991,8 +992,9 @@ fn a_revolved_label_needs_the_form_s_parametrisation() {
             checked += 1;
         }
     }
-    // (the partial torus is a surface of revolution, no support label)
-    assert_eq!(checked, 8);
+    // (every curved face: the partial torus's revolved side is a torus too, its profile's
+    // analytic face since WR-448, and the round's)
+    assert_eq!(checked, 9);
 
     // a quarter cylinder of radius 2 about z from height 0 to 5, its quarter circle the
     // rational quadratic arc with end weights 1 and c^2 (c = 1 the circle's own
@@ -1139,8 +1141,9 @@ fn a_support_builds_from_its_own_label() {
             faces += 1;
         }
     }
-    // (the partial torus is a surface of revolution, no support label)
-    assert_eq!(faces, 7);
+    // (one curved analytic face per body: the partial torus's revolved side is a torus too,
+    // its profile's analytic face since WR-448, and its label builds it like the others')
+    assert_eq!(faces, 8);
 
     // a label off its form is still refused: the #2554 cone's radius changed by 1e-9,
     // which is far above the rounding of the recognition the old check compared against

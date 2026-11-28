@@ -17,7 +17,9 @@
 //! - a round of an exact class ([`ExactRound`]) offsets to its kind's own exact offset (a
 //!   cylinder of r to the cylinder of `r'`), which carries the definition of radius `r'`
 //!   on the offset supports, re-certified (an identity: the supports classified again give
-//!   the class, the offset on its surface).
+//!   the class, the offset on its surface). Where its kind is its B-spline net, that
+//!   offset is an offset surface of the net with no NURBS form to certify a definition on,
+//!   and it is kept without one.
 //!
 //! Where `r'` is not positive (an inward offset at or past the radius) the round collapses
 //! onto its spine: no surface, as a cylinder's offset collapses
@@ -39,6 +41,7 @@ use super::{BlendDefinitionInput, ProceduralBlend};
 use crate::blend::fillet_section::recertify::net_of_definition;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -221,9 +224,11 @@ pub fn procedural_offset(
             b.recertify(k)?;
         }
         None => {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the offset round is not a procedural blend",
+                SurfaceFailure::Defect {
+                    why: "the offset round is not a procedural blend, though it was made as one with no kept definition and only put into the old blend's parameters",
+                },
             ))
         }
     }
@@ -241,9 +246,11 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         made.swap_uv(k)?;
     }
     let SurfaceKind::ProceduralBlend(pb) = made.kind_mut() else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the made surface is not a procedural blend",
+            SurfaceFailure::Defect {
+                why: "the surface made is not a procedural blend, though its caller made it as one and swapping its UV keeps its kind",
+            },
         ));
     };
     // (p, q) drive (s, t): u and v, or v and u when swapped
@@ -261,9 +268,11 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         }
         let (now_a, now_b, _) = pb.definition_map();
         let (Some(&na), Some(&nb)) = (now_a.get(c), now_b.get(c)) else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the definition map has no entry for the parameter",
+                SurfaceFailure::Defect {
+                    why: "the definition map has no entry for the parameter, though both its arrays hold one for each of the two parameters walked",
+                },
             ));
         };
         // the net's range in this parameter, then the same s in like's parameter
@@ -291,7 +300,9 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
 
 /// The offset of an exact round's surface `surface` (`offset`, its kind's own exact
 /// offset by `distance`, or `None` where that collapses) carrying the definition of the
-/// moved radius on the offset supports, re-certified.
+/// moved radius on the offset supports, re-certified. An `offset` with no NURBS form (the
+/// offset surface of a round stored as a B-spline net) is returned as it is, keeping no
+/// definition: there is no form to certify the moved one on.
 ///
 /// # Errors
 ///
@@ -311,24 +322,29 @@ pub fn exact_offset(
     let (Some(moved), Some(mut offset)) = (moved_radius(r, tau, distance, tol), offset) else {
         return Ok(BlendOffset::Collapsed);
     };
-    let mut inputs = *round.inputs();
-    let mut supports = Vec::new();
-    for (i, o) in inputs.offsets.iter_mut().enumerate() {
-        let support = round
-            .support(i)
-            .ok_or_else(|| SolidError::surface_failed(OP, "the round has no support to offset"))?;
-        // the centre's signed offset from the support is side_i r; the support moves by
-        // -tau side_i d, so the centre's offset from it is side_i r'
-        let side = if *o >= 0.0 { 1.0 } else { -1.0 };
-        supports.push(offset_support(k, support, -tau * side * distance, tol)?);
-        *o = side * moved;
+    // A round whose kind is its B-spline net (a canal class: a plane and a cylinder at a
+    // slant, an ellipse its spine) has an offset surface as its kind's offset: S + d n of the
+    // net, which is S (an exact round's bound is 0), so the exact offset, but with no NURBS
+    // form the moved definition could be certified on. It stays that offset surface, keeping
+    // no definition, as a round on a B-spline support does (#3424: a shell refused every
+    // wall).
+    if as_b_spline(k, &offset)?.is_none() {
+        return Ok(BlendOffset::Round(Box::new(offset)));
     }
-    let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::surface_failed(
-            OP,
-            "the round has fewer than two supports",
-        ));
+    let mut inputs = *round.inputs();
+    // the centre's signed offset from support i is side_i r; the support moves by
+    // -tau side_i d, so the centre's offset from it is side_i r' (support 0, then 1)
+    let move_support = |support: &Surface, o: &mut f64| -> Result<Surface> {
+        let side = if *o >= 0.0 { 1.0 } else { -1.0 };
+        let moved_support = offset_support(k, support, -tau * side * distance, tol)?;
+        *o = side * moved;
+        Ok(moved_support)
     };
+    let [r0, r1] = &round.supports;
+    let [o0, o1] = &mut inputs.offsets;
+    let s0 = move_support(r0.as_ref(), o0)?;
+    let s1 = move_support(r1.as_ref(), o1)?;
+    let (s0, s1) = (&s0, &s1);
     let moved_round =
         ExactRound::create(k, round.class(), [s0, s1], moved, round.leader(), inputs)?;
     moved_round.recertify(k, &offset)?;

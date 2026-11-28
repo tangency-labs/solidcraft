@@ -7,7 +7,8 @@
 //!   wide: the end view on the right in first angle, on the left in third.
 //! - Its two centre lines are chain lines (ISO 128-20's long-dashed dotted line) half as wide: a long
 //!   dash of 24 line widths, a gap of 3, a dot and a gap of 3. They run `h / 4` past the outlines
-//!   and cross on a long dash. Strokes have butt caps, so the dot is one line width long.
+//!   and cross on a long dash. Its dot is one line width long: under the round caps
+//!   ([`solidcraft_geom::paper::Dashes::under_round_caps`]) a round dot one width across.
 
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_geom::cell::Projection;

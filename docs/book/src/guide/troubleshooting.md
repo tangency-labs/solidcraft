@@ -10,7 +10,9 @@ shader compiler. That covers older Intel graphics, PCs without a graphics driver
 ## Start in safe mode
 
 Safe mode starts with default settings (your own settings stay as they are, for the next normal
-start), skips the "Recover unsaved design?" offer and draws with the software renderer.
+start), skips the "Recover unsaved design?" offer and draws with the software renderer, without
+anti-aliasing: the software renderer draws every sample on the processor. It still autosaves, and
+the next normal start offers what it kept.
 
 - Windows: run `solidcraft.exe --safe-mode` from a terminal in the install folder, or add
   ` --safe-mode` to the end of a shortcut's *Target*.
@@ -151,18 +153,14 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
-graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
-graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
-rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
-software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
-before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
+SolidCraft lets wgpu, its graphics library, choose the graphics API and the graphics card, the
+same way any app built on it does: on Windows it looks at Vulkan, Direct3D 12 and OpenGL and
+takes the most capable card, on macOS Metal, on Linux Vulkan, then OpenGL. Choosing the API in
+**Preferences > Graphics > Graphics API**, or setting `WGPU_BACKEND`, starts only that one.
 
-If a graphics driver crashes the app while it starts a graphics API, the next launch knows
-which API it was and skips it on this computer, going on in the same order. Safe mode and
-software rendering leave it out too, so that driver is not loaded again (unless every API has
-crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
-API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
+If the window can't open, SolidCraft starts once more on the software renderer, which doesn't
+depend on the graphics driver. After a launch that failed to come up or lost its graphics device,
+the next one starts in safe graphics mode on the software renderer.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps
@@ -178,7 +176,8 @@ A newly selected API gets one guarded startup attempt. If the app stops before i
 frame is presented, the next normal launch restores the previous choice. A handled
 startup failure restores it before retrying. A failure to save the guard uses software
 rendering for that launch. The guard does not detect a blank image or a hang after the
-first frame; normal device-loss recovery still applies.
+first frame; on Windows the hang check above handles a hang, and device-loss recovery
+still applies.
 
 Safe mode uses the software renderer without consuming a pending API choice. An explicit
 launch override still takes precedence and is shown in Graphics. Changing the API in
@@ -208,9 +207,12 @@ land above what they point at.
 
 When the graphics driver stops responding, the system resets it (on Windows, "Display driver
 stopped responding and has recovered"), and the graphics device SolidCraft draws with is gone
-for good: the window can't draw anything more. SolidCraft then closes, keeps your unsaved
-changes for recovery as it does after a crash, and starts again; the new window says what
-happened, with what the graphics driver reported, and offers the changes back. The old window
+for good: the window can't draw anything more. On Linux that is when the driver reports the
+device lost (Vulkan's `VK_ERROR_DEVICE_LOST`), as after a GPU reset or, with some drivers, after
+waking from sleep. SolidCraft then closes, writes the unsaved changes of every open design for
+recovery, and starts again; the new window says what happened, with what the graphics driver
+reported, and offers the changes back. A design whose changes couldn't be written (no recovery
+folder, or the write failed) is named there instead. The old window
 closes on its own; SolidCraft doesn't wait for the driver to release it. If the device is reset
 again within ten minutes of that restart, the next start uses software rendering, which doesn't
 depend on the graphics driver. Updating the graphics driver from the GPU maker usually stops the

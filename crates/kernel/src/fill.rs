@@ -124,7 +124,7 @@ pub fn patch_edges_report(body: &Body, at: &[Vec3], spec: &PatchSpec) -> Result<
     let chain = picked_loop(&record, at, body.size() * 0.05 + 1e-6)?;
     let mut orders = vec![spec.continuity; chain.len()];
     for (p, g) in &spec.edges {
-        let e = nearest_edge(&record, *p, body.size() * 0.05 + 1e-6).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
+        let e = nearest_edge(&record, *p, body.size() * 0.05 + 1e-6).ok_or_else(|| KernelError::Invalid(format!("no edge at {p}")))?;
         let k = chain.iter().position(|c| c.0 == e).ok_or_else(|| KernelError::Invalid("a continuity pick is not on an edge of the loop".into()))?;
         if let Some(slot) = orders.get_mut(k) {
             *slot = *g;
@@ -549,9 +549,9 @@ fn picked_loop(record: &b::Brep, at: &[Vec3], reach: f64) -> Result<Vec<(usize, 
     let mut picked: Vec<usize> = Vec::new();
     for p in at {
         if !p.is_finite() {
-            return Err(KernelError::Invalid(format!("no edge at {p:?}")));
+            return Err(KernelError::Invalid(format!("no edge at {p}")));
         }
-        let e = nearest_edge(record, *p, reach).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
+        let e = nearest_edge(record, *p, reach).ok_or_else(|| KernelError::Invalid(format!("no edge at {p}")))?;
         if !picked.contains(&e) {
             picked.push(e);
         }

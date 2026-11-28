@@ -119,8 +119,11 @@ pub fn plain_path(p: &Path) -> String {
     }
 }
 
-/// Claude Desktop's configuration folders: the regular one, and the Microsoft Store (MSIX)
-/// package's redirected copy on Windows.
+/// Claude Desktop's configuration folders: the regular one, and on Windows the Microsoft Store
+/// (MSIX) package's. That one has been in two places: the package's redirected copy of the regular
+/// folder, and `%LOCALAPPDATA%\Claude-Data\claude_<package-id>`, the folder a current package reads
+/// and its Edit config button opens (#20877). Every one that exists gets the entries, so whichever
+/// the installed version reads has them.
 fn claude_desktop_dirs(env: &Env) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(a) = &env.appdata {
@@ -146,6 +149,13 @@ fn claude_desktop_dirs(env: &Env) -> Vec<PathBuf> {
             .collect();
         pk.sort();
         dirs.extend(pk);
+    }
+    if let Some(l) = &env.local_appdata
+        && let Ok(rd) = std::fs::read_dir(l.join("Claude-Data"))
+    {
+        let mut data: Vec<PathBuf> = rd.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("claude_")).map(|e| e.path()).collect();
+        data.sort();
+        dirs.extend(data);
     }
     dirs
 }

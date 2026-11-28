@@ -209,3 +209,140 @@ pub(super) fn unbind(s: &mut Session, params: &Value) -> Result<Value> {
     setup.surfaces.remove(&input.target);
     publish(s, input.name, setup, command)
 }
+
+/// The image textures render setup `name` gives the design's bodies, for an export: one plan per
+/// binding, with its maps' bytes. A binding that cannot be read (its target gone, a built-in
+/// surface this build lacks or that changed, an image missing) is left out with a warning.
+pub(in crate::cmd) fn export_plans(s: &Session, name: &str, command: &str, warnings: &mut Vec<String>) -> Result<Vec<solidcraft_io::SurfacePlan>> {
+    use solidcraft_render::texture_input::MapRole;
+    let setup = s.doc.render.setups.get(name).ok_or_else(|| bad(command, format!("there is no render setup named `{name}`")))?;
+    if setup.surfaces.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A design whose bodies cannot be named for the setup (too many placed bodies for the
+    // renderer, say) is still exported: its images are left out, with why.
+    let identities = match targets(s, command) {
+        Ok(identities) => identities,
+        Err(e) => {
+            warnings.push(format!("render setup `{name}`: its images are left out: {e}"));
+            return Ok(Vec::new());
+        }
+    };
+    let maximum = solidcraft_doc::render_texture_resources::MAX_TEXTURE_BYTES as u64;
+    // Each image read once and shared by every binding that uses it.
+    let mut read: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
+    let mut map = |sha: String, bytes: &dyn Fn() -> std::result::Result<Vec<u8>, String>| -> std::result::Result<solidcraft_io::SurfaceMap, String> {
+        let bytes = match read.get(&sha) {
+            Some(b) => b.clone(),
+            None => {
+                let b: Arc<[u8]> = Arc::from(bytes()?);
+                read.insert(sha.clone(), b.clone());
+                b
+            }
+        };
+        Ok(solidcraft_io::SurfaceMap { sha256: sha, bytes })
+    };
+    let mut plans = Vec::new();
+    for binding in setup.surfaces.iter() {
+        let Some(world) = identities.get(&binding.target) else {
+            warnings.push(format!("render setup `{name}`: a surface's body is gone or changed: left out"));
+            continue;
+        };
+        let mut plan = solidcraft_io::SurfacePlan {
+            setup: name.to_string(),
+            definition: binding.target.definition.clone(),
+            component: binding.target.component,
+            path: binding.target.occurrence_path.clone(),
+            world: world.clone(),
+            origin: binding.local_frame.origin,
+            u: binding.local_frame.u,
+            v: binding.local_frame.v,
+            flip_v: true,
+            normal_strength: binding.normal_strength,
+            base_color: None,
+            normal: None,
+            roughness: None,
+            metallic: None,
+        };
+        let outcome = match &binding.source {
+            SurfaceSource::Builtin(builtin) => (|| {
+                if !cfg!(feature = "bundled-render-library") {
+                    return Err(format!("this build has no built-in surface images, so `{}` is written without them", builtin.id));
+                }
+                if source(&builtin.id, command).ok().as_ref() != Some(builtin) {
+                    return Err(format!("built-in surface `{}` differs from the installed one: written without its images", builtin.id));
+                }
+                let bytes = |role: MapRole, file: &str| {
+                    super::library::texture_bytes(&format!("{}/{file}", builtin.id), role, maximum, command).map_err(|e| e.to_string())
+                };
+                plan.base_color = Some(map(builtin.base_color_sha256.to_string(), &|| bytes(MapRole::BaseColor, "base_color"))?);
+                plan.normal = Some(map(builtin.normal_sha256.to_string(), &|| bytes(MapRole::NormalOpenGl, "normal_open_gl"))?);
+                plan.roughness = Some(map(builtin.roughness_sha256.to_string(), &|| bytes(MapRole::Roughness, "roughness"))?);
+                plan.metallic = Some(map(builtin.metallic_sha256.to_string(), &|| bytes(MapRole::Metallic, "metallic"))?);
+                Ok(())
+            })(),
+            SurfaceSource::Embedded(embedded) => (|| {
+                plan.flip_v = embedded.flip_v;
+                let resources = &s.doc.render.texture_resources;
+                let mut bytes = |id: Option<HdrId>| -> std::result::Result<Option<solidcraft_io::SurfaceMap>, String> {
+                    id.map(|id| map(id.to_string(), &|| resources.required(&id).map(|r| r.bytes().to_vec()).map_err(|e| e.to_string()))).transpose()
+                };
+                plan.base_color = bytes(embedded.base_color)?;
+                plan.normal = bytes(embedded.normal_open_gl)?;
+                plan.roughness = bytes(embedded.roughness)?;
+                plan.metallic = bytes(embedded.metallic)?;
+                Ok(())
+            })(),
+        };
+        match outcome {
+            Ok(()) => plans.push(plan),
+            Err(e) => warnings.push(format!("{world}: render setup `{name}`: {e}")),
+        }
+    }
+    Ok(plans)
+}
+
+/// The optics render setup `name` gives the design's bodies, for an export: one plan per binding.
+/// What the export cannot write (a glass model, subsurface scattering, transmissive shadows) is a
+/// warning naming the body; a binding whose body is gone is left out with a warning.
+pub(in crate::cmd) fn optics_plans(s: &Session, name: &str, command: &str, warnings: &mut Vec<String>) -> Result<Vec<solidcraft_io::OpticsPlan>> {
+    let Some(setup) = s.doc.render.setups.get(name) else { return Ok(Vec::new()) };
+    if setup.optics.is_empty() {
+        return Ok(Vec::new());
+    }
+    let identities = match targets(s, command) {
+        Ok(identities) => identities,
+        Err(e) => {
+            warnings.push(format!("render setup `{name}`: its optics are not written: {e}"));
+            return Ok(Vec::new());
+        }
+    };
+    let mut plans = Vec::new();
+    for binding in setup.optics.iter() {
+        let Some(world) = identities.get(&binding.target) else {
+            warnings.push(format!("render setup `{name}`: a body given optics is gone or changed: left out"));
+            continue;
+        };
+        let optics = &binding.optics;
+        for (unwritten, what) in [
+            (optics.model.is_some(), "its glass model"),
+            (optics.subsurface.is_some(), "its subsurface scattering"),
+            (optics.shadow_transmission, "its transmissive shadows"),
+        ] {
+            if unwritten {
+                warnings.push(format!("{world}: render setup `{name}`: {what} has no OpenUSD form here: left out"));
+            }
+        }
+        plans.push(solidcraft_io::OpticsPlan {
+            setup: name.to_string(),
+            definition: binding.target.definition.clone(),
+            component: binding.target.component,
+            path: binding.target.occurrence_path.clone(),
+            world: world.clone(),
+            ior: optics.ior,
+            absorption_per_mm: optics.absorption_per_mm,
+            thin_sheet: optics.boundary == solidcraft_doc::render_optics::OpticalBoundary::ThinSheet,
+        });
+    }
+    Ok(plans)
+}

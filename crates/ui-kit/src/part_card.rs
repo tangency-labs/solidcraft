@@ -1,0 +1,212 @@
+//! Parts library cards: a part's picture on the tile ground with its name under it, a folder with
+//! how many parts it holds, a names-only row, a placeholder while a folder is read, and the folder
+//! button that starts the library's breadcrumb. Tokens only; the host's accent marks a selection.
+use egui::{Response, Sense, Ui, vec2};
+
+use solidcraft_theme::{TabAccent, Tokens};
+
+/// The library's card sizes. Each keeps its own width, so its picture never stretches: a wider
+/// list fits more columns, centred, and a list narrower than one card shrinks that card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PartCardSize {
+    Small,
+    Medium,
+    Large,
+}
+
+impl PartCardSize {
+    /// The card's width: three Small, two Medium or one Large fill the library's default width.
+    pub fn width(self) -> f32 {
+        match self {
+            Self::Small => 84.0,
+            Self::Medium => 130.0,
+            Self::Large => 268.0,
+        }
+    }
+
+    /// The gap between two cards in a row.
+    pub fn gap() -> f32 {
+        Tokens::get().space_8
+    }
+
+    /// How many cards fit across a list `room` wide (at least one).
+    pub fn columns_in(self, room: f32) -> usize {
+        (((room + Self::gap()) / (self.width() + Self::gap())).floor() as usize).max(1)
+    }
+
+    /// The picture's height.
+    pub fn picture(self) -> f32 {
+        match self {
+            Self::Small => 56.0,
+            Self::Medium => 88.0,
+            Self::Large => 150.0,
+        }
+    }
+
+    fn font(self) -> f32 {
+        match self {
+            Self::Small => Tokens::get().font_panel,
+            Self::Medium | Self::Large => Tokens::get().font_caption,
+        }
+    }
+
+    /// The card's whole height: the picture and one line of name.
+    pub fn height(self) -> f32 {
+        self.picture() + Tokens::get().space_4 + self.font() + Tokens::get().space_4
+    }
+}
+
+/// What a card shows.
+#[derive(Clone, Copy)]
+pub enum PartFace<'a> {
+    /// A part: its picture once drawn (`None` while it is drawn), and its kind where it is not a
+    /// SolidCraft design (a STEP or mesh file).
+    Part { picture: Option<crate::PreviewArt>, badge: Option<&'a str> },
+    /// A folder, with "N parts".
+    Folder { count: &'a str },
+    /// A card at its final size while the folder is read, so nothing jumps.
+    Placeholder,
+}
+
+pub struct PartCard<'a> {
+    pub name: &'a str,
+    pub face: PartFace<'a>,
+    pub size: PartCardSize,
+    /// The card's width: the size's own, or less where the list is narrower than one card.
+    pub width: f32,
+    pub selected: bool,
+    /// The card being dragged into the view: its picture fades.
+    pub dragging: bool,
+    /// The host's accent: a selection, a folder's icon and the kind's pill.
+    pub accent: TabAccent,
+}
+
+/// One card. The response clicks and drags; the full name is its tooltip.
+pub fn part_card(ui: &mut Ui, card: PartCard<'_>) -> Response {
+    let t = Tokens::get();
+    let size = card.size;
+    let sense = if matches!(card.face, PartFace::Placeholder) { Sense::hover() } else { Sense::click_and_drag() };
+    let width = card.width;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, size.height()), sense);
+    let picture = egui::Rect::from_min_size(rect.min, vec2(width, size.picture()));
+    let accent = card.accent;
+    let painter = ui.painter_at(rect.expand(1.0));
+    let edge = if card.selected {
+        t.primary_border(accent.color)
+    } else if response.hovered() && !matches!(card.face, PartFace::Placeholder) {
+        t.control_border_stroke(t.form_dim)
+    } else {
+        t.control_border_stroke(t.control_border)
+    };
+    let inner = picture.shrink(t.space_4);
+    // A part is a file preview, which brings its own ground; a folder or placeholder sits on the tile's.
+    if let PartFace::Part { picture: art, .. } = card.face {
+        let lit = response.hovered() && !card.dragging;
+        crate::file_preview(ui, response.id.with("preview"), picture, art, lit, if card.dragging { 0.45 } else { 1.0 });
+    } else {
+        painter.rect_filled(picture, t.radius_md, t.dialog_footer);
+        if card.selected {
+            painter.rect_filled(picture, t.radius_md, accent.soft);
+        }
+    }
+    painter.rect_stroke(picture, t.radius_md, edge, egui::StrokeKind::Inside);
+    match card.face {
+        PartFace::Part { .. } => {}
+        PartFace::Placeholder => {
+            painter.hline(inner.shrink(t.space_8).x_range(), inner.center().y, t.control_border_stroke(t.control_border));
+        }
+        PartFace::Folder { count } => {
+            let icon = (size.picture() * 0.4).clamp(t.space_16, t.space_24 * 2.0);
+            let at = egui::Rect::from_center_size(inner.center() - vec2(0.0, t.space_6), vec2(icon, icon));
+            crate::icons::paint_ink(&painter, at, "folder", accent.color);
+            let line = egui::Rect::from_min_max(egui::pos2(inner.left(), at.bottom() + t.space_2), egui::pos2(inner.right(), inner.bottom()));
+            painter.text(line.center_top(), egui::Align2::CENTER_TOP, count, egui::FontId::proportional(t.font_caption), t.text_dim);
+        }
+    }
+    if let PartFace::Part { badge: Some(badge), .. } = card.face {
+        pill(&painter, picture.left_top() + vec2(t.space_4, t.space_4), badge, accent.color);
+    }
+    let name = egui::Rect::from_min_max(egui::pos2(rect.left(), picture.bottom() + t.space_4), rect.max);
+    if matches!(card.face, PartFace::Placeholder) {
+        let bar = egui::Rect::from_min_size(name.min + vec2(0.0, size.font() * 0.25), vec2(name.width() * 0.6, size.font() * 0.6));
+        painter.rect_filled(bar, t.radius_sm, t.dialog_footer);
+        return response;
+    }
+    super::text::paint_text(ui, name, card.name, egui::FontId::proportional(size.font()), t.form_ink, false);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, card.name));
+    response.on_hover_text(card.name)
+}
+
+/// A names-only row (the List size): the kind's icon, the name and the kind's pill, in the host's `accent`.
+pub fn part_row(ui: &mut Ui, name: &str, icon: &str, badge: Option<&str>, selected: bool, accent: TabAccent) -> Response {
+    let t = Tokens::get();
+    let width = super::metrics::dimension(ui.available_width());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height), Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    if selected {
+        painter.rect(rect, t.radius_sm, accent.soft, t.primary_border(accent.color), egui::StrokeKind::Inside);
+    } else if response.hovered() {
+        painter.rect_filled(rect, t.radius_sm, t.hover);
+    }
+    let glyph = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_12, rect.center().y), vec2(t.space_14, t.space_14));
+    crate::icons::paint_ink(&painter, glyph, icon, if icon == "folder" { accent.color } else { t.form_dim });
+    let mut right = rect.right() - t.space_4;
+    if let Some(badge) = badge {
+        right = pill_left_of(&painter, egui::pos2(right, rect.center().y), badge, accent.color) - t.space_4;
+    }
+    let text =
+        egui::Rect::from_min_max(egui::pos2(glyph.right() + t.space_8, rect.top()), egui::pos2(right.max(glyph.right() + t.space_8), rect.bottom()));
+    super::text::paint_text(ui, text, name, egui::FontId::proportional(t.font_small), t.form_ink, false);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+    response.on_hover_text(name)
+}
+
+/// The breadcrumb's first segment: the folder's icon, its name (cut short) and a chevron; it
+/// opens the choose-folder action. Tokens: control fill, border and radius; the icon in the host's `accent`.
+pub fn folder_button(ui: &mut Ui, name: &str, max_width: f32, accent: TabAccent) -> Response {
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_small);
+    let text = ui.painter().layout_no_wrap(name.to_owned(), font.clone(), t.form_ink).size().x;
+    let chrome = t.space_8 + t.space_14 + t.space_6 + t.space_6 + t.space_10 + t.space_8;
+    let width = (text + chrome).min(max_width.max(chrome + t.space_24));
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height), Sense::click());
+    let painter = ui.painter_at(rect);
+    painter.rect(
+        rect,
+        t.control_radius,
+        if response.hovered() { t.hover } else { t.control_fill },
+        t.control_border_stroke(t.control_border),
+        egui::StrokeKind::Inside,
+    );
+    let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
+    crate::icons::paint_ink(&painter, icon, "folder", accent.color);
+    let chevron =
+        egui::Rect::from_center_size(egui::pos2(rect.right() - t.space_8 - t.space_10 / 2.0, rect.center().y), vec2(t.space_10, t.space_10));
+    crate::icons::paint_ink(&painter, chevron, "chevron", t.form_dim);
+    let label = egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), egui::pos2(chevron.left() - t.space_6, rect.bottom()));
+    super::text::paint_text(ui, label, name, font, t.form_ink, false);
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+    response
+}
+
+/// A small outlined pill whose top left is at `at`.
+fn pill(painter: &egui::Painter, at: egui::Pos2, text: &str, ink: egui::Color32) {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(t.font_badge), ink);
+    let r = egui::Rect::from_min_size(at, galley.size() + vec2(t.space_8, t.space_2 * 2.0));
+    painter.rect(r, r.height() / 2.0, t.panel, t.control_border_stroke(ink), egui::StrokeKind::Inside);
+    painter.galley(r.min + vec2(t.space_4, t.space_2), galley, ink);
+}
+
+/// A pill ending at `right_center`; returns its left edge.
+fn pill_left_of(painter: &egui::Painter, right_center: egui::Pos2, text: &str, ink: egui::Color32) -> f32 {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(t.font_badge), ink);
+    let size = galley.size() + vec2(t.space_8, t.space_2 * 2.0);
+    let left = right_center.x - size.x;
+    pill(painter, egui::pos2(left, right_center.y - size.y / 2.0), text, ink);
+    left
+}

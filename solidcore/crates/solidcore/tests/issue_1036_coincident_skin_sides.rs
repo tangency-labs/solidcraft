@@ -7,10 +7,9 @@
 //! tolerance 2e-5, and their separation changes sides: the flag's former per-span
 //! crossing rule took such a span pair for a crossing, and the Booleans then gave the
 //! wrong bodies (A − B empty, A ∩ B = A). A crossing is now decided on the merged range,
-//! which ends where one of the coincident curves stops (WR-647). With
-//! `simple_coincidence_crossing_is_point` on, its remaining nearest-point half still takes
-//! the one-sided span pairs for points and A − B is still empty; these tests use the
-//! default kernel.
+//! which ends where one of the coincident curves stops (WR-647). The flag's remaining
+//! nearest-point half, which still took the one-sided span pairs for points and left
+//! A − B empty, is retired (WR-647 part D).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

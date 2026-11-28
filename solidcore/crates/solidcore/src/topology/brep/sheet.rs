@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 
 use crate::curve::curve::CurveKind;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::USE_DEFAULT;
@@ -218,8 +219,9 @@ pub struct Merged {
 ///
 /// # Errors
 ///
-/// Those of the copy, the merge and the edge queries; [`SolidError::topology_failed`] for a
-/// group of merged faces that does not leave exactly one face.
+/// Those of the copy, the merge and the edge queries;
+/// [`TopologyFailure::MergedGroupNotOneFace`] for a group of merged faces that does not
+/// leave exactly one face.
 pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     use crate::topology::brep::p1::{edges, faces};
     use crate::topology::EdgeId;
@@ -232,16 +234,19 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_edges = Vec::new();
     for oe in edges(b, None)? {
         let Some(EntityRef::Edge(ce)) = copy_of(EntityRef::Edge(oe))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "an edge without its copy",
+                TopologyFailure::Defect {
+                    why: "an edge has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         let record = c.edge(ce)?;
         let curve = record
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP_MERGED, "an edge's curve"))?;
+            .ok_or_else(|| SolidError::topology(OP_MERGED, TopologyFailure::EdgeWithoutCurve))?;
         let middle = curve.evaluate_point(k, record.interval.mid())?;
         let mut on = Vec::new();
         for eu in crate::topology::edge::edgeuses(&c, ce, None, None)? {
@@ -256,9 +261,12 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_faces = Vec::new();
     for of in faces(b, None)? {
         let Some(EntityRef::Face(cf)) = copy_of(EntityRef::Face(of))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "a face without its copy",
+                TopologyFailure::Defect {
+                    why: "a face has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         copied_faces.push((of, cf));
@@ -322,9 +330,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
             .iter()
             .filter(|&f| label.get(f).copied() == group);
         let (Some(&now), None) = (survivors.next(), survivors.next()) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "merged faces that do not leave exactly one face",
+                TopologyFailure::MergedGroupNotOneFace,
             ));
         };
         face_map.push((of, now));

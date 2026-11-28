@@ -135,7 +135,9 @@ use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -260,7 +262,11 @@ pub struct Cone {
 /// unbounded cone's NURB runs over the STEP heights reversed, so negation holds only for
 /// an interval symmetric about 0 (the infinite cylinder's), where it is kept. Upstream
 /// negates every inside-out unbounded height, which names another height on the NURB.
-fn unbounded_maps_linearly(inside_out: bool, step_ivl: &Extent1d, nurb_ivl: &Extent1d) -> bool {
+pub(crate) fn unbounded_maps_linearly(
+    inside_out: bool,
+    step_ivl: &Extent1d,
+    nurb_ivl: &Extent1d,
+) -> bool {
     inside_out
         && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
@@ -298,9 +304,9 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step_exact(
     };
 
     // convert sweep coordinate
-    let circle = rev.polar_curve().ok_or_else(|| {
-        SolidError::surface_missing(OP_TO_STEP, "the polar curve of the surface of revolution")
-    })?;
+    let circle = rev
+        .polar_curve()
+        .ok_or_else(|| SolidError::surface(OP_TO_STEP, SurfaceFailure::NoPolarConverter))?;
     let (x, exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
 
     // convert linear coordinate
@@ -472,7 +478,7 @@ pub(crate) fn cone_iso_curve(
         if length < scaled_zero {
             return Err(SolidError::surface(
                 OP_ISO,
-                SurfaceFailure::InvalidValue("the iso line has zero length"),
+                SurfaceFailure::DegenerateIsoCurve,
             ));
         }
         let scale = length / line_vec.dot(cone_z_axis);
@@ -765,10 +771,15 @@ impl Cone {
     /// (whose query makes the cone's NURB when missing).
     fn adjust_gen_line_with_owner(&mut self, k: &Kernel, ivl: &Extent1d) -> Result<()> {
         let Some(CurveKind::Line(line)) = self.rev.gen_curve.as_mut().map(Curve::kind_mut) else {
-            return Err(SolidError::surface_missing(
+            return Err(Failure::new(
                 OP_GEN,
-                "the cone's generator line",
-            ));
+                SurfaceFailure::Defect {
+                    why: "the cone's generator is not a line, though its one caller, the cone's \
+                          construction, set it to a line just before",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
         };
         let dom = line.step_interval();
         if ivl.is_contained_by(&dom, EFF_ZERO) && dom.is_contained_by(ivl, EFF_ZERO) {
@@ -938,18 +949,16 @@ impl Cone {
         // Build NURB; fail cleanly if degenerate (single zero-radius apex is valid).
         match self.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    operation,
-                    "the cone's NURB could not be made",
-                ))
-            }
+            Err(e) => return Err(SolidError::surface_nurb_not_made(operation, SM_ERR, Err(e))),
             Ok(()) => {}
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 operation,
-                "the cone has no NURB",
+                SurfaceFailure::Defect {
+                    why: "the cone's make_nurb returned success yet left no NURB, though on \
+                          success it sets the NURB of the revolution it builds",
+                },
             ));
         }
         Ok(self)
@@ -1077,9 +1086,9 @@ impl Cone {
     ) -> Result<Self> {
         // Reject non-positive radius (ctor assert is a no-op in release).
         if radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CYL_CANONICAL,
-                "the cylinder's radius is not positive",
+                SurfaceFailure::RadiusNotPositive,
             ));
         }
         let cylinder = Self::new_cylinder_unbounded(
@@ -1239,7 +1248,7 @@ impl Cone {
         self.rev
             .gen_curve
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the cone's generator curve"))
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))
     }
 
     // ---- equality -------------------------------------------------------------------
@@ -1281,16 +1290,10 @@ impl Cone {
         // Method: just call the parent's version,
         // unless the new domain would result in going past the apex.
         let v_domain = new_step_uv_domain.v_interval();
-        if self.radius(v_domain.min()) < -EFF_ZERO {
+        if self.radius(v_domain.min()) < -EFF_ZERO || self.radius(v_domain.max()) < -EFF_ZERO {
             return Err(SolidError::surface(
                 OP_ADJUST,
-                SurfaceFailure::InvalidValue("the domain reaches past the apex"),
-            ));
-        }
-        if self.radius(v_domain.max()) < -EFF_ZERO {
-            return Err(SolidError::surface(
-                OP_ADJUST,
-                SurfaceFailure::InvalidValue("the domain reaches past the apex"),
+                SurfaceFailure::DomainPastApex,
             ));
         }
 
@@ -1619,11 +1622,10 @@ impl Cone {
                     rows
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {
-                    return Err(SolidError::surface_failed(
-                        OP_EVAL,
-                        "the cone's NURB evaluation failed",
-                    ))
+                Err(e) => {
+                    return Err(Failure::new(OP_EVAL, SurfaceFailure::NurbEvaluationFailed)
+                        .caused_by(e)
+                        .into_error())
                 }
             }
         } else {
@@ -1692,9 +1694,9 @@ impl Cone {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL_STEP,
-                "the STEP form evaluates derivatives up to order 3 only",
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
             )); // Not implemented
         }
 
@@ -1974,9 +1976,9 @@ impl Cone {
         if let Some(s) = opt_scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
                 // Unable to scale analytical surfaces non-uniformly
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "an analytic surface cannot be scaled non-uniformly",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             scale = s.x;
@@ -2238,6 +2240,26 @@ pub fn total_coincidence_checker(
     })
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Cone {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            rev,
+            base_radius,
+            semi_angle_deg,
+            inside_out,
+            cylinder,
+        } = self;
+        d.tag(0xC0E);
+        rev.content(d)?;
+        d.f64(*base_radius);
+        d.f64(*semi_angle_deg);
+        d.bool(*inside_out);
+        d.bool(*cylinder);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2419,10 +2441,9 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(
             e.surface_failure(),
-            Some(&SurfaceFailure::Failed(
-                "the cylinder's radius is not positive"
-            ))
+            Some(&SurfaceFailure::RadiusNotPositive)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let c = Cone::create_canonical_cylinder(&k(), &std_placement(), 2.0).unwrap();
         assert!(c.is_cylinder() && c.is_cylinder_class());
         assert_eq!(c.type_code(), CYLINDER_TYPE);
@@ -2488,9 +2509,11 @@ mod tests {
         let e = c
             .convert_uv_from_nurbs_to_step(&k(), Point2::new(0.5, 0.5))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_TO_STEP);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        // the degenerate sweep iso curve left no polar converter after a successful make
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoPolarConverter));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
     }
 
     #[test]
@@ -2522,12 +2545,7 @@ mod tests {
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(e.operation(), OP_ADJUST);
-        assert_eq!(
-            e.surface_failure(),
-            Some(&SurfaceFailure::InvalidValue(
-                "the domain reaches past the apex"
-            ))
-        );
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::DomainPastApex));
         // the parent's AdjustSTEPUVDomain is ported (surf_of_revolution_p2)
         assert!(c
             .adjust_step_uv_domain(&k(), &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
@@ -2542,7 +2560,8 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(c
             .transform(
                 &k(),
@@ -2983,29 +3002,61 @@ mod tests {
         }
     }
 
-    /// The cone's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// A cone without generator (an empty one, whose data was never read) is the caller's,
+    /// with upstream's `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn a_cone_without_generator_is_the_callers() {
+        let e = Cone::empty(true).max_analytic_domain(&k()).unwrap_err();
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// A STEP evaluation past order 3 is the caller's argument, refused by name with
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_derivative_past_order_3_is_the_callers() {
+        let e = cone123()
+            .evaluate_step(Point2::new(10.0, 1.0), 4, 0)
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::DerivativeOrderTooHigh { max: 3 })
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// The cone's failures keep the operation, status and entity of the bare `Upstream`
+    /// statuses they replace (a sample); their class is the cause's.
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_GEN,
-                SurfaceFailure::Missing("the cone's generator curve"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_ISO,
-                SurfaceFailure::InvalidValue("the iso line has zero length"),
+                SurfaceFailure::DegenerateIsoCurve,
                 crate::error::SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_EVAL_STEP,
-                SurfaceFailure::Failed("the STEP form evaluates derivatives up to order 3 only"),
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
                 SM_ERR,
+                ErrorKind::InvalidInput,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -3014,7 +3065,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

@@ -141,35 +141,15 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
     if arenas.features.len() > MAX_FEATURES {
         return Err(format!("{} features (at most {MAX_FEATURES} are rebuilt)", arenas.features.len()));
     }
-    let mut features: Vec<&Value> = arenas.features.iter().collect();
-    features.sort_by_key(|f| f.get("ordinal").and_then(Value::as_u64).unwrap_or(u64::MAX));
-
-    // Each feature's PartDesign body. A feature after a body's tip changes what is built, and
-    // the comparison with the file's solids then refuses the rebuild.
-    let mut body_of: HashMap<&str, &str> = HashMap::new();
-    for feature in &features {
-        let Some(d) = operation(feature) else { continue };
-        if s(d, "definition") == Some("tree_node") && s(d, "role") == Some("solid_bodies") {
-            let body = s(feature, "id").unwrap_or_default();
-            for child in d.pointer("/children/children").and_then(Value::as_array).into_iter().flatten() {
-                if let Some(c) = child.as_str() {
-                    body_of.insert(c, body);
-                }
-            }
-        }
-    }
+    let features = in_order(arenas);
+    // A feature after a body's tip changes what is built, and the comparison with the file's
+    // solids then refuses the rebuild.
+    let body_of = bodies_of(&features);
     let name_of = |id: &str| -> String {
         features.iter().find(|f| s(f, "id") == Some(id)).and_then(|f| s(f, "name")).map_or_else(|| short(id).to_string(), str::to_string)
     };
 
-    let mut b = Builder {
-        doc: Document::new("FreeCAD"),
-        warnings: Vec::new(),
-        sketches: HashMap::new(),
-        bodies: HashMap::new(),
-        frame: IDENTITY,
-        made: HashMap::new(),
-    };
+    let mut b = Builder::new();
     // A point on a model edge, placed: the edge's shape by its object's placement, and that
     // object by its body's.
     let placed_edge = |edge: &str| -> Option<Vec3> {
@@ -223,6 +203,58 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
     Ok(NativeDesign { doc: b.doc, warnings: b.warnings })
 }
 
+/// The design's features in history order.
+fn in_order(arenas: &Arenas) -> Vec<&Value> {
+    let mut features: Vec<&Value> = arenas.features.iter().collect();
+    features.sort_by_key(|f| f.get("ordinal").and_then(Value::as_u64).unwrap_or(u64::MAX));
+    features
+}
+
+/// Each feature's PartDesign body, by feature id.
+fn bodies_of<'a>(features: &[&'a Value]) -> HashMap<&'a str, &'a str> {
+    let mut body_of = HashMap::new();
+    for feature in features {
+        let Some(d) = operation(feature) else { continue };
+        if s(d, "definition") == Some("tree_node") && s(d, "role") == Some("solid_bodies") {
+            let body = s(feature, "id").unwrap_or_default();
+            for child in d.pointer("/children/children").and_then(Value::as_array).into_iter().flatten() {
+                if let Some(c) = child.as_str() {
+                    body_of.insert(c, body);
+                }
+            }
+        }
+    }
+    body_of
+}
+
+/// The design's sketches alone, for a file whose history is not rebuilt: each comes in as
+/// [`rebuild`] makes it (on its placed plane, with the constraints that keep its geometry), so
+/// the file's solids can come in with its sketches beside them. A sketch that cannot be made is
+/// left out with a warning saying why. An error when no sketch can be made.
+pub(super) fn sketches(arenas: &Arenas) -> Result<NativeDesign, String> {
+    if arenas.features.len() > MAX_FEATURES {
+        return Err(format!("{} features (at most {MAX_FEATURES} are read)", arenas.features.len()));
+    }
+    let features = in_order(arenas);
+    let body_of = bodies_of(&features);
+    let mut b = Builder::new();
+    let mut made = 0;
+    for feature in &features {
+        let Some(d) = operation(feature).filter(|d| s(d, "definition") == Some("sketch")) else { continue };
+        let id = s(feature, "id").unwrap_or_default();
+        let name = s(feature, "name").map_or_else(|| short(id).to_string(), str::to_string);
+        b.frame = body_of.get(id).and_then(|body| arenas.placements.get(short(body))).copied().unwrap_or(IDENTITY);
+        match b.sketch(arenas, d, &name) {
+            Ok(_) => made += 1,
+            Err(e) => b.warnings.push(format!("{e}; the sketch was left out")),
+        }
+    }
+    if made == 0 {
+        return Err("no sketch could be read".into());
+    }
+    Ok(NativeDesign { doc: b.doc, warnings: b.warnings })
+}
+
 struct Builder {
     doc: Document,
     warnings: Vec<String>,
@@ -248,6 +280,17 @@ enum Role {
 }
 
 impl Builder {
+    fn new() -> Builder {
+        Builder {
+            doc: Document::new("FreeCAD"),
+            warnings: Vec::new(),
+            sketches: HashMap::new(),
+            bodies: HashMap::new(),
+            frame: IDENTITY,
+            made: HashMap::new(),
+        }
+    }
+
     fn add(&mut self, kind: FeatureKind, name: &str) -> Result<u64, String> {
         // Two sketches (or planes) may not share a name; FreeCAD labels can repeat, so number it.
         let free =
@@ -375,9 +418,15 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation,
             targets,
@@ -417,7 +466,7 @@ impl Builder {
             },
             Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius")?),
                 height: mm(len("height")?),
                 operation: op,
@@ -425,7 +474,7 @@ impl Builder {
             },
             Some("cone") if whole("angle", TAU) => FeatureKind::Cone {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius1")?),
                 top_radius: mm(len("radius2")?),
                 height: mm(len("height")?),
@@ -512,11 +561,20 @@ impl Builder {
                         alignment2: Default::default(),
                         reversed: false,
                         reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
+                        spacing_list1: Vec::new(),
+                        spacing_list2: Vec::new(),
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             Some("circular") => {
@@ -544,6 +602,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
@@ -595,6 +654,7 @@ impl Builder {
             angle2: second.map(deg),
             symmetric,
             convention: RevolveConvention::SketchNormal,
+            join_profile_arcs: false,
             to: None,
         };
         let id = self.add(kind, name)?;
@@ -891,7 +951,7 @@ fn build_sketch(arenas: &Arenas, sid: &str, doc: &mut Document) -> Result<(Sketc
         }
         let value = s(def, "parameter").and_then(|p| arenas.parameters.get(p)).and_then(|p| p.pointer("/value/value")).and_then(Value::as_f64);
         for candidate in ctx.candidates(def, value) {
-            if let Some(d) = try_add(&mut sk, doc, candidate, dof, &solved) {
+            if let Some(d) = try_add(&mut sk, doc, candidate, dof, &solved)? {
                 dof = d;
                 kept += 1;
                 break;
@@ -903,11 +963,11 @@ fn build_sketch(arenas: &Arenas, sid: &str, doc: &mut Document) -> Result<(Sketc
 
 /// Add `k` when the sketch still solves, loses a degree of freedom, and keeps every point where
 /// FreeCAD put it.
-fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, geometry: &Sketch) -> Option<usize> {
+fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, geometry: &Sketch) -> Result<Option<usize>, String> {
     let param = match k.value() {
         Some(v) => {
             let (e, unit) = if k.is_angle() { (format!("{} deg", round(v.to_degrees())), "deg") } else { (format!("{} mm", round(v)), "mm") };
-            Some(doc.new_model_param(&e, unit))
+            Some(doc.new_model_param(&e, unit).map_err(|e| e.to_string())?)
         }
         None => None,
     };
@@ -919,16 +979,16 @@ fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, g
     let mut trial = sk.clone();
     if trial.add_constraint(k, param.clone()).is_err() {
         undo(doc, &param);
-        return None;
+        return Ok(None);
     }
     let rep = solidcraft_doc::sketch::solve(&mut trial);
     let moved = trial.points.iter().zip(&geometry.points).any(|(a, b)| a.pos.dist(b.pos) > KEPT);
     if rep.ok() && rep.dof < dof && !moved {
         *sk = trial;
-        return Some(rep.dof);
+        return Ok(Some(rep.dof));
     }
     undo(doc, &param);
-    None
+    Ok(None)
 }
 
 struct Ctx<'a> {

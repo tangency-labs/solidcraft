@@ -52,39 +52,74 @@ pub(crate) fn clearance_table_diameter(opts: &HoleOpts) -> Option<f64> {
     solidcraft_engine::cmd::clearance_diameter(&opts.clearance_size, fit)
 }
 
-/// The cap screw heads a clearance counterbore can be sized to: (label id, the command's `head`;
-/// none for a counterbore typed by hand).
-pub(crate) const SCREW_HEADS: [(&str, Option<&str>); 3] =
-    [("None", None), ("ui.head_socket", Some("ISO 4762")), ("ui.head_button", Some("ISO 7380-1"))];
+/// The screw heads a clearance counterbore or countersink can be sized to: (label id, the
+/// command's `head`; none for a recess typed by hand). New heads go at the end: presets keep a
+/// head by its place here.
+pub(crate) const SCREW_HEADS: [(&str, Option<&str>); 4] =
+    [("None", None), ("ui.head_socket", Some("ISO 4762")), ("ui.head_button", Some("ISO 7380-1")), ("ui.head_countersunk", Some("ISO 10642"))];
 
-/// The counterbore the options' screw head makes for their bolt size, with the command's
-/// default gap: (diameter, depth) as the counterbore fields take them. None without a head, or
-/// for a size the head's standard does not have.
-pub(crate) fn head_counterbore_texts(opts: &HoleOpts) -> Option<(String, String)> {
-    let standard = SCREW_HEADS.get(opts.head)?.1?;
-    let (d, h) = solidcraft_engine::cmd::head_counterbore(standard, &opts.clearance_size)?;
-    Some((format!("{d} mm"), format!("{h} mm")))
+/// The Hole Type a head's recess is (the dialog's: 1 counterbore, 2 countersink): a countersunk
+/// head sits in a countersink, a cap screw's in a counterbore.
+pub(crate) fn head_hole_kind(standard: &str) -> usize {
+    if standard == "ISO 10642" { 2 } else { 1 }
 }
 
-/// Why a clearance counterbore's head gives no counterbore: the head's standard has no head for
-/// the bolt size. None when it does, or without a head.
-pub(crate) fn head_problem(opts: &HoleOpts) -> Option<String> {
-    let standard = SCREW_HEADS.get(opts.head)?.1?;
-    head_counterbore_texts(opts)
+/// The options' screw head, if it is one for a hole of Hole Type `kind`.
+fn head_for(opts: &HoleOpts, kind: usize) -> Option<&'static str> {
+    SCREW_HEADS.get(opts.head)?.1.filter(|standard| head_hole_kind(standard) == kind)
+}
+
+/// The recess the options' screw head makes for their bolt size in a hole of Hole Type `kind`,
+/// with the command's default gap, as the dialog's fields take it: a counterbore's diameter and
+/// depth, or a countersink's diameter and angle. None without a head of that kind, or for a size
+/// the head's standard does not have.
+pub(crate) fn head_texts(opts: &HoleOpts, kind: usize) -> Option<(String, String)> {
+    let standard = head_for(opts, kind)?;
+    match kind {
+        2 => solidcraft_engine::cmd::head_countersink(standard, &opts.clearance_size).map(|d| (format!("{d} mm"), "90 deg".to_string())),
+        _ => solidcraft_engine::cmd::head_counterbore(standard, &opts.clearance_size).map(|(d, h)| (format!("{d} mm"), format!("{h} mm"))),
+    }
+}
+
+/// The counterbore the options' screw head makes for their bolt size, with the command's
+/// default gap: (diameter, depth) as the counterbore fields take them. None without a cap screw
+/// head, or for a size the head's standard does not have.
+pub(crate) fn head_counterbore_texts(opts: &HoleOpts) -> Option<(String, String)> {
+    head_texts(opts, 1)
+}
+
+/// Why a clearance recess's head gives no recess in a hole of Hole Type `kind`: the head's
+/// standard has no head for the bolt size. None when it does, or without a head of that kind.
+pub(crate) fn head_problem_for(opts: &HoleOpts, kind: usize) -> Option<String> {
+    let standard = head_for(opts, kind)?;
+    head_texts(opts, kind)
         .is_none()
         .then(|| solidcraft_ui_text::format("hole.no_head", &[("standard", standard), ("size", opts.clearance_size.trim())]))
 }
 
-/// A clearance counterbore's Head row: the cap screw head it seats (ISO 4762 socket head or
-/// ISO 7380-1 button head). A new head or bolt size fills the counterbore's diameter and depth
-/// with the head's and its gap, which stay editable; OK then sends `head`, and the diameter or
-/// depth only when they were changed.
-pub(crate) fn head_row(ui: &mut egui::Ui, opts: &mut HoleOpts, cb_diameter: &mut String, cb_depth: &mut String) {
+/// [`head_problem_for`] a counterbore.
+pub(crate) fn head_problem(opts: &HoleOpts) -> Option<String> {
+    head_problem_for(opts, 1)
+}
+
+/// A clearance recess's Head row, for a hole of Hole Type `kind`: a counterbore lists the cap
+/// screw heads it seats (ISO 4762 socket head, ISO 7380-1 button head), a countersink the
+/// countersunk head (ISO 10642). A new head or bolt size fills the recess's fields (`top`, the
+/// diameter, and `second`, the counterbore's depth or the countersink's angle) with the head's and
+/// its gap, which stay editable; OK then sends `head`, and a field only when it was changed. A head
+/// of the other Hole Type (chosen before the type changed) counts as none.
+pub(crate) fn head_row(ui: &mut egui::Ui, opts: &mut HoleOpts, kind: usize, top: &mut String, second: &mut String) {
+    // The heads this Hole Type lists, by their place in `SCREW_HEADS`: None first.
+    let listed: Vec<usize> =
+        (0..SCREW_HEADS.len()).filter(|i| SCREW_HEADS.get(*i).and_then(|h| h.1).is_none_or(|s| head_hole_kind(s) == kind)).collect();
+    if !listed.contains(&opts.head) {
+        opts.head = 0;
+    }
     crate::dialogs::form_row(ui, "ui.screw_head", |ui| {
-        let labels: Vec<&str> = SCREW_HEADS.iter().map(|h| h.0).collect();
-        let mut selected = opts.head.min(SCREW_HEADS.len() - 1);
+        let labels: Vec<&str> = listed.iter().filter_map(|i| SCREW_HEADS.get(*i).map(|h| h.0)).collect();
+        let mut selected = listed.iter().position(|i| *i == opts.head).unwrap_or(0);
         crate::dialogs::combo(ui, "hole_screw_head", &labels, &mut selected);
-        opts.head = selected;
+        opts.head = listed.get(selected).copied().unwrap_or(0);
     });
     if opts.head == 0 {
         opts.head_filled = None;
@@ -92,13 +127,13 @@ pub(crate) fn head_row(ui: &mut egui::Ui, opts: &mut HoleOpts, cb_diameter: &mut
     }
     let key = (opts.head, opts.clearance_size.trim().to_string());
     if opts.head_filled.as_ref() != Some(&key) {
-        if let Some((d, h)) = head_counterbore_texts(opts) {
-            *cb_diameter = d;
-            *cb_depth = h;
+        if let Some((d, h)) = head_texts(opts, kind) {
+            *top = d;
+            *second = h;
         }
         opts.head_filled = Some(key);
     }
-    if let Some(problem) = head_problem(opts) {
+    if let Some(problem) = head_problem_for(opts, kind) {
         crate::dialogs::form_row(ui, "", |ui| {
             ui.label(egui::RichText::new(problem).color(Tokens::get().warning));
         });
@@ -652,10 +687,46 @@ mod tests {
         assert_eq!(head_counterbore_texts(&opts), Some(("8 mm".to_string(), "4.5 mm".to_string())));
         assert_eq!(head_problem(&opts), None);
         opts.head = 2;
-        opts.clearance_size = "M2".into();
+        opts.clearance_size = "M14".into();
         assert_eq!(head_counterbore_texts(&opts), None);
         let problem = head_problem(&opts).unwrap_or_default();
-        assert!(problem.contains("ISO 7380-1") && problem.contains("M2"), "{problem}");
+        assert!(problem.contains("ISO 7380-1") && problem.contains("M14"), "{problem}");
+    }
+
+    /// #17728: a countersunk head fills a countersink (Ø and 90°), and each Hole Type sees only
+    /// its own heads: a countersunk head gives a counterbore nothing, a socket head a countersink.
+    #[test]
+    fn countersunk_head_fills_the_countersink_only() {
+        crate::i18n::install();
+        let countersunk = SCREW_HEADS.iter().position(|h| h.1 == Some("ISO 10642")).unwrap();
+        let mut opts = HoleOpts { clearance: true, clearance_size: "M6".into(), head: countersunk, ..HoleOpts::default() };
+        assert_eq!(head_texts(&opts, 2), Some(("14.44 mm".to_string(), "90 deg".to_string())));
+        assert_eq!((head_counterbore_texts(&opts), head_problem(&opts)), (None, None), "not a counterbore's head");
+        opts.clearance_size = "M1.6".into();
+        assert_eq!(head_texts(&opts, 2), None);
+        let problem = head_problem_for(&opts, 2).unwrap_or_default();
+        assert!(problem.contains("ISO 10642") && problem.contains("M1.6"), "{problem}");
+        opts.head = 1;
+        assert_eq!((head_texts(&opts, 2), head_problem_for(&opts, 2)), (None, None), "a socket head gives a countersink nothing");
+    }
+
+    #[test]
+    fn new_clearance_counterbore_follows_the_bolt_size() {
+        crate::i18n::install();
+        let app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut form = crate::dialogs::Dialog::for_command(&app, "solid.hole").unwrap().kind;
+        let ctx = crate::fonts::test_context();
+        let mut counterbore_for = |size: &str| {
+            let Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } = &mut form else { panic!("expected Hole") };
+            *kind = 1;
+            opts.clearance = true;
+            opts.clearance_size = size.into();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| head_row(ui, opts, *kind, cb_diameter, cb_depth));
+            output.textures_delta.clear();
+            (cb_diameter.clone(), cb_depth.clone())
+        };
+        assert_eq!(counterbore_for("M3"), ("6.5 mm".to_string(), "3.5 mm".to_string()));
+        assert_eq!(counterbore_for("M5"), ("9.5 mm".to_string(), "5.5 mm".to_string()));
     }
 
     #[test]

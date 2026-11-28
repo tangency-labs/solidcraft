@@ -21,6 +21,7 @@ use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldKernelAdapter,
     ManifoldNotificationKeys,
 };
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{Context, MarkLock};
@@ -108,6 +109,12 @@ pub(super) fn finish(
 }
 
 const OP: &str = "primitive::boolean_2d";
+/// A coincident faceuse's face: a faceuse is made with its face, and the radial search
+/// returns the faceuse of an edgeuse around the shared edge.
+const FACEUSE_FACE: &str = "the radial search's coincident faceuse has no face, though a faceuse is made with its face and the search returns the faceuse of an edgeuse around the shared edge";
+/// The covering face's surface: the covering face is the first face, whose surface
+/// `boolean_2d` read before calling [`finish`], or the face this loop built on a surface.
+const COVERING_SURFACE: &str = "the covering face has no surface, though it is the first face, whose surface boolean_2d read, or a face this loop built on a surface";
 
 /// The local `SmTopologyIntersector` and the caller's notification state.
 struct Session<'s, 'k, 'c> {
@@ -199,7 +206,7 @@ fn finish_with(
                 .step_by(2)
             {
                 let face = eu::face(a, edgeuse)?
-                    .ok_or_else(|| SolidError::primitive_missing(OP, "the edgeuse's face"))?;
+                    .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutFace))?;
                 if marks_a.is_marked(k, Entity::Face(face), mark_a) {
                     continue;
                 }
@@ -215,9 +222,8 @@ fn finish_with(
                     None,
                 )?;
                 if let Some(faceuse) = sector.coincident_faceuse {
-                    let mate = eu::faceuse_face(b, faceuse)?.ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the coincident faceuse's face")
-                    })?;
+                    let mate = eu::faceuse_face(b, faceuse)?
+                        .ok_or_else(|| SolidError::primitive_broken_link(OP, FACEUSE_FACE))?;
                     marks_b.mark(k, Entity::Face(mate), mark_b);
                     // sTI.Relate(pF,pOFace), its status unchecked
                     session.ti.relate_faces(a, face, b, mate)?;
@@ -225,7 +231,7 @@ fn finish_with(
             }
             for edgeuse in edge::edgeuses(b, other, None, None)?.into_iter().step_by(2) {
                 let face = eu::face(b, edgeuse)?
-                    .ok_or_else(|| SolidError::primitive_missing(OP, "the edgeuse's face"))?;
+                    .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutFace))?;
                 if marks_b.is_marked(k, Entity::Face(face), mark_b) {
                     continue;
                 }
@@ -245,9 +251,8 @@ fn finish_with(
                     Err(_) => continue,
                 };
                 if let Some(faceuse) = sector.coincident_faceuse {
-                    let mate = eu::faceuse_face(a, faceuse)?.ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the coincident faceuse's face")
-                    })?;
+                    let mate = eu::faceuse_face(a, faceuse)?
+                        .ok_or_else(|| SolidError::primitive_broken_link(OP, FACEUSE_FACE))?;
                     marks_a.mark(k, Entity::Face(mate), mark_a);
                     session.ti.relate_faces(a, mate, b, face)?;
                 }
@@ -281,9 +286,11 @@ fn finish_with(
                     true,
                     false,
                 )?;
-                let original = a.face(covering)?.surface.as_ref().ok_or_else(|| {
-                    SolidError::primitive_missing(OP, "the covering face's surface")
-                })?;
+                let original = a
+                    .face(covering)?
+                    .surface
+                    .as_ref()
+                    .ok_or_else(|| SolidError::primitive_broken_link(OP, COVERING_SURFACE))?;
                 let surface = if original.owner().is_some() {
                     original.copy(k)?
                 } else {

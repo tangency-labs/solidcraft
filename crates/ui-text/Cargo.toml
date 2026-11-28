@@ -11,6 +11,9 @@ workspace = true
 [dependencies]
 serde_json = { workspace = true }
 log = { workspace = true }
+# Inflates a catalog the host embedded compressed (MIT OR Apache-2.0; already in the tree, and
+# pure Rust, so it builds for wasm).
+flate2 = { workspace = true }
 # Right-to-left interface text (Hebrew): the Unicode Bidirectional Algorithm puts translated
 # strings in display order, which egui does not do itself (MIT OR Apache-2.0).
 unicode-bidi = "0.3"

@@ -1,0 +1,14 @@
+[package]
+name = "solidcraft-design-preview"
+description = "A saved design's picture and summary for file browsers (Quick Look, Finder icons), read without the kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+zip = { workspace = true }

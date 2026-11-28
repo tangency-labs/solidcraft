@@ -207,6 +207,244 @@ fn off_message(off: Off, uv: [f64; 2]) -> EvalError {
     }
 }
 
+/// Whole-surface certified bounds for [`along`] on a [`super::spline::Nurbs`] net, computed once
+/// when the surface is built.
+///
+/// When `certified` holds, every control point of the net is finite, all weights share one sign
+/// and are certified non-zero against de Boor rounding (`min |w| > 2 γ_(12p+4) max |w|`), and
+/// both knot vectors are finite, non-decreasing, and end on a non-empty span. Then for each
+/// direction `d`, any iso-line along `d` over the whole knot range is guaranteed evaluable with
+/// one-signed finite weights and per-point rounding bound at most `err_bound[d]`, and its
+/// Euclidean diameter is guaranteed strictly larger than `reach + err` whenever
+/// `reach < non_collapsed_below[d]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CollapseBounds {
+    pub(super) certified: bool,
+    pub(super) non_collapsed_below: [f64; 2],
+    pub(super) err_bound: [f64; 2],
+}
+
+impl CollapseBounds {
+    pub(super) const NONE: CollapseBounds = CollapseBounds {
+        certified: false,
+        non_collapsed_below: [0.0; 2],
+        err_bound: [f64::INFINITY; 2],
+    };
+
+    /// Compute whole-surface bounds for a NURBS net; returns [`Self::NONE`] whenever any
+    /// prerequisite (finite net, one-signed certified weights, valid non-decreasing knots) does
+    /// not hold.
+    pub(super) fn of(
+        degree: [usize; 2],
+        knots: &[Vec<f64>; 2],
+        count: [usize; 2],
+        ctrl: &[[f64; 4]],
+    ) -> CollapseBounds {
+        let [pu, pv] = degree;
+        let [nu, nv] = count;
+        if pu == 0
+            || pv == 0
+            || pu > MAX_SPLINE_DEGREE
+            || pv > MAX_SPLINE_DEGREE
+            || nu <= pu
+            || nv <= pv
+            || nu.checked_mul(nv) != Some(ctrl.len())
+            || knots[0].len() != nu + pu + 1
+            || knots[1].len() != nv + pv + 1
+        {
+            return Self::NONE;
+        }
+        let valid_knots = |k: &[f64], p: usize, n: usize| -> bool {
+            let finite = k.iter().all(|x| x.is_finite());
+            let mono = k
+                .windows(2)
+                .all(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| a <= b));
+            let range = match (k.first(), k.get(p), k.get(n - 1), k.get(n), k.last()) {
+                (Some(&first), Some(&lo), Some(&prev), Some(&hi), Some(&last)) => {
+                    lo < hi && prev < hi && (hi - lo).is_finite() && (last - first).is_finite()
+                }
+                _ => false,
+            };
+            finite && mono && range
+        };
+        if !valid_knots(&knots[0], pu, nu) || !valid_knots(&knots[1], pv, nv) {
+            return Self::NONE;
+        }
+        let Some(first_c) = ctrl.first() else {
+            return Self::NONE;
+        };
+        let sign = first_c[3] > 0.0;
+        let (mut w_min, mut w_max, mut x_max) = (f64::INFINITY, 0.0f64, 0.0f64);
+        for c in ctrl {
+            if !c.iter().all(|x| x.is_finite()) || c[3] == 0.0 || (c[3] > 0.0) != sign {
+                return Self::NONE;
+            }
+            let w = c[3].abs();
+            w_min = w_min.min(w);
+            w_max = w_max.max(w);
+            x_max = x_max.max(c[0].abs()).max(c[1].abs()).max(c[2].abs());
+        }
+        let mut err_bound = [0.0; 2];
+        let mut non_collapsed_below = [0.0; 2];
+        for d in 0..2 {
+            let o = 1 - d;
+            let po = degree.get(o).copied().unwrap_or(0);
+            let g = gamma(12 * po + 4);
+            let ew = g * w_max;
+            let ex = g * x_max;
+            if !(w_min > 2.0 * ew) {
+                return Self::NONE;
+            }
+            let p_bound = 3f64.sqrt() * (x_max + ex) / (w_min - ew);
+            let e_bound =
+                (3f64.sqrt() * ex + p_bound * ew) / (w_min - 2.0 * ew) + 2.0 * UNIT * p_bound;
+            if !(p_bound.is_finite() && e_bound.is_finite()) {
+                return Self::NONE;
+            }
+            if let Some(slot) = err_bound.get_mut(d) {
+                *slot = e_bound;
+            }
+            let pd = degree.get(d).copied().unwrap_or(0);
+            let nd = count.get(d).copied().unwrap_or(0);
+            let no = count.get(o).copied().unwrap_or(0);
+            let Some(kd) = knots.get(d) else {
+                return Self::NONE;
+            };
+            let Some((first_d, end_d, _, _)) = indices(pd, kd, nd, None) else {
+                return Self::NONE;
+            };
+            let mut min_hi = [f64::INFINITY; 3];
+            let mut max_lo = [f64::NEG_INFINITY; 3];
+            for j in first_d..=end_d {
+                let mut col_lo = [f64::INFINITY; 3];
+                let mut col_hi = [f64::NEG_INFINITY; 3];
+                for i in 0..no {
+                    let (iu, iv) = if d == 0 { (j, i) } else { (i, j) };
+                    let Some(c) = ctrl.get(iv * nu + iu) else {
+                        return Self::NONE;
+                    };
+                    let inv = 1.0 / c[3];
+                    let p = [c[0] * inv, c[1] * inv, c[2] * inv];
+                    if !p.iter().all(|x| x.is_finite()) {
+                        return Self::NONE;
+                    }
+                    for ((lo, hi), x) in col_lo.iter_mut().zip(col_hi.iter_mut()).zip(p) {
+                        *lo = lo.min(x);
+                        *hi = hi.max(x);
+                    }
+                }
+                for ((mh, ml), (ch, cl)) in min_hi
+                    .iter_mut()
+                    .zip(max_lo.iter_mut())
+                    .zip(col_hi.into_iter().zip(col_lo))
+                {
+                    *mh = mh.min(ch);
+                    *ml = ml.max(cl);
+                }
+            }
+            let sep = (0..3)
+                .map(|c| {
+                    max_lo
+                        .get(c)
+                        .zip(min_hi.get(c))
+                        .map_or(0.0, |(a, b)| (a - b).max(0.0))
+                })
+                .fold(0.0f64, f64::max);
+            let diag_lb = (sep - 2.0 * e_bound).max(0.0);
+            let err_floor = 2.0 * 3f64.sqrt() * e_bound / (1.0 - gamma(6));
+            if diag_lb > err_floor && diag_lb.is_finite() {
+                if let Some(slot) = non_collapsed_below.get_mut(d) {
+                    *slot = diag_lb;
+                }
+            }
+        }
+        CollapseBounds {
+            certified: true,
+            non_collapsed_below,
+            err_bound,
+        }
+    }
+}
+
+/// Precomputed knot span and de Boor weights for one parameter `t` along a knot vector: shared
+/// across all columns of an iso-line so the knot search and divisions run once per iso-line.
+struct DeBoorPlan {
+    p: usize,
+    first: usize,
+    g: f64,
+    alphas: [[f64; MAX_SPLINE_DEGREE + 1]; MAX_SPLINE_DEGREE],
+}
+
+impl DeBoorPlan {
+    fn new(p: usize, knots: &[f64], n: usize, t: f64) -> Result<DeBoorPlan, Off> {
+        if p > MAX_SPLINE_DEGREE || n <= p {
+            return Err(Off::Malformed);
+        }
+        let t = onto_knots(knots, p, n, t).ok_or(Off::Range)?;
+        let end = n.min(knots.len());
+        let k = match knots.get(p + 1..end) {
+            Some(after) => p + after.partition_point(|x| *x <= t),
+            None => p,
+        };
+        let first = k.checked_sub(p).ok_or(Off::Malformed)?;
+        let mut alphas = [[0.0f64; MAX_SPLINE_DEGREE + 1]; MAX_SPLINE_DEGREE];
+        for r in 1..=p {
+            let row = alphas.get_mut(r - 1).ok_or(Off::Malformed)?;
+            for j in r..=p {
+                let i = first.checked_add(j).ok_or(Off::Malformed)?;
+                let lo = *knots.get(i).ok_or(Off::Malformed)?;
+                let hi_at = i
+                    .checked_add(p + 1)
+                    .and_then(|x| x.checked_sub(r))
+                    .ok_or(Off::Malformed)?;
+                let span = *knots.get(hi_at).ok_or(Off::Malformed)? - lo;
+                if !(span > 0.0) {
+                    return Err(Off::Malformed);
+                }
+                *row.get_mut(j).ok_or(Off::Malformed)? = (t - lo) / span;
+            }
+        }
+        Ok(DeBoorPlan {
+            p,
+            first,
+            g: gamma(12 * p + 4),
+            alphas,
+        })
+    }
+
+    fn eval(&self, at: impl Fn(usize) -> Option<Hom>) -> Result<Hom, Off> {
+        let p = self.p;
+        let mut d = [Hom::default(); MAX_SPLINE_DEGREE + 1];
+        let (mut ex, mut ew, mut sx, mut sw) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for (j, slot) in d.iter_mut().take(p + 1).enumerate() {
+            let q = at(self.first.checked_add(j).ok_or(Off::Malformed)?).ok_or(Off::Malformed)?;
+            ex = ex.max(q.ex);
+            ew = ew.max(q.ew);
+            sx = sx.max(q.h[0].abs()).max(q.h[1].abs()).max(q.h[2].abs());
+            sw = sw.max(q.h[3].abs());
+            *slot = q;
+        }
+        for r in 1..=p {
+            let row = self.alphas.get(r - 1).ok_or(Off::Malformed)?;
+            for j in (r..=p).rev() {
+                let a = *row.get(j).ok_or(Off::Malformed)?;
+                let prev = d
+                    .get(j.checked_sub(1).ok_or(Off::Malformed)?)
+                    .ok_or(Off::Malformed)?
+                    .h;
+                let cur = d.get_mut(j).ok_or(Off::Malformed)?;
+                for (c, q) in cur.h.iter_mut().zip(prev) {
+                    *c = (1.0 - a) * q + a * *c;
+                }
+            }
+        }
+        let mut out = *d.get(p).ok_or(Off::Malformed)?;
+        out.ex = ex + self.g * sx;
+        out.ew = ew + self.g * sw;
+        Ok(out)
+    }
+}
+
 /// The point at `t` of the homogeneous B-spline of degree `p` on `knots` over `n` control
 /// points given by `at` (each with its rounding), by de Boor's algorithm on a scratch array,
 /// with its rounding: the inputs' plus `γ_(12p+4)` of their largest coordinate (each of the `p`
@@ -218,58 +456,7 @@ fn de_boor(
     at: impl Fn(usize) -> Option<Hom>,
     t: f64,
 ) -> Result<Hom, Off> {
-    if p > MAX_SPLINE_DEGREE || n <= p {
-        return Err(Off::Malformed);
-    }
-    let t = onto_knots(knots, p, n, t).ok_or(Off::Range)?;
-    let last = n.checked_sub(1).ok_or(Off::Malformed)?;
-    let mut k = p;
-    while k < last
-        && knots
-            .get(k.checked_add(1).ok_or(Off::Malformed)?)
-            .is_some_and(|x| *x <= t)
-    {
-        k = k.checked_add(1).ok_or(Off::Malformed)?;
-    }
-    let first = k.checked_sub(p).ok_or(Off::Malformed)?;
-    let mut d = [Hom::default(); MAX_SPLINE_DEGREE + 1];
-    let (mut ex, mut ew, mut sx, mut sw) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    for (j, slot) in d.iter_mut().take(p + 1).enumerate() {
-        let q = at(first.checked_add(j).ok_or(Off::Malformed)?).ok_or(Off::Malformed)?;
-        ex = ex.max(q.ex);
-        ew = ew.max(q.ew);
-        sx = sx.max(q.h[0].abs()).max(q.h[1].abs()).max(q.h[2].abs());
-        sw = sw.max(q.h[3].abs());
-        *slot = q;
-    }
-    for r in 1..=p {
-        for j in (r..=p).rev() {
-            let i = first.checked_add(j).ok_or(Off::Malformed)?;
-            let lo = *knots.get(i).ok_or(Off::Malformed)?;
-            let hi_at = i
-                .checked_add(p + 1)
-                .and_then(|x| x.checked_sub(r))
-                .ok_or(Off::Malformed)?;
-            let span = *knots.get(hi_at).ok_or(Off::Malformed)? - lo;
-            if !(span > 0.0) {
-                return Err(Off::Malformed);
-            }
-            let a = (t - lo) / span;
-            let prev = d
-                .get(j.checked_sub(1).ok_or(Off::Malformed)?)
-                .ok_or(Off::Malformed)?
-                .h;
-            let cur = d.get_mut(j).ok_or(Off::Malformed)?;
-            for (c, q) in cur.h.iter_mut().zip(prev) {
-                *c = (1.0 - a) * q + a * *c;
-            }
-        }
-    }
-    let g = gamma(12 * p + 4);
-    let mut out = *d.get(p).ok_or(Off::Malformed)?;
-    out.ex = ex + g * sx;
-    out.ew = ew + g * sw;
-    Ok(out)
+    DeBoorPlan::new(p, knots, n, t)?.eval(at)
 }
 
 /// An iso-line's homogeneous control points, gathered: their Euclidean bounding box, the
@@ -351,16 +538,16 @@ fn indices(p: usize, knots: &[f64], n: usize, range: Option<(f64, f64)>) -> Opti
     let last = n.checked_sub(1)?;
     // The last span k in [p, n − 1] whose start is at or before t (`strict`: before t).
     let span = |t: f64, strict: bool| -> Option<usize> {
-        let mut k = p;
-        while k < last {
-            let next = *knots.get(k.checked_add(1)?)?;
-            if next < t || (!strict && next <= t) {
-                k = k.checked_add(1)?;
-            } else {
-                break;
-            }
+        if last < p {
+            return None;
         }
-        Some(k)
+        let after = knots.get(p + 1..n)?;
+        let count = if strict {
+            after.partition_point(|x| *x < t)
+        } else {
+            after.partition_point(|x| *x <= t)
+        };
+        Some(p + count)
     };
     let start = span(a, false)?;
     let first = start.checked_sub(p)?;
@@ -371,6 +558,9 @@ fn indices(p: usize, knots: &[f64], n: usize, range: Option<(f64, f64)>) -> Opti
 /// Whether the iso-line whose control points are `pts(j)`, `j` in the span's indices (degree
 /// `p` on `knots` over `n`, taken over the span's range), is one point, or within `reach`
 /// after a map that stretches by at most `scale` and shrinks by at least `floor` (module doc).
+/// When `early` is `Some(threshold)`, the caller certifies that every column in `first..=end` is
+/// finite with one-signed certified non-zero weights and that any partial bounding box with
+/// diagonal above `threshold` already guarantees `Ok(false)`.
 #[allow(clippy::too_many_arguments)]
 fn iso_line(
     p: usize,
@@ -381,10 +571,37 @@ fn iso_line(
     reach: f64,
     scale: f64,
     floor: f64,
+    early: Option<f64>,
 ) -> Result<bool, EvalError> {
     let mut row = Row::new();
-    for j in first..=end {
-        row.push(pts(j)?)?;
+    if let Some(threshold) = early {
+        row.push(pts(first)?)?;
+        if end > first {
+            row.push(pts(end)?)?;
+            if (row.hi - row.lo).len() > threshold {
+                return Ok(false);
+            }
+            let mid = first + (end - first) / 2;
+            if mid > first && mid < end {
+                row.push(pts(mid)?)?;
+                if (row.hi - row.lo).len() > threshold {
+                    return Ok(false);
+                }
+            }
+            for j in first + 1..end {
+                if j == mid {
+                    continue;
+                }
+                row.push(pts(j)?)?;
+                if (row.hi - row.lo).len() > threshold {
+                    return Ok(false);
+                }
+            }
+        }
+    } else {
+        for j in first..=end {
+            row.push(pts(j)?)?;
+        }
     }
     let (diag, err) = row.diameter();
     if diag <= err && !row.infinite {
@@ -461,6 +678,123 @@ pub fn collapsed_on(
     along(s, uv, d, reach, range)
 }
 
+/// Whether the piece of `s`'s iso-line along `d` (0: u, 1: v) through `uv` over the `d`
+/// parameters `range` lies within `reach` mm of `centre`, certified: a plane's iso-line is a
+/// segment, inside the ball when its ends are; a spline's piece is cut from the line exactly
+/// (knot insertion, [`super::pcurve::segment`]) and lies in its control points' hull where its
+/// weights are positive, so it is inside the ball when they are, by their rounding. `false`
+/// where it is not certified inside (a point outside, a weight not certified positive); a
+/// revolution, a range off the knots or input that is not finite is refused.
+pub fn iso_within(
+    s: &EvalSurface,
+    uv: [f64; 2],
+    d: usize,
+    range: (f64, f64),
+    centre: Vec3,
+    reach: f64,
+) -> Result<bool, EvalError> {
+    check(uv, reach)?;
+    if d > 1 {
+        return Err(past(d));
+    }
+    let (a, b) = (range.0.min(range.1), range.0.max(range.1));
+    if !(a.is_finite() && b.is_finite() && centre.is_finite()) {
+        return Err(malformed("an iso-line piece or centre that is not finite"));
+    }
+    // Whether a point, `e` from where it is computed, is certified within the reach.
+    let inside = |p: Vec3, e: f64| p.dist(centre) * (1.0 + gamma(6)) + e <= reach;
+    match s {
+        EvalSurface::Plane { origin, du, dv } => {
+            let at = |t: f64| {
+                let [u, v] = if d == 0 { [t, uv[1]] } else { [uv[0], t] };
+                *origin + *du * u + *dv * v
+            };
+            let (p, q) = (at(a), at(b));
+            // A plane's point is a few products and sums, within γ₆ of its size.
+            let e = |p: Vec3| gamma(6) * (p.len() + centre.len());
+            Ok(inside(p, e(p)) && inside(q, e(q)))
+        }
+        EvalSurface::Nurbs(n) => {
+            let q = s.wrap(uv);
+            let ctrl = n.ctrl();
+            let (deg, knots, count) = (n.degree(), n.knots(), n.count());
+            let o = usize::from(d == 0);
+            let get = |a: &[usize; 2], k: usize| a.get(k).copied().unwrap_or(0);
+            let (pd, po) = (get(&deg, d), get(&deg, o));
+            let (nd, no, nu) = (get(&count, d), get(&count, o), get(&count, 0));
+            let none: &[f64] = &[];
+            let (kd, ko) = (
+                knots.get(d).map_or(none, Vec::as_slice),
+                knots.get(o).map_or(none, Vec::as_slice),
+            );
+            let t0 = q.get(o).copied().unwrap_or(f64::NAN);
+            let net = |along: usize, across: usize| -> Option<Hom> {
+                let (i, j) = if d == 0 {
+                    (along, across)
+                } else {
+                    (across, along)
+                };
+                ctrl.get(j.checked_mul(nu)?.checked_add(i)?)
+                    .copied()
+                    .map(Hom::exact)
+            };
+            // The iso-line's control points: each column's point at t0, de Boor along o.
+            let plan = DeBoorPlan::new(po, ko, no, t0).map_err(|e| off_message(e, uv))?;
+            let mut line = Vec::new();
+            line.try_reserve(nd)
+                .map_err(|_| refused("an iso-line allocation overflow"))?;
+            let (mut ex, mut ew) = (0.0f64, 0.0f64);
+            for j in 0..nd {
+                let h = plan.eval(|i| net(j, i)).map_err(|e| off_message(e, uv))?;
+                (ex, ew) = (ex.max(h.ex), ew.max(h.ew));
+                line.push(h.h);
+            }
+            let (Some(&lo), Some(&hi)) = (kd.get(pd), kd.get(nd)) else {
+                return Err(malformed("knots that do not fit"));
+            };
+            if !(lo <= a && b <= hi) {
+                return Err(refused("an iso-line piece off the knot range"));
+            }
+            let piece = if a < b {
+                super::pcurve::segment(pd, kd, &line, a, b)
+                    .map_err(|e| malformed(&format!("an iso-line piece: {e}")))?
+                    .1
+            } else {
+                let h = de_boor(pd, kd, nd, |j| line.get(j).copied().map(Hom::exact), a)
+                    .map_err(|e| off_message(e, uv))?;
+                vec![h.h]
+            };
+            // Knot insertion takes at most 2p convex combinations of three operations each, and
+            // a point's de Boor at most γ_(12p+4): within that of the largest coordinate.
+            let g = gamma(18 * pd + 8);
+            let size = |k: usize| {
+                line.iter()
+                    .map(|h| h.get(k).map_or(0.0, |x| x.abs()))
+                    .fold(0.0, f64::max)
+            };
+            let (sx, sw) = (size(0).max(size(1)).max(size(2)), size(3));
+            for h in piece {
+                let r = Hom {
+                    h,
+                    ex: ex + g * sx,
+                    ew: ew + g * sw,
+                };
+                if !(h[3] > r.ew) {
+                    return Ok(false);
+                }
+                let (p, e) = r.euclid()?;
+                if !inside(p, e) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        EvalSurface::Revolved { .. } => Err(refused(
+            "an iso-line piece of a revolution within reach of a point",
+        )),
+    }
+}
+
 /// [`collapsed_on`] after its checks; `d` is 0 or 1.
 fn along(
     s: &EvalSurface,
@@ -492,6 +826,17 @@ fn along(
                 knots.get(o).map_or(none, Vec::as_slice),
             );
             let t0 = q.get(o).copied().unwrap_or(f64::NAN);
+            let bounds = n.collapse_bounds();
+            if range.is_none()
+                && bounds.certified
+                && bounds
+                    .non_collapsed_below
+                    .get(d)
+                    .is_some_and(|&lim| reach < lim)
+            {
+                let _ = onto_knots(ko, po, no, t0).ok_or_else(|| off_message(Off::Range, uv))?;
+                return Ok(false);
+            }
             // Control point `along` (index along d) and `across` (along o) of the net.
             let net = |along: usize, across: usize| -> Option<Hom> {
                 let (i, j) = if d == 0 {
@@ -503,13 +848,23 @@ fn along(
                     .copied()
                     .map(Hom::exact)
             };
-            // The iso-line's control point j: its column's point at t0, de Boor along o.
-            let pts = |j: usize| -> Result<Hom, EvalError> {
-                de_boor(po, ko, no, |i| net(j, i), t0).map_err(|e| off_message(e, uv))
-            };
             let span = indices(pd, kd, nd, range)
                 .ok_or_else(|| malformed("a range off the spline, or knots that do not fit"))?;
-            iso_line(pd, kd, nd, span, &pts, reach, 1.0, 1.0)
+            // The knot span and de Boor weights at t0 depend only on t0 and ko: compute once for
+            // every column of the iso-line.
+            let plan = DeBoorPlan::new(po, ko, no, t0).map_err(|e| off_message(e, uv))?;
+            let pts = |j: usize| -> Result<Hom, EvalError> {
+                plan.eval(|i| net(j, i)).map_err(|e| off_message(e, uv))
+            };
+            let early = if bounds.certified {
+                let e_bound = bounds.err_bound.get(d).copied().unwrap_or(f64::INFINITY);
+                let err_floor = 2.0 * 3f64.sqrt() * e_bound / (1.0 - gamma(6));
+                let threshold = reach.max(err_floor);
+                threshold.is_finite().then_some(threshold)
+            } else {
+                None
+            };
+            iso_line(pd, kd, nd, span, &pts, reach, 1.0, 1.0, early)
         }
         EvalSurface::Revolved {
             profile,
@@ -547,7 +902,7 @@ fn along(
                 let span = indices(p, knots, ctrl.len(), range).ok_or_else(|| {
                     malformed("a range off the profile, or knots that do not fit")
                 })?;
-                iso_line(p, knots, ctrl.len(), span, &pts, reach, top, bottom)
+                iso_line(p, knots, ctrl.len(), span, &pts, reach, top, bottom, None)
             }
         }
     }
@@ -861,7 +1216,7 @@ pub fn collapse(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, E
 /// at most `reach − δ` there has one of at most `reach` at `uv` (the triangle inequality), and
 /// a pole answered is a pole within `reach`. A shift not under `reach` (at no reach, any shift)
 /// is refused ([`EvalError::OffRange`], `OffRangeBeyondReach`), never answered; so is a
-/// rational net off the range. Parameters on the range, a closed direction (wrapped by whole
+/// rational net off both ranges. Parameters on the range, a closed direction (wrapped by whole
 /// periods: the same point), and any other surface go to [`collapse`] unchanged.
 pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
     check(uv, reach)?;
@@ -894,8 +1249,10 @@ pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collap
 /// `f`. Every point of an iso-line through `uv` along `f` is then within `o_e` times that of the
 /// line through the nearest point (moving across `e`), and the piece of an iso-line along `e`
 /// past the range within the same of its end; `δ` is twice the sum over the directions, rounded
-/// up. A strip with a weight other than the net's first, or not positive, is refused
-/// ([`EvalError::OffRange`]): a rational continuation is not bounded here.
+/// up. Where a strip has a weight other than the net's first and `uv` is off along one direction
+/// only, the shift is instead bounded on the strip between `uv` and the nearest point along it
+/// and the whole range across ([`rational_partial_bound`]); off both ranges, or with a weight
+/// not positive, it is refused ([`EvalError::OffRange`]).
 fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, EvalError> {
     let EvalSurface::Nurbs(n) = s else {
         return Ok(None);
@@ -956,6 +1313,49 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
             uv[0], uv[1]
         ))
     };
+    // Whether a strip the bound below takes (each overrun direction's end span along it, the
+    // whole range across) has a weight other than the net's first.
+    let mut weighted = false;
+    for e in 0..2 {
+        if off.get(e).copied().unwrap_or(0.0) == 0.0 {
+            continue;
+        }
+        let (p, first) = (get(&deg, e), span.get(e).ok_or_else(bad)?.0);
+        for i in first..=first + p {
+            for j in 0..get(&count, 1 - e) {
+                let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
+                let at = iv.checked_mul(nu).and_then(|x| x.checked_add(iu));
+                let w = at.and_then(|x| ctrl.get(x)).ok_or_else(bad)?[3];
+                weighted |= w != w0;
+            }
+        }
+    }
+    if weighted {
+        // Off along one direction `e` only, the surface between `uv` and the nearest point moves
+        // by at most `o_e B + 2ε` over the strip between them along `e` and the whole range
+        // across ([`rational_partial_bound`]); twice that, rounded up. Off both ranges the strip
+        // across is off its range too, which the bound does not take: refused, as a pcurve past
+        // both ranges of a rational patch is.
+        let e = match off {
+            [o, 0.0] if o > 0.0 => 0,
+            [0.0, o] if o > 0.0 => 1,
+            _ => return Err(rational()),
+        };
+        let (o, x, t) = (
+            off.get(e).copied().ok_or_else(bad)?,
+            near.get(e).copied().ok_or_else(bad)?,
+            q.get(e).copied().ok_or_else(bad)?,
+        );
+        let along = if t < x { [x - o, x] } else { [x, x + o] };
+        let (pf, mf, kf) = (get(&deg, 1 - e), get(&count, 1 - e), kn(1 - e));
+        let across = [*kf.get(pf).ok_or_else(bad)?, *kf.get(mf).ok_or_else(bad)?];
+        let (bound, eps) = rational_partial_bound(s, e, along, across, f64::INFINITY)?;
+        let delta = 2.0 * (o * bound + 2.0 * eps) * (1.0 + gamma(4));
+        if !delta.is_finite() {
+            return Err(refused("a shift onto the knot range is not finite"));
+        }
+        return Ok(Some((near, delta)));
+    }
     // Control point `i` along e, `j` across, as a Euclidean point of the one weight w0.
     let point = |e: usize, i: usize, j: usize| -> Result<Vec3, EvalError> {
         let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
@@ -1478,20 +1878,34 @@ fn rational_partial_bound(
                 }
                 finite(near + part)
             };
-            let mut top = 0.0f64;
+            // How far the weights move from one Bézier point to the next, over every row.
+            let mut turns = Vec::new();
+            let mut most_turn = 0.0f64;
             for kk in 0..p {
-                let step = apart(kk, kk + 1)?;
                 let mut turn = 0.0f64;
                 for j in 0..rows.len() {
                     let ((_, _, wa, va), (_, _, wb, vb)) =
                         (at(j, kk).ok_or_else(bad)?, at(j, kk + 1).ok_or_else(bad)?);
                     turn = turn.max((wb - wa).abs() * (1.0 + UNIT) + va + vb);
                 }
+                most_turn = most_turn.max(turn);
+                turns.push(turn);
+            }
+            // The factor `ω_(k+1) / Ω` on the first term is at most `ω_max / ω_min` of the iso-line's
+            // weights `ω_k` (Ω is a convex combination of them), and those differ by at most `p`
+            // steps of `most_turn`, so `ω_max ≤ ω_min + p most_turn ≤ low + p most_turn`. Where the
+            // weights do not change along d (a cylinder's arc, straight along its axis) that is
+            // `low` and the first term is the plain Euclidean step, not `ω⁺ / ω⁻` times it. The
+            // smaller of the two bounds is taken.
+            let heavy = high.min((low + p as f64 * most_turn) * (1.0 + gamma(4)));
+            let mut top = 0.0f64;
+            for (kk, turn) in turns.iter().enumerate() {
+                let step = apart(kk, kk + 1)?;
                 let mut far = 0.0f64;
                 for mm in 0..=p {
                     far = far.max(apart(kk, mm)?);
                 }
-                top = top.max(high * step + turn * far);
+                top = top.max(heavy * step + turn * far);
             }
             // The quotient by the piece's length and the least weight, then the bound's sums
             // and products, rounded up. A positive `top` whose bound is zero or below the normal
@@ -1575,6 +1989,65 @@ fn rational_partial_bound(
         ));
     }
     Ok((bound, eps))
+}
+
+/// A certified bound on how far a spline surface moves when a point of the strip `along` × `across`
+/// (`along` on the knot range along `d` or past either end of it, `across` across it) moves along
+/// `d` by at most `o` within the strip. On a polynomial net it is `o` times the [`partial_bound`]
+/// over `across` (past the range across by what it reaches past it) with `d` past its range by
+/// what `along` reaches past it; on a rational net `o B + 2ε` of [`rational_partial_bound`] over
+/// the strip, which takes `across` on its range only. Rounded up.
+///
+/// Refused as those bounds are (a rational strip off its range across, a weight not certified
+/// positive on it, knots that do not fit), for a surface that is not a spline, and for a strip
+/// or a move that is not finite or a move that is negative.
+pub fn strip_shift_bound(
+    s: &EvalSurface,
+    d: usize,
+    along: [f64; 2],
+    across: [f64; 2],
+    o: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a shift bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    if !(o >= 0.0
+        && o.is_finite()
+        && along.iter().chain(&across).all(|x| x.is_finite())
+        && along[0] <= along[1]
+        && across[0] <= across[1])
+    {
+        return Err(malformed("a strip or a move that is not finite"));
+    }
+    let range = |e: usize| -> Result<[f64; 2], EvalError> {
+        match s.interval(e) {
+            Some((a, b)) if a <= b && a.is_finite() && b.is_finite() => Ok([a, b]),
+            _ => Err(malformed("knots that do not fit")),
+        }
+    };
+    let past_by =
+        |[a, b]: [f64; 2], [lo, hi]: [f64; 2]| (a - lo).max(hi - b).max(0.0) * (1.0 + UNIT);
+    let (rd, rf) = (range(d)?, range(1 - d)?);
+    let w0 = n.ctrl().first().map_or(0.0, |c| c[3]);
+    let shift = if w0 > 0.0 && n.ctrl().iter().all(|c| c[3] == w0) {
+        let on = [
+            across[0].max(rf[0]).min(rf[1]),
+            across[1].max(rf[0]).min(rf[1]),
+        ];
+        o * partial_bound(s, d, on, past_by(rd, along), past_by(rf, across))?
+    } else {
+        let (bound, eps) = rational_partial_bound(s, d, along, across, f64::INFINITY)?;
+        o * bound + 2.0 * eps
+    };
+    let shift = shift * (1.0 + gamma(4));
+    if shift.is_finite() {
+        Ok(shift)
+    } else {
+        Err(refused("a shift bound that is not finite"))
+    }
 }
 
 /// A pcurve put on a spline's knot range ([`pcurve_onto_knots`]).

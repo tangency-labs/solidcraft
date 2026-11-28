@@ -1,7 +1,7 @@
 //! The session's refusals on its edges, typed ([`BlendRefusal`] in
 //! [`SolidError::BlendRefused`]): an edge with no blend (from every preparation), a round
-//! too small to change the part (constant circular rounds, before preparation), a round
-//! that cannot end where its edge runs on tangentially and a setback asked for too short
+//! too small to change the part or to build (constant circular rounds, before preparation), a
+//! round that cannot end where its edge runs on tangentially and a setback asked for too short
 //! or too long (from `DoFilleting`).
 //!
 //! Not upstream (solidcore's): upstream fails an edge with no blend edge use with
@@ -67,7 +67,7 @@ impl FilletSession<'_> {
 
     /// The first circular constant round of `edges` (edge i at `radii[i]`, or `radii[0]`
     /// for every edge; its section
-    /// `sections[i]` or `sections[0]`) too small to change the part
+    /// `sections[i]` or `sections[0]`) too small to change the part or to build
     /// ([`round_too_small`]), refused as [`BlendRefusal::RoundTooSmall`] with status `SM_ERR`
     /// before the edges are prepared. Edges without a blend edge use are left to the
     /// preparation.
@@ -116,11 +116,12 @@ impl FilletSession<'_> {
     }
 
     /// `DoFilleting`'s result with its refusal typed, its status unchanged: a Setback's
-    /// refusal noted on the way (a setback asked for too short or too long:
-    /// [`BlendRefusal::SetbackTooShort`], [`BlendRefusal::SetbackTooLong`]), which the
-    /// later steps return as their own failure; else a round that ends where its edge runs
-    /// on tangentially ([`NoRoomReason::TangentContinuationEndUnsupported`]): the first such
-    /// end's edge and vertex and the edge not blended that it runs on into
+    /// refusal noted on the way (a setback asked for too short or too long, or one whose
+    /// growth the rails' reach held: [`BlendRefusal::SetbackTooShort`],
+    /// [`BlendRefusal::SetbackTooLong`], [`BlendRefusal::SetbackUncertifiedWithinRails`]),
+    /// which the later steps return as their own failure; else a round that ends where its
+    /// edge runs on tangentially ([`NoRoomReason::TangentContinuationEndUnsupported`]): the
+    /// first such end's edge and vertex and the edge not blended that it runs on into
     /// ([`BlendRefusal::ContinuesInto`]), at the tangency of the vertex's corner. A refusal
     /// that names no such data stays as it was.
     pub(crate) fn typed_filleting(&mut self, k: &Kernel, result: Result<()>) -> Result<()> {

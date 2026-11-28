@@ -11,6 +11,7 @@
 
 mod coincident_strip;
 mod curved_strip;
+mod duplicate_edge_run;
 pub mod p1;
 pub mod p2;
 pub mod p3;

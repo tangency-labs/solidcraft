@@ -386,3 +386,248 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
     let only = FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face: 0 }], change: solidcraft_kernel::history::Change::Kept };
     assert!(from_origins(&only, &[one], 1).is_none());
 }
+
+/// The pieces of a round panel's cap a fold parted are named by the fold's role of each
+/// (`F2:top#[F30:fold:stay]`, `F2:top#[F30:fold:1]`, #21300), and keep the number by place earlier
+/// builds gave them (`F2:top#2`, `F2:top#1`) as their former name. A later sheet feature that keeps
+/// both pieces (Unfold) carries each name to the same piece only: neither answers to the other's
+/// name, new or former, so a reference on one never moves to the other.
+#[test]
+fn a_folded_sheet_cap_piece_answers_only_to_its_own_names_after_a_later_sheet_feature() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+                "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                           {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}},
+            {"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"},
+            {"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+             "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"},
+            {"id": 31, "name": "Unfold1", "type": "sheet_unfold"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let caps: Vec<usize> = (0..names.faces.len()).filter(|&f| crate::naming::strip_piece(&names.faces[f]) != names.faces[f]).collect();
+    let cap_names: Vec<&String> = caps.iter().map(|&f| &names.faces[f]).collect();
+    let formers = [("top", "stay", 2), ("top", "1", 1), ("bottom", "stay", 2), ("bottom", "1", 1)];
+    for (side, role, number) in formers {
+        let (want, former) = (format!("F2:{side}#[F30:fold:{role}]"), format!("F2:{side}#{number}"));
+        let Some(&f) = caps.iter().find(|&&f| names.faces[f] == want) else { panic!("{cap_names:?}") };
+        assert!(names.verified(f), "{want}");
+        assert_eq!(names.info[f].former.as_deref(), Some(former.as_str()), "{want}");
+        // Its own names find it, and only it.
+        for name in [&want, &former] {
+            let found: Vec<&String> = caps.iter().filter(|&&g| matches(&names, g, name) == Some(Match::Exact)).map(|&g| &names.faces[g]).collect();
+            assert_eq!(found, [&want], "{name}");
+        }
+    }
+    for &f in &caps {
+        let others: Vec<&String> =
+            names.info[f].aliases.iter().chain(&names.info[f].synonyms).filter(|a| **a != names.faces[f] && cap_names.contains(a)).collect();
+        assert!(others.is_empty(), "{} answers to {others:?}", names.faces[f]);
+    }
+}
+
+/// Two folds of one round panel (#21300): the second, Fold F31, folds the part the first left.
+/// The bends around the pieces of the cap tell them apart (the middle piece lies between both), so
+/// they are named by them as before, exactly, with no former name: the folds' roles name only
+/// pieces nothing around them tells apart.
+#[test]
+fn the_pieces_of_a_round_cap_two_folds_parted_are_named_by_the_bends_around_them_as_before() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"c": 2, "k": 0, "l": 4},
+                "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"},
+                           {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"},
+                           {"a": 4, "b": 5, "construction": true, "id": "l2", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                           {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]},
+                           {"fixed": false, "id": "f1a", "pos": [-45.0, 20.0]}, {"fixed": false, "id": "f1b", "pos": [45.0, 20.0]}]}},
+            {"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"},
+            {"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+             "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"},
+            {"a": [-45.0, 20.0, 0.0], "b": [45.0, 20.0, 0.0], "angle": "90 deg", "curve": "l2", "id": 31, "name": "Fold2",
+             "position": "centerline", "stays": "right", "sketch": 1, "type": "sheet_fold"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let mut tops: Vec<(&str, Option<&str>, bool)> = (0..names.faces.len())
+        .filter(|&f| crate::naming::strip_piece(&names.faces[f]) == "F2:top" && names.faces[f] != "F2:top")
+        .map(|f| (names.faces[f].as_str(), names.info[f].former.as_deref(), names.verified(f)))
+        .collect();
+    tops.sort_unstable();
+    let got: Vec<&str> = tops.iter().map(|t| t.0).collect();
+    assert_eq!(
+        got,
+        ["F2:top#[F30:bend.inner:F2:top,F31:bend.inner:F2:top]", "F2:top#[F30:bend.inner:F2:top]", "F2:top#[F31:bend.inner:F2:top]"],
+        "{tops:?}"
+    );
+    assert!(tops.iter().all(|t| t.2 && t.1.is_none()), "{tops:?}");
+}
+
+/// #22047: a piece whose neighbour list loses one adjacent face (e.g. a shortened bevel or corner
+/// cut) is still uniquely identified by its surviving neighbours, both in one design and across a
+/// link, while numbered ties, split pieces, pattern copies and zero-overlap whole faces are
+/// refused.
+#[test]
+fn piece_overlap_and_resuffixed_lookup_survive_adjacent_neighbour_changes() {
+    use crate::lineage::link_role;
+    use crate::name_lookup::unique_resuffixed_on_body;
+
+    // Two pieces of `side`: piece 0 touches 5 unique neighbours (including `bevel`); piece 1
+    // touches `top` and `notch`.
+    let before = qualify(
+        named(&["side", "side", "bottom", "hole1", "hole2", "hole3", "bevel", "top", "notch"]),
+        &[(0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (1, 7), (1, 8)],
+    );
+    let stored = before.faces[0].clone();
+    assert_eq!(stored, "side#[bevel,bottom,hole1,hole2,hole3]");
+
+    // Shortening the bevel removes `bevel` from piece 0's bounds while the other 4 remain.
+    let after =
+        qualify(named(&["side", "side", "bottom", "hole1", "hole2", "hole3", "top", "notch"]), &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, 7)]);
+    assert_eq!(matches(&after, 0, &stored), Some(Match::Stem));
+    assert_eq!(piece_overlap(&after, 0, &stored), Some((4, 5)));
+    assert_eq!(piece_overlap(&after, 1, &stored), Some((0, 5)));
+    assert_eq!(unique_resuffixed_on_body(&after, &stored), Some(0));
+
+    // Same across a linked component (`F3:link:<digest>#[F3:link:…,…]`).
+    let linked = |n: &str| format!("F3:{}", link_role(3, n, 0));
+    let stored_linked = linked(&stored);
+    assert!(stored_linked.starts_with("F3:link:") && stored_linked.contains("#["));
+    let linked_after_faces: Vec<String> = after.faces.iter().map(|n| linked(n)).collect();
+    let linked_after_refs: Vec<&str> = linked_after_faces.iter().map(String::as_str).collect();
+    let linked_after = qualify(named(&linked_after_refs), &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, 7)]);
+    assert_eq!(matches(&linked_after, 0, &stored_linked), Some(Match::Stem));
+    assert_eq!(piece_overlap(&linked_after, 0, &stored_linked), Some((4, 5)));
+    assert_eq!(unique_resuffixed_on_body(&linked_after, &stored_linked), Some(0));
+
+    // Split piece: two pieces on the same body both keep some of the stored neighbours -> refused.
+    let split = qualify(named(&["side", "side", "bottom", "hole1", "hole2", "hole3"]), &[(0, 2), (0, 3), (1, 4), (1, 5)]);
+    assert_eq!(piece_overlap(&split, 0, &stored), Some((2, 5)));
+    assert_eq!(piece_overlap(&split, 1, &stored), Some((2, 5)));
+    assert_eq!(unique_resuffixed_on_body(&split, &stored), None);
+
+    // Whole face (unqualified again, #11731) -> refused even if some neighbours remain.
+    let whole_unrelated = qualify(named(&["side", "other"]), &[(0, 1)]);
+    assert_eq!(piece_overlap(&whole_unrelated, 0, &stored), None);
+    assert_eq!(unique_resuffixed_on_body(&whole_unrelated, &stored), None);
+
+    // Numbered pieces carry no neighbour identity -> refused.
+    assert_eq!(piece_overlap(&after, 0, "side#1"), None);
+    assert_eq!(piece_overlap(&after, 0, "side#[bottom,hole1]#2"), None);
+    assert_eq!(unique_resuffixed_on_body(&after, "side#[bottom,hole1]#2"), None);
+
+    // Pattern copies stay isolated by instance suffix (`…#[…]@F9.1`, suffix after qualifier),
+    // including when copied neighbours carry the same instance suffix in `info.bounds`.
+    let copy_after = qualify(
+        named(&[
+            "side#[bottom,hole1,hole2,hole3]@F9.1",
+            "side#[back,top]@F9.1",
+            "bottom@F9.1",
+            "hole1@F9.1",
+            "hole2@F9.1",
+            "hole3@F9.1",
+            "top@F9.1",
+            "back@F9.1",
+        ]),
+        &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, 7)],
+    );
+    assert_eq!(piece_overlap(&copy_after, 0, "side#[bevel,bottom,hole1,hole2,hole3]@F9.1"), Some((4, 5)));
+    assert_eq!(piece_overlap(&copy_after, 0, "side#[bevel,bottom]@F9.2"), None);
+    assert_eq!(piece_overlap(&copy_after, 0, &stored), None);
+    assert_eq!(unique_resuffixed_on_body(&copy_after, "side#[bevel,bottom,hole1,hole2,hole3]@F9.1"), Some(0));
+    assert_eq!(unique_resuffixed_on_body(&copy_after, "side#[bevel,bottom,hole1,hole2,hole3]@F9.2"), None);
+}
+
+/// #22047: an unmoved planar face piece keeps resolving through `locate_face`, `locate_one`,
+/// `face_has_name` and `lineage_face_indices` when an adjacent corner cut shortens and drops off
+/// its boundary, while splitting that piece itself is still rejected as ambiguous.
+#[test]
+fn a_planar_face_piece_stays_resolved_when_an_adjacent_cut_shortens() {
+    let build = |corner_len: &str, split_main: bool| {
+        let mut features = vec![
+            serde_json::json!({"id": 1, "name": "Base", "type": "box", "corner": [0, 0, 0], "length": "100", "width": "40", "height": "60"}),
+            serde_json::json!({"id": 2, "name": "Hole1", "type": "hole", "position": [100, 12, 35], "direction": [-1, 0, 0], "diameter": "6", "depth": "20"}),
+            serde_json::json!({"id": 3, "name": "Hole2", "type": "hole", "position": [100, 28, 35], "direction": [-1, 0, 0], "diameter": "6", "depth": "20"}),
+            serde_json::json!({"id": 4, "name": "CornerCut", "type": "box", "corner": [50, -1, 50], "length": corner_len, "width": "42", "height": "12", "operation": "cut"}),
+            serde_json::json!({"id": 5, "name": "LowerSlot", "type": "box", "corner": [85, -1, 10], "length": "20", "width": "42", "height": "10", "operation": "cut"}),
+        ];
+        if split_main {
+            features.push(serde_json::json!({
+                "id": 6, "name": "CenterSlot", "type": "box", "corner": [85, 18, 19], "length": "20", "width": "4", "height": "45", "operation": "cut"
+            }));
+        }
+        let doc = crate::Document { features: serde_json::from_value(serde_json::Value::Array(features)).unwrap(), ..crate::Document::default() };
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        (doc, model)
+    };
+
+    let pick = Vec3::new(100.0, 20.0, 35.0);
+    let (_, before_model) = build("52", false);
+    let before_state = before_model.state();
+    let before_body = before_state.body("Body1").unwrap();
+    let before_names = crate::naming::names(before_body);
+    let main_before = (0..before_body.body.face_count())
+        .find(|&f| before_body.body.point_lies_on_face(f, pick, 1e-3).ok().flatten().is_some())
+        .expect("main +x face at pick");
+    let stored = before_names.faces[main_before].clone();
+    assert!(stored.starts_with("F1:+x#[") && stored.contains("F4:-z"), "expected corner cut in qualifier: {stored}");
+
+    // Shortening CornerCut so it stops at x = 80 drops F4:-z from the +x face's qualifier.
+    let (after_doc, after_model) = build("30", false);
+    let after_state = after_model.state();
+    let after_body = after_state.body("Body1").unwrap();
+    let after_names = crate::naming::names(after_body);
+    let main_after = (0..after_body.body.face_count())
+        .find(|&f| after_body.body.point_lies_on_face(f, pick, 1e-3).ok().flatten().is_some())
+        .expect("main +x face after shortening corner cut");
+    assert_ne!(after_names.faces[main_after], stored, "qualifier should have changed after edit");
+    assert_eq!(matches(&after_names, main_after, &stored), Some(Match::Stem));
+
+    let hit = crate::name_lookup::locate_face(&after_state, &stored, pick).expect("locate_face recovers resuffixed piece");
+    assert_eq!(hit.face, main_after);
+    assert!(hit.verified);
+    let one = crate::name_lookup::locate_one(&after_state, Some("Body1"), &stored).expect("locate_one recovers resuffixed piece");
+    assert_eq!(one.face, main_after);
+    assert!(crate::name_lookup::face_has_name(after_body, main_after, &stored));
+    assert_eq!(after_doc.lineage_face_indices(after_body, &stored).unwrap(), vec![main_after]);
+    assert_eq!(crate::name_lookup::face_body(&after_state, &stored).map(|b| b.name.as_str()), Some("Body1"));
+
+    // An exact-match body must win over an overlap-only body in `face_body`, matching `locate_face`.
+    let mut exact_body = before_body.clone();
+    exact_body.name = "ExactBody".into();
+    let mut overlap_body = after_body.clone();
+    overlap_body.name = "OverlapBody".into();
+    let mut mixed = crate::ModelState::default();
+    mixed.bodies = vec![overlap_body, exact_body];
+    assert_eq!(crate::name_lookup::face_body(&mixed, &stored).map(|b| b.name.as_str()), Some("ExactBody"));
+
+    // Splitting the main +x piece itself so two pieces each keep one hole must stay ambiguous.
+    let (split_doc, split_model) = build("30", true);
+    let split_state = split_model.state();
+    let split_body = split_state.body("Body1").unwrap();
+    assert!(crate::name_lookup::locate_face(&split_state, &stored, Vec3::new(100.0, 6.0, 35.0)).is_none());
+    assert!(crate::name_lookup::locate_one(&split_state, Some("Body1"), &stored).is_err());
+    assert!(split_doc.lineage_face_indices(split_body, &stored).is_err());
+}

@@ -26,11 +26,12 @@
 //! | [`piece`], [`to_uv`]         | `sm_MxPiece`, `sm_MxToUV`             |
 //!
 //! Deviations: out-params are return values; an index the fork reads out of range (only
-//! on malformed data) is `SM_ERR`; a twist term names its side by an index into the
+//! on malformed data) is a `Defect` with status `SM_ERR`; a twist term names its side by an index into the
 //! caller's sides instead of a pointer. [`coons_chamfer`] is not the fork's, which takes
 //! the bilinear patch for every chamfer face. `sm_MxRoots` recurses at most 61 deep (its own
 //! `depth > 60` stop, as the fork; the Mixed corner, WR-697).
 
+use crate::error::blend::{BlendFailure, MixedStep};
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
@@ -81,29 +82,47 @@ pub struct Srf {
 impl Srf {
     /// `At(i, j)`.
     fn at(&self, i: usize, j: usize) -> Result<&Vec<V4>> {
-        let nvs = self.vb.len().checked_sub(1).ok_or_else(err)?;
+        let nvs = self.vb.len().checked_sub(1).ok_or_else(out_of_table)?;
         g(&self.p, i * nvs + j)
     }
 }
 
-fn err() -> SolidError {
-    SolidError::blend_failed(OP, "an index past the mixed corner's polynomial tables")
+/// An index or size past a table of the algebra: one condition at every index helper and
+/// size step (the tables are made at the sizes their degrees and breaks give, and the
+/// B-splines read are the kernel's own, canonical and consistent). A Mixed face rebuilt
+/// from a record reads the caller's curves: the record's check refuses, as invalid input,
+/// an empty curve the rule reads, an empty segment, or breaks that do not strictly
+/// increase from 0 to 1 (or two within the rounding [`union`] merges, or two of different
+/// curves the union merges that [`refine`] keeps apart, [`breaks_coincide`]), before the
+/// rule runs (`CornerRecord::validate`).
+fn out_of_table() -> SolidError {
+    SolidError::blend(
+        OP,
+        BlendFailure::Defect {
+            why: "an index or size is past a table of the Mixed corner's algebra, though every table is built at the size its degree and breaks give, from consistent canonical B-spline data or a record whose curves the record check found non-empty, with breaks strictly increasing from 0 to 1, no two of a curve within the rounding its union merges and none of two curves merged by the union but kept apart by its refinement",
+        },
+    )
+}
+
+/// The Mixed corner's geometry has no construction at `step` (status `SM_ERR`).
+fn unbuildable(step: MixedStep) -> SolidError {
+    SolidError::blend(OP, BlendFailure::MixedCornerUnbuildable(step))
 }
 
 fn g<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(err)
+    v.get(i).ok_or_else(out_of_table)
 }
 
 fn gm<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i).ok_or_else(err)
+    v.get_mut(i).ok_or_else(out_of_table)
 }
 
 fn first<T: Copy>(v: &[T]) -> Result<T> {
-    v.first().copied().ok_or_else(err)
+    v.first().copied().ok_or_else(out_of_table)
 }
 
 fn last<T: Copy>(v: &[T]) -> Result<T> {
-    v.last().copied().ok_or_else(err)
+    v.last().copied().ok_or_else(out_of_table)
 }
 
 /// `std::min` (`(b < a) ? b : a`).
@@ -194,7 +213,7 @@ fn bez_split(b: &[V4], t: f64) -> Result<(Bez, Bez)> {
     let mut c = b.to_vec();
     let mut l = vec![V4::default(); n];
     let mut r = vec![V4::default(); n];
-    let last_i = n.checked_sub(1).ok_or_else(err)?;
+    let last_i = n.checked_sub(1).ok_or_else(out_of_table)?;
     *gm(&mut l, 0)? = *g(&c, 0)?;
     *gm(&mut r, last_i)? = *g(&c, last_i)?;
     for k in 1..n {
@@ -213,7 +232,7 @@ fn bez_split(b: &[V4], t: f64) -> Result<(Bez, Bez)> {
 fn bez_elevate(b: &[V4], to: usize) -> Result<Bez> {
     let mut c = b.to_vec();
     if c.is_empty() {
-        return Err(err());
+        return Err(out_of_table());
     }
     while c.len() - 1 < to {
         let n = c.len() - 1;
@@ -233,7 +252,7 @@ fn bez_elevate(b: &[V4], to: usize) -> Result<Bez> {
 
 /// `sm_MxBezDeriv`: d/dt of a segment over a span `len` (a Bezier of one degree less).
 fn bez_deriv(b: &[V4], len: f64) -> Result<Bez> {
-    let n = b.len().checked_sub(1).ok_or_else(err)?;
+    let n = b.len().checked_sub(1).ok_or_else(out_of_table)?;
     if n == 0 {
         return Ok(vec![V4::default()]);
     }
@@ -246,8 +265,8 @@ fn bez_deriv(b: &[V4], len: f64) -> Result<Bez> {
 
 /// `sm_MxBezTimes`: the product of a scalar Bezier (its first coordinates) and a Bezier.
 fn bez_times(s: &[V4], p: &[V4]) -> Result<Bez> {
-    let m = s.len().checked_sub(1).ok_or_else(err)?;
-    let n = p.len().checked_sub(1).ok_or_else(err)?;
+    let m = s.len().checked_sub(1).ok_or_else(out_of_table)?;
+    let n = p.len().checked_sub(1).ok_or_else(out_of_table)?;
     let mut r = vec![V4::default(); m + n + 1];
     for i in 0..=m {
         for j in 0..=n {
@@ -310,6 +329,25 @@ pub fn refine(c: &Crv, brks: &[f64]) -> Result<Crv> {
     Ok(r)
 }
 
+/// Whether break `t` lies within rounding of the break `back` before it: within
+/// `1e-13·(1 + |t|)`, the gap [`union`] drops. A curve whose breaks are this close would
+/// keep a segment the union of its breaks with another curve's does not, so the record
+/// check refuses it (`BezierCurveRecord::validate_read`).
+#[must_use]
+pub fn breaks_merge(back: f64, t: f64) -> bool {
+    t <= back + 1e-13 * (1.0 + t.abs())
+}
+
+/// Whether breaks `x < y` of two curves are one break to [`refine`]: each lies within the
+/// rounding `refine` skips (`1e-14·(1 + |t|)`) of the other, so refining either curve to the
+/// other's break adds no segment. Two breaks that [`breaks_merge`] but do not coincide would
+/// leave the two curves [`common`] refines with different segment counts, so the record check
+/// refuses them (`CornerRecord::validate`).
+#[must_use]
+pub fn breaks_coincide(x: f64, y: f64) -> bool {
+    y <= x + 1e-14 * (1.0 + y.abs()) && x >= y - 1e-14 * (1.0 + x.abs())
+}
+
 /// `sm_MxUnion`: the sorted breaks of both, those within rounding of the previous one
 /// dropped.
 fn union(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -319,7 +357,7 @@ fn union(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut r: Vec<f64> = Vec::new();
     for t in u {
         match r.last() {
-            Some(&back) if t <= back + 1e-13 * (1.0 + t.abs()) => {}
+            Some(&back) if breaks_merge(back, t) => {}
             _ => r.push(t),
         }
     }
@@ -331,7 +369,7 @@ pub fn common(a: &mut Crv, b: &mut Crv) -> Result<()> {
     let u = union(&a.brk, &b.brk);
     *a = refine(a, &u)?;
     *b = refine(b, &u)?;
-    let d = a.deg().max(b.deg()).ok_or_else(err)?;
+    let d = a.deg().max(b.deg()).ok_or_else(out_of_table)?;
     *a = elevate(a, d)?;
     *b = elevate(b, d)?;
     // the breaks as one list (rounding apart only)
@@ -432,8 +470,8 @@ pub fn unit(c: &Crv, reverse: bool) -> Result<Crv> {
         }
         r.seg.push(s);
     }
-    *r.brk.first_mut().ok_or_else(err)? = 0.0;
-    *r.brk.last_mut().ok_or_else(err)? = 1.0;
+    *r.brk.first_mut().ok_or_else(out_of_table)? = 0.0;
+    *r.brk.last_mut().ok_or_else(out_of_table)? = 1.0;
     Ok(r)
 }
 
@@ -488,10 +526,15 @@ pub fn unit_weights(c: &Crv) -> Result<Crv> {
 pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
     for comp in companions.iter() {
         if comp.seg.len() != c.seg.len() {
-            return Err(err());
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a companion curve is not on the curve's breaks, though c1's callers make the companions on them (the parameter curve refined at its composition's breaks, the field composed over it)",
+                },
+            ));
         }
     }
-    let n = c.deg().ok_or_else(err)?;
+    let n = c.deg().ok_or_else(out_of_table)?;
     let a0 = first(&c.brk)?;
     let a1 = last(&c.brk)?;
     let mut h = Vec::new();
@@ -500,7 +543,7 @@ pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
     }
     for s in 1..c.seg.len() {
         let left = g(&c.seg, s - 1)?.clone();
-        let nm1 = n.checked_sub(1).ok_or_else(err)?;
+        let nm1 = n.checked_sub(1).ok_or_else(out_of_table)?;
         let dl = mul(
             sub(*g(&left, n)?, *g(&left, nm1)?),
             n as f64 / *g(&h, s - 1)?,
@@ -519,13 +562,13 @@ pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
         }
         let det = aa * bb - ab * ab;
         if det.is_nan() || det <= 0.0 {
-            return Err(err());
+            return Err(unbuildable(MixedStep::JoinSingular));
         }
         let l = (ar * bb - ab * br) / det;
         let m = (aa * br - ab * ar) / det;
         let den = n as f64 * l - m;
         if den.is_nan() || den <= 0.0 {
-            return Err(err());
+            return Err(unbuildable(MixedStep::JoinSpanNotPositive));
         }
         let hs = n as f64 / (n as f64 * l - m);
         let k = l * hs;
@@ -547,7 +590,7 @@ pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
                 *q = mul(*q, kn);
             }
             for comp in companions.iter_mut() {
-                let kd = k.powf(comp.deg().ok_or_else(err)? as f64);
+                let kd = k.powf(comp.deg().ok_or_else(out_of_table)? as f64);
                 for q in gm(&mut comp.seg, t)?.iter_mut() {
                     *q = mul(*q, kd);
                 }
@@ -564,7 +607,7 @@ pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
         *gm(&mut c.brk, s)? = t;
         t += hs * (a1 - a0) / d_sum;
     }
-    *c.brk.last_mut().ok_or_else(err)? = a1;
+    *c.brk.last_mut().ok_or_else(out_of_table)? = a1;
     for comp in companions.iter_mut() {
         comp.brk.clone_from(&c.brk);
     }
@@ -593,11 +636,11 @@ fn boehm(pts: Vec<V4>, p: usize, mults: &[usize], knots: &[f64]) -> Result<Crv> 
             // t in [U[k], U[k+1]), s = current multiplicity
             let s = u.iter().filter(|&&x| x == t).count();
             let mut q = vec![V4::default(); pp.len() + 1];
-            let kp = k.checked_sub(p).ok_or_else(err)?;
+            let kp = k.checked_sub(p).ok_or_else(out_of_table)?;
             for i in 0..=kp {
                 *gm(&mut q, i)? = *g(&pp, i)?;
             }
-            let ks = (k + 1).checked_sub(s).ok_or_else(err)?;
+            let ks = (k + 1).checked_sub(s).ok_or_else(out_of_table)?;
             for i in ks..=pp.len() {
                 *gm(&mut q, i)? = *g(&pp, i - 1)?;
             }
@@ -614,8 +657,11 @@ fn boehm(pts: Vec<V4>, p: usize, mults: &[usize], knots: &[f64]) -> Result<Crv> 
         seg: Vec::new(),
     };
     for s in 0..knots.len().saturating_sub(1) {
-        out.seg
-            .push(pp.get(s * p..s * p + p + 1).ok_or_else(err)?.to_vec());
+        out.seg.push(
+            pp.get(s * p..s * p + p + 1)
+                .ok_or_else(out_of_table)?
+                .to_vec(),
+        );
     }
     Ok(out)
 }
@@ -639,7 +685,7 @@ pub fn from_bspline(curve: &BSplineCurve) -> Result<Crv> {
         pts.push(point(pt, w));
     }
     if u_len != pts.len() + p + 1 {
-        return Err(err());
+        return Err(out_of_table());
     }
     boehm(pts, p, &can.knot_multiplicities, &can.knots)
 }
@@ -654,15 +700,15 @@ pub fn srf_from_bspline(surf: &BSplineSurface) -> Result<Srf> {
         .iter()
         .sum::<usize>()
         .checked_sub(du + 1)
-        .ok_or_else(err)?;
+        .ok_or_else(out_of_table)?;
     let nv = can
         .v_multiplicities
         .iter()
         .sum::<usize>()
         .checked_sub(dv + 1)
-        .ok_or_else(err)?;
+        .ok_or_else(out_of_table)?;
     if nu * nv != can.control_points.len() {
-        return Err(err());
+        return Err(out_of_table());
     }
     let weight = |i: usize| -> Result<f64> {
         if can.weights.is_empty() {
@@ -691,7 +737,7 @@ pub fn srf_from_bspline(surf: &BSplineSurface) -> Result<Srf> {
         ub: can.u_knots.clone(),
         p: Vec::new(),
     };
-    let nus = out.ub.len().checked_sub(1).ok_or_else(err)?;
+    let nus = out.ub.len().checked_sub(1).ok_or_else(out_of_table)?;
     out.p = vec![vec![V4::default(); (du + 1) * (dv + 1)]; nus * nvs];
     for js in 0..nvs {
         for b in 0..=dv {
@@ -870,7 +916,7 @@ pub fn compose(srf: &Srf, pc: &Crv) -> Result<Crv> {
 /// `sm_MxSrfDerivV`: `S`'s homogeneous derivative in v (each patch's control rows
 /// differenced, degree `dv - 1`).
 pub fn srf_deriv_v(srf: &Srf) -> Result<Srf> {
-    let rdv = srf.dv.checked_sub(1).ok_or_else(err)?;
+    let rdv = srf.dv.checked_sub(1).ok_or_else(out_of_table)?;
     let mut r = Srf {
         du: srf.du,
         dv: rdv,
@@ -878,8 +924,8 @@ pub fn srf_deriv_v(srf: &Srf) -> Result<Srf> {
         vb: srf.vb.clone(),
         p: Vec::new(),
     };
-    let nus = srf.ub.len().checked_sub(1).ok_or_else(err)?;
-    let nvs = srf.vb.len().checked_sub(1).ok_or_else(err)?;
+    let nus = srf.ub.len().checked_sub(1).ok_or_else(out_of_table)?;
+    let nvs = srf.vb.len().checked_sub(1).ok_or_else(out_of_table)?;
     r.p = vec![vec![V4::default(); (r.du + 1) * (r.dv + 1)]; nus * nvs];
     for i in 0..nus {
         for j in 0..nvs {
@@ -1065,7 +1111,7 @@ pub fn first_order(s: &mut Side, e: usize, target: V4, scale: f64) -> Result<()>
     let (x, res) = solve(&a, &b)?;
     if res > 1e-9 * scale {
         // Mixed corner: a side's tangent leaves its neighbour's tangent plane at a corner
-        return Err(err());
+        return Err(unbuildable(MixedStep::SideLeavesTangentPlane));
     }
     let slot = gm(&mut s.val, e)?;
     for (k, sl) in slot.iter_mut().take(3).enumerate() {
@@ -1138,7 +1184,7 @@ pub fn twists(sides: &mut [Side], eqs: &[[TwistTerm; 2]], scale: f64, want_k: bo
     let (x, res) = solve(&a, &b)?;
     if res > 1e-8 * scale {
         // Mixed corner: the corner's twists are not compatible
-        return Err(err());
+        return Err(unbuildable(MixedStep::TwistsIncompatible));
     }
     for (i, term) in terms.iter().enumerate() {
         let s = gm(sides, term.side)?;
@@ -1168,8 +1214,8 @@ fn ribbon(s: &Side) -> Result<Crv> {
 
 /// `sm_MxSrfMapU`: `f` applied to each column of control points in u (each a curve).
 fn srf_map_u(srf: &Srf, f: &dyn Fn(&Crv) -> Result<Crv>) -> Result<Srf> {
-    let nus = srf.ub.len().checked_sub(1).ok_or_else(err)?;
-    let nvs = srf.vb.len().checked_sub(1).ok_or_else(err)?;
+    let nus = srf.ub.len().checked_sub(1).ok_or_else(out_of_table)?;
+    let nvs = srf.vb.len().checked_sub(1).ok_or_else(out_of_table)?;
     let mut r = Srf {
         dv: srf.dv,
         vb: srf.vb.clone(),
@@ -1191,9 +1237,9 @@ fn srf_map_u(srf: &Srf, f: &dyn Fn(&Crv) -> Result<Crv>) -> Result<Srf> {
             }
             let m = f(&c)?;
             if r.p.is_empty() {
-                r.du = m.deg().ok_or_else(err)?;
+                r.du = m.deg().ok_or_else(out_of_table)?;
                 r.ub.clone_from(&m.brk);
-                let nm = m.brk.len().checked_sub(1).ok_or_else(err)?;
+                let nm = m.brk.len().checked_sub(1).ok_or_else(out_of_table)?;
                 r.p = vec![vec![V4::default(); (r.du + 1) * (r.dv + 1)]; nm * nvs];
             }
             for (i, seg) in m.seg.iter().enumerate() {
@@ -1208,8 +1254,8 @@ fn srf_map_u(srf: &Srf, f: &dyn Fn(&Crv) -> Result<Crv>) -> Result<Srf> {
 
 /// `sm_MxSrfTranspose`.
 pub fn srf_transpose(srf: &Srf) -> Result<Srf> {
-    let nus = srf.ub.len().checked_sub(1).ok_or_else(err)?;
-    let nvs = srf.vb.len().checked_sub(1).ok_or_else(err)?;
+    let nus = srf.ub.len().checked_sub(1).ok_or_else(out_of_table)?;
+    let nvs = srf.vb.len().checked_sub(1).ok_or_else(out_of_table)?;
     let mut r = Srf {
         du: srf.dv,
         dv: srf.du,
@@ -1254,7 +1300,7 @@ fn tensor_u(mut curves: Vec<Crv>, h: &[[f64; 4]; 4]) -> Result<Srf> {
     }
     let c0 = g(&curves, 0)?;
     let mut s = Srf {
-        du: c0.deg().ok_or_else(err)?,
+        du: c0.deg().ok_or_else(out_of_table)?,
         dv: 3,
         ub: c0.brk.clone(),
         vb: vec![0.0, 1.0],
@@ -1369,7 +1415,7 @@ pub fn coons(c0: &Side, c1: &Side, d0: &Side, d1: &Side) -> Result<Srf> {
 fn tensor_linear(mut u0: Crv, mut u1: Crv) -> Result<Srf> {
     common(&mut u0, &mut u1)?;
     let mut s = Srf {
-        du: u0.deg().ok_or_else(err)?,
+        du: u0.deg().ok_or_else(out_of_table)?,
         dv: 1,
         ub: u0.brk.clone(),
         vb: vec![0.0, 1.0],
@@ -1389,8 +1435,8 @@ fn tensor_linear(mut u0: Crv, mut u1: Crv) -> Result<Srf> {
 /// `c(u)` times the scalar curve `f(v)` (its first coordinate).
 fn tensor_scalar(c: &Crv, f: &Crv) -> Result<Srf> {
     let mut s = Srf {
-        du: c.deg().ok_or_else(err)?,
-        dv: f.deg().ok_or_else(err)?,
+        du: c.deg().ok_or_else(out_of_table)?,
+        dv: f.deg().ok_or_else(out_of_table)?,
         ub: c.brk.clone(),
         vb: f.brk.clone(),
         p: Vec::new(),
@@ -1480,10 +1526,10 @@ pub fn coons_chamfer(c0: &Side, c1: &Side, d0: &Side, d1: &Side, tol: f64) -> Re
 /// `sm_MxSrfToBSpline`: the patches as one rational B-spline surface (`SM_ERR` where a
 /// weight is not positive).
 pub fn srf_to_bspline(srf: &Srf) -> Result<BSplineSurface> {
-    let nus = srf.ub.len().checked_sub(1).ok_or_else(err)?;
-    let nvs = srf.vb.len().checked_sub(1).ok_or_else(err)?;
+    let nus = srf.ub.len().checked_sub(1).ok_or_else(out_of_table)?;
+    let nvs = srf.vb.len().checked_sub(1).ok_or_else(out_of_table)?;
     if nus == 0 || nvs == 0 || srf.du == 0 || srf.dv == 0 {
-        return Err(err());
+        return Err(out_of_table());
     }
     let n_u = nus * srf.du + 1;
     let n_v = nvs * srf.dv + 1;
@@ -1499,7 +1545,7 @@ pub fn srf_to_bspline(srf: &Srf) -> Result<BSplineSurface> {
             )?;
             if q[3].is_nan() || q[3] <= 0.0 {
                 // Mixed corner: a face's weights are not all positive
-                return Err(err());
+                return Err(unbuildable(MixedStep::FaceWeightNotPositive));
             }
             pts.push(project(q));
             w.push(q[3]);
@@ -1551,7 +1597,7 @@ pub fn piece(c: &Crv, a: f64, b: f64) -> Result<Crv> {
 /// `sm_MxToUV`: a uv curve (B-spline, rational where its weights differ) from a 2D
 /// piecewise Bezier curve.
 pub fn to_uv(c: &Crv) -> Result<BSplineCurve> {
-    let p = c.deg().ok_or_else(err)?;
+    let p = c.deg().ok_or_else(out_of_table)?;
     let mut pts = Vec::new();
     let mut w: Vec<f64> = Vec::new();
     let mut rational = false;

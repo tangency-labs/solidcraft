@@ -3,7 +3,7 @@
 //! in words an agent can act on: which plugin, which grant and how to approve it, or which host
 //! import a `read` entry was refused. A refusal is an error, never a prompt.
 use super::*;
-use crate::schema::plugin::{PluginTool, PluginToolKind};
+use crate::schema::plugin::{PluginTool, PluginToolKind, RunParams};
 
 /// How a person approves a grant a plugin lacks.
 pub const APPROVE: &str = "approve it in Preferences › Plugins by installing the plugin again and allowing it, \
@@ -73,11 +73,10 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
     Ok(Some(match entry.kind {
         EntryKind::Command => {
             let inputs = tool_input(entry);
+            let input = entry_input_schema(inputs.clone());
             json!({"id":id,"label":name,"kind":"command","plugin":plugin,
-                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, expected_design?: token this edit was computed against; as a tool, the inputs alone",
-                "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-                    "approval":{"type":"string"},"params":inputs.clone(),
-                    "expected_design":schemars::schema_for!(craft_plugin::DesignToken).to_value()}},
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, ui_event?: explicit panel action, expected_design?: token this edit was computed against; as a tool, the inputs alone",
+                "input":input,
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }
@@ -98,6 +97,19 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }
     }))
+}
+
+/// Keep the named-call envelope and its typed event definitions in step with plugin.run.
+fn entry_input_schema(inputs: Value) -> Value {
+    let mut schema = crate::schema::input_schema_for::<RunParams>().to_value();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.retain(|name, _| matches!(name.as_str(), "approval" | "params" | "ui_event" | "expected_design"));
+        properties.insert("params".into(), inputs);
+    }
+    if let Some(object) = schema.as_object_mut() {
+        object.insert("required".into(), json!(["approval", "params"]));
+    }
+    schema
 }
 
 /// Hook defaults are resolved by the engine, so the transport accepts omitted keys. All other
@@ -198,7 +210,11 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
             error.into()
         }
         HostError::LimitExceeded { limit } if limit.starts_with("memory exceeds") => missing_grant(id, "memory_mib"),
-        HostError::OverCeiling { limit, .. } if limit == "memory_mib" => missing_grant(id, "memory_mib"),
+        HostError::OverCeiling { limit, requested, .. }
+            if limit == "memory_mib" || (limit == "fuel" && *requested <= craft_plugin::MAX_APPROVED_FUEL) =>
+        {
+            missing_grant(id, limit)
+        }
         _ => error.into(),
     }
 }

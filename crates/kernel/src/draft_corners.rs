@@ -15,24 +15,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::Result;
 
-/// How a tapered extrusion closes the gap its offset opens at a sharp corner of the profile.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DraftCorner {
-    /// Each wall continues as itself (a line's plane, an arc's cone) until it meets its
-    /// neighbour: every section is the profile's curves offset and continued as themselves.
-    #[default]
-    PreserveCurvature,
-    /// Each offset curve continues straight along its end tangent (a flat face each side).
-    Tangent,
-    /// An arc about the corner (a cone about it).
-    Round,
-}
-
-impl DraftCorner {
-    /// The three rules, in the order a dialog offers them.
-    pub const ALL: [DraftCorner; 3] = [DraftCorner::PreserveCurvature, DraftCorner::Tangent, DraftCorner::Round];
-}
+pub use solidcraft_kernel_api::DraftCorner;
 
 /// Why a rule cannot close a corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

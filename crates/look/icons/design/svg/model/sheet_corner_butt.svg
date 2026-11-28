@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Sheet Corner Butt</title>
+  <path d="M42 10L54 10L54 22L42 22Z" fill="none" stroke="#6f879c" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 6"/>
+  <path d="M10 10L32 10L32 22L10 22Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42 32L54 32L54 54L42 54Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

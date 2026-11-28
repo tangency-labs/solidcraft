@@ -449,9 +449,11 @@ pub(super) fn generator_crosses_plane(
     })
 }
 
-/// Bounds the whole output curve using the same control-net enclosure as patches.
-pub(super) fn curve_plane_deviation(curve: &Curve, plane: &Plane) -> Option<f64> {
-    plane_deviation(&net_points(curve)?, plane)
+impl Plane {
+    /// Bounds the distance of the whole trimmed curve to this plane using its control net.
+    pub(in crate::surface) fn curve_deviation(&self, curve: &Curve) -> Option<f64> {
+        plane_deviation(&net_points(curve)?, self)
+    }
 }
 
 /// Bounds the whole output curve's distance to the bounded source extrusion.

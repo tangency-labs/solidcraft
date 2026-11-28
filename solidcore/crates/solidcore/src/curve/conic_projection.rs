@@ -433,6 +433,48 @@ pub fn circle_plane(points: &[Vec3]) -> Option<Frame> {
     })
 }
 
+/// Whether `pieces` are one chain of arcs on one circle: the same centre and radius, each
+/// starting where the one before ends (to angle roundoff), all turning one way, at most a full
+/// turn in all. [`project_arcs`] takes its input as such a chain: two arcs over the same half
+/// turn sum to a full turn but cover only half the circle.
+pub fn one_arc_chain(pieces: &[PlanarPiece]) -> bool {
+    let tau = std::f64::consts::TAU;
+    let roundoff = f64::EPSILON * 64.0 * tau;
+    let mut first: Option<(Vec2, f64, f64)> = None;
+    let mut end = 0.0;
+    let mut total = 0.0_f64;
+    for piece in pieces {
+        let PlanarPiece::Seg(Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        }) = *piece
+        else {
+            return false;
+        };
+        if !(start.is_finite() && sweep.is_finite() && sweep != 0.0) {
+            return false;
+        }
+        match first {
+            None => first = Some((center, radius, sweep.signum())),
+            Some((c, r, turn)) => {
+                let gap = (start - end).rem_euclid(tau);
+                if center != c
+                    || radius != r
+                    || sweep.signum() != turn
+                    || gap.min(tau - gap) > roundoff
+                {
+                    return false;
+                }
+            }
+        }
+        end = start + sweep;
+        total += sweep;
+    }
+    first.is_some() && total.abs() <= tau + roundoff
+}
+
 /// Project certified circular arcs as ellipses or rational quadratic conics.
 /// Only the certificate's centre, radius and selected sweep determine the result.
 pub fn project_arcs(

@@ -7,7 +7,8 @@
 //! The marker and navigation cube artwork below is not command icons; SolidCraft's code-drawn
 //! glyphs (`solidcraft_look::glyphs`) are installed with its look.
 pub use crate::ui_kit::icons::{
-    clear_texture_cache, paint_accented, paint_app_bar, paint_danger, paint_icon, paint_ink, paint_ink_flipped, paint_ink_mirrored, paint_on,
+    clear_texture_cache, paint_accented, paint_app_bar, paint_danger, paint_greyscale, paint_icon, paint_ink, paint_ink_flipped, paint_ink_mirrored,
+    paint_on,
 };
 
 pub(crate) mod markers;
@@ -260,6 +261,32 @@ mod tests {
                 output.textures_delta.clear();
             }
             assert_ne!(textures[&false], textures[&true], "matching Look values must not mix ordinary gray bins with shaded red bins");
+        }
+    }
+
+    /// Verifies that greyscale finish converts all color channels equally to desaturate artwork pixels.
+    #[test]
+    fn greyscale_finish_desaturates_artwork_pixels() {
+        let ctx = crate::fonts::test_context();
+        let draw = |ui: &mut egui::Ui| {
+            let r = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(32.0, 32.0));
+            paint_greyscale(ui.painter(), r, "extrude", None, 1.0);
+        };
+        let mut out = ctx.run_ui(egui::RawInput::default(), draw);
+        let pixels = out
+            .textures_delta
+            .set
+            .values()
+            .flat_map(|deltas| deltas.iter().map(|d| &d.image))
+            .find_map(|data| match data {
+                egui::ImageData::Color(image) if image.size == [32, 32] => Some(image.pixels.clone()),
+                _ => None,
+            })
+            .expect("greyscale icon texture");
+        out.textures_delta.clear();
+        for pixel in &pixels {
+            assert_eq!(pixel.r(), pixel.g(), "greyscale pixels must have equal red and green channels");
+            assert_eq!(pixel.g(), pixel.b(), "greyscale pixels must have equal green and blue channels");
         }
     }
 }

@@ -14,7 +14,9 @@
 //! net's bound is within the tenth of `tol` the curve is held to (#2510). An end goes onto
 //! the crossing by the least 3D step, not `OntoPlane`'s least uv step, and the curve ends
 //! there, not at the given point (#2907): a point within `tol` of both surfaces is what the
-//! vertices are, and the curve is held to the crossing itself. Not the fork's: the march's
+//! vertices are, and the curve is held to the crossing itself. Not the fork's (#15767): a start
+//! tangent the heading orients out through an open side of the domain is reversed into it.
+//! Not the fork's: the march's
 //! last step, onto the end, takes no turn test, so one turning past a right angle leaves the
 //! end's tangent reversed, and a span ending on it can't be fitted however often it is split
 //! (the goldens' generated `blend.fillet_geom_p2` case `gen0177`, at `ang_tol` 1.2, was fitted
@@ -415,7 +417,35 @@ pub fn surface_plane_curve(
     };
 
     // the stations: from the start, along the level line, to the end
-    let (t0, r0) = tr.tangent(start_uv, start_dir.unwrap_or(end - start))?;
+    let (mut t0, mut r0) = tr.tangent(start_uv, start_dir.unwrap_or(end - start))?;
+    // Not the fork's (#15767): a curve on the surface between two points cannot start by
+    // leaving its domain. From a start on an open side of the domain, a tangent oriented by
+    // the heading (the chord to the end, where none is given) that leaves through that side
+    // by more than `ang_tol` is the level line's other branch: the curve takes the one into
+    // the domain. The chord heads the wrong way where the curve turns through more than a
+    // half turn, as a round's end rib does where the round nearly fills the end face.
+    let leaves = |rate: Point2| {
+        let (lo, hi) = (dom.min(), dom.max());
+        let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
+        let (pu, pv) = (pad(lo.x, hi.x), pad(lo.y, hi.y));
+        let out = |at: f64, lo: f64, hi: f64, pad: f64, rate: f64| {
+            (at <= lo + pad && rate < 0.0) || (at >= hi - pad && rate > 0.0)
+        };
+        (
+            !closed_u && out(start_uv.x, lo.x, hi.x, pu, rate.x),
+            !closed_v && out(start_uv.y, lo.y, hi.y, pv, rate.y),
+        )
+    };
+    let (_, su0, sv0, _) = tr.eval(start_uv)?;
+    let steep = |rate: Point2, (out_u, out_v): (bool, bool)| {
+        (out_u && (rate.x * su0.length()).abs() > ang_tol.sin())
+            || (out_v && (rate.y * sv0.length()).abs() > ang_tol.sin())
+    };
+    let flipped = Point2::new(-r0.x, -r0.y);
+    if steep(r0, leaves(r0)) && leaves(flipped) == (false, false) {
+        t0 = -t0;
+        r0 = flipped;
+    }
     let mut last = Station {
         uv: start_uv,
         x: start_x,
@@ -864,6 +894,64 @@ mod tests {
         assert!(first.z.abs() <= 1.0e-11, "{first:?}");
         assert!((first.y + 0.01 * first.x).abs() <= 1.0e-11, "{first:?}");
         assert!(first.distance(start) <= 3.0e-6, "{}", first.distance(start));
+    }
+
+    /// #15767: a curve turning through more than a half turn between its ends. The unit
+    /// cylinder about z over 0 to 270 degrees, cut by the plane z = 10 from the arc's start
+    /// (1, 0, 10) to its end (0, -1, 10). The chord to the end, (-1, -1, 0), heads against the
+    /// arc's start tangent (0, 1, 0), so the heading alone starts the trace out of the domain,
+    /// through the 0-degree side. The curve on the surface is the 270-degree arc: every point
+    /// lies at distance 1 from the axis on z = 10, and it passes (0, 1, 10) and (-1, 0, 10).
+    /// The trace holds the curve to a tenth of `tol` (1e-7) of the exact one, so each sampled
+    /// point is within that of the circle; the arc's extreme points are within it too.
+    #[test]
+    fn a_curve_turning_more_than_a_half_turn_starts_into_the_domain() {
+        let k = Kernel::new(&KernelOptions::default());
+        let mut cyl = crate::surface::cone::Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            1.0,
+            0.0,
+            270.0,
+            20.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let surf = Surface::from(cyl);
+        let domain = Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0);
+        let cutter = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 10.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let (start, end) = (Point3::new(1.0, 0.0, 10.0), Point3::new(0.0, -1.0, 10.0));
+        let tol = 1.0e-6;
+        let c = surface_plane_curve(&k, &surf, &cutter, start, end, None, tol, 0.1).unwrap();
+        let ivl = c.curve_3d.natural_interval();
+        let (mut max_y, mut min_x) = (f64::MIN, f64::MAX);
+        for i in 0..=400 {
+            let p = c
+                .curve_3d
+                .evaluate_point(
+                    &k,
+                    ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 400.0,
+                )
+                .unwrap();
+            let radial = (p.x * p.x + p.y * p.y).sqrt();
+            assert!((radial - 1.0).abs() <= 0.1 * tol, "{i}: {p:?}");
+            assert!((p.z - 10.0).abs() <= 0.1 * tol, "{i}: {p:?}");
+            max_y = max_y.max(p.y);
+            min_x = min_x.min(p.x);
+        }
+        // the 401 samples of a 270-degree arc are 0.0118 rad apart: the nearest lies within
+        // 1 - cos(0.0059) = 1.8e-5 of an extreme point's coordinate
+        assert!(max_y >= 1.0 - 2.0e-5, "{max_y}");
+        assert!(min_x <= -1.0 + 2.0e-5, "{min_x}");
     }
 
     /// A plane goes on past the face it was made for: an end on the plane `z = 0` but past its

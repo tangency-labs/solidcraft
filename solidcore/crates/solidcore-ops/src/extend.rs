@@ -13,8 +13,14 @@
 //! sequences the kernel's calls and carries the faces' and sides' attributes onto the new sheet;
 //! it computes nothing.
 //!
+//! A face's extension comes back with its analytic kind where it has one
+//! ([`Surface::copy_and_add_analytics`]: a B-spline that is a plane is made a plane).
+//!
 //! A face on a surface that goes on past its trims (a plane: [`Surface::reaches_past_trims`])
-//! is extended by growing its trim within it instead, as the kernel's
+//! that is its surface's whole box grows its surface as any face does: the plane widened. Any
+//! other such face (one with holes, or trimmed within its plane), or one whose widening is
+//! refused (but for a distance below the side's resolution, which no route extends), is
+//! extended by growing its trim within the surface instead, as the kernel's
 //! [`extend_trim`] makes it: the edge moved outward by the distance, its neighbours carried
 //! along their tangents to meet it, its holes kept; every continuation is the plane itself.
 //!
@@ -250,9 +256,11 @@ fn extension(
 /// the attributes of the faces and sides they continue, each face facing the way it did.
 ///
 /// - A sheet of one face: the edge all of one side of the face, its surface's whole box; the
-///   face continued on its surface extended. A face on a surface that goes on past its trims (a
-///   plane) is extended by growing its trim ([`extend_trim`]: the edge, on its outer loop, moved
-///   `distance` outward, its neighbours carried along their tangents), the same for every `how`.
+///   face continued on its surface extended, given back its analytic kind where it has one. A
+///   face on a surface that goes on past its trims (a plane) that is not its surface's whole box,
+///   or has holes, is extended by growing its trim ([`extend_trim`]: the edge, on its outer loop,
+///   moved `distance` outward, its neighbours carried along their tangents), the same for every
+///   `how`; so is a whole one whose surface's widening is refused.
 /// - A sheet of several faces that are the pieces of one surface, as the kernel splits a
 ///   surface into faces ([`one_surface`]: a skin through a section with a double knot is two
 ///   faces): the edge all of one side of its face, that side on the side of the surface's whole
@@ -260,8 +268,8 @@ fn extension(
 ///   again where the faces were ([`sheet_of`]): the whole side grows, every face along it with
 ///   it, and the faces stay as they were split, their seams one edge each.
 /// - A sheet of plane faces that merge into one plane face ([`merged_faces`]: a flat sheet the
-///   skin split into faces): that face, the edge the one it is now part of, its trim grown as a
-///   one-face plane's.
+///   skin split into faces): that face, the edge the one it is now part of, extended as a
+///   one-face plane is.
 /// - Any other sheet: one side across a curved face and the plane faces beside it
 ///   ([`extended_side`]: an arch on straight legs), the edge the curved face's or a plane's
 ///   beside it; the seams stay one edge each.
@@ -337,26 +345,70 @@ fn one_face(
     let Some(surf) = face_p2::surface(b, f)?.cloned() else {
         return Ok(Err(Error::Unsupported("a face with no surface")));
     };
-    // a surface that goes on past its trims (a plane) grows the trim within itself, the
-    // same for every continuation; its face's holes are kept
-    if surf.reaches_past_trims() {
-        // the trim grows past an edge of its outer loop, not of a hole
-        if !face_p4::edges(b, f, None, true, None)?.contains(&picked) {
-            return Ok(Err(Error::Argument));
-        }
-        let made = match extend_trim(k, b, f, picked, distance) {
-            Ok(made) => made,
-            Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
-            Err(e) => return Ok(Err(refused(e))),
-        };
-        let mut r = made.brep;
-        copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(made.face))?;
-        for (from, to) in made.edges {
-            copy_attributes(b, EntityRef::Edge(from), &mut r, EntityRef::Edge(to))?;
-        }
-        return finish(k, r, Expect::FACES);
+    let holed = face_p2::loops(b, f, false, None)?.len() != 1;
+    let dom = face_p2::uv_domain(b, f)?;
+    if !surf.reaches_past_trims() {
+        return surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance);
     }
-    if face_p2::loops(b, f, false, None)?.len() != 1 {
+    // a face on a surface that goes on past its trims (a plane) grows the surface as any face
+    // does when it is the surface's whole box (the plane widened); otherwise, or where that is
+    // refused, it grows its trim within the surface, the same for every continuation, its holes
+    // kept
+    if !holed && surf.is_whole_box(k, &dom)? {
+        // a distance below the side's resolution is the answer whatever the route: there is no
+        // extension that short (the trim's route would only refuse it otherwise)
+        if let r @ (Ok(_) | Err(Error::NoEffect)) =
+            surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance)?
+        {
+            return Ok(r);
+        }
+    }
+    trim_grown(k, b, f, picked, distance)
+}
+
+/// [`one_face`] on a plane face by its trim ([`extend_trim`]): the edge, on its outer loop,
+/// moved `distance` outward, its neighbours carried along their tangents.
+fn trim_grown(
+    k: &mut Kernel,
+    b: &Brep,
+    f: FaceId,
+    picked: EdgeId,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    // the trim grows past an edge of its outer loop, not of a hole
+    if !face_p4::edges(b, f, None, true, None)?.contains(&picked) {
+        return Ok(Err(Error::Argument));
+    }
+    let made = match extend_trim(k, b, f, picked, distance) {
+        Ok(made) => made,
+        Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+        Err(e) => return Ok(Err(refused(e))),
+    };
+    let mut r = made.brep;
+    copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(made.face))?;
+    for (from, to) in made.edges {
+        copy_attributes(b, EntityRef::Edge(from), &mut r, EntityRef::Edge(to))?;
+    }
+    finish(k, r, Expect::FACES)
+}
+
+/// [`one_face`] by its surface `surf` (the face's box `dom`) extended past the side `picked`
+/// runs along: the face its surface's whole box, without holes; the extension given back its
+/// analytic kind where it has one ([`Surface::copy_and_add_analytics`]: a B-spline that is a
+/// plane, a plane).
+#[allow(clippy::too_many_arguments)]
+fn surface_grown(
+    k: &mut Kernel,
+    b: &Brep,
+    f: FaceId,
+    surf: &Surface,
+    dom: &Extent2d,
+    holed: bool,
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    if holed {
         return Ok(Err(Error::Unsupported("a face with holes")));
     }
     let edges = face_p4::edges(b, f, None, false, None)?;
@@ -364,36 +416,36 @@ fn one_face(
         return Ok(Err(Error::Argument));
     }
     let on = near(b);
-    let dom = face_p2::uv_domain(b, f)?;
     // the face is its surface's whole box, as the kernel's extension decides it
-    if !surf.is_whole_box(k, &dom)? {
+    if !surf.is_whole_box(k, dom)? {
         return Ok(Err(Error::Unsupported(
             "a face that is not its surface's whole box",
         )));
     }
-    let grow = match grown_side(k, b, &surf, &dom, &edges, picked, on)? {
+    let grow = match grown_side(k, b, surf, dom, &edges, picked, on)? {
         Ok(s) => s,
         Err(e) => return Ok(Err(e)),
     };
-    let (grown, mapped) = match extension(surf.extended_by_distance(k, &dom, grow, how, distance))?
-    {
+    let (grown, mapped) = match extension(surf.extended_by_distance(k, dom, grow, how, distance))? {
         Ok(made) => made,
         Err(e) => return Ok(Err(e)),
     };
+    // the extension's sides are found on it as the kernel made it, whatever kind it is given
+    let grown_dom = grown.natural_uv_domain_with_nurb(k)?;
     let grown_eval = grown.copy(k)?;
+    let grown = grown.copy_and_add_analytics(k)?;
     let (mut r, nf) = sheet_on(k, grown, b.tolerance())?;
     // the face and each side stand for the face and side they continue
     copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(nf))?;
     let made = face_p4::edges(&r, nf, None, false, None)?;
-    let rdom = face_p2::uv_domain(&r, nf)?;
     let was = Sides {
         b,
-        surf: &surf,
-        dom: &dom,
+        surf,
+        dom,
         edges: &edges,
         on,
     };
-    carry_sides(k, &was, &mut r, (&grown_eval, &rdom, &made), mapped)?;
+    carry_sides(k, &was, &mut r, (&grown_eval, &grown_dom, &made), mapped)?;
     // the new face faces the way the old one did
     if let (Some(was), Some(now)) = (upward(b, f)?, upward(&r, nf)?) {
         if was != now {
@@ -620,7 +672,16 @@ mod tests {
         // the straight side at angle 90, through (0, 10, 10)
         let side = edge_at(&sheet, &order, [0.0, 10.0, 10.0]);
         let out = extend_sheet(&sheet, &order, side, 3.0, Continuation::Tangent).unwrap();
-        assert!(matches!(step_box(&out).0, SurfaceKind::BSpline(_)));
+        // the kernel's Tangent run-off round the axis is the quarter's B-spline with its end
+        // span mirrored, straight along the axis; given back its analytic kind (as SolidCraft's
+        // Extend Sheet does) it is that spline section extruded along the axis, on the same
+        // parameters, not the cylinder: the mirrored arc turns about another axis
+        let kind = step_box(&out).0;
+        assert!(
+            matches!(kind, SurfaceKind::SurfOfExtrusion(_)),
+            "{:?}",
+            std::mem::discriminant(&kind)
+        );
     }
 
     /// A body whose edge list is not in id order (as an importer may leave it): the record's

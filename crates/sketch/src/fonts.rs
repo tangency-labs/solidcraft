@@ -23,8 +23,16 @@ const MAX_DIR_DEPTH: usize = 6;
 /// Font files kept in memory once read, and the most bytes they may add up to.
 const MAX_CACHED_FONTS: usize = 16;
 const MAX_CACHED_BYTES: usize = 128 << 20;
-/// Longest font name or path accepted.
+/// Longest font name accepted.
 const MAX_FONT_NAME: usize = 1024;
+/// Longest font file path accepted: a design's fonts are kept whole against its folder, which
+/// can itself be long.
+const MAX_FONT_PATH: usize = 4096;
+
+/// Whether `name` is longer than a font name, or for a file, a font file path, may be.
+fn too_long(name: &str) -> bool {
+    name.len() > if is_path(name) { MAX_FONT_PATH } else { MAX_FONT_NAME }
+}
 
 /// Asked before a font file named by its path is read. A design names such files, and an
 /// agent's folders (`vfs::PathScope`) live above this crate; the first check set stays.
@@ -76,7 +84,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
     if name.is_empty() || normalize(name) == normalize(DEFAULT_FONT_FAMILY) {
         return Ok(FontData { bytes: FontBytes::Builtin, index: 0, weight: None });
     }
-    if name.len() > MAX_FONT_NAME {
+    if too_long(name) {
         return Err(SketchError::Invalid("the font name is too long".into()));
     }
     if is_path(name) {
@@ -98,7 +106,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
 /// The file a font name means (`~` and `%VAR%` expanded), or `None` for a family name.
 pub fn font_file_path(name: &str) -> Option<PathBuf> {
     let name = name.trim();
-    (name.len() <= MAX_FONT_NAME && is_path(name)).then(|| expand(name))
+    (!too_long(name) && is_path(name)).then(|| expand(name))
 }
 
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
@@ -220,7 +228,7 @@ pub fn families_in(dirs: &[PathBuf]) -> Vec<String> {
         for family in file_families(&path) {
             let key = normalize(&family);
             // Names starting with a dot are a system's private fonts.
-            if !key.is_empty() && !family.starts_with('.') && seen.insert(key) {
+            if !key.is_empty() && !family.starts_with('.') && check_family(&family).is_ok() && seen.insert(key) {
                 out.push(family);
             }
         }
@@ -235,7 +243,11 @@ const MAX_NAME_TABLE: u32 = 1 << 20;
 /// The family names of each face of a font file, from its name tables alone.
 fn file_families(path: &Path) -> Vec<String> {
     let names = face_tables(path, b"name", MAX_NAME_TABLE);
-    names.iter().filter_map(|face| ttf_parser::name::Table::parse(face.table.as_deref()?).and_then(|table| family_name(&table))).collect()
+    names
+        .iter()
+        .filter(|face| face.outlines)
+        .filter_map(|face| ttf_parser::name::Table::parse(face.table.as_deref()?).and_then(|table| family_name(&table)))
+        .collect()
 }
 
 /// One table of one face of a font file, and what its table directory says of the face.
@@ -473,7 +485,7 @@ fn override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsStri
     }
 }
 
-/// The folders searched for installed fonts, in order: none in the browser, which has only the
+/// The folders and registry-named files searched for installed fonts, in order: none in the browser, which has only the
 /// font the web app fetches ([`fallback::provide_web_font`]).
 pub fn font_dirs() -> Vec<PathBuf> {
     if cfg!(target_arch = "wasm32") {
@@ -508,15 +520,87 @@ pub fn font_dirs() -> Vec<PathBuf> {
             dirs.push(PathBuf::from("/run/host/user-fonts"));
         }
     }
+    #[cfg(windows)]
+    dirs.extend(registry_font_files().iter().cloned());
     dirs
 }
 
-/// TrueType/OpenType files under `dirs` (bounded in depth and count): in `dirs`' order, and sorted
+/// Interpret Windows registry text without relying on the host platform's path syntax, so the
+/// mapping is testable on every platform. Relative values are file names in Windows' Fonts
+/// folder; rooted drive paths and UNC files keep their location. Never traverse a relative path.
+#[cfg(any(windows, test))]
+fn registry_font_path(value: &str, fonts: &Path) -> Option<PathBuf> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > MAX_FONT_NAME || value.chars().any(char::is_control) || !has_font_extension(value) {
+        return None;
+    }
+    let drive = value.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && value.as_bytes().get(1) == Some(&b':')
+        && value.as_bytes().get(2).is_some_and(|b| matches!(b, b'/' | b'\\'));
+    if drive || value.starts_with(r"\\") || value.starts_with("//") {
+        Some(PathBuf::from(value))
+    } else if !value.contains(['/', '\\', ':']) {
+        Some(fonts.join(value))
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn registry_font_files() -> &'static [PathBuf] {
+    static FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    FILES.get_or_init(read_registry_font_files)
+}
+
+#[cfg(windows)]
+fn read_registry_font_files() -> Vec<PathBuf> {
+    use winreg::{
+        RegKey,
+        enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE},
+        types::FromRegValue,
+    };
+    let fonts = std::env::var_os("WINDIR")
+        .or_else(|| std::env::var_os("SystemRoot"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("Fonts");
+    let mut files = Vec::new();
+    for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let Ok(key) = RegKey::predef(root).open_subkey(r"Software\Microsoft\Windows NT\CurrentVersion\Fonts") else { continue };
+        for (_, value) in key.enum_values().take(MAX_FONT_FILES).flatten() {
+            let Ok(value) = String::from_reg_value(&value) else { continue };
+            if let Some(path) = registry_font_path(&value, &fonts) {
+                files.push(path);
+                if files.len() >= MAX_FONT_FILES {
+                    break;
+                }
+            }
+        }
+        if files.len() >= MAX_FONT_FILES {
+            break;
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// TrueType/OpenType files under `dirs`, including explicitly named registry files (bounded in depth and count): in `dirs`' order, and sorted
 /// within each folder, so the result doesn't depend on how the system lists a folder.
 fn font_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let mut todo: Vec<(PathBuf, usize)> = dirs.iter().rev().map(|d| (d.clone(), 0)).collect();
     while let Some((dir, depth)) = todo.pop() {
+        if dir.is_file() {
+            if has_font_extension(&dir.to_string_lossy()) && seen.insert(dir.clone()) {
+                out.push(dir);
+                if out.len() >= MAX_FONT_FILES {
+                    return out;
+                }
+            }
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         let (mut files, mut sub) = (Vec::new(), Vec::new());
         for e in entries.flatten() {
@@ -532,6 +616,9 @@ fn font_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
         }
         files.sort();
         for path in files {
+            if !seen.insert(path.clone()) {
+                continue;
+            }
             out.push(path);
             if out.len() >= MAX_FONT_FILES {
                 return out;
@@ -585,6 +672,22 @@ mod tests {
         let dirs = font_dirs();
         for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
             assert!(dirs.contains(&PathBuf::from(dir)), "missing {dir}");
+        }
+    }
+
+    #[test]
+    fn registry_font_values_map_to_absolute_files_or_the_fonts_folder() {
+        let folder = Path::new("C:/Windows/Fonts");
+        for (value, expected) in [
+            ("celtic.ttf", "C:/Windows/Fonts/celtic.ttf"),
+            ("D:/My Fonts/Celtic.otf", "D:/My Fonts/Celtic.otf"),
+            (r"D:\My Fonts\Celtic.otf", r"D:\My Fonts\Celtic.otf"),
+            (r"\\server\fonts\Celtic.ttc", r"\\server\fonts\Celtic.ttc"),
+        ] {
+            assert_eq!(registry_font_path(value, folder), Some(PathBuf::from(expected)), "{value}");
+        }
+        for value in ["", "not-a-font.txt", "../escape.ttf", r"relative\font.ttf", "C:relative.ttf", "bad\0.ttf"] {
+            assert_eq!(registry_font_path(value, folder), None, "{value:?}");
         }
     }
 
@@ -648,7 +751,10 @@ mod tests {
             assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
         }
         assert_eq!(font_file_path("DejaVu Sans"), None);
-        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
+        // A font file path may be longer than a font name, up to MAX_FONT_PATH.
+        assert!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))).is_some());
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_PATH))), None);
+        assert_eq!(font_file_path(&"a".repeat(MAX_FONT_NAME + 1)), None);
     }
 
     #[test]

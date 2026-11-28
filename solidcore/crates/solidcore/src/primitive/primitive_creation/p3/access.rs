@@ -11,6 +11,7 @@
 
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::Curve;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
@@ -116,9 +117,9 @@ pub trait PrimitiveAccess: SweepAccess {
         let input = curve
             .as_ref()
             .ok_or_else(|| {
-                SolidError::primitive_missing(
+                SolidError::primitive(
                     "primitive::primitive_creation::p3::wire",
-                    "the wire's curve",
+                    PrimitiveFailure::NoCurveGiven,
                 )
             })?
             .clone();

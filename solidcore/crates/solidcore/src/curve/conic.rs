@@ -988,6 +988,31 @@ mod tests {
     }
 
     #[test]
+    fn circle_finds_all_four_crossings_with_a_nearly_tangent_ellipse() {
+        let circle = Conic::new(ConicType::Ellipse, 1.0, 1.0);
+        let (a, b, h) = (0.5, 0.71, 0.49999);
+        let mut ellipse = Conic::new(ConicType::Ellipse, a, b);
+        ellipse.transform_2d(0.0, Vec2::new(h, 0.0));
+
+        // Substitute y^2 = 1 - x^2 into (x - h)^2/a^2 + y^2/b^2 = 1.
+        // Both solutions for x are inside the circle, each with two opposite y values.
+        let aa = b * b - a * a;
+        let half_b = -h * b * b;
+        let cc = b * b * h * h + a * a * (1.0 - b * b);
+        let delta = (half_b * half_b - aa * cc).sqrt();
+        let hits = circle.intersect_conic(&ellipse, 1e-7).unwrap();
+        assert_eq!(hits.len(), 4);
+        for x in [(-half_b - delta) / aa, (-half_b + delta) / aa] {
+            let y = (1.0 - x * x).sqrt();
+            for expected in [Vec3::new(x, y, 0.0), Vec3::new(x, -y, 0.0)] {
+                assert!(hits
+                    .iter()
+                    .any(|hit| circle.evaluate_point(hit.param).distance(expected) < 1e-9));
+            }
+        }
+    }
+
+    #[test]
     fn knots_kind_eq() {
         let c = Conic::new(ConicType::Ellipse, 2.0, 1.0);
         assert_eq!(c.knots(None), (vec![-1.0, 3.0], vec![3, 3]));

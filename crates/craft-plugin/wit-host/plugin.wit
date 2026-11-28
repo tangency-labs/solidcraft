@@ -1,0 +1,13 @@
+package craft:host@0.1.0;
+
+// Read-only negotiation, independent of the command/importer API version. Existing worlds
+// and interfaces remain unchanged. A plugin imports this with capability `host@0.1`.
+interface capabilities {
+    // Only requested capabilities this host supports, required first, then optional, in
+    // manifest order and with the requested version spelling. These are not file grants.
+    granted: func() -> list<string>;
+}
+
+world host-query {
+    import capabilities;
+}

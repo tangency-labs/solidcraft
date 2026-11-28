@@ -21,3 +21,8 @@ serde_json = { workspace = true }
 solidcraft-gpu = { workspace = true }
 # Synthetic reference pictures for the compare_picture test.
 image = { workspace = true }
+# A temporary folder per test, removed when the test ends, a failure included.
+tempfile = "3.27"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

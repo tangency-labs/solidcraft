@@ -309,6 +309,10 @@ impl LayoutService {
     pub fn registry(&self) -> &PanelRegistry {
         &self.registry
     }
+    /// Register a newly discovered panel kind without changing any placement.
+    pub fn register_panel(&mut self, spec: PanelSpec) -> PanelResult<()> {
+        self.registry.register(spec)
+    }
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -1418,13 +1422,16 @@ fn apply(
             if layout.section(&section)?.location.zone() != Zone::Bottom {
                 return Err(error(Rule::Placement, "row height requires a Bottom section"));
             }
-            let (min, max) = bottom_height_bounds(layout, registry)?;
+            // A card with no tab available here keeps its own height and doesn't bound the row.
+            let shown = |s: &Section| s.location.zone() == Zone::Bottom && presented_tab(s, availability).is_some();
+            let (min, max) = bottom_height_bounds_of(layout, registry, shown)?;
             if !height.is_finite() || height <= 0.0 || height > MAX_LOGICAL || height < min || height > max {
                 return Err(error(Rule::Bounds, "Bottom height outside common row bounds"));
             }
-            let members: BTreeSet<_> =
-                layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom).flat_map(|s| s.tabs.iter().cloned()).collect();
-            for target in layout.sections.iter_mut().filter(|s| s.location.zone() == Zone::Bottom) {
+            // A height in a gap between the admitted ones snaps to the nearer.
+            let height = resolve_bottom_height(&bottom_height_ranges(layout, registry, shown)?, height).unwrap_or(height);
+            let members: BTreeSet<_> = layout.sections.iter().filter(|s| shown(s)).flat_map(|s| s.tabs.iter().cloned()).collect();
+            for target in layout.sections.iter_mut().filter(|s| shown(s)) {
                 target.size.height = height;
             }
             for panel in &mut layout.instances {
@@ -1677,10 +1684,16 @@ fn apply(
 
 fn normalize_fixed_bottom_rows(layout: &mut Layout, registry: &PanelRegistry) -> PanelResult<()> {
     let mut fixed = Vec::new();
+    let mut open = Vec::new();
     for section in layout.sections.iter().filter(|section| section.location.zone() == Zone::Bottom) {
         let mut declared = false;
         for instance in &section.tabs {
-            declared |= registry.get(&layout.instance(instance)?.kind)?.fixed_bottom_height.is_some();
+            let spec = registry.get(&layout.instance(instance)?.kind)?;
+            declared |= spec.fixed_bottom_height.is_some();
+            if spec.bottom_always_open {
+                // Arriving from another zone, the card starts at its smallest height.
+                open.push((section.id.clone(), layout.instance(instance)?.memory.location.zone() != Zone::Bottom));
+            }
         }
         if declared {
             let (min, _) = tab_bounds(layout, registry, section)?;
@@ -1692,6 +1705,15 @@ fn normalize_fixed_bottom_rows(layout: &mut Layout, registry: &PanelRegistry) ->
         section.size.height = height;
         section.collapsed = false;
     }
+    for (id, arrived) in open {
+        let smallest = bottom_height_ranges(layout, registry, |s| s.id == id)?.first().map(|range| range.0);
+        let section = section_mut(layout, &id)?;
+        section.collapsed = false;
+        if let Some(height) = smallest.filter(|_| arrived) {
+            section.size.height = height;
+        }
+    }
+    normalize_bottom_heights(layout, registry)?;
     Ok(())
 }
 

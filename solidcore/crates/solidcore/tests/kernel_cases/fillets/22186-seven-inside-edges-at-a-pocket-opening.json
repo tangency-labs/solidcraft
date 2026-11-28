@@ -1,0 +1,210 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b0"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  70.0,
+                  65.0,
+                  5.0
+                ],
+                [
+                  5.0,
+                  65.0,
+                  5.0
+                ]
+              ],
+              "index": 49
+            },
+            {
+              "at": [
+                [
+                  70.0,
+                  65.0,
+                  70.0
+                ],
+                [
+                  5.0,
+                  65.0,
+                  70.0
+                ]
+              ],
+              "index": 51
+            },
+            {
+              "at": [
+                [
+                  5.0,
+                  65.0,
+                  5.0
+                ],
+                [
+                  5.0,
+                  65.0,
+                  70.0
+                ]
+              ],
+              "index": 52
+            },
+            {
+              "at": [
+                [
+                  70.0,
+                  65.0,
+                  5.0
+                ],
+                [
+                  70.0,
+                  65.0,
+                  70.0
+                ]
+              ],
+              "index": 53
+            },
+            {
+              "at": [
+                [
+                  5.0,
+                  65.0,
+                  5.0
+                ],
+                [
+                  5.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 50
+            },
+            {
+              "at": [
+                [
+                  5.0,
+                  65.0,
+                  70.0
+                ],
+                [
+                  5.0,
+                  0.0,
+                  70.0
+                ]
+              ],
+              "index": 54
+            },
+            {
+              "at": [
+                [
+                  70.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  70.0,
+                  65.0,
+                  5.0
+                ]
+              ],
+              "index": 48
+            }
+          ],
+          "points": [
+            [
+              37.5,
+              65,
+              5
+            ],
+            [
+              37.5,
+              65,
+              70
+            ],
+            [
+              5,
+              65,
+              37.5
+            ],
+            [
+              70,
+              65,
+              37.5
+            ],
+            [
+              5,
+              32.5,
+              5
+            ],
+            [
+              5,
+              32.5,
+              70
+            ],
+            [
+              70,
+              32.5,
+              5
+            ]
+          ],
+          "tolerance": 6.49619052838329
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "22186-seven-inside-edges-at-a-pocket-opening",
+  "expected": {
+    "body_count": 1,
+    "method": "Integrate pocket sections parallel to the floor. Let W=H=D=65, r=5 and k=1-pi/4. For height t in [0,r] above the floor each side retreats by s=r-sqrt(2*r*t-t^2). The remaining cut area is (W-2*s)*(H-2*s)-3*k*(r-s)^2: three corners meet a spherical octant and the fourth has a mitre. From r to D the cut area is W*H-3*k*r^2. Relative to the sharp pocket the added volume is 3*k*r^2*(D-r)+2*(W+H)*r^2*k-4*r^3*(5/3-pi/2)+2*k*r^3. Add this to the rounded block volume less W*H*D.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22186"
+    ],
+    "tolerance": {
+      "abs_mm": 0.001
+    },
+    "volume_mm3": 144955.19845369138,
+    "what": "R5 on four floor edges and three longitudinal edges of the 65 mm square pocket in the rounded block."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "22186-seven-inside-edges-at-a-pocket-opening.bodies.json.gz",
+  "result": [
+    {
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22186"
+  ],
+  "ungraded": [],
+  "what": "R5 on four floor edges and three longitudinal edges of the 65 mm square pocket in the rounded block.",
+  "why_not": []
+}

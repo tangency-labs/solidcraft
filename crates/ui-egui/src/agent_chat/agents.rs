@@ -92,6 +92,57 @@ impl Protocol {
             Protocol::Anthropic => Kind::Anthropic,
         }
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn service_tiers(self, base_url: &str, responses: bool) -> &'static [ServiceTier] {
+        match self {
+            Protocol::OpenAi if responses && !is_opencode_go(base_url) => &[ServiceTier::Default, ServiceTier::Fast, ServiceTier::Ultrafast],
+            Protocol::OpenAi if base_url.trim().trim_end_matches('/').eq_ignore_ascii_case(OPENAI_API_BASE) => {
+                &[ServiceTier::Default, ServiceTier::Fast]
+            }
+            _ => &[],
+        }
+    }
+}
+
+const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+
+/// The service tier requested for an endpoint turn. Default lets the provider choose.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ServiceTier {
+    #[default]
+    Default,
+    Fast,
+    Ultrafast,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ServiceTier {
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Fast => "fast",
+            Self::Ultrafast => "ultrafast",
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        solidcraft_ui_text::tr(match self {
+            Self::Default => "ui.agent_chat_service_tier_default",
+            Self::Fast => "ui.agent_chat_service_tier_fast",
+            Self::Ultrafast => "ui.agent_chat_service_tier_ultrafast",
+        })
+    }
+}
+
+/// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
+/// carry `x-opencode-session` (the `zen/go` gateway and the per-model
+/// `inference/go/...` endpoints alike). The model list and connection test are
+/// plain GETs and send none.
+pub(super) fn is_opencode_go(base_url: &str) -> bool {
+    let u = base_url.trim().to_ascii_lowercase();
+    u.starts_with("https://opencode.ai/") && u.contains("/go")
 }
 
 /// An agent the user added.
@@ -118,6 +169,8 @@ pub struct AgentConfig {
     /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
     /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
 }
 
 impl Default for AgentConfig {
@@ -134,6 +187,7 @@ impl Default for AgentConfig {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
         }
     }
 }
@@ -186,6 +240,8 @@ pub struct Entry {
     pub request_timeout_s: u64,
     /// API: the reasoning effort to send, empty for none (trimmed, in length).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
     /// Found installed, but its program didn't start when asked its version: why (#9034).
     pub problem: Option<String>,
     /// Found installed: the command that installs it again.
@@ -208,9 +264,14 @@ impl Entry {
             allow_insecure_http: c.kind == Kind::Api && c.allow_insecure_http,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
             reasoning_effort: reasoning_effort(&c.reasoning_effort),
+            openai_responses: c.kind == Kind::Api && c.openai_responses && !is_opencode_go(&c.base_url),
             problem: None,
             install: "",
         }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn service_tiers(&self) -> &'static [ServiceTier] {
+        self.kind.protocol().map_or(&[], |protocol| protocol.service_tiers(&self.base_url, self.openai_responses))
     }
     /// A short line under the name: the version, the model, the command, or why it can't start.
     pub fn detail(&self) -> String {
@@ -254,6 +315,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
             problem: f.problem.clone(),
             install: f.install,
         }));
@@ -279,6 +341,25 @@ pub fn current(app: &crate::SolveApp) -> Option<Entry> {
 /// The permission mode for an agent: its own, else the global one.
 pub fn mode_for(p: &crate::prefs::Prefs, id: &str) -> Mode {
     p.agent_permissions.get(id).copied().unwrap_or(p.ai_permissions)
+}
+
+/// The permission mode that holds for an agent: the organization's while its policy sets
+/// `ai_permissions` (an agent's own mode doesn't apply then), else [`mode_for`].
+pub fn mode_in_force(app: &crate::SolveApp, id: &str) -> Mode {
+    if app.policy.locks("ai_permissions") { app.preferences.ai_permissions } else { mode_for(&app.preferences, id) }
+}
+
+/// The mode an agent's Permissions row shows: its own choice (None for "Same as above"), or, while
+/// the organization's policy sets `ai_permissions`, the mode in force. The agent's own choice is kept,
+/// unchanged, for when the policy goes.
+pub fn mode_shown(app: &crate::SolveApp, id: &str) -> Option<Mode> {
+    if app.policy.locks("ai_permissions") { Some(app.preferences.ai_permissions) } else { app.preferences.agent_permissions.get(id).copied() }
+}
+
+/// Whether an "always allow" answer lets `agent` use `tool` without asking. None does while the
+/// organization's policy sets `ai_permissions`: the answers are kept for when the policy goes.
+pub fn always_allowed_in_force(app: &crate::SolveApp, agent: &str, tool: &str) -> bool {
+    !app.policy.locks("ai_permissions") && always_allowed(&app.preferences, agent, tool)
 }
 
 /// Whether `tool` is always allowed for `agent`.
@@ -310,7 +391,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
-    ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "OpenAI", base_url: OPENAI_API_BASE },
     ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
     ApiPreset { name: "Google Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
@@ -320,6 +401,8 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
     // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
     ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
+    // AI/ML API lists image, video and speech models too; the picker keeps the chat ones (#20006).
+    ApiPreset { name: "AI/ML API", base_url: "https://api.aimlapi.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
@@ -519,6 +602,13 @@ mod tests {
                 .any(|p| p.name == "UnoRouter" && p.base_url == "https://api.unorouter.com/v1" && key_safe_for(p.base_url))
         );
         assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "UnoRouter"), "this preset uses OpenAI-compatible chat completions");
+        // #20006: AI/ML API, OpenAI-compatible over HTTPS, just before OpenRouter.
+        let at = |name: &str| OPENAI_PRESETS.iter().position(|p| p.name == name);
+        let aimlapi = at("AI/ML API").expect("AI/ML API preset");
+        assert_eq!(OPENAI_PRESETS[aimlapi].base_url, "https://api.aimlapi.com/v1");
+        assert!(key_safe_for(OPENAI_PRESETS[aimlapi].base_url));
+        assert_eq!(Some(aimlapi + 1), at("OpenRouter"));
+        assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "AI/ML API"));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");

@@ -12,7 +12,21 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SplitBodyParams>(),
-        &["body", "body_name", "body_names", "line", "name", "participants", "plane", "sketch", "tool", "tool_faces", "tool_plane", "tool_sheet"],
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "line",
+            "name",
+            "participants",
+            "plane",
+            "sketch",
+            "tool",
+            "tool_bodies",
+            "tool_faces",
+            "tool_plane",
+            "tool_sheet",
+        ],
     );
     assert_keys(
         input_schema_for::<SplitFaceParams>(),
@@ -128,6 +142,14 @@ fn the_check_takes_what_the_schema_allows() {
         ),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}}), true),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_plane": true}), true),
+        (
+            "solid.split_body",
+            &body,
+            json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": ["U", "V"]}),
+            true,
+        ),
+        ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": "U"}), false),
+        ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": [1]}), false),
         ("solid.split_body", &body, json!({"body": "B", "tool_plane": "yes"}), false),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": {"x": 0, "y": 0, "z": 0}, "side": 1}}), true),
         ("solid.split_body", &body, json!({"body": "B", "sketch": 4, "line": "cut", "participants": ["*"]}), true),
@@ -328,4 +350,184 @@ fn split_body_by_faces_refuses_what_does_not_cut_through() {
         assert!(e.contains(says), "{p}: {e}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+/// A 10 mm cube from (0, 0, 5), and three flat surface bodies, each a sketch line on XY extruded
+/// 20 mm up, so each crosses the whole cube: `AtX3` the plane x = 3 (the point [3, 2, 10] is on
+/// it), `AtX8` the plane x = 8, and `AtY6` the plane y = 6. `Away`, the plane x = 50, misses the
+/// cube.
+fn flat_sheets() -> Session {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("solid.box", json!({"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    for (name, a, b) in [("AtX3", [3, -5], [3, 15]), ("AtX8", [8, -5], [8, 15]), ("AtY6", [-5, 6], [15, 6]), ("Away", [50, -5], [50, 15])] {
+        run("sketch.create", json!({"plane": "XY", "name": name}));
+        let curves = run("sketch.line", json!({"points": [a, b]}))["created"]["curves"].clone();
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": name, "curves": curves, "distance": 20, "body_name": name}));
+    }
+    s
+}
+
+/// #13303: Split Body with the whole surface body cuts with several surface bodies at once, each
+/// as it is. `AtX3` and `AtX8` cut the cube into slabs 3, 5 and 2 mm thick: 300, 500 and
+/// 200 mm³. `AtX8` crosses only the piece past x = 3 and leaves the other. `AtX3` and `AtY6`
+/// cross: `AtY6` cuts both pieces `AtX3` leaves, into 3 · 6 · 10 = 180, 7 · 6 · 10 = 420,
+/// 3 · 4 · 10 = 120 and 7 · 4 · 10 = 280 mm³. The other bodies are saved, and a reopened design
+/// builds the same parts.
+#[test]
+fn split_body_cuts_with_several_whole_surface_bodies() {
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    for (others, want) in [(json!(["AtX8"]), vec![200.0, 300.0, 500.0]), (json!(["AtY6"]), vec![120.0, 180.0, 280.0, 420.0])] {
+        let mut s = flat_sheets();
+        let p = json!({"body": "Cube", "tool": {"body": "AtX3", "point": [3, 2, 10]}, "tool_sheet": "body", "tool_bodies": others});
+        let id = s.execute("solid.split_body", &p).unwrap_or_else(|e| panic!("{p}: {e}"))["feature"].as_u64().unwrap();
+        assert!(near(&cube_parts(&s), &want), "{p}: {:?}", cube_parts(&s));
+        let saved = s.doc.to_json();
+        assert!(saved.contains("\"tool_bodies\""), "{saved}");
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!(reopened.model.result(id).unwrap().error.is_none(), "{p}");
+        assert!(near(&cube_parts(&reopened), &want), "{p}: {:?}", cube_parts(&reopened));
+    }
+}
+
+/// #13303: what Split Body with several surface bodies refuses, each leaving the design as it
+/// was: other bodies without `tool_sheet` "body" or with a plane, a body the design lacks, a solid, the tool's
+/// body again, one body twice, and a body that cuts no piece.
+#[test]
+fn split_body_by_several_surface_bodies_refuses_what_cannot_cut() {
+    let mut s = flat_sheets();
+    s.execute("solid.box", &json!({"corner": [30, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Block"})).unwrap();
+    let tool = json!({"body": "AtX3", "point": [3, 2, 10]});
+    for (p, says) in [
+        (json!({"body": "Cube", "tool": tool, "tool_bodies": ["AtX8"]}), "needs `tool_sheet` \"body\""),
+        (json!({"body": "Cube", "plane": "XY", "tool_bodies": ["AtX8"]}), "needs a face `tool`"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Nope"]}), "no body `Nope`"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Block"]}), "not a surface body"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["AtX3"]}), "a splitting tool twice"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["AtX8", "AtX8"]}), "a splitting tool twice"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Away"]}), "`Away` does not cut `Cube` through"),
+    ] {
+        let before = s.doc.to_json();
+        let e = s.execute("solid.split_body", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+/// #13303 review: another surface body from a further placement of a component cuts where that
+/// placement puts it, not at the component's first. `Slice`, the plane x = 1, is in `Part`, and a
+/// copy of `Part` 6 mm along x puts `Slice (Part:2)` at x = 7. With `AtX3` it cuts the cube into
+/// slabs 3, 4 and 3 mm thick: 300, 400 and 300 mm³. The first placement would leave 100, 200
+/// and 700.
+#[test]
+fn split_body_cuts_with_a_surface_body_where_its_placement_puts_it() {
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    let mut s = flat_sheets();
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("component.create", json!({"name": "Part", "grounded": false}));
+    run("sketch.create", json!({"plane": "XY", "name": "SliceSketch"}));
+    let curves = run("sketch.line", json!({"points": [[1, -5], [1, 15]]}))["created"]["curves"].clone();
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "SliceSketch", "curves": curves, "distance": 20, "body_name": "Slice"}));
+    run("component.activate", json!({"component": "root"}));
+    run("occurrence.copy", json!({"component": "Part", "translate": [6, 0, 0]}));
+    let p = json!({"body": "Cube", "tool": {"body": "AtX3", "point": [3, 2, 10]}, "tool_sheet": "body", "tool_bodies": ["Slice (Part:2)"]});
+    run("solid.split_body", p.clone());
+    assert!(near(&cube_parts(&s), &[300.0, 300.0, 400.0]), "{p}: {:?}", cube_parts(&s));
+}
+
+/// #22525: Split Body splits a surface body along whole surface bodies into its regions, each a
+/// surface body of its own. `Shell` is a cylinder r = 50 surface extruded 100 up. `Pad` and
+/// `Pad2` are rectangular tubes on YZ extruded 80 along +x, so each crosses the shell's wall
+/// once near x = 50: `Pad` over |y| ≤ 10, z 40…60, `Pad2` over |y| ≤ 10, z 10…25. On the wall
+/// each cuts out a patch of height h and angle 2·asin(10/50): area h · 50 · 2·asin(0.2), so
+/// 2000·asin(0.2) = 402.716 and 1500·asin(0.2) = 302.037 mm². The rest is the shell's
+/// 2π · 50 · 100 = 31415.927 mm² less both. A tube that misses the shell
+/// is refused, and a reopened design builds the same parts.
+#[test]
+fn split_body_splits_a_surface_body_into_its_regions() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("sketch.create", json!({"plane": "XY", "name": "ShellSketch"}));
+    run("sketch.circle.center", json!({"center": [0, 0], "radius": 50, "id": "rim"}));
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "ShellSketch", "curves": ["rim"], "distance": 100, "body_name": "Shell"}));
+    for (name, z0, z1) in [("Pad", 40, 60), ("Pad2", 10, 25), ("Miss", 200, 220)] {
+        run("sketch.create", json!({"plane": "YZ", "name": name}));
+        let curves = run("sketch.rectangle.two_point", json!({"p0": [-10, z0], "p1": [10, z1]}))["created"]["curves"].clone();
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": name, "curves": curves, "distance": 80, "body_name": name}));
+    }
+    let areas = |s: &Session| {
+        let st = s.model.state();
+        let shells: Vec<_> = st.bodies.iter().filter(|b| b.name.starts_with("Shell")).collect();
+        assert!(shells.iter().all(|b| b.body.is_surface()), "every piece is a surface body");
+        let mut v: Vec<f64> = shells.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().area).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let whole = 2.0 * std::f64::consts::PI * 50.0 * 100.0;
+    let (pad, pad2) = (2000.0 * 0.2f64.asin(), 1500.0 * 0.2f64.asin());
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b);
+    assert!(near(&areas(&s), &[whole]));
+
+    let before = s.doc.to_json();
+    let tool = json!({"body": "Pad", "point": [40, 10, 50]});
+    for (p, says) in [
+        (json!({"body": "Shell", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Miss"]}), "`Miss` does not cut `Shell` through"),
+        (json!({"body": "Shell", "tool": {"body": "Miss", "point": [40, 10, 210]}, "tool_sheet": "body"}), "`Miss` does not cut `Shell` through"),
+    ] {
+        let e = s.execute("solid.split_body", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+
+    let one = json!({"body": "Shell", "tool": tool, "tool_sheet": "body"});
+    s.execute("solid.split_body", &one).unwrap_or_else(|e| panic!("{one}: {e}"));
+    assert!(near(&areas(&s), &[pad, whole - pad]), "{:?}", areas(&s));
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    let both = json!({"body": "Shell", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Pad2"]});
+    let id = s.execute("solid.split_body", &both).unwrap_or_else(|e| panic!("{both}: {e}"))["feature"].as_u64().unwrap();
+    let want = [pad2, pad, whole - pad - pad2];
+    assert!(near(&areas(&s), &want), "{:?}", areas(&s));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.result(id).unwrap().error.is_none());
+    assert!(near(&areas(&reopened), &want), "{:?}", areas(&reopened));
+}
+
+/// #22525: a closed surface body (a full turn of a closed profile, whose shells close) splits
+/// into surface regions too, not as a solid. `Ring` turns the rectangle r 5…10 by 10 high
+/// about Z: walls 2π·10·10 and 2π·5·10, ends 2·π(10² − 5²), 450π mm² in all. The plane y = 2
+/// (`Cut`, a line on XY extruded both ways) cuts it into two arches. Past y = 2 lie the walls'
+/// 10·10·(π − 2·asin 0.2) and 5·10·(π − 2·asin 0.4) and twice the end's part, a segment
+/// r²·acos(2/r) − 2·√(r² − 4) of r = 10 less one of r = 5; the other arch is the rest.
+#[test]
+fn split_body_splits_a_closed_surface_body_into_its_regions() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("sketch.create", json!({"plane": "XZ", "name": "R"}));
+    run("sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+    run("sketch.finish", json!({}));
+    run("surface.revolve", json!({"sketch": "R", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "body_name": "Ring"}));
+    run("sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run("sketch.line", json!({"points": [[-20, 2], [20, 2]], "ids": ["l1"]}));
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "Line", "curves": ["l1"], "distance": 40, "direction": "symmetric", "body_name": "Cut"}));
+    assert!(s.model.state().body("Ring").is_some_and(|b| b.is_closed_sheet()), "the ring is a closed surface body");
+
+    let p = json!({"body": "Ring", "tool": {"body": "Cut", "point": [15, 2, 0]}, "tool_sheet": "body"});
+    s.execute("solid.split_body", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let st = s.model.state();
+    let rings: Vec<_> = st.bodies.iter().filter(|b| b.name.starts_with("Ring")).collect();
+    assert!(rings.iter().all(|b| b.is_surface() && b.body.is_surface()), "every piece is an open surface body");
+    let mut areas: Vec<f64> = rings.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().area).collect();
+    areas.sort_by(f64::total_cmp);
+    let pi = std::f64::consts::PI;
+    let segment = |r: f64| r * r * (2.0 / r).acos() - 2.0 * (r * r - 4.0).sqrt();
+    let far = 100.0 * (pi - 2.0 * 0.2f64.asin()) + 50.0 * (pi - 2.0 * 0.4f64.asin()) + 2.0 * (segment(10.0) - segment(5.0));
+    let mut want = [far, 450.0 * pi - far];
+    want.sort_by(f64::total_cmp);
+    assert!(areas.len() == 2 && areas.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b), "{areas:?} want {want:?}");
 }

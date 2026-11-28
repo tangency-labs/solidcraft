@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="860" height="680" viewBox="0 0 860 680">
+  <title>23136-mixed-chamfer-reflex-rails</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="860" height="680" fill="#ffffff"/>
+    <polygon id="top_face" data-name="top face" points="120,570 760,570 760,360 420,360 420,110 120,110" fill="#f0f0f0"/>
+    <polygon id="wedge_of_the_concave_chamfer" data-name="wedge of the concave chamfer" points="420,360 500,360 420,280" fill="#dce9f5"/>
+    <line id="edge_along_x" data-name="edge along x" x1="420" y1="360" x2="760" y2="360" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="edge_along_y" data-name="edge along y" x1="420" y1="360" x2="420" y2="110" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="rail_before__of_the_chamfer_along_x" data-name="rail before, of the chamfer along x" x1="500" y1="280" x2="760" y2="280" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="rail_before__of_the_chamfer_along_y" data-name="rail before, of the chamfer along y" x1="500" y1="280" x2="500" y2="170" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="concave_chamfer" data-name="concave chamfer" x1="500" y1="360" x2="420" y2="280" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="mitre_line_of_the_two_convex_chamfers" data-name="mitre line of the two convex chamfers" x1="340" y1="440" x2="460" y2="320" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="mitre_line_on_the_wall_y___0" data-name="mitre line on the wall y = 0" x1="500" y1="360" x2="460" y2="320" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="mitre_line_on_the_wall_x___0" data-name="mitre line on the wall x = 0" x1="420" y1="280" x2="460" y2="320" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="rail_on_the_top__of_the_chamfer_along_x" data-name="rail on the top, of the chamfer along x" x1="340" y1="440" x2="760" y2="440" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="rail_on_the_top__of_the_chamfer_along_y" data-name="rail on the top, of the chamfer along y" x1="340" y1="440" x2="340" y2="110" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="V" cx="420" cy="360" r="4" fill="#000000"/>
+    <circle id="X_on_the_top" data-name="X on the top" cx="340" cy="440" r="4" fill="#000000"/>
+    <circle id="X_on_the_wall_y___0" data-name="X on the wall y = 0" cx="500" cy="360" r="4" fill="#000000"/>
+    <circle id="X_on_the_wall_x___0" data-name="X on the wall x = 0" cx="420" cy="280" r="4" fill="#000000"/>
+    <circle id="M" cx="460" cy="320" r="4" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 30 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Three chamfers of both convexities: the rails on the reflex face</tspan></text>
+    <text transform="matrix(1 0 0 1 30 60)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Plan view of an L block&apos;s inside top corner V. The upright edge at V is concave, the two top edges convex.</tspan></text>
+    <text transform="matrix(1 0 0 1 430 382)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">V</tspan></text>
+    <text transform="matrix(1 0 0 1 316 462)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">X</tspan></text>
+    <text transform="matrix(1 0 0 1 502 380)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">X</tspan></text>
+    <text transform="matrix(1 0 0 1 400 274)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">X</tspan></text>
+    <text transform="matrix(1 0 0 1 472 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">M</tspan></text>
+    <text transform="matrix(1 0 0 1 580 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">top edge along x (convex)</tspan></text>
+    <text transform="matrix(1 0 0 1 525 138)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">top edge along y (convex)</tspan></text>
+    <line id="leader_to_the_edge_along_y" data-name="leader to the edge along y" x1="420" y1="134" x2="521" y2="133" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 190 510)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">top face: its angle at V is 270 degrees</tspan></text>
+    <text transform="matrix(1 0 0 1 570 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">notch (no material)</tspan></text>
+    <text transform="matrix(1 0 0 1 430 462)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">rail on the top face: on the far side of the edge</tspan></text>
+    <text transform="matrix(1 0 0 1 538 272)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">rail taken before: towards the other edge</tspan></text>
+    <text transform="matrix(1 0 0 1 570 210)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">wedge the concave chamfer adds</tspan></text>
+    <line id="leader_to_the_wedge" data-name="leader to the wedge" x1="438" y1="310" x2="566" y2="206" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 210)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">mitre lines X-M,</tspan></text>
+    <text transform="matrix(1 0 0 1 150 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">seen from above</tspan></text>
+    <line id="leader_to_the_mitre_line" data-name="leader to the mitre line" x1="393.333" y1="386.667" x2="220" y2="234" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 640)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The rails cross at X on the top face. The three chamfer planes meet at M, below the top and past the convex chamfers&apos; rails on the walls,</tspan></text>
+    <text transform="matrix(1 0 0 1 30 658)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">over the wedge. A rail taken towards the other edge lies in the notch, where the top face is not, so its chamfer plane was wrong.</tspan></text>
+  </g>
+</svg>

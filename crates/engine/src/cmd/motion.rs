@@ -2,7 +2,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -105,6 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactSets>)
@@ -212,6 +213,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&STUDY_LIST_CONTRACT)
         .output(output_schema_for::<MotionStudies>),
     CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
@@ -238,6 +240,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&EXPLODE_LIST_CONTRACT)
         .output(output_schema_for::<ExplodeViews>),
     CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
@@ -686,9 +689,11 @@ fn drive_with_contact_within(
         }
         place_holding(s, &held)
     };
-    // Loops already open at the start stay as they are; a loop the motion opens stops it.
-    let open_at_start: BTreeSet<u64> = set(s, 0.0).conflicts.iter().map(|c| c.0).collect();
-    let opened = |sol: &joints::Solution| sol.conflicts.iter().find(|c| !open_at_start.contains(&c.0)).map(|c| c.1.clone());
+    // With contact sets enabled, place at t = 0 before building contact geometry. Otherwise skip
+    // the t = 0 solve unless the target pose has conflicts and needs to distinguish pre-existing
+    // open loops from newly opened ones.
+    let mut open_at_start: Option<BTreeSet<u64>> =
+        if s.doc.assembly.contact_enabled { Some(set(s, 0.0).conflicts.iter().map(|c| c.0).collect()) } else { None };
     let cache = if s.doc.assembly.contact_enabled { Some(contact_sweep::ContactGeometry::new(s)?) } else { None };
     let mut sol;
     let mut stopped = None;
@@ -794,21 +799,28 @@ fn drive_with_contact_within(
         sol = set(s, 1.0);
     }
     let mut stopped_by_loop = None;
-    if let Some(mut name) = opened(&sol) {
-        // The furthest the loops still close, short of where contact stopped; the joint named is
-        // the one whose loop opens first.
-        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
-        for _ in 0..14 {
-            let mid = (lo + hi) / 2.0;
-            match opened(&set(s, mid)) {
-                None => lo = mid,
-                Some(n) => (hi, name) = (mid, n),
+    if !sol.conflicts.is_empty() {
+        let open_at_start = open_at_start.get_or_insert_with(|| {
+            let mut start_s = s.scratch();
+            set(&mut start_s, 0.0).conflicts.iter().map(|c| c.0).collect()
+        });
+        let opened = |sol: &joints::Solution| sol.conflicts.iter().find(|c| !open_at_start.contains(&c.0)).map(|c| c.1.clone());
+        if let Some(mut name) = opened(&sol) {
+            // The furthest the loops still close, short of where contact stopped; the joint named is
+            // the one whose loop opens first.
+            let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
+            for _ in 0..14 {
+                let mid = (lo + hi) / 2.0;
+                match opened(&set(s, mid)) {
+                    None => lo = mid,
+                    Some(n) => (hi, name) = (mid, n),
+                }
             }
+            sol = set(s, lo);
+            stopped = None;
+            budget_lo = None;
+            stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
         }
-        sol = set(s, lo);
-        stopped = None;
-        budget_lo = None;
-        stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
     }
     let values: Vec<Value> = want.iter().map(|(id, _)| json!({"joint": id, "values": effective_values(s, *id)})).collect();
     let mut out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
@@ -823,14 +835,14 @@ fn drive_with_contact_within(
 const MAX_ADVANCES: usize = 200;
 
 /// Drive one joint (joint.drive), honouring contact sets.
-pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<Value> {
+pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<(Value, joints::Solution)> {
     let given = (0..given.min(q.len())).map(|i| (id, i)).collect();
-    Ok(drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)?.0)
+    drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)
 }
 
 /// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
-pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<Value> {
-    Ok(drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)?.0)
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<(Value, joints::Solution)> {
+    drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)
 }
 
 /// A command's reply as JSON: the contact and motion study commands build their replies from the
@@ -1087,8 +1099,39 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let m = s.doc.assembly.studies.get(i).cloned().ok_or_else(|| bad(cmd, "study"))?;
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
+    let given = keyed(&m);
+    let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+        .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+        .collect();
     let before = positions(s);
-    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let driven_exprs: Vec<(u64, usize)> = given.iter().copied().filter(|(id, idx)| want.iter().any(|(w, q)| *w == *id && *idx < q.len())).collect();
+    if !driven_exprs.is_empty()
+        && s.doc.assembly.joints.iter().any(|j| driven_exprs.iter().any(|&(id, idx)| id == j.id && j.exprs.value(idx).is_some()))
+    {
+        let doc = s.doc_mut();
+        for (id, idx) in driven_exprs {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+                j.exprs.set_value(idx, None);
+            }
+        }
+    }
+    let (out, sol) = drive_with_contact(s, &want, &given)?;
+    let mut pending = std::mem::take(&mut s.pending_joint_bases);
+    for (jid, old_vals, old_exprs) in before_vals {
+        if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+            let dofs = j.kind.dofs().len();
+            let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+            if j.values != old_vals || cur_exprs != old_exprs {
+                pending.entry(jid).or_insert((old_vals, old_exprs));
+            }
+        }
+    }
+    s.pending_joint_bases = pending;
     let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
@@ -1200,7 +1243,7 @@ fn traced_point(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<u64>, Vec3)> {
     };
     let at = p.get("point").and_then(vec3).filter(|v| v.len() < 1e7).ok_or_else(|| bad(cmd, "`point` must be [x, y, z], a world point"))?;
     let mut t = s.scratch();
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let local = solidcraft_doc::mat_inverse(&path_world(&t, &path, cmd)?)
         .map(|m| solidcraft_doc::apply_point(&m, at))
         .ok_or_else(|| bad(cmd, "the occurrence's placement is not invertible"))?;
@@ -1221,7 +1264,7 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, TraceRu
     let mut t = s.scratch();
     // Traced from where the parts are placed: moves only shown (an exploded view, a move not
     // captured yet) are not where the joints are solved.
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let world = |t: &Session| path_world(t, &path, cmd);
     let (default, given, plan) = motion_plan(s, p, cmd)?;
     let n = sample_count(p, default.min(MAX_TRACE), MAX_TRACE, cmd)?;
@@ -1416,6 +1459,7 @@ fn delete_study(s: &mut Session, p: &Value) -> Result<Value> {
 /// with a single component, has nothing to separate (#9142).
 const EXPLODE_NEEDS_COMPONENTS: &str =
     "Exploded View pulls components apart, so the design needs two or more of them (New Component, Insert Design or Create Components from Bodies)";
+const MAX_EXPLODE_TRANSLATION: f64 = 1e7;
 
 /// Exploded View is offered once the design has two or more occurrences to move apart (#9142).
 fn has_parts_to_explode(s: &Session) -> std::result::Result<(), String> {
@@ -1456,6 +1500,44 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     out
 }
 
+/// The unit moves for an automatic exploded view, prepared once for an interactive preview.
+#[derive(Clone, Debug)]
+pub struct AutomaticExplode {
+    moves: Vec<(u64, Mat, Vec3)>,
+}
+
+impl Session {
+    /// Prepare the same view that OK will create. Keep the temporary document and the command's
+    /// model refresh out of subsequent slider updates.
+    pub fn prepare_automatic_explode(&self) -> Result<AutomaticExplode> {
+        let mut scratch = self.scratch();
+        let created = scratch.execute("explode.create", &json!({}))?;
+        let index = view_index(&scratch, &created, "explode.show")?;
+        let view = scratch.doc.assembly.exploded.get(index).ok_or_else(|| bad("explode.show", "view"))?;
+        let placed: BTreeMap<u64, Mat> = scratch.doc.occurrences.iter().filter(|o| o.parent == 0).map(|o| (o.id, o.transform)).collect();
+        let moves = view.moves.iter().filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect();
+        Ok(AutomaticExplode { moves })
+    }
+}
+
+impl AutomaticExplode {
+    /// The preview placements at `scale`. Apply the translation limit at the scaled distance,
+    /// just as `explode.show` does when called on a view created at that scale.
+    pub fn placements(&self, scale: f64) -> Result<BTreeMap<u64, Mat>> {
+        let scale = explode_scale(Some(scale))?;
+        let scaled = self.moves.iter().map(|(o, m, t)| (*o, *m, *t * scale)).filter(|(_, _, t)| t.len() < MAX_EXPLODE_TRANSLATION);
+        let moves = placements_at(scaled, 1.0);
+        if !moves.values().all(solidcraft_doc::is_placement) {
+            return Err(bad("explode.show", "exploded view moves an occurrence out of range"));
+        }
+        Ok(moves)
+    }
+}
+
+fn explode_scale(scale: Option<f64>) -> Result<f64> {
+    scale.filter(|x| x.is_finite() && x.abs() <= 100.0).ok_or_else(|| bad("explode.create", "`scale` must be a number up to 100"))
+}
+
 fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.create";
     let moves: Vec<(u64, Vec3)> = match p.get("moves") {
@@ -1469,7 +1551,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
                     let t = m
                         .get("translate")
                         .and_then(vec3)
-                        .filter(|v| v.len() < 1e7)
+                        .filter(|v| v.len() < MAX_EXPLODE_TRANSLATION)
                         .ok_or_else(|| bad(cmd, "each move needs `translate`: [x, y, z]"))?;
                     Ok((o, t))
                 })
@@ -1478,7 +1560,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`moves` must be a list")),
         None => {
             let scale = match p.get("scale") {
-                Some(v) => v.as_f64().filter(|x| x.is_finite() && x.abs() <= 100.0).ok_or_else(|| bad(cmd, "`scale` must be a number up to 100"))?,
+                Some(v) => explode_scale(v.as_f64())?,
                 None => 1.0,
             };
             let c = centres(s);
@@ -1503,7 +1585,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
-        s.pending_moves.clear();
+        s.clear_pending_moves();
         s.exploded.clear();
         s.revision += 1;
         return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
@@ -1517,6 +1599,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
     s.exploded.clone_from(&moves);
     s.pending_moves = moves;
+    s.pending_move_records.clear();
     s.revision += 1;
     typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }
@@ -1541,7 +1624,7 @@ pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec
     let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
     v.moves
         .iter()
-        .filter(|(_, t)| t.len() < 1e7)
+        .filter(|(_, t)| t.len() < MAX_EXPLODE_TRANSLATION)
         .filter_map(|(o, t)| {
             let (transform, parent) = *placed.get(o)?;
             let Some(frame) = (parent != 0).then(|| s.doc.occurrence_of(parent)).flatten() else {
@@ -1555,15 +1638,18 @@ pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
 pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+    placements_at(moves.iter().copied(), amount)
+}
+
+fn placements_at(moves: impl Iterator<Item = (u64, Mat, Vec3)>, amount: f64) -> BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
-    for (o, m, t) in moves {
-        let mut m = *m;
+    for (o, mut m, t) in moves {
         if let Some(r) = m.get_mut(3) {
             r[0] += t.x * amount;
             r[1] += t.y * amount;
             r[2] += t.z * amount;
         }
-        out.insert(*o, m);
+        out.insert(o, m);
     }
     out
 }

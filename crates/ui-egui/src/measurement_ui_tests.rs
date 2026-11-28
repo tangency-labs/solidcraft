@@ -608,3 +608,238 @@ fn measure_takes_a_sketch_lines_woken_middle() {
     let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
     assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-9), "{picked:?}");
 }
+
+#[test]
+fn dual_measure_converts_original_lengths_and_area_without_changing_document_units() {
+    let mut h = Harness::new();
+    h.app.preferences.length_decimals = 2;
+    for (unit, primary, dual) in [
+        ("mm", "6.50 mm", "6.50 mm [0.2559 in]"),
+        ("in", "0.2559 in", "0.2559 in [6.50 mm]"),
+        ("cm", "0.65 cm", "0.65 cm [0.2559 in]"),
+        ("m", "0.01 m", "0.01 m [0.2559 in]"),
+        ("ft", "0.02 ft", "0.02 ft [6.50 mm]"),
+    ] {
+        h.app.run("document.units", json!({"units":unit})).unwrap();
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, false), primary);
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, true), dual);
+        assert_eq!(h.app.session.doc.units, unit);
+    }
+    h.app.run("document.units", json!({"units":"mm"})).unwrap();
+    assert_eq!(crate::prefs::show_measure(&h.app, 645.16, 2, true), "645.16 mm² [1.000 in²]");
+    assert_eq!(crate::prefs::show_measure(&h.app, 16387.064, 3, true), "16387.06 mm³ [1.000 in³]");
+    let lines = crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"face", "area_mm2":645.16, "perimeter_mm":101.6}), true);
+    assert!(lines.iter().any(|s| s.contains("645.16 mm² [1.000 in²]")), "{lines:?}");
+    assert!(lines.iter().any(|s| s.contains("101.60 mm [4.000 in]")), "{lines:?}");
+    let lines =
+        crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"edge", "diameter":6.5, "radius":3.25, "circumference":20.42}), true);
+    assert!(lines[0].contains("6.50 mm [0.2559 in]"), "{lines:?}");
+}
+
+#[test]
+fn dual_measure_toggle_updates_panel_and_viewport_and_can_be_turned_off() {
+    let mut h = vertex_measurement([0., 0., 0.], [3., 4., 12.]);
+    h.app.preferences.length_decimals = 2;
+    let units = h.app.session.doc.units.clone();
+    let before = result(&h).clone();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Measure { dual_units: false, .. }));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().filter(|s| s.contains("13.00 mm [0.5118 in]")).count() >= 2, "panel and viewport: {text:?}");
+    assert_eq!(h.app.session.doc.units, units);
+    assert_eq!(*result(&h), before);
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    assert!(!painted_text(&mut h).iter().any(|s| s.contains("[0.5118 in]")));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    dual_measure_evidence(&mut h, "dual-measure-distance.png");
+}
+
+/// Optional full-size UI evidence from the same rendered controls exercised by the test.
+fn dual_measure_evidence(h: &mut Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_DUAL_MEASURE_EVIDENCE") else { return };
+    h.ctx = egui::Context::default();
+    crate::fonts::setup_bundled_fonts(&h.ctx);
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 720.));
+    let mut textures = std::collections::HashMap::new();
+    for frame in 0..6 {
+        let mut output =
+            h.ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| h.app.ui(ui));
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if frame == 5 {
+            let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(name)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn dual_measure_shows_a_selected_edges_length_in_both_units() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.length_decimals = 2;
+    h.app.run("solid.box", json!({"length":6.5,"width":10,"height":5,"body_name":"Box"})).unwrap();
+    let point = solidcore_record::Vec3::new(3.25, 0., 0.);
+    let index = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let mesh = st.body("Box").unwrap().mesh();
+        mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
+    };
+    h.app.session.selection = vec![Sel::Edge { body: "Box".into(), index, point }];
+    h.app.start("inspect.measure");
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().any(|s| s.contains("Length  6.50 mm [0.2559 in]")), "{text:?}");
+    dual_measure_evidence(&mut h, "dual-measure-edge.png");
+}
+
+/// A 400 × 40 × 5 panel with 3 mm holes at x = 22.5, 111.25, 200 and 377.5 on y = 20: three at
+/// a pitch of 88.75 and one 177.5 further on, where a hole is left out. Measure is open on it.
+fn panel_with_a_row_of_holes() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.length_decimals = 2;
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":400,"width":40,"height":5,"corner":[0,0,0],"body_name":"Panel"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Holes"})).unwrap();
+    for x in [22.5, 111.25, 200.0, 377.5] {
+        h.app.run("sketch.circle.center", json!({"center":[x, 20],"diameter":3})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance":5,"operation":"cut"})).unwrap();
+    h.app.start("inspect.measure");
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h
+}
+
+/// The wall of the panel's hole at `x`, as a click on it picks it.
+fn hole_wall(h: &Harness, x: f64) -> Sel {
+    let st = crate::open_meshing::session_world(&h.app.session);
+    let mesh = st.body("Panel").unwrap().mesh();
+    let on_wall = |p: &solidcore_record::Vec3| ((p.x - x).hypot(p.y - 20.0) - 1.5).abs() < 1e-3;
+    let index =
+        mesh.triangles.iter().zip(&mesh.tri_face).find_map(|(tri, face)| mesh.tri(tri)?.iter().all(on_wall).then_some(*face as usize)).unwrap();
+    Sel::Face { body: "Panel".into(), index, point: solidcore_record::Vec3::new(x + 1.5, 20.0, 2.5) }
+}
+
+fn pick_hole(h: &mut Harness, x: f64) {
+    let sel = hole_wall(h, x);
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, sel);
+    h.app.dialog = Some(d);
+}
+
+fn measure_picks(h: &Harness) -> usize {
+    h.app.dialog.as_ref().unwrap().inputs[0].items.len()
+}
+
+/// Measure's "Spacing of several holes" option (#10170): off, a third pick starts over as it
+/// always did; on, round picks add up and the panel lists the gaps in order along the row, the
+/// span and whether the spacing is even, with each gap labelled in the view.
+#[test]
+fn measure_spacing_option_lists_the_gaps_of_a_row_of_holes() {
+    let mut h = panel_with_a_row_of_holes();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Measure { spacing: false, .. }), "the option starts off");
+    for x in [22.5, 111.25] {
+        pick_hole(&mut h, x);
+    }
+    let text = painted_text(&mut h);
+    assert!((result(&h)["center_distance"].as_f64().unwrap() - 88.75).abs() < 1e-9, "{}", result(&h));
+    assert!(result(&h).get("spacing").is_none() && !text.iter().any(|s| s.contains("Even spacing")), "{text:?}");
+    pick_hole(&mut h, 200.0);
+    assert_eq!(measure_picks(&h), 1, "off, a third pick starts over from itself");
+
+    h.step(&json!({"click":{"handle":"measure:spacing"}})).unwrap();
+    h.frames(3);
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Measure { spacing: true, .. }));
+    for x in [22.5, 111.25] {
+        pick_hole(&mut h, x);
+    }
+    assert_eq!(measure_picks(&h), 3, "on, the picks add up");
+    // The panel measures the new picks in one frame and the view draws them in the next.
+    h.frames(2);
+    let text = painted_text(&mut h);
+    let sp = result(&h)["spacing"].clone();
+    assert_eq!((&sp["pattern"], &sp["even"]), (&json!("line"), &json!(true)), "{sp}");
+    // Picked 200, 22.5, 111.25: items 1, 2, 3. The row runs from the end picked first: 1, 3, 2.
+    for want in ["Row of 3", "Gap 1–3  88.75 mm", "Gap 3–2  88.75 mm", "Span  177.50 mm", "Even spacing  88.75 mm", "Item 3  Ø  3.00 mm"] {
+        assert!(text.iter().any(|s| s == want), "{want}: {text:?}");
+    }
+    assert_eq!(text.iter().filter(|s| *s == "88.75 mm").count(), 2, "each gap is labelled in the view: {text:?}");
+    for handle in ["measure:gap:1", "measure:gap:2", "measure:item:1", "measure:item:2", "measure:item:3"] {
+        assert!(crate::scenario::handle_at(handle).is_some(), "{handle}");
+    }
+    assert!(crate::scenario::handle_at("measure:gap:3").is_none() && crate::scenario::handle_at("measure:label").is_none());
+    spacing_evidence(&mut h, "measure-spacing-even-row.png");
+
+    // The hole left out: its gap is the one that differs.
+    pick_hole(&mut h, 377.5);
+    h.frames(2);
+    let text = painted_text(&mut h);
+    for want in ["Row of 4", "Gap 1–4 (differs)  177.50 mm", "Span  355.00 mm", "Uneven spacing, most gaps  88.75 mm"] {
+        assert!(text.iter().any(|s| s == want), "{want}: {text:?}");
+    }
+    assert!(text.iter().any(|s| s == "177.50 mm") && crate::scenario::handle_at("measure:gap:3").is_some(), "{text:?}");
+    spacing_evidence(&mut h, "measure-spacing-hole-left-out.png");
+
+    // A gap's label drags away from the part, as a distance's does.
+    let own = crate::scenario::rect_of("measure:gap:1").unwrap();
+    let from = own.left_top() + egui::vec2(6.0, 4.0);
+    h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 40.0, "y1": from.y - 60.0, "steps": 6}));
+    painted_text(&mut h);
+    let moved = crate::scenario::rect_of("measure:gap:1").unwrap().min - own.min;
+    assert!((moved - egui::vec2(40.0, -60.0)).length() < 1.0, "the gap's label follows the pointer: {moved:?}");
+    assert_eq!(measure_picks(&h), 4, "dragging a label picks nothing");
+
+    // Something that is not round among them is said, not measured.
+    let top = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let mesh = st.body("Panel").unwrap().mesh();
+        let index = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .find_map(|(tri, f)| mesh.tri(tri)?.iter().all(|p| (p.z - 5.0).abs() < 1e-6).then_some(*f as usize));
+        Sel::Face { body: "Panel".into(), index: index.unwrap(), point: solidcore_record::Vec3::new(300.0, 20.0, 5.0) }
+    };
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, top);
+    h.app.dialog = Some(d);
+    h.frames(2);
+    let text = painted_text(&mut h);
+    assert!(text.iter().any(|s| s.contains("three or more round edges or holes")), "{text:?}");
+    assert!(crate::scenario::handle_at("measure:gap:1").is_none(), "nothing measured, nothing drawn");
+
+    // Off again, the next pick starts over.
+    h.step(&json!({"click":{"handle":"measure:spacing"}})).unwrap();
+    h.frames(3);
+    pick_hole(&mut h, 22.5);
+    assert_eq!(measure_picks(&h), 1);
+}
+
+/// Optional full-size evidence of the spacing measurement's panel and view labels.
+fn spacing_evidence(h: &mut Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_MEASURE_SPACING_EVIDENCE") else { return };
+    let ctx = egui::Context::default();
+    crate::fonts::setup_bundled_fonts(&ctx);
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600., 1000.));
+    let mut textures = std::collections::HashMap::new();
+    for frame in 0..6 {
+        let mut output =
+            ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| h.app.ui(ui));
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if frame == 5 {
+            let image = crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(name)).unwrap();
+        }
+    }
+}

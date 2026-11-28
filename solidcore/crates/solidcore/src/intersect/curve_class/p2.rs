@@ -204,6 +204,9 @@ impl<O: ClassObject> CurveClassification<O> {
         geometry: &impl ClassGeometry<O>,
         other: &Self,
     ) -> Result<()> {
+        self.native_material_face = None;
+        self.native_foreign_support = None;
+        let mut copied_curve = true;
         // when needed - free old curve
         if self.is_curve_owned && self.curve.is_some() {
             self.curve = None;
@@ -219,7 +222,8 @@ impl<O: ClassObject> CurveClassification<O> {
                     OP_CC,
                     "owned classification curve is not a curve",
                 ))?;
-                if ignored(curve.copy(k))?.is_some() {
+                copied_curve = ignored(curve.copy(k))?.is_some();
+                if copied_curve {
                     self.curve = Some(c);
                 }
             }
@@ -237,6 +241,10 @@ impl<O: ClassObject> CurveClassification<O> {
         self.ok_to_set_tolerance = other.ok_to_set_tolerance;
         self.source_reach = other.source_reach;
         self.seam_hint = other.seam_hint;
+        if copied_curve && self.curve == other.curve {
+            self.native_material_face = other.native_material_face;
+            self.native_foreign_support = other.native_foreign_support;
+        }
         self.tgt_loops_only = other.tgt_loops_only;
         self.tgt_loops.clear();
         self.tgt_loops.extend_from_slice(&other.tgt_loops);
@@ -419,6 +427,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // set the modified curve bit
         self.is_curve_current = options.is_curve_current;
+        if !options.is_curve_current {
+            self.native_foreign_support = None;
+        }
 
         let zone_tol_3d = options.zone_tol_3d;
 
@@ -431,6 +442,8 @@ impl<O: ClassObject> CurveClassification<O> {
             // set new values
             self.is_curve_owned = options.is_curve_owned;
             self.curve = options.curve;
+            self.native_material_face = None;
+            self.native_foreign_support = None;
             self.src_zone_tol_3d = if zone_tol_3d > 0.0 {
                 zone_tol_3d
             } else {

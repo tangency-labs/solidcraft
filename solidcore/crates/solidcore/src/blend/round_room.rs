@@ -96,8 +96,9 @@ impl SolutionObject for CurveHandle {
 /// The points where the boundary of the planar face `f` meets itself other than at a vertex
 /// its two edges share: every pair of the face's edges (of all its loops) intersected by the
 /// kernel's curve intersector (`GlobalCurveIntersect`, analytic for lines and conics) within
-/// the larger of their tolerances, a meeting within that tolerance of a vertex both edges end
-/// at being their joint. A face that is not planar gives none (its boundary is not judged).
+/// the larger of their tolerances, a meeting within that tolerance, or the vertex's own, of a
+/// vertex both edges end at being their joint. A face that is not planar gives none (its
+/// boundary is not judged).
 ///
 /// # Errors
 /// Those of the topology reads, the intersections and the evaluations.
@@ -147,9 +148,12 @@ pub fn boundary_crossings(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Point3>
                     continue;
                 };
                 let p = c1.evaluate_point(k, t)?;
+                // the meeting is their joint within the vertex's tolerance too: the zone
+                // in which the topology has its edges meet (an edge may end that far from it)
                 let mut joint = false;
                 for &v in &shared {
-                    joint |= (b.vertex(v)?.point - p).length() <= tol;
+                    let vertex = b.vertex(v)?;
+                    joint |= (vertex.point - p).length() <= tol.max(vertex.tolerance);
                 }
                 if !joint {
                     out.push(p);

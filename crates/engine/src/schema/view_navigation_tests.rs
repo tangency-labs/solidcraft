@@ -15,6 +15,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
     assert_keys(input_schema_for::<super::OriginAxesAcrossViewParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<super::ScaleBarParams>(), &["enabled"]);
     assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
     assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
     assert_keys(input_schema_for::<LayoutParams>(), &["mode"]);
@@ -259,6 +260,9 @@ fn strict_keeps_todays_errors() {
         ("view.perspective", json!({"enabled": 1})),
         ("view.perspective", json!({"enabled": "true"})),
         ("view.perspective", json!({"enabled": null})),
+        ("view.scale_bar", json!({"enabled": 1})),
+        ("view.scale_bar", json!({"enabled": "true"})),
+        ("view.scale_bar", json!({"enabled": null})),
     ]);
 }
 
@@ -284,6 +288,20 @@ fn origin_axes_across_view_replies_match_the_output_schema() {
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     for enabled in [true, false] {
         let reply = s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        assert_eq!(reply, json!({"enabled": enabled}));
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+#[test]
+fn scale_bar_replies_match_the_output_schema() {
+    let schema = output_schema_for::<super::ScaleBarResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let reply = s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap();
         assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
         assert_eq!(reply, json!({"enabled": enabled}));
     }
@@ -611,7 +629,7 @@ fn the_types_read_each_key_as_its_handler_does() {
     check("view.perspective", json!({}), "enabled", with(vec![json!(true), json!(false)]));
     let base = json!({"camera": nav_camera(), "action": "fit"});
     let all_actions: Vec<Value> =
-        ["left", "right", "up", "down", "clockwise", "counterclockwise", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
+        ["left", "right", "up", "down", "clockwise", "counterclockwise", "turn_around", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
     check("view.navigate", json!({"camera": nav_camera()}), "action", with(all_actions));
     check("view.navigate", base.clone(), "fit", with(vec![json!(true), json!(false)]));
     check(

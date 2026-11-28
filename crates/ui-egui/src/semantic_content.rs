@@ -455,6 +455,24 @@ pub(crate) fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// The presentations drawn so far this frame.
+pub(crate) fn presented_owners(app: &SolveApp) -> Vec<ContentOwner> {
+    app.tree.content.owners.iter().filter(|(_, state)| state.presented).map(|(owner, _)| *owner).collect()
+}
+
+/// The menu a row asked for in a presentation drawn after `before` was taken: a panel in its own
+/// OS window, which is drawn after the frame's [`finalize`] has opened the other rows' menus
+/// (#19364). The next frame's [`begin`] would drop the request, so its window opens it.
+pub(crate) fn take_late_menu(app: &mut SolveApp, before: &[ContentOwner]) -> Option<(egui::Pos2, crate::context_menu::Target)> {
+    let session = app.session.uid;
+    app.tree
+        .content
+        .owners
+        .iter_mut()
+        .filter(|(owner, state)| state.presented && !before.contains(owner))
+        .find_map(|(_, state)| state.actions.as_mut().filter(|actions| actions.session == Some(session))?.take_menu())
+}
+
 /// Finalize content tree hover state, pointer ownership, and drag interactions across panels
 /// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {

@@ -53,7 +53,8 @@
 //!   `smsurf_GetSurfaceCache` is the cache passed to
 //!   [`SurfaceTrace::find_boundary_start_points`] and [`SurfaceTrace::do_trace`] (see
 //!   [`crate::intersect::surface_tracer`]); `SmCacheCheckOutIn` has no counterpart,
-//!   the cache flags `DoTrace` changes are restored on every exit. The curve cache
+//!   the cache flags `DoTrace` changes for the call are read by none of its steps,
+//!   so the cache keeps its own. The curve cache
 //!   of `GetOrCreateObjectCache(SM_OC_CURVE)` is built fresh
 //!   ([`make_curve_cache`]); a failed build is `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Ignored statuses** stay ignored: the curve `GetKnots` into the knot vector
@@ -914,22 +915,20 @@ impl<'s> SurfaceDropCurve<'s> {
         out.max_drop_dists.clear();
         out.deviations.clear();
 
-        let (max_drop_dist, max_deviation, uv_curves) = surface_drop_curve(
+        let dropped = self.base.surface.drop_curve_splitting_seams(
             k,
-            self.base.surface,
             &self.base.uv_domain,
             self.curve,
             &self.interval,
             self.base.approx_tol_3d,
             true,
-            false,
             context,
         )?;
 
-        for c in uv_curves {
+        for c in dropped.uv_curves {
             out.uv_curves.push(c);
-            out.max_drop_dists.push(max_drop_dist);
-            out.deviations.push(max_deviation);
+            out.max_drop_dists.push(dropped.max_drop_to_surf);
+            out.deviations.push(dropped.max_approx_dev);
         }
         Ok(())
     }
@@ -1716,18 +1715,13 @@ impl<'s> SurfaceDropCurve<'s> {
             self.base.ang_tol_rad = ang;
         }
 
-        // temporarily turn off point testing and turn on boundary curve processing
-        let saved_point_test = cache.point_test_enabled;
-        let saved_boundary = cache.process_boundary_curves;
-        cache.point_test_enabled = false;
-        cache.process_boundary_curves = true;
-        let r = self.drop_trace_body(k, cache, context);
-        cache.point_test_enabled = saved_point_test;
-        cache.process_boundary_curves = saved_boundary;
-        r
+        // (upstream temporarily turns off point testing and turns on boundary curve
+        // processing: none of the steps reads either, and the drop's point solves run
+        // with point testing off themselves, so the cache keeps its flags)
+        self.drop_trace_body(k, cache, context)
     }
 
-    /// The part of [`SurfaceDropCurve::drop_trace`] run with the cache flags changed.
+    /// The part of [`SurfaceDropCurve::drop_trace`] after its tolerances.
     fn drop_trace_body<O: SolutionObject>(
         &mut self,
         k: &Kernel,

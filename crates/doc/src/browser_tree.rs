@@ -83,6 +83,28 @@ impl Document {
         self.browser_groups.iter().find(|g| g.component == component && g.folder == folder && g.has_item(key))
     }
 
+    /// The browser folder a model body sits in: the names of the groups from the top of its
+    /// component's Bodies folder down to the one holding it, joined by `/` (`Frame/Rails`), or
+    /// `None` for a body in no group. A placed copy is in its definition's group.
+    pub fn model_body_folder(&self, body: &crate::ModelBody) -> Option<String> {
+        if !self.browser_groups.iter().any(|g| g.folder == "bodies") {
+            return None;
+        }
+        let mut at = self.group_of_item(self.model_body_component(body), "bodies", body.definition_name())?;
+        let mut names = vec![at.name.as_str()];
+        for _ in 0..MAX_GROUP_NESTING {
+            match at.parent.and_then(|p| self.browser_group(p)) {
+                Some(g) => {
+                    names.push(g.name.as_str());
+                    at = g;
+                }
+                None => break,
+            }
+        }
+        names.reverse();
+        Some(names.join("/"))
+    }
+
     /// Only the browser's groups and order changed (a group made, nested, moved into, ordered):
     /// nothing is evaluated and no placement moves. The same whole-Document proof as
     /// [`Document::differs_only_in_render`]; `next_id` may differ, as a new group takes an id.

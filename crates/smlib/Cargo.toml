@@ -18,6 +18,12 @@ solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore = { workspace = true }
 
+[features]
+# Solidcore's own profiler (`Kernel::take_profile`), written as JSON Lines by
+# `write_kernel_profiles` when the app asks for a file. Off, every scope in the kernel
+# compiles to nothing. `solidcore-ops/profile` scopes each of its calls' profiles.
+solidcore-profile = ["solidcore/profile", "solidcore-ops/profile"]
+
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 flate2 = "1.1"

@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import argparse
 import calendar
-import fcntl
 import json
 import os
 import re
@@ -62,7 +61,16 @@ import time
 from pathlib import Path
 from typing import Any, NoReturn
 
+# Windows has no fcntl, so the watcher lock uses msvcrt there.
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
 STATE_DIR = Path.home() / ".local" / "state" / "sc-pr-wait"
+# On Windows a locked byte range cannot be read by anyone else. The lock sits on one byte far past
+# the PID, so a second watcher can still read which process holds it.
+WINDOWS_LOCK_OFFSET = 1 << 30
 STALE_STATE_SECONDS = 6 * 3600
 MAX_FAILED_POLLS = 8
 MIN_INTERVAL = 60
@@ -137,7 +145,8 @@ def fail(message: str, code: int = 2) -> NoReturn:
 
 def gh(args: list[str]) -> str:
     """Run gh once. A failure is transient when it looks like the network or GitHub."""
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    # gh writes UTF-8. Without the encoding, Windows decodes it with the ANSI code page, which fails on an emoji.
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8")
     if proc.returncode == 0:
         return proc.stdout
     lines = proc.stderr.strip().splitlines()
@@ -173,17 +182,38 @@ def parse_target(raw: str | None, repo: str | None) -> tuple[str, int]:
     return repo, pr
 
 
+def try_lock(handle: Any) -> bool:
+    """Take the watcher lock without waiting. False when another process holds it.
+
+    The operating system drops the lock when the process ends, however it ends."""
+    if sys.platform != "win32":
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
+    fd = handle.fileno()
+    os.lseek(fd, WINDOWS_LOCK_OFFSET, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except PermissionError:
+        return False
+    return True
+
+
 def lock(repo: str, pr: int) -> Any:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     handle = open(STATE_DIR / f"{repo.replace('/', '__')}__{pr}.lock", "a+")
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    if not try_lock(handle):
         handle.seek(0)
         pid = handle.read().strip() or "unknown"
+        if sys.platform == "win32":
+            check = f"Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\" | Select-Object ProcessId,CommandLine"
+        else:
+            check = f"ps -o pid,args -p {pid}"
         fail(
             f"pid {pid} already watches {repo}#{pr}; this one exits. If its events never reach you, check it "
-            f"with `ps -o pid,args -p {pid}` and stop it by that number only if it is your own watcher."
+            f"with `{check}` and stop it by that number only if it is your own watcher."
         )
     handle.seek(0)
     handle.truncate()
@@ -471,7 +501,7 @@ class Watcher:
 def local_head(branch: str) -> str | None:
     """The local HEAD commit, when the current checkout is on the PR's head branch."""
     def git(*args: str) -> str:
-        proc = subprocess.run(["git", *args], capture_output=True, text=True)
+        proc = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
         return proc.stdout.strip() if proc.returncode == 0 else ""
     if not branch or git("branch", "--show-current") != branch:
         return None
@@ -479,6 +509,10 @@ def local_head(branch: str) -> str | None:
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        # A pipe on Windows prints with the ANSI code page, which cannot print an emoji from a comment.
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(prog="pr-wait", description="Watch a tangency-labs PR; one line per real event.")
     p.add_argument("pr", nargs="?", help="PR number or URL")
     p.add_argument("--repo", help="owner/name (default tangency-labs/solidcraft)")
