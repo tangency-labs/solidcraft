@@ -2334,7 +2334,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
-                ends: Box::new([start_setback, end_setback, start_extension, end_extension].map(|e| e.as_deref().map(str::to_string).unwrap_or_default())),
+                ends: Box::new(
+                    [start_setback, end_setback, start_extension, end_extension].map(|e| e.as_deref().map(str::to_string).unwrap_or_default()),
+                ),
                 orientation: 1,
                 symmetric: false,
                 flip: *flip,
