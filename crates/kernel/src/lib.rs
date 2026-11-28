@@ -952,3 +952,28 @@ mod trimmed_face_mesh_tests;
 // A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
 #[cfg(feature = "backend-occt")]
 pub use route::foreign;
+
+/// The selected geometry backend for this process, including the opt-in measurement backend.
+pub fn active_backend() -> &'static str {
+    #[cfg(feature = "backend-occt")]
+    {
+        foreign::kernel().name()
+    }
+    #[cfg(not(feature = "backend-occt"))]
+    {
+        "solidcore"
+    }
+}
+
+/// The backend whose persistent geometry caches can be trusted. An experimental
+/// process that explicitly changes kernels cannot safely label older geometry.
+pub fn persistent_cache_backend() -> Option<&'static str> {
+    #[cfg(feature = "backend-occt")]
+    {
+        foreign::cache_kernel().map(|k| k.name())
+    }
+    #[cfg(not(feature = "backend-occt"))]
+    {
+        Some("solidcore")
+    }
+}

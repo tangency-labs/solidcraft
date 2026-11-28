@@ -9,11 +9,6 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
-// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
-// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
-// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
-// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
-// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
@@ -3276,7 +3271,7 @@ mod tests {
         assert!(read_design_geometry(&package(&entries)).is_none());
         // The kernel that computed it is recorded, and a model the C++ kernel computed (an earlier
         // build's) is evaluated again (a cache without one is a miss too).
-        assert_eq!(written(&original)["kernel"], json!(native_cache::KERNEL));
+        assert_eq!(written(&original)["kernel"], json!(solidcraft_kernel::active_backend()));
         let bytes = with(&[("kernel", "smlib")]);
         assert!(read_design_geometry(&bytes).is_none(), "the C++ kernel's cache");
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
@@ -3285,6 +3280,31 @@ mod tests {
         manifest.as_object_mut().unwrap().remove("kernel");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
+    }
+
+    #[test]
+    fn model_and_import_caches_distinguish_geometry_kernels() {
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
+        let mut entries = parts(&bytes);
+        let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+        let active = solidcraft_kernel::active_backend();
+        assert_eq!(manifest["kernel"], json!(active));
+        assert!(read_design_geometry(&bytes).is_some());
+
+        let legacy_identity = json!([manifest["format"], manifest["producer"], manifest["app"], manifest["build"]]);
+        assert_eq!(native_cache::identity_for_kernel("solidcore"), legacy_identity);
+        let mut occt_identity = legacy_identity;
+        occt_identity.as_array_mut().unwrap().push(json!("occt"));
+        assert_eq!(native_cache::identity_for_kernel("occt"), occt_identity);
+        assert_eq!(native_cache::identity(), native_cache::identity_for_kernel(active));
+
+        let other = if active == "solidcore" { "occt" } else { "solidcore" };
+        manifest["kernel"] = json!(other);
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        let bytes = package(&entries);
+        assert!(read_design_geometry(&bytes).is_none());
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
     }
 
     #[test]

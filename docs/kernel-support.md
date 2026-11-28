@@ -123,6 +123,11 @@ bodies.
 So the interface took a second kernel without changes to the trait, and the gaps are in what the
 adapter carries back: history, construction sources and apart solids.
 
-### Known limitations
+### Cache compatibility
 
-- The model cache saved in a design and the import cache don't record the kernel that computed them, so the opt-in `backend-occt` build can share cached bodies with a normal build of the same commit ([#23125](https://github.com/tangency-labs/solidcraft/issues/23125)).
+The model cache records the selected kernel. The import cache also separates entries from the
+opt-in `backend-occt` backend from those computed by solidcore. Switching kernels between runs
+causes a cache miss rather than reusing another kernel's geometry. An experimental process
+that explicitly calls `set_kernel` no longer reads or writes persistent geometry caches.
+Older evaluated models may still be alive, so those caches cannot safely be labelled with
+the new selection. Normal app runs select their backend once and retain caching.
