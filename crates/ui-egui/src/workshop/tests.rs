@@ -592,6 +592,8 @@ fn nightly() -> semver::Version {
 /// release) leaves the item out, as the link would refuse it.
 #[test]
 fn the_window_lists_what_a_link_could_open() {
+    crate::i18n::install();
+    let _language = solidcraft_ui_text::scope("en");
     use solidcraft_engine::workshop::{Kind as K, Tier as T};
     let (index, items) = read_with(signed(&lasting_index()), None, &nightly()).unwrap();
     assert_eq!(index.sequence, 42);
