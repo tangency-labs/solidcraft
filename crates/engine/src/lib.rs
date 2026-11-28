@@ -3434,6 +3434,10 @@ impl Session {
             }),
             ..Snapshot::of(self, spec.label)
         };
+        // The closed save writers rename history in place, without changing its steps.
+        // Retain only their lengths: pinning every old document would force copies on Save As.
+        let sketch_save_history_len =
+            (before.sketch_entry.is_some() && matches!(spec.id, "file.save" | "file.save_as")).then_some((self.undo.len(), self.redo.len()));
         let link_read_before = (spec.id == "component.relink").then(|| before.doc.clone());
         let link_observations_before = self.plugin_state.link_changes.clone();
         let link_reads_before = self.plugin_state.link_reads.clone();
@@ -3654,6 +3658,37 @@ impl Session {
                 Ok(v)
             }
             Err(e) => {
+                // A returned save error has already renamed the history back. Keep its coherent
+                // entry bindings while restoring every other entry field below. Unproven failure
+                // paths (including a panic before rename-back) use the ordinary rollback.
+                let saved_sketch_binding = sketch_save_history_len.and_then(|(undo_len, redo_len)| {
+                    let entry = self.sketch_entry.as_ref()?;
+                    let original = before.sketch_entry.as_ref()?;
+                    let top = entry.undo_len.checked_sub(1).and_then(|i| self.undo.get(i));
+                    let anchored = match (top, &entry.undo_top) {
+                        (Some(step), Some(doc)) => Arc::ptr_eq(&step.doc, doc),
+                        (None, None) => entry.undo_len == 0,
+                        _ => false,
+                    };
+                    (self.undo.len() == undo_len
+                        && self.redo.len() == redo_len
+                        && self.active_sketch == before.active_sketch
+                        && self.sketching_view == before.sketching_view
+                        && self.doc.name == before.doc.name
+                        && self.doc.as_ref() == before.doc.as_ref()
+                        && entry.sketch == original.sketch
+                        && entry.undo_len == original.undo_len
+                        && entry.restore_marker == original.restore_marker
+                        && entry.pending_moves == original.pending_moves
+                        && entry.pending_move_records == original.pending_move_records
+                        && entry.pending_joint_bases == original.pending_joint_bases
+                        && entry.last_capture_state == original.last_capture_state
+                        && entry.visibility == original.visibility
+                        && entry.doc.as_ref() == original.doc.as_ref()
+                        && entry.undo_top.as_deref() == original.undo_top.as_deref()
+                        && anchored)
+                        .then(|| (entry.doc.clone(), entry.undo_top.clone()))
+                });
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
                 self.plugin_state.link_changes = link_observations_before;
@@ -3667,6 +3702,10 @@ impl Session {
                 self.active_sketch = before.active_sketch;
                 self.sketching_view = before.sketching_view;
                 self.sketch_entry.clone_from(&before.sketch_entry);
+                if let (Some(entry), Some((doc, undo_top))) = (self.sketch_entry.as_mut(), saved_sketch_binding) {
+                    entry.doc = doc;
+                    entry.undo_top = undo_top;
+                }
                 if let Some(section) = before.section.take() {
                     self.set_section_state(section);
                 }
@@ -5030,6 +5069,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         drawings,
         next_component_color_index,
         plane_extents,
+        view_frame,
         plugin_data,
         linked_bodies_left_out,
     } = a;
@@ -5078,6 +5118,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
         && *plane_extents == b.plane_extents
+        && *view_frame == b.view_frame
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link

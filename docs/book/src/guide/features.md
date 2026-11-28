@@ -161,8 +161,11 @@ and is smoothed over. A taper steeper than the profile's details (a stroke, a cu
 narrower than it) is refused with that reason; a smaller taper or distance builds. A taper
 composes with a start offset (a drafted pocket that starts part way up a part): the offset moves
 the profile along the normal and the sides are drafted from there, so the profile is the section
-at the start whatever the offset. A taper with a two-sided or symmetric extent is not built yet
-and says so.
+at the start whatever the offset. On a symmetric extrude the taper drafts both halves from the
+start plane outward; on two sides it drafts the first side, and `taper2` (Taper Angle 2) the
+second, which takes the taper when `taper2` is left out. A taper of 6 deg with `taper2: "-6 deg"`
+makes one slope through the profile. A thin wall on two sides or symmetric, and a symmetric
+extrude with Symmetric Offset, are not tapered yet and say so.
 
 **Thin Extrude** (`thin: true` on `solid.extrude`, the Thin Extrude box in its dialog) builds a
 wall of constant thickness along sketch curves instead of filling profiles: open chains (a single
@@ -550,7 +553,7 @@ still be added through `set`. The fields of the common features:
 
 | Feature | Fields |
 |---|---|
-| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
+| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `taper2`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
 | Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |

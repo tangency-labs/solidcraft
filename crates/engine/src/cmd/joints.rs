@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, export_frame?: bool (robot exports write it as a frame of its own), occurrence?: id|name (default: from the pick, or the named face's or sketch's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face, or a round end of a round face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | faces: [[x,y,z],[x,y,z]] (two faces of this part, one point on each: the plane midway between them, kept by the faces' names; the Center rule's walls) | point: [x,y,z], z?: [x,y,z] | sketch: id|name, point: \"<point id or curve.center>\" | curve: \"<circle/arc/ellipse id>\" (a solved sketch point, z along the sketch's normal, re-resolved on every solve so it follows parameter changes) | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces and sketch points are kept by identity: the origin follows its face, circle or sketch point when the design changes",
+        "name?, export_frame?: bool (robot exports write it as a frame of its own), occurrence?: id|name (default: from the pick, or the named face's or sketch's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face, or a round end of a round face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | faces: [[x,y,z],[x,y,z]] (two parallel planar faces of this part, one point on each: the plane midway between them, kept by the faces' names; optional snap?: a joint origin reference on the same occurrence whose resolved point is projected onto that midplane, e.g. a hole circle, face, edge, sketch point or named origin) | point: [x,y,z], z?: [x,y,z] | sketch: id|name, point: \"<point id or curve.center>\" | curve: \"<circle/arc/ellipse id>\" (a solved sketch point, z along the sketch's normal, re-resolved on every solve so it follows parameter changes) | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces and sketch points are kept by identity: the origin follows its face, circle or sketch point when the design changes",
     ),
     CommandSpec::new("joint.origin_frame", "Export Origin as Frame", crate::checked!("joint.origin_frame", origin_frame))
         .icon("joint_origin")
@@ -75,7 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
-         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, faces: [[x,y,z],[x,y,z]] (two faces of one part: the plane midway between them), or face|circle: \"<face name>\", sketch: id|name with point|curve, plane: \"XY\"|\"o:<ids>/origin/<item>\"|\"<name>\", axis: \"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
+         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, faces: [[x,y,z],[x,y,z]] (two parallel planar faces of one part: the plane midway between them, with optional snap?: a reference on the same occurrence projected onto that midplane), or face|circle: \"<face name>\", sketch: id|name with point|curve, plane: \"XY\"|\"o:<ids>/origin/<item>\"|\"<name>\", axis: \"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
          b's z against a's as two faces meet - two plane or axis datums mate aligned, each part keeping its side of the datum, and flip mates them; \
          true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
@@ -681,6 +681,9 @@ pub(crate) fn in_first_placement(s: &Session, v: &Value, path: &[u64], cmd: &str
     if let Some(faces) = out.get_mut("faces").and_then(Value::as_array_mut) {
         faces.iter_mut().take(2).for_each(point);
     }
+    if let Some(snap) = out.get("snap").filter(|v| v.is_object() && v.get("snap").is_none()).cloned() {
+        out["snap"] = in_first_placement(s, &snap, path, cmd)?;
+    }
     out.get_mut("z").map(dir);
     out.get_mut("x").map(dir);
     out.get_mut("x").and_then(|x| x.get_mut("face")).map(point);
@@ -1013,15 +1016,113 @@ fn read_origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointO
     let world = world.or_else(|| faces.map(|[at, _]| at));
     let Some(path) = picked_placement(s, v, world, cmd)? else { return origin_on_part(s, v, cmd) };
     let (occurrence, inside) = joints::origin_anchor(&s.doc, &path);
+    // Validate and resolve any `snap` on a between-faces origin whose placement is a repeated
+    // sub-assembly copy before projecting points into the part's first placement.
+    let mut named_inner_snap: Option<Snap> = None;
+    if faces.is_some()
+        && let Some(snap_val) = v.get("snap").filter(|val| !val.is_null())
+    {
+        match snap_val {
+            Value::String(name) if !inside.is_empty() => {
+                if let Some(found) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
+                    if found.origin.occurrence != occurrence || found.origin.inside != inside {
+                        return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+                    }
+                    if matches!(found.origin.snap, Snap::BetweenFaces { .. }) {
+                        return Err(bad(cmd, "between-faces `snap` cannot nest another `faces` origin"));
+                    }
+                    named_inner_snap = Some(found.origin.snap.clone());
+                }
+            }
+            Value::Object(m) => {
+                if let Some(snap_path) = m.get("path").filter(|p| !p.is_null()) {
+                    let last = snap_path.as_array().and_then(|ids| ids.last()).cloned();
+                    let id = occurrence_id(s, m.get("occurrence").or(last.as_ref()), cmd)?;
+                    if super::component::occurrence_path(s, snap_val, id, cmd)? != path {
+                        return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     let mut on_part = if inside.is_empty() { v.clone() } else { in_first_placement(s, v, &path, cmd)? };
     if let Some(m) = on_part.as_object_mut() {
         m.remove("path");
         m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+        if named_inner_snap.is_some() {
+            m.remove("snap");
+        } else if let Some(sm) = m.get_mut("snap").and_then(Value::as_object_mut) {
+            sm.remove("path");
+        }
     }
     // A part in a sub-assembly placed more than once is found on its first placement, then the
     // origin goes on the copy it was picked on (#11426).
-    let o = origin_on_part(s, &on_part, cmd)?;
+    let mut o = origin_on_part(s, &on_part, cmd)?;
+    if let Some(inner) = named_inner_snap
+        && let Snap::BetweenFaces { snap, .. } = &mut o.snap
+    {
+        *snap = Some(Box::new(inner));
+        joints::resolve_origin(&s.doc, &s.model.state(), &o).map_err(|e| bad(cmd, e.to_string()))?;
+    }
     Ok(if inside.is_empty() { o } else { JointOrigin { occurrence, inside, snap: o.snap } })
+}
+
+/// Resolve the optional inner `snap` of a between-faces origin on `occurrence`, forbidding
+/// nested between-faces references and references on another occurrence.
+fn read_inner_snap(s: &Session, snap_val: &Value, occurrence: u64, cmd: &str) -> Result<Snap> {
+    if let Value::String(name) = snap_val {
+        if name.is_empty() {
+            return Err(bad(cmd, "`snap` must not be empty"));
+        }
+        let inner = if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
+            o.origin.clone()
+        } else if let Some(o) = origin_from_name(s, name, Some(occurrence), cmd)? {
+            o
+        } else {
+            return Err(bad(cmd, format!("no joint origin `{name}`")));
+        };
+        if !inner.inside.is_empty() || inner.occurrence != occurrence {
+            return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+        }
+        if matches!(inner.snap, Snap::BetweenFaces { .. }) {
+            return Err(bad(cmd, "between-faces `snap` cannot nest another `faces` origin"));
+        }
+        return Ok(inner.snap);
+    }
+    let Some(map) = snap_val.as_object() else {
+        return Err(bad(cmd, "`snap` must be a joint origin name or an origin object"));
+    };
+    if map.contains_key("faces") || map.contains_key("snap") {
+        return Err(bad(cmd, "between-faces `snap` cannot nest another `faces` origin"));
+    }
+    if let Some(snap_path) = map.get("path").filter(|p| !p.is_null()) {
+        let last = snap_path.as_array().and_then(|ids| ids.last()).cloned();
+        let id = occurrence_id(s, map.get("occurrence").or(last.as_ref()), cmd)?;
+        let resolved = super::component::occurrence_path(s, snap_val, id, cmd)?;
+        let (anchor, inner_inside) = joints::origin_anchor(&s.doc, &resolved);
+        if !inner_inside.is_empty() || anchor != occurrence {
+            return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+        }
+    }
+    if let Some(occ_val) = map.get("occurrence").filter(|o| !o.is_null())
+        && occurrence_id(s, Some(occ_val), cmd)? != occurrence
+    {
+        return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+    }
+    let mut inner_val = snap_val.clone();
+    if let Some(m) = inner_val.as_object_mut() {
+        m.remove("path");
+        m.insert("occurrence".into(), json!(occurrence));
+    }
+    let inner = read_origin_param(s, Some(&inner_val), cmd)?;
+    if !inner.inside.is_empty() || inner.occurrence != occurrence {
+        return Err(bad(cmd, "between-faces `snap` must be on the same occurrence"));
+    }
+    if matches!(inner.snap, Snap::BetweenFaces { .. }) {
+        return Err(bad(cmd, "between-faces `snap` cannot nest another `faces` origin"));
+    }
+    Ok(inner.snap)
 }
 
 /// [`origin_param`] for a snap on one occurrence's own component, read at its first placement.
@@ -1069,7 +1170,11 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
             let [wa, wb] = faces.ok_or_else(|| bad(cmd, "`faces` must be two points, one on each face: [[x, y, z], [x, y, z]]"))?;
             let (la, lb) = (local(wa), local(wb));
             let picked = |at| joints::between_face_pick(&s.doc, &st, component, at).map_err(|err| bad(cmd, err.to_string()));
-            Snap::BetweenFaces { a: picked(la)?, b: picked(lb)? }
+            let inner = match v.get("snap") {
+                None | Some(Value::Null) => None,
+                Some(snap_val) => Some(Box::new(read_inner_snap(s, snap_val, occurrence, cmd)?)),
+            };
+            Snap::BetweenFaces { a: picked(la)?, b: picked(lb)?, snap: inner }
         }
         "edge" => {
             let (on, corner) = (v.get("on").and_then(vec3).map(local), v.get("corner").and_then(vec3).map(local));
@@ -1761,14 +1866,19 @@ pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: O
     Ok(origin)
 }
 
-fn persistent_alignment(origin: &JointOrigin) -> Option<&XRef> {
-    let x = match &origin.snap {
+fn persistent_alignment_snap(snap: &Snap) -> Option<&XRef> {
+    let x = match snap {
         Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
             x.as_ref()
         }
+        Snap::BetweenFaces { snap: Some(inner), .. } => return persistent_alignment_snap(inner),
         _ => None,
     };
     x.filter(|x| matches!(x, XRef::Reference { .. } | XRef::Planar { .. }))
+}
+
+fn persistent_alignment(origin: &JointOrigin) -> Option<&XRef> {
+    persistent_alignment_snap(&origin.snap)
 }
 
 fn check_alignment_path(s: &Session, origin: &JointOrigin, cmd: &str) -> Result<()> {
@@ -1864,16 +1974,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
-    let aligned = |origin: &JointOrigin| {
-        matches!(
-            &origin.snap,
-            Snap::FaceCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
-                | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
-                | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
-                | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
-                | Snap::SketchPoint { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
-        )
-    };
+    let aligned = |origin: &JointOrigin| persistent_alignment(origin).is_some();
     if angle.is_none() && !j.kind.is_relation() && !aligned(&j.a) && !aligned(&j.b) {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
     }
@@ -3099,15 +3200,7 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         && p.get("angle").is_none()
         && let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| !j.kind.is_relation() && j.exprs.angle.is_none()).cloned()
     {
-        let explicit_alignment = |o: &JointOrigin| {
-            matches!(
-                &o.snap,
-                Snap::FaceCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
-                    | Snap::CircleCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
-                    | Snap::Plane { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
-                    | Snap::Axis { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
-            )
-        };
+        let explicit_alignment = |o: &JointOrigin| persistent_alignment(o).is_some();
         let turn =
             if explicit_alignment(&j.a) || explicit_alignment(&j.b) { j.angle } else { joints::least_turn_angle(&s.doc, &s.model.state(), &j) };
         if let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id) {

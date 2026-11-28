@@ -2809,7 +2809,7 @@ impl Document {
 }
 
 /// The values features are evaluated with: the parameters, and the design's length unit.
-fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+pub(crate) fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let (mut vals, perr) = doc.param_values();
     if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
         && scale != 1.0
@@ -2918,7 +2918,7 @@ fn turns_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature) -> 
 
 /// The features a pattern or mirror of `features` replays: each source, and the sources of one
 /// that is itself a pattern or mirror of features (see `copy_plan`), each once.
-fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec<&'a Feature> {
+pub(crate) fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec<&'a Feature> {
     let mut out: Vec<&Feature> = Vec::new();
     let mut todo: Vec<crate::FeatureId> = features.to_vec();
     // A bound on the walk, as on the copy plan's nesting: a design can't make it run on.
@@ -4187,7 +4187,8 @@ impl Feature {
                     && !extent.through_all
                     && !extent.through_all2
                     && extent.to2.is_none()
-                    && extent.taper.is_none() =>
+                    && extent.taper.is_none()
+                    && extent.taper2.is_none() =>
             {
                 Some(Reads { bodies: operated(self, feature_op(self))?, ..sketch(s)? })
             }
@@ -7564,45 +7565,51 @@ impl CaptureStepper {
                                 joint_components.insert(c);
                             }
                         };
-                        let x_ref = match &o.snap {
-                            crate::joints::Snap::FaceCenter { x, .. }
-                            | crate::joints::Snap::CircleCenter { x, .. }
-                            | crate::joints::Snap::Plane { x, .. }
-                            | crate::joints::Snap::Axis { x, .. }
-                            | crate::joints::Snap::SketchPoint { x, .. } => x.as_ref(),
-                            _ => None,
-                        };
-                        if let Some(crate::joints::XRef::Reference { reference, .. }) = x_ref {
-                            match reference {
-                                crate::joints::AlignmentRef::SketchLine { sketch, .. } => {
-                                    joint_sketches.insert(*sketch);
+                        let mut record_snap = |snap: &crate::joints::Snap| {
+                            let x_ref = match snap {
+                                crate::joints::Snap::FaceCenter { x, .. }
+                                | crate::joints::Snap::CircleCenter { x, .. }
+                                | crate::joints::Snap::Plane { x, .. }
+                                | crate::joints::Snap::Axis { x, .. }
+                                | crate::joints::Snap::SketchPoint { x, .. } => x.as_ref(),
+                                _ => None,
+                            };
+                            if let Some(crate::joints::XRef::Reference { reference, .. }) = x_ref {
+                                match reference {
+                                    crate::joints::AlignmentRef::SketchLine { sketch, .. } => {
+                                        joint_sketches.insert(*sketch);
+                                    }
+                                    crate::joints::AlignmentRef::Construction { feature }
+                                    | crate::joints::AlignmentRef::ConstructionPlane { feature } => {
+                                        joint_construct.insert(*feature);
+                                    }
+                                    _ => {}
                                 }
-                                crate::joints::AlignmentRef::Construction { feature }
-                                | crate::joints::AlignmentRef::ConstructionPlane { feature } => {
-                                    joint_construct.insert(*feature);
-                                }
-                                _ => {}
                             }
-                        }
-                        match &o.snap {
-                            crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
-                            crate::joints::Snap::FaceCenter { .. }
-                            | crate::joints::Snap::CircleCenter { .. }
-                            | crate::joints::Snap::Edge { .. }
-                            | crate::joints::Snap::BetweenFaces { .. } => {
-                                note_comp(&mut joint_components, &mut any_component_dirty);
-                            }
-                            crate::joints::Snap::SketchPoint { sketch, x, .. } => {
-                                joint_sketches.insert(*sketch);
-                                if x.is_some() {
+                            match snap {
+                                crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
+                                crate::joints::Snap::FaceCenter { .. }
+                                | crate::joints::Snap::CircleCenter { .. }
+                                | crate::joints::Snap::Edge { .. }
+                                | crate::joints::Snap::BetweenFaces { .. } => {
                                     note_comp(&mut joint_components, &mut any_component_dirty);
                                 }
+                                crate::joints::Snap::SketchPoint { sketch, x, .. } => {
+                                    joint_sketches.insert(*sketch);
+                                    if x.is_some() {
+                                        note_comp(&mut joint_components, &mut any_component_dirty);
+                                    }
+                                }
+                                crate::joints::Snap::Plane { .. } | crate::joints::Snap::Axis { .. } => {
+                                    any_component_dirty = true;
+                                    any_sketch_dirty = true;
+                                    any_construct_dirty = true;
+                                }
                             }
-                            crate::joints::Snap::Plane { .. } | crate::joints::Snap::Axis { .. } => {
-                                any_component_dirty = true;
-                                any_sketch_dirty = true;
-                                any_construct_dirty = true;
-                            }
+                        };
+                        record_snap(&o.snap);
+                        if let crate::joints::Snap::BetweenFaces { snap: Some(inner), .. } = &o.snap {
+                            record_snap(inner);
                         }
                     }
                 }
@@ -8144,8 +8151,34 @@ fn fingerprints_digest(results: &[FeatureResult]) -> u64 {
 /// so).
 pub(crate) const DESIGN_LEN: &str = "\u{1}design_len";
 
-/// An expression's value. A length that comes out unit-less without being a bare number (a
-/// unit-less parameter used as a length) is in the design's units.
+/// The Move `f`'s translation, rotation pivot (the origin when unset), axis (Z when unset) and
+/// angle, its expressions read, with a turn picked on an edge or round face put where that
+/// geometry is in `st`, the model just before the Move (#17974). The one reading for the bodies it
+/// moves, their constructions and a hole callout that follows them.
+pub(crate) fn move_motion(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+    warning: &mut Option<String>,
+) -> Result<(Vec3, Vec3, Vec3, f64)> {
+    let FeatureKind::Move { translate, rotate_axis, rotate_about, origin, angle, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a move".into()));
+    };
+    let t = Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
+    let angle = match angle {
+        Some(a) => val(vals, a, Kind::Angle)?,
+        None => 0.0,
+    };
+    let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+    let (origin, axis) = match rotate_about {
+        Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
+        None => (origin, axis),
+    };
+    Ok((t, origin, axis, angle))
+}
+
 /// A point given as length expressions.
 pub(crate) fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
     let [x, y, z] = p;
@@ -8164,6 +8197,8 @@ fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr, field: &str) ->
     crate::unit_direction(v).ok_or_else(|| DocError::Invalid(format!("the {field} is zero: give it a direction [x, y, z] that isn't [0, 0, 0]")))
 }
 
+/// An expression's value. A length that comes out unit-less without being a bare number (a
+/// unit-less parameter used as a length) is in the design's units.
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
     val_with(vals, e, k, None)
 }
@@ -8274,6 +8309,30 @@ pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, 
         out.extend(kernel::draft_corners(r, distance, taper)?);
     }
     Ok(out)
+}
+
+/// Region `r` of `ss` drafted by `taper` over `from..to` along `sign` times the normal of
+/// `start_plane` (where `r` is the section), its sharp corners closed by `corner` or, when the
+/// user chose none, by [`draft_corner_for`] over the length `to - from` (noted in `notes`), its
+/// faces named by `roles`.
+#[allow(clippy::too_many_arguments)]
+fn drafted_tool(
+    ss: &SolvedSketch,
+    r: &Region2,
+    start_plane: &Plane,
+    (from, to): (f64, f64),
+    sign: f64,
+    taper: f64,
+    corner: Option<kernel::DraftCorner>,
+    roles: crate::lineage::ProfileRoles<'_>,
+    notes: &mut Vec<String>,
+) -> Result<Traced> {
+    let corner = match corner {
+        Some(c) => c,
+        None => draft_corner_for(ss, r, to - from, taper, notes)?,
+    };
+    let body = kernel::extrude_tapered_between(start_plane, r, from, to, 0.0, sign, taper, corner)?;
+    Ok(roles.tool(body, None))
 }
 
 /// The corner rule a taper takes for profile `r` of `ss` when the user chose none: preserve
@@ -11463,9 +11522,10 @@ fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
     ids.iter().map(|id| format!("`{}`", id.as_ref())).collect::<Vec<_>>().join(", ")
 }
 
-struct HoleSpot<'a> {
-    at: Vec3,
-    point: Option<&'a str>,
+/// Where a hole drills, and the sketch point it drills at (none for a hole at a position).
+pub(crate) struct HoleSpot<'a> {
+    pub(crate) at: Vec3,
+    pub(crate) point: Option<&'a str>,
 }
 
 fn sketch_hole_spots<'a>(points: &'a crate::SketchPoints, sketch: &crate::SolvedSketch, limit: usize) -> Vec<HoleSpot<'a>> {
@@ -11488,7 +11548,7 @@ fn sketch_hole_spots<'a>(points: &'a crate::SketchPoints, sketch: &crate::Solved
 
 /// Point ids can come from a script or a saved sketch. Keep ordinary ids readable and encode
 /// ids that are long or could be read as part of a face name's grammar.
-fn hole_point_role(id: &str) -> String {
+pub(crate) fn hole_point_role(id: &str) -> String {
     if id.len() <= 64 && id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.')) {
         format!("point:{id}")
     } else {
@@ -11500,7 +11560,7 @@ fn hole_point_role(id: &str) -> String {
 /// Where a hole feature drills (each on the surface) and in which direction: at its sketch
 /// points perpendicular to the sketch (into the material), else at its position. A point gone
 /// from the sketch drops only its own hole ([`hole_points_gone`]); with none left it fails.
-fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Feature) -> Result<(Vec<HoleSpot<'a>>, Vec3)> {
+pub(crate) fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Feature) -> Result<(Vec<HoleSpot<'a>>, Vec3)> {
     let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (mut spots, dir) = match points {
         Some(sp) if !sp.single => {
@@ -11561,7 +11621,7 @@ fn sketch_plane_follows_face(doc: &Document, sketch: u64) -> bool {
 
 /// A hole's depth: down to the To Object (where the hole's axis meets the face there, else the
 /// point's depth along the axis), else as given.
-fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth: &Option<crate::Expr>) -> Result<Option<crate::Expr>> {
+pub(crate) fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth: &Option<crate::Expr>) -> Result<Option<crate::Expr>> {
     let Some(t) = to else { return Ok(depth.clone()) };
     let mut d = (*t - *at).dot(dir);
     // The face at the To point, met along the axis.
@@ -12524,27 +12584,15 @@ enum CapRoles {
     Named([&'static str; 2]),
 }
 
-fn centered_extrude(
-    plane: &Plane,
-    region: &Region2,
-    start: f64,
-    end: f64,
-    sketch: Option<&SolvedSketch>,
-    thin: Option<&crate::lineage::ThinWallRoles>,
+/// The names of an extrude's caps, the low one's then the high one's (`lo` and `hi`: their levels
+/// along the sketch normal), and the second name each answers to. A two-sided extrude and a
+/// symmetric one, straight or tapered, name their caps here, so a taper renames no cap.
+fn extrude_cap_names(
     cap_roles: CapRoles,
+    lo: f64,
+    hi: f64,
     one_sided_direction: Option<crate::Direction>,
-) -> Result<Vec<Traced>> {
-    if !plane.origin.is_finite()
-        || !plane.x.is_finite()
-        || !plane.y.is_finite()
-        || (plane.x.len2() - 1.0).abs() > 1e-8
-        || (plane.y.len2() - 1.0).abs() > 1e-8
-        || plane.x.dot(plane.y).abs() > 1e-8
-    {
-        return Err(DocError::Invalid("extrude frame is not finite and orthonormal".into()));
-    }
-    // The faces' roles: the sketch curve under each side, the caps by where they lie.
-    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+) -> ([Option<String>; 2], [Option<String>; 2]) {
     // A two-sided extrude has no cap on its sketch plane: its two caps close the two ends of
     // the tool, the low one downwards and the high one upwards, so they are named by the end
     // they close. Their height cannot tell them apart: both sides may lie on the same side of
@@ -12576,7 +12624,38 @@ fn centered_extrude(
         Some(crate::Direction::Symmetric) | None if same_side => [Some("cap:low".to_string()), Some("cap:high".to_string())],
         Some(crate::Direction::Symmetric) | None => [None, None],
     };
-    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
+    (caps, cap_synonyms)
+}
+
+fn centered_extrude(
+    plane: &Plane,
+    region: &Region2,
+    start: f64,
+    end: f64,
+    sketch: Option<&SolvedSketch>,
+    thin: Option<&crate::lineage::ThinWallRoles>,
+    cap_roles: CapRoles,
+    one_sided_direction: Option<crate::Direction>,
+) -> Result<Vec<Traced>> {
+    // The faces' roles: the sketch curve under each side, the caps by where they lie.
+    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+    let (caps, cap_synonyms) = extrude_cap_names(cap_roles, lo, hi, one_sided_direction);
+    named_extrude(plane, region, start, end, crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin })
+}
+
+/// [`centered_extrude`] with its faces named by `roles`: `region` extruded straight from `start`
+/// to `end` along `plane`'s normal.
+fn named_extrude(plane: &Plane, region: &Region2, start: f64, end: f64, roles: crate::lineage::ProfileRoles<'_>) -> Result<Vec<Traced>> {
+    if !plane.origin.is_finite()
+        || !plane.x.is_finite()
+        || !plane.y.is_finite()
+        || (plane.x.len2() - 1.0).abs() > 1e-8
+        || (plane.y.len2() - 1.0).abs() > 1e-8
+        || plane.x.dot(plane.y).abs() > 1e-8
+    {
+        return Err(DocError::Invalid("extrude frame is not finite and orthonormal".into()));
+    }
+    let sketch = roles.sketch;
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -12788,6 +12867,9 @@ fn feature_tools_with_constructor(
             let tapered = match &extent.taper {
                 Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
                 None => false,
+            } || match &extent.taper2 {
+                Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
+                None => false,
             };
             // The plane To Object ends on, when it is flat: a face's plane, square to the
             // extrusion or at a slant to it (but not within 5 degrees of running along it), or
@@ -12943,17 +13025,169 @@ fn feature_tools_with_constructor(
                 _ => 0.0,
             };
             // A taper of 0 is a straight extrusion (the dialog stores one, and designs carry it);
-            // the tapered path refuses a profile with holes without a draft (#13188).
-            if let Some(tp) = &extent.taper
-                && val(vals, tp, Kind::Angle)? != 0.0
-            {
-                let taper = val(vals, tp, Kind::Angle)?;
-                if extent.extend_to_face && curved.is_some() {
-                    return Err(DocError::Invalid("not supported yet: extending the To face with a taper".into()));
+            // the tapered path refuses a profile with holes without a draft (#13188). A second
+            // side's taper (`taper2`, Two Sides only) is the first's when absent, as the two
+            // halves of a symmetric extrude both take `taper`.
+            let taper = extent.taper.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.unwrap_or(0.0);
+            // A second side that runs Through All or To Object (#18691) takes no taper yet: the
+            // tapered path ends each side at a distance. Refused, whichever taper would reach it
+            // (`taper2`, or `taper` standing in for it), so neither is dropped without a word.
+            let taper_given = taper != 0.0 || extent.taper2.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.is_some_and(|t| t != 0.0);
+            if taper_given && (extent.through_all2 || extent.to2.is_some()) {
+                return Err(DocError::Invalid(
+                    "not supported yet: a taper with the second side Through All or To Object; give the second side a Distance, or leave out the taper".into(),
+                ));
+            }
+            let taper2 = match (&extent.taper2, &extent.distance2) {
+                (Some(_), None) => return Err(DocError::Invalid("`taper2` goes with `distance2` (the second side's taper)".into())),
+                (Some(e), Some(_)) => val(vals, e, Kind::Angle)?,
+                (None, _) => taper,
+            };
+            // Both ways from the start: a second distance, or symmetric (To Object makes a
+            // symmetric extrude one-sided, as on the straight path below).
+            let two_ways = extent.distance2.is_some() || (extent.to.is_none() && extent.direction == crate::Direction::Symmetric);
+            if (taper != 0.0 || taper2 != 0.0) && extent.extend_to_face && curved.is_some() {
+                return Err(DocError::Invalid("not supported yet: extending the To face with a taper".into()));
+            }
+            if two_ways && (taper != 0.0 || taper2 != 0.0) {
+                if thin.is_some() {
+                    return Err(DocError::Invalid("not supported yet: a taper on a thin extrude with two sides or symmetric".into()));
                 }
-                if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
-                    return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
+                let base = from
+                    + match &extent.start_offset {
+                        Some(e) => val(vals, e, Kind::Length)?,
+                        None => 0.0,
+                    };
+                let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
+                // As the straight path tells a symmetric offset (refused there with a second side).
+                if direction == crate::Direction::Symmetric && extent.symmetric_offset && base.abs() > 1e-9 {
+                    return Err(DocError::Invalid("not supported yet: a taper with symmetric offset".into()));
                 }
+                // The second side's reach and the first's, signed along the normal from the start.
+                let (a, b) = extent_sides(vals, extent, d, direction, second_end)?;
+                if a == 0.0 && b == 0.0 {
+                    return Err(DocError::Invalid("extrude distance is zero".into()));
+                }
+                if a * b > 0.0 {
+                    return Err(DocError::Invalid("not supported yet: a taper on two sides whose ends lie on one side of the start".into()));
+                }
+                // To a curved face (the first side's end): that side runs past the face, as a
+                // one-sided taper does, and is cut back to it before the sides are joined.
+                let target = curved.and_then(|bi| tst.bodies.get(bi)).zip(to_face).zip(extent.to);
+                let b = match target {
+                    Some(((tb, (_, fi)), p)) if b != 0.0 => {
+                        b.signum() * tapered_reach(&ss, &regions, (tb, fi, p.0, to_offset), base, b.signum(), b.abs(), taper, extent.corner)?
+                    }
+                    _ => b,
+                };
+                let (lo, hi) = (base + a.min(b), base + a.max(b));
+                extrude_within_reach([lo, hi])?;
+                // The caps are named as the straight extrude names them (`extrude_cap_names`), so
+                // a taper renames no cap. The start plane lies inside the tool and has no cap.
+                let cap_roles = if extent.distance2.is_some() { CapRoles::TwoSided } else { CapRoles::ByHeight };
+                let (names, synonyms) = extrude_cap_names(cap_roles, lo, hi, extent.one_sided_direction.filter(|_| extent.distance2.is_none()));
+                let at = |level: f64| -> (Option<String>, Option<String>) {
+                    let k = usize::from(level >= hi);
+                    (names.get(k).cloned().flatten(), synonyms.get(k).cloned().flatten())
+                };
+                let mut notes = Vec::new();
+                let start_plane = ss.plane.offset(base);
+                let growth = (b.abs() * taper.tan().abs()).max(a.abs() * taper2.tan().abs());
+                let mut tools = Vec::new();
+                // `taper2 == -taper` (to 1e-12 rad, so an expression that rounds differently still counts) drafts one plane through
+                // the profile: the second side's walls continue the first side's, so the tool is
+                // one drafted extrusion through the start plane, one wall per curve. (To a curved
+                // face the first side is cut back on its own, below.)
+                if a != 0.0 && b != 0.0 && (taper + taper2).abs() <= 1e-12 && target.is_none() {
+                    let ((c0, s0), (c1, s1)) = (at(base + a), at(base + b));
+                    for r in &regions {
+                        let roles = crate::lineage::ProfileRoles {
+                            sketch: Some(&ss),
+                            region: Some(r),
+                            caps: [c0.clone(), c1.clone()],
+                            cap_synonyms: [s0.clone(), s1.clone()],
+                            thin: None,
+                        };
+                        tools.push(drafted_tool(&ss, r, &start_plane, (-a.abs(), b.abs()), b.signum(), taper, extent.corner, roles, &mut notes)?);
+                    }
+                } else {
+                    // Each side drafted on its own from the start plane, and the two joined per
+                    // profile: one tool per profile, as on one side.
+                    let side = |reach: f64, other: f64, taper: f64, notes: &mut Vec<String>| -> Result<Vec<Traced>> {
+                        if reach == 0.0 {
+                            return Ok(Vec::new());
+                        }
+                        // The start cap is a cap only when the other side is empty.
+                        let start = if other == 0.0 { at(base) } else { (None, None) };
+                        let far = at(base + reach);
+                        let mut out = Vec::new();
+                        for r in &regions {
+                            if taper == 0.0 {
+                                // An undrafted side is a straight prism, its caps low then high.
+                                let ((c0, s0), (c1, s1)) = if reach > 0.0 { (start.clone(), far.clone()) } else { (far.clone(), start.clone()) };
+                                let roles = crate::lineage::ProfileRoles {
+                                    sketch: Some(&ss),
+                                    region: Some(r),
+                                    caps: [c0, c1],
+                                    cap_synonyms: [s0, s1],
+                                    thin: None,
+                                };
+                                out.extend(named_extrude(&ss.plane, r, base + reach.min(0.0), base + reach.max(0.0), roles)?);
+                            } else {
+                                let roles = crate::lineage::ProfileRoles {
+                                    sketch: Some(&ss),
+                                    region: Some(r),
+                                    caps: [start.0.clone(), far.0.clone()],
+                                    cap_synonyms: [start.1.clone(), far.1.clone()],
+                                    thin: None,
+                                };
+                                out.push(drafted_tool(&ss, r, &start_plane, (0.0, reach.abs()), reach.signum(), taper, extent.corner, roles, notes)?);
+                            }
+                        }
+                        Ok(out)
+                    };
+                    let mut first = side(b, a, taper, &mut notes)?;
+                    if let Some(((tb, (_, fi)), p)) = target
+                        && !first.is_empty()
+                    {
+                        first = trim_to_curved_face(first, tb, fi, p.0, to_offset, &ss.plane, base, base + b, extent.extend_to_face)?;
+                    }
+                    let second = side(a, b, taper2, &mut notes)?;
+                    // Two caps named alike (both ends on one side of the sketch plane) are pieces
+                    // of one face, numbered by where they lie as the straight extrude's are; the
+                    // union numbers pieces from different operands in operand order, so the
+                    // halves go in in the order of their far ends' spread.
+                    let swap = crate::naming::along_spread(vec![(0, centre + n * (base + b)), (1, centre + n * (base + a))]).first() == Some(&1);
+                    let (first, second) = if swap { (second, first) } else { (first, second) };
+                    tools = if first.is_empty() || second.is_empty() {
+                        first.into_iter().chain(second).collect()
+                    } else if first.len() == second.len() {
+                        // The two halves of each profile share the profile at the start plane:
+                        // one union joins them there.
+                        first.iter().zip(&second).map(|(f1, f2)| union_all(&[f1, f2])).collect::<Result<_>>()?
+                    } else {
+                        let all: Vec<&Traced> = first.iter().chain(&second).collect();
+                        vec![union_all(&all)?]
+                    };
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                notes.retain(|note| seen.insert(note.clone()));
+                for note in notes {
+                    append_warning(warning, note);
+                }
+                *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo, hi) });
+                let one_target = if targets.is_empty() { st.bodies.len() == 1 } else { targets.len() == 1 };
+                let at_once = match operation {
+                    Operation::Cut => true,
+                    Operation::Join => one_target,
+                    _ => false,
+                };
+                if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
+                    tools = join_apart_tools(tools)?;
+                }
+                return Ok(tools);
+            }
+            if taper != 0.0 {
                 let sign = if extent.to.is_none() && extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
                 let (len, sign) = if d < 0.0 { (-d, -sign) } else { (d, sign) };
                 // Where the extrude starts: the From Object's level and a start offset along the
@@ -12994,12 +13228,7 @@ fn feature_tools_with_constructor(
                             cap_synonyms: [None, None],
                             thin: thin_roles.as_ref(),
                         };
-                        let corner = match extent.corner {
-                            Some(c) => c,
-                            None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
-                        };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, corner)?;
-                        Ok(roles.tool(body, None))
+                        drafted_tool(&ss, r, &start_plane, (0.0, len), sign, taper, extent.corner, roles, &mut notes)
                     })
                     .collect::<Result<_>>()?;
                 for note in notes {
@@ -19068,7 +19297,7 @@ fn eval_feature_kind(
             // stops inside a flat panel's thickness, and an intersect where it changes one. A
             // tapered cut through the sheet goes on to be read as its shadow.
             if matches!(operation, Operation::Cut | Operation::Intersect)
-                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some())
+                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some() || extent.taper2.is_some())
                 && !st.surface_sheets.is_empty()
             {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
@@ -20407,25 +20636,14 @@ fn eval_feature_kind(
             st.bodies.push(envelope);
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames, carry, leave } => {
+        FeatureKind::Move { bodies, copy, copy_frames, carry, leave, .. } => {
             if !copy_frames.is_empty()
                 && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
             {
                 return Err(DocError::Invalid("invalid Move copy placements".into()));
             }
-            let t =
-                Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
-            let ang = match angle {
-                Some(a) => val(vals, a, Kind::Angle)?,
-                None => 0.0,
-            };
-            let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
-            let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
             // A turn picked on an edge follows the edge where it is now (#17974).
-            let (origin, axis) = match rotate_about {
-                Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
-                None => (origin, axis),
-            };
+            let (t, origin, axis, ang) = move_motion(doc, vals, st, f, warning)?;
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let base_motion = crate::rigid(t, origin, axis, ang);
@@ -21118,12 +21336,12 @@ fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
 
 /// The frames of [`TOOL_FRAMES`] for the feature being evaluated; what was there before is put
 /// back when it is dropped.
-struct ToolFrames(Vec<(String, Mat)>);
+pub(crate) struct ToolFrames(Vec<(String, Mat)>);
 
 impl ToolFrames {
     /// For a feature with drawn tools (see [`tools_component`]): the bodies placed differently
     /// from the component its tools are made in, so they meet them where they are shown (#3383).
-    fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
+    pub(crate) fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
         if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
             return None;
         }
@@ -21159,7 +21377,7 @@ impl Drop for ToolFrames {
 
 /// The matrix taking the evaluated feature's drawn tools into body `name`'s frame (`None`: the
 /// same frame).
-fn tool_frame(name: &str) -> Option<Mat> {
+pub(crate) fn tool_frame(name: &str) -> Option<Mat> {
     TOOL_FRAMES.with(|t| t.borrow().iter().find(|(n, _)| n == name).map(|(_, m)| *m))
 }
 
@@ -21168,7 +21386,7 @@ fn tool_frame(name: &str) -> Option<Mat> {
 /// component's frame. A through-all extent, and every test of where a tool meets its targets, is
 /// measured on it, so a target in another, moved component is met where it is shown (#3383).
 /// The model itself when no such body is placed differently.
-fn targets_as_shown<'a>(st: &'a ModelState, f: &Feature, targets: &[String]) -> Result<std::borrow::Cow<'a, ModelState>> {
+pub(crate) fn targets_as_shown<'a>(st: &'a ModelState, f: &Feature, targets: &[String]) -> Result<std::borrow::Cow<'a, ModelState>> {
     let names: &[String] = if targets.is_empty() { &f.participants } else { targets };
     let all = names.iter().any(|n| n == "*");
     let mut out: Option<ModelState> = None;

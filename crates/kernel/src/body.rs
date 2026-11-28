@@ -751,7 +751,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } | S::Sweep { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -1622,7 +1622,10 @@ impl Body {
             let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
             let source = self.record.lazy().map_or_else(|| self.record.arc().clone(), |m| m.source().clone());
             let moves = crate::placement::Rigid::of_matrix(&identity).and_then(|id| crate::placement::moved(&source, &id)).is_some();
-            let blended = source.faces.iter().any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }));
+            let blended = source
+                .faces
+                .iter()
+                .any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. } | solidcore_record::brep::Surface::Sweep { .. }));
             match (moves, blended) {
                 (false, _) => Movable::No,
                 (true, true) => Movable::Exactly,

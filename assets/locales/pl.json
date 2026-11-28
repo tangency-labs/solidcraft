@@ -6403,7 +6403,7 @@
   "ui.drawing_detail.step_size": "Kliknij, aby ustawić rozmiar obszaru.",
   "ui.drawing_detail.title": "Widok szczegółu",
   "ui.drawing_dimension_tool.pick": "Kliknij krawędź w widoku rysunku.",
-  "ui.drawing_dimension_tool.place": "Kliknij arkusz, aby umieścić wymiar.",
+  "ui.drawing_dimension_tool.place": "Kliknij arkusz lub naciśnij Enter, aby umieścić wymiar.",
   "ui.drawing_export.all_sheets": "Wszystkie arkusze",
   "ui.drawing_export.dxf": "DXF (linie)",
   "ui.drawing_export.dxf_note": "Pokazany arkusz, jego linie w milimetrach, osobna warstwa dla każdego rodzaju linii. Widoki cieniowane i obrazy są pomijane.",
