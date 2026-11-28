@@ -3954,6 +3954,9 @@ mod face;
 pub use face::{between_face_pick, end_faces, face_is_round, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
+
+#[path = "joints_combine.rs"]
+pub mod combine;
 pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};
 pub use relations::relation_values;
 

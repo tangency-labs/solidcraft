@@ -561,6 +561,30 @@ pub struct PickedPlacement {
     pub placement: crate::Mat,
 }
 
+/// One rule of a Combine's placement (#23542): an assembly constraint between a reference on the
+/// tool (`tool`, the side that moves) and one on the target (`target`, which stays). The rule is
+/// kept as the joint `Constraint::fit` maps it to, and solved by the joint solver.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct CombineConstraint {
+    #[serde(rename = "type")]
+    pub rule: crate::joints::Constraint,
+    pub target: Box<crate::joints::JointOrigin>,
+    pub tool: Box<crate::joints::JointOrigin>,
+    /// The gap (a distance's, a mate's or a flush's; a tangent's on top of the radius).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Placement offset")]
+    pub offset: Option<Expr>,
+    /// An angle rule's angle; for the others, a turn about the references' common axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Placement angle")]
+    pub angle: Option<Expr>,
+    /// The joint's facing, as `assembly.constraint.create` keeps it: the tool's reference along the
+    /// target's (true) or against it (false, as two faces meet). The command sets it from the rule
+    /// (a mate against, a flush along, the others as the parts face when it is made) and `flip`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+}
+
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct ThinWall {
@@ -1286,6 +1310,12 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Offset radius")]
         offset_radius: Option<Expr>,
+        /// Where the one tool goes against the target (#23542): assembly constraints between a
+        /// reference on the tool and one on the target. The boolean uses a copy of the tool moved
+        /// to where they put it; the tool body itself stays where it is. Empty, as older designs:
+        /// the tool is combined where it is.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placement: Vec<CombineConstraint>,
     },
     /// Alternating rectangular cuts in the intersection of two crossing rectangular blocks.
     FingerJoint {

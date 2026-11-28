@@ -19930,9 +19930,15 @@ fn eval_feature_kind(
             let tool = more::cone(point(vals, base)?, direction(vals, axis, "axis")?, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius, placement } => {
             if tools.iter().any(|t| t == target) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
+            }
+            if !placement.is_empty() && tools.len() != 1 {
+                return Err(DocError::Invalid(format!(
+                    "a placement places one tool, and this Combine has {}: combine each tool on its own",
+                    tools.len()
+                )));
             }
             // A cut's clearance (#3774): each tool is grown by it before it cuts.
             let offset = match offset {
@@ -20086,6 +20092,18 @@ fn eval_feature_kind(
                         }
                     })
                     .collect::<Result<Vec<_>>>()?
+            };
+            // The tool moved to where its placement puts it (#23542). Only this copy moves: the
+            // tool body, a kept tool and a linked component's placement stay where they are.
+            let tb = match (placement.is_empty(), target_world) {
+                (true, _) | (false, None) => tb,
+                (false, Some(w)) => tb
+                    .into_iter()
+                    .map(|t| {
+                        let m = combine_tool_placement(doc, vals, st, &w, t.body.size(), placement)?.world;
+                        Ok(Traced::step(kernel::transform_matrix(&t.body, m)?, &[&t]))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
             };
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
@@ -20901,6 +20919,78 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
 
 /// Where a body's geometry is placed in the world: through its component's placement and any
 /// offset it was moved into that component with (as [`state_in_frame_at`] places it).
+/// Where a Combine's placement moves its tool (#23542), in the target body's coordinates (`target`
+/// is the target body's world transform), where the tool is combined: its rules as joints between
+/// the target and the tool, solved by the joint solver. `size` is the tool's size. The references
+/// are found where the target and the tool are shown.
+pub fn combine_tool_placement(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    target: &Mat,
+    size: f64,
+    placement: &[crate::CombineConstraint],
+) -> Result<crate::joints::combine::ToolPlacement> {
+    use crate::joints::combine::{PlacementJoint, TARGET, TOOL, place_tool};
+    use crate::joints::{Constraint, Joint, JointOrigin, RefShape};
+    let into_target = crate::mat_inverse(target).ok_or_else(|| DocError::Invalid("the target is placed where it cannot be combined".into()))?;
+    // A reference's frame in the target's coordinates.
+    let frame = |o: &JointOrigin| -> Result<Mat> { Ok(crate::mat_mul(&into_target, &doc.origin_world(st, o)?)) };
+    let mut rules = Vec::with_capacity(placement.len());
+    for (i, c) in placement.iter().enumerate() {
+        let name = format!("{} {}", c.rule.name().replace('_', " "), i + 1);
+        let fit = c
+            .rule
+            .fit(RefShape::of(&c.target.snap), RefShape::of(&c.tool.snap))
+            .ok_or_else(|| DocError::Invalid(format!("{name}: its references don't fit the rule")))?;
+        let (target_frame, tool_frame) = (
+            frame(&c.target).map_err(|e| DocError::Invalid(format!("{name}: on the target, {e}")))?,
+            frame(&c.tool).map_err(|e| DocError::Invalid(format!("{name}: on the tool, {e}")))?,
+        );
+        let mut offset = match &c.offset {
+            Some(e) => val(vals, e, Kind::Length)?,
+            None => 0.0,
+        };
+        // A cylinder resting on a plane: the gap is on top of its radius (the round side is b).
+        if c.rule == Constraint::Tangent {
+            let round = if fit.swap { &c.target } else { &c.tool };
+            offset += doc.origin_radius(st, round).map_err(|e| DocError::Invalid(format!("{name}: {e}")))?;
+        }
+        let angle = match &c.angle {
+            Some(e) => val(vals, e, Kind::Angle)?,
+            None => 0.0,
+        };
+        let (target_side, tool_side) = (JointOrigin::new(TARGET, c.target.snap.clone()), JointOrigin::new(TOOL, c.tool.snap.clone()));
+        // The rule's fit puts the plane or axis on side a.
+        let ((a, fa), (b, fb)) =
+            if fit.swap { ((tool_side, tool_frame), (target_side, target_frame)) } else { ((target_side, target_frame), (tool_side, tool_frame)) };
+        let joint = Joint {
+            id: i as u64 + 1,
+            name,
+            kind: fit.kind,
+            a,
+            b,
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: c.flip,
+            offset,
+            offset_xy: [0.0; 2],
+            angle,
+            suppressed: false,
+            exprs: Default::default(),
+            captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
+            constraint: Some(c.rule),
+            dynamics: Vec::new(),
+        };
+        rules.push(PlacementJoint { joint, a: fa, b: fb });
+    }
+    // In the target's coordinates the target is at the identity, and so is the tool's copy, which
+    // the Combine has already brought into them.
+    place_tool(&crate::IDENTITY, &crate::IDENTITY, size, &rules)
+}
+
 fn body_world(doc: &Document, mb: &ModelBody) -> Mat {
     let m = doc.component_transform(doc.model_body_component(mb));
     doc.model_body_offset(mb).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m)

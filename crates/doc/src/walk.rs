@@ -97,6 +97,8 @@ impl Walk for crate::thread_forms::SteepFlank {}
 impl Walk for crate::MoveSpace {}
 // An Align frame's joint origin: picks in its component's coordinates, found by their names.
 impl Walk for Box<crate::joints::JointOrigin> {}
+// A Combine placement's rule (#23542).
+impl Walk for crate::joints::Constraint {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {

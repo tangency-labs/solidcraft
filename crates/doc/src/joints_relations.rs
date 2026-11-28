@@ -24,11 +24,18 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
     let world = |occ: u64| if occ == 0 { IDENTITY } else { occurrence_world(doc, occ) };
     let fa = mat_mul(&world(j.a.occurrence), &j.offset_frame_a(resolve_origin(doc, st, &j.a).ok()?));
     let fb = mat_mul(&world(j.b.occurrence), &resolve_origin(doc, st, &j.b).ok()?);
-    // B's joint frame in A's as it is.
-    let now = mat_mul(&mat_inverse(&fa)?, &fb);
     // A turn weighs as far as it moves a point B's size away.
     let size = component_of(doc, j.b.part()).map(|c| component_bodies(doc, st, c).iter().map(|b| b.body.size()).fold(0.0, f64::max));
-    let scale = size.unwrap_or(0.0).clamp(1.0, 1e5);
+    values_between(j, &fa, &fb, size.unwrap_or(0.0))
+}
+
+/// [`relation_values`] for joint frames already found: A's (with its lateral offsets) and B's,
+/// both in world coordinates, and B's size, which a turn weighs as. A Combine's placement uses it
+/// for the tool's body, which no occurrence holds (#23542).
+pub(super) fn values_between(j: &Joint, fa: &Mat, fb: &Mat, size: f64) -> Option<Vec<f64>> {
+    // B's joint frame in A's as it is.
+    let now = mat_mul(&mat_inverse(fa)?, fb);
+    let scale = size.clamp(1.0, 1e5);
     let n = j.kind.dofs().len();
     let angles: Vec<usize> = (0..n).filter(|i| j.kind.is_angle(*i)).collect();
     let mut gaps = |q: &[f64]| -> Option<Vec<f64>> {

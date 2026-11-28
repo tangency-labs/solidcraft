@@ -3172,6 +3172,8 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`offset_radius` must be positive"));
         }
     }
+    // Where the one tool goes against the target (#23542).
+    let placement = super::joints::constraint::combine_placement(s, p, tools.len(), cmd)?;
     let mut out = add_feature(
         s,
         p,
@@ -3184,6 +3186,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             offset_edges,
             offset_faces,
             offset_radius,
+            placement,
         },
     )?;
     // New Component: the result goes into a component of its own.

@@ -219,6 +219,7 @@ fn combine_schema_and_the_key_check_agree() {
             "offset_radius",
             "operation",
             "participants",
+            "placement",
             "target",
             "tools",
             "touching",
