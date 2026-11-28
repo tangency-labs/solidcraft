@@ -199,6 +199,8 @@ explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
+file.copy_with_links             copies a design and the files it links: tested in crates/engine/src/cmd/file_copy_links_tests.rs
+file.copy_with_links.list        lists what Copy with Links would copy: tested in crates/engine/src/cmd/file_copy_links_tests.rs
 file.export_mjcf                 writes a MuJoCo model and its STL meshes: tested in crates/engine/src/cmd/mjcf_tests.rs
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.export_urdf_options          the URDF export with its options dialog first: tested in crates/engine/src/cmd/urdf_tests.rs
