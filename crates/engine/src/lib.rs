@@ -98,6 +98,7 @@ pub use cmd::scan_align::preview_align as preview_scan_align;
 pub use cmd::settings::MAX_PROFILE_NAME;
 pub use cmd::settings::profile_name;
 pub use cmd::shown_scope;
+pub use cmd::shown_scope_for;
 pub use cmd::sketch_selection;
 pub use cmd::standard_view;
 pub use cmd::use_import_cache_dir;
