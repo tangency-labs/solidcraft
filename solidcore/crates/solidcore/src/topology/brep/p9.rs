@@ -1425,6 +1425,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
         let tolerance = b.edge(edge_id)?.tolerance;
         ignore_status(edge::set_tolerance(b, new_edge, tolerance, true, true))?;
         ignore_status(vertex::set_tolerance(b, new_vertex, tolerance, true, true))?;
+        carry_trim_cover_raise(b, edge_id, new_edge, new_vertex)?;
         insert_brep_entity(b, EntityRef::Edge(new_edge))?;
         insert_brep_entity(b, EntityRef::Vertex(new_vertex))?;
         state.with_env(k, |env| {
@@ -1455,6 +1456,31 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
             vertex: Some(new_vertex),
         })
     })
+}
+
+/// (not upstream) The split `edge`'s cover raise ([`crate::topology::TrimCoverRaises`]) goes to
+/// its new piece and vertex while each holds the raised tolerance, so fits along them match.
+fn carry_trim_cover_raise(
+    b: &mut Brep,
+    edge: EdgeId,
+    new_edge: EdgeId,
+    new_vertex: VertexId,
+) -> Result<()> {
+    let Some(&(before, after)) = b.trim_cover_raises().edges.get(&edge) else {
+        return Ok(());
+    };
+    if b.edge(edge)?.tolerance.to_bits() != after.to_bits() {
+        return Ok(());
+    }
+    let mut record = b.trim_cover_raises().clone();
+    if b.edge(new_edge)?.tolerance.to_bits() == after.to_bits() {
+        record.edges.insert(new_edge, (before, after));
+    }
+    if b.vertex(new_vertex)?.tolerance.to_bits() == after.to_bits() {
+        record.vertices.insert(new_vertex, (before, after));
+    }
+    b.set_trim_cover_raises(record);
+    Ok(())
 }
 
 /// Inputs for `MakeEdgeInFaceWithVU`. Optional geometry is owned, as the native
@@ -3254,6 +3280,58 @@ mod tests {
             Some(&TopologyFailure::SheetReoriented)
         );
         assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
+    }
+
+    /// A split edge's kept-trim cover raise goes to the new edge and vertex (#22002), so the
+    /// new piece fits at `before` as the edge did, not at the raised tolerance it was given.
+    #[test]
+    fn a_split_cover_raised_edge_gives_its_raise_to_the_new_edge_and_vertex() {
+        use crate::topology::edgeuse::p3::fit_tolerance;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let e = b.edge_list()[0];
+        let before = b.edge(e).unwrap().tolerance;
+        let after = 1e-3;
+        assert!(before < after, "{before:e}");
+        edge::set_tolerance(&mut b, e, after, true, true).unwrap();
+        let mut raises = crate::topology::TrimCoverRaises::default();
+        raises.edges.insert(e, (before, after));
+        b.set_trim_cover_raises(raises);
+        let fit = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(fit, before);
+
+        let interval = b.edge(e).unwrap().interval;
+        let (first, second, vertex) = crate::heal::stitch::p1::make_vertex_split_edge(
+            &mut k,
+            &mut b,
+            e,
+            (interval.min() + interval.max()) * 0.5,
+        )
+        .unwrap();
+        let new_edge = [first, second]
+            .into_iter()
+            .flatten()
+            .find(|&c| c != e)
+            .unwrap();
+        let vertex = vertex.unwrap();
+        assert_eq!(b.edge(new_edge).unwrap().tolerance, after);
+
+        let raises = b.trim_cover_raises();
+        assert_eq!(raises.edges.get(&e), Some(&(before, after)));
+        assert_eq!(
+            raises.edges.get(&new_edge),
+            Some(&(before, after)),
+            "{raises:?}"
+        );
+        assert_eq!(
+            raises.vertices.get(&vertex),
+            Some(&(before, after)),
+            "{raises:?}"
+        );
+        assert_eq!(fit_tolerance(&k, &mut b, new_edge).unwrap(), fit);
     }
 
     /// A UV trim curve that cannot be split does not leave the edge split half done
