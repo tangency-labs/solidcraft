@@ -978,7 +978,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             look2,
             distance2,
         );
-        dragged2 = *distance2 != before;
+        dragged2 = *distance2 != before || ui.ctx().is_being_dragged(egui::Id::unique("sc_manipulator2"));
     }
     if let Some(tip) = tip2 {
         handles.push(arrow_grab(bs, tip));
@@ -1330,9 +1330,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
     }
+    // Drag ownership also matters within a snap interval, where the text stays identical.
+    let dragged1 = two_distances && ui.ctx().is_being_dragged(arrow_id);
     // A primary drag may have replaced a previously active Distance 2. Select the primary
     // text now, rather than focusing the old secondary text until the following frame.
-    if two_distances && *value != before {
+    if two_distances && (dragged1 || *value != before) {
         on_second = false;
         second = None;
         label = "Distance 1";
@@ -1362,7 +1364,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let shows_all = names_all && *value == before;
     // Distance 2's arrow changed its value before the canvas copy was taken. Either arrow
     // must give this field the keyboard, or the previously focused form row takes it back.
-    let changed = dragged2
+    let changed = dragged1
+        || dragged2
         || *value != before
         || match (&second, &second_before) {
             (Some(now), Some(was)) => now != was,
@@ -1380,7 +1383,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
     // The box's distance, or the arrow's, is the one being edited now.
     let box_has_keyboard = ui.ctx().memory(|m| m.has_focus(egui::Id::unique("sc_canvas_value")));
-    let editing_now = if two_distances && *value != before {
+    let editing_now = if two_distances && (dragged1 || *value != before) {
         Some(0)
     } else if two_distances && box_has_keyboard {
         Some(usize::from(on_second))
@@ -1575,6 +1578,49 @@ pub(crate) fn value_box_in(
     value_box_full(ui, ids, label, value, at, (select_all, keep_tab), ("", None), place)
 }
 
+fn box_dropped_id() -> egui::Id {
+    egui::Id::unique("sc_canvas_box_dropped")
+}
+
+/// Every frame. A dropped box keeps its place only while shown, so the next opens by its handle.
+pub(crate) fn share_box_drag(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    let shown_last = ctx.data(|d| d.get_temp::<u64>(box_dropped_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
+    if !shown_last {
+        ctx.data_mut(|d| d.insert_temp(box_dropped_id(), None::<Pos2>));
+    }
+}
+
+fn dropped(ctx: &egui::Context) -> Option<Pos2> {
+    ctx.data(|d| d.get_temp::<Option<Pos2>>(box_dropped_id())).flatten().filter(|p| p.is_finite())
+}
+
+fn box_grip(ui: &mut egui::Ui, area: egui::Id) {
+    let ctx = ui.ctx().clone();
+    let shown = ctx.memory(|m| m.area_rect(area));
+    // Registered before the label and field, so the field keeps its own presses. Inset: the box
+    // is placed edge to edge with a handle's reach (#6608), and that edge is the handle's.
+    let grip = ui
+        .interact(shown.map_or(egui::Rect::NOTHING, |r| r.shrink(2.0)), area.with("grip"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::Grab);
+    // By where the pointer is, not by each frame's motion: the box moves a frame after it.
+    let pointer = grip.interact_pointer_pos();
+    let held = area.with("grip_held");
+    if grip.drag_started()
+        && let (Some(r), Some(p)) = (shown, pointer)
+    {
+        ctx.data_mut(|d| d.insert_temp(held, p - r.min));
+    }
+    if grip.dragged() || grip.drag_stopped() {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        let to = pointer.zip(ctx.data(|d| d.get_temp::<egui::Vec2>(held))).map(|(p, by)| p - by);
+        if let Some(to) = to {
+            ctx.data_mut(|d| d.insert_temp(box_dropped_id(), Some(to)));
+            ctx.request_repaint();
+        }
+    }
+}
+
 /// [`value_box_in`] with a short dimmed note after the field (a pull's step size) and a hint
 /// shown in the field while it is empty.
 fn value_box_full(
@@ -1592,6 +1638,15 @@ fn value_box_full(
         return None;
     }
     let t = Tokens::get();
+    let main = area == egui::Id::unique("sc_canvas_area");
+    if main {
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(box_dropped_id().with("shown"), frame));
+    }
+    let pinned = main.then(|| dropped(ui.ctx())).flatten().map(|p| {
+        let (size, view) = (box_size(ui, area, label, note), place.view.unwrap_or_else(|| ui.clip_rect()));
+        (p.clamp(view.min, (view.max - size).max(view.min)), egui::Align2::LEFT_TOP)
+    });
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
     // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
     let pointer = ui.ctx().pointer_hover_pos();
@@ -1603,12 +1658,15 @@ fn value_box_full(
     // either of them moves out of it.
     // Always inside the drawing area too: a box hung from a handle that has left the window
     // (a far drag) would be cut off at its edge, out of reach (#18722).
-    let at = if place.dialog.is_some() || place.handles.is_some() || !place.handle_obstacles.is_empty() || place.view.is_some() {
+    let at = if pinned.is_some() {
+        at
+    } else if place.dialog.is_some() || place.handles.is_some() || !place.handle_obstacles.is_empty() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
         at
     };
+    let (at, pivot) = pinned.unwrap_or((at, pivot));
     let mut field = None;
     // Background: under Preferences, Report a bug and other system windows (#9016). The box is
     // already kept clear of the command window (#6608), which floats at Middle with Features.
@@ -1616,9 +1674,17 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
-                );
+                if main {
+                    box_grip(ui, area);
+                }
+                let caption =
+                    egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption);
+                if main {
+                    // Its label drags the box rather than selecting its text.
+                    ui.add(egui::Label::new(caption).selectable(false));
+                } else {
+                    ui.label(caption);
+                }
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab, hint);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {

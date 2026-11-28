@@ -480,3 +480,87 @@ fn dragging_either_chamfer_arrow_takes_focus_from_the_other_distance() {
         }
     }
 }
+
+/// Drag ownership, not a changed number, chooses the text target inside a snap interval.
+#[test]
+fn an_unchanged_snapped_chamfer_drag_takes_focus_from_the_other_distance() {
+    for flip in [false, true] {
+        for secondary in [false, true] {
+            let (mut h, _) = blend_beside_its_arrow("solid.chamfer", true, flip, secondary);
+            let step = crate::canvas::snap_step(h.app.cam.half_height());
+            let decimals = h.app.preferences.length_decimals;
+            let first = crate::canvas::format_len_drag(&h.app.session.doc, 3.0, step, decimals);
+            let second = crate::canvas::format_len_drag(&h.app.session.doc, 7.0, step, decimals);
+            for (label, text) in [("dialog:Distance 1", &first), ("dialog:Distance 2", &second)] {
+                h.step(&json!({"click":{"handle":label}})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+            }
+            h.frames(4);
+            let handle = if secondary { "arrow2" } else { "arrow" };
+            let tip = crate::scenario::handle_at(handle).unwrap();
+            let window = h.app.viewport.dialog_rect.unwrap();
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+            h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+            h.frames(24);
+            let opposite = if secondary { "dialog:Distance 1" } else { "dialog:Distance 2" };
+            h.step(&json!({"click":{"handle":opposite}})).unwrap();
+            h.frames(4);
+            let canvas_id = egui::Id::unique("sc_canvas_value");
+            let focused = h.ctx.memory(|m| m.focused()).unwrap();
+            assert_ne!(focused, canvas_id);
+            assert!(h.ctx.read_response(focused).unwrap().rect.contains(crate::scenario::handle_at(opposite).unwrap()));
+            assert_eq!(crate::canvas::chamfer_editing(h.app.dialog.as_ref().unwrap()), Some(usize::from(!secondary)));
+            let raw_values = |h: &Harness| {
+                let Some(Kind::Fillet { radius, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the chamfer form") };
+                (radius.clone(), distance2.clone())
+            };
+            let before = raw_values(&h);
+            let design = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            let camera = h.app.cam;
+            let sibling = blend_distance(&h, !secondary);
+            let tip = crate::scenario::handle_at(handle).unwrap();
+            assert!(!h.app.viewport.dialog_rect.unwrap().contains(tip), "the actual arrow must remain exposed");
+            let (base, _) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            let [bx, by] = h.at(&json!({"world":[base.x,base.y,base.z]})).unwrap();
+            let direction = (tip - egui::pos2(bx as f32, by as f32)).normalized();
+            let across = tip + egui::vec2(-direction.y, direction.x) * 12.0;
+            let arrow_id = egui::Id::unique(if secondary { "sc_manipulator2" } else { "sc_manipulator" });
+            // Cross the drag threshold transversely, staying at the same snapped length.
+            // Inspect every frame so a transient number change cannot mask the focus bug.
+            h.frame_with_modifiers(vec![egui::Event::PointerMoved(tip)], egui::Modifiers::NONE);
+            assert_eq!(raw_values(&h), before);
+            h.frame_with_modifiers(
+                vec![egui::Event::PointerButton { pos: tip, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                egui::Modifiers::NONE,
+            );
+            assert_eq!(raw_values(&h), before);
+            for at in [across, tip] {
+                h.frame_with_modifiers(vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
+                assert!(h.ctx.is_being_dragged(arrow_id), "the real arrow must own the drag");
+                assert_eq!(raw_values(&h), before, "the drag must never leave its original snapped value");
+            }
+            h.frame_with_modifiers(
+                vec![egui::Event::PointerButton { pos: tip, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                egui::Modifiers::NONE,
+            );
+            h.frames(4);
+            assert_eq!(raw_values(&h), before);
+            assert_eq!(crate::canvas::chamfer_editing(h.app.dialog.as_ref().unwrap()), Some(usize::from(secondary)));
+            assert!(h.ctx.memory(|m| m.has_focus(canvas_id)), "the unchanged snapped drag must select its own floating text");
+            // No Ctrl+A: this must replace the drag-selected text, not the opposite row.
+            h.step(&json!({"text":"9 mm"})).unwrap();
+            h.frames(4);
+            assert!((blend_distance(&h, secondary) - 9.0).abs() < 1e-9);
+            assert!((blend_distance(&h, !secondary) - sibling).abs() < 1e-9);
+            let label = if secondary { "Distance 2" } else { "Distance 1" };
+            let texts = value_box_texts(&h);
+            assert!(texts.iter().any(|text| text == label) && texts.iter().any(|text| text == "9 mm"), "{texts:?}");
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(h.app.session.doc.to_json(), design);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+}
