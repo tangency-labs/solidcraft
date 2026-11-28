@@ -10387,6 +10387,13 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
 /// chord: a spot moved onto the facets of a bore (a hole drilled out from a tube's axis) started in
 /// the air short of the bore, and the material between it and the bore was left (#20424).
 fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], from_inside: bool) -> Vec3 {
+    hole_on_surface_hit(st, p, dir, scope, from_inside).0
+}
+
+/// [`hole_on_surface_in`], also reporting whether `p` classified on a body's boundary so
+/// [`hole_start`] keeps the snapped boundary point without falling through to display-mesh
+/// probing.
+fn hole_on_surface_hit(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], from_inside: bool) -> (Vec3, bool) {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
@@ -10398,9 +10405,11 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
             continue;
         }
         let inside = match b.body.classify_point(p) {
-            // Already on the surface: the drill enters right here.
-            Ok(kernel::PointClass::OnBoundary) => return p,
-            Ok(kernel::PointClass::Inside) if !from_inside => return p,
+            // Within the body's boundary tolerance of a face: snap along the drill axis onto the
+            // exact surface so a sub-tolerance offset off a curved face does not leave a
+            // countersink rim slicing a microscopic sliver of that face.
+            Ok(kernel::PointClass::OnBoundary) => return (snap_on_boundary(b, p, dir), true),
+            Ok(kernel::PointClass::Inside) if !from_inside => return (p, false),
             Ok(kernel::PointClass::Inside) => true,
             Ok(kernel::PointClass::Outside) => false,
             // A body the kernel cannot classify the spot against does not move it.
@@ -10413,6 +10422,35 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
             && best.is_none_or(|bq| h.point.dist(p) < bq.dist(p))
         {
             best = Some(h.point);
+        }
+    }
+    (best.unwrap_or(p), false)
+}
+
+/// Where the drill axis through `p` along `dir` meets the exact surface of the boundary face of
+/// `b` holding `p` when `p` classified as [`kernel::PointClass::OnBoundary`], else `p`.
+///
+/// `classify_point` puts any point within the body's zone tolerance on the boundary without moving
+/// it onto the mathematical surface. Projecting along the axis onto that face's exact surface (as
+/// `fire_ray` already does outside the tolerance band and [`brep_face_start`] does within display
+/// tolerance) places the hole entry on the exact surface instead of a sub-tolerance step off it.
+fn snap_on_boundary(b: &ModelBody, p: Vec3, dir: Vec3) -> Vec3 {
+    if b.body.is_mesh() {
+        return p;
+    }
+    let tol = b.body.record().tolerance * 2.0;
+    if !(tol.is_finite() && tol > 0.0) {
+        return p;
+    }
+    let Ok(faces) = b.body.faces_within(p, tol) else { return p };
+    let mut best: Option<Vec3> = None;
+    for (face, _) in faces {
+        let Ok(Some(foot)) = b.body.point_lies_on_face(face, p, tol) else { continue };
+        if let Ok(Some(q)) = b.body.face_line_hit(face, p, dir)
+            && solidcraft_kernel::Body::distance_across_surface(p, foot, q) <= tol
+            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
+        {
+            best = Some(q);
         }
     }
     best.unwrap_or(p)
@@ -11926,11 +11964,12 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     if !scope.is_empty() && st.bodies.iter().any(|b| b.body.is_mesh()) && on_a_brep_face(st, p, scope) {
         return p;
     }
-    let anywhere = hole_on_surface(st, p, dir, &[]);
-    // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
-    // at all).
-    if anywhere == p {
-        return p;
+    let (anywhere, on_boundary) = hole_on_surface_hit(st, p, dir, &[], true);
+    // `hole_on_surface_hit` marks `on_boundary` when `p` lies on a body's boundary (already
+    // snapped along `dir` onto that face's exact surface), and hands `p` itself back when it meets
+    // no body at all.
+    if on_boundary || anywhere == p {
+        return anywhere;
     }
     // A point within a body's chord tolerance of a face (a pick on its display mesh) starts on
     // that face, where the axis meets its exact surface (#20741).
@@ -12691,6 +12730,22 @@ fn hole_tools_reaching(
         let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo, reach: hi - lo, part };
         Ok((crate::lineage::part_tool(tool, part), Some(prism)))
     };
+    // For horizontal radial holes (`up.any_perp()` along `±Z`), turn the revolve profile plane
+    // off `±Z` so a full-turn countersink's rim seam vertex does not land directly on a Z-axis
+    // cylinder's tangent crest; keep `up.any_perp()` for vertical holes so their seam alignment
+    // with the bore cylinder is unchanged.
+    let revolve_plane = || -> Result<Plane> {
+        let up = (-dir).normalized().ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+        let side0 = up.any_perp();
+        let side = if side0.z.abs() > 0.5 {
+            let side1 = up.cross(side0);
+            let (sin, cos) = 0.613_f64.sin_cos();
+            side0 * cos + side1 * sin
+        } else {
+            side0
+        };
+        Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))
+    };
     // Reuse the existing drill-point tool for the narrow bore, independently of its entry.
     let bore = |tip_angle: Option<&crate::Expr>| -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
         if let Some(tip_angle) = tip_angle {
@@ -12700,9 +12755,7 @@ fn hole_tools_reaching(
             if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
-                let up = -dir;
-                let side = up.any_perp();
-                let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+                let rp = revolve_plane()?;
                 let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tip)];
                 let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] };
                 return Ok(kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
@@ -12763,8 +12816,7 @@ fn hole_tools_reaching(
             let reach = (rc - r * 0.9) / half.tan();
             let len = reach.min(-bottom);
             let r_end = rc - len * half.tan();
-            let up = -dir;
-            let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+            let rp = revolve_plane()?;
             let pts = [Vec2::new(rc, 0.0), Vec2::new(r_end, -len), Vec2::new(0.0, -len), Vec2::new(0.0, top), Vec2::new(rc, top)];
             let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] };
             tools.extend(

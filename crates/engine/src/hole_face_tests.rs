@@ -1968,3 +1968,144 @@ fn saved_sketch_holes_keep_legacy_tie_break_and_look_ahead_order() {
     near(base - volume(&mut s), pi() * 25.0 * 4.0);
     assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 20.0, 20.0, 16.0));
 }
+
+/// Build a ring sector (r 988..1000+eps, z -85..5, -63°..-45°) and drill two through countersunk
+/// holes (Ø 6.6, cs Ø 12.4, 90°) from a sketch on the plane tangent to r = 1000 at θ = -60.95°.
+fn ring_sector_with_tangent_countersink(eps: f64, inward_plane_normal: bool, flip: bool) -> (Session, f64) {
+    let mut s = Session::default();
+    let (a0, a1) = (-63.0_f64.to_radians(), -45.0_f64.to_radians());
+    let (r_in, r_out) = (988.0_f64, 1000.0 + eps);
+    let pt = |r: f64, a: f64| [r * a.cos(), r * a.sin()];
+
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -85.0, "name": "Sector"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0.0, 0.0], "start": pt(r_in, a0), "sweep": 18.0, "id": "inner"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0.0, 0.0], "start": pt(r_out, a0), "sweep": 18.0, "id": "outer"}));
+    run(&mut s, "sketch.line", json!({"points": ["inner.start", "outer.start"]}));
+    run(&mut s, "sketch.line", json!({"points": ["inner.end", "outer.end"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["inner"], "type": "radius", "value": r_in}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["outer"], "type": "radius", "value": r_out}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mid = 0.5 * (a0 + a1);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({
+            "sketch": "Sector",
+            "profiles": [{"point": pt(0.5 * (r_in + r_out), mid)}],
+            "distance": 90.0,
+            "operation": "new",
+            "body_name": "SectorBody",
+        }),
+    );
+    {
+        let state = s.model.state();
+        let has_outer_radius = state
+            .body("SectorBody")
+            .unwrap()
+            .body
+            .record()
+            .faces
+            .iter()
+            .any(|f| matches!(f.surface, solidcore_record::brep::Surface::Cylinder { radius, .. } if (radius - r_out).abs() < 1e-10));
+        assert!(has_outer_radius, "eps = {eps:e}: outer cylindrical face did not keep radius {r_out}");
+    }
+    let base_vol = body_volume(&mut s, "SectorBody");
+
+    let theta = -60.95_f64.to_radians();
+    let (c, sn) = (theta.cos(), theta.sin());
+    let x_dir = if inward_plane_normal { [sn, -c, 0.0] } else { [-sn, c, 0.0] };
+    run(
+        &mut s,
+        "sketch.create",
+        json!({
+            "plane": {"origin": [1000.0 * c, 1000.0 * sn, 0.0], "x_dir": x_dir, "y_dir": [0.0, 0.0, 1.0]},
+            "name": "HolePts",
+        }),
+    );
+    run(&mut s, "sketch.point", json!({"point": [0.0, -20.0], "id": "p1"}));
+    run(&mut s, "sketch.point", json!({"point": [0.0, -60.0], "id": "p2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({
+            "sketch": "HolePts",
+            "points": ["p1", "p2"],
+            "type": "countersink",
+            "diameter": 6.6,
+            "cs_diameter": 12.4,
+            "cs_angle": "90 deg",
+            "flip": flip,
+            "targets": ["SectorBody"],
+            "name": "Hole",
+        }),
+    );
+    (s, base_vol)
+}
+
+/// Countersunk holes sketched on a plane tangent to a cylindrical face succeed and preserve
+/// continuous removed volume when the cylinder protrudes past the sketch plane by sub-tolerance
+/// amounts (1e-9 .. 1e-6 mm) as well as below and above the tolerance band.
+#[test]
+fn countersunk_hole_on_plane_tangent_to_cylinder_succeeds_across_tolerance_band() {
+    let bore_area_two = 2.0 * pi() * 3.3 * 3.3;
+    let (mut ref_s, ref_base) = ring_sector_with_tangent_countersink(0.0, false, false);
+    assert_eq!(said(&ref_s, "Hole"), "");
+    let ref_removed = ref_base - body_volume(&mut ref_s, "SectorBody");
+    assert!((ref_removed - 1045.483).abs() < 0.5, "reference removed volume {ref_removed} mm³");
+
+    // Outward tangent plane normal across the full negative, sub-tolerance, and positive sweep.
+    for eps in [-1e-7, 0.0, 1e-9, 1e-8, 3e-8, 6.3e-8, 1e-7, 4e-7, 1e-6, 0.1] {
+        let (mut s, base_vol) = ring_sector_with_tangent_countersink(eps, false, false);
+        assert_eq!(said(&s, "Hole"), "", "outward normal eps = {eps:e}");
+        {
+            let state = s.model.state();
+            let body = &state.body("SectorBody").unwrap().body;
+            assert!(body.validity().is_empty(), "outward normal eps = {eps:e}: {:?}", body.validity());
+        }
+        let removed = base_vol - body_volume(&mut s, "SectorBody");
+        let expected = ref_removed + bore_area_two * eps;
+        assert!((removed - expected).abs() < 0.05, "outward normal eps = {eps:e}: removed {removed:.6} mm³, expected {expected:.6} mm³");
+    }
+
+    // Inward tangent plane normal across the sub-tolerance band (drilling inward from the outer face).
+    for eps in [-1e-7, 0.0, 1e-9, 1e-8, 3e-8, 6.3e-8, 1e-7, 4e-7, 1e-6] {
+        let (mut s, base_vol) = ring_sector_with_tangent_countersink(eps, true, false);
+        assert_eq!(said(&s, "Hole"), "", "inward normal eps = {eps:e}");
+        {
+            let state = s.model.state();
+            let body = &state.body("SectorBody").unwrap().body;
+            assert!(body.validity().is_empty(), "inward normal eps = {eps:e}: {:?}", body.validity());
+        }
+        let removed = base_vol - body_volume(&mut s, "SectorBody");
+        let expected = ref_removed + bore_area_two * eps;
+        assert!((removed - expected).abs() < 0.05, "inward normal eps = {eps:e}: removed {removed:.6} mm³, expected {expected:.6} mm³");
+    }
+}
+
+/// Flipping a countersunk hole sketched on a plane tangent to a cylindrical face (so it drills away
+/// from the cylinder into air) succeeds cleanly across the sub-tolerance band instead of failing in
+/// boolean radial-sector culling.
+#[test]
+fn countersunk_hole_on_plane_tangent_to_cylinder_with_flip_succeeds_across_tolerance_band() {
+    for inward in [false, true] {
+        for eps in [0.0, 1e-9, 1e-8, 6.3e-8, 4e-7] {
+            let (mut s, base_vol) = ring_sector_with_tangent_countersink(eps, inward, true);
+            {
+                let id = s.doc.find_feature("Hole").unwrap().id;
+                let res = s.model.result(id).unwrap();
+                assert!(res.error.is_none(), "inward={inward} eps={eps:e}: {:?}", res.error);
+                assert!(
+                    res.warning.as_deref().is_some_and(|w| w.contains("remove no material")),
+                    "inward={inward} eps={eps:e}: expected no-material warning, got {:?}",
+                    res.warning
+                );
+                let state = s.model.state();
+                let body = &state.body("SectorBody").unwrap().body;
+                assert!(body.validity().is_empty(), "inward={inward} eps={eps:e}: {:?}", body.validity());
+            }
+            let after_vol = body_volume(&mut s, "SectorBody");
+            assert!((after_vol - base_vol).abs() < 1e-3, "inward={inward} eps={eps:e}: flipped hole changed volume {base_vol} -> {after_vol}");
+        }
+    }
+}
