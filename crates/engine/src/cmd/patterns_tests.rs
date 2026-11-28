@@ -3510,6 +3510,30 @@ fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
     }
 }
 
+/// #18048: a pattern of a Draft drafts the copied face where the draft finds it now. The pad's
+/// side at x = 30 is drafted 5 deg about its bottom edge and the pad and draft are patterned
+/// 50 apart; making the pad 30 long moves that side to x = 40, so the copy's side is at x = 90,
+/// not at x = 80 where it was picked. Each pad is 30 x 20 x 20 less the wedge 4000 tan 5 deg.
+#[test]
+fn pattern_of_a_draft_follows_its_face_after_an_edit() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+    run(
+        &mut s,
+        "solid.draft",
+        json!({"faces": [[30, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+    );
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pad1", "Draft1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(rel(volume(&mut s), 40000.0 + 2.0 * (8000.0 - wedge)) < 1e-6, "20 long: {}", volume(&mut s));
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Pad1", "set": {"length": "30 mm"}}));
+    assert!(r["error"].is_null(), "{r}");
+    let want = 40000.0 + 2.0 * (12000.0 - wedge);
+    assert!(rel(volume(&mut s), want) < 1e-6, "30 long: {} vs {want}", volume(&mut s));
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
