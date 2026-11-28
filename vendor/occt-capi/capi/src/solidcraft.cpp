@@ -452,3 +452,20 @@ API uint32_t occt_solid_at(uint32_t h, int32_t index) {
     return put_shape(solids(index + 1));
   });
 }
+
+// A solid ruled from a closed section (read_profile's data of one loop) to the point (x, y, z).
+API uint32_t occt_loft_to_point(const void* data, size_t count, double x, double y, double z) {
+  return guard_handle([&]() -> uint32_t {
+    ProfileReader r{data, count};
+    const std::vector<TopoDS_Wire> wires = read_loops(r);
+    if (wires.size() != 1) throw std::invalid_argument("a loft section is one loop");
+    if (r.at != count) throw std::invalid_argument("the loft's data runs past its section");
+    BRepOffsetAPI_ThruSections maker(Standard_True, Standard_True, 1e-7);
+    maker.CheckCompatibility(Standard_False);
+    maker.AddWire(wires[0]);
+    maker.AddVertex(BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex());
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("the loft to a point could not be built");
+    return put_shape(maker.Shape());
+  });
+}

@@ -555,6 +555,20 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
 /// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
 /// `fit` saying how they reshape the section on the way. Without rails, the plain loft to a point.
 pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if rails.is_empty()
+        && let Some(made) = super::foreign::run_each(
+            &crate::backend::Occt,
+            OpKind::Loft,
+            |k| k.loft_to_point(plane, lp, apex, rails, fit).map(|s| vec![s]),
+            |bodies| {
+                let pieces = crate::helix::loft_to_point_plan(plane, lp, apex)?;
+                bodies.into_iter().map(|b| crate::smlib_sweeps::name_loft_to_point(b, plane, &pieces)).collect()
+            },
+        )
+    {
+        return made.and_then(|mut b| b.pop().ok_or_else(|| crate::KernelError::Failed("the loft is empty".into())));
+    }
     match which(OpKind::Loft) {
         Which::Solidcore => Solidcore.loft_to_point(plane, lp, apex, rails, fit),
     }

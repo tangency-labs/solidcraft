@@ -158,7 +158,7 @@ impl Backend for Occt {
             OpKind::Thicken => Support::Yes,
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
-            OpKind::Loft => Support::Some("two sections, no rails".into()),
+            OpKind::Loft => Support::Some("two sections, or a section to a point; no rails".into()),
             OpKind::Split => Support::Some("a body split by a plane into one piece on each side; a sheet trimmed by a plane".into()),
             _ => Support::No,
         }
@@ -455,8 +455,15 @@ impl Modelling for Occt {
         unsupported("a loft")
     }
 
-    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
-        unsupported("a loft to a point")
+    fn loft_to_point(&self, plane: &Plane, section: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        if !rails.is_empty() {
+            return unsupported("a loft to a point along rails");
+        }
+        // solidcore plans the section (checked, wound away from the apex); OCCT rules exactly
+        // those curves to the apex, as solidcore's loft does.
+        let pieces = crate::helix::loft_to_point_plan(plane, section, apex).map_err(refused)?;
+        let curves = crate::smlib_sweeps::section_curves(plane, &pieces).map_err(refused)?;
+        Shape::loft_to_point(&encode_profile(&curves)?, xyz(apex)).map_err(failed)
     }
 }
 
@@ -905,6 +912,23 @@ mod tests {
         // The four top edges, mitred (the matrix's closed form).
         let top = vec![v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0), v(5.0, 10.0, 10.0), v(0.0, 5.0, 10.0)];
         same_solid("the top edges rounded, mitred", 1000.0 - 4.0 * (10.0 * (1.0 - PI / 4.0) - 2.0 * (5.0 / 6.0 - PI / 4.0)), removing(top, 1.0));
+    }
+
+    #[test]
+    fn lofts_to_a_point_match_solidcore_with_the_same_names() {
+        use solidcore_record::{Loop2, Vec2};
+        use std::f64::consts::PI;
+        let one = |b: crate::Result<Body>| b.map(|b| vec![b]);
+        let sq = Loop2::polygon(&[Vec2::new(-2.0, -2.0), Vec2::new(2.0, -2.0), Vec2::new(2.0, 2.0), Vec2::new(-2.0, 2.0)]);
+        // A square pyramid: A h / 3.
+        parity("a square to a point above", Some(16.0 * 3.0 / 3.0), || one(crate::route::loft_to_point(&Plane::XY, &sq, v(0.0, 0.0, 3.0))));
+        parity("a square to a point below, off centre", Some(16.0 * 2.0 / 3.0), || {
+            one(crate::route::loft_to_point(&Plane::XY, &sq, v(1.0, 0.5, -2.0)))
+        });
+        // A cone of r 2, 3 high.
+        parity("a circle to a point", Some(PI * 4.0 * 3.0 / 3.0), || {
+            one(crate::route::loft_to_point(&Plane::XY, &Loop2::circle(Vec2::ZERO, 2.0), v(0.0, 0.0, 3.0)))
+        });
     }
 
     #[test]
