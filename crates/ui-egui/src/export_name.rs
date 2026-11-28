@@ -262,6 +262,14 @@ mod tests {
         assert_eq!(stem(all, &names, "x"), "Rover RV-102 C Sam Acme Motor mount CC-BY-4.0");
         assert_eq!(stem("{part_number}_rev{revision}", &names, "x"), "RV-102_revC");
 
+        // The material and finish of a design that is one part (#20114) are placeholders too; a
+        // template that named them before kept the braces as typed, and now fills them in.
+        let m = metadata(json!({"material": "5052-H32, 0.090 in", "finish": "Powder coat, RAL 9005, matt"}));
+        let names = Names { design: "Bracket", body: None, source: None, metadata: &m };
+        assert_eq!(stem("{design} {material} {finish}", &names, "x"), "Bracket 5052-H32, 0.090 in Powder coat, RAL 9005, matt");
+        let bare = Names { design: "Bracket", body: None, source: None, metadata: &metadata(json!({})) };
+        assert_eq!(stem("{design}-{material}", &bare, "x"), "Bracket-", "unset: empty, as every property");
+
         let names = Names { design: "Bracket", body: None, source: None, metadata: &metadata(json!({"revision": 3})) };
         assert_eq!(stem("{design}_rev{revision}", &names, "x"), "Bracket_rev", "unset, or not text, reads as empty");
         assert_eq!(stem("{part_number}", &names, "Old"), "Old", "nothing is left");
@@ -331,6 +339,8 @@ mod tests {
                 "{author}",
                 "{organization}",
                 "{description}",
+                "{material}",
+                "{finish}",
                 "{license}"
             ]
         );

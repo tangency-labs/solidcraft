@@ -13,8 +13,8 @@ mod common;
 use common::edge_at;
 use solidcore_ops::make_cylinder;
 use solidcore_ops::sweep::railed::{
-    loft_blend, loft_rails, open_section_turns, point_frames, section_frames, BlendFrame,
-    Continuity, RailFit, RailLoft, RailSection,
+    loft_blend, loft_rails, open_section_turns, point_frames, polyline_rail, section_frames,
+    BlendFrame, Continuity, RailFit, RailLoft, RailSection,
 };
 use solidcore_ops::sweep::Curve;
 use solidcore_ops::Error;
@@ -65,6 +65,27 @@ fn a_stretched_straight_rail_lofts_the_same_frustum() {
     };
     let body = loft_rails(&[section(1.0, 0.0), section(2.0, 10.0)], &[rail], &how);
     assert!(body.is_ok(), "{body:?}");
+}
+
+/// Four straight rails through the corners of the square frustum (three or more rails warp the
+/// stations; straight rails along the frustum's wall leave every station the frustum's square):
+/// the solid is the same frustum, `h / 3 (A_0 + A_1 + sqrt(A_0 A_1))`.
+#[test]
+fn four_straight_rails_loft_the_square_frustum() {
+    let corners = [[1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
+    let rails: Vec<Curve> = corners
+        .iter()
+        .map(|c| line([c[0], c[1], 0.0], [2.0 * c[0], 2.0 * c[1], 10.0]))
+        .collect();
+    let body = loft_rails(
+        &[section(1.0, 0.0), section(2.0, 10.0)],
+        &rails,
+        &RailLoft::new(1e-6),
+    )
+    .unwrap();
+    let v = body.volume(1e-10).unwrap();
+    let want = 10.0 / 3.0 * 28.0;
+    assert!((v - want).abs() <= 1e-6 * want, "{v} against {want}");
 }
 
 /// The kernel's refusal past the wires reaches ops as its own error, naming the bound.
@@ -131,7 +152,7 @@ fn malformed_lofts_are_refused() {
     assert_eq!(
         loft_rails(
             &[section(1.0, 0.0), section(2.0, 10.0)],
-            &[rail.clone(), rail.clone(), rail],
+            &vec![rail; 17],
             &how
         )
         .err(),
@@ -230,4 +251,39 @@ fn malformed_point_sections_are_refused() {
         open_section_turns(&[open, [[0.0, 3.0, 0.0], [0.0, 3.0, 0.0]]]),
         Err(Error::Unsupported(_))
     ));
+}
+
+/// A polyline rail is solidcore's degree-1 curve through its points, in ops' form: its points
+/// with unit weights, its knots spaced as the points are in order; a loft along it builds.
+#[test]
+fn a_polyline_rail_is_a_degree_one_nurbs_and_guides_a_loft() {
+    let points = [[1.0, -1.0, 0.0], [1.5, -1.5, 5.0], [2.0, -2.0, 10.0]];
+    match polyline_rail(&points).unwrap() {
+        Curve::Nurbs {
+            degree,
+            points: cp,
+            knots,
+        } => {
+            assert_eq!(degree, 1);
+            assert_eq!(
+                cp,
+                vec![
+                    [1.0, -1.0, 0.0, 1.0],
+                    [1.5, -1.5, 5.0, 1.0],
+                    [2.0, -2.0, 10.0, 1.0]
+                ]
+            );
+            assert_eq!(knots, vec![0.0, 0.0, 0.5, 1.0, 1.0]);
+        }
+        other => panic!("{other:?}"),
+    }
+    let rail = polyline_rail(&points).unwrap();
+    let body = loft_rails(
+        &[section(1.0, 0.0), section(2.0, 10.0)],
+        &[rail],
+        &RailLoft::new(1e-6),
+    )
+    .unwrap();
+    assert!(body.volume(1e-10).unwrap() > 0.0);
+    assert!(polyline_rail(&[[0.0, 0.0, 0.0]]).is_err());
 }

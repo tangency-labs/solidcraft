@@ -270,6 +270,29 @@ pub fn axis_mode_between(a: Vec2, b: Vec2) -> &'static str {
     if d.x.abs() >= d.y.abs() { "horizontal" } else { "vertical" }
 }
 
+/// The ends of the segment from `a` to `b` turned to horizontal (`horizontal`) or vertical,
+/// keeping its length and the way it ran along that axis: about its middle when both ends may
+/// move, about the end that may not when one may not (`a_moves`, `b_moves`). `None` when neither
+/// may move, or the segment has no length or is not finite.
+pub fn turned_to_axis(a: Vec2, b: Vec2, horizontal: bool, a_moves: bool, b_moves: bool) -> Option<(Vec2, Vec2)> {
+    let d = b - a;
+    let length = d.len();
+    if !(a.is_finite() && b.is_finite() && length.is_finite() && length > 0.0) {
+        return None;
+    }
+    let sign = |v: f64| if v < 0.0 { -1.0 } else { 1.0 };
+    let along = if horizontal { Vec2::new(length * sign(d.x), 0.0) } else { Vec2::new(0.0, length * sign(d.y)) };
+    match (a_moves, b_moves) {
+        (true, true) => {
+            let mid = (a + b) * 0.5;
+            Some((mid - along * 0.5, mid + along * 0.5))
+        }
+        (false, true) => Some((a, a + along)),
+        (true, false) => Some((b - along, b)),
+        (false, false) => None,
+    }
+}
+
 /// Unit direction from `from` toward `to`, or `None` when points coincide or are non-finite.
 pub fn unit_direction(from: Vec2, to: Vec2) -> Option<Vec2> {
     (from.is_finite() && to.is_finite()).then(|| (to - from).normalized()).flatten()
@@ -649,6 +672,44 @@ impl Sketch {
             },
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod turned_to_axis_tests {
+    use super::*;
+
+    /// A vertical, a steep and a reversed segment turned to horizontal, and the mirror cases
+    /// turned to vertical: the length and the way along the axis stay, about the middle, or about
+    /// the end that may not move.
+    #[test]
+    fn a_segment_turns_to_the_axis_keeping_its_length() {
+        let v = Vec2::new;
+        for (a, b, horizontal) in [
+            (v(10.0, 10.0), v(10.0, 40.0), true),
+            (v(10.0, 10.0), v(13.0, 40.0), true),
+            (v(13.0, 40.0), v(10.0, 10.0), true),
+            (v(10.0, 10.0), v(40.0, 10.0), false),
+            (v(10.0, 10.0), v(40.0, 13.0), false),
+        ] {
+            let length = (b - a).len();
+            for (a_moves, b_moves) in [(true, true), (false, true), (true, false)] {
+                let (na, nb) = turned_to_axis(a, b, horizontal, a_moves, b_moves).unwrap();
+                let d = nb - na;
+                let case = format!("{a:?}-{b:?} horizontal {horizontal}, moves {a_moves} {b_moves}: {na:?} {nb:?}");
+                assert!((d.len() - length).abs() < 1e-9, "{case}");
+                let (across, along, was) = if horizontal { (d.y, d.x, (b - a).x) } else { (d.x, d.y, (b - a).y) };
+                assert!(across.abs() < 1e-12 && along * was.signum() > 0.0, "{case}");
+                match (a_moves, b_moves) {
+                    (false, _) => assert_eq!(na, a, "{case}"),
+                    (_, false) => assert_eq!(nb, b, "{case}"),
+                    _ => assert!(((na + nb) * 0.5 - (a + b) * 0.5).len() < 1e-9, "{case}"),
+                }
+            }
+        }
+        assert!(turned_to_axis(v(0.0, 0.0), v(0.0, 5.0), true, false, false).is_none());
+        assert!(turned_to_axis(v(1.0, 1.0), v(1.0, 1.0), true, true, true).is_none());
+        assert!(turned_to_axis(v(f64::NAN, 0.0), v(0.0, 5.0), true, true, true).is_none());
     }
 }
 

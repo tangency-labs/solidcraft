@@ -1362,8 +1362,19 @@ impl Cone {
             // the other surface's first surface is this one: its UV curves are swapped,
             // also in a partial output
             IntersectTarget::Revolution(r) => {
-                let more =
-                    r.intersect_with_cone_into(k, other_domain, self, domain, approx_tol_3d, out);
+                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                    k,
+                    [this, other_surface],
+                );
+                let more = r.intersect_with_cone_into(
+                    k,
+                    other_domain,
+                    self,
+                    domain,
+                    approx_tol_3d,
+                    contact,
+                    out,
+                );
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
                 more?
             }

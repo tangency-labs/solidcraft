@@ -279,6 +279,9 @@ fn origin(
     if let Some(feature) = out.snap.secondary_axis_feature_mut() {
         *feature = *features.get(feature)?;
     }
+    if let Some(sketch) = out.snap.sketch_feature_mut() {
+        *sketch = *features.get(sketch)?;
+    }
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }

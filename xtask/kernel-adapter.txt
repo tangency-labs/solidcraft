@@ -4,6 +4,6 @@
 # (xtask/src/layers.rs, adapter_check) fails on a use this list does not name, and on a listed use
 # that is gone: remove its line in the same pull request. Never add a line: take solidcore's
 # services from solidcraft_kernel::services and its operations from solidcraft_kernel.
-crates/geom -> solidcore-tess  geom is below the kernel; its display plan and plan evaluator (solidcore_tess::eval) stay on tess with the shared display crates until the adapter split (§12, step 10)
+crates/geom -> solidcore-tess  geom is below the kernel; its display plan and plan evaluator (solidcore_tess::eval) and its paper constructions (solidcore_tess::weld_symbol) stay on tess with the shared display crates until the adapter split (§12, step 10)
 crates/viewport -> solidcore-tess  shared display crate, kept on solidcore-tess display types (§13, question 2)
 crates/viewport-gpu -> solidcore-tess  shared display crate, kept on solidcore-tess display types (§13, question 2)

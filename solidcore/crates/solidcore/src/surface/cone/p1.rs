@@ -262,7 +262,11 @@ pub struct Cone {
 /// unbounded cone's NURB runs over the STEP heights reversed, so negation holds only for
 /// an interval symmetric about 0 (the infinite cylinder's), where it is kept. Upstream
 /// negates every inside-out unbounded height, which names another height on the NURB.
-fn unbounded_maps_linearly(inside_out: bool, step_ivl: &Extent1d, nurb_ivl: &Extent1d) -> bool {
+pub(crate) fn unbounded_maps_linearly(
+    inside_out: bool,
+    step_ivl: &Extent1d,
+    nurb_ivl: &Extent1d,
+) -> bool {
     inside_out
         && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())

@@ -140,7 +140,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bd = BrepData::from_brep(b, &env, &mut Vec::new())?;
+    let bd = BrepData::from_brep(k, b, &env, &mut Vec::new())?;
     let face_ids = bl::faces(b, None)?;
     let edge_ids = bl::edges(b, None)?;
     let vertex_ids = bl::vertices(b, None)?;

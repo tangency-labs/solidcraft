@@ -65,16 +65,38 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
 - `sheet.perforate`: `diameter`, `pitch`, `margin?`, `pattern?` (`staggered`|`square`), `body?`,
   `sketch?`+`profiles?`; holes go in the flat pattern, the DXF and the volume, not the B-rep.
 
+### `sheet.hardware`
+- `sheet.hardware {"kind":"nut","thread":"M3","position":[x,y,z]}` (or `sketch`+`points?`, `single?`): the
+  mounting hole of a self-clinching nut, flush nut (`flush_nut`), stud or standoff, cut through the sheet
+  and recorded on the hole (`hardware`: kind, thread, `length`, `part` such as `nut.m3`). `length` is
+  required for a stud or standoff and refused for a nut; `diameter?` is the table's size to 0.08 mm over.
+- The hole is a plain through hole: folded, in the flat pattern and in the DXF. It has no thread of its
+  own. Sizes: `docs/hardware-catalogue.md` (nuts M2.5-M8, flush nuts M2.5-M6, studs M3-M8, standoffs M3-M5).
+- A sheet thinner than the hardware needs is refused. A centre nearer an edge, a cut-out or a bend than
+  the table's minimum is a `warning` in the reply (the hole is still cut); a bend is measured to where the
+  bend starts. A later change of gauge warns instead of failing the timeline.
+- Redefine with `timeline.redefine {"command":"sheet.hardware"}`, never `solid.hole`.
+- `sheet.flat_pattern` lists each hardware hole under `hardware`: `kind`, `thread`, `length` (null for a
+  nut), `part`, `position` (the hole's centre in the flat) and `hole_diameter`. The key is left out when
+  the sheet has none, and a hole a later cut took away is not listed.
+- `sheet.export_dxf` is the sheet and its mounting holes only: the hardware is not in the file. With
+  `hardware_notes: true` it also puts a note beside each hardware hole, `M3 nut` or `M4 stud 10 mm`, on
+  layer `HARDWARE` (as high as `note_height`), with `layers: roles`; `layers: single` leaves the notes out.
+- In the app: the Press-in Hardware button of the Sheet Metal tab opens a window with the kind, the thread
+  (only the sizes the table has for the kind), a stud's or standoff's length and the place picked on a
+  face or at sketch points. It shows the table's numbers, the preview's refusal and its warnings. Edit
+  Feature on the hole opens the same window.
+
 ### `sheet.flat_pattern`, `sheet.export_dxf`, `sheet.export_bend_table`
 - `sheet.flat_pattern {"body":"..."}` answers `flat_size_mm` (`[x,y,thickness]`), `outline`,
   `cutouts`, `cutout_shapes`, `pockets`, `bends` (`bend`, `angle_deg`, `included_angle_deg`,
   `radius`, `direction`, `allowance`, `length`, `start`, `end` in flat coordinates),
-  `bend_zones`, `perforations`, `bores` (holes drilled along a panel into its rim) and the unfolded
+  `bend_zones`, `perforations`, `hardware`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),
-  `bend_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
+  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
   Layers: `OUTLINE`, `CUT`, `TEXT`/`ETCH`, `BEND_UP`/`BEND_DOWN`, `BEND_NOTES`,
-  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`.
+  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE` (only with `hardware_notes`).
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
@@ -215,11 +237,15 @@ Ask the shop for the rule: thickness, K-factor (or a 90° deduction or allowance
 relief width and depth, the gap between flanges that meet at a corner, and the corner relief. Never
 invent a K-factor: it depends on the material, the tooling and the grain direction.
 
-Today's build unfolds every bend from the rule's K-factor. OPEN DRAFT PR #9911 adds
-`unfold_method` (`KFactor`|`Deduction`|`Allowance`) and a 90° deduction or allowance value per
-rule, and derives K = (2·BA90/π − R)/T; it is not in the build from this branch. When it lands, a
-rule can take a shop's chart value instead of a K-factor, and the skill's arithmetic above stays
-the same because the engine still unfolds from one K.
+Every bend unfolds from the rule's K-factor. A rule can give that K-factor directly
+(`unfold_method` `k_factor`, the default) or take a shop's chart value instead: `unfold_method`
+`deduction` or `allowance`, with `unfold_value` the 90° bend deduction or allowance for the rule's
+thickness and radius. The rule derives K = (2·BA90/π − R)/T, with BA90 = 2·(R + T) − BD90 for a
+deduction, and refuses a value whose K is outside 0…1, naming the range. The arithmetic above
+stays the same: read the derived K from `sheet.rules` (`values.k_factor`). One chart value fits
+one thickness and radius, so make one rule per chart line. A library pick (`material` with
+`gauge`) changes the thickness, so it takes such a rule back to `k_factor`, said in `notes`,
+unless the same call gives `unfold_method` or `unfold_value`.
 
 ## Corners and relief
 

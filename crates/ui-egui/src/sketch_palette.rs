@@ -16,6 +16,7 @@ use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
@@ -24,14 +25,40 @@ use solidcraft_theme::Tokens;
 
 pub(crate) const INSTANCE_ID: &str = "sketch-options";
 
+/// Which last editing view, if any, an existing sketch reuses when reopened (#18998).
+/// Chosen from the Sketch Palette; remembered cameras stay scoped to the open design.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SketchOpenView {
+    /// The existing behaviour: turn to face the sketch if the separate look-at option is on.
+    #[default]
+    Face,
+    /// Use the view left at Finish or Cancel.
+    Last,
+    /// Use only the last view left at Finish; Cancel does not replace it.
+    LastFinished,
+}
+
+impl SketchOpenView {
+    pub const ALL: [Self; 3] = [Self::Face, Self::Last, Self::LastFinished];
+
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Face => "ui.palette_sketch_open_view.face",
+            Self::Last => "ui.palette_sketch_open_view.last",
+            Self::LastFinished => "ui.palette_sketch_open_view.last_finished",
+        }
+    }
+}
+
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
     static MODE: Cell<(u8, Option<u64>)> = const { Cell::new((0, None)) };
 }
 
-/// Option keys and existing localized labels. The five primary design rows are selected below;
+/// Option keys and existing localized labels. The primary design rows are selected below;
 /// the remaining display options live in More. Point/profile labels share the dialog IDs.
-pub const TOGGLES: [(&str, &str); 10] = [
+pub const TOGGLES: &[(&str, &str)] = &[
     ("grid", "Sketch Grid"),
     ("snap", "Snap"),
     ("slice", "Slice"),
@@ -41,6 +68,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
     ("show_constraints", "Constraints"),
     ("show_projected", "Projected Geometries"),
     ("show_construction", "Construction Geometries"),
+    ("show_control_polygons", "sketch.show_control_polygons"),
     ("sketch_3d", "3D Sketch"),
 ];
 
@@ -417,8 +445,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let status = constraint_status(remaining, solved, geometry);
     let fraction = constrained_fraction(remaining, total, solved && geometry);
-    let option_label =
-        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+    let option_label = |label: &'static str| {
+        if matches!(label, "ui.profile" | "ui.points" | "sketch.show_control_polygons") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) }
+    };
     let more = solidcraft_ui_text::tr("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
@@ -430,10 +459,13 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         "show_constraints" => !opts.hide_constraints,
         "show_projected" => !opts.hide_projected,
         "show_construction" => !opts.hide_construction,
+        "show_control_polygons" => !opts.hide_control_polygons,
         "sketch_3d" => opts.three_d,
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let open_view = app.ui.sketch_open_view;
+    let mut chosen_open_view = None;
     let mut linetype = None;
     let mut construction = false;
     let mut look = false;
@@ -448,6 +480,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let image_tool = image_tool(app);
     let framing = app.preferences.frame_images_in_sketch;
     let mut frame_image = false;
+    // The 3-Point Arc's tangent snap (#20719): a mode of that tool, so it is here and not in
+    // Preferences; kept for the next time the tool runs.
+    let arc_snap = app.preferences.sketch_arc_tangent_snap;
+    let mut arc_snap_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -500,6 +536,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                if current == "sketch.arc.three_point" {
+                    arc_snap_clicked =
+                        crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
                 section.inner
             });
             start = section.flatten();
@@ -546,13 +586,27 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
-            for (key, label) in TOGGLES {
+            for &(key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
                 {
                     set = Some((key.to_string(), !shown(key)));
                 }
             }
+            // A tool option, not a Preferences row. Face preserves the existing
+            // reopen behaviour; remembered cameras are only kept while the design is open.
+            crate::ui_kit::row(ui, solidcraft_ui_text::tr("ui.palette_sketch_open_view"), |ui| {
+                let mut selected = SketchOpenView::ALL.iter().position(|choice| *choice == open_view).unwrap_or(0);
+                let choices = SketchOpenView::ALL.map(|choice| solidcraft_ui_text::tr(choice.label_id()));
+                let response = crate::ui_kit::dropdown(ui, "sketch_open_view", &mut selected, &choices)
+                    .backing_on_hover_text(solidcraft_ui_text::tr("ui.palette_sketch_open_view_note"));
+                crate::scenario::publish_target("sketch_palette:open_view", response.rect);
+                if let Some(&choice) = SketchOpenView::ALL.get(selected)
+                    && choice != open_view
+                {
+                    chosen_open_view = Some(choice);
+                }
+            });
         });
         section_alias("sketch_palette:options_fold", more);
     };
@@ -583,13 +637,21 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, draw_footer).response.rect.height()
         };
         let top = ui.cursor().top();
-        let options =
-            egui::ScrollArea::vertical().id_salt("sc_palette_options").min_scrolled_height(0.0).auto_shrink([false, true]).show(ui, draw_body);
+        let t = Tokens::get();
+        let body_inset = egui::Margin::symmetric((t.space_12 - t.space_4) as i8, t.space_6 as i8);
+        let options = egui::ScrollArea::vertical()
+            .id_salt("sc_palette_options")
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| egui::Frame::NONE.inner_margin(body_inset).show(ui, draw_body));
         crate::scenario::publish_rect("sketch_palette:options", options.inner_rect);
         crate::panel_runtime::report_content_extent(ui, top, options.content_size.y + footer_height, false);
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if let Some(choice) = chosen_open_view {
+        app.ui.sketch_open_view = choice;
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();
@@ -627,6 +689,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if frame_image {
         app.preferences.frame_images_in_sketch = !framing;
     }
+    if arc_snap_clicked {
+        app.preferences.sketch_arc_tangent_snap = !arc_snap;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -650,6 +715,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn existing_sketch_open_view_is_a_palette_option_with_face_default() {
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").expect("more sketch options");
+        h.call("ui.click", json!({"x": more.x, "y": more.y}));
+        assert!(crate::scenario::handle_at("sketch_palette:open_view").is_some());
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
+    }
+
+    #[test]
     fn card_uses_design_dimensions_and_all_options_still_run_commands() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -669,7 +746,7 @@ mod tests {
         let more = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
         h.call("ui.click", json!({"x":more.x,"y":more.y}));
         let active = h.app.session.active_sketch.unwrap();
-        for (key, _) in TOGGLES {
+        for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
@@ -1347,5 +1424,18 @@ mod tests {
         let idx = sk.curve_index(&circle).unwrap();
         assert!(!sk.curves[idx].construction, "the previously selected circle stays a normal curve");
         set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn sketch_palette_body_has_consistent_padding() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let options = crate::scenario::rect_of("sketch_palette:options").expect("options scroll area rect");
+        let header = crate::scenario::rect_of("sketch_palette:status_header").expect("status header rect");
+        let t = Tokens::get();
+        let expected_x = t.space_12 - t.space_4;
+        assert!(header.left() - options.left() >= expected_x - 0.5, "body left inset matches footer/dialog padding");
+        assert!(header.top() - options.top() >= t.space_6 - 0.5, "body top inset gives breathing room below header");
     }
 }

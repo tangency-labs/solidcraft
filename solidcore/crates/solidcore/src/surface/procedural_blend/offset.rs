@@ -17,7 +17,9 @@
 //! - a round of an exact class ([`ExactRound`]) offsets to its kind's own exact offset (a
 //!   cylinder of r to the cylinder of `r'`), which carries the definition of radius `r'`
 //!   on the offset supports, re-certified (an identity: the supports classified again give
-//!   the class, the offset on its surface).
+//!   the class, the offset on its surface). Where its kind is its B-spline net, that
+//!   offset is an offset surface of the net with no NURBS form to certify a definition on,
+//!   and it is kept without one.
 //!
 //! Where `r'` is not positive (an inward offset at or past the radius) the round collapses
 //! onto its spine: no surface, as a cylinder's offset collapses
@@ -298,7 +300,9 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
 
 /// The offset of an exact round's surface `surface` (`offset`, its kind's own exact
 /// offset by `distance`, or `None` where that collapses) carrying the definition of the
-/// moved radius on the offset supports, re-certified.
+/// moved radius on the offset supports, re-certified. An `offset` with no NURBS form (the
+/// offset surface of a round stored as a B-spline net) is returned as it is, keeping no
+/// definition: there is no form to certify the moved one on.
 ///
 /// # Errors
 ///
@@ -318,6 +322,15 @@ pub fn exact_offset(
     let (Some(moved), Some(mut offset)) = (moved_radius(r, tau, distance, tol), offset) else {
         return Ok(BlendOffset::Collapsed);
     };
+    // A round whose kind is its B-spline net (a canal class: a plane and a cylinder at a
+    // slant, an ellipse its spine) has an offset surface as its kind's offset: S + d n of the
+    // net, which is S (an exact round's bound is 0), so the exact offset, but with no NURBS
+    // form the moved definition could be certified on. It stays that offset surface, keeping
+    // no definition, as a round on a B-spline support does (#3424: a shell refused every
+    // wall).
+    if as_b_spline(k, &offset)?.is_none() {
+        return Ok(BlendOffset::Round(Box::new(offset)));
+    }
     let mut inputs = *round.inputs();
     // the centre's signed offset from support i is side_i r; the support moves by
     // -tau side_i d, so the centre's offset from it is side_i r' (support 0, then 1)

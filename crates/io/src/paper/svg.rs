@@ -9,12 +9,13 @@
 //!   negative way, so its sweep flag is 0.
 //! - **Curves:** lines `L`, circular arcs `A` in the grid's pieces of at most a quarter turn (a half
 //!   turn's centre is ill-conditioned once its ends are rounded), cubics `C`, parabolas `Q`.
-//! - **Paint:** strokes `stroke-width`, with butt caps, miter joins and a miter limit of 4 on the
-//!   root; fills black, even-odd, or in a coloured paper's ink. Text is its glyph outlines, one
-//!   `<path>` a run, filled in the same ink nonzero (SVG's default), so it looks the same without the
+//! - **Paint:** strokes `stroke-width`, with round caps and round joins on the root; fills black,
+//!   even-odd, or in a coloured paper's ink. Text is its glyph outlines, one `<path>` a run, filled in the same ink nonzero (SVG's default), so it looks the same without the
 //!   font and never reflows. One `<path>` per item, so each stays one object in an editor.
 //! - **Dashes** are the stroke's own `stroke-dasharray`, and `stroke-dashoffset` when its phase
 //!   isn't 0, in millimetres: SVG runs the pattern along the whole path and round a closed one.
+//!   A dot (a dash 0 long on the grid) is written one step long, a nanometre: Qt's SVG renderer
+//!   draws nothing for a dash 0 long, and every renderer draws the round caps of that one.
 //! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
 //!   so they can't be XML ids. No background: the page stays transparent, as cutters want. A
 //!   coloured paper is one `<rect>` under everything.
@@ -56,7 +57,7 @@ pub fn paper_svg_on(scene: &Prepared, paper: Option<PaperColour>, pictures: &dyn
     let _ = writeln!(
         w.out,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"0 0 {width} {height}\" \
-         fill=\"none\" stroke=\"{ink}\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">"
+         fill=\"none\" stroke=\"{ink}\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
     );
     if let Some(paper) = paper {
         let _ = writeln!(w.out, "<rect width=\"{width}\" height=\"{height}\" fill=\"{}\" stroke=\"none\"/>", hex(paper.rgb()));
@@ -207,7 +208,8 @@ impl Writer {
             if i > 0 {
                 self.out.push(' ');
             }
-            push_number(&mut self.out, *length);
+            // A dot is a dash one step long (the module's notes); a gap is at least a step already.
+            push_number(&mut self.out, (*length).max(1));
         }
         if dashes.phase != 0 {
             self.out.push_str("\" stroke-dashoffset=\"");

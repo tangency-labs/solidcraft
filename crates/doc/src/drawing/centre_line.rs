@@ -52,7 +52,7 @@ impl Document {
                 let basis = drawing.resolve_view(line.view)?.basis;
                 let found = lookup.corner(&line.a).and_then(|(a, exact_a)| {
                     lookup.corner(&line.b).and_then(|(b, exact_b)| {
-                        if !solidcraft_kernel::services::paper_gaps::projected_endpoints_are_distinct(basis, [a, b]) {
+                        if !solidcraft_kernel::planar::projected_endpoints_are_distinct(basis, [a, b]) {
                             Err(Status::Unmeasurable("the centre-line endpoints coincide in the view".into()))
                         } else {
                             Ok(([a, b], exact_a && exact_b))

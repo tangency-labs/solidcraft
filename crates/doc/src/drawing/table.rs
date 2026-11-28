@@ -148,6 +148,11 @@ impl PartsList {
                 ("count", row.count.to_string()),
             ];
             fields.extend(values.map(|(key, value)| (key.to_string(), value)));
+            // A column named `finish` (a list starts without one; the editor adds it) shows the part's
+            // finish; without one the free property of that name (already in `fields`) shows, as it always did.
+            if !row.finish.is_empty() {
+                fields.insert("finish".to_string(), row.finish.clone());
+            }
             // In one of the row it is listed under, as a list reads; `count` has them all.
             let quantity = match row.quantity {
                 Quantity::Count => Some(row.each.to_string()),

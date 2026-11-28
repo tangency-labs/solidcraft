@@ -829,12 +829,61 @@ pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: Chamfer
     })
 }
 
+/// The largest fitting size reported by a blend refusal: a length in mm (radius, chord width, or
+/// chamfer distance) or a scale factor on a two-sided chamfer's distances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BlendFit {
+    /// A constant or curvature fillet radius (mm).
+    Radius(f64),
+    /// A chord-length fillet width (mm).
+    Chord(f64),
+    /// An equal or fixed-angle chamfer distance (mm).
+    Distance(f64),
+    /// A scale factor on a two-sided chamfer's distances.
+    Scale(f64),
+}
+
+impl BlendFit {
+    /// The fitting length in mm for a radius, chord width, or chamfer distance (`None` for a
+    /// two-sided scale factor).
+    pub fn length_mm(self) -> Option<f64> {
+        match self {
+            BlendFit::Radius(v) | BlendFit::Chord(v) | BlendFit::Distance(v) => Some(v),
+            BlendFit::Scale(_) => None,
+        }
+    }
+}
+
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
 /// that fits is 3 mm". `None` where it names none, or names a scale ("2 times the distances").
 pub fn named_fit(why: &str) -> Option<f64> {
     let (_, rest) = why.split_once("that fits is ")?;
     let (number, _) = rest.split_once(" mm")?;
     number.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// The typed largest fitting size a refusal names ([`largest_fit_note`] or [`scale_fit_note`]).
+/// `None` where the refusal names no usable positive size.
+pub fn named_blend_fit(why: &str) -> Option<BlendFit> {
+    let (_, rest) = why.split_once("the largest ")?;
+    let positive = |n: &str| n.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0);
+    if let Some(after) = rest.strip_prefix("radius that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Radius);
+    }
+    if let Some(after) = rest.strip_prefix("chord width that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Chord);
+    }
+    if let Some(after) = rest.strip_prefix("distance that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Distance);
+    }
+    if let Some(after) = rest.strip_prefix("that fits is ") {
+        let (number, _) = after.split_once(" times the distances given")?;
+        return positive(number).map(BlendFit::Scale);
+    }
+    None
 }
 
 /// What [`largest_that_fits`] found: the largest size it built, with its result, or (none built)
@@ -1012,9 +1061,9 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
         let r = match fillet_turning(body, &pts, radius, turn) {
             Ok(_) => continue,
-            Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
+            Err(KernelError::TooLarge(why)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius, turn)? {
+                match fillet_max_why(body, &pts, radius, turn, named_fit(&why))?.found {
                     Some((r, _)) => r,
                     None => return one(),
                 }
@@ -1239,6 +1288,31 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     let mut out = picks.to_vec();
     for e in chain.into_iter().skip(picked) {
         out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
+    }
+    Ok(out)
+}
+
+/// The middles of the edges of `body` that a rolling offset rounds where both their faces are
+/// among `moved`: convex edges for a body grown (`grown`), concave ones for a body shrunk. Smooth
+/// edges (faces meeting tangentially) have no corner to round. Decided exactly from the record's
+/// faces, edges and surfaces.
+pub(crate) fn offset_round_edges(body: &Body, moved: &[usize], grown: bool) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let mut is_moved = vec![false; rec.rec.faces.len()];
+    for &f in moved {
+        if let Some(slot) = is_moved.get_mut(f) {
+            *slot = true;
+        }
+    }
+    let mut out = Vec::new();
+    for (e, edge) in rec.rec.edges.iter().enumerate() {
+        let faces = rec.faces_of(e);
+        if faces.len() != 2 || !faces.iter().all(|f| is_moved.get(*f as usize).copied().unwrap_or(false)) || smooth_join(&rec, e)? {
+            continue;
+        }
+        if convex_at(&rec, e, edge.vertices[0]) == Some(grown) {
+            out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on an offset edge".into()))?);
+        }
     }
     Ok(out)
 }
@@ -2958,6 +3032,22 @@ mod tests {
         assert_eq!(without_fit_note("the trim leaks"), "the trim leaks");
     }
 
+    /// Typed blend fit parsing distinguishes radius, chord width, chamfer distance and two-sided
+    /// scale, and ignores zero or missing fit sizes.
+    #[test]
+    fn a_refusal_parses_typed_blend_fit() {
+        assert_eq!(named_blend_fit("too large, at the edge at (1, 2, 3); the largest radius that fits is 3 mm"), Some(BlendFit::Radius(3.0)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("chord width", 1.25))), Some(BlendFit::Chord(1.25)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("distance", 2.5))), Some(BlendFit::Distance(2.5)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", scale_fit_note(0.6))), Some(BlendFit::Scale(0.6)));
+        assert_eq!(named_blend_fit("too large; the largest radius that fits is 0 mm"), None);
+        assert_eq!(named_blend_fit("the fillet is larger than the faces beside its edges allow"), None);
+        assert_eq!(BlendFit::Radius(3.0).length_mm(), Some(3.0));
+        assert_eq!(BlendFit::Chord(1.25).length_mm(), Some(1.25));
+        assert_eq!(BlendFit::Distance(2.5).length_mm(), Some(2.5));
+        assert_eq!(BlendFit::Scale(0.6).length_mm(), None);
+    }
+
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.
     fn blend(body: &Body, pts: &[Vec3], size: f64, round: bool) -> Result<Body> {
         if round { fillet(body, pts, size) } else { chamfer(body, pts, size) }
@@ -3674,6 +3764,26 @@ mod tests {
         assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
         assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    /// #22188: `solid.chamfer` 1.5 x 45 deg on a vertical edge meeting a widened recess floor
+    /// whose side edge stops short of 1.5 mm while the wall continues past it.
+    #[test]
+    fn chamfer_1_5_by_45_on_an_edge_meeting_a_widened_recess_floor_builds() {
+        for side_edge_len in [1.0, 0.2] {
+            let slab = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 5.0)).unwrap();
+            let wall = crate::build::box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 15.0)).unwrap();
+            let step = crate::boolean(&slab, &wall, crate::BoolOp::Union).unwrap().unwrap();
+            let deeper = crate::build::box_solid(Vec3::new(0.0, 10.0 + side_edge_len, 2.0), Vec3::new(10.0, 20.0, 5.0)).unwrap();
+            let body = crate::boolean(&step, &deeper, crate::BoolOp::Cut).unwrap().unwrap();
+            let before = crate::measure(&body).unwrap().volume;
+            let pick = Vec3::new(10.0, 10.0, 10.0);
+            let out = chamfer_sides_carrying_face(&body, &[pick], 1.5, ChamferSide::Angle(std::f64::consts::FRAC_PI_4), false).unwrap();
+            assert!(out.validity().is_empty(), "len={side_edge_len}: {:?}", out.validity());
+            let after = crate::measure(&out).unwrap().volume;
+            let removed = 10.0 * 0.5 * 1.5 * 1.5;
+            assert!(((before - after) - removed).abs() < 1e-5, "len={side_edge_len}: {} vs {removed}", before - after);
+        }
     }
 }
 

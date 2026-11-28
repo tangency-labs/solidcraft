@@ -95,6 +95,21 @@ pub enum BlendRefusal {
         /// Which test refused it.
         why: SetbackTooLongWhy,
     },
+    /// A Swept turn at `vertex` that no radius of its rounds builds: its side edge is sharp
+    /// and of the rounds' convexity, so their ball cannot circle it
+    /// ([`crate::blend::blend_corner::swept::classify_swept`]). The ball passes a side edge
+    /// rounded first at a radius of at least `least_radius`, the rounds' radius (the larger
+    /// where they differ within the tolerance; `docs/generic-blend.md`, Turn: R >= r). The
+    /// side edge's other tests for a Swept turn (not tangent, straight and square to both
+    /// rounded edges on a plane) are not made before this refusal.
+    SweptTurnPastSharpEdge {
+        /// The corner's vertex.
+        vertex: VertexId,
+        /// The sharp side edge between the rounds.
+        side_edge: EdgeId,
+        /// The least radius `side_edge` is rounded at for the ball to pass it.
+        least_radius: f64,
+    },
     /// A chamfer's angle to its first face that runs out past the other face instead of
     /// meeting it: the chamfer's line and the other face meet only at an angle less than
     /// pi less the wedge between the faces. Radians, at the wedge the edge's chamfer is
@@ -181,9 +196,9 @@ impl BlendRefusal {
             | Self::ContinuesInto { edge, .. }
             | Self::RoundTooSmall { edge, .. }
             | Self::ChamferAngleTooLarge { edge, .. } => EntityRef::Edge(edge),
-            Self::SetbackTooShort { vertex, .. } | Self::SetbackTooLong { vertex, .. } => {
-                EntityRef::Vertex(vertex)
-            }
+            Self::SetbackTooShort { vertex, .. }
+            | Self::SetbackTooLong { vertex, .. }
+            | Self::SweptTurnPastSharpEdge { vertex, .. } => EntityRef::Vertex(vertex),
         }
     }
 }

@@ -64,7 +64,7 @@ fn expressions_accept_what_params_expr_accepts() {
     }
 }
 
-/// `AxisDir` accepts what `features::axis_dir_param` reads (X, Y or Z trimmed of what Rust's
+/// `AxisDir` accepts what `features::axis_dir_form` reads (X, Y or Z trimmed of what Rust's
 /// `trim` removes, in any case, or a non-zero vector), and its schema agrees: its string pattern
 /// allows exactly that whitespace (`conforms` doesn't read patterns), and a schema can't refuse
 /// the zero vector. `ScaleFactors` takes exactly three numbers or expressions.
@@ -1401,6 +1401,14 @@ fn step_and_component_link_schema_keys_and_replies() {
         (
             "component.links",
             json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "importer": {"format": "step"}, "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 2, "name": "Board", "path": "board.kic", "importer": {"format": "kic.convert", "plugin": "kic", "version": "1.2"}, "file": "/parts/board.kic", "found": true, "changed": true}]}),
         ),
         (
             "component.links",

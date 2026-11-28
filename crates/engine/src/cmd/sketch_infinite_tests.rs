@@ -570,3 +570,32 @@ fn an_offset_of_it_is_infinite_too() {
     let sk = sketch(&s);
     assert!(made.iter().all(|id| curve(&sk, id).infinite));
 }
+
+/// Coordinate Crosshairs (#22234): one command adds an infinite horizontal and vertical
+/// construction line through the sketch's origin, both fixed, so the sketch keeps no degrees of
+/// freedom; one Undo takes both away. Outside a sketch it is refused.
+#[test]
+fn coordinate_crosshairs_add_two_fixed_construction_lines_through_the_origin() {
+    let mut s = new_sketch();
+    let before = sketch(&s).curves.len();
+    let out = run(&mut s, "sketch.crosshairs", json!({}));
+    let made: Vec<String> = out["curves"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    assert_eq!(made.len(), 2, "{out}");
+    let sk = sketch(&s);
+    let origin = sk.point_index("origin").unwrap();
+    let mut directions = Vec::new();
+    for id in &made {
+        let c = curve(&sk, id);
+        assert!(c.infinite && c.construction && c.fixed, "{id}: infinite, construction and fixed");
+        let CurveKind::Line { a, b } = c.kind else { panic!("{id} is a line") };
+        assert_eq!(a, origin, "{id} starts on the origin");
+        let (p, q) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        directions.push((q - p).normalized().unwrap());
+    }
+    assert!(directions.iter().any(|d| (d.y).abs() < 1e-9) && directions.iter().any(|d| (d.x).abs() < 1e-9), "{directions:?}");
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], 0, "the crosshairs add no degrees of freedom");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).curves.len(), before, "one Undo takes both away");
+    let mut outside = Session::default();
+    assert!(outside.execute("sketch.crosshairs", &json!({})).is_err(), "refused outside a sketch");
+}

@@ -515,7 +515,7 @@ fn the_command_now_has_a_toolbar_placement_and_opens_a_window() {
     h.step(&json!({"start": "sketch.move"})).unwrap();
     let d = h.app.dialog.as_ref().expect("sketch.move opens a tool window");
     assert!(matches!(d.kind, Kind::SketchModify(Mod::Move { .. })), "{:?}", d.kind);
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), vec!["Entities", "Center"]);
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), vec!["Entities", "Center", "From", "To"]);
     // Opening the window commits nothing, and the context menu's engine error is gone.
     assert_eq!(curve_ids(&h).len(), before);
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
@@ -598,6 +598,53 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     let xs: Vec<f64> = sk.points.iter().map(|p| p.pos.x).collect();
     assert!(xs.iter().any(|x| x.abs() < 1e-6), "the original stays at x = 0: {xs:?}");
     assert!(xs.iter().any(|x| (x - 50.0).abs() < 1e-6), "the copy's far corner is at x = 50: {xs:?}");
+}
+
+/// #21235: Point to Point. With a From and a To point picked, X and Y follow To minus From, and
+/// OK moves the picked entities so From lands on To. Without them, the typed X and Y stand.
+#[test]
+fn the_move_window_moves_from_one_picked_point_to_another() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    // Clear of the sketch origin, which would hold a corner drawn on it.
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]})).unwrap();
+    let rect = curve_ids(&h);
+    h.app.run("sketch.point", json!({"point": [50, 40], "id": "target"})).unwrap();
+    let target = "target".to_string();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let corner = {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let p = sk.points.iter().position(|p| (p.pos - solidcore_record::Vec2::new(10.0, 10.0)).len2() < 1e-18).unwrap();
+        sk.points[p].id.clone()
+    };
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+        // A typed step first: From and To take over from it once both are picked.
+        d.kind = Kind::SketchModify(moved("7 mm", "7 mm", "0 deg"));
+        d.inputs[2].items = vec![Sel::SketchPoint { id: corner }];
+        d.inputs[3].items = vec![Sel::SketchPoint { id: target }];
+    }
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let Kind::SketchModify(k @ Mod::Move { x, y, .. }) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((x.as_str(), y.as_str()), ("40 mm", "30 mm"), "X and Y show To - From");
+    let out = commands(&h.app, k, &d.inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(out[0].1["translate"], json!([40.0, 30.0]));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter applies and closes the window: {:?}", h.app.status);
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(sid).unwrap().sketch;
+    let at: Vec<solidcore_record::Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    assert!(
+        at.iter().filter(|p| (**p - solidcore_record::Vec2::new(50.0, 40.0)).len2() < 1e-12).count() >= 2,
+        "the corner lands on the To point: {at:?}"
+    );
+    assert!(at.iter().any(|p| (*p - solidcore_record::Vec2::new(70.0, 50.0)).len2() < 1e-12), "the far corner moved with it: {at:?}");
 }
 
 /// #19523: the Move/Copy window showed nothing until OK, so a user could not see where the

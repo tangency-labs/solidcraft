@@ -218,39 +218,490 @@ pub struct Resolved {
     pub edge_names: Vec<String>,
 }
 
-/// Resolutions of body-based references, keyed by the reference, the sketch plane and the
-/// identity of every body's display mesh: re-resolving an unchanged model (every sketch edit
-/// does) is free.
-static CACHE: std::sync::Mutex<Vec<(String, Resolved)>> = std::sync::Mutex::new(Vec::new());
-const CACHE_SIZE: usize = 64;
+/// Resolutions of body-based references, keyed by the query, the sketch plane, and the O(1)
+/// identity of only the 1-2 referenced bodies (without tessellating or scanning unrelated
+/// bodies): re-resolving an unchanged model (every sketch edit does) is O(1).
+const CACHE_SIZE: usize = 1024;
+static CACHE: std::sync::LazyLock<std::sync::Mutex<ProjectionCache>> = std::sync::LazyLock::new(Default::default);
 
-fn is_sketch_curve(src: &LinkSource) -> bool {
-    matches!(src, LinkSource::SketchCurve { .. })
+#[cfg(test)]
+mod cache_test_hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<usize> = const { Cell::new(0) };
+        static MISSES: Cell<usize> = const { Cell::new(0) };
+        static BYPASS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn bypassed() -> bool {
+        BYPASS.with(Cell::get)
+    }
+
+    pub(super) fn note_hit() {
+        HITS.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(super) fn note_miss() {
+        MISSES.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(super) fn counted<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
+        HITS.with(|c| c.set(0));
+        MISSES.with(|c| c.set(0));
+        let out = f();
+        (out, HITS.with(Cell::get), MISSES.with(Cell::get))
+    }
+
+    pub(super) fn without_cache<T>(f: impl FnOnce() -> T) -> T {
+        let prev = BYPASS.with(|b| b.replace(true));
+        struct Reset(bool);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                BYPASS.with(|b| b.set(self.0));
+            }
+        }
+        let _guard = Reset(prev);
+        f()
+    }
 }
 
-fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<String> {
-    // An intersection with a sketch curve (#11048) changes with that sketch, not with the meshes.
-    let body_based = matches!(
-        src,
-        LinkSource::Edge { .. }
-            | LinkSource::Face { .. }
-            | LinkSource::Body { .. }
-            | LinkSource::Vertex { .. }
-            | LinkSource::Iso { .. }
-            | LinkSource::Spun { .. }
-    ) || matches!(src, LinkSource::Intersection { a, b } if !is_sketch_curve(a) && !is_sketch_curve(b));
-    if !body_based {
+fn vec3_bits(v: Vec3) -> [u64; 3] {
+    [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]
+}
+
+fn plane_bits(plane: &Plane) -> [[u64; 3]; 3] {
+    [vec3_bits(plane.origin), vec3_bits(plane.x), vec3_bits(plane.y)]
+}
+
+fn hash_body(b: &crate::ModelBody, state: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    b.name.hash(state);
+    b.sheet.hash(state);
+    b.mesh_cell_id().hash(state);
+    b.names.id().hash(state);
+    b.placement_cell_id().hash(state);
+}
+
+fn hash_skip(skip: &std::collections::BTreeSet<usize>, state: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    skip.len().hash(state);
+    for edge in skip {
+        edge.hash(state);
+    }
+}
+
+fn skip_matches(stored: &[usize], live: &std::collections::BTreeSet<usize>) -> bool {
+    stored.len() == live.len() && stored.iter().eq(live.iter())
+}
+
+/// O(1) identity of a referenced [`crate::ModelBody`] without forcing tessellation or retaining
+/// computed display meshes. Holding `body` plus weak handles to the lazy mesh, naming, and rigid
+/// placement cells prevents pointer reuse (ABA) while the entry lives in [`CACHE`].
+struct BodyIdentity {
+    name: String,
+    body: solidcraft_kernel::Body,
+    sheet: bool,
+    mesh_cell: std::sync::Weak<std::sync::OnceLock<std::sync::Arc<Mesh>>>,
+    names_cell: std::sync::Weak<std::sync::OnceLock<std::sync::Arc<crate::history_names::Names>>>,
+    placement_cell: crate::eval::PlacementCell,
+}
+
+impl BodyIdentity {
+    fn of(b: &crate::ModelBody) -> Self {
+        Self {
+            name: b.name.clone(),
+            body: b.body.clone(),
+            sheet: b.sheet,
+            mesh_cell: b.mesh_cell(),
+            names_cell: b.names.names_cell(),
+            placement_cell: b.placement_cell(),
+        }
+    }
+
+    fn matches(&self, b: &crate::ModelBody) -> bool {
+        self.name == b.name
+            && self.sheet == b.sheet
+            && std::sync::Weak::ptr_eq(&self.mesh_cell, &b.mesh_cell())
+            && std::sync::Weak::ptr_eq(&self.names_cell, &b.names.names_cell())
+            && self.placement_cell.matches(b)
+            && self.body.same(&b.body)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum CacheKind {
+    Project,
+    Include,
+    Intersect,
+    Text,
+}
+
+impl From<LinkKind> for CacheKind {
+    fn from(kind: LinkKind) -> Self {
+        match kind {
+            LinkKind::Project => Self::Project,
+            LinkKind::Include => Self::Include,
+            LinkKind::Intersect => Self::Intersect,
+            LinkKind::Text => Self::Text,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum CachedSide {
+    Body,
+    Face { at: [u64; 3] },
+}
+
+enum CacheQuery {
+    Edge { at: [u64; 3] },
+    Face { at: [u64; 3], skip: Vec<usize> },
+    Body,
+    Vertex { at: [u64; 3] },
+    Iso { at: [u64; 3], dir: String },
+    Spun { origin: [u64; 3], dir: [u64; 3] },
+    Intersection { a: CachedSide, b: CachedSide },
+    NamedEdge { index: usize, near: [u64; 3] },
+    NamedFace { index: usize, at: [u64; 3], skip: Vec<usize> },
+    FaceIndices { indices: Vec<usize>, skip: Vec<usize> },
+}
+
+enum CacheQueryRef<'a> {
+    Edge { at: [u64; 3] },
+    Face { at: [u64; 3], skip: &'a std::collections::BTreeSet<usize> },
+    Body,
+    Vertex { at: [u64; 3] },
+    Iso { at: [u64; 3], dir: &'a str },
+    Spun { origin: [u64; 3], dir: [u64; 3] },
+    Intersection { a: CachedSide, b: CachedSide },
+    NamedEdge { index: usize, near: [u64; 3] },
+    NamedFace { index: usize, at: [u64; 3], skip: &'a std::collections::BTreeSet<usize> },
+    FaceIndices { indices: &'a [usize], skip: &'a std::collections::BTreeSet<usize> },
+}
+
+impl CacheQuery {
+    fn matches(&self, query: &CacheQueryRef<'_>) -> bool {
+        match (self, query) {
+            (Self::Edge { at }, CacheQueryRef::Edge { at: q_at }) => at == q_at,
+            (Self::Face { at, skip }, CacheQueryRef::Face { at: q_at, skip: q_skip }) => at == q_at && skip_matches(skip, q_skip),
+            (Self::Body, CacheQueryRef::Body) => true,
+            (Self::Vertex { at }, CacheQueryRef::Vertex { at: q_at }) => at == q_at,
+            (Self::Iso { at, dir }, CacheQueryRef::Iso { at: q_at, dir: q_dir }) => at == q_at && dir.as_str() == *q_dir,
+            (Self::Spun { origin, dir }, CacheQueryRef::Spun { origin: q_origin, dir: q_dir }) => origin == q_origin && dir == q_dir,
+            (Self::Intersection { a, b }, CacheQueryRef::Intersection { a: q_a, b: q_b }) => a == q_a && b == q_b,
+            (Self::NamedEdge { index, near }, CacheQueryRef::NamedEdge { index: q_index, near: q_near }) => index == q_index && near == q_near,
+            (Self::NamedFace { index, at, skip }, CacheQueryRef::NamedFace { index: q_index, at: q_at, skip: q_skip }) => {
+                index == q_index && at == q_at && skip_matches(skip, q_skip)
+            }
+            (Self::FaceIndices { indices, skip }, CacheQueryRef::FaceIndices { indices: q_indices, skip: q_skip }) => {
+                indices.as_slice() == *q_indices && skip_matches(skip, q_skip)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl CacheQueryRef<'_> {
+    fn hash_into(&self, state: &mut impl std::hash::Hasher) {
+        use std::hash::Hash;
+        match self {
+            Self::Edge { at } => {
+                0u8.hash(state);
+                at.hash(state);
+            }
+            Self::Face { at, skip } => {
+                1u8.hash(state);
+                at.hash(state);
+                hash_skip(skip, state);
+            }
+            Self::Body => 2u8.hash(state),
+            Self::Vertex { at } => {
+                3u8.hash(state);
+                at.hash(state);
+            }
+            Self::Iso { at, dir } => {
+                4u8.hash(state);
+                at.hash(state);
+                dir.hash(state);
+            }
+            Self::Spun { origin, dir } => {
+                5u8.hash(state);
+                origin.hash(state);
+                dir.hash(state);
+            }
+            Self::Intersection { a, b } => {
+                6u8.hash(state);
+                a.hash(state);
+                b.hash(state);
+            }
+            Self::NamedEdge { index, near } => {
+                7u8.hash(state);
+                index.hash(state);
+                near.hash(state);
+            }
+            Self::NamedFace { index, at, skip } => {
+                8u8.hash(state);
+                index.hash(state);
+                at.hash(state);
+                hash_skip(skip, state);
+            }
+            Self::FaceIndices { indices, skip } => {
+                9u8.hash(state);
+                indices.hash(state);
+                hash_skip(skip, state);
+            }
+        }
+    }
+
+    fn to_owned_query(&self) -> CacheQuery {
+        match self {
+            Self::Edge { at } => CacheQuery::Edge { at: *at },
+            Self::Face { at, skip } => CacheQuery::Face { at: *at, skip: skip.iter().copied().collect() },
+            Self::Body => CacheQuery::Body,
+            Self::Vertex { at } => CacheQuery::Vertex { at: *at },
+            Self::Iso { at, dir } => CacheQuery::Iso { at: *at, dir: (*dir).to_string() },
+            Self::Spun { origin, dir } => CacheQuery::Spun { origin: *origin, dir: *dir },
+            Self::Intersection { a, b } => CacheQuery::Intersection { a: *a, b: *b },
+            Self::NamedEdge { index, near } => CacheQuery::NamedEdge { index: *index, near: *near },
+            Self::NamedFace { index, at, skip } => CacheQuery::NamedFace { index: *index, at: *at, skip: skip.iter().copied().collect() },
+            Self::FaceIndices { indices, skip } => CacheQuery::FaceIndices { indices: indices.to_vec(), skip: skip.iter().copied().collect() },
+        }
+    }
+}
+
+struct CacheLookup<'a> {
+    plane: [[u64; 3]; 3],
+    kind: CacheKind,
+    first: &'a crate::ModelBody,
+    second: Option<&'a crate::ModelBody>,
+    query: CacheQueryRef<'a>,
+}
+
+impl CacheLookup<'_> {
+    fn hash_value(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.plane.hash(&mut h);
+        self.kind.hash(&mut h);
+        hash_body(self.first, &mut h);
+        self.second.is_some().hash(&mut h);
+        if let Some(second) = self.second {
+            hash_body(second, &mut h);
+        }
+        self.query.hash_into(&mut h);
+        h.finish()
+    }
+
+    fn to_owned_key(&self) -> CacheKey {
+        CacheKey {
+            plane: self.plane,
+            kind: self.kind,
+            first: BodyIdentity::of(self.first),
+            second: self.second.map(BodyIdentity::of),
+            query: self.query.to_owned_query(),
+        }
+    }
+}
+
+struct CacheKey {
+    plane: [[u64; 3]; 3],
+    kind: CacheKind,
+    first: BodyIdentity,
+    second: Option<BodyIdentity>,
+    query: CacheQuery,
+}
+
+impl CacheKey {
+    fn matches(&self, lookup: &CacheLookup<'_>) -> bool {
+        self.plane == lookup.plane
+            && self.kind == lookup.kind
+            && self.query.matches(&lookup.query)
+            && self.first.matches(lookup.first)
+            && match (&self.second, lookup.second) {
+                (Some(stored), Some(live)) => stored.matches(live),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+struct CacheNode {
+    hash: u64,
+    key: CacheKey,
+    value: Resolved,
+    prev: Option<usize>,
+    next: Option<usize>,
+}
+
+#[derive(Default)]
+struct ProjectionCache {
+    buckets: std::collections::HashMap<u64, Vec<usize>>,
+    nodes: Vec<CacheNode>,
+    head: Option<usize>,
+    tail: Option<usize>,
+}
+
+impl ProjectionCache {
+    fn find(&self, hash: u64, lookup: &CacheLookup<'_>) -> Option<usize> {
+        self.buckets.get(&hash)?.iter().copied().find(|&idx| self.nodes.get(idx).is_some_and(|node| node.key.matches(lookup)))
+    }
+
+    fn get(&mut self, lookup: &CacheLookup<'_>) -> Option<Resolved> {
+        let hash = lookup.hash_value();
+        let idx = self.find(hash, lookup)?;
+        self.move_to_front(idx);
+        self.nodes.get(idx).map(|node| node.value.clone())
+    }
+
+    fn insert(&mut self, lookup: &CacheLookup<'_>, value: Resolved) {
+        let hash = lookup.hash_value();
+        if let Some(idx) = self.find(hash, lookup) {
+            if let Some(node) = self.nodes.get_mut(idx) {
+                node.value = value;
+            }
+            self.move_to_front(idx);
+            return;
+        }
+        let key = lookup.to_owned_key();
+        if self.nodes.len() < CACHE_SIZE {
+            let idx = self.nodes.len();
+            self.nodes.push(CacheNode { hash, key, value, prev: None, next: None });
+            self.push_front(idx);
+            self.buckets.entry(hash).or_default().push(idx);
+            return;
+        }
+        let Some(idx) = self.tail else { return };
+        self.detach(idx);
+        let old_hash = if let Some(node) = self.nodes.get_mut(idx) {
+            let prev_hash = node.hash;
+            node.hash = hash;
+            node.key = key;
+            node.value = value;
+            Some(prev_hash)
+        } else {
+            None
+        };
+        if let Some(old_hash) = old_hash
+            && let std::collections::hash_map::Entry::Occupied(mut entry) = self.buckets.entry(old_hash)
+        {
+            entry.get_mut().retain(|&slot| slot != idx);
+            if entry.get().is_empty() {
+                entry.remove();
+            }
+        }
+        self.push_front(idx);
+        self.buckets.entry(hash).or_default().push(idx);
+    }
+
+    fn move_to_front(&mut self, idx: usize) {
+        if self.head == Some(idx) {
+            return;
+        }
+        self.detach(idx);
+        self.push_front(idx);
+    }
+
+    fn detach(&mut self, idx: usize) {
+        let Some((prev, next)) = self.nodes.get_mut(idx).map(|n| (n.prev.take(), n.next.take())) else {
+            return;
+        };
+        match prev {
+            Some(p) => {
+                if let Some(node) = self.nodes.get_mut(p) {
+                    node.next = next;
+                }
+            }
+            None => self.head = next,
+        }
+        match next {
+            Some(n) => {
+                if let Some(node) = self.nodes.get_mut(n) {
+                    node.prev = prev;
+                }
+            }
+            None => self.tail = prev,
+        }
+    }
+
+    fn push_front(&mut self, idx: usize) {
+        let old_head = self.head;
+        if let Some(node) = self.nodes.get_mut(idx) {
+            node.prev = None;
+            node.next = old_head;
+        }
+        match old_head {
+            Some(h) => {
+                if let Some(node) = self.nodes.get_mut(h) {
+                    node.prev = Some(idx);
+                }
+            }
+            None => self.tail = Some(idx),
+        }
+        self.head = Some(idx);
+    }
+}
+
+fn cache_get(lookup: &CacheLookup<'_>) -> Option<Resolved> {
+    #[cfg(test)]
+    if cache_test_hooks::bypassed() {
+        cache_test_hooks::note_miss();
         return None;
     }
-    let bodies: Vec<String> = st
-        .bodies
-        .iter()
-        .map(|b| {
-            let m = b.mesh();
-            format!("{}@{:p}/{}/{:?}", b.name, std::sync::Arc::as_ptr(&m), m.triangles.len(), m.bounds())
-        })
-        .collect();
-    Some(format!("{kind:?}|{src:?}|{plane:?}|{}", bodies.join(";")))
+    let hit = CACHE.lock().ok().and_then(|mut cache| cache.get(lookup));
+    #[cfg(test)]
+    if hit.is_some() {
+        cache_test_hooks::note_hit();
+    } else {
+        cache_test_hooks::note_miss();
+    }
+    hit
+}
+
+fn cache_insert(lookup: &CacheLookup<'_>, value: Resolved) {
+    #[cfg(test)]
+    if cache_test_hooks::bypassed() {
+        return;
+    }
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.insert(lookup, value);
+    }
+}
+
+fn intersection_side<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, CachedSide)> {
+    match src {
+        LinkSource::Body { body } => Some((st.body(body)?, CachedSide::Body)),
+        LinkSource::Face { body, at } => Some((st.body(body)?, CachedSide::Face { at: vec3_bits(*at) })),
+        _ => None,
+    }
+}
+
+/// Build an O(1) body-scoped cache lookup for `src` when every referenced body exists by name in
+/// `st`. Sources that depend on sketches/datums or fall back to searching across all bodies skip
+/// caching without tessellating unrelated bodies.
+fn cache_lookup<'a>(
+    st: &'a ModelState,
+    plane: &Plane,
+    kind: LinkKind,
+    src: &'a LinkSource,
+    skip: &'a std::collections::BTreeSet<usize>,
+) -> Option<CacheLookup<'a>> {
+    let (first, second, query) = match src {
+        LinkSource::Edge { body, at } => (st.body(body)?, None, CacheQueryRef::Edge { at: vec3_bits(*at) }),
+        LinkSource::Face { body, at } => (st.body(body)?, None, CacheQueryRef::Face { at: vec3_bits(*at), skip }),
+        LinkSource::Body { body } => (st.body(body)?, None, CacheQueryRef::Body),
+        LinkSource::Vertex { body, at } => (st.body(body)?, None, CacheQueryRef::Vertex { at: vec3_bits(*at) }),
+        LinkSource::Iso { body, at, dir } => (st.body(body)?, None, CacheQueryRef::Iso { at: vec3_bits(*at), dir: dir.as_str() }),
+        LinkSource::Spun { body, origin, dir } => (st.body(body)?, None, CacheQueryRef::Spun { origin: vec3_bits(*origin), dir: vec3_bits(*dir) }),
+        // An intersection with a sketch curve (#11048) changes with that sketch, not with body identity.
+        LinkSource::Intersection { a, b } => {
+            let (first, side_a) = intersection_side(st, a)?;
+            let (second, side_b) = intersection_side(st, b)?;
+            (first, Some(second), CacheQueryRef::Intersection { a: side_a, b: side_b })
+        }
+        _ => return None,
+    };
+    Some(CacheLookup { plane: plane_bits(plane), kind: kind.into(), first, second, query })
 }
 
 /// Resolve a link source against the model state before the sketch.
@@ -287,19 +738,15 @@ pub fn resolve_omitting(
     frame: Option<&(u64, crate::Mat)>,
     skip: &std::collections::BTreeSet<usize>,
 ) -> Result<Resolved> {
-    let key = cache_key(st, plane, kind, src).map(|k| if skip.is_empty() { k } else { format!("{k}|omit{skip:?}") });
-    if let Some(k) = &key
-        && let Ok(c) = CACHE.lock()
-        && let Some((_, r)) = c.iter().find(|(x, _)| x == k)
+    let lookup = cache_lookup(st, plane, kind, src, skip);
+    if let Some(lookup) = &lookup
+        && let Some(hit) = cache_get(lookup)
     {
-        return Ok(r.clone());
+        return Ok(hit);
     }
     let r = resolve_uncached(doc, vals, st, plane, kind, src, frame, skip)?;
-    if let Some(k) = key
-        && let Ok(mut c) = CACHE.lock()
-    {
-        c.insert(0, (k, r.clone()));
-        c.truncate(CACHE_SIZE);
+    if let Some(lookup) = &lookup {
+        cache_insert(lookup, r.clone());
     }
     Ok(r)
 }
@@ -422,8 +869,7 @@ fn resolve_uncached(
                 LinkKind::Intersect => {
                     let curves = sketch_curves(ss, ci);
                     let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
-                    let hits =
-                        solidcraft_kernel::services::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    let hits = solidcraft_kernel::curves::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
                     hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
@@ -535,15 +981,30 @@ fn resolve_uncached(
                 "X" => (Vec3::ZERO, Vec3::X),
                 "Y" => (Vec3::ZERO, Vec3::Y),
                 "Z" => (Vec3::ZERO, Vec3::Z),
-                _ => match crate::construct::DatumRef::parse_key(name) {
-                    // The origin axis of a component (#15086), where that component now stands.
-                    Some(datum) => match crate::construct::resolve_datum_in(doc, &datum, 0)? {
-                        crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
-                        _ => return Err(lost(&format!("axis {name}"))),
-                    },
-                    // A construction axis, by name (#9324), where the timeline so far puts it.
-                    None => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
-                },
+                _ => {
+                    let (author, frame_mat) = frame.copied().unwrap_or((0, crate::IDENTITY));
+                    match crate::construct::DatumRef::parse_key(name) {
+                        // The origin axis of a component (#15086), where that component now stands,
+                        // in the sketch's frame.
+                        Some(datum) => {
+                            let resolved = crate::construct::resolve_datum(doc, &datum)?;
+                            let geom = if frame.is_some() {
+                                let inverse = crate::mat_inverse(&frame_mat)
+                                    .ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+                                resolved.placed(&inverse)
+                            } else {
+                                resolved
+                            };
+                            match geom {
+                                crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
+                                _ => return Err(lost(&format!("axis {name}"))),
+                            }
+                        }
+                        // A construction axis, by name (#9324), where the timeline so far puts it,
+                        // in the sketch's frame.
+                        None => crate::eval::construction_axis_in_frame(doc, st, name, author, &frame_mat)?,
+                    }
+                }
             };
             let o = plane.to_local(o);
             let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));
@@ -605,7 +1066,7 @@ fn edge_geom(
 ) -> Result<Vec<LinkGeom>> {
     Ok(match kind {
         LinkKind::Intersect => match section()? {
-            EdgeSection::Crossings(points) => points,
+            EdgeSection::Meets(geom) => geom,
             EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
             EdgeSection::Mesh => section_of_polyline(plane, &pts),
         },
@@ -633,32 +1094,46 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
 
 /// Where a body edge meets a sketch plane.
 enum EdgeSection {
-    /// The points where its exact curve crosses or touches the plane, in the plane's coordinates.
-    Crossings(Vec<LinkGeom>),
+    /// The points where its exact curve crosses or touches the plane, and the parts of it lying
+    /// in the plane, in the plane's coordinates.
+    Meets(Vec<LinkGeom>),
     /// It lies in the plane: it meets the plane along its whole length.
     InPlane,
     /// A mesh body's edge: its display polyline is the edge.
     Mesh,
 }
 
-/// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
-/// edge on (an intersection curve's NURBS form). The kernel counts a contact at either end of
-/// the edge and gives no crossings for a curve lying in the plane, so an edge with none whose
-/// two vertices are in the plane (each within its own tolerance) lies in it.
+/// Where edge `e` of `body` meets `plane`: the kernel's section of the curve it evaluates the
+/// edge on (an intersection curve's NURBS form), which tells an edge lying in the plane from
+/// one crossing it and counts a contact at either end of the edge. A part of the edge lying in
+/// the plane is projected exactly, as a whole edge lying in it is.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
+    use solidcraft_kernel::curves::PlaneSection;
     if body.body.is_mesh() {
         return Ok(EdgeSection::Mesh);
     }
-    let record = body.body.record();
-    let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
-    let hits =
-        solidcraft_kernel::services::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
-    if !hits.is_empty() {
-        return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));
+    let edge = body.body.record().edges.get(e).ok_or_else(|| lost("the edge"))?;
+    let curve = edge.parameters();
+    let (points, parts) = match solidcraft_kernel::curves::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
+        PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
+        PlaneSection::Meets { points, in_plane } => (points, in_plane),
+    };
+    let mut geom: Vec<LinkGeom> = points.into_iter().map(LinkGeom::Point).collect();
+    for part in parts {
+        let projected = solidcraft_kernel::projection::projected_part(
+            curve,
+            part.interval,
+            part.ends,
+            plane,
+            body.body.planar_edges_tolerance(),
+            solidcraft_sketch::MAX_SPLINE_POINTS,
+            solidcraft_sketch::MAX_COORD,
+        )
+        .map_err(|e| DocError::Invalid(e.to_string()))?
+        .ok_or_else(|| DocError::Invalid(format!("exact projection is not supported for the part of native edge {e} in the sketch plane")))?;
+        geom.extend(projection_links(projected)?);
     }
-    let on_plane =
-        |v: &u32| record.vertices.get(*v as usize).is_some_and(|v| plane.height(Vec3::new(v.point[0], v.point[1], v.point[2])).abs() <= v.tolerance);
-    Ok(if edge.vertices.iter().all(on_plane) { EdgeSection::InPlane } else { EdgeSection::Crossings(Vec::new()) })
+    Ok(EdgeSection::Meets(geom))
 }
 
 /// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
@@ -797,15 +1272,10 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
         .iter()
         .map(|e| {
             let projected = if let Some(pieces) = body.body.cylinder_edge_projection(plane, *e) {
-                solidcraft_kernel::services::conic_projection::classify_pieces(
-                    plane,
-                    &pieces,
-                    solidcraft_sketch::MAX_SPLINE_POINTS,
-                    solidcraft_sketch::MAX_COORD,
-                )
-                .map(Some)
+                solidcraft_kernel::projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .map(Some)
             } else {
-                solidcraft_kernel::services::spline_projection::projected_edge(
+                solidcraft_kernel::projection::projected_edge(
                     body.body.record(),
                     plane,
                     *e,
@@ -824,8 +1294,8 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
 }
 
 /// Store the modelling operation's geometric images as document link state.
-fn projection_links(geometry: Vec<solidcraft_kernel::services::conic_projection::Projection>) -> Result<Vec<LinkGeom>> {
-    use solidcraft_kernel::services::conic_projection::Projection;
+fn projection_links(geometry: Vec<solidcraft_kernel::projection::Projection>) -> Result<Vec<LinkGeom>> {
+    use solidcraft_kernel::projection::Projection;
     geometry
         .into_iter()
         .map(|g| {
@@ -876,16 +1346,16 @@ fn names_kept(names: Vec<String>, before: usize, geom: &[LinkGeom]) -> Vec<Strin
 /// round's edges end a few 1e-5 mm short of their neighbours (#8284); the sketch only shares a
 /// point between ends 1e-7 apart, and without it the outline has no closed profile.
 fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
-    let met = solidcraft_kernel::services::outline::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
+    let met = solidcraft_kernel::projection::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
     for (g, m) in geom.iter_mut().zip(met) {
         *g = link_of_piece(m);
     }
 }
 
-/// Link geometry as an outline piece of the kernel's ([`solidcraft_kernel::services::outline::Piece`]), field
+/// Link geometry as an outline piece of the kernel's ([`solidcraft_kernel::projection::OutlinePiece`]), field
 /// by field.
-fn outline_piece(g: LinkGeom) -> solidcraft_kernel::services::outline::Piece {
-    use solidcraft_kernel::services::outline::Piece;
+fn outline_piece(g: LinkGeom) -> solidcraft_kernel::projection::OutlinePiece {
+    use solidcraft_kernel::projection::OutlinePiece as Piece;
     match g {
         LinkGeom::Point(p) => Piece::Point(p),
         LinkGeom::Line(a, b) => Piece::Line(a, b),
@@ -900,8 +1370,8 @@ fn outline_piece(g: LinkGeom) -> solidcraft_kernel::services::outline::Piece {
 }
 
 /// An outline piece of the kernel's as link geometry, field by field.
-fn link_of_piece(g: solidcraft_kernel::services::outline::Piece) -> LinkGeom {
-    use solidcraft_kernel::services::outline::Piece;
+fn link_of_piece(g: solidcraft_kernel::projection::OutlinePiece) -> LinkGeom {
+    use solidcraft_kernel::projection::OutlinePiece as Piece;
     match g {
         Piece::Point(p) => LinkGeom::Point(p),
         Piece::Line(a, b) => LinkGeom::Line(a, b),
@@ -1007,7 +1477,7 @@ fn at_vertices(body: &crate::ModelBody, plane: &Plane, e: usize, g: &mut [LinkGe
 pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
     let (LinkSource::Edge { body, .. }, Some(index)) = (&r.source, r.edge_index) else { return None };
     let body = st.body(body).filter(|body| !body.body.is_mesh())?;
-    crate::naming::edge_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+    crate::naming::edge_name_index(body).names.get(index).filter(|name| !name.is_empty()).cloned()
 }
 
 /// The persistent name of the vertex a `Vertex` reference resolved to, for its link to keep and
@@ -1015,7 +1485,7 @@ pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
 pub fn resolved_vertex_name(st: &ModelState, r: &Resolved) -> Option<String> {
     let (LinkSource::Vertex { body, .. }, Some(index)) = (&r.source, r.vertex_index) else { return None };
     let body = st.body(body).filter(|body| !body.body.is_mesh())?;
-    crate::naming::vertex_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+    crate::naming::vertex_name_index(body).names.get(index).filter(|name| !name.is_empty()).cloned()
 }
 
 fn lost(reference: &str) -> DocError {
@@ -1068,6 +1538,16 @@ fn locate_named_vertex(st: &ModelState, kind: LinkKind, body: &str, name: &str, 
 /// moved onto it.
 fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str, index: usize, near: Vec3) -> Result<Resolved> {
     let target = st.body(body).ok_or_else(|| lost("named projection body"))?;
+    let lookup = CacheLookup {
+        plane: plane_bits(plane),
+        kind: kind.into(),
+        first: target,
+        second: None,
+        query: CacheQueryRef::NamedEdge { index, near: vec3_bits(near) },
+    };
+    if let Some(hit) = cache_get(&lookup) {
+        return Ok(hit);
+    }
     let pts = target.mesh().edges.get(index).cloned().unwrap_or_default();
     let at = pts
         .windows(2)
@@ -1082,7 +1562,7 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
     let source = LinkSource::Edge { body: body.into(), at };
-    Ok(Resolved {
+    let resolved = Resolved {
         geom: merge_split_circles(geom),
         wires,
         exact,
@@ -1092,7 +1572,9 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         edge_index: Some(index),
         vertex_index: None,
         edge_names: Vec::new(),
-    })
+    };
+    cache_insert(&lookup, resolved.clone());
+    Ok(resolved)
 }
 
 /// A vertex found by its persistent name: vertex `index` of `body` at its evaluated point `at`.
@@ -1123,6 +1605,16 @@ fn resolve_named_face(
     skip: &std::collections::BTreeSet<usize>,
 ) -> Result<Resolved> {
     let target = st.body(body).ok_or_else(|| lost("named projection body"))?;
+    let lookup = CacheLookup {
+        plane: plane_bits(plane),
+        kind: kind.into(),
+        first: target,
+        second: None,
+        query: CacheQueryRef::NamedFace { index, at: vec3_bits(at), skip },
+    };
+    if let Some(hit) = cache_get(&lookup) {
+        return Ok(hit);
+    }
     let mesh = target.mesh();
     if mesh.triangles.len() > 2_000_000 || mesh.edges.len() > 2_000_000 {
         return Err(DocError::Invalid("named face projection work limit exceeded".into()));
@@ -1148,7 +1640,7 @@ fn resolve_named_face(
     if geom.is_empty() {
         return Err(DocError::Invalid("named face projects to nothing on this sketch plane".into()));
     }
-    Ok(Resolved {
+    let resolved = Resolved {
         geom,
         wires: Vec::new(),
         exact: Vec::new(),
@@ -1158,7 +1650,9 @@ fn resolve_named_face(
         edge_index: None,
         vertex_index: None,
         edge_names,
-    })
+    };
+    cache_insert(&lookup, resolved.clone());
+    Ok(resolved)
 }
 
 fn projection_face_edges(body: &crate::ModelBody, mesh: &Mesh, index: u32, plane: &Plane) -> Result<Vec<usize>> {
@@ -1217,6 +1711,18 @@ pub fn resolve_face_indices(
     pieces: Option<&mut Vec<EdgePieces>>,
 ) -> Result<Resolved> {
     let body = st.body(body_name).ok_or_else(|| lost("projection body"))?;
+    let lookup = pieces.is_none().then(|| CacheLookup {
+        plane: plane_bits(plane),
+        kind: kind.into(),
+        first: body,
+        second: None,
+        query: CacheQueryRef::FaceIndices { indices, skip },
+    });
+    if let Some(lookup) = &lookup
+        && let Some(hit) = cache_get(lookup)
+    {
+        return Ok(hit);
+    }
     let mesh = body.mesh();
     if mesh.triangles.len() > 2_000_000 || indices.len() > 10_000 {
         return Err(DocError::Invalid("anchored projection work limit exceeded".into()));
@@ -1252,7 +1758,7 @@ pub fn resolve_face_indices(
             // Each edge's pieces as the link has them: a circle whose two edges fit to the same
             // half is made whole again across all of them (`merge_split_circles`), keeping which
             // edge each is of. Each edge is read as `projected_edges_named` reads it.
-            let names = crate::naming::edge_names(body);
+            let edges_named = crate::naming::edge_name_index(body);
             let mut owner = Vec::new();
             let mut flat = Vec::new();
             for (k, (e, exact)) in edges.iter().zip(exact_edges(body, plane, &edges)?).enumerate() {
@@ -1265,7 +1771,7 @@ pub fn resolve_face_indices(
             *out = edges
                 .iter()
                 .map(|e| {
-                    let name = names.get(*e).cloned().unwrap_or_default();
+                    let name = edges_named.names.get(*e).cloned().unwrap_or_default();
                     let faces_exact = mesh.edge_faces.get(*e).is_some_and(|fs| fs.iter().all(|f| crate::naming::face_name_exact(body, *f as usize)));
                     EdgePieces { exact: !name.is_empty() && faces_exact, name, geom: Vec::new() }
                 })
@@ -1302,7 +1808,7 @@ pub fn resolve_face_indices(
     if geometry.is_empty() {
         return Err(lost("anchored projection boundaries"));
     }
-    Ok(Resolved {
+    let resolved = Resolved {
         geom: merge_split_circles(geometry),
         wires: Vec::new(),
         exact: Vec::new(),
@@ -1312,7 +1818,11 @@ pub fn resolve_face_indices(
         edge_index: None,
         vertex_index: None,
         edge_names,
-    })
+    };
+    if let Some(lookup) = &lookup {
+        cache_insert(lookup, resolved.clone());
+    }
+    Ok(resolved)
 }
 
 /// [`refresh_links`] for a sketch attached to a face by `anchor`.
@@ -1523,7 +2033,7 @@ fn placement_frame(doc: &Document, component: u64, path: &[u64], what: &str) -> 
 
 /// Is `m` a rotation (or a reflection) and a translation, as a placement is?
 fn is_rigid(m: &Mat) -> bool {
-    solidcraft_kernel::services::affine::is_rigid(m, 1e-6, 1e-12)
+    solidcraft_kernel::affine::is_rigid(m, 1e-6, 1e-12)
 }
 
 /// The transform from the source's own frame (its body's frame, or its sketch's component
@@ -1670,8 +2180,7 @@ impl Motion2 {
 /// moved, or when it tilts against the plane (its projection then changes shape).
 fn in_plane_motion(seen: &Mat, now: &Mat, plane: &Plane) -> Option<Motion2> {
     let coordinates = |v: Vec3| [v.x, v.y, v.z];
-    let (a, [x, y]) =
-        solidcraft_kernel::services::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
+    let (a, [x, y]) = solidcraft_kernel::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
     Some(Motion2 { a, b: Vec2::new(x, y) })
 }
 
@@ -1704,7 +2213,7 @@ pub fn omitted_edges(body: &crate::ModelBody, omit: &[String]) -> Result<std::co
     if omit.len() > solidcraft_sketch::MAX_LINK_OMIT {
         return Err(DocError::Invalid("too many deleted projection members".into()));
     }
-    let keys: Vec<String> = crate::naming::edge_names(body).iter().map(|n| omit_name(n)).collect();
+    let keys: Vec<String> = crate::naming::edge_name_index(body).names.iter().map(|n| omit_name(n)).collect();
     let mut skip = std::collections::BTreeSet::new();
     for name in omit {
         let key = omit_name(name);
@@ -1844,6 +2353,14 @@ pub(crate) fn refresh_sketch_links_with(
                 } else {
                     crate::naming::face_on_body(target, name, *at)
                 }
+            });
+            let found = found.or_else(|| {
+                if !crate::name_lookup::refound_at_saved_point(name, st.body(body)) {
+                    return None;
+                }
+                let hit = unchanged_face_at_saved_point(st, plane, l, sk, body, *at)?;
+                warn.push(format!("projected face `{name}` has a new name; it was found again at its saved point, with the same edges"));
+                Some(hit)
             });
             let Some((index, p)) = found else {
                 lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
@@ -2016,6 +2533,36 @@ pub(crate) fn refresh_sketch_links_with(
     Ok(warn)
 }
 
+/// A face link whose stored `name` finds no face of `body` now, found again as the one face its
+/// saved point `at` lies on, when projecting that face gives exactly the geometry the link holds
+/// (#22919). A name worked out from geometry when the design was saved (an Align that kept no
+/// history named the faces it moved by guesswork, #20308) finds nothing once the same face has
+/// its exact name, although nothing about the face changed. The projected edges being the same
+/// curves at the same places is what proves it the same face: a face that changed shape, moved,
+/// or is not the only face under the point is still lost, and the sketch fails as before. A link
+/// with members left out (`omit_edges`) keeps them by edge names, so it is not re-found this way.
+fn unchanged_face_at_saved_point(st: &ModelState, plane: &Plane, l: &Link, sk: &Sketch, body: &str, at: Vec3) -> Option<(usize, Vec3)> {
+    if !l.omit_edges.is_empty() || l.kind == LinkKind::Intersect {
+        return None;
+    }
+    let target = st.body(body)?;
+    let tolerance = (target.body.size() * 1e-6).max(1e-6);
+    let held: Vec<Vec2> = sk.link_points(&l.id).iter().filter_map(|i| sk.points.get(*i).map(|p| p.pos)).collect();
+    if held.is_empty() {
+        return None;
+    }
+    let unchanged = |index: usize, p: Vec3| {
+        let Ok(r) = resolve_named_face(st, plane, l.kind, body, index, p, &std::collections::BTreeSet::new()) else { return false };
+        let mut probe = sk.clone();
+        let Ok(update) = probe.update_link_detail(&l.id, &r.geom) else { return false };
+        let now: Vec<Vec2> = probe.link_points(&l.id).iter().filter_map(|i| probe.points.get(*i).map(|p| p.pos)).collect();
+        !update.rebuilt && now.len() == held.len() && now.iter().zip(&held).all(|(a, b)| a.dist(*b) <= tolerance)
+    };
+    let mut same = crate::name_lookup::faces_at_saved_point(target, at).into_iter().filter(|(index, p)| unchanged(*index, *p));
+    let found = same.next()?;
+    same.next().is_none().then_some(found)
+}
+
 /// A link whose face or edge `name` finds nothing, keeping its geometry. The sketch fails naming
 /// every such link; or, built to be shown, the link is marked lost and gets a warning.
 fn lose_named(doc: &Document, sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
@@ -2131,7 +2678,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        let query = solidcraft_kernel::services::query::Query::new(b.body.record());
+        let query = solidcraft_kernel::query::Query::new(b.body.record());
         for (_, i) in query.faces_at(at, tol) {
             if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
@@ -2141,7 +2688,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let Some((name, index, plane, b)) = found.first() else {
         return Err("no planar face of the model passes through that point".into());
     };
-    if !found.iter().all(|(_, _, p, _)| solidcraft_kernel::services::constraint::same_plane(p, plane)) {
+    if !found.iter().all(|(_, _, p, _)| solidcraft_kernel::planar::same_plane(p, plane)) {
         return Err("that point lies where faces on different planes meet: pick a point inside one planar face".into());
     }
     let face = crate::naming::face_names(b).get(*index).cloned().ok_or_else(|| "that face has no name to keep it by".to_string())?;
@@ -2506,8 +3053,7 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
         let samples = pcurve_levels(&used.pcurve, t0, t1);
         for pair in samples.windows(2) {
             let (Some(a), Some(b)) = (pair.first().copied(), pair.last().copied()) else { return false };
-            let Some((qa, qb)) =
-                solidcraft_kernel::services::pcurve::eval(&used.pcurve, a).zip(solidcraft_kernel::services::pcurve::eval(&used.pcurve, b))
+            let Some((qa, qb)) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, a).zip(solidcraft_kernel::curves::pcurve_eval(&used.pcurve, b))
             else {
                 return false;
             };
@@ -2518,14 +3064,14 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
             let (mut lo, mut hi) = (a, b);
             for _ in 0..80 {
                 let mid = lo.midpoint(hi);
-                let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, mid) else { return false };
+                let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, mid) else { return false };
                 if (q[1] > v) == above_a {
                     lo = mid;
                 } else {
                     hi = mid;
                 }
             }
-            let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
+            let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
             cuts.push(q[0]);
         }
     }
@@ -2600,7 +3146,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
         fit_world(to, &pts)
     };
-    let relation = solidcraft_kernel::services::conic_projection::plane_relation(from, to);
+    let relation = solidcraft_kernel::projection::plane_relation(from, to);
     let parallel = relation.parallel;
     let edge_on = relation.edge_on;
     let flip = relation.flip;
@@ -2634,7 +3180,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 .collect::<Result<_>>()?;
             let pieces = solidcraft_sketch::fit_beziers_with_handles(&source, &tangents, *periodic).map_err(|e| DocError::Invalid(e.to_string()))?;
             projection_links(
-                solidcraft_kernel::services::conic_projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
+                solidcraft_kernel::projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
                     .map_err(|e| DocError::Invalid(e.to_string()))?,
             )?
         }
@@ -2644,7 +3190,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
             if *control {
                 let metadata = nurbs.as_ref().map(|n| (n.knots.as_slice(), n.weights.as_slice()));
                 projection_links(
-                    solidcraft_kernel::services::conic_projection::project_control(
+                    solidcraft_kernel::projection::project_control(
                         from,
                         to,
                         &source,
@@ -2657,7 +3203,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 )?
             } else if parallel {
                 vec![LinkGeom::Spline {
-                    pts: solidcraft_kernel::services::conic_projection::project_points(from, to, &source),
+                    pts: solidcraft_kernel::projection::project_points(from, to, &source),
                     control: false,
                     degree: *degree,
                     periodic: *periodic,
@@ -2665,7 +3211,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 }]
             } else {
                 projection_links(
-                    solidcraft_kernel::services::conic_projection::project_fit(
+                    solidcraft_kernel::projection::project_fit(
                         from,
                         to,
                         &source,
@@ -2681,7 +3227,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         // A circle or arc seen edge on is the line it covers, out to its own extremes: samples of
         // it fall short of them, by up to its chord tolerance (#17482).
         Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) if edge_on => {
-            match solidcraft_kernel::services::conic_projection::project_arcs(from, to, &sk.segs(ci), solidcraft_sketch::MAX_COORD)
+            match solidcraft_kernel::projection::project_arcs(from, to, &sk.segs(ci), solidcraft_sketch::MAX_COORD)
                 .map_err(|e| DocError::Invalid(e.to_string()))?
             {
                 Some(geometry) => projection_links(geometry)?,
@@ -3022,7 +3568,7 @@ fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
-/// [`Query::outline_stretches`](solidcraft_kernel::services::query::Query::outline_stretches)), each projected exactly as an edge link
+/// [`Query::outline_stretches`](solidcraft_kernel::query::Query::outline_stretches)), each projected exactly as an edge link
 /// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
 /// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
 /// the sketch where its normal out of the material leans toward it; edge-on is away, as in
@@ -3044,7 +3590,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     let rec = body.body.record();
     let n = plane.normal();
     let size = body.body.size().max(1e-9);
-    let q = solidcraft_kernel::services::query::Query::new(rec);
+    let q = solidcraft_kernel::query::Query::new(rec);
     let mut edges = Vec::new();
     // The stretches of the edges on the outline, each projected as an edge link projects it.
     for stretch in q.outline_stretches(n, size).ok()? {
@@ -3055,7 +3601,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
             at_vertices(body, plane, e, &mut g);
             g
         } else {
-            let pieces = solidcraft_kernel::services::spline_projection::project_curve(
+            let pieces = solidcraft_kernel::projection::project_curve(
                 edge.parameters(),
                 stretch.range,
                 true,
@@ -3064,17 +3610,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
                 body.body.planar_edges_tolerance(),
                 &mut 262_144,
             )?;
-            let classified = solidcraft_kernel::services::conic_projection::classify_pieces(
-                plane,
-                &pieces,
-                solidcraft_sketch::MAX_SPLINE_POINTS,
-                solidcraft_sketch::MAX_COORD,
-            )
-            .ok()?;
+            let classified =
+                solidcraft_kernel::projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .ok()?;
             projection_links(classified).ok()?
         };
         // Tidied by the kernel: an edge seen end on is a point of the outline, not a curve of it.
-        edges.extend(solidcraft_kernel::services::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
+        edges.extend(solidcraft_kernel::projection::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
     }
     // The silhouettes of the curved faces, traced where they lie inside them.
     // Prepared once per body: every sketch that projects it, on any plane, shares it.
@@ -3096,13 +3638,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
         match s.accuracy {
             solidcraft_geom::section::CurveAccuracy::Analytic => {
                 let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
-                sils.extend(solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
+                sils.extend(solidcraft_kernel::projection::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
             }
             _ => {
                 let pts: Vec<Vec2> = s.points.iter().map(|p| Vec2::new(p[0], p[1])).collect();
                 // A traced silhouette along an edge already in the outline (a round's end, where
                 // the view grazes the round) is that edge.
-                if pts.iter().all(|p| edges.iter().any(|g| solidcraft_kernel::services::outline::near(g, *p, size * 1e-6))) {
+                if pts.iter().all(|p| edges.iter().any(|g| solidcraft_kernel::projection::near(g, *p, size * 1e-6))) {
                     continue;
                 }
                 let tol = size * 1e-5;
@@ -3119,8 +3661,8 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     // edge's own end there. Edges come first, so their exact ends are the ones kept.
     let mut out = edges;
     out.extend(sils);
-    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
-    Some(solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
+    let out = solidcraft_kernel::projection::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
+    Some(solidcraft_kernel::projection::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
 }
 
 /// The ends of `g` (none for a closed curve or a point).
@@ -3160,7 +3702,7 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
             continue;
         }
         let Some(pieces) = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<Vec<_>>>() else { continue };
-        let pieces = solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
+        let pieces = solidcraft_kernel::projection::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
         let pieces: Vec<LinkGeom> = pieces.into_iter().map(link_of_piece).collect();
         let (Some(first), Some(last)) = (pieces.first().and_then(piece_ends), pieces.last().and_then(piece_ends)) else { continue };
         if closes(first[0]) && closes(last[1]) {
@@ -3172,8 +3714,8 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
     }
     let mut out: Vec<_> = geom.into_iter().map(outline_piece).collect();
     out.extend(sides.into_iter().map(outline_piece));
-    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, tol);
-    solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
+    let out = solidcraft_kernel::projection::meet_at_shared_ends(out, tol);
+    solidcraft_kernel::projection::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the
@@ -4461,5 +5003,323 @@ mod exact_loop_tests {
         let mut out = Vec::new();
         fit_chain_with_arcs(&pts, Some(1e-4), &mut out, true);
         assert!(matches!(out.as_slice(), [LinkGeom::Arc { .. }]), "expected 10-degree arc preserved, got {out:?}");
+    }
+}
+
+#[cfg(test)]
+mod projection_cache_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn vec2_bits(v: Vec2) -> [u64; 2] {
+        [v.x.to_bits(), v.y.to_bits()]
+    }
+
+    fn assert_geom_bit_identical(a: &LinkGeom, b: &LinkGeom) {
+        match (a, b) {
+            (LinkGeom::Point(pa), LinkGeom::Point(pb)) => assert_eq!(vec2_bits(*pa), vec2_bits(*pb)),
+            (LinkGeom::Line(a0, a1), LinkGeom::Line(b0, b1)) => {
+                assert_eq!(vec2_bits(*a0), vec2_bits(*b0));
+                assert_eq!(vec2_bits(*a1), vec2_bits(*b1));
+            }
+            (LinkGeom::Circle(ca, ra), LinkGeom::Circle(cb, rb)) => {
+                assert_eq!(vec2_bits(*ca), vec2_bits(*cb));
+                assert_eq!(ra.to_bits(), rb.to_bits());
+            }
+            (LinkGeom::Arc { c: ca, a: aa, b: ba }, LinkGeom::Arc { c: cb, a: ab, b: bb }) => {
+                assert_eq!(vec2_bits(*ca), vec2_bits(*cb));
+                assert_eq!(vec2_bits(*aa), vec2_bits(*ab));
+                assert_eq!(vec2_bits(*ba), vec2_bits(*bb));
+            }
+            (LinkGeom::Conic { a: aa, apex: pa, b: ba, rho: ra }, LinkGeom::Conic { a: ab, apex: pb, b: bb, rho: rb }) => {
+                assert_eq!(vec2_bits(*aa), vec2_bits(*ab));
+                assert_eq!(vec2_bits(*pa), vec2_bits(*pb));
+                assert_eq!(vec2_bits(*ba), vec2_bits(*bb));
+                assert_eq!(ra.to_bits(), rb.to_bits());
+            }
+            (LinkGeom::Ellipse { c: ca, major: ma, minor: ra }, LinkGeom::Ellipse { c: cb, major: mb, minor: rb }) => {
+                assert_eq!(vec2_bits(*ca), vec2_bits(*cb));
+                assert_eq!(vec2_bits(*ma), vec2_bits(*mb));
+                assert_eq!(ra.to_bits(), rb.to_bits());
+            }
+            (
+                LinkGeom::Spline { pts: pa, control: ca, degree: da, periodic: pera, nurbs: na },
+                LinkGeom::Spline { pts: pb, control: cb, degree: db, periodic: perb, nurbs: nb },
+            ) => {
+                assert_eq!(pa.iter().copied().map(vec2_bits).collect::<Vec<_>>(), pb.iter().copied().map(vec2_bits).collect::<Vec<_>>());
+                assert_eq!((ca, da, pera), (cb, db, perb));
+                match (na, nb) {
+                    (Some(a), Some(b)) => {
+                        assert_eq!(a.knots.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.knots.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                        assert_eq!(
+                            a.weights.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                            b.weights.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                        );
+                    }
+                    (None, None) => {}
+                    _ => panic!("nurbs mismatch: {na:?} vs {nb:?}"),
+                }
+            }
+            _ => panic!("LinkGeom variant mismatch: {a:?} vs {b:?}"),
+        }
+    }
+
+    fn assert_resolved_bit_identical(a: &Resolved, b: &Resolved) {
+        assert_eq!(a.geom.len(), b.geom.len(), "geom len mismatch");
+        for (ga, gb) in a.geom.iter().zip(&b.geom) {
+            assert_geom_bit_identical(ga, gb);
+        }
+        assert_eq!(a.wires.len(), b.wires.len(), "wires len mismatch");
+        for (wa, wb) in a.wires.iter().zip(&b.wires) {
+            assert_eq!(wa.iter().copied().map(vec3_bits).collect::<Vec<_>>(), wb.iter().copied().map(vec3_bits).collect::<Vec<_>>());
+        }
+        assert_eq!(format!("{:?}", a.exact), format!("{:?}", b.exact));
+        assert_eq!(format!("{:?}", a.source), format!("{:?}", b.source));
+        assert_eq!(a.moved, b.moved);
+        assert_eq!(a.face_index, b.face_index);
+        assert_eq!(a.edge_index, b.edge_index);
+        assert_eq!(a.vertex_index, b.vertex_index);
+        assert_eq!(a.edge_names, b.edge_names);
+    }
+
+    fn box_feature(corner: Vec3, length: &str, width: &str, height: &str) -> crate::FeatureKind {
+        crate::FeatureKind::Box {
+            corner: crate::point_expr(corner),
+            length: length.into(),
+            width: width.into(),
+            height: height.into(),
+            operation: crate::Operation::NewBody,
+            centred: false,
+        }
+    }
+
+    #[test]
+    fn projection_cache_leaves_unrelated_bodies_unmeshed_and_reuses_across_sketch_edits() {
+        let mut doc = Document::new("multi-body projection cache");
+        let mut first_feature = 0;
+        for i in 0..40 {
+            let id = doc.add_feature(box_feature(Vec3::new(i as f64 * 25.0, 0.0, 0.0), "10", "10", "10"), Some(&format!("Box{}", i + 1))).unwrap();
+            if i == 0 {
+                first_feature = id;
+            }
+        }
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        let initial = model.state();
+        assert_eq!(initial.bodies.len(), 40);
+        assert!(initial.bodies.iter().all(|b| b.cached_mesh().is_none()), "bodies should start unmeshed before projection");
+        let target_name = initial.bodies.iter().find(|b| b.feature == first_feature).unwrap().name.clone();
+        assert_eq!(target_name, "Body1");
+
+        let edge_src = LinkSource::Edge { body: target_name.clone(), at: Vec3::new(5.0, 0.0, 10.0) };
+        let face_src = LinkSource::Face { body: target_name.clone(), at: Vec3::new(5.0, 5.0, 10.0) };
+        let body_src = LinkSource::Body { body: target_name.clone() };
+        let vals = BTreeMap::new();
+        let edge_res = resolve(&doc, &vals, &initial, &Plane::XY, LinkKind::Project, &edge_src).unwrap();
+        let face_res = resolve(&doc, &vals, &initial, &Plane::XY, LinkKind::Project, &face_src).unwrap();
+        let body_res = resolve(&doc, &vals, &initial, &Plane::XY, LinkKind::Project, &body_src).unwrap();
+
+        let target_body = initial.body(&target_name).unwrap();
+        let edge_name = resolved_edge_name(&initial, &edge_res).expect("box edge should have a persistent name");
+        let face_name = crate::naming::face_names(target_body).get(face_res.face_index.unwrap()).cloned().unwrap();
+
+        let mut sketch = Sketch::new();
+        sketch.add_link(LinkKind::Project, edge_res.source.clone(), &edge_res.geom).unwrap();
+        sketch.add_link(LinkKind::Project, edge_res.source.clone(), &edge_res.geom).unwrap();
+        sketch.links[1].edge_name = Some(edge_name);
+        sketch.add_link(LinkKind::Project, face_res.source.clone(), &face_res.geom).unwrap();
+        sketch.add_link(LinkKind::Project, face_res.source.clone(), &face_res.geom).unwrap();
+        sketch.links[3].face_name = Some(face_name);
+        sketch.add_link(LinkKind::Project, body_res.source.clone(), &body_res.geom).unwrap();
+
+        let sketch_id = doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, Some("Proj")).unwrap();
+        model.evaluate(&doc);
+        assert!(model.result(sketch_id).and_then(|r| r.error.as_deref()).is_none(), "{:?}", model.result(sketch_id));
+        for body in model.state().bodies.iter().filter(|b| b.name != target_name) {
+            assert!(body.cached_mesh().is_none(), "unrelated body {} must remain unmeshed after projection", body.name);
+        }
+
+        // Repeated edits to the sketch must hit the projection cache with zero misses and keep
+        // every unrelated body unmeshed.
+        for edit in 0..3 {
+            let crate::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch_id).unwrap().kind else {
+                panic!("sketch feature");
+            };
+            let y = 20.0 + edit as f64 * 5.0;
+            let p0 = sketch.add_point(Vec2::new(0.0, y), None).unwrap();
+            let p1 = sketch.add_point(Vec2::new(10.0, y), None).unwrap();
+            sketch.add_line_pts(p0, p1, None).unwrap();
+
+            let ((), hits, misses) = cache_test_hooks::counted(|| model.evaluate(&doc));
+            assert!(model.result(sketch_id).and_then(|r| r.error.as_deref()).is_none(), "{:?}", model.result(sketch_id));
+            assert_eq!(misses, 0, "edit {edit}: expected zero projection cache misses, got hits={hits} misses={misses}");
+            assert!(hits >= 5, "edit {edit}: expected all 5 links to hit projection cache, got hits={hits}");
+            for body in model.state().bodies.iter().filter(|b| b.name != target_name) {
+                assert!(body.cached_mesh().is_none(), "edit {edit}: unrelated body {} was unexpectedly meshed", body.name);
+            }
+        }
+    }
+
+    #[test]
+    fn projection_cache_handles_over_64_links_named_and_auto_face_with_exact_results_and_invalidation() {
+        let mut doc = Document::new("projection cache capacity and invalidation");
+        let box_id = doc.add_feature(box_feature(Vec3::ZERO, "10", "10", "10"), Some("Box1")).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        let state = model.state();
+        let body = state.body("Body1").unwrap();
+        let top_face = (0..body.body.face_count()).find(|&i| body.body.face_plane(i).is_some_and(|p| p.normal().z > 0.9)).unwrap();
+        let picked = body.body.face_plane(top_face).unwrap();
+        let anchor = doc.capture_face_anchor(body, top_face, &picked, &[], 0, &[]).unwrap();
+
+        let vals = BTreeMap::new();
+        let empty_skip = BTreeSet::new();
+        let face_edges = projection_face_edges(body, &body.mesh(), u32::try_from(top_face).unwrap(), &Plane::XY).unwrap();
+        let omitted_one = BTreeSet::from([face_edges[0]]);
+        let edge_at = Vec3::new(5.0, 0.0, 10.0);
+        let face_at = Vec3::new(5.0, 5.0, 10.0);
+        let vertex_at = Vec3::new(10.0, 10.0, 10.0);
+        let named_edge_idx = nearest_edge(&body.mesh(), edge_at).unwrap().0;
+
+        let link_queries: Vec<(Plane, LinkKind, LinkSource)> = (0..70)
+            .map(|i| {
+                let plane = Plane::XY.offset(i as f64 * 0.25);
+                let (kind, src) = match i % 4 {
+                    0 => (LinkKind::Project, LinkSource::Edge { body: "Body1".into(), at: edge_at }),
+                    1 => (LinkKind::Project, LinkSource::Face { body: "Body1".into(), at: face_at }),
+                    2 => (LinkKind::Project, LinkSource::Body { body: "Body1".into() }),
+                    _ => (LinkKind::Project, LinkSource::Vertex { body: "Body1".into(), at: vertex_at }),
+                };
+                (plane, kind, src)
+            })
+            .collect();
+
+        let run_all = |st: &ModelState| -> Vec<Resolved> {
+            let mut out = Vec::with_capacity(link_queries.len() + 4);
+            for (plane, kind, src) in &link_queries {
+                out.push(resolve_omitting(&doc, &vals, st, plane, *kind, src, None, &empty_skip).unwrap());
+            }
+            out.push(resolve_named_edge(st, &Plane::XY, LinkKind::Project, "Body1", named_edge_idx, edge_at).unwrap());
+            out.push(resolve_named_face(st, &Plane::XY, LinkKind::Project, "Body1", top_face, face_at, &empty_skip).unwrap());
+            out.push(resolve_named_face(st, &Plane::XY, LinkKind::Project, "Body1", top_face, face_at, &omitted_one).unwrap());
+            out.push(resolve_anchored_face(&doc, st, &picked, LinkKind::Project, &anchor).unwrap());
+            out
+        };
+
+        // Pass 1: prime >64 distinct entries (74 total: 70 link sources + named edge + 2 named faces + anchored auto_face).
+        let (cold, cold_hits, cold_misses) = cache_test_hooks::counted(|| run_all(&state));
+        assert_eq!((cold_hits, cold_misses), (0, 74));
+
+        // Pass 2: every entry (>64!) must hit without thrashing.
+        let (warm, warm_hits, warm_misses) = cache_test_hooks::counted(|| run_all(&state));
+        assert_eq!((warm_hits, warm_misses), (74, 0));
+
+        // Pass 3: compare cached output bit-for-bit against uncached resolution (bypassing cache).
+        let uncached = cache_test_hooks::without_cache(|| run_all(&state));
+        assert_eq!(cold.len(), warm.len());
+        assert_eq!(warm.len(), uncached.len());
+        for (idx, ((c, w), u)) in cold.iter().zip(&warm).zip(&uncached).enumerate() {
+            assert_resolved_bit_identical(c, w);
+            assert_resolved_bit_identical(w, u);
+            assert!(!u.geom.is_empty(), "query {idx} produced empty geometry");
+        }
+
+        // Pass 4: auto_face sketch attached to the anchored face reuses cache across sketch edits.
+        let anchored_res = warm.last().unwrap();
+        let mut auto_sketch = Sketch::new();
+        auto_sketch.add_link(LinkKind::Project, anchored_res.source.clone(), &anchored_res.geom).unwrap();
+        auto_sketch.links[0].face_name = Some(anchor.target.name.clone());
+        auto_sketch.links[0].auto_face = true;
+        let auto_sketch_id = doc
+            .add_feature(
+                crate::FeatureKind::Sketch {
+                    plane: PlaneRef::Face { plane: picked, at: picked.origin, name: None, anchor: Some(Box::new(anchor.clone())) },
+                    sketch: auto_sketch,
+                },
+                Some("AutoFaceSketch"),
+            )
+            .unwrap();
+        model.evaluate(&doc);
+        assert!(model.result(auto_sketch_id).and_then(|r| r.error.as_deref()).is_none(), "{:?}", model.result(auto_sketch_id));
+        {
+            let crate::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(auto_sketch_id).unwrap().kind else {
+                panic!("auto_face sketch feature");
+            };
+            let p0 = sketch.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+            let p1 = sketch.add_point(Vec2::new(4.0, 4.0), None).unwrap();
+            sketch.add_line_pts(p0, p1, None).unwrap();
+        }
+        let ((), auto_hits, auto_misses) = cache_test_hooks::counted(|| model.evaluate(&doc));
+        assert!(model.result(auto_sketch_id).and_then(|r| r.error.as_deref()).is_none(), "{:?}", model.result(auto_sketch_id));
+        assert_eq!(auto_misses, 0, "auto_face sketch edit must not miss projection cache");
+        assert!(auto_hits >= 1, "auto_face sketch edit must hit projection cache");
+
+        // Pass 5: mutating the upstream body invalidates cached projections and returns updated geometry.
+        {
+            let crate::FeatureKind::Box { length, .. } = &mut doc.feature_mut(box_id).unwrap().kind else {
+                panic!("box feature");
+            };
+            *length = "25".into();
+        }
+        let ((), eval_hits, eval_misses) = cache_test_hooks::counted(|| model.evaluate(&doc));
+        assert!(model.result(auto_sketch_id).and_then(|r| r.error.as_deref()).is_none(), "{:?}", model.result(auto_sketch_id));
+        assert_eq!(eval_hits, 0, "mutated upstream body must invalidate auto_face sketch cache");
+        assert!(eval_misses >= 1, "mutated upstream body must re-resolve auto_face sketch");
+
+        let updated = model.state();
+        let updated_body = updated.body("Body1").unwrap();
+        let updated_top = (0..updated_body.body.face_count()).find(|&i| updated_body.body.face_plane(i).is_some_and(|p| p.normal().z > 0.9)).unwrap();
+        let updated_edge = nearest_edge(&updated_body.mesh(), edge_at).unwrap().0;
+
+        let ((edge2, face2, named_edge2, named_face2, face_indices2), inv_hits, inv_misses) = cache_test_hooks::counted(|| {
+            (
+                resolve(&doc, &vals, &updated, &Plane::XY, LinkKind::Project, &LinkSource::Edge { body: "Body1".into(), at: edge_at }).unwrap(),
+                resolve(&doc, &vals, &updated, &Plane::XY, LinkKind::Project, &LinkSource::Face { body: "Body1".into(), at: face_at }).unwrap(),
+                resolve_named_edge(&updated, &Plane::XY, LinkKind::Project, "Body1", updated_edge, edge_at).unwrap(),
+                resolve_named_face(&updated, &Plane::XY, LinkKind::Project, "Body1", updated_top, face_at, &empty_skip).unwrap(),
+                resolve_face_indices(&updated, &Plane::XY, LinkKind::Project, "Body1", &[updated_top], &empty_skip, None).unwrap(),
+            )
+        });
+        assert_eq!((inv_hits, inv_misses), (0, 5), "upstream body change must invalidate all 5 cached entries");
+        let anchored2 = resolve_anchored_face(&doc, &updated, &picked, LinkKind::Project, &anchor).unwrap();
+
+        let span = |r: &Resolved| -> f64 {
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+            for p in r.geom.iter().flat_map(|g| match g {
+                LinkGeom::Point(p) => vec![*p],
+                LinkGeom::Line(a, b) => vec![*a, *b],
+                LinkGeom::Arc { a, b, .. } => vec![*a, *b],
+                _ => Vec::new(),
+            }) {
+                min_x = min_x.min(p.x);
+                max_x = max_x.max(p.x);
+                min_y = min_y.min(p.y);
+                max_y = max_y.max(p.y);
+            }
+            (max_x - min_x).max(max_y - min_y)
+        };
+        assert!((span(&face2) - 25.0).abs() < 1e-6, "updated face projection must reflect length=25: {:?}", face2.geom);
+        assert!((span(&named_face2) - 25.0).abs() < 1e-6, "updated named face must reflect length=25: {:?}", named_face2.geom);
+        assert!((span(&edge2) - 25.0).abs() < 1e-6, "updated edge projection must reflect length=25: {:?}", edge2.geom);
+        assert!((span(&named_edge2) - 25.0).abs() < 1e-6, "updated named edge must reflect length=25: {:?}", named_edge2.geom);
+        assert!((span(&face_indices2) - 25.0).abs() < 1e-6, "updated face_indices must reflect length=25: {:?}", face_indices2.geom);
+        assert!((span(&anchored2) - 25.0).abs() < 1e-6, "updated anchored face must reflect length=25: {:?}", anchored2.geom);
+
+        let uncached_updated = cache_test_hooks::without_cache(|| {
+            (
+                resolve(&doc, &vals, &updated, &Plane::XY, LinkKind::Project, &LinkSource::Edge { body: "Body1".into(), at: edge_at }).unwrap(),
+                resolve(&doc, &vals, &updated, &Plane::XY, LinkKind::Project, &LinkSource::Face { body: "Body1".into(), at: face_at }).unwrap(),
+                resolve_named_edge(&updated, &Plane::XY, LinkKind::Project, "Body1", updated_edge, edge_at).unwrap(),
+                resolve_named_face(&updated, &Plane::XY, LinkKind::Project, "Body1", updated_top, face_at, &empty_skip).unwrap(),
+                resolve_face_indices(&updated, &Plane::XY, LinkKind::Project, "Body1", &[updated_top], &empty_skip, None).unwrap(),
+                resolve_anchored_face(&doc, &updated, &picked, LinkKind::Project, &anchor).unwrap(),
+            )
+        });
+        assert_resolved_bit_identical(&edge2, &uncached_updated.0);
+        assert_resolved_bit_identical(&face2, &uncached_updated.1);
+        assert_resolved_bit_identical(&named_edge2, &uncached_updated.2);
+        assert_resolved_bit_identical(&named_face2, &uncached_updated.3);
+        assert_resolved_bit_identical(&face_indices2, &uncached_updated.4);
+        assert_resolved_bit_identical(&anchored2, &uncached_updated.5);
     }
 }

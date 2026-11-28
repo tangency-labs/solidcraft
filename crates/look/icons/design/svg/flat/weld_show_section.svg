@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Show section sketch</title>
+  <path d="M15 6.65L15 40.65L49 40.65Z" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 52.65L49 52.65M15 47.65L15 57.65M49 47.65L49 57.65" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

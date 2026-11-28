@@ -306,32 +306,49 @@ run standalone wasm validation on each published code revision.
 
 ## Portable thumbnail
 
-A warm save (with `cache`, the default) may add `cache/thumbnail.png` and its small
-`cache/thumbnail.json` key. The picture is a 240 x 150 PNG, bounded to 256 KiB,
-keyed by `solidcraft-thumbnail/1`, application version, exact document SHA-256 and
-PNG SHA-256. It contains an isometric view of visible solid bodies with their
-appearances. It is display-only and independent of the producing geometry kernel.
+A save (with `cache`, the default) may add `cache/thumbnail.png` and its small
+`cache/thumbnail.json` key. The picture is a 512 x 384 PNG, bounded to 512 KiB,
+keyed by `solidcraft-thumbnail/2`, exact document SHA-256 and PNG SHA-256. The key
+also records the application version, but a reader does not require it: an update
+must not hide every saved picture. Pictures of the earlier
+`solidcraft-thumbnail/1` are misses and are drawn again.
 
-Saving uses only already placed bodies and cached meshes, at most 1,024 bodies,
-100,000 triangles and 100,000 vertices. A preflight also caps projected pixel-box
-work at four million supersampled pixels and face-color lookups at one million,
-so overlapping triangles cannot make a small picture arbitrarily expensive.
-It never evaluates or tessellates a cold
-model for a picture. Active edits, pending moves, model errors, absent warm
-geometry or exceeded limits omit the picture, as does `cache: false`. Browser
-downloads omit the PNG. Plain JSON never contains the PNG. The same writer is used by desktop and browser saves.
+The picture is the model cut out over transparent pixels: the visible bodies with
+their appearances and edges, or the shown sketches of a design without bodies. The
+camera is always the isometric home view, orthographic, fitted to the model's
+outline with a margin of 6% of the shorter side. It has no backdrop, grid or axes.
+Because every picture is isometric, the app draws one ground grid in the theme's
+3D view colours under all of them (`ui_kit::file_preview`).
+
+A private, ancillary PNG chunk, `scSh`, holds the model's footprint: the model
+dropped onto its lowest level, as a 160 x 128 grey PNG covering picture pixels
+x -64 to 576 and y 0 to 512, at most 32 KiB. The app blurs it into the shadow on
+its grid. It travels inside the picture, so the container has no extra part, and
+other PNG readers skip it. A picture without it casts no shadow.
+
+A save draws the placed model with the renderer the host installed, or with the
+CPU rasterizer in a process with none, so command-line and headless saves have
+pictures too. It does not evaluate features. It does mesh bodies that nothing has
+drawn yet, giving up before the next body once meshing has taken five seconds,
+and it omits the picture of more than 1,024 bodies or 1,000,000 triangles. A
+design of more than 256 occurrences is not placed for its picture alone. An open
+sketch or a feature error does not drop the picture; pending moves and a joint
+drag do, as does `cache: false`. Plain JSON never contains the PNG. The same
+writer is used by desktop and browser saves.
 
 The seekable thumbnail reader checks the small key, retained document metadata,
 PNG size/header and hashes without resolving source blobs. The Home/Recent Files
-reader tries its local picture cache, then this portable picture, then its existing
-background reconstruction. PNG decoding also has dimension and allocation limits.
-Missing, mismatched, truncated or malformed pictures are misses and never prevent
-authoritative document opening.
+and parts library reader tries its local picture cache, then this portable
+picture, then its existing background reconstruction. PNG decoding, of the picture
+and of its footprint, has dimension and allocation limits. Missing, mismatched,
+truncated or malformed pictures are misses and never prevent authoritative
+document opening.
 
 On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
 shows this picture as the design's icon, and Space shows the design's saved display meshes
-(see "Provisional saved display") in a 3D view turned by dragging and zoomed by scrolling or
-pinching, or this picture when the design has none. They read the container with
+(see "Provisional saved display") in a 3D view turned by dragging, panned by Shift-dragging,
+right-dragging or middle-dragging, zoomed by scrolling or pinching, and reset by
+Option-double-clicking or middle double-clicking, or this picture when the design has none. They read the container with
 `crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
 the container format, the PNG header and size and every mesh blob, but not the caches' keys or
 build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and

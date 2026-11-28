@@ -448,7 +448,7 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         let reply = h.call("ui.prefs", json!({"open":"General"}));
         assert_eq!(
             reply["result"]["policy"],
-            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}, "off": []}),
             "{reply}"
         );
         assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");

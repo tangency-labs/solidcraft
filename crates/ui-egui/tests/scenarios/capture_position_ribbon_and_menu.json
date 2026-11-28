@@ -1,0 +1,229 @@
+[
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.create",
+      "params": {
+        "name": "Block",
+        "grounded": false
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 10,
+        "width": 10,
+        "height": 10,
+        "body_name": "BlockBody"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    }
+  },
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "click": {
+      "handle": "row:occurrence:2"
+    }
+  },
+  {
+    "key": "M"
+  },
+  {
+    "expect": {
+      "dialog": "Move"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Capture All Positions"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:X Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "30"
+  },
+  {
+    "key": "Enter"
+  },
+  {
+    "expect": {
+      "dialog": null,
+      "features": 1,
+      "errors": 0,
+      "bbox": {
+        "body": "BlockBody",
+        "min": [30, 0, 0],
+        "max": [40, 10, 10]
+      },
+      "query": {
+        "command": "component.list",
+        "path": ["pending_moves"],
+        "value": [2]
+      }
+    }
+  },
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "start": "component.capture_position"
+  },
+  {
+    "expect": {
+      "features": 2,
+      "errors": 0,
+      "shown_handles": ["timeline:CapturePosition1"],
+      "query": {
+        "command": "component.list",
+        "path": ["pending_moves"],
+        "value": []
+      }
+    }
+  },
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "frames": 200
+  },
+  {
+    "click": {
+      "handle": "row:occurrence:2"
+    }
+  },
+  {
+    "key": "M"
+  },
+  {
+    "click": {
+      "handle": "dialog:Capture All Positions"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Y Distance"
+    }
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "20"
+  },
+  {
+    "key": "Enter"
+  },
+  {
+    "expect": {
+      "features": 2,
+      "bbox": {
+        "body": "BlockBody",
+        "min": [30, 20, 0],
+        "max": [40, 30, 10]
+      }
+    }
+  },
+  {
+    "widget": "Assemble"
+  },
+  {
+    "expect": {
+      "shown_handles": ["toolbar:component.capture_position"]
+    }
+  },
+  {
+    "click": {
+      "handle": "toolbar:component.capture_position"
+    }
+  },
+  {
+    "expect": {
+      "features": 3,
+      "errors": 0,
+      "shown_handles": ["timeline:CapturePosition2"]
+    }
+  },
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "Block:1",
+        "translate": [0, 0, 15],
+        "capture": false
+      }
+    }
+  },
+  {
+    "call": "ui.menu",
+    "params": {
+      "x": 100,
+      "y": 170,
+      "target": {
+        "type": "occurrence",
+        "path": [2]
+      }
+    }
+  },
+  {
+    "call": "ui.menuPick",
+    "params": {
+      "item": "Capture Position"
+    }
+  },
+  {
+    "expect": {
+      "features": 4,
+      "errors": 0,
+      "shown_handles": ["timeline:CapturePosition3"],
+      "bbox": {
+        "body": "BlockBody",
+        "min": [30, 20, 15],
+        "max": [40, 30, 25]
+      }
+    }
+  },
+  {
+    "note": "UI triggers for Capture Position: Move/Copy with Capture All Positions unticked, toolbar trigger, ASSEMBLE ribbon button, and Browser Placement -> Capture Position context menu."
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "timeline.inspect",
+        "params": {
+          "feature": "CapturePosition3"
+        },
+        "path": ["type"],
+        "value": "capture_position"
+      }
+    }
+  }
+]

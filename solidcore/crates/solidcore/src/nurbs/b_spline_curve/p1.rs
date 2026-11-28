@@ -998,6 +998,19 @@ impl BSplineCurve {
                 .ok_or_else(no_control_point);
         }
 
+        // The inner ends of an unclamped knot vector are valid parameters.
+        // The legacy point evaluator refuses U[p] and U[m-p], but the
+        // derivative evaluator already evaluates those spans exactly.
+        let knots = cur.knots();
+        let degree = cur.degree();
+        if knots.get(degree) == Some(&t) || knots.iter().rev().nth(degree) == Some(&t) {
+            let mut point = [Vec3::ZERO];
+            crv_derivs_into(cur, t, Side::Left, &mut point)
+                .map_err(SolidError::nurbs_routine(OP_EVAL_PT))?;
+            let [point] = point;
+            return Ok(point);
+        }
+
         // LEFT/RIGHT doesn't matter on C0 curves for point evals
         crv_eval(cur, t, Side::Left).map_err(SolidError::nurbs_routine(OP_EVAL_PT))
     }
@@ -2077,6 +2090,41 @@ mod tests {
         ];
         let u = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         BSplineCurve::from_nurb(Curve::new(pw, 3, u).unwrap(), 3, false)
+    }
+
+    #[test]
+    fn unclamped_curve_evaluates_both_inner_domain_ends() {
+        let knots = vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0];
+        let controls = [(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)];
+        // At U[2] the nonzero basis weights are 3/4 and 1/4 on P0,P1.
+        // At U[4] they are 1/4 and 3/4 on P2,P3. For a rational curve
+        // multiply these by the control weights, then divide by their sum.
+        for (weights, expected) in [
+            (
+                None,
+                [Vec3::new(0.2, 0.375, 0.0), Vec3::new(0.675, 0.15, 0.0)],
+            ),
+            (
+                Some([2.0, 1.0, 3.0, 1.0]),
+                [Vec3::new(11.0 / 70.0, 0.3, 0.0), Vec3::new(0.75, 0.2, 0.0)],
+            ),
+        ] {
+            let pw = controls
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, y))| match weights {
+                    Some(w) => CPoint::new(x * w[i], y * w[i], NOZ, w[i]),
+                    None => CPoint::new(x, y, NOZ, NOW),
+                })
+                .collect();
+            let curve = BSplineCurve::from_nurb(Curve::new(pw, 2, knots.clone()).unwrap(), 2, true);
+            for (t, expected) in [0.2, 0.8].into_iter().zip(expected) {
+                let point = curve.evaluate_point(t).unwrap();
+                assert!((point - expected).length() < 1e-12, "{t}: {point:?}");
+                assert!((point - curve.evaluate(t, 1, true, false).unwrap()[0]).length() < 1e-12);
+            }
+            assert!(curve.evaluate_point(0.5).is_ok());
+        }
     }
 
     #[test]

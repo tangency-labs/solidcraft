@@ -43,9 +43,9 @@ pub use path::{DxfPath, DxfPathStyle, DxfVertex, admit_path, path_shapes};
 pub enum DxfLinetype {
     #[default]
     Continuous,
-    /// AutoCAD's DASHED: a dash of 12.7 mm and a gap of 6.35 mm.
+    /// AutoCAD's DASHED: a 12.7 mm dash and a 6.35 mm gap, written in the file's units.
     Dashed,
-    /// Short 2 mm dashes and 1 mm gaps for hidden edges in millimetre drawings.
+    /// Short 2 mm dashes and 1 mm gaps, written in the file's units, for hidden edges.
     Hidden,
 }
 
@@ -396,6 +396,58 @@ impl DxfShape {
         }
         Ok(())
     }
+
+    /// This shape with every length multiplied by `k`; angles, ratios, parameters, knots,
+    /// weights and bulges are kept.
+    pub fn scaled(&self, k: f64) -> DxfShape {
+        use DxfShape as S;
+        let verts = |verts: &[DxfVertex]| verts.iter().map(|v| DxfVertex { at: v.at * k, bulge: v.bulge }).collect();
+        match self {
+            S::Insert { block, at, scale, angle_deg, columns, rows, column_spacing, row_spacing } => S::Insert {
+                block: block.clone(),
+                at: *at * k,
+                scale: *scale * k,
+                angle_deg: *angle_deg,
+                columns: *columns,
+                rows: *rows,
+                column_spacing: *column_spacing * k,
+                row_spacing: *row_spacing * k,
+            },
+            S::SourceEllipse { c, major, major_radius, ratio, t0, t1 } => {
+                S::SourceEllipse { c: *c * k, major: *major * k, major_radius: *major_radius * k, ratio: *ratio, t0: *t0, t1: *t1 }
+            }
+            S::SourceSpline { degree, flags, knots, ctrl, fit, weights } => S::SourceSpline {
+                degree: *degree,
+                flags: *flags,
+                knots: knots.clone(),
+                ctrl: ctrl.iter().map(|p| *p * k).collect(),
+                fit: fit.iter().map(|p| *p * k).collect(),
+                weights: weights.clone(),
+            },
+            S::SourcePolyline { vertices, closed } => S::SourcePolyline { vertices: verts(vertices), closed: *closed },
+            S::SourceOmitted { kind } => S::SourceOmitted { kind: kind.clone() },
+            S::Point(p) => S::Point(*p * k),
+            S::Line(a, b) => S::Line(*a * k, *b * k),
+            S::Polyline { points } => S::Polyline { points: points.iter().map(|p| *p * k).collect() },
+            S::LwPolyline { verts, closed } => S::LwPolyline { verts: verts.iter().map(|(p, b)| (*p * k, *b)).collect(), closed: *closed },
+            S::BulgedPolyline { vertices, closed } => S::BulgedPolyline { vertices: verts(vertices), closed: *closed },
+            S::Circle { c, r } => S::Circle { c: *c * k, r: *r * k },
+            S::Arc { c, r, a0, a1 } => S::Arc { c: *c * k, r: *r * k, a0: *a0, a1: *a1 },
+            S::Ellipse { c, major, ratio, t0, t1 } => S::Ellipse { c: *c * k, major: *major * k, ratio: *ratio, t0: *t0, t1: *t1 },
+            S::Spline { degree, knots, ctrl, weights } => {
+                S::Spline { degree: *degree, knots: knots.clone(), ctrl: ctrl.iter().map(|p| *p * k).collect(), weights: weights.clone() }
+            }
+            S::Text { at, height, angle_deg, text } => S::Text { at: *at * k, height: *height * k, angle_deg: *angle_deg, text: text.clone() },
+            S::AlignedText { at, height, angle_deg, text, horizontal, vertical } => S::AlignedText {
+                at: *at * k,
+                height: *height * k,
+                angle_deg: *angle_deg,
+                text: text.clone(),
+                horizontal: *horizontal,
+                vertical: *vertical,
+            },
+        }
+    }
 }
 
 // Field-for-field adapter for the existing sketch-export representation.
@@ -426,11 +478,7 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcraft_kernel::services::dxf::export::bulge_arc(
-                solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
-                to,
-            )
-            .is_none()
+            && solidcraft_kernel::dxf::export::bulge_arc(solidcraft_kernel::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to).is_none()
         {
             return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
         }
@@ -469,11 +517,8 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcraft_kernel::services::dxf::export::bulged_edge_points(
-        solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
-        to,
-    )
-    .map_err(|error| IoError::Invalid(error.reason))?;
+    let points = solidcraft_kernel::dxf::export::bulged_edge_points(solidcraft_kernel::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to)
+        .map_err(|error| IoError::Invalid(error.reason))?;
     out.try_reserve(points.len()).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
     out.extend(points);
     Ok(())
@@ -531,11 +576,14 @@ struct Out {
     next: u64,
     limit: Option<usize>,
     failure: Option<std::borrow::Cow<'static, str>>,
+    /// A millimetre length in the file's units (1 for a millimetre file): the file's own
+    /// DASHED and HIDDEN linetype patterns are defined in millimetres.
+    k: f64,
 }
 
 impl Out {
     fn new(next: u64, limit: Option<usize>) -> Self {
-        Self { s: String::new(), next, limit, failure: None }
+        Self { s: String::new(), next, limit, failure: None, k: 1.0 }
     }
     fn check(&self) -> Result<()> {
         match &self.failure {
@@ -947,18 +995,16 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
-        DxfShape::Arc { c, r, a0, a1 } => {
-            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::dxf::export::arc_fields_finite(*a0, *a1)
-        }
+        DxfShape::Arc { c, r, a0, a1 } => c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::dxf::export::arc_fields_finite(*a0, *a1),
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
-                && solidcraft_kernel::services::dxf::export::axis_nonzero(*major)
+                && solidcraft_kernel::dxf::export::axis_nonzero(*major)
                 && ratio.is_finite()
                 && *ratio > 0.0
                 && *ratio <= 1.0
                 && t0.is_finite()
                 && t1.is_finite()
-                && solidcraft_kernel::services::dxf::export::finite_span(*t0, *t1)
+                && solidcraft_kernel::dxf::export::finite_span(*t0, *t1)
         }
         DxfShape::Spline { degree, knots, ctrl, weights } => {
             let degree = usize::from(*degree);
@@ -984,7 +1030,7 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         }
         DxfShape::Text { at, height, angle_deg, text } | DxfShape::AlignedText { at, height, angle_deg, text, .. } => {
             text_encode::writable(text)?;
-            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::dxf::export::finite_degrees(*angle_deg)
+            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::dxf::export::finite_degrees(*angle_deg)
         }
     };
     if !finite {
@@ -1130,7 +1176,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
             positive(emitted_length(*r)?)?;
-            if !solidcraft_kernel::services::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
+            if !solidcraft_kernel::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
@@ -1173,7 +1219,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
 
 fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
     extents.map_or((point, point), |(lo, hi)| {
-        let b = solidcraft_kernel::services::dxf::export::union_bounds(lo, hi, point, point);
+        let b = solidcraft_kernel::dxf::export::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
 }
@@ -1244,6 +1290,14 @@ where
 
     // Everything but the header, which needs the handle seed.
     let mut o = Out::new(0x20, limit);
+    // File units per millimetre, the reciprocal of the reader's units_scale.
+    o.k = match insunits {
+        1 => 1.0 / 25.4,
+        2 => 1.0 / 304.8,
+        5 => 1.0 / 10.0,
+        6 => 1.0 / 1000.0,
+        _ => 1.0,
+    };
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
     // The objects the tables point at: the layout dictionary and the layout of each space, the
@@ -1301,7 +1355,8 @@ where
     }
     o.code(0, "ENDTAB");
     // The three linetypes every drawing has, and DASHED, which the dashed layers name: dash and
-    // gap lengths (a gap is negative) after the pattern's total.
+    // gap lengths, defined in millimetres and written in the file's units (a gap is negative),
+    // after the pattern's total.
     let mut linetypes: Vec<(&str, &str, &[f64])> = vec![
         ("ByBlock", "", &[]),
         ("ByLayer", "", &[]),
@@ -1319,9 +1374,9 @@ where
         o.code(3, description);
         o.code(72, 65);
         o.code(73, pattern.len());
-        o.len(40, pattern.iter().map(|d| d.abs()).sum());
+        o.len(40, pattern.iter().map(|d| d.abs()).sum::<f64>() * o.k);
         for d in pattern {
-            o.len(49, *d);
+            o.len(49, *d * o.k);
             o.code(74, 0);
         }
     }
@@ -1615,6 +1670,7 @@ where
 
     o.check()?;
     let mut head = Out::new(0, limit);
+    head.k = o.k;
     head.code(0, "SECTION");
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
@@ -2260,6 +2316,63 @@ mod tests {
         assert!(dxf.ends_with("  0\nEOF\n"));
         // No entities: a valid, empty drawing.
         assert_eq!(entities(&write_dxf_drawing_units(&[], &[], 4).unwrap()).len(), 0);
+    }
+
+    #[test]
+    fn an_inches_drawing_writes_inches_and_the_imperial_header() {
+        // The geometry is given in the drawing's units: one of them is 25.4 mm.
+        let ents = vec![
+            DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(1.0, 0.0)) },
+            DxfEntity { layer: "CUT".into(), shape: DxfShape::Circle { c: Vec2::new(1.0, 1.0), r: 1.0 } },
+        ];
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents, 1).unwrap();
+        let p = pairs(&dxf);
+        let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
+        assert_eq!(after("$INSUNITS")[0], (70, "1".to_string()));
+        assert_eq!(after("$MEASUREMENT")[0], (70, "0".to_string()));
+        // The line's end, the circle's centre and its radius, and the extents read in inches, as
+        // the entities gave them.
+        let file = entities(&dxf);
+        assert!(near(&values(&file[0], 11), &[1.0]) && near(&values(&file[0], 21), &[0.0]));
+        assert!(near(&values(&file[1], 10), &[1.0]) && near(&values(&file[1], 20), &[1.0]) && near(&values(&file[1], 40), &[1.0]));
+        assert_eq!(&after("$EXTMIN")[..2], &[(10, "0.0".to_string()), (20, "0.0".to_string())]);
+        assert_eq!(&after("$EXTMAX")[..2], &[(10, "2.0".to_string()), (20, "2.0".to_string())]);
+        // The file's own DASHED pattern is converted from millimetres to half and quarter inches.
+        let types = table_records(&p, "LTYPE");
+        let dashed = types.iter().find(|r| field(r, 2) == "DASHED").unwrap();
+        let numbers = |code: i32| dashed.iter().filter(|(c, _)| *c == code).map(|(_, v)| v.parse::<f64>().unwrap()).collect::<Vec<_>>();
+        assert!(near(&numbers(49), &[0.5, -0.25]) && near(&numbers(40), &[0.75]));
+        // The reader converts the inches back to millimetres: the geometry comes out as it went in.
+        let back = read_dxf(&dxf).unwrap();
+        assert!(
+            matches!(&back[..], [Geom2::Line(a, b), Geom2::Circle(c, r)] if b.dist(Vec2::new(25.4, 0.0)) < 1e-9 && c.dist(Vec2::new(25.4, 25.4)) < 1e-9 && (r - 25.4).abs() < 1e-9),
+            "{back:?}"
+        );
+    }
+
+    #[test]
+    fn every_file_unit_keeps_the_dashed_pattern_its_millimetre_length() {
+        // $INSUNITS 1 in, 2 ft, 5 cm, 6 m: the DASHED pattern is the 12.7/6.35 mm pattern in the
+        // file's units, and the reader takes it (and the geometry) back to millimetres.
+        for (units, to_mm) in [(1, 25.4), (2, 304.8), (5, 10.0), (6, 1000.0)] {
+            let ents = vec![DxfEntity { layer: "BEND_UP".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(1.0, 0.0)) }];
+            let dxf = write_dxf_drawing_units(&[DxfLayer::new("BEND_UP", 7).dashed()], &ents, units).unwrap();
+            let back = read_dxf(&dxf).unwrap();
+            assert!(matches!(&back[..], [Geom2::Line(a, b)] if a == &Vec2::ZERO && b.dist(Vec2::new(to_mm, 0.0)) < 1e-6), "{units}: {back:?}");
+        }
+    }
+
+    #[test]
+    fn scaled_keeps_angles_ratios_knots_and_weights_and_scales_the_lengths() {
+        let shape = DxfShape::Ellipse { c: Vec2::new(50.0, 40.0), major: Vec2::new(25.0, 0.0), ratio: 0.48, t0: 0.0, t1: FRAC_PI_2 };
+        let twice = shape.scaled(2.0);
+        let DxfShape::Ellipse { c, major, ratio, t0: _, t1 } = twice else { panic!("{twice:?}") };
+        assert!(c.dist(Vec2::new(100.0, 80.0)) < 1e-12 && major.dist(Vec2::new(50.0, 0.0)) < 1e-12);
+        assert!((ratio - 0.48).abs() < 1e-12 && (t1 - FRAC_PI_2).abs() < 1e-12);
+        let text = DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text: "AB".into() };
+        let third = text.scaled(1.0 / 3.0);
+        let DxfShape::Text { at, height, angle_deg, .. } = third else { panic!("{third:?}") };
+        assert!(at.dist(Vec2::new(10.0, 4.0)) < 1e-12 && (height - 1.0).abs() < 1e-12 && angle_deg == 90.0);
     }
 
     #[test]
@@ -3247,14 +3360,28 @@ mod tests {
             ("BEND_NOTES", 8, DxfLinetype::Continuous),
             ("PERFORATION", 3, DxfLinetype::Continuous),
             ("ROLL", 3, DxfLinetype::Continuous),
+            ("HARDWARE", 8, DxfLinetype::Continuous),
             ("FORM_UP", 1, DxfLinetype::Dashed),
             ("FORM_DOWN", 5, DxfLinetype::Dashed),
             ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
         ] {
             every.declare_layer(name, color, linetype, None).unwrap();
         }
-        assert_eq!(every.layers().len(), 13);
+        assert_eq!(every.layers().len(), 14);
         write_dxf_file(&every).unwrap();
+
+        // A hardware note is text on its own layer, grey and continuous: nothing else is admitted there.
+        let mut note = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = note.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        note.push(hardware, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "M3 nut".into() }, None).unwrap();
+        let written = write_dxf_file(&note).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["HARDWARE"]);
+        let mut circle = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = circle.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        circle.push(hardware, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        assert!(dashed.declare_layer("HARDWARE", 8, DxfLinetype::Dashed, None).unwrap_err().to_string().contains("declared producer"));
     }
 
     /// A flat pattern's file with every role's standard layer and one entity of its kind on each,

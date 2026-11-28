@@ -317,6 +317,10 @@ struct TrimmedEdge<O> {
     unreached: bool,
     /// Material boundaries reached through a chart seam that disappears.
     periodic_ends: Vec<PeriodicBoundaryEnd<O>>,
+    /// (not upstream) How many of the two trim points are the base vertex dropped onto the
+    /// curve because no neighbour's offset gave the curve a trim point there: an end no
+    /// neighbour bounds.
+    dropped: usize,
 }
 
 /// An intersection end whose old chart seam no longer meets the intersection.
@@ -338,6 +342,10 @@ pub struct PeriodicBoundaryEnd<O> {
 
 enum BoundaryRoot {
     NoCut,
+    /// The support contains the whole component (a range of solutions over its interval): the
+    /// smooth continuation of the component's own face beyond a tangent boundary, such as a
+    /// round's extension along the cylinder it is tangent to. It bounds no part of the component.
+    Contains,
     /// The root's curve parameter, its point, and its (u, v) on the boundary's displaced,
     /// extended support.
     One(f64, Point3, Point2),
@@ -4390,6 +4398,10 @@ impl OffsetGeometryCreation {
         let mut root: Option<(f64, Point3, Point2)> = None;
         for solution in roots.as_slice() {
             if solution.solution_type == SolutionType::RangeOfValues {
+                let (lo, hi) = (solution.start.param(0)?, solution.end.param(0)?);
+                if lo.min(hi) <= interval.min() && lo.max(hi) >= interval.max() {
+                    return Ok(BoundaryRoot::Contains);
+                }
                 return Ok(BoundaryRoot::Unresolved);
             }
             let parameter = solution.start.param(0)?;
@@ -4646,6 +4658,13 @@ impl OffsetGeometryCreation {
                                 continue 'seams;
                             }
                             return Ok(PeriodicEnd::Unresolved);
+                        }
+                        BoundaryRoot::Contains => {
+                            // No support bounds the component on this side of the seam: as
+                            // where there is none, the construction does not apply and the
+                            // ordinary trim does (T-1504).
+                            ordinary_end = true;
+                            continue 'seams;
                         }
                         BoundaryRoot::Unresolved => return Ok(PeriodicEnd::Unresolved),
                     };
@@ -5605,6 +5624,7 @@ impl OffsetGeometryCreation {
                 inverted,
                 unreached: dropped == [true, true],
                 periodic_ends,
+                dropped: dropped.iter().filter(|&&d| d).count(),
             }))
         } else {
             Ok(None)
@@ -6597,6 +6617,7 @@ impl OffsetGeometryCreation {
             inverted,
             unreached,
             periodic_ends,
+            ..
         }) = trimmed
         else {
             // TrimExtendedEdge() call did not work: a search that found no cut
@@ -6999,6 +7020,8 @@ impl OffsetGeometryCreation {
         // Now see if we have an intersection curve that has proper trimming
         let mut off_curve: Option<SolidError> = None;
         let mut min_dist = BIG_DOUBLE;
+        // (not upstream) the chosen curve's trim points that no neighbour gave
+        let mut min_dropped = usize::MAX;
         // (the chosen curve with its two UV curves, which every candidate has)
         let mut min_curve: Option<(O, O, O)> = None;
         let mut trim_ivl = Extent1d::new();
@@ -7076,6 +7099,7 @@ impl OffsetGeometryCreation {
                 inverted: my_inverted,
                 unreached: my_unreached,
                 periodic_ends: my_periodic_ends,
+                dropped: my_dropped,
             }) = my_trim
             {
                 if !my_periodic_ends.is_empty() {
@@ -7105,8 +7129,16 @@ impl OffsetGeometryCreation {
 
                     let dist = distance(mid_pnt, orig_mid);
 
-                    if dist < min_dist {
+                    // Not upstream: a curve the neighbours' offsets bound at more of its ends
+                    // comes first. An end no neighbour bounds is the base vertex dropped onto
+                    // the curve; where another curve is cut there, the dropped one ends
+                    // nowhere the offset's vertices are (a piece of the intersection split off
+                    // by a periodic chart's seam, past the neighbours' offsets), so it is not
+                    // the edge's offset, however near its middle lies. The midpoint decides
+                    // between curves bounded alike, as upstream.
+                    if (my_dropped, dist) < (min_dropped, min_dist) {
                         min_curve = Some((c3, uv1, uv2));
+                        min_dropped = my_dropped;
                         min_dist = dist;
                         trim_ivl = my_trim;
                         inverted = my_inverted;

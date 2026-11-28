@@ -2,8 +2,10 @@
 //!
 //! [`ModelView`] is a layer-hosting view with a `CAMetalLayer`. It uploads the model's triangle
 //! corners once, then draws a frame only when something changes: the view's size or scale, a
-//! drag (the model turns as a ball under the pointer, about every axis), a scroll or a pinch
-//! (zoom). Between those the GPU does nothing. The shading is a
+//! drag (the model turns as a ball under the pointer, about every axis), a Shift-drag, right-drag
+//! or middle-drag (pan), a scroll or a pinch (zoom), or an Option-double-click or middle
+//! double-click (reset to the starting view, leaving plain left double-click to Quick Look's own
+//! open-in-app action). Between those the GPU does nothing. The shading is a
 //! light from the viewer, as the app's own; the background is Quick Look's own (the layer is
 //! clear where there is no model).
 //!
@@ -16,11 +18,11 @@ use std::cell::{Cell, RefCell};
 use std::ptr::NonNull;
 
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSEvent, NSResponder, NSView};
+use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2_app_kit::{NSClickGestureRecognizer, NSEvent, NSEventModifierFlags, NSGestureRecognizer, NSGestureRecognizerDelegate, NSResponder, NSView};
 use objc2_core_foundation::CGSize;
-use objc2_foundation::{NSObject, NSRect, NSSize, NSString};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSRect, NSSize, NSString};
 use objc2_metal::{
     MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLCreateSystemDefaultDevice,
     MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLLibrary, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
@@ -28,7 +30,7 @@ use objc2_metal::{
     MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
-use solidcraft_design_preview::{Grab, Matrices, Model, Orbit, Vertex};
+use solidcraft_design_preview::{Grab, Matrices, Model, Orbit, Pan, Vertex};
 
 /// The shaders: corners in, a light from the viewer (with a little ambient and a soft highlight)
 /// out. Normals face the viewer whichever way a triangle winds, so nothing is culled.
@@ -71,12 +73,19 @@ struct Gpu {
     depth: RefCell<Option<Retained<ProtocolObject<dyn MTLTexture>>>>,
 }
 
+/// The drag in progress, if any.
+#[derive(Clone, Copy)]
+enum Drag {
+    None,
+    Orbit(Grab),
+    Pan(Pan),
+}
+
 pub struct Ivars {
     gpu: Gpu,
     radius: f32,
     orbit: Cell<Orbit>,
-    /// Where the drag in progress started.
-    grab: Cell<Option<Grab>>,
+    drag: Cell<Drag>,
 }
 
 define_class!(
@@ -88,6 +97,16 @@ define_class!(
     #[ivars = Ivars]
     pub struct ModelView;
 
+    unsafe impl NSObjectProtocol for ModelView {}
+
+    // SAFETY: the method's signature matches NSGestureRecognizerDelegate's optional selector.
+    unsafe impl NSGestureRecognizerDelegate for ModelView {
+        #[unsafe(method(gestureRecognizer:shouldAttemptToRecognizeWithEvent:))]
+        fn should_attempt(&self, _recognizer: &NSGestureRecognizer, event: &NSEvent) -> bool {
+            event.modifierFlags().contains(NSEventModifierFlags::Option)
+        }
+    }
+
     impl ModelView {
         #[unsafe(method(acceptsFirstMouse:))]
         fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
@@ -96,27 +115,92 @@ define_class!(
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
-            let (x, y, width, height) = self.pointer(event);
-            self.ivars().grab.set(self.ivars().orbit.get().grab(x, y, width, height));
+            let flags = event.modifierFlags();
+            if event.clickCount() == 2 && flags.contains(NSEventModifierFlags::Option) {
+                self.ivars().drag.set(Drag::None);
+                return;
+            }
+            if flags.contains(NSEventModifierFlags::Shift) {
+                self.start_pan(event);
+            } else {
+                let (x, y, width, height) = self.pointer(event);
+                let drag = self.ivars().orbit.get().grab(x, y, width, height).map_or(Drag::None, Drag::Orbit);
+                self.ivars().drag.set(drag);
+            }
+        }
+
+        #[unsafe(method(resetView:))]
+        fn reset_view(&self, _sender: Option<&AnyObject>) {
+            self.ivars().drag.set(Drag::None);
+            self.turn(Orbit::reset);
         }
 
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, event: &NSEvent) {
-            let Some(grab) = self.ivars().grab.get() else { return };
             let (x, y, width, height) = self.pointer(event);
-            self.turn(|orbit| orbit.drag_to(&grab, x, y, width, height));
+            match self.ivars().drag.get() {
+                Drag::Orbit(grab) => self.turn(|orbit| orbit.drag_to(&grab, x, y, width, height)),
+                Drag::Pan(pan) => self.turn(|orbit| orbit.pan_to(&pan, x, y, width, height)),
+                Drag::None => {}
+            }
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) {
+            self.ivars().drag.set(Drag::None);
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, event: &NSEvent) {
+            self.start_pan(event);
+        }
+
+        #[unsafe(method(rightMouseDragged:))]
+        fn right_mouse_dragged(&self, event: &NSEvent) {
+            self.continue_pan(event);
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, _event: &NSEvent) {
+            self.ivars().drag.set(Drag::None);
+        }
+
+        #[unsafe(method(otherMouseDown:))]
+        fn other_mouse_down(&self, event: &NSEvent) {
+            // Button 2 is the middle mouse button in AppKit (0 is left, 1 is right).
+            if event.buttonNumber() != 2 {
+                return;
+            }
+            if event.clickCount() == 2 {
+                self.ivars().drag.set(Drag::None);
+                self.turn(Orbit::reset);
+                return;
+            }
+            self.start_pan(event);
+        }
+
+        #[unsafe(method(otherMouseDragged:))]
+        fn other_mouse_dragged(&self, event: &NSEvent) {
+            if event.buttonNumber() == 2 {
+                self.continue_pan(event);
+            }
+        }
+
+        #[unsafe(method(otherMouseUp:))]
+        fn other_mouse_up(&self, _event: &NSEvent) {
+            self.ivars().drag.set(Drag::None);
         }
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             // A trackpad scrolls in points, a wheel in lines.
             let per = if event.hasPreciseScrollingDeltas() { 0.01 } else { 0.1 };
-            self.turn(|orbit| orbit.zoom_by((event.scrollingDeltaY() * per).exp() as f32));
+            self.zoom(event, (event.scrollingDeltaY() * per).exp() as f32);
         }
 
         #[unsafe(method(magnifyWithEvent:))]
         fn magnify(&self, event: &NSEvent) {
-            self.turn(|orbit| orbit.zoom_by((1.0 + event.magnification()) as f32));
+            self.zoom(event, (1.0 + event.magnification()) as f32);
         }
 
         #[unsafe(method(setFrameSize:))]
@@ -140,13 +224,45 @@ impl ModelView {
     pub fn new(mtm: MainThreadMarker, model: Model) -> Option<Retained<Self>> {
         let gpu = Gpu::new(&model.vertices)?;
         let layer = gpu.layer.clone();
-        let this = Self::alloc(mtm).set_ivars(Ivars { gpu, radius: model.radius, orbit: Cell::new(Orbit::default()), grab: Cell::new(None) });
+        let this = Self::alloc(mtm).set_ivars(Ivars { gpu, radius: model.radius, orbit: Cell::new(Orbit::default()), drag: Cell::new(Drag::None) });
         // SAFETY: NSView's designated initializer, with an empty frame the host resizes.
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: NSRect::ZERO] };
         // Layer-hosting: the view's layer is ours, set before the view wants one.
         view.setLayer(Some(&layer));
         view.setWantsLayer(true);
+        // Claim Option + left double-click with a gesture recognizer so it resets the view without
+        // opening the file in the app, while plain left double-click stays with Quick Look's host.
+        // SAFETY: `view` implements `resetView:` with one optional sender argument and conforms to
+        // `NSGestureRecognizerDelegate`; both `target` and `delegate` are weak references.
+        let double_click = unsafe {
+            NSClickGestureRecognizer::initWithTarget_action(NSClickGestureRecognizer::alloc(mtm), Some(view.as_ref()), Some(sel!(resetView:)))
+        };
+        double_click.setNumberOfClicksRequired(2);
+        double_click.setDelegate(Some(ProtocolObject::from_ref(&*view)));
+        view.addGestureRecognizer(&double_click);
         Some(view)
+    }
+
+    /// Start a pan drag at `event`'s pointer location.
+    fn start_pan(&self, event: &NSEvent) {
+        let (x, y, width, height) = self.pointer(event);
+        let drag = self.ivars().orbit.get().pan_start(x, y, width, height).map_or(Drag::None, Drag::Pan);
+        self.ivars().drag.set(drag);
+    }
+
+    /// Continue a pan drag in progress to `event`'s pointer location.
+    fn continue_pan(&self, event: &NSEvent) {
+        let Drag::Pan(pan) = self.ivars().drag.get() else { return };
+        let (x, y, width, height) = self.pointer(event);
+        self.turn(|orbit| orbit.pan_to(&pan, x, y, width, height));
+    }
+
+    /// Zoom by `factor`, re-anchoring any pan in progress so the model stays under the pointer.
+    fn zoom(&self, event: &NSEvent, factor: f32) {
+        self.turn(|orbit| orbit.zoom_by(factor));
+        if matches!(self.ivars().drag.get(), Drag::Pan(_)) {
+            self.start_pan(event);
+        }
     }
 
     /// Where `event` happened in this view, in points from the bottom left, and the view's size.

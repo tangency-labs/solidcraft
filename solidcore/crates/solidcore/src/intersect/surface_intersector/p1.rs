@@ -124,6 +124,7 @@ use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::intersect::IntersectFailure;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -2194,10 +2195,50 @@ impl<'s> SurfaceIntersector<'s> {
 
 // ---- file-static helpers ---------------------------------------------------------------------
 
+/// The fractions of the UV curves' intervals at which [`compute_curve_type`] may judge
+/// the curve, in the order tried: the mid parameter (upstream's only one), then the
+/// quarters, eighths and sixteenths of the interval, each level from the middle out.
+const CURVE_TYPE_FRACTIONS: [f64; 15] = [
+    0.5, 0.25, 0.75, 0.375, 0.625, 0.125, 0.875, 0.4375, 0.5625, 0.3125, 0.6875, 0.1875, 0.8125,
+    0.0625, 0.9375,
+];
+
 /// The kind of the intersection curve with UV curves `uv_curve1` on `surface1` and
-/// `uv_curve2` on `surface2`, judged at their mid parameters (`sm_ComputeCurveType`):
-/// crossing unless the normals are parallel within `1e-4`, then tangent, or
-/// coincident when the principal curvatures (signed by the normals' sense) agree.
+/// `uv_curve2` on `surface2` (`sm_ComputeCurveType`): crossing unless the normals are
+/// parallel within `1e-4`, then tangent, or coincident when the principal curvatures
+/// (signed by the normals' sense) agree.
+///
+/// The curve is judged at its mid parameters, as upstream, when everything the label
+/// needs evaluates there: both UV points and both surface normals, and where the normals
+/// are parallel both surfaces' principal curvatures. Where something does not (#21636:
+/// the curve's middle lies on a singular point of a surface, such as a patch collapsed
+/// to a point, where the curvatures are undefined, or a UV curve or a normal fails to
+/// evaluate there) the curve is judged at the first fraction of [`CURVE_TYPE_FRACTIONS`]
+/// where it does: the label is a property of the whole curve, and one point where the
+/// surfaces have no normal or curvature says nothing about the others. A normal
+/// "evaluates" when its evaluator succeeds with a vector of unit length:
+/// `SmSurface::EvaluateNormal` reports a point where every one of its tricks fails as
+/// the zero vector, not as a failure, and the zero vector is perpendicular to everything.
+///
+/// When no fraction decides:
+/// - a curve with parallel normals at some fraction but curvatures at none is
+///   [`TsectCurveType::Tangent`]: the normals show the tangency (upstream's "at least
+///   TAN"), nothing shows the coincidence;
+/// - a curve with both normals at no fraction (no point of the curve shows how the
+///   surfaces meet) stays [`TsectCurveType::Crossing`], the type it starts with
+///   (upstream and the fork's bcc6f01). It is the label that claims no contact: the
+///   traced-curve output (`p3`) keeps the curve as an ordinary intersection edge (it
+///   keeps `check_for_interior_curves` set, the singular-point splits of crossing curves
+///   apply to it, and it passes the probation of low-angle loops in
+///   `adv_surface_intersector`, which drops tangent and coincident ones), and nothing
+///   measured could justify dropping it.
+///
+/// Neither case is a refusal: that would turn valid input into one (#21636).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and [`SolidError::Cancelled`] (never read as a missing
+/// point, normal or curvature, [`crate::error::ignored`]).
 pub fn compute_curve_type(
     k: &Kernel,
     surface1: &Surface,
@@ -2205,16 +2246,47 @@ pub fn compute_curve_type(
     uv_curve1: &Curve,
     uv_curve2: &Curve,
 ) -> Result<TsectCurveType> {
-    let mut ret = TsectCurveType::Crossing;
     let ivl1 = uv_curve1.natural_interval();
     let ivl2 = uv_curve2.natural_interval();
-    // fork bcc6f01 (`sm_ComputeCurveType`): normals that cannot be evaluated show no
-    // tangency; the curve keeps the crossing type it starts with.
-    let (Some(p1), Some(p2)) = (
-        crate::error::ignored(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)))?,
-        crate::error::ignored(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)))?,
-    ) else {
-        return Ok(ret);
+    // parallel normals were seen where the curvatures did not evaluate
+    let mut tangent = false;
+    for fraction in CURVE_TYPE_FRACTIONS {
+        let Some((uv1, uv2, norm1, norm2)) = curve_type_normals(
+            k,
+            surface1,
+            surface2,
+            uv_curve1.evaluate_point(k, ivl1.evaluate(fraction)),
+            uv_curve2.evaluate_point(k, ivl2.evaluate(fraction)),
+        )?
+        else {
+            continue;
+        };
+        match classify_curve_type(k, surface1, surface2, uv1, uv2, norm1, norm2)? {
+            Some(kind) => return Ok(kind),
+            None => tangent = true,
+        }
+    }
+    Ok(if tangent {
+        TsectCurveType::Tangent
+    } else {
+        TsectCurveType::Crossing
+    })
+}
+
+/// The UV points and unit normals of [`compute_curve_type`] at one curve parameter, from
+/// the UV curves' point evaluations there: `None` when a point or a normal does not
+/// evaluate (a failed evaluation, or a normal that is not of unit length).
+/// [`SolidError::Unported`] and [`SolidError::Cancelled`] propagate
+/// ([`crate::error::ignored`]).
+fn curve_type_normals(
+    k: &Kernel,
+    surface1: &Surface,
+    surface2: &Surface,
+    p1: Result<Point3>,
+    p2: Result<Point3>,
+) -> Result<Option<(Point2, Point2, Vec3, Vec3)>> {
+    let (Some(p1), Some(p2)) = (crate::error::ignored(p1)?, crate::error::ignored(p2)?) else {
+        return Ok(None);
     };
     let uv1 = Point2::new(p1.x, p1.y);
     let uv2 = Point2::new(p2.x, p2.y);
@@ -2222,8 +2294,29 @@ pub fn compute_curve_type(
         crate::error::ignored(surface_evaluate_normal(k, surface1, uv1))?,
         crate::error::ignored(surface_evaluate_normal(k, surface2, uv2))?,
     ) else {
-        return Ok(ret);
+        return Ok(None);
     };
+    let unit = |n: Vec3| {
+        let len = n.length();
+        len.is_finite() && len > 0.5
+    };
+    Ok((unit(norm1) && unit(norm2)).then_some((uv1, uv2, norm1, norm2)))
+}
+
+/// The [`compute_curve_type`] label from the unit normals `norm1` and `norm2` of the
+/// surfaces at `uv1` and `uv2` (the body of `sm_ComputeCurveType` after its
+/// evaluations): `None` when the normals are parallel and a surface's principal
+/// curvatures do not evaluate there (a singular point).
+fn classify_curve_type(
+    k: &Kernel,
+    surface1: &Surface,
+    surface2: &Surface,
+    uv1: Point2,
+    uv2: Point2,
+    norm1: Vec3,
+    norm2: Vec3,
+) -> Result<Option<TsectCurveType>> {
+    let mut ret = TsectCurveType::Crossing;
     let mut sign = 1.0;
     let dot = norm1.dot(norm2);
     if dot < 0.0 {
@@ -2236,8 +2329,12 @@ pub fn compute_curve_type(
     if dot.abs() > 1.0 - limit {
         // We're at least TAN.
         ret = TsectCurveType::Tangent;
-        let g1 = surface_evaluate_geometric(k, surface1, uv1)?;
-        let g2 = surface_evaluate_geometric(k, surface2, uv2)?;
+        let (Some(g1), Some(g2)) = (
+            unless_singular(surface_evaluate_geometric(k, surface1, uv1))?,
+            unless_singular(surface_evaluate_geometric(k, surface2, uv2))?,
+        ) else {
+            return Ok(None);
+        };
         let (prin_cur11, prin_cur12, prin_kv11) = (g1.k1, g1.k2, g1.kv1);
         let (prin_cur21, prin_cur22, prin_kv21, prin_kv22) = (g2.k1, g2.k2, g2.kv1, g2.kv2);
 
@@ -2246,17 +2343,17 @@ pub fn compute_curve_type(
         if (prin_cur11 - prin_cur12).abs() < limit * scale {
             // Surf1 is umbilical. If Surf2 is not umbilical, return TAN.
             if (prin_cur21 - prin_cur22).abs() > limit * scale {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
             // Surf2 is also umbilical.  If radii of curvatures are equal, then COINC.
             if (prin_cur11 - sign * prin_cur21).abs() > limit * scale {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
-            return Ok(TsectCurveType::Coincident);
+            return Ok(Some(TsectCurveType::Coincident));
         }
         // Here, Srf1 is not umbilical. If Srf2 is umbilical, just quit now.
         if (prin_cur21 - prin_cur22).abs() < limit * scale {
-            return Ok(ret);
+            return Ok(Some(ret));
         }
 
         // Now check to see if we have curvature vectors and magnitudes which are
@@ -2264,11 +2361,11 @@ pub fn compute_curve_type(
         if prin_kv11.dot(prin_kv21).abs() > 1.0 - limit {
             // First prin crv vectors line up.  Compare the appropriate curvatures.
             if (prin_cur11 - sign * prin_cur21).abs() > limit * scale {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
             let scale2 = 1.0 + prin_cur12.abs();
             if (prin_cur12 - sign * prin_cur22).abs() > limit * scale2 {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
             ret = TsectCurveType::Coincident;
         }
@@ -2276,16 +2373,16 @@ pub fn compute_curve_type(
             // First prin crv vector of Surf1 lines up with 2nd prin crv vector
             // of Surf2.  Compare the appropriate curvatures.
             if (prin_cur11 - sign * prin_cur22).abs() > limit * scale {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
             let scale2 = 1.0 + prin_cur12.abs();
             if (prin_cur12 - sign * prin_cur21).abs() > limit * scale2 {
-                return Ok(ret);
+                return Ok(Some(ret));
             }
             ret = TsectCurveType::Coincident;
         }
     }
-    Ok(ret)
+    Ok(Some(ret))
 }
 
 /// True when `point_to_test` lies on the traced curve span from `prev` to `next`
@@ -2563,6 +2660,20 @@ fn surface_evaluate_geometric(k: &Kernel, surface: &Surface, uv: Point2) -> Resu
     })
 }
 
+/// A surface's principal curvatures for [`classify_curve_type`]: `None` where the point is a
+/// singular point of the surface ([`SurfaceFailure::SingularPoint`]: a pole, an apex, a
+/// collapsed patch edge, where curvatures are undefined and another point of the curve may
+/// decide). Every other refusal propagates as before (#21996 review): a surface that cannot
+/// give its curvatures at a regular point (a procedural sweep refusing second partials)
+/// proves no contact, and its refusal is named, not read as a tangency.
+fn unless_singular(g: Result<Principal>) -> Result<Option<Principal>> {
+    match g {
+        Ok(g) => Ok(Some(g)),
+        Err(e) if matches!(e.surface_failure(), Some(SurfaceFailure::SingularPoint)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// `smsurf_EvaluateNormalSection(eval, direction, ..)`: the curvature in `direction`.
 fn evaluate_normal_section(eval: &[[Vec3; 3]; 3], direction: Vec3) -> Result<f64> {
     // (upstream may rebuild a vanishing first derivative of the caller's matrix in
@@ -2735,9 +2846,10 @@ mod tests {
     }
 
     /// fork bcc6f01 (`sm_ComputeCurveType`, "normals that cannot be evaluated show no
-    /// tangency"): the first UV curve cannot be evaluated. Upstream reads its unset
-    /// point and goes on to compare normals there; the port keeps the crossing type, as
-    /// the fork does.
+    /// tangency"): the first UV curve cannot be evaluated at any parameter, so no point of
+    /// the curve shows how the surfaces meet. Upstream reads its unset point and goes on
+    /// to compare normals there; the port keeps the crossing type, as the fork does
+    /// (#21636: the label that claims no contact).
     #[test]
     fn compute_curve_type_without_a_uv_point_is_crossing() {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
@@ -2755,6 +2867,118 @@ mod tests {
         let k = Kernel::default();
         let r = compute_curve_type(&k, &s1, &s2, &bad, &uv2);
         assert_eq!(r.unwrap(), TsectCurveType::Crossing);
+    }
+
+    /// A degree 1 B-spline on `[0, 1]^2` in the plane `z = 0` whose first u span
+    /// `[0, 0.5]` collapses to the origin (its four control points are the origin) and
+    /// whose second span is the triangle from the origin to the edge `x = 1`,
+    /// `-1 <= y <= 1`: normal `+z` on the triangle and, as a limit, on the collapsed
+    /// span, where the curvatures are undefined.
+    fn collapsed_patch() -> Surface {
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let pts = [
+            o,
+            o,
+            o,
+            o,
+            Point3::new(1.0, -1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        ];
+        Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 1,
+                v_degree: 1,
+                control_points: &pts,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[2, 1, 2],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 0.5, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                uv_domain: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    fn uv_line(from: [f64; 2], to: [f64; 2]) -> Curve {
+        Curve::from(
+            crate::curve::line::Line::create_line_segment(
+                2,
+                Vec3::new(from[0], from[1], 0.0),
+                Vec3::new(to[0], to[1], 0.0),
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// #21636: a curve on a degenerate NURBS patch and the plane `z = 0` that holds it,
+    /// with its midpoint on the patch's collapsed span: the patch's normal there is the
+    /// limit `+z`, parallel to the plane's, but its curvatures are undefined (a singular
+    /// point), which refused the whole intersection. The two surfaces coincide: both are
+    /// flat with normal `+z` on the rest of the curve, so the curve is coincident (both
+    /// umbilical with zero curvatures).
+    #[test]
+    fn compute_curve_type_judges_a_curve_with_a_singular_midpoint_elsewhere() {
+        let k = Kernel::default();
+        let patch = collapsed_patch();
+        let flat = plane([0.0, -0.5, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        // u from 0 to 0.9 at v = 0.5: the midpoint u = 0.45 is on the collapsed span
+        let uv1 = uv_line([0.0, 0.5], [0.9, 0.5]);
+        // the curve's image, the segment from the origin to (0.8, 0, 0), on the plane
+        let uv2 = uv_line([0.0, 0.5], [0.8, 0.5]);
+        let mid = Point2::new(0.45, 0.5);
+        let at_mid = surface_evaluate_normal(&k, &patch, mid).unwrap();
+        assert!((at_mid.z - 1.0).abs() < 1e-12, "{at_mid:?}");
+        assert!(surface_evaluate_geometric(&k, &patch, mid).is_err());
+        let r = compute_curve_type(&k, &patch, &flat, &uv1, &uv2);
+        assert_eq!(r.unwrap(), TsectCurveType::Coincident);
+        // the surfaces taken the other way round
+        let r = compute_curve_type(&k, &flat, &patch, &uv2, &uv1);
+        assert_eq!(r.unwrap(), TsectCurveType::Coincident);
+    }
+
+    /// #21636: a curve that lies on the patch's collapsed span from end to end has
+    /// normals parallel to the plane's everywhere and curvatures nowhere: the normals show
+    /// the tangency and nothing shows a coincidence, so it is tangent, not a refusal.
+    #[test]
+    fn compute_curve_type_with_parallel_normals_and_no_curvatures_is_tangent() {
+        let k = Kernel::default();
+        let patch = collapsed_patch();
+        let flat = plane([0.0, -0.5, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let uv1 = uv_line([0.05, 0.2], [0.45, 0.8]);
+        // the curve's image is the origin; the plane's normal is +z everywhere
+        let uv2 = uv_line([0.0, 0.5], [0.8, 0.5]);
+        let r = compute_curve_type(&k, &patch, &flat, &uv1, &uv2);
+        assert_eq!(r.unwrap(), TsectCurveType::Tangent);
+    }
+
+    /// #21996 review: only a singular point's missing curvatures leave the label to another
+    /// point of the curve; any other refusal to give them (a procedural sweep refusing its
+    /// second partials at a regular point) is named, not read as a tangency.
+    #[test]
+    fn only_a_singular_points_missing_curvatures_are_passed_over() {
+        let op = "test";
+        let singular = SolidError::surface(op, SurfaceFailure::SingularPoint);
+        assert!(unless_singular(Err(singular)).unwrap().is_none());
+        let other = SolidError::surface(
+            op,
+            SurfaceFailure::Defect {
+                why: "no second partials",
+            },
+        );
+        let e = unless_singular(Err(other)).unwrap_err();
+        assert!(
+            matches!(e.surface_failure(), Some(SurfaceFailure::Defect { .. })),
+            "{e}"
+        );
+        let cancelled = SolidError::cancelled(op);
+        assert!(unless_singular(Err(cancelled)).unwrap_err().is_cancelled());
     }
 
     /// `m_apUserPointer` follows copies and assignment, and compares by identity.

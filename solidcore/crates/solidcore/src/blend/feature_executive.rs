@@ -1733,7 +1733,7 @@ fn apply_patches(
         let stitched = stitch_and_orient(k, base);
         if feature.trimmed_crossing_base_patches {
             stitched?;
-            remove_crossing_patch_rims(k, base, &rim_supports, &patch_faces)?;
+            remove_patch_rims(k, base, &rim_supports, &patch_faces)?;
             if let Some(before) = before {
                 for &face in material_faces {
                     if !bounds_material(base, face)? {
@@ -1835,7 +1835,11 @@ fn copied_patch_faces(
 /// Stitching can keep either edge of a rim, or split it. Each rim now bounds
 /// one of the copied patch faces and its original support. A seam or the shared
 /// cut between the two patches has no such pair of incident faces.
-fn remove_crossing_patch_rims(
+///
+/// # Errors
+/// Propagates errors from inspecting the patch boundary, removing its redundant
+/// joins or rebinding the resulting geometry.
+pub fn remove_patch_rims(
     k: &mut Kernel,
     base: &mut Brep,
     supports: &[FaceId],

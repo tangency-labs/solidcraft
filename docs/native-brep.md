@@ -162,6 +162,15 @@ only says what the face is (axis, radius). Pcurves on such a face are SMLib's
 own trims, with nothing fitted. A STEP writer writes the analytic surface and
 the face's edges without pcurves.
 
+A face whose surface has no kind here, SMLib's implicit offset surface, is
+written as a `spline` that stands in for it, as SMLib's export writes it. The
+spline lies within half the face's tolerance of the surface, which is never
+more than the tolerance the record gives the face (the least of its edges' and
+the body's): for an offset, the kernel's net of it, certified within that at
+every parameter; for a surface the kernel cannot certify, a fit checked at
+samples. An export that cannot fit the surface that closely fails, rather than
+write a face that lies outside its tolerance (#21926).
+
 A `ball_patch` face always carries `nurbs`: the rational patch on the sphere of
 `center` and `radius` that SMLib makes at the corner of three equal rounds
 (`SmBallPatch`, flat surface kind 6). The patch is its own net, not a piece of

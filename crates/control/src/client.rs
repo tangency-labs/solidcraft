@@ -7,6 +7,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -29,6 +31,20 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// How often a long wait is reported ([`Connection::with_progress`]).
 const PROGRESS_EVERY: Duration = Duration::from_secs(30);
+
+/// How often a long wait notifies an attached structured progress sink.
+const SINK_PROGRESS_EVERY: Duration = Duration::from_secs(2);
+
+/// Progress update emitted during a long `control.pending` wait.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WaitProgress {
+    /// Monotonically increasing update count for this wait (starting at 1).
+    pub progress: u64,
+    /// Optional total when known.
+    pub total: Option<u64>,
+    /// Concise status message for the caller.
+    pub message: String,
+}
 
 /// How an error starts when a request is still running in the app after the wait: the request
 /// was not cancelled and its reply waits on the connection; [`Connection::pending`] gets it.
@@ -156,6 +172,8 @@ enum Waited {
     Nothing,
     /// Still running when the wait ran out.
     Running,
+    /// Cancelled via the connection's out-of-band cancellation flag.
+    Cancelled,
 }
 
 /// A connection to the app listening at an address. It connects when a call needs it, so a
@@ -180,6 +198,12 @@ pub struct Connection {
     waits: Waits,
     /// Where a long wait is reported.
     progress: fn(&str),
+    /// Optional structured progress sink notified during long `control.pending` waits.
+    progress_sink: Option<Arc<dyn Fn(&WaitProgress) + Send + Sync>>,
+    /// Minimum interval between repeated `progress_sink` updates during `control.pending` polling.
+    progress_interval: Duration,
+    /// Optional out-of-band cancellation flag checked during `control.pending` waits.
+    cancel_flag: Option<Arc<AtomicBool>>,
 }
 
 impl Connection {
@@ -200,6 +224,9 @@ impl Connection {
             settled: None,
             waits: Waits::default(),
             progress: |_| {},
+            progress_sink: None,
+            progress_interval: SINK_PROGRESS_EVERY,
+            cancel_flag: None,
         }
     }
 
@@ -215,6 +242,32 @@ impl Connection {
     pub fn with_progress(mut self, progress: fn(&str)) -> Self {
         self.progress = progress;
         self
+    }
+
+    /// Attach or clear a structured progress sink notified during long `control.pending` waits.
+    pub fn set_progress_sink(&mut self, sink: Option<Arc<dyn Fn(&WaitProgress) + Send + Sync>>) {
+        self.progress_sink = sink;
+    }
+
+    /// Set the minimum interval between repeated `progress_sink` updates while polling
+    /// `control.pending`.
+    pub fn set_progress_interval(&mut self, interval: Duration) {
+        self.progress_interval = interval;
+    }
+
+    /// Attach or clear an out-of-band cancellation flag polled during long `control.pending` waits.
+    pub fn set_cancel_flag(&mut self, flag: Option<Arc<AtomicBool>>) {
+        self.cancel_flag = flag;
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_flag.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+
+    fn emit_progress(&self, progress: u64, total: Option<u64>, message: String) {
+        if let Some(sink) = &self.progress_sink {
+            sink(&WaitProgress { progress, total, message });
+        }
     }
 
     /// How long to wait for a request still running.
@@ -448,12 +501,18 @@ impl Connection {
 
     /// Wait up to `limit` for the outstanding request, asking `control.pending` now and then and
     /// reporting how long it takes. An error: the connection, and so the reply, was lost.
-    fn wait_outstanding(&mut self, limit: Duration) -> Result<Waited, CallError> {
+    fn wait_outstanding(&mut self, limit: Duration, initial_step: u64) -> Result<Waited, CallError> {
         let start = Instant::now();
         let mut told = start;
+        let mut sink_told = start;
+        let mut step = initial_step;
         loop {
             let Some(o) = &self.outstanding else { return Ok(Waited::Nothing) };
             let what = o.what.clone();
+            if self.is_cancelled() {
+                let _ = self.cancel(json!({}));
+                return Ok(Waited::Cancelled);
+            }
             let r = self.ask_pending()?;
             if r.get("pending").is_none_or(Value::is_null) {
                 self.outstanding = None;
@@ -461,6 +520,10 @@ impl Connection {
             }
             if r.get("done").and_then(Value::as_bool) == Some(true) {
                 self.outstanding = None;
+                if step > 0 {
+                    step += 1;
+                    self.emit_progress(step, None, format!("{what} finished in the app"));
+                }
                 return Ok(Waited::Done(r.get("reply").cloned().unwrap_or(Value::Null)));
             }
             let waited = start.elapsed();
@@ -472,7 +535,26 @@ impl Connection {
                 (self.progress)(&format!("{what} is still running in the app ({secs} s); waiting for it"));
                 told = Instant::now();
             }
-            std::thread::sleep(self.waits.poll.min(limit.saturating_sub(waited)));
+            if self.progress_sink.is_some() && (step == 0 || sink_told.elapsed() >= self.progress_interval) {
+                step += 1;
+                let secs = self.outstanding.as_ref().map_or(0, Outstanding::secs);
+                self.emit_progress(step, None, format!("{what} is still running in the app ({secs} s); waiting for it"));
+                sink_told = Instant::now();
+            }
+            let mut sleep_left = self.waits.poll.min(limit.saturating_sub(waited));
+            if self.cancel_flag.is_some() {
+                let slice = Duration::from_millis(50);
+                while !sleep_left.is_zero() {
+                    if self.is_cancelled() {
+                        break;
+                    }
+                    let chunk = sleep_left.min(slice);
+                    std::thread::sleep(chunk);
+                    sleep_left = sleep_left.saturating_sub(chunk);
+                }
+            } else {
+                std::thread::sleep(sleep_left);
+            }
         }
     }
 
@@ -504,10 +586,11 @@ impl Connection {
     /// `pending`. Still running after the wait: the new request is not sent.
     fn settle_earlier(&mut self) -> Result<(), CallError> {
         let Some(what) = self.outstanding.as_ref().map(|o| o.what.clone()) else { return Ok(()) };
-        match self.wait_outstanding(self.waits.settle) {
+        match self.wait_outstanding(self.waits.settle, 0) {
             Ok(Waited::Done(reply)) => self.settled = Some(Settled::Finished { what, reply }),
             Ok(Waited::Nothing) => {}
             Ok(Waited::Running) => return Err(self.still_running(true)),
+            Ok(Waited::Cancelled) => return Err(CallError::Refused(format!("cancelled: wait for {what} was cancelled by client"))),
             // The connection was lost, and the earlier reply with it (`pending` says so): the new
             // request goes on a fresh connection.
             Err(_) => {}
@@ -526,10 +609,11 @@ impl Connection {
             };
         }
         let Some(what) = self.outstanding.as_ref().map(|o| o.what.clone()) else { return json!({"pending": null}) };
-        match self.wait_outstanding(self.waits.settle) {
+        match self.wait_outstanding(self.waits.settle, 0) {
             Ok(Waited::Done(reply)) => json!({"pending": what, "done": true, "reply": reply}),
             Ok(Waited::Nothing) => json!({"pending": null}),
             Ok(Waited::Running) => json!({"pending": what, "done": false, "running_s": self.outstanding.as_ref().map_or(0, Outstanding::secs)}),
+            Ok(Waited::Cancelled) => json!({"pending": what, "done": false, "cancelled": true}),
             Err(_) => {
                 self.settled = None;
                 json!({"pending": what, "lost": true})
@@ -575,18 +659,26 @@ impl Connection {
         // Timed out in the app, still running: wait for its result on this connection.
         if v.get("running").and_then(Value::as_bool) == Some(true) {
             self.outstanding = Some(Outstanding { what: what.clone(), effect: Some(effect), since: sent });
-            (self.progress)(&format!(
+            let msg = format!(
                 "{what} is still running in the app after {} s; waiting up to {} s more for it",
                 sent.elapsed().as_secs(),
                 self.waits.pending.as_secs()
-            ));
+            );
+            (self.progress)(&msg);
+            let initial_step = if self.progress_sink.is_some() {
+                self.emit_progress(1, None, msg);
+                1
+            } else {
+                0
+            };
             let document = self.document;
-            return match self.wait_outstanding(self.waits.pending)? {
+            return match self.wait_outstanding(self.waits.pending, initial_step)? {
                 Waited::Done(reply) => Ok(reply),
                 Waited::Nothing => Err(CallError::Lost(format!(
                     "{what} timed out in the app, which kept no result for it: inspect the {document} before sending it again"
                 ))),
                 Waited::Running => Err(self.still_running(false)),
+                Waited::Cancelled => Err(CallError::Refused(format!("cancelled: {what} was cancelled by client"))),
             };
         }
         // Refused unrun behind a request this client did not know of: wait for that one, then

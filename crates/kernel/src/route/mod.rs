@@ -1,5 +1,5 @@
 //! The router: which kernel runs each operation (`docs/design/kernel-layer.md`), one module per
-//! family of the interface ([`modelling`]).
+//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`], [`frames`], [`projection`], [`affine`], [`curves`], [`develop`], [`points`], [`query`], [`holes`], [`planar`], [`hatch`], [`mesh`], [`tube_cope`], [`shaft_spline`], [`dxf`], [`sections`], [`tessellate`], [`runtime`], [`profiles`]).
 //!
 //! These are the application's entry points for the operations of the kernel interface
 //! ([`OpKind`]). Each asks [`which`] kernel runs it and calls that kernel's adapter. Which kernels
@@ -8,13 +8,42 @@
 
 use solidcraft_kernel_api::OpKind;
 
+pub mod affine;
+pub mod curves;
+pub mod develop;
+pub mod dxf;
+pub mod hatch;
+pub mod mesh;
+pub mod planar;
+pub mod points;
+pub mod profiles;
+pub mod projection;
+pub mod query;
+pub mod runtime;
+pub mod sections;
+pub mod shaft_spline;
+pub mod tessellate;
+pub mod tube_cope;
+
+mod cell_grid;
+mod exchange;
+#[cfg(feature = "backend-occt")]
+pub mod foreign;
+mod frames;
+mod holes;
 mod modelling;
 
+pub use cell_grid::*;
+pub use exchange::*;
+pub use frames::*;
+pub use holes::*;
 pub use modelling::*;
 
 /// A kernel compiled into this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Which {
+    /// solidcore, through its adapter (`crate::backend::Solidcore`): the kernel SolidCraft
+    /// maintains, and the default.
     Solidcore,
 }
 

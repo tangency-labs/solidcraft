@@ -25,7 +25,7 @@ pub const MAX_IMPORT_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
 /// The largest file an exporter may return (RFC 0015 §4: 256 MiB output).
 pub const MAX_EXPORT_FILE_BYTES: usize = 256 * 1024 * 1024;
-/// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
+/// Default host deadline ceilings; users may approve larger guest compute budgets.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
 /// A long job (an entry with `"job": true`) runs for at most ten minutes. The limit is fixed: a
@@ -81,12 +81,15 @@ pub mod conditions;
 pub mod dialog;
 pub mod images;
 mod input;
+pub mod layout;
 mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
+pub use input::FONT_KEY;
 pub use input::check_input;
 pub use input::check_input_field;
+pub use input::font_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
@@ -162,12 +165,12 @@ pub enum HostError {
     #[error("not supported: {reason}")]
     Unsupported { reason: String },
     /// The plugin asks for more of a budget than the app lets plugins have, so it was not run.
-    /// `limit` is the manifest field (`fuel`, `memory_mib`); `requested` and `allowed` are in its
+    /// `limit` is the manifest field (`fuel`, `memory_mib`, `host_calls`, `deadline_ms`); `requested` and `allowed` are in its
     /// unit.
     #[error("{}", over_ceiling(limit, *requested, *allowed))]
     OverCeiling { limit: String, requested: u64, allowed: u64 },
     /// The plugin ran into one of its budgets and was stopped. `limit` is `fuel`, `memory_mib`,
-    /// `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
+    /// `host_calls`, `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
     /// importer may hand over); `allowed` is that budget, in its unit.
     #[error("{}", exhausted(limit, *allowed))]
     Exhausted { limit: String, allowed: u64 },
@@ -184,6 +187,12 @@ fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
         "fuel" => format!(
             "asks for {requested} fuel, more than the {allowed} plugins may use; allow its fuel request when you install it, or raise the fuel ceiling for plugins"
         ),
+        "host_calls" => format!(
+            "asks for {requested} host calls, more than the {allowed} plugins may use; raise Max plugin host calls in Preferences > Plugins (max_host_calls in --plugin-limits)"
+        ),
+        "deadline_ms" => format!(
+            "asks for {requested} ms of guest time, more than the {allowed} ms plugins may use; raise Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+        ),
         _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
     }
 }
@@ -193,7 +202,12 @@ fn exhausted(limit: &str, allowed: u64) -> String {
         "fuel" => format!("used all {allowed} fuel it asks for and was stopped"),
         "memory_mib" => format!("needed more than the {allowed} MiB of memory it asks for and was stopped"),
         "deadline_ms" if allowed == 0 => "ran longer than its time limit and was stopped".into(),
-        "deadline_ms" => format!("ran longer than its time limit of {allowed} ms and was stopped"),
+        "deadline_ms" => format!(
+            "ran longer than its time limit of {allowed} ms and was stopped; raise runtime.limits.deadline_ms and, if needed, Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+        ),
+        "host_calls" => format!(
+            "used all {allowed} host calls it asks for and was stopped; raise runtime.limits.host_calls and, if needed, Max plugin host calls in Preferences > Plugins (max_host_calls in --plugin-limits)"
+        ),
         "stack_kib" => format!("ran out of its {allowed} KiB stack and was stopped"),
         "design_mib" => format!("made a design larger than {allowed} MiB, the most an importer may hand over"),
         _ => format!("went over its {limit} limit of {allowed} and was stopped"),
@@ -322,6 +336,33 @@ pub struct CommandSchema {
     pub group: Option<String>,
 }
 
+/// The severity level of a message logged by a plugin guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A named folder resolved by the app after user approval, never a guest-supplied root.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -432,6 +473,12 @@ pub trait PluginHost {
         Ok(())
     }
     fn log(&mut self, message: &str);
+    /// Receive a log message with its severity level from a plugin guest.
+    /// By default delegates to [`PluginHost::log`].
+    fn log_level(&mut self, level: LogLevel, message: &str) {
+        let _ = level;
+        self.log(message);
+    }
     fn progress(&mut self, fraction: f32, message: &str);
     /// Writes the running plugin's file `name` in the open design from its bytes, as they are
     /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
@@ -484,20 +531,29 @@ pub trait PluginHost {
 pub struct HostLimits {
     pub max_fuel: u64,
     pub max_memory_mib: usize,
+    pub max_host_calls: u64,
+    pub max_deadline_ms: u64,
 }
 impl Default for HostLimits {
     fn default() -> Self {
-        Self { max_fuel: 100_000_000_000, max_memory_mib: 128 }
+        Self { max_fuel: 100_000_000_000, max_memory_mib: 128, max_host_calls: 256, max_deadline_ms: MAX_COMMAND_DEADLINE_MS }
     }
 }
 impl HostLimits {
     pub fn validate(&self) -> Result<()> {
-        if self.max_fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
-            return Err(invalid("host_limits", "requires positive max_fuel and max_memory_mib 1..4096 (Wasm32)"));
+        if self.max_fuel == 0 || self.max_host_calls == 0 || self.max_deadline_ms == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
+            return Err(invalid("host_limits", "requires positive max_fuel, max_host_calls, max_deadline_ms and max_memory_mib 1..4096 (Wasm32)"));
         }
         Ok(())
     }
     pub fn check(&self, requested: &Limits) -> Result<()> {
+        self.check_kind(requested, false)
+    }
+    /// Importers retain their existing ten-minute ceiling and separate host-import budget.
+    pub fn check_importer(&self, requested: &Limits) -> Result<()> {
+        self.check_kind(requested, true)
+    }
+    fn check_kind(&self, requested: &Limits, importer: bool) -> Result<()> {
         self.validate()?;
         requested.validate()?;
         if requested.fuel > self.max_fuel {
@@ -510,6 +566,13 @@ impl HostLimits {
                 allowed: self.max_memory_mib as u64,
             });
         }
+        if !importer && requested.host_calls > self.max_host_calls {
+            return Err(HostError::OverCeiling { limit: "host_calls".into(), requested: requested.host_calls, allowed: self.max_host_calls });
+        }
+        let max_deadline_ms = if importer { self.max_deadline_ms.max(MAX_IMPORTER_DEADLINE_MS) } else { self.max_deadline_ms };
+        if requested.deadline_ms > max_deadline_ms {
+            return Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: requested.deadline_ms, allowed: max_deadline_ms });
+        }
         Ok(())
     }
 }
@@ -520,13 +583,18 @@ pub struct Limits {
     pub fuel: u64,
     pub memory_mib: usize,
     pub deadline_ms: u64,
+    #[serde(default = "default_host_calls")]
+    pub host_calls: u64,
     /// The guest stack in KiB, when the default is too small (a real decoder needed about 16 MiB).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack_kib: Option<u32>,
 }
+fn default_host_calls() -> u64 {
+    256
+}
 impl Default for Limits {
     fn default() -> Self {
-        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, stack_kib: None }
+        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, host_calls: default_host_calls(), stack_kib: None }
     }
 }
 impl Limits {
@@ -537,8 +605,11 @@ impl Limits {
         if !(1..=MAX_MEMORY_MIB).contains(&self.memory_mib) {
             return Err(invalid("runtime.limits.memory_mib", "must be 1..4096 (Wasm32)"));
         }
-        if !(1..=MAX_IMPORTER_DEADLINE_MS).contains(&self.deadline_ms) {
-            return Err(invalid("runtime.limits.deadline_ms", "must be 1..600000"));
+        if self.deadline_ms == 0 {
+            return Err(invalid("runtime.limits.deadline_ms", "must be positive"));
+        }
+        if self.host_calls == 0 {
+            return Err(invalid("runtime.limits.host_calls", "must be positive"));
         }
         if self.stack_kib.is_some_and(|kib| !(64..=65_536).contains(&kib)) {
             return Err(invalid("runtime.limits.stack_kib", "must be 64..65536 (64 KiB to 64 MiB)"));
@@ -596,8 +667,18 @@ pub struct FilePermission {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum UiSlot {
-    Menu { name: String },
-    Ribbon { name: String },
+    Menu {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
+    Ribbon {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_group: Option<bool>,
+    },
 }
 
 fn empty_input_schema() -> Value {
@@ -657,6 +738,9 @@ pub struct Entry {
     /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
     /// and shows its progress in the app's operations.
     pub job: bool,
+    /// Whether this entry appears in the Model tab's default Plugins group. None follows slot placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group: Option<bool>,
 }
 
 impl Entry {
@@ -711,6 +795,8 @@ struct DeclaredEntry {
     slots: Vec<UiSlot>,
     #[serde(default)]
     job: bool,
+    #[serde(default)]
+    model_group: Option<bool>,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -728,6 +814,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
+                model_group: None,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -754,6 +841,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
+                model_group: value.model_group,
             },
         }
     }
@@ -842,6 +930,9 @@ pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Explicit ribbon menus. Entries not named here keep their individual buttons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ribbon_groups: Vec<RibbonGroup>,
     /// Opt-in notifications, under capability `design@0.1`. Missing for existing packages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listeners: Vec<Listener>,
@@ -861,6 +952,23 @@ pub struct RuntimeManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<ui::Declarations>,
 }
+
+/// A plugin's opt-in ribbon button and the entries its menu lists, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RibbonGroup {
+    pub label: String,
+    /// A package-relative SVG path, checked and loaded by the host like an entry icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub entries: Vec<String>,
+}
+
+/// The package-relative SVG paths a host may read for plugin icons.
+pub fn valid_icon_path(path: &str) -> bool {
+    images::valid_path(path)
+}
+
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`, optionally with storage).
     /// A runtime's entries are all commands, all importers or all exporters.
@@ -916,17 +1024,21 @@ impl RuntimeManifest {
             {
                 return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
+            layout::validate(&entry.input_schema, &field)?;
             validate_list_inputs(&entry.input_schema, &field)?;
             directory_read_fields(&entry.input_schema)?;
             conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
-                    UiSlot::Menu { name } | UiSlot::Ribbon { name } => !plain(name, 80),
+                    UiSlot::Menu { name, label } | UiSlot::Ribbon { name, label, .. } => {
+                        !plain(name, 80) || label.as_ref().is_some_and(|l| !plain(l, 80))
+                    }
                 })
             {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
             }
         }
+        self.validate_ribbon_groups()?;
         if self.listeners.len() > 16 {
             return Err(invalid("runtime.listeners", "at most 16 distinct listeners"));
         }
@@ -977,8 +1089,40 @@ impl RuntimeManifest {
             if self.permissions.input_folder {
                 return Err(invalid("runtime.permissions.input_folder", "only an importer reads the folder of the file it imports"));
             }
-            if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
-                return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+        }
+        Ok(())
+    }
+
+    fn validate_ribbon_groups(&self) -> Result<()> {
+        if self.ribbon_groups.len() > 32 {
+            return Err(invalid("runtime.ribbon_groups", "requires at most 32 ribbon groups"));
+        }
+        let mut labels = BTreeSet::new();
+        let mut grouped = BTreeSet::new();
+        for (index, group) in self.ribbon_groups.iter().enumerate() {
+            let field = format!("runtime.ribbon_groups.{index}");
+            if !plain(&group.label, 80) {
+                return Err(invalid(format!("{field}.label"), "requires 1..80 printable characters"));
+            }
+            if !labels.insert(group.label.trim()) {
+                return Err(invalid(format!("{field}.label"), format!("ribbon group `{}` is listed twice", group.label.trim())));
+            }
+            if group.icon.as_deref().is_some_and(|icon| !valid_icon_path(icon)) {
+                return Err(invalid(format!("{field}.icon"), "must be a relative .svg path inside the package, at most 128 characters"));
+            }
+            if group.entries.is_empty() || group.entries.len() > 32 {
+                return Err(invalid(format!("{field}.entries"), "requires 1..32 distinct entry names"));
+            }
+            for name in &group.entries {
+                if !self.entries.iter().any(|entry| entry.name == *name) {
+                    return Err(invalid(format!("{field}.entries"), format!("unknown entry `{name}`; name an entry from runtime.entries")));
+                }
+                if !grouped.insert(name) {
+                    return Err(invalid(
+                        format!("{field}.entries"),
+                        format!("entry `{name}` is listed twice; an entry belongs to at most one ribbon group"),
+                    ));
+                }
             }
         }
         Ok(())
@@ -1018,7 +1162,14 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
-            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            let is_alnum = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+            let valid = |e: &String| {
+                let bytes = e.as_bytes();
+                (1..=16).contains(&bytes.len())
+                    && bytes.first().copied().is_some_and(is_alnum)
+                    && bytes.last().copied().is_some_and(is_alnum)
+                    && bytes.iter().all(|&c| is_alnum(c) || c == b'_')
+            };
             if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
             {
                 return Err(invalid(
@@ -1203,6 +1354,7 @@ fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {
             {
                 return Err(invalid(&field, "selection and target inputs must be lists"));
             }
+            font_field(property).map_err(|_| invalid(format!("{field}.{FONT_KEY}"), "must be true on a string property"))?;
             validate_list_inputs(property, &field)?;
         }
     }

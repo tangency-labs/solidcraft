@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: resistance seam</title>
+  <path d="M6 22L46 22L46 32L6 32Z" fill="#b8c3cf"/>
+  <path d="M6 22L46 22L46 32L6 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 32L58 32L58 42L18 42Z" fill="#b8c3cf"/>
+  <path d="M18 32L58 32L58 42L18 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 32A18 7 0 1 0 50 32A18 7 0 1 0 14 32Z" fill="#328bd3"/>
+  <path d="M14 32A18 7 0 1 0 50 32A18 7 0 1 0 14 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

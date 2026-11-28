@@ -70,6 +70,30 @@ pub fn with_exprs(v: &Value, mut eval: impl FnMut(&str) -> std::result::Result<f
     Ok((Value::Array(out), kept))
 }
 
+/// Raw trimmed text for any string entries in `matrix`'s translation column (preserving both
+/// parameter expressions and unit-qualified literals for `CapturePosition`).
+pub fn translation_exprs(v: &Value) -> [Option<String>; 3] {
+    let mut exprs: [Option<String>; 3] = Default::default();
+    let Some(a) = v.as_array() else {
+        return exprs;
+    };
+    let rows = a.iter().all(Value::is_array);
+    if rows {
+        for (i, slot) in exprs.iter_mut().enumerate() {
+            if let Some(s) = a.get(i).and_then(Value::as_array).and_then(|r| r.get(3)).and_then(Value::as_str) {
+                *slot = Some(s.trim().to_string());
+            }
+        }
+    } else {
+        for (i, slot) in exprs.iter_mut().enumerate() {
+            if let Some(s) = a.get(i * 4 + 3).and_then(Value::as_str) {
+                *slot = Some(s.trim().to_string());
+            }
+        }
+    }
+    exprs
+}
+
 /// Read `matrix` as a rigid transform. It is row-major: 12 numbers (three rows of rotation
 /// and translation, `[r00, r01, r02, tx, r10, …, tz]`) or 16 (a fourth row `0, 0, 0, 1`), flat
 /// or as rows.

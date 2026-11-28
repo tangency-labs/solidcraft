@@ -9,7 +9,8 @@
 //! within it of the first arc's circle where the run has turned to; so the sweep that
 //! follows the reading ends where the path does.
 //!
-//! Not upstream: SolidCraft's sweep dispatch (`straight`, `circular`, `segmented`).
+//! Not upstream: SolidCraft's sweep dispatch (`straight`, `circular`, `segmented`), and how
+//! its curve sweep reads a closed path and a profile's loops ([`ends_meet`], [`loop_runs`]).
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use std::f64::consts::TAU;
@@ -628,6 +629,47 @@ pub fn closed_loop(k: &Kernel, curves: &[Curve], gap: f64) -> Result<Verdict> {
     Ok(v)
 }
 
+/// Whether `curves`, end to end in order, come back to where they start: the last one's end
+/// within `tol` of the first one's start, by the plain distance between the two points (not
+/// certified; [`closed_loop`] proves every join). No curves do not.
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn ends_meet(k: &Kernel, curves: &[Curve], tol: f64) -> Result<bool> {
+    let (Some(head), Some(tail)) = (curves.first(), curves.last()) else {
+        return Ok(false);
+    };
+    Ok((head.ends(k)?.start - tail.ends(k)?.end).length() <= tol)
+}
+
+/// The runs of `curves`, in order, that each close a loop: a run's curves taken as end to end,
+/// its last ending within `tol` of where its first starts (the plain distance, not
+/// certified). One run of them all when they do not split into closed loops that way (no
+/// curves, or curves left over after the last loop closes).
+///
+/// # Errors
+///
+/// Those of [`Curve::ends`].
+pub fn loop_runs(k: &Kernel, curves: &[Curve], tol: f64) -> Result<Vec<std::ops::Range<usize>>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    let mut first = None;
+    for (i, c) in curves.iter().enumerate() {
+        let e = c.ends(k)?;
+        let start = *first.get_or_insert(e.start);
+        if (e.end - start).length() <= tol {
+            out.push(from..i + 1);
+            from = i + 1;
+            first = None;
+        }
+    }
+    if from != curves.len() || out.is_empty() {
+        return Ok(std::iter::once(0..curves.len()).collect());
+    }
+    Ok(out)
+}
+
 /// The Euclidean control points of the profile's curves (lines, circles and B-splines),
 /// every weight positive, so each curve lies in the convex hull of its own; `None` for a
 /// curve of another kind or a weight not finite and positive.
@@ -774,6 +816,40 @@ mod tests {
             end,
         };
         PathPiece::of_arc(k, &d).unwrap()
+    }
+
+    #[test]
+    fn a_profile_splits_into_the_loops_it_closes() {
+        let k = Kernel::default();
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let square = |x: f64, s: f64| {
+            vec![
+                line(p(x, 0.0), p(x + s, 0.0)),
+                line(p(x + s, 0.0), p(x + s, s)),
+                line(p(x + s, s), p(x, s)),
+                line(p(x, s), p(x, 0.0)),
+            ]
+        };
+        // one run of the first n curves
+        let one = |n: usize| std::iter::once(0..n).collect::<Vec<_>>();
+        let two = [square(0.0, 4.0), square(1.0, 1.0)].concat();
+        assert_eq!(loop_runs(&k, &two, 1e-6).unwrap(), vec![0..4, 4..8]);
+        assert!(ends_meet(&k, &square(0.0, 4.0), 1e-6).unwrap());
+        // the second loop ends at its own start, not the first one's
+        assert!(!ends_meet(&k, &two, 1e-6).unwrap());
+        // a loop and a curve left over: one run of all of them
+        let mut open = square(0.0, 4.0);
+        open.push(line(p(10.0, 0.0), p(11.0, 0.0)));
+        assert_eq!(loop_runs(&k, &open, 1e-6).unwrap(), one(5));
+        assert!(!ends_meet(&k, &open, 1e-6).unwrap());
+        assert_eq!(loop_runs(&k, &[], 1e-6).unwrap(), one(0));
+        assert!(!ends_meet(&k, &[], 1e-6).unwrap());
+        // the last end 1e-7 short of the start still closes within 1e-6, not within 1e-8
+        let mut near = square(0.0, 4.0);
+        near[3] = line(p(0.0, 4.0), p(0.0, 1e-7));
+        assert_eq!(loop_runs(&k, &near, 1e-6).unwrap(), one(4));
+        assert!(ends_meet(&k, &near, 1e-6).unwrap());
+        assert!(!ends_meet(&k, &near, 1e-8).unwrap());
     }
 
     #[test]

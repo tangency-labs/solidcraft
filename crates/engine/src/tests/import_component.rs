@@ -971,6 +971,7 @@ fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
     assert_eq!(s.doc.links[&comp].step_names.as_deref(), Some("auto"));
     assert!(std::path::Path::new(&s.doc.links[&comp].path).is_absolute());
     assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["importer"], json!({"format": "step"}));
     let saved = dir.join("assembly.sc");
     run(&mut s, "file.save", json!({"path": saved}));
     let (doc, _) = solidcraft_io::read_design_file(&saved.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
@@ -1186,4 +1187,80 @@ fn deleting_a_component_of_an_imported_assembly_deletes_its_bodies() {
     assert_eq!(holding(&mut again), expected, "reopened");
     assert_eq!(shown_boxes(&again), [pin_box]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Inspection must inventory the STEP's six placements, not its three definitions (#21797).
+/// The expected boxes/volumes come from rig_file's dimensions and the second arm's Z quarter-turn.
+#[test]
+fn document_inspection_lists_every_nested_step_placement_after_reopening() {
+    fn check(s: &mut Session) {
+        let doc = s.doc.clone();
+        let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.doc.marker);
+        let r = run(s, "document.inspect", json!({"measure":true}));
+        let bodies = r["bodies"].as_array().unwrap();
+        assert_eq!(bodies.len(), 6, "three part definitions have six placements: {r}");
+        let names: std::collections::BTreeSet<_> = bodies.iter().map(|b| b["name"].as_str().unwrap()).collect();
+        assert_eq!(names.len(), 6, "each placement has a distinct usable world name");
+        for (min, max, volume) in [
+            ([0.0, 0.0, 0.0], [100.0, 60.0, 5.0], 30000.0),
+            ([10.0, 10.0, 5.0], [30.0, 14.0, 9.0], 320.0),
+            ([28.0, 11.0, 9.0], [30.0, 13.0, 19.0], 40.0),
+            ([56.0, 10.0, 5.0], [60.0, 30.0, 9.0], 320.0),
+            ([57.0, 28.0, 9.0], [59.0, 30.0, 19.0], 40.0),
+            ([90.0, 50.0, 5.0], [92.0, 52.0, 15.0], 40.0),
+        ] {
+            let body = bodies.iter().find(|b| (0..3).all(|k| (b["bbox"]["min"][k].as_f64().unwrap() - min[k]).abs() < 1e-6)).unwrap();
+            assert_eq!(body["closed"], true, "{body}");
+            assert!((body["volume_mm3"].as_f64().unwrap() - volume).abs() < 1e-6, "{body}");
+            for (k, expected) in max.into_iter().enumerate() {
+                assert!((body["bbox"]["max"][k].as_f64().unwrap() - expected).abs() < 1e-6, "{body}");
+            }
+        }
+        assert!((bodies.iter().map(|b| b["volume_mm3"].as_f64().unwrap()).sum::<f64>() - 30760.0).abs() < 1e-6);
+        let listed = run(s, "document.inspect", json!({"bodies":"names", "measure":true}));
+        assert_eq!(listed["bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect::<std::collections::BTreeSet<_>>(), names);
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!((s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.doc.marker), before);
+    }
+    let dir = temp_dir("inspect-placements");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path":path}));
+    assert_eq!(s.model.state().bodies.len(), 3, "the importer still shares the part definitions");
+    check(&mut s);
+    let design = dir.join("inspection.solidcraft");
+    run(&mut s, "file.save_as", json!({"path":design.to_string_lossy()}));
+    std::fs::remove_file(path).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":design.to_string_lossy()}));
+    check(&mut reopened);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_link_names_its_importer_and_older_designs_load_without_one() {
+    use solidcraft_doc::{DesignLink, LinkImporter};
+    let importer =
+        LinkImporter { format: "kic.convert".into(), plugin: Some("kic".into()), version: Some("1.2".into()), options: json!({"layers": ["top"]}) };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.doc_mut().links.insert(1, DesignLink { path: "board.kic".into(), feature: 1, importer: Some(importer.clone()), ..Default::default() });
+    s.doc_mut().links.insert(2, DesignLink { path: "part.sc".into(), feature: 2, ..Default::default() });
+    let text = solidcraft_io::write_design(&s.doc).unwrap();
+    let read = solidcraft_io::read_design(&text).unwrap();
+    assert_eq!(read.links[&1].importer, Some(importer));
+    assert!(read.links[&1].path == "board.kic" && !read.links[&1].is_design());
+    assert!(read.links[&2].importer.is_none() && read.links[&2].is_design());
+    // A link saved before the field has no importer, is a design link, and saves without one.
+    let old: DesignLink = serde_json::from_value(json!({"path": "part.sc", "feature": 3})).unwrap();
+    assert!(old.importer.is_none() && old.is_design());
+    assert!(serde_json::to_value(&old).unwrap().get("importer").is_none());
+    // A build that does not know the field ignores it: the design opens with its linked bodies.
+    let mut written: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for link in written["links"].as_object_mut().unwrap().values_mut() {
+        link.as_object_mut().unwrap().remove("importer");
+    }
+    let unaware = solidcraft_io::read_design(written.to_string().as_bytes()).unwrap();
+    assert!(unaware.links.values().all(|l| l.importer.is_none()) && unaware.links.len() == 2);
+    assert_eq!(unaware.features.len(), s.doc.features.len(), "the bodies' features are kept");
 }

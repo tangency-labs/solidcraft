@@ -40,10 +40,11 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
-    // 108 -> 109 because Turn Around adds one portable Navigation preference.
+    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 111 because
+    // the keyboard profile (#15302) is a portable Shortcuts preference.
     assert_eq!(
         keys.len(),
-        109,
+        111,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -75,6 +76,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_axis_speed",
         "space_mouse_reverse",
         "space_mouse_buttons",
+        "space_mouse_long_buttons",
         "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
@@ -826,6 +828,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
+        "free_orbit_key",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
         "hide_constraint_glyphs_zoomed_out",
@@ -836,6 +839,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "invert_navigator_arrows",
         "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
+        "keyboard_profile",
         "language",
         "layout",
         "line_drag_draws_one",
@@ -925,9 +929,11 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
+    // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 109);
+    // Test change: one more portable key, keyboard_profile (the keyboard profile your keys sit on, #15302).
+    assert_eq!(expected.len(), 111);
     assert_eq!(actual, expected);
 }
 

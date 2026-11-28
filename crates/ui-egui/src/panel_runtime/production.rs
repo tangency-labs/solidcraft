@@ -1649,7 +1649,7 @@ impl FramePanelContent for ProductionFrame<'_> {
         }
         match product {
             Product::RenderLibrary | Product::RenderInspector | Product::RenderShots if !context.preview_geometry => {
-                let rect = super::workspace::egui_rect(context.outer);
+                let rect = super::egui_rect(context.outer);
                 let id = match product {
                     Product::RenderLibrary => "render:appearances",
                     Product::RenderInspector => "render:inspector",
@@ -1658,7 +1658,7 @@ impl FramePanelContent for ProductionFrame<'_> {
                 crate::scenario::publish_rect(id, rect);
             }
             Product::PartsLibrary => {
-                crate::scenario::publish_rect("library:card", super::workspace::egui_rect(context.outer));
+                crate::scenario::publish_rect("library:card", super::egui_rect(context.outer));
             }
             _ => {}
         }

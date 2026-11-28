@@ -240,6 +240,52 @@ fn a_sketch_whose_projected_faces_are_gone_names_each_projection_as_the_user_see
     }
 }
 
+/// A face projected by a name worked out from geometry when it was saved (an Align that kept no
+/// history guessed it, #20308) finds nothing once the same face has its exact name (#22919). The
+/// face under the saved point projects to exactly the curves the link holds, so it is that face:
+/// the link keeps its curves and says it was found again. A face that changed shape under the
+/// point, a name whose root no face has, and a name saved before format 14, are still lost.
+#[test]
+fn a_projection_saved_by_a_guessed_name_is_found_again_where_its_face_is_unchanged() {
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    // The top face's name told apart by a move no face has: its root, `shared:top`, is there.
+    let guessed = "shared:top@F9.1";
+    sketch.links[0].face_name = Some(guessed.into());
+    let saved = sketch.clone();
+
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &initial, &plane, &mut sketch).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("has a new name; it was found again at its saved point")), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    assert_eq!(sketch.curves, saved.curves, "the same curves, ids and all");
+    assert!(sketch.points.iter().zip(&saved.points).all(|(a, b)| a.id == b.id && a.pos.dist(b.pos) < 1e-9));
+
+    // The top face under the point is 30 mm wide now: not the face the link holds.
+    let mut grown = ModelState::default();
+    grown.bodies.push(named_box("Source", 30., 10.));
+    let mut sketch = saved.clone();
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &grown, &plane, &mut sketch).unwrap_err();
+    assert!(lost_one(&error, guessed), "{error}");
+
+    // A name whose root no face has (its sketch curve deleted and drawn again) is lost.
+    let mut sketch = saved.clone();
+    sketch.links[0].face_name = Some("F7:side:l47@F9.1".into());
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &initial, &plane, &mut sketch).unwrap_err();
+    assert!(lost_one(&error, "F7:side:l47@F9.1"), "{error}");
+
+    let legacy = format!("{}{guessed}", crate::naming::LEGACY_MARK);
+    let mut sketch = saved.clone();
+    sketch.links[0].face_name = Some(legacy.clone());
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &initial, &plane, &mut sketch).unwrap_err();
+    assert!(lost_one(&error, &legacy), "{error}");
+}
+
 /// A projection's label names its kind and lists its curves, four of them and then "…", or its
 /// points when it gives no curve; a link of each kind lost by name is named by its kind.
 #[test]
@@ -1268,6 +1314,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
         parent: 0,
         name: "Part".into(),
         transform: PART_FRAME,
+        base_transform: None,
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
@@ -1413,6 +1460,7 @@ fn model_plane_resolution_places_both_cached_and_uncached_construction_planes() 
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
+        base_transform: None,
     });
     let built = Plane::new(Vec3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y).unwrap();
     let id = doc.add_feature(crate::FeatureKind::ConstructionPlane { plane: PlaneRef::Custom { plane: built } }, Some("Shelf")).unwrap();
@@ -1454,6 +1502,6 @@ fn a_planar_pick_checks_face_trims_before_testing_plane_ambiguity() {
     assert_eq!(body, "L");
     assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z.abs() > 1.0 - 1e-9);
     let (index, _) = crate::naming::face_on_body(&state.bodies[0], &name, pick).unwrap();
-    assert!(solidcraft_kernel::services::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
+    assert!(solidcraft_kernel::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
     assert!(crate::project::pick_planar_face(&state, Some("L"), Vec3::new(20.0, 15.0, 10.0)).unwrap_err().contains("different planes meet"));
 }

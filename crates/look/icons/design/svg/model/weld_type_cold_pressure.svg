@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: cold pressure (look to be decided)</title>
+  <path d="M6 22L46 22L46 32L6 32Z" fill="#b8c3cf"/>
+  <path d="M6 22L46 22L46 32L6 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 32L58 32L58 42L18 42Z" fill="#b8c3cf"/>
+  <path d="M18 32L58 32L58 42L18 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 22L32 30L38 22" fill="none" stroke="#236ead" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"/>
+  <path d="M26 42L32 34L38 42" fill="none" stroke="#236ead" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"/>
+</svg>

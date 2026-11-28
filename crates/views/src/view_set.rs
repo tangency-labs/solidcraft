@@ -288,6 +288,9 @@ pub struct ViewSet {
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
     camera_link: CameraLinkMode,
+    /// The window's sub-tabs are folded into the design's tab, which shows its name and how many
+    /// views it has (the chevron after its +). The views themselves are unchanged.
+    collapsed: bool,
 }
 
 impl Default for ViewSet {
@@ -324,7 +327,18 @@ impl ViewSet {
             elsewhere: 0,
             tiles: None,
             camera_link: CameraLinkMode::Off,
+            collapsed: false,
         }
+    }
+
+    /// Whether the window's sub-tabs are folded into the design's tab.
+    pub fn collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    /// Fold the window's sub-tabs into the design's tab (`collapsed`), or show them again.
+    pub fn set_collapsed(&mut self, collapsed: bool) {
+        self.collapsed = collapsed;
     }
 
     /// Arrange the live views in their new strips, reusing existing window identities in order.
@@ -804,6 +818,8 @@ impl ViewSet {
         let name = self.default_name(kind);
         self.views.push(DesignView { editing: None, id, kind, name, subject, spec: None, compass: true });
         self.active = id;
+        // A new view shows folded sub-tabs again, so it can be seen.
+        self.collapsed = false;
         id
     }
 
@@ -940,6 +956,7 @@ impl ViewSet {
         let id = view.id;
         self.views.insert(at.min(self.views.len()), view);
         self.active = id;
+        self.collapsed = false;
         Some(id)
     }
 
@@ -997,6 +1014,7 @@ impl ViewSet {
         let copy = DesignView { editing: None, id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
+        self.collapsed = false;
         Some(self.active)
     }
 
@@ -1190,6 +1208,7 @@ impl ViewSet {
             "views": strips.clone().flat_map(|strip| strip.views.iter().map(move |view| view_json(view, strip.window_id))).collect::<Vec<_>>(),
             "closed": strips.flat_map(|strip| strip.closed.iter().map(move |(at, view)| json!({"at": at, "view": view_json(view, strip.window_id)}))).collect::<Vec<_>>(),
             "tiles": self.tiles.as_ref().map(Tiles::to_json),
+            "collapsed": self.collapsed,
             "windows": self.windows.iter().map(|window| json!({
                 "id": window.id,
                 "name": window.views.window_name(),
@@ -1287,6 +1306,8 @@ impl ViewSet {
             Some(strip)
         };
         let mut set = read_strip(0, value)?;
+        // A set saved before sub-tabs could fold, or with a bad value, shows them.
+        set.collapsed = value.get("collapsed").and_then(Value::as_bool).unwrap_or(false);
         for (id, item) in window_records {
             let Some(mut views) = read_strip(id, item) else { continue };
             if let Some(name) = item.get("name").and_then(Value::as_str) {
@@ -2518,6 +2539,57 @@ mod tests {
         let mut back = back;
         assert_eq!(back.reopen(), Some(ids[1]));
         assert!(back.open(ViewKind::Sheet, None, false) > ids[4], "ids stay unique after a reload");
+    }
+
+    /// Folding hides the sub-tabs only: showing, moving or renaming a view keeps them folded,
+    /// and a view added (opened, a copy, one reopened) shows them again so it can be seen.
+    #[test]
+    fn folded_sub_tabs_show_again_for_a_new_view_only() {
+        let mut set = sheets(3);
+        let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
+        set.set_collapsed(true);
+        set.activate(ids[0]);
+        set.move_view(0, 2);
+        set.rename(ids[1], "Profile");
+        assert!(set.collapsed(), "showing, moving or renaming a view keeps them folded");
+        set.open(ViewKind::Sheet, Some("s1".into()), true);
+        assert!(set.collapsed(), "a view shown again by reuse is not a new one");
+        for add in [0, 1, 2] {
+            set.set_collapsed(true);
+            match add {
+                0 => {
+                    set.open(ViewKind::Render, None, false);
+                }
+                1 => {
+                    set.duplicate(ids[0]);
+                }
+                _ => {
+                    set.close(ids[2]);
+                    set.set_collapsed(true);
+                    set.reopen();
+                }
+            }
+            assert!(!set.collapsed(), "case {add}: a new view shows the sub-tabs");
+        }
+    }
+
+    /// Folded sub-tabs come back folded; a set saved before they could fold, or with a bad
+    /// value, shows them.
+    #[test]
+    fn folded_sub_tabs_are_remembered() {
+        let mut set = sheets(3);
+        set.set_collapsed(true);
+        let back = ViewSet::from_json(&set.to_json()).unwrap();
+        assert!(back.collapsed(), "folded sub-tabs stay folded");
+        assert_eq!(back, set);
+        for old in [json!(null), json!("yes"), json!(1)] {
+            let mut saved = set.to_json();
+            saved["collapsed"] = old.clone();
+            assert!(!ViewSet::from_json(&saved).unwrap().collapsed(), "{old}");
+        }
+        let mut saved = set.to_json();
+        saved.as_object_mut().map(|map| map.remove("collapsed"));
+        assert!(!ViewSet::from_json(&saved).unwrap().collapsed(), "saved before folding existed");
     }
 
     #[test]

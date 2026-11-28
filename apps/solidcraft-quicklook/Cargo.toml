@@ -34,7 +34,7 @@ solidcraft-design-preview = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSCell", "NSControl", "NSEvent", "NSImage", "NSImageView", "NSResponder", "NSView", "NSViewController"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSCell", "NSClickGestureRecognizer", "NSControl", "NSEvent", "NSGestureRecognizer", "NSImage", "NSImageView", "NSResponder", "NSView", "NSViewController"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFData"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace", "CGContext", "CGDataProvider", "CGImage"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSString", "NSURL"] }

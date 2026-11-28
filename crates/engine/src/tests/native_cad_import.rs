@@ -10,6 +10,7 @@ use crate::*;
 const BLOCK_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.FCStd");
 const BLOCK_3DM: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.3dm");
 const BRACKET_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/bracket.FCStd");
+const SHELLED_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/shelled.FCStd");
 
 /// `bytes` saved as `name` in a fresh temp directory.
 fn file(tag: &str, name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
@@ -150,6 +151,66 @@ fn a_freecad_history_comes_in_as_editable_features() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A FreeCAD history that is not rebuilt (here it ends in a shell) still brings the file's
+/// sketches: the solids come in as the Import feature, as before, and every sketch comes in
+/// beside them in the same component, editable, on its plane (one on a datum plane 10 mm up),
+/// with its dimensions as parameters. `history: solids` still brings the solids alone.
+#[test]
+fn an_unrebuilt_freecad_history_brings_its_sketches_beside_the_solids() {
+    use solidcraft_geom::prelude::*;
+    let (dir, path) = file("shelled", "shelled.FCStd", SHELLED_FCSTD);
+    // The file's shelled body, as FreeCAD measures it.
+    let expected = 2306.8722474294136;
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path}));
+    assert_eq!(r["history"], "sketches", "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("Shell")), "the warning still says why: {r}");
+    let component = r["component"].as_u64().unwrap();
+    assert_eq!(r["features"], 4, "the Import feature and three sketches: {r}");
+    assert_eq!(s.doc.features[0].kind.type_name(), "BaseFeature");
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 0.05, "the solids are the file's: {v}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // file.insert_step names the sketches it added.
+    let mut d = Session::default();
+    let inserted = run(&mut d, "file.insert_step", json!({"path": path}));
+    assert_eq!((inserted["history"].as_str(), inserted["features_added"].as_array().map(Vec::len)), (Some("sketches"), Some(3)), "{inserted}");
+    let sketches: Vec<(&str, &solidcraft_doc::PlaneRef, &solidcraft_doc::sketch::Sketch)> = s
+        .doc
+        .features
+        .iter()
+        .skip(1)
+        .map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { plane, sketch } if f.component == component => (f.name.as_str(), plane, sketch),
+            other => panic!("{} is a {} outside the import's component", f.name, other.type_name()),
+        })
+        .collect();
+    assert_eq!(sketches.iter().map(|(n, ..)| *n).collect::<Vec<_>>(), ["BaseSketch", "HoleSketch", "Reference"]);
+
+    // The hole's sketch sits on the datum plane, 10 mm up, its circle centred at (20, 10).
+    let (_, plane, hole) = sketches[1];
+    let solidcraft_doc::PlaneRef::Custom { plane } = plane else { panic!("{plane:?}") };
+    assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
+    let circle = hole.curves.iter().find_map(|c| match c.kind {
+        solidcraft_doc::sketch::CurveKind::Circle { c, .. } => Some(hole.points[c].pos),
+        _ => None,
+    });
+    let centre = plane.to_world(circle.expect("a circle"));
+    assert!((centre.x - 20.0).abs() < 1e-9 && (centre.y - 10.0).abs() < 1e-9 && (centre.z - 10.0).abs() < 1e-9, "{centre:?}");
+    // Its 6 mm diameter is a parameter of the design.
+    let diameter = hole.constraints.iter().find(|c| c.kind.value().is_some_and(|v| (v - 6.0).abs() < 1e-9 || (v - 3.0).abs() < 1e-9));
+    assert!(diameter.and_then(|c| c.param.as_deref()).is_some_and(|p| s.doc.param(p).is_some()), "{:?}", hole.constraints);
+    // The rectangle keeps its constraints: its 40 mm side is a dimension.
+    assert!(sketches[0].2.constraints.iter().any(|c| c.kind.value().is_some_and(|v| (v - 40.0).abs() < 1e-9)));
+
+    let mut d = Session::default();
+    let r = run(&mut d, "file.insert_step", json!({"path": path, "history": "solids"}));
+    assert!(r.get("history").is_none() && r.get("features_added").is_none(), "{r}");
+    assert_eq!(d.doc.features.len(), 1, "history: solids brings the solids alone");
+    assert!((volume(&mut d) - expected).abs() < 0.05);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rebuilt history that cannot be inserted (here the design is at its feature limit) falls
 /// back to the file's solids with a warning, and leaves the design as it was: no features,
 /// parameters or component of the attempt stay behind.
@@ -170,6 +231,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
         participants: Vec::new(),
         shell_piece_order: false,
         kernel_piece_order: false,
+        least_face_piece_order: false,
         pattern_names_in_order: false,
         inserted: false,
         link_faces: Vec::new(),
@@ -181,8 +243,9 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
             sketch: solidcraft_doc::sketch::Sketch::new(),
         },
     };
-    // Room for the file's one Import feature, but not for the five features of its history.
-    let made = solidcraft_doc::MAX_FEATURES - 3;
+    // Room for the file's one Import feature, but not for the five features of its history, nor
+    // for its two sketches, which come in beside the solids when there is room.
+    let made = solidcraft_doc::MAX_FEATURES - 1;
     {
         let doc = s.doc_mut();
         doc.features.extend((1..=made).map(|i| dummy(i as u64)));
@@ -193,6 +256,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
     assert!(r["history"].is_null(), "the solids came in: {r}");
     let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     assert!(warnings.iter().any(|w| w.contains("feature history was not rebuilt")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("sketches were not imported")), "{warnings:?}");
     assert_eq!(s.doc.features.len(), before + 1, "only the file's Import feature was added");
     assert_eq!(s.doc.features.iter().filter(|f| !f.name.starts_with("Dummy")).count(), 1);
     assert_eq!(s.doc.feature(r["feature"].as_u64().unwrap()).unwrap().kind.type_name(), "BaseFeature");

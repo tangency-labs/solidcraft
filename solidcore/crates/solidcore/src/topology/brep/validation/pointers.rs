@@ -509,22 +509,30 @@ pub(crate) fn validate_pointers_traced(
         // evaluates its curves and surface (solidcore#3247)
         k.check_cancelled("topology::brep::validation::pointers::validate_pointers")?;
         let tol = b.face(f)?.tolerance;
-        let on = if crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
-            &mut *b
+        // not upstream: a face whose neighbourhood passed this check on a body before
+        // passes it again ([`crate::geom::check_memo`])
+        let clean = crate::geom::check_memo::face_clean(k, f);
+        let on = if clean {
+            None
+        } else if crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
+            Some(&mut *b)
         } else {
-            match &mut standing {
+            Some(match &mut standing {
                 Some(copy) => copy,
                 none => none.insert(b.clone_standing_for_self()?),
-            }
+            })
         };
-        let checked = crate::topology::trimming_tools::check_face(
-            k,
-            on,
-            f,
-            tol,
-            r.array.as_deref_mut(),
-            walk,
-        );
+        let checked = match on {
+            Some(on) => crate::topology::trimming_tools::check_face(
+                k,
+                on,
+                f,
+                tol,
+                r.array.as_deref_mut(),
+                walk,
+            ),
+            None => Ok(()),
+        };
         if let Err(e) = checked {
             if e.is_unported_or_cancelled() {
                 return Err(e);
@@ -2293,6 +2301,19 @@ fn edge_geometry(
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
+    // not upstream: an edge whose neighbourhood passed this check on a body before, with
+    // no report and no warning, gives the same geometry answers and has no end that turns
+    // back ([`crate::geom::check_memo`]); only its curve's owner is checked again
+    if !fix_tolerances && !repair_ends && crate::geom::check_memo::edge_clean(k, e) {
+        let curve = required(b.edge(e)?.curve.as_ref())?;
+        if curve.owner() != Some(keys(EntityRef::Edge(e))) {
+            return Err(crate::SolidError::topology(
+                super::OP,
+                crate::error::topology::TopologyFailure::CurveNotOwnedByEdge,
+            ));
+        }
+        return Ok(false);
+    }
     let mut turned_back = false;
     if !repair_ends {
         turned_back |= ends_turned_back(k, required(b.edge(e)?.curve.as_ref())?, None)?;

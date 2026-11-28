@@ -1,0 +1,127 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 2.9670597283903604,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "20499-revolve-two-sided-130-40",
+  "expected": {
+    "body_count": 1,
+    "edges": 3,
+    "faces": 3,
+    "method": "Pappus: the circle's area pi r^2 = 25 pi times the path of its centre, 2 pi R (170/360) with R = 30: V = 2 pi^2 R r^2 (170/360) = 6990.969784104961. Faces: the torus sector and two caps = 3; edges: the two cap circles and the seam = 3; vertices: 2.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20499"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "vertices": 2,
+    "volume_mm3": 6990.969784104961,
+    "what": "a circle of radius 5, its centre 30 from the Z axis, revolved about Z two-sided by 130 and 40 degrees: a 170 degree sector of a torus with two flat caps (refused by the check as 'Bad Infinite Region': the ray that looks for the infinite region entered and left the torus face within one leaf of its cache, 2.5 and 2 degrees off the surface, and was given the exit as its first hit)"
+  },
+  "expressible": false,
+  "gallery_note": "The check refused this body as 'Bad Infinite Region' until the line/surface leaf solve was given its certified pass: the ray that looks for the infinite region enters and leaves the torus face within one leaf, 2.5 and 2 degrees off the surface, and the solve's guesses found only the exit. SolidCraft turns the swept body itself, so the entry's result is its own record.",
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "records": "20499-revolve-two-sided-130-40.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "operand": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2953.4675463214753,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 6990.969784104964
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#20499"
+  ],
+  "traced_ops": [
+    "revolve",
+    "copy"
+  ],
+  "ungraded": [],
+  "what": "a circle of radius 5, its centre 30 from the Z axis, revolved about Z two-sided by 130 and 40 degrees: a 170 degree sector of a torus with two flat caps (refused by the check as 'Bad Infinite Region': the ray that looks for the infinite region entered and left the torus face within one leaf of its cache, 2.5 and 2 degrees off the surface, and was given the exit as its first hit)",
+  "why_not": [
+    "no kernel operation made a body the case ends with"
+  ]
+}

@@ -61,3 +61,51 @@ fn commands_filter_and_describe_one_command() {
     assert_eq!(two_ids.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&two_ids.stderr).contains("one --id"), "{}", String::from_utf8_lossy(&two_ids.stderr));
 }
+
+/// `--schemas` adds each command's input and output JSON Schemas to its registry entry, so a
+/// binding generator reads every command from one call. The same build prints the same bytes.
+#[test]
+fn commands_with_schemas_for_bindings() {
+    let plain: serde_json::Value = serde_json::from_slice(&cli_output(&["commands"]).stdout).unwrap();
+    let output = cli_output(&["commands", "--schemas"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let full: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (plain, full) = (plain.as_array().unwrap(), full.as_array().unwrap());
+
+    // The same commands in the same order, each with the plain entry's fields unchanged.
+    assert_eq!(plain.len(), full.len());
+    for (p, f) in plain.iter().zip(full) {
+        for (key, value) in p.as_object().unwrap() {
+            assert_eq!(&f[key], value, "{}: {key}", p["id"]);
+        }
+        assert!(f.get("input").is_some() && f.get("output").is_some(), "{}", f["id"]);
+    }
+
+    // A converted command has both schemas; each one still in unconverted.txt has none yet.
+    let find = |id: &str| full.iter().find(|c| c["id"] == id).unwrap();
+    let solid_box = find("solid.box");
+    assert!(solid_box["input"]["properties"].is_object(), "{}", solid_box["input"]);
+    assert!(solid_box["output"].is_object(), "{}", solid_box["output"]);
+    let unconverted = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/engine/src/schema/unconverted.txt")).unwrap();
+    for id in unconverted.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        assert!(find(id)["input"].is_null(), "{id} is listed as unconverted but has an input schema");
+    }
+    // Most commands are converted, so a missing schema stays the exception.
+    let without = full.iter().filter(|c| c["input"].is_null()).count();
+    assert!(without * 10 < full.len(), "{without} of {} commands have no input schema", full.len());
+
+    assert_eq!(cli_output(&["commands", "--schemas"]).stdout, output.stdout, "a second run printed different bytes");
+
+    // With a filter word, in either order.
+    for args in [["commands", "config.", "--schemas"], ["commands", "--schemas", "config."]] {
+        let some: serde_json::Value = serde_json::from_slice(&cli_output(&args).stdout).unwrap();
+        let some = some.as_array().unwrap();
+        assert!(!some.is_empty() && some.len() < full.len());
+        assert!(some.iter().all(|c| c["id"].as_str().unwrap().contains("config.") && c.get("input").is_some()));
+    }
+
+    let both = cli_output(&["commands", "--schemas", "--id", "solid.box"]);
+    assert_eq!(both.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&both.stderr).contains("leave out --schemas"), "{}", String::from_utf8_lossy(&both.stderr));
+}

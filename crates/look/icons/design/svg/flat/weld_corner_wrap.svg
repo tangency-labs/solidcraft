@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Corner: wrap round</title>
+  <path d="M11 53L11 11L53 11" fill="none" stroke="currentColor" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -31,3 +31,7 @@ blend.fillet_executive_p3	sweep5-letter_g-e1-r1.0	0	34	blend-surface	5.250451267
 blend.fillet_executive_p3	sweep5-letter_g-e10-r1.0	0	32	blend-surface	3.2452175665360214e-6	4e-5
 topology.brep_p10	gen0026	0	20	UNCOVERED	1.875254385907965e-5	1.345444275102642e-5
 topology.brep_p10	gen0026	0	33	UNCOVERED	1.8752543532229993e-5	1.3454442544978595e-5
+heal.heal_data_p3	split_face_seam_cone_r0.02_0.03_h1_s60_q0	0	1	not-enclosed	-	1e-5
+heal.heal_data_p3	split_face_seam_cone_r0.02_0.03_h1_s60_q0	0	5	not-enclosed	-	1e-5
+heal.heal_data_p3	split_face_seam_cone_r0.02_0.03_h25_s60_q0	0	1	not-enclosed	-	1e-5
+heal.heal_data_p3	split_face_seam_cone_r0.02_0.03_h25_s60_q0	0	5	not-enclosed	-	1e-5

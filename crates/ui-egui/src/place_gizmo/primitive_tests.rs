@@ -356,7 +356,7 @@ fn marker_stands_a_new_cone_on_the_face() {
     let (name, kind) = last(&h);
     let FeatureKind::Cone { base, axis, .. } = &kind else { panic!("a Cone: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "{:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "{:?}", axis.0);
+    assert!(solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "{axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 
@@ -451,7 +451,7 @@ fn marker_stands_a_new_coil_on_the_face() {
     let (name, kind) = last(&h);
     let FeatureKind::Coil { base, axis, .. } = &kind else { panic!("a Coil: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "{:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "{:?}", axis.0);
+    assert!(solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "{axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 

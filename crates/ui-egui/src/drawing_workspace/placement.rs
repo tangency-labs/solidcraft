@@ -1,6 +1,7 @@
 use egui::{Stroke, vec2};
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
+use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::drawing::{Drawing, view::Beside};
 use solidcraft_engine::doc::ids::encode;
 use solidcraft_engine::geom::Vec3Geom;
@@ -24,12 +25,26 @@ const ORIENTATIONS: [(&str, &str); 7] = [
 const SCALES: [&str; 5] = ["1:4", "1:2", "1:1", "2:1", "4:1"];
 const STYLES: [VisualStyle; 2] = [VisualStyle::Visible, VisualStyle::VisibleHidden];
 
+/// What a base view can draw: the whole design, then every component occurrence nested ones
+/// included, parents before their children, each with the occurrence path `drawing.view.base`
+/// takes as `source.occurrences`.
+pub(super) fn sources(doc: &Document) -> Vec<(String, Option<Vec<u64>>)> {
+    let mut found: Vec<(Vec<u64>, String)> =
+        doc.occurrences.iter().filter_map(|occurrence| Some((doc.occurrence_path(occurrence.id)?, occurrence.name.clone()))).collect();
+    found.sort();
+    let mut list = vec![(doc.name.clone(), None)];
+    list.extend(found.into_iter().map(|(path, name)| (name, Some(path))));
+    list
+}
+
 pub(super) struct Placement {
     owner: (u64, u64, u64),
     orientation: usize,
     scale: usize,
     style: usize,
     parent: Option<u64>,
+    /// The occurrence path a base view draws (`None`: the whole design).
+    source: Option<Vec<u64>>,
     key: Option<(u64, Value)>,
     preview: Option<Marks>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -44,6 +59,7 @@ impl Placement {
             scale: 2,
             style: 0,
             parent: None,
+            source: None,
             key: None,
             preview: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -62,6 +78,17 @@ impl Placement {
         Some(placement)
     }
 
+    /// Draw the whole design (`None`) or one occurrence path, as the model drop-down does.
+    #[cfg(test)]
+    pub(super) fn choose_source(&mut self, path: Option<Vec<u64>>) {
+        self.source = path;
+    }
+
+    #[cfg(test)]
+    pub(super) fn request(&self, drawing: &Drawing) -> Option<Value> {
+        self.target(drawing, Vec2::new(0.0, 0.0)).map(|(_, _, request)| request)
+    }
+
     fn orientation(&self) -> &str {
         ORIENTATIONS.get(self.orientation).unwrap_or(&ORIENTATIONS[0]).0
     }
@@ -76,7 +103,11 @@ impl Placement {
 
     fn target(&self, drawing: &Drawing, cursor: Vec2) -> Option<(Vec2, Option<Beside>, Value)> {
         let Some(parent) = self.parent else {
-            return Some((cursor, None, json!({"view":self.orientation(),"scale":self.scale(),"visual_style":self.style()})));
+            let mut request = json!({"view":self.orientation(),"scale":self.scale(),"visual_style":self.style()});
+            if let Some(path) = &self.source {
+                request["source"] = json!({"occurrences":[path]});
+            }
+            return Some((cursor, None, request));
         };
         let centre = drawing.view_centre(parent).ok()?;
         let beside = Beside::of_offset(cursor - centre)?;
@@ -97,7 +128,7 @@ impl Placement {
         Some((at, Some(beside), request))
     }
 
-    pub(super) fn fields(&mut self, ui: &mut egui::Ui, source: &str) {
+    pub(super) fn fields(&mut self, ui: &mut egui::Ui, doc: &Document) {
         let tr = solidcraft_ui_text::tr;
         ui_kit::section_heading(ui, tr("ui.drawing_panel.orientation"));
         ui_kit::text(
@@ -123,9 +154,20 @@ impl Placement {
                 ui_kit::choice_row(ui, tr("ui.drawing_panel.saved_view"), "base_view_saved", &mut 0, &[tr("ui.drawing_panel.none")]);
             });
             ui_kit::section_heading(ui, tr("ui.drawing_panel.view"));
-            ui.add_enabled_ui(false, |ui| {
-                ui_kit::choice_row(ui, tr("ui.drawing_panel.model"), "base_view_model", &mut 0, &[source]);
-            });
+            let choices = sources(doc);
+            let mut chosen = choices.iter().position(|(_, path)| *path == self.source).unwrap_or(0);
+            let labels: Vec<String> = choices
+                .iter()
+                .enumerate()
+                .map(|(index, (name, path))| {
+                    let depth = path.as_ref().map_or(0, Vec::len);
+                    let name = if index == 0 { doc.name.as_str() } else { name.as_str() };
+                    format!("{}{name}", "    ".repeat(depth))
+                })
+                .collect();
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            ui_kit::choice_row(ui, tr("ui.drawing_panel.model"), "base_view_model", &mut chosen, &labels);
+            self.source = choices.get(chosen).and_then(|(_, path)| path.clone());
             ui_kit::choice_row(ui, tr("ui.scale"), "base_view_scale", &mut self.scale, &SCALES);
             let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr);
             ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "base_view_style", &mut self.style, &styles);

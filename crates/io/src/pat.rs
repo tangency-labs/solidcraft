@@ -8,7 +8,7 @@
 use solidcore_record::Vec2;
 use solidcore_record::profile::line_family::{LineFamily, MAX_DASHES};
 use solidcraft_doc::drawing::hatch::{Invalid, Pattern};
-use solidcraft_kernel::services::profile::MAX_FAMILIES;
+use solidcraft_kernel::hatch::MAX_FAMILIES;
 
 use crate::{IoError, Result};
 

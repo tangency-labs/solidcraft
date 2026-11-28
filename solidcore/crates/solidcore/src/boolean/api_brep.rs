@@ -430,7 +430,7 @@ fn about_circle(
 /// A failure at an "after" site would leave the operand half glued, so a check up front
 /// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
 /// or nesting past the copy bound) means no gluing at all.
-fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
+pub(crate) fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use std::collections::BTreeMap;
 
     use crate::topology::brep::p7::glue_edges_general;
@@ -614,6 +614,8 @@ fn merge_boolean_by(
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
     use crate::boolean::merge::p3::BooleanDriver;
+    // (not upstream) counted, for tests of how many booleans an operation runs
+    k.work_counters.add_boolean();
     // (not upstream: WR-754) the operands' self-touch edge copies glued first
     glue_self_touching_edges(k, &mut brep1)?;
     glue_self_touching_edges(k, &mut brep2)?;

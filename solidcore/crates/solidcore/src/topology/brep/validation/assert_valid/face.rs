@@ -35,7 +35,7 @@ use super::{base, class, geometry_key, seams, Cx};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
 use crate::geom::extent1d::Extent1d;
-use crate::geom::extent2d::SS_NONE;
+use crate::geom::extent2d::{Extent2d, SS_NONE};
 use crate::geom::solution_array::SolutionType;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
@@ -91,6 +91,10 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
         rtn &= base::topology(b, cx, this)?;
     }
 
+    // not upstream: the geometric tests of a face whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::face_clean(k, f);
+
     // locals
     let face_zone_tol = fp2::tolerance(b, f)?;
     let domain = fp2::uv_domain(b, f)?;
@@ -134,11 +138,15 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
             .this_value(b, C, this, 23, ok, 0.0, || UNDEF_DOUBLE)?;
 
         // Get Face->Surface->Poles (if any)
-        let singular = surface.get_singularities(k, true, false)?;
+        let singular = if geo {
+            Some(surface.get_singularities(k, true, false)?)
+        } else {
+            None
+        };
 
         // When the surface has singularities (poles) - they must be marked by vertices
         // or out of the model
-        if singular.singular != SS_NONE {
+        if let Some(singular) = singular.filter(|s| s.singular != SS_NONE) {
             // for every possible pole:[UMinPole, VMinPole, UMaxPole, VMaxPole]
             for pole in singular
                 .pole_points
@@ -187,6 +195,9 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
                 }
                 // count the number of times the vertex connects to this face
                 connections += 1;
+                if !geo {
+                    break;
+                }
                 let mut pc = PointClassification::new(face_zone_tol);
                 // side effect: builds the UV trim curve
                 match tvu::compute_uv_point(k, b, vu, true) {
@@ -241,7 +252,35 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
         rtn &= faceuse(b, cx, fu)?;
     }
 
+    if geo {
+        rtn &= face_shape(k, b, cx, f, &domain, has_surface)?;
+    }
+    // 39: no Vertex may be shared by two Face Loops
+    let ok = !need || assert_test_face39(b, f)?;
+    rtn &= cx.rep.this_bool(b, C, this, 39, ok)?;
+    if geo {
+        rtn &= face_seams(k, b, cx, f, has_surface)?;
+    }
+
+    // all done
+    Ok(rtn)
+}
+
+/// The geometric tests of [`face`] on its shape: degenerate faces (27, 28), coincident
+/// vertices and edges (32-34), the loops' nesting and overlaps (37, 38).
+fn face_shape(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    f: FaceId,
+    domain: &Extent2d,
+    has_surface: bool,
+) -> Result<bool> {
+    let this = EntityRef::Face(f);
+    let mut rtn = true;
+    let need = cx.rep.need(0);
     let face_tol = fp2::tolerance(b, f)?;
+    let domain = *domain;
 
     // 27: Zero Area Face degenerates to a point location
     let ok = !need || {
@@ -277,9 +316,19 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
     // no UVSpace to check - AssertTest 3 reports it
     let ok = !cx.rep.need(2) || !has_surface || seams::assert_test_face38(k, b, f)?;
     rtn &= cx.rep.this_bool(b, C, this, 38, ok)?;
-    // 39: no Vertex may be shared by two Face Loops
-    let ok = !need || assert_test_face39(b, f)?;
-    rtn &= cx.rep.this_bool(b, C, this, 39, ok)?;
+    Ok(rtn)
+}
+
+/// The geometric tests of [`face`] on its seams (29, 31, 36) and its surface's own check.
+fn face_seams(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    f: FaceId,
+    has_surface: bool,
+) -> Result<bool> {
+    let this = EntityRef::Face(f);
+    let mut rtn = true;
 
     // Test = FALSE when pFace->Edges intersects pFace->PeriodicSurface->Seam (run at
     // every level; status ignored)

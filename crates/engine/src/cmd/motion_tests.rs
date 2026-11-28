@@ -817,6 +817,26 @@ fn motion_list_round_trips_key_units_through_motion_study() {
 }
 
 #[test]
+fn automatic_explode_preview_matches_saved_views_at_each_scale() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "__preview", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
+    run(&mut s, "explode.show", json!({"view": "__preview"}));
+    let doc = s.doc.clone();
+    let pending = s.pending_moves.clone();
+    let undo = s.undo.len();
+    let preview = s.prepare_automatic_explode().unwrap();
+    for scale in [0.0, 0.125, 1.0, 2.0] {
+        let mut copy = s.scratch();
+        let saved = run(&mut copy, "explode.create", json!({"scale": scale}));
+        run(&mut copy, "explode.show", json!({"view": saved["view"]}));
+        assert_eq!(preview.placements(scale).unwrap(), copy.pending_moves, "scale {scale}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.pending_moves, pending);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
 fn exploded_views_show_without_changing_the_design() {
     let mut s = rail();
     let before = s.doc.occurrences.clone();
@@ -966,6 +986,12 @@ fn an_animation_has_the_frames_and_the_size_asked_for() {
     let bytes = std::fs::read(&gif).unwrap();
     assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64));
     assert_eq!(gif_frames(&bytes), (64, 40, 6));
+    // 24 and 30 aren't a whole number of hundredths a frame: they play at 24 and 30, not 25 and 33.
+    for fps in [24.0, 30.0] {
+        let p = json!({"study": "Push", "path": gif.to_string_lossy(), "samples": 6, "width": 16, "height": 16, "fps": fps});
+        let r = super::animation::export_with(&s, &p, Some(&cpu)).unwrap();
+        assert_eq!(r["fps"], fps, "{r}");
+    }
     // Without samples: the study's steps + 1.
     let r =
         super::animation::export_with(&s, &json!({"study": "Push", "path": gif.to_string_lossy(), "width": 32, "height": 32}), Some(&cpu)).unwrap();
@@ -1638,4 +1664,194 @@ fn occurrence_centres_use_exact_body_bounds() {
     assert_eq!(c.len(), 2);
     assert!((c[0].1.x - 5.0).abs() < 1e-4);
     assert!((c[1].1.x - 35.0).abs() < 1e-4);
+}
+
+#[test]
+fn motion_play_records_pending_joint_bases_across_steps_contact_and_errors() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": [10], "name": "Rail"}));
+    assert!((b_x(&s) - 20.0).abs() < 1e-6);
+    assert!(s.pending_joint_bases.is_empty());
+    let jid = s.doc.assembly.joints[0].id;
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    // Multi-step play keeps earliest baseline [10.0].
+    run(&mut s, "motion.play", json!({"study": "Push", "step": 25}));
+    run(&mut s, "motion.play", json!({"study": "Push", "step": 50}));
+    assert!((s.doc.assembly.joints[0].values[0] - 2.5).abs() < 1e-6);
+    assert!((b_x(&s) - 12.5).abs() < 1e-6);
+    assert_eq!(s.pending_joint_bases.get(&jid), Some(&(vec![10.0], Vec::new())));
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![10.0]));
+    assert!((s.doc.assembly.joints[0].captured.as_ref().unwrap()[0] - 2.5).abs() < 1e-6);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert!((s.doc.assembly.joints[0].values[0] - 10.0).abs() < 1e-6);
+    assert!((b_x(&s) - 20.0).abs() < 1e-6);
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    assert!((s.doc.assembly.joints[0].values[0] - 2.5).abs() < 1e-6);
+
+    let idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    assert!((s.doc.assembly.joints[0].values[0] - 10.0).abs() < 1e-6);
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert!((s.doc.assembly.joints[0].values[0] - 2.5).abs() < 1e-6);
+
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert!((s.doc.assembly.joints[0].values[0] - 10.0).abs() < 1e-6);
+    assert!((b_x(&s) - 20.0).abs() < 1e-6);
+
+    // With contact_enabled: true, motion.play stops at contact and capture_position -> suppress restores 10.0.
+    run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    let played = run(&mut s, "motion.play", json!({"study": "Push", "step": 100}));
+    assert!(played["stopped_by_contact"].is_object(), "{played}");
+    assert!((b_x(&s) - 10.0).abs() < 2e-3, "{}", b_x(&s));
+    let cp_contact = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![10.0]));
+    run(&mut s, "timeline.suppress", json!({"feature": cp_contact, "suppressed": true}));
+    assert!((s.doc.assembly.joints[0].values[0] - 10.0).abs() < 1e-6);
+    assert!((b_x(&s) - 20.0).abs() < 1e-6);
+    run(&mut s, "timeline.delete", json!({"feature": cp_contact}));
+
+    // Contact-at-start no-op leaves pending_joint_bases empty, and failing motion.play leaves it unchanged.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 0}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert!(s.pending_joint_bases.is_empty());
+    let noop = run(&mut s, "motion.play", json!({"study": "Push", "step": 100}));
+    assert!(noop["stopped_by_contact"].is_object(), "{noop}");
+    assert!(s.pending_joint_bases.is_empty());
+    assert!(s.execute("motion.play", &json!({"study": "Missing", "step": 10})).is_err());
+    assert!(s.pending_joint_bases.is_empty());
+}
+
+#[test]
+fn motion_play_cylindrical_keying_one_dof_preserves_other_dof_expr() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "dist0", "expression": "5 mm"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": [0, "dist0"], "name": "Cyl"}),
+    );
+    run(&mut s, "motion.study", json!({"name": "Spin", "steps": 100, "keys": [{"joint": "Cyl", "index": 0, "points": [[0, 0], [100, 90]]}]}));
+    run(&mut s, "motion.play", json!({"study": "Spin", "step": 50}));
+    assert!((s.doc.assembly.joints[0].values[0] - 45.0_f64.to_radians()).abs() < 1e-6);
+    assert!((s.doc.assembly.joints[0].values[1] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![0.0, 5.0]));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![None, Some("dist0".to_string())]);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert!(s.doc.assembly.joints[0].values[0].abs() < 1e-9);
+    assert!((s.doc.assembly.joints[0].values[1] - 5.0).abs() < 1e-9);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+
+    run(&mut s, "parameters.change", json!({"name": "dist0", "expression": "12 mm"}));
+    assert!((s.doc.assembly.joints[0].values[1] - 12.0).abs() < 1e-9);
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    assert!((s.doc.assembly.joints[0].values[0] - 45.0_f64.to_radians()).abs() < 1e-6);
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert!(s.doc.assembly.joints[0].values[0].abs() < 1e-9);
+    assert!((s.doc.assembly.joints[0].values[1] - 12.0).abs() < 1e-9);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+}
+
+#[test]
+fn motion_play_clears_keyed_dof_expr_and_restores_across_capture_position() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": ["gap"], "name": "Rail"}));
+    run(&mut s, "motion.study", json!({"name": "Slide", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 5], [100, 25]]}]}));
+    run(&mut s, "motion.play", json!({"study": "Slide", "step": 50}));
+    assert!((s.doc.assembly.joints[0].values[0] - 15.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    assert!((b_x(&s) - 25.0).abs() < 1e-6);
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![5.0]));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert!((b_x(&s) - 15.0).abs() < 1e-6);
+
+    let idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    run(&mut s, "timeline.roll_to", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+
+    // Same-value step 0 still clears j.exprs and records base_exprs = [Some("gap")].
+    run(&mut s, "motion.play", json!({"study": "Slide", "step": 0}));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    let cp_same = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    run(&mut s, "timeline.suppress", json!({"feature": cp_same, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+}
+
+#[test]
+fn motion_play_same_value_after_cp1_creates_cp2_and_prevents_expr_resurrection() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": ["gap"], "name": "Rail"}));
+    run(&mut s, "motion.study", json!({"name": "Slide", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 5], [100, 25]]}]}));
+    let _cp_prev = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    // Playing step 0 (same numeric value 5.0) clears "gap"; capture_position {} must create CP_cleared.
+    run(&mut s, "motion.play", json!({"study": "Slide", "step": 0}));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    let cp_cleared = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    // Changing "gap" must NOT resurrect "gap" onto Rail.
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    // Suppressing CP_cleared restores "gap" (20 mm).
+    run(&mut s, "timeline.suppress", json!({"feature": cp_cleared, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert!((s.doc.assembly.joints[0].values[0] - 20.0).abs() < 1e-6);
 }

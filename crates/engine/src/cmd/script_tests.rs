@@ -761,6 +761,25 @@ fn a_standard_part_replays_with_its_seat_joint() {
     same(&mut s, &mut t);
 }
 
+#[test]
+fn a_component_name_split_replays_with_its_authored_properties() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C2600101::Housing", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 4}));
+    run(
+        &mut s,
+        "component.metadata.set",
+        json!({
+            "component": "C2600101::Housing",
+            "properties": {"Num": "manual"},
+            "name_split": {"separator": "::", "left_property": "Num", "right_property": "Name"}
+        }),
+    );
+    let script = script(&mut s);
+    let mut back = replay(&script);
+    same(&mut s, &mut back);
+}
+
 /// A standard part whose builder output someone changed is refused with its
 /// own message per kind of change: the replay would silently replace the
 /// changes with the library's.

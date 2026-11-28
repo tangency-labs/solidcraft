@@ -514,6 +514,10 @@ pub struct FilletParams {
     pub radius: Option<Expr>,
     #[serde(flatten)]
     pub corners: CornerSelection,
+    /// For two parallel lines `a` and `b` that share no end: which end the half circle that joins
+    /// them closes, `start` (default) or `end`, along line `a`'s direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -531,8 +535,13 @@ impl FilletParams {
             Some(_) => Some(expr(p, "radius").ok_or_else(|| format!("`radius` {}", params::expr_problem(p.get("radius"))))?),
         };
         let corners = CornerSelection::read(p)?;
+        let end = match str_(p, "end") {
+            None => None,
+            Some(e @ ("start" | "end")) => Some(e.to_string()),
+            Some(_) => return Err("`end` must be \"start\" or \"end\"".into()),
+        };
         let sketch = sketch_of(p)?;
-        Ok(FilletParams { radius, corners, sketch })
+        Ok(FilletParams { radius, corners, end, sketch })
     }
 }
 

@@ -228,3 +228,221 @@ fn a_bad_option_is_refused_before_the_board_is_read() {
     assert!(s.doc.features.is_empty(), "a refused option left a feature behind");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+fn rewrite_board(path: &std::path::Path, width: f64) {
+    std::fs::write(
+        path,
+        format!(
+            r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 0 0) (end {width} 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1)))"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_opened_board_stays_linked_and_update_links_reads_it_again_with_its_options() {
+    let path = board_file("live-link", 2.0);
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "copper": "mesh", "silkscreen": false, "thickness": 1.0}));
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    let listed = run(&mut s, "component.links", json!({}));
+    let link = &listed["links"][0];
+    assert_eq!(link["component"], json!(component), "{listed}");
+    assert_eq!(link["importer"]["format"], json!("kicad"), "{listed}");
+    assert_eq!(link["changed"], json!(false), "{listed}");
+    let kept = s.doc.links[&component].importer.as_ref().expect("the options are kept").options.clone();
+    assert_eq!(kept["copper"], json!("mesh"), "{kept}");
+    assert_eq!(kept["thickness"], json!(1.0), "{kept}");
+    let unchanged = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(unchanged["unchanged"].as_array().map(Vec::len), Some(1), "{unchanged}");
+
+    // The board file changes: the link says so, and Update Links brings the new board in.
+    rewrite_board(&path, 30.5);
+    let listed = run(&mut s, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], json!(true), "{listed}");
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    // The same options: the overriding 1 mm thickness and the modelled copper, not the file's 2 mm.
+    let got = volume(&mut s);
+    assert!((got - (30.5 * 10.0 * 1.0 + 9.0 * 0.3 * 0.035)).abs() < 1e-3, "{got}");
+    assert_eq!(s.doc.links.keys().copied().collect::<Vec<_>>(), [component], "the component keeps its link");
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == component).count(), 2, "one board feature and its solid, not two of each");
+    let listed = run(&mut s, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], json!(false), "{listed}");
+    let again = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(again["unchanged"].as_array().map(Vec::len), Some(1), "{again}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_board_that_cannot_be_read_again_keeps_its_bodies() {
+    let path = board_file("live-link-broken", 2.0);
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    let before = volume(&mut s);
+    let features = s.doc.features.len();
+    std::fs::write(&path, "(kicad_pcb (general").unwrap();
+    let error = s.execute("component.update_links", &json!({})).unwrap_err();
+    assert!(format!("{error}").contains("board.kicad_pcb"), "{error}");
+    assert_eq!(s.doc.features.len(), features);
+    assert!((volume(&mut s) - before).abs() < 1e-9);
+    assert_eq!(s.doc.links.len(), 1, "the link stays");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The board a caller named to `doc.open` stays one Update Links may read again when the window
+/// takes the opened design over, or accepts the worker's result: its link is looked at, not "not
+/// allowed". (Called directly, not through the window's loop.)
+#[test]
+fn the_board_a_caller_named_stays_allowed_when_the_window_takes_the_design() {
+    let state = |window: &mut Session| {
+        let listed = run(window, "component.links", json!({}));
+        (listed["links"][0]["found"].clone(), listed["links"][0]["state"].clone())
+    };
+    let path = board_file("live-link-window", 2.0);
+
+    // The window takes over a design opened in a scratch session.
+    let mut scratch = Session::default();
+    run(&mut scratch, "doc.open", json!({"path": path.to_string_lossy()}));
+    let mut window = Session::default();
+    window.replace_design(scratch);
+    assert_eq!(state(&mut window), (json!(true), json!(null)));
+
+    // The window accepts the result of a worker that opened it.
+    let mut window = Session::default();
+    let mut worker = window.scratch();
+    run(&mut worker, "doc.open", json!({"path": path.to_string_lossy()}));
+    window.accept_computed(worker).unwrap();
+    assert_eq!(window.doc.links.len(), 1);
+    assert_eq!(state(&mut window), (json!(true), json!(null)));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_board_opened_as_meshes_is_read_again_as_meshes() {
+    let path = board_file("live-link-mesh", 2.0);
+    let mut s = Session::default();
+    let opened = run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "representation": "mesh"}));
+    assert_ne!(opened["board_solid"], json!(true), "{opened}");
+    rewrite_board(&path, 30.5);
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    let component = *s.doc.links.keys().next().unwrap();
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == component).count(), 1, "still no solid board beside the meshes");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Update Links reads a board again with the holes it was opened with.
+#[test]
+fn update_links_keeps_the_holes_a_board_was_opened_with() {
+    let path = board_file("live-link-holes", 2.0);
+    let board = |width: f64| {
+        format!(
+            r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 0 0) (end {width} 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#
+        )
+    };
+    let via = std::f64::consts::PI * 0.3 * 0.3 * 2.0;
+    std::fs::write(&path, board(30.0)).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "holes": "all", "copper": "none", "silkscreen": false}));
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    assert_eq!(s.doc.links[&component].importer.as_ref().unwrap().options["holes"], json!("all"));
+    std::fs::write(&path, board(30.5)).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    let got = volume(&mut s);
+    assert!((got - (30.5 * 10.0 * 2.0 - via)).abs() < 0.01, "the via is still drilled: {got}");
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// A design received from someone else, saved at `design` in `dir`, whose one KiCad link names
+/// the project `x.kicad_pro` beside it: the session never opened the board, so only the trust
+/// checks decide whether Update Links reads it.
+fn received_project_link(dir: &std::path::Path, board: &std::path::Path) -> Session {
+    let mut opener = Session::default();
+    run(&mut opener, "doc.open", json!({"path": board.to_string_lossy()}));
+    let mut s = Session { doc: opener.doc.clone(), path: Some(dir.join("design.sc").to_string_lossy().into_owned()), ..Default::default() };
+    std::fs::write(dir.join("x.kicad_pro"), "{}").unwrap();
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    let link = s.doc_mut().links.get_mut(&component).unwrap();
+    link.path = "x.kicad_pro".into();
+    link.file_sha256 = Some("an older board".into());
+    s
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_project_whose_board_points_outside_the_design_folder_is_refused() {
+    let outside = board_file("live-link-outside", 2.0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-live-link-received-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("x.kicad_pcb")).unwrap();
+    let mut s = received_project_link(&dir, &outside);
+    let features = s.doc.features.len();
+    let before = volume(&mut s);
+    let said = match s.execute("component.update_links", &json!({})) {
+        Ok(out) => out.to_string(),
+        Err(e) => e.to_string(),
+    };
+    assert!(said.contains("not allowed"), "{said}");
+    assert_eq!(s.doc.features.len(), features, "{said}");
+    assert!((volume(&mut s) - before).abs() < 1e-9, "{said}");
+    assert_eq!(s.doc.links.values().next().unwrap().file_sha256.as_deref(), Some("an older board"), "nothing was read");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(outside.parent().unwrap());
+}
+
+#[test]
+fn a_linked_project_reads_the_board_beside_it_again() {
+    let board = board_file("live-link-project", 2.0);
+    let dir = board.parent().unwrap().to_path_buf();
+    let mut s = received_project_link(&dir, &board);
+    std::fs::rename(&board, dir.join("x.kicad_pcb")).unwrap();
+    rewrite_board(&dir.join("x.kicad_pcb"), 30.5);
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    let got = volume(&mut s);
+    // The wider board, 30.5 x 10 x 2 mm, whatever thin copper it carries.
+    assert!((got - 30.5 * 10.0 * 2.0).abs() < 0.5, "{got}");
+    let digest = solidcraft_doc::DesignLink::file_digest(&std::fs::read(dir.join("x.kicad_pcb")).unwrap());
+    assert_eq!(s.doc.links.values().next().unwrap().file_sha256.as_deref(), Some(digest.as_str()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_holes_option_chooses_which_holes_are_drilled() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-holes-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        r#"(kicad_pcb (general (thickness 1))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 2.4) (drill 2) (layers "F.Cu" "B.Cu") (net 1))
+  (footprint "MountingHole:MountingHole_2mm" (layer "F.Cu") (at 15 5)
+    (pad "" np_thru_hole circle (at 0 0) (size 2 2) (drill 2) (layers "*.Cu" "*.Mask"))))"#,
+    )
+    .unwrap();
+    // A 200 mm³ board, less a 2 mm hole (π mm³) for each hole that comes in.
+    let hole = std::f64::consts::PI;
+    for (holes, expected) in [(None, 200.0 - hole), (Some("none"), 200.0), (Some("all"), 200.0 - 2.0 * hole)] {
+        let mut s = Session::default();
+        let mut params = json!({"path": path.to_string_lossy(), "copper": "none", "silkscreen": false});
+        if let Some(holes) = holes {
+            params["holes"] = json!(holes);
+        }
+        run(&mut s, "doc.open", params);
+        let got = volume(&mut s);
+        assert!((got - expected).abs() < 0.05, "{holes:?}: {got} vs {expected}");
+    }
+    let mut s = Session::default();
+    let error = s.execute("doc.open", &json!({"path": path.to_string_lossy(), "holes": "vias"})).unwrap_err();
+    assert!(format!("{error}").contains("holes"), "{error}");
+    let _ = std::fs::remove_dir_all(dir);
+}

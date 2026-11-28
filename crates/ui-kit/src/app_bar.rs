@@ -1362,6 +1362,10 @@ pub struct TabHandles<'a> {
     pub view_new: &'a str,
     pub view_more: &'a str,
     pub switcher: &'a str,
+    /// The chevron after the selected design's +, which folds its sub-tabs or shows them.
+    pub view_collapse: &'a str,
+    /// The mark between the tabs where files dragged over the bar would open.
+    pub file_drop: &'a str,
 }
 
 /// One document tab.
@@ -1381,6 +1385,9 @@ pub struct DocTab<'a> {
     /// small + after its name). Several: the selected design's tab expands to show them (or a
     /// view switcher), and any other design's tab carries a count badge.
     pub views: &'a [ViewTab<'a>],
+    /// Its sub-tabs are folded: selected, with views shown as sub-tabs, it stays a plain tab with
+    /// its name, how many views it has, the +, a chevron that shows them again, and ×.
+    pub collapsed: bool,
 }
 
 /// What a view's sub-tab says about its source.
@@ -1430,6 +1437,9 @@ pub struct ViewText<'a> {
     pub new_view: &'a str,
     pub more: &'a str,
     pub switch_view: &'a str,
+    /// The chevron's name and hover text: it folds the sub-tabs, or shows them again.
+    pub collapse_views: &'a str,
+    pub expand_views: &'a str,
 }
 
 /// The state a design tab's shield shows. The colour carries the state; the tooltip has the words.
@@ -1654,6 +1664,8 @@ pub enum TabAction {
     New,
     /// The selected design's view at this place was chosen, or its close button was.
     SelectView(usize),
+    /// The chevron folds the selected design's sub-tabs into its tab (true) or shows them (false).
+    CollapseViews(bool),
     CloseView(usize),
     ReturnView(usize),
     /// The + was clicked and the strip has no menu for it.
@@ -1949,7 +1961,8 @@ const LAYOUT_BUTTON: f32 = 28.0;
 /// What a pill takes after its views: the + (and the Layout button), the separator and the close.
 fn pill_after(strip: &TabStrip) -> f32 {
     let layout = if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON };
-    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 } + layout
+    let chevron = if has_chevron(strip) { CHEVRON } else { 0.0 };
+    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 } + layout + chevron
 }
 
 fn clear_layout_data<'a>(strip: &'a TabStrip<'_>) -> Option<&'a crate::view_layout_menu::LayoutMenu> {
@@ -1972,7 +1985,47 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
 /// Whether tab `i` is the shown, selected design with a single view: its plain tab carries a
 /// small + after its name, regardless of the preference for sub-tabs or a view switcher.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1) || folded(strip, i)
+}
+
+/// What the chevron that folds the sub-tabs takes, after the +.
+const CHEVRON: f32 = 22.0;
+
+/// Whether the selected design's tab has the chevron that folds its sub-tabs: views shown as
+/// sub-tabs, in the main window's strip.
+fn has_chevron(strip: &TabStrip) -> bool {
+    strip.views_as_tabs && !strip.pop_out
+}
+
+/// Whether tab `i` is the shown, selected design whose sub-tabs are folded into it: a plain tab
+/// with a count badge, its +, and a chevron between the + and ×.
+fn folded(strip: &TabStrip, i: usize) -> bool {
+    has_chevron(strip) && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.collapsed)
+}
+
+/// The chevron in `rect`: the kit's disclosure, open (pointing down) while the sub-tabs show,
+/// which folds them into the design's tab; `collapsed` (pointing right), it shows them again.
+fn collapse_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, collapsed: bool, pen: &mut Pen) {
+    if editing_active(ui.ctx()) {
+        return;
+    }
+    let t = Tokens::get();
+    let label = if collapsed { strip.view_text.expand_views } else { strip.view_text.collapse_views };
+    let resp = ui.interact(rect, ui.scope_id().with("view_collapse"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    ui.ctx().accesskit_node_builder(resp.id, |node| node.set_expanded(!collapsed));
+    solidcraft_ui_registry::publish_target(strip.handles.view_collapse, rect);
+    let hot = resp.hovered() || resp.has_focus();
+    if hot {
+        ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover_button);
+    }
+    if resp.has_focus() {
+        paint_focus(ui.painter(), rect, VIEW_RADIUS);
+    }
+    crate::disclosure::disclosure(ui.painter(), rect.center(), !collapsed, t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.7 }));
+    if resp.backing_on_hover_text(label).clicked() {
+        pen.actions.push(TabAction::CollapseViews(!collapsed));
+    }
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -2154,64 +2207,6 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     for line in glyph_lines(icon) {
         p.add(egui::Shape::line(line.iter().map(|&point| at(point)).collect(), stroke));
     }
-}
-
-/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
-/// The caller supplies a rectangle excluding its menu and window controls.
-pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let painter = painter.with_clip_rect(rect);
-    painter.rect_filled(rect, 0, t.sketch_soft);
-    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let chip_width = (chip.size().x + 16.0).min(rect.width());
-    let leading = (rect.width() - chip_width - 6.0).max(0.0);
-    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
-    if glyph_width > 0.0 {
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
-    }
-    let name_x = rect.left() + glyph_width;
-    let name_width = (leading - glyph_width).max(0.0);
-    let mut after = name_x;
-    if name_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
-        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let name = painter.layout_job(job);
-        after += name.size().x.min(name_width);
-        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
-    }
-    let chip_x = (after + 6.0).min(rect.right() - chip_width);
-    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
-    painter.rect_filled(chip_rect, 9, t.chip);
-    let padding = 8.0_f32.min(chip_width / 2.0);
-    let text_width = (chip_width - 2.0 * padding).max(0.0);
-    if text_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let chip = painter.layout_job(job);
-        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
-    }
-}
-
-/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
-pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
-    let Some(owner) = owner else {
-        paint_sketch_header(painter, rect, name, editing);
-        return;
-    };
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
-    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
-    paint_sketch_header(painter, left, name, editing);
-    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
-    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
-    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
 }
 
 /// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
@@ -2879,6 +2874,9 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let layout_x = close.left() - 20.0 + if strip.pop_out || modern { DESIGN_CLOSE_WIDTH } else { 0.0 };
     let layout = Rect::from_center_size(pos2(layout_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
     let plus_x = if has_layout { layout.left() - 16.0 } else { layout_x };
+    // The chevron that folds the sub-tabs sits right after the +.
+    let chevron = has_chevron(strip).then(|| Rect::from_center_size(pos2(plus_x, cy), vec2(20.0, if modern { 26.0 } else { 24.0 })));
+    let plus_x = plus_x - if chevron.is_some() { CHEVRON } else { 0.0 };
     let plus = Rect::from_center_size(pos2(plus_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
     if modern && has_layout {
         separator(layout.left() - 2.0);
@@ -2982,6 +2980,9 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
         pen.drag = None;
     }
     plus_button(ui, strip, plus, 14.0, pen);
+    if let Some(chevron) = chevron {
+        collapse_button(ui, strip, chevron, false, pen);
+    }
     if has_layout {
         if clear_layout_data(strip).is_some() {
             clear_layout_button(ui, strip, layout, pen);
@@ -3435,6 +3436,40 @@ pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
+/// Where files dragged from outside the window onto the bar would open: the bar's row and the
+/// places between the shown tabs (from the left end of the first to the right end of the last),
+/// each with the place among all the tabs a file dropped there opens at; and the pass it was
+/// drawn in.
+#[derive(Clone, Debug)]
+struct FileDropZone {
+    rect: Rect,
+    gaps: Vec<(f32, usize)>,
+    pass: u64,
+}
+
+impl FileDropZone {
+    /// The place between tabs (or at either end) nearest `p`, when `p` is over the bar.
+    fn place(&self, p: Pos2) -> Option<usize> {
+        if !self.rect.contains(p) {
+            return None;
+        }
+        self.gaps.iter().min_by(|a, b| (a.0 - p.x).abs().total_cmp(&(b.0 - p.x).abs())).map(|(_, at)| *at)
+    }
+}
+
+/// The place among the tabs of the strip that keeps its state at `id` ([`TabStrip::id`]) where
+/// files dropped with the pointer at `pointer` open, as a new tab each (0 before the first tab,
+/// the number of tabs after the last); `None` when the pointer is not over the bar. Read from the
+/// strip as last drawn (this pass or the one before), so an app can take a drop before it draws
+/// the strip, and a strip no longer drawn takes none.
+pub fn file_drop_place(ctx: &egui::Context, id: egui::Id, pointer: Option<Pos2>) -> Option<usize> {
+    let zone = ctx.data(|d| d.get_temp::<FileDropZone>(id.with("file_drop")))?;
+    if zone.pass.saturating_add(1) < ctx.cumulative_pass_nr() {
+        return None;
+    }
+    zone.place(pointer?)
+}
+
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
     tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
 }
@@ -3460,6 +3495,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         .copied()
         .filter(|tab| {
             strip.shown_selected == Some(strip.selected)
+                && !folded(strip, strip.selected)
                 && (tab.views.len() >= min_views
                     || strip.pop_out
                     || strip.view_rename.is_some()
@@ -3471,7 +3507,6 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         });
     let selected = strip.selected;
     let kind_of = |i: usize| geom.as_ref().filter(|_| i == selected).map_or(SelectedLayout::Plain, |g| g.kind);
-    let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - geom.as_ref().map_or(0.0, |g| (g.width - MIN_TAB).max(0.0)));
     let natural: Vec<f32> = strip
         .tabs
         .iter()
@@ -3489,9 +3524,15 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
             let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
             let count = if tab.views.len() > 1 { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-            (text + 40.0 + badge + plus + count).clamp(72.0, MAX_FIT)
+            let chevron = if folded(strip, i) { CHEVRON } else { 0.0 };
+            (text + 40.0 + badge + plus + chevron + count).clamp(72.0, MAX_FIT)
         })
         .collect();
+    // A folded selected design keeps the room its name, count, + and chevron need, as an expanded
+    // one keeps its pill's.
+    let folded_w = folded(strip, selected).then(|| natural.get(selected).copied()).flatten();
+    let reserved = geom.as_ref().map(|g| g.width).or(folded_w).map_or(0.0, |width| (width - MIN_TAB).max(0.0));
+    let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - reserved);
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - new_tab_width;
     let menu_id = strip.id.with("menu");
     let mut menu: Option<(usize, Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
@@ -3515,6 +3556,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         .map(|i| match geom.as_ref() {
             Some(g) if i == strip.selected => g.width,
             _ if fit_all => natural.get(i).copied().unwrap_or(w),
+            _ if i == selected => folded_w.map_or(w, |width| width.max(w)),
             _ => w,
         })
         .collect();
@@ -3568,7 +3610,10 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
+        // A plain tab's × sits inside its drag area; over the × the pointer is the button's arrow.
+        let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
+        let over_close = plain && ui.rect_contains_pointer(xr);
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() && !over_close {
             ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
         }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
@@ -3627,8 +3672,12 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
         let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
         let count = if tab.views.len() > 1 && plain { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-        let (text_x, text_w) =
-            if plain { (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - count).max(10.0)) } else { (tr.left() + 13.0 + dot, name_w - badge) };
+        let chevron = if folded(strip, i) { CHEVRON } else { 0.0 };
+        let (text_x, text_w) = if plain {
+            (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - chevron - count).max(10.0))
+        } else {
+            (tr.left() + 13.0 + dot, name_w - badge)
+        };
         let tip = tab_tip(tab.name, tab.place, text_size.x > text_w);
         let clip = Rect::from_min_size(tr.min, vec2(text_x - tr.left() + text_w, tr.height()));
         match strip.rename.as_mut().filter(|_| active) {
@@ -3643,7 +3692,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         if dot > 0.0 && tab.dirty {
             ui.painter().circle_filled(pos2(tr.left() + 13.0 + 3.5, tr.center().y), 3.5, t.warning);
         }
-        let shield_x = if plain { tr.right() - 31.0 - plus } else { text_x + text_w + 11.0 };
+        let shield_x = if plain { tr.right() - 31.0 - plus - chevron } else { text_x + text_w + 11.0 };
         if let Some(badge) = tab.security {
             let br = Rect::from_center_size(pos2(shield_x, tr.center().y), vec2(14.0, 14.0));
             crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
@@ -3660,11 +3709,15 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 count_badge(ui, at, tab.views.len(), false);
             }
             if plus > 0.0 {
-                let pr = Rect::from_center_size(pos2(tr.right() - 35.0, tr.center().y), vec2(20.0, 20.0));
+                let pr = Rect::from_center_size(pos2(tr.right() - 35.0 - chevron, tr.center().y), vec2(20.0, 20.0));
                 plus_button(ui, strip, pr, 12.0, &mut pen);
             }
+            // Folded sub-tabs: the chevron between the + and × shows them again.
+            if chevron > 0.0 {
+                let cr = Rect::from_center_size(pos2(tr.right() - 35.0, tr.center().y), vec2(20.0, 20.0));
+                collapse_button(ui, strip, cr, true, &mut pen);
+            }
             // ×
-            let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
             let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
             let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
             solidcraft_ui_registry::publish_target(&format!("{}{i}", h.close), xr);
@@ -3700,6 +3753,31 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         }
         None => d.remove::<ViewDrag>(vdrag_id),
     });
+    // Files dragged over the bar from outside the window open there, each as a tab of its own: a
+    // mark shows the place among the tabs they would open at.
+    let mut gaps = Vec::with_capacity(shown + 1);
+    let mut gap = x0;
+    gaps.push((gap, first));
+    for (k, w) in widths.iter().enumerate() {
+        gap += w;
+        gaps.push((gap, first + k + 1));
+    }
+    let zone = FileDropZone { rect: Rect::from_x_y_ranges(x0..=x1.max(x0), r.y_range()), gaps, pass: ui.ctx().cumulative_pass_nr() };
+    let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+    if let Some(gx) =
+        pointer.filter(|_| hovering).and_then(|p| zone.place(p)).and_then(|at| zone.gaps.iter().find(|(_, i)| *i == at)).map(|(x, _)| *x)
+    {
+        // In the 2-point gap a tab leaves at its right.
+        let x = (gx - 1.0).clamp(x0 + 1.0, x1.max(x0 + 1.0));
+        let mark = Rect::from_center_size(pos2(x, r.center().y), vec2(3.0, (r.height() - 6.0).max(3.0)));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, strip.id.with("file_drop_mark")));
+        painter.rect_filled(mark, 1.5, t.accent);
+        for y in [mark.top(), mark.bottom()] {
+            painter.circle_filled(pos2(x, y), 3.5, t.accent);
+        }
+        solidcraft_ui_registry::publish_handle(h.file_drop, mark.center());
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(strip.id.with("file_drop"), zone));
     // In the order they happened: a later choice this frame (the list's, the menu's) wins.
     actions.extend(shut.map(TabAction::Close));
     actions.extend(pick.map(TabAction::Select));

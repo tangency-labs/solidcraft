@@ -250,7 +250,7 @@ impl Indirect {
         // preview), every placement is drawn in full, as each mesh's own draws were.
         let mut out = Indirect { arena, entries, groups, args: None, instances: None, triangles: Vec::new(), batched, on_gpu: false };
         let (instances, args) = out.contents(draws);
-        out.args = Some(super::buffer_init(device, "sc_indirect_args", &args, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST)?);
+        out.args = Some(super::buffer_init(device, "sc_indirect_args", &args, Self::args_usage())?);
         if !instances.is_empty() {
             let usage = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
             out.instances = Some((super::buffer_init(device, "sc_indirect_instances", &instances, usage)?, instances.len() as u64));
@@ -274,6 +274,29 @@ impl Indirect {
     /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
     pub(super) fn culls_on_gpu(&self) -> bool {
         self.on_gpu
+    }
+
+    fn args_usage() -> wgpu::BufferUsages {
+        let base = wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST;
+        if cfg!(test) { base | wgpu::BufferUsages::COPY_SRC } else { base }
+    }
+
+    /// Whether the draw-argument buffer is missing (for example after a refused allocation) and
+    /// needs another [`Self::write`] even when the shown placements did not change.
+    pub(super) fn args_missing(&self) -> bool {
+        self.args.is_none()
+    }
+
+    /// The buffer the draw arguments are drawn from (for tests).
+    #[cfg(test)]
+    pub(super) fn args(&self) -> Option<wgpu::Buffer> {
+        self.args.clone()
+    }
+
+    /// Drop the argument buffer to simulate a refused allocation (for tests).
+    #[cfg(test)]
+    pub(super) fn clear_args(&mut self) {
+        self.args = None;
     }
 
     /// The buffer the placements are drawn from.
@@ -341,16 +364,24 @@ impl Indirect {
     /// Write the placements in view and each entry's arguments ([`Indirect::contents`]): the CPU
     /// culled this frame, so it draws from these again (`on_gpu` off).
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, draws: &[InstancedDraw]) {
+        let was_on_gpu = self.on_gpu;
         self.on_gpu = false;
         let (instances, args) = self.contents(draws);
-        if let Some(buffer) = &self.args {
+        if was_on_gpu || self.args.is_none() {
+            // Leaving a GPU cull (or retrying after a refused allocation): allocate a private
+            // argument buffer instead of writing into the shared GPU-cull buffer.
+            self.args = crate::buffer_init(device, "sc_indirect_args", &args, Self::args_usage()).ok();
+        } else if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
         }
         if instances.is_empty() {
+            if was_on_gpu {
+                self.instances = None;
+            }
             return;
         }
         let need = instances.len() as u64;
-        if self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
+        if was_on_gpu || self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
             // Room to grow, so a camera move that brings a few more placements into view does
             // not make a buffer each frame.
             let size = need.saturating_mul(3) / 2;

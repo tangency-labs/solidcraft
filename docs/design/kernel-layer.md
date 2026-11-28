@@ -1,10 +1,6 @@
 # A swappable kernel layer in SolidCraft
 
-Status: approved by the owner on 2026-11-24 for **phase 1 only**: the seam (§12). Phase 1 is the
-kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel
-only through that interface. No second kernel is planned or being built. The later sections
-describe what the seam must allow, so that the interface is right the first time; they are not
-a plan to add another kernel.
+Status: approved by the owner in full. He approved phase 1, the seam (§12), on 2026-11-24, and on 2026-11-26 every later phase of §12 as well: "I asked for it". Phase 1 is the kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel only through that interface. No second kernel is planned or being built. The later sections describe what the seam must allow, so that the interface is right the first time; they are not a plan to add another kernel.
 
 The owner's brief (2026-11-24):
 
@@ -60,6 +56,7 @@ Decisions the owner has made. The rest of this document follows them; the open q
 | 2026-11-24 | **We write and maintain the solidcore adapter, and only it.** It adapts `solidcore-ops`, solidcore's own API, and lives in SolidCraft. Anyone else writes and maintains their own kernel's adapter to our interface; it must pass our naming gate and an accuracy gate (tolerance equal to or tighter than solidcore's) and appear in the support matrix (§8). |
 | 2026-11-24 | **Run-time selection comes later.** In phase 1, build features alone decide which kernels are compiled in, and solidcore is the only one. The launch-time switch, per-operation routes and hot swap described below are later work. This supersedes the launch-time switch in the compile-time decision above. |
 | 2026-11-24 | **STEP stays in solidcore** (§2, §10). |
+| 2026-11-26 | **Build all of it.** Every later phase of §12 is approved too (steps 6 to 16: smlib onto `solidcore-ops`, the adapter split, sweep and loft in the trait, exchange, measurement, run-time selection and designs recording their kernel). Each step still follows §12's rules. Still no second kernel. |
 
 Contents:
 0. [Decisions](#decisions)
@@ -1101,7 +1098,7 @@ Rules for every step:
 
 The steps that move existing call sites don't change any function that runs.
 
-### Phase 1: the seam (approved, being built)
+### Phase 1: the seam (approved, built)
 
 1. **This document**, docs only.
 2. **`crates/kernel-api`.** The `Backend` trait, `OpKind`, `Support`, `BackendError` and the
@@ -1129,10 +1126,10 @@ The steps that move existing call sites don't change any function that runs.
 Phase 1 ends when every crate but the adapter, geom (step 6) and the shared display crates
 (§13, question 2) reaches solidcore only through `crates/kernel`.
 
-### Later phases (not approved yet)
+### Later phases (approved 2026-11-26)
 
 These finish "solidcore only through ops" and make the seam usable by another kernel's adapter.
-They need the owner's yes before they start.
+The owner approved them on 2026-11-26. Each step follows the rules at the top of this section.
 
 6. **geom's ops and seam uses move up.**
    - Before any move, the missing `solidcore-ops` curve-evaluation entry points go in as their

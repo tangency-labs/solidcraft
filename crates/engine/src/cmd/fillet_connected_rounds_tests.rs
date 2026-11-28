@@ -227,3 +227,63 @@ fn a_refused_fillet_carries_the_kernel_calls_code() {
     let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
     assert_eq!(&row["error_code"], timeline_code, "{row}");
 }
+
+/// #22148: a failure's code carries its class into the timeline JSON. A can (a cylinder of radius
+/// 10, open at its top) shelled thicker than its radius is refused by the operations library
+/// itself, before the kernel builds anything ("the wall is too thick: it leaves no room inside
+/// the body", kind 0, `NoRoom`); solidcore classes only its own errors, so the class is
+/// `unclassed`, in the command's error and in the timeline JSON, in full and in short. (The
+/// kernel's classes reach the code through the same copy: `solidcraft_kernel::failure`'s tests.)
+#[test]
+fn a_failures_class_reaches_the_timeline_json() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name":"wall", "expression":"2 mm"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Can"}));
+    let before = s.doc.as_ref().clone();
+    let e = s.execute("solid.shell", &json!({"faces": [[0, 0, 20]], "thickness": 12})).unwrap_err();
+    let code = e.error_code().cloned().unwrap_or_else(|| panic!("no code: {e}"));
+    assert_eq!((code.kind, code.operation.as_str()), (0, "NoRoom"), "{code}: {e}");
+    assert_eq!(code.class, "unclassed", "{code}: {e}");
+
+    let mut s = Session::new(before);
+    let out = run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": "wall"}));
+    let id = out["feature"].as_u64().unwrap();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert!(inspected["error"].is_null() && inspected.get("error_code").is_none(), "{inspected}");
+    s.execute("parameters.change", &json!({"name":"wall", "expression":"12 mm"})).ok();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert_eq!(inspected["error_code"], json!({"call": code.call, "kind": 0, "operation": "NoRoom", "class": "unclassed"}), "{inspected}");
+    for detail in [json!(true), json!("summary")] {
+        let doc = run(&mut s, "document.inspect", json!({"timeline":detail}));
+        let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
+        assert_eq!(row["error_code"], inspected["error_code"], "{detail}: {row}");
+    }
+    // a kernel class reaches the reply as the code names it, never as `unclassed`
+    for class in ["refusal", "defect", "port_failure"] {
+        let code = solidcraft_kernel::ErrorCode { call: "blend".into(), kind: 6, operation: "blend::op".into(), class: class.into() };
+        let reply = crate::schema::inspect::ErrorCodeReply::from(&code);
+        assert_eq!(json!(reply)["class"], class);
+    }
+}
+
+/// The application checks surface regularity as well as closure. The three-sided end of
+/// this inside round must be a trimmed plane even where its arc is tangent to a side.
+#[test]
+fn inside_round_at_a_pocket_opening_passes_the_face_geometry_check() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":75,"width":75,"height":75,"body_name":"Block"}));
+    let mut edges = Vec::new();
+    for a in [0.0, 75.0] {
+        for b in [0.0, 75.0] {
+            edges.extend([[37.5, a, b], [a, 37.5, b], [a, b, 37.5]]);
+        }
+    }
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":edges,"radius":5}));
+    run(&mut s, "solid.box", json!({"length":65,"width":65,"height":65,"corner":[5,0,5],"body_name":"Pocket"}));
+    run(&mut s, "solid.combine", json!({"target":"Block","tools":["Pocket"],"operation":"cut"}));
+    let measure = |s: &mut Session| run(s, "inspect.measure", json!({"bodies":["Block"]}))["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    let before = measure(&mut s);
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[5,32.5,5]],"radius":2}));
+    let gained = measure(&mut s) - before;
+    assert!((gained - 65.0 * (4.0 - std::f64::consts::PI)).abs() < 1e-5, "{gained}");
+}

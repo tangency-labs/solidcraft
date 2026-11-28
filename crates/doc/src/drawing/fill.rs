@@ -12,7 +12,7 @@ use solidcore_record::profile::line_family::MAX_DASHES;
 use solidcore_record::{Region2, Vec2};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::profile::MAX_FAMILIES;
+use solidcraft_kernel::hatch::MAX_FAMILIES;
 use solidcraft_sketch::{CurveKind, Profile, find_profiles_checked};
 
 use super::hatch::{MAX_DESCRIPTION_CHARS, MAX_NAME_BYTES, Pattern};
@@ -297,7 +297,7 @@ impl Drawing {
                 let point = |id| solved.sketch.point(id).ok_or_else(|| fail("arc references an unknown point"));
                 let (center, start, end) = (point(c)?, point(a)?, point(b)?);
                 if start != end {
-                    let sweep = solidcraft_kernel::services::prism::counterclockwise_sweep(center, start, end)
+                    let sweep = solidcraft_kernel::affine::counterclockwise_sweep(center, start, end)
                         .ok_or_else(|| fail("arc has no finite nonzero radial directions"))?;
                     if sweep <= 1e-12 {
                         return Err(fail("noncoincident arc sweep at or below 1e-12 radians cannot be converted exactly"));

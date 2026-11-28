@@ -624,17 +624,6 @@ fn rust_brep(
     }
 }
 
-/// The replayed model of a case: the Rust B-rep as the op receives it (#18325's
-/// certificates, `tests/issue_18325_moved_rows.rs`); `None` when it does not build.
-///
-/// # Errors
-///
-/// A [`HarnessError`] for inputs that do not parse or a source the harness cannot read.
-pub fn scene(case: &Case) -> Result<Option<Brep>, HarnessError> {
-    let i = case.parse::<Inputs>()?;
-    Ok(rust_brep(&i)?.ok().map(|(b, _)| b))
-}
-
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     // a B-rep value above 1e150 is refused (HANG-29, fuzz case fuzz00086): building a face on such a
     // surface does not return upstream and spins in the port for tens of seconds

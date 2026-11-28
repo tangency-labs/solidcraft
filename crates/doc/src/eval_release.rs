@@ -21,6 +21,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
+/// A noted body's kernel forms together with a witness state known to hold it.
+#[derive(Debug)]
+struct NotedForm {
+    forms: kernel::KernelForms,
+    /// A noted state that holds this solid: while it stays among the model's held states, this
+    /// solid is held without scanning every historical state's bodies. Holding a `Weak` prevents
+    /// allocator address reuse while the witness is checked.
+    witness: Option<Weak<ModelState>>,
+}
+
 /// The bodies of the states evaluated in a cache, to let go of their forms.
 #[derive(Debug, Default)]
 pub(super) struct Noted {
@@ -29,7 +39,7 @@ pub(super) struct Noted {
     states: HashMap<usize, Weak<ModelState>>,
     /// The forms of their bodies, by solid ([`kernel::Body::solid_id`]). They stay noted while
     /// the body lives anywhere, so one that is used again after its forms went is let go again.
-    forms: HashMap<usize, kernel::KernelForms>,
+    forms: HashMap<usize, NotedForm>,
     /// A state was noted since forms were last let go.
     fresh: bool,
     /// Counted up by a noted body that keeps a form after it was let go
@@ -49,19 +59,24 @@ impl Noted {
     fn note<'a>(&mut self, states: impl Iterator<Item = &'a Arc<ModelState>>) {
         for state in states {
             let Entry::Vacant(new) = self.states.entry(Arc::as_ptr(state) as usize) else { continue };
-            new.insert(Arc::downgrade(state));
+            let weak = Arc::downgrade(state);
+            new.insert(weak.clone());
             self.fresh = true;
             for b in &state.bodies {
                 match self.forms.entry(b.body.solid_id()) {
                     Entry::Vacant(forms) => {
-                        forms.insert(b.body.kernel_forms()).tell(&self.made_again);
+                        forms.insert(NotedForm { forms: b.body.kernel_forms(), witness: Some(weak.clone()) }).forms.tell(&self.made_again);
                     }
                     // Another body has the address of one that is gone, or going.
-                    Entry::Occupied(mut forms) if !forms.get().of(&b.body) => {
-                        forms.insert(b.body.kernel_forms());
-                        forms.get().tell(&self.made_again);
+                    Entry::Occupied(mut forms) if !forms.get().forms.of(&b.body) => {
+                        forms.insert(NotedForm { forms: b.body.kernel_forms(), witness: Some(weak.clone()) });
+                        forms.get().forms.tell(&self.made_again);
                     }
-                    Entry::Occupied(_) => {}
+                    Entry::Occupied(mut forms) => {
+                        if forms.get().witness.as_ref().is_none_or(|w| w.strong_count() == 0) {
+                            forms.get_mut().witness = Some(weak.clone());
+                        }
+                    }
                 }
             }
         }
@@ -69,7 +84,7 @@ impl Noted {
         // the states noted have doubled.
         if self.states.len() > self.swept_at.saturating_mul(2).max(4096) {
             self.states.retain(|_, state| state.strong_count() > 0);
-            self.forms.retain(|_, forms| !forms.gone());
+            self.forms.retain(|_, entry| !entry.forms.gone());
             self.swept_at = self.states.len();
         }
     }
@@ -79,7 +94,7 @@ impl Model {
     /// The states this model holds: after every feature, and of the features the history marker
     /// hides ([`Model::rolled_results`]).
     fn held_states(&self) -> impl Iterator<Item = &Arc<ModelState>> {
-        self.results.iter().map(|r| &r.state).chain(self.rolled_results.values().map(|(_, r)| &r.state))
+        self.results.iter().map(|r| &r.state).chain(self.rolled_results.values().map(|(_, _, r)| &r.state))
     }
 
     /// The addresses of the states this model holds, in one order whatever order they are held in.
@@ -109,11 +124,15 @@ impl Model {
     ///
     /// No form is let go and no body looked at unless something happened since the last call:
     /// the model holds other states, a state was noted, or a body that was asked to let its
-    /// forms go made one again. Then the bodies of each state the model holds are looked at,
-    /// state by state (features times bodies), and every noted body once.
+    /// forms go made one again. Each noted solid keeps a witness state known to contain it, so
+    /// when that state is still among the model's held states the solid is proved held in O(1);
+    /// only solids whose witness left the model scan held states to re-verify or release them.
     pub fn release_left(&self) {
         let _span = solidcraft_profile::span("doc", "release");
         let held_now = self.held_now();
+        let shown = self.state();
+        let mut held_addrs: HashSet<usize> = held_now.iter().copied().collect();
+        held_addrs.insert(Arc::as_ptr(&shown) as usize);
         let Ok(mut cache) = self.cache.lock() else { return };
         let noted = &mut cache.noted;
         let made_again = noted.made_again.load(Ordering::Acquire);
@@ -123,16 +142,54 @@ impl Model {
         }
         noted.made_again_seen = made_again;
         noted.released_for = held_now;
-        noted.forms.retain(|_, forms| !forms.gone());
-        let forms: Vec<(usize, kernel::KernelForms)> = noted.forms.iter().map(|(id, forms)| (*id, forms.clone())).collect();
+        noted.forms.retain(|_, entry| !entry.forms.gone());
+        let mut unresolved: HashMap<usize, kernel::KernelForms> = HashMap::new();
+        for (&id, entry) in &mut noted.forms {
+            let live = entry.witness.as_ref().is_some_and(|w| w.strong_count() > 0 && held_addrs.contains(&(Weak::as_ptr(w) as usize)));
+            if !live {
+                if entry.witness.as_ref().is_some_and(|w| w.strong_count() == 0) {
+                    entry.witness = None;
+                }
+                unresolved.insert(id, entry.forms.clone());
+            }
+        }
         cache.release_passes += 1;
         // The forms are let go without the cache's lock: freeing them holds no evaluation up.
         drop(cache);
-        let shown = self.state();
-        let held: HashSet<usize> =
-            self.held_states().chain(std::iter::once(&shown)).flat_map(|s| s.bodies.iter().map(|b| b.body.solid_id())).collect();
-        for (_, forms) in forms.iter().filter(|(id, _)| !held.contains(id)) {
+        if unresolved.is_empty() {
+            return;
+        }
+        let mut found_witnesses: Vec<(usize, Weak<ModelState>)> = Vec::new();
+        for state in std::iter::once(&shown).chain(self.held_states()) {
+            #[cfg(test)]
+            super::cost_tests::count(|c| c.release_states_scanned += 1);
+            for b in &state.bodies {
+                let id = b.body.solid_id();
+                if unresolved.remove(&id).is_some() {
+                    found_witnesses.push((id, Arc::downgrade(state)));
+                    if unresolved.is_empty() {
+                        break;
+                    }
+                }
+            }
+            if unresolved.is_empty() {
+                break;
+            }
+        }
+        for forms in unresolved.into_values() {
             forms.release();
+        }
+        if !found_witnesses.is_empty()
+            && let Ok(mut cache) = self.cache.lock()
+        {
+            for (id, witness) in found_witnesses {
+                if witness.strong_count() > 0
+                    && let Some(entry) = cache.noted.forms.get_mut(&id)
+                    && entry.witness.as_ref().is_none_or(|old| old.strong_count() == 0 || !held_addrs.contains(&(Weak::as_ptr(old) as usize)))
+                {
+                    entry.witness = Some(witness);
+                }
+            }
         }
     }
 }

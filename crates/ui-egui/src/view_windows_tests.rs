@@ -323,3 +323,36 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     assert!(h.app.viewport.context_menu.is_none(), "the pick closes the menu");
     assert!(history_shown(&h), "Find in Timeline brings the History tab to the front");
 }
+
+#[test]
+fn a_macos_pop_out_window_keeps_its_native_frame_in_both_top_bar_modes_and_hides_the_traffic_lights_with_the_bar() {
+    use crate::view_windows::{os_title_bar_is_custom, traffic_lights_hidden};
+    use solidcraft_views::TopBar;
+    // The OS window never changes with the mode, so it is never recreated (round corners, traffic lights).
+    assert!(!os_title_bar_is_custom(true), "macOS keeps its frame and traffic lights");
+    assert!(os_title_bar_is_custom(false), "other systems draw their own caption buttons");
+    // The traffic lights follow an At top edge bar that has slid away; nothing else hides them.
+    assert!(traffic_lights_hidden(true, TopBar::Edge, 0.0));
+    assert!(!traffic_lights_hidden(true, TopBar::Edge, 0.01), "visible as soon as the bar starts to appear");
+    assert!(!traffic_lights_hidden(true, TopBar::Always, 0.0));
+    assert!(!traffic_lights_hidden(false, TopBar::Edge, 0.0));
+}
+
+#[test]
+fn choosing_at_top_edge_in_a_pop_out_window_keeps_it_open_and_its_icons_drawn() {
+    let (mut h, children) = windows(1);
+    let (_, window) = crate::documents::view_window_ids(&h.app)[0];
+    h.app.run("tab.window.set_options", json!({"window": window, "top_bar": "edge"})).unwrap();
+    for _ in 0..8 {
+        frame(&mut h, Vec::new());
+    }
+    assert_eq!(crate::documents::view_window_ids(&h.app).len(), 1, "the window is still open");
+    assert_eq!(SEEN.with(|s| s.borrow().clone()), children, "no other window appeared");
+    // The icon cache every window shares still draws.
+    let mut out = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(16.0, 16.0));
+        crate::icons::paint_ink(ui.painter(), rect, "window_here", egui::Color32::WHITE);
+    });
+    assert!(out.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Mesh(_))), "an icon still paints");
+    out.textures_delta.clear();
+}

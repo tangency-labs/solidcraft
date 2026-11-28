@@ -687,10 +687,10 @@ mod tests {
         assert_eq!(head_counterbore_texts(&opts), Some(("8 mm".to_string(), "4.5 mm".to_string())));
         assert_eq!(head_problem(&opts), None);
         opts.head = 2;
-        opts.clearance_size = "M2".into();
+        opts.clearance_size = "M14".into();
         assert_eq!(head_counterbore_texts(&opts), None);
         let problem = head_problem(&opts).unwrap_or_default();
-        assert!(problem.contains("ISO 7380-1") && problem.contains("M2"), "{problem}");
+        assert!(problem.contains("ISO 7380-1") && problem.contains("M14"), "{problem}");
     }
 
     /// #17728: a countersunk head fills a countersink (Ø and 90°), and each Hole Type sees only
@@ -702,12 +702,31 @@ mod tests {
         let mut opts = HoleOpts { clearance: true, clearance_size: "M6".into(), head: countersunk, ..HoleOpts::default() };
         assert_eq!(head_texts(&opts, 2), Some(("14.44 mm".to_string(), "90 deg".to_string())));
         assert_eq!((head_counterbore_texts(&opts), head_problem(&opts)), (None, None), "not a counterbore's head");
-        opts.clearance_size = "M2".into();
+        opts.clearance_size = "M1.6".into();
         assert_eq!(head_texts(&opts, 2), None);
         let problem = head_problem_for(&opts, 2).unwrap_or_default();
-        assert!(problem.contains("ISO 10642") && problem.contains("M2"), "{problem}");
+        assert!(problem.contains("ISO 10642") && problem.contains("M1.6"), "{problem}");
         opts.head = 1;
         assert_eq!((head_texts(&opts, 2), head_problem_for(&opts, 2)), (None, None), "a socket head gives a countersink nothing");
+    }
+
+    #[test]
+    fn new_clearance_counterbore_follows_the_bolt_size() {
+        crate::i18n::install();
+        let app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut form = crate::dialogs::Dialog::for_command(&app, "solid.hole").unwrap().kind;
+        let ctx = crate::fonts::test_context();
+        let mut counterbore_for = |size: &str| {
+            let Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } = &mut form else { panic!("expected Hole") };
+            *kind = 1;
+            opts.clearance = true;
+            opts.clearance_size = size.into();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| head_row(ui, opts, *kind, cb_diameter, cb_depth));
+            output.textures_delta.clear();
+            (cb_diameter.clone(), cb_depth.clone())
+        };
+        assert_eq!(counterbore_for("M3"), ("6.5 mm".to_string(), "3.5 mm".to_string()));
+        assert_eq!(counterbore_for("M5"), ("9.5 mm".to_string(), "5.5 mm".to_string()));
     }
 
     #[test]

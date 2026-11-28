@@ -64,6 +64,10 @@
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
 //!   arcs' second pass does with knots; and each point section takes the nearest
 //!   circle's arcs and weights (`collapse_point_sections`).
+//! - **Mirrored sections mirrored once.** (WR-21288, not upstream) With mirrored
+//!   approximated arcs of equal radii, the second pass keeps a section that already has
+//!   the most knots as the first pass mirrored it; upstream mirrors it a second time,
+//!   back to the unmirrored arc.
 //! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
 //!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
@@ -3400,18 +3404,23 @@ impl CircularCrossSectionFsg {
                     let num_unique_knots = current.number_of_unique_knots()?;
 
                     // when needed - replace pArc with a new Arc with appropriate number of knots
-                    if num_unique_knots != *max_num_unique_knots {
-                        let max_ctrl_pts = add(*max_num_unique_knots, 2, OP)? as u64;
-                        *slot = Some(BSplineCurve::approximate_arc(
-                            3,
-                            Some(max_ctrl_pts),
-                            &placement,
-                            radius1,
-                            0.0,
-                            angle * 180.0 / PI,
-                            self.tol_percent_radius,
-                        )?);
+                    if num_unique_knots == *max_num_unique_knots {
+                        // Not upstream (WR-21288): a section that already has the most
+                        // knots is kept as the 1st pass made it, mirrored already. Upstream
+                        // mirrors it again below, back to the unmirrored arc; only a
+                        // section built again here is mirrored.
+                        continue;
                     }
+                    let max_ctrl_pts = add(*max_num_unique_knots, 2, OP)? as u64;
+                    *slot = Some(BSplineCurve::approximate_arc(
+                        3,
+                        Some(max_ctrl_pts),
+                        &placement,
+                        radius1,
+                        0.0,
+                        angle * 180.0 / PI,
+                        self.tol_percent_radius,
+                    )?);
                 } else {
                     // on 2nd pass with unequal gapVector radii
                     // Do need to fix knot vector of blend

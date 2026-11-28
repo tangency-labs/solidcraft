@@ -205,6 +205,21 @@ pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
     m
 }
 
+/// Which coordinate frame an occurrence move reads its translation and rotation in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveSpace {
+    #[default]
+    Local,
+    World,
+}
+
+impl MoveSpace {
+    pub fn is_local(&self) -> bool {
+        *self == MoveSpace::Local
+    }
+}
+
 /// A placement of a component inside a parent component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Occurrence {
@@ -216,6 +231,10 @@ pub struct Occurrence {
     pub name: String,
     #[serde(default = "identity")]
     pub transform: Mat,
+    /// Baseline transform before timeline `CapturePosition` features are applied.
+    /// `None` in legacy designs and before any `CapturePosition` applies to this occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_transform: Option<Mat>,
     /// Grounded occurrences don't move.
     #[serde(default)]
     pub grounded: bool,
@@ -227,6 +246,17 @@ pub struct Occurrence {
     /// occurrence follows when they change (oldest first; none in older designs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expressed_moves: Vec<ExpressedMove>,
+}
+
+impl Occurrence {
+    /// Keep `base_transform` consistent when a direct `capture: true` command or joint solve
+    /// moves this occurrence from `old_resolved` to `new_resolved`.
+    pub fn adjust_base_for_direct_move(&mut self, old_resolved: &Mat, new_resolved: &Mat) {
+        if let Some(base) = self.base_transform {
+            self.base_transform =
+                mat_inverse(old_resolved).map(|inv| mat_mul(&base, &mat_mul(&inv, new_resolved))).filter(is_placement).or(Some(*new_resolved));
+        }
+    }
 }
 
 fn identity() -> Mat {
@@ -375,8 +405,7 @@ impl ExpressedMove {
         // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
         // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
         // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
-        let kept = solidcraft_kernel::services::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z])
-            .map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        let kept = solidcraft_kernel::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
         apply_vector(&self.frame, d(now.translate, self.at) + kept)
     }
 
@@ -535,6 +564,9 @@ pub fn map_dir_expr(m: &Mat, d: &mut crate::DirExpr) {
 impl FeatureKind {
     /// Map the feature's world geometry (points, directions, explicit planes) by `m`.
     pub fn transform_geometry(&mut self, m: &Mat) {
+        if matches!(self, FeatureKind::CapturePosition { .. }) {
+            return;
+        }
         use crate::feature_geometry::Geo;
         use crate::walk::Walk;
         self.walk_geometry_mut(&mut |g| match g {
@@ -585,6 +617,42 @@ impl Document {
             .flatten()
             .copied()
             .collect()
+    }
+
+    /// Active component-pattern copies mapped to their seed occurrence id.
+    /// Each copy's placement is owned by its active `FeatureKind::Pattern` feature relative to
+    /// the first placement of its component (`reconcile_component_patterns`).
+    pub fn pattern_occurrence_seeds(&self) -> std::collections::BTreeMap<u64, u64> {
+        if self.occurrences.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+        let marker = self.marker.unwrap_or(self.features.len());
+        let mut by_id = std::collections::HashMap::with_capacity(self.occurrences.len());
+        let mut first_of = std::collections::HashMap::new();
+        for o in &self.occurrences {
+            by_id.insert(o.id, o.component);
+            first_of.entry(o.component).or_insert(o.id);
+        }
+        let mut out = std::collections::BTreeMap::new();
+        for (index, feature) in self.features.iter().enumerate() {
+            if index >= marker || feature.suppressed {
+                continue;
+            }
+            let crate::FeatureKind::Pattern { components, occurrences, .. } = &feature.kind else {
+                continue;
+            };
+            if components.is_empty() {
+                continue;
+            }
+            for &copy_id in occurrences {
+                let Some(&comp) = by_id.get(&copy_id) else { continue };
+                let Some(&seed_id) = first_of.get(&comp) else { continue };
+                if seed_id != copy_id {
+                    out.entry(copy_id).or_insert(seed_id);
+                }
+            }
+        }
+        out
     }
 
     /// Occurrences available at the current history position, in document order.
@@ -775,8 +843,12 @@ impl Document {
         let mut out = Vec::new();
         let owners = self.model_body_components(st);
         let names = WorldNames::new(self, st);
+        let mut by_component: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+        for (b, owner) in st.bodies.iter().zip(&owners) {
+            by_component.entry(*owner).or_default().push(b);
+        }
         for (comp, path, m) in self.placements() {
-            for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
+            for b in by_component.get(&comp).into_iter().flatten().copied() {
                 let name = names.name(&b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
@@ -950,6 +1022,7 @@ impl Document {
             parent,
             name: format!("{cname}:{k}"),
             transform,
+            base_transform: None,
             grounded: false,
             expressed_moves: Vec::new(),
             bom_type: None,
@@ -1024,6 +1097,7 @@ impl Document {
                 parent,
                 name,
                 transform: IDENTITY,
+                base_transform: None,
                 grounded: false,
                 expressed_moves: Vec::new(),
                 bom_type: None,
@@ -1034,7 +1108,7 @@ impl Document {
 }
 
 /// The most occurrences a design holds.
-const MAX_OCCURRENCES: usize = 100_000;
+pub(crate) const MAX_OCCURRENCES: usize = 100_000;
 
 /// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
 /// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000
@@ -1091,6 +1165,218 @@ fn decimal(s: &str) -> Option<usize> {
         return None;
     }
     s.parse().ok()
+}
+
+impl Document {
+    /// Whether this document uses timeline `CapturePosition` features, occurrence `base_transform`s,
+    /// or joint `base_values`.
+    pub fn has_capture_position_timeline(&self) -> bool {
+        self.occurrences.iter().any(|o| o.base_transform.is_some())
+            || self.assembly.joints.iter().any(|j| j.base_values.is_some())
+            || self.features.iter().any(|f| matches!(f.kind, FeatureKind::CapturePosition { .. }))
+    }
+
+    /// Compute the new local transforms for every occurrence moved by one `CapturePosition` step
+    /// without mutating `self` (atomic: if any move fails, nothing changes).
+    pub fn compute_capture_position_step(
+        &self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        moves: &[crate::CapturedOccurrenceMove],
+    ) -> Result<Vec<(usize, Mat)>> {
+        if moves.len() > MAX_PLACEMENTS {
+            return Err(DocError::Invalid("too many captured occurrence moves".into()));
+        }
+        let mut transforms: Vec<Mat> = self.occurrences.iter().map(|o| o.transform).collect();
+        let mut by_id = std::collections::HashMap::with_capacity(self.occurrences.len());
+        let mut first_of = std::collections::HashMap::with_capacity(self.occurrences.len());
+        for (idx, occ) in self.occurrences.iter().enumerate() {
+            by_id.entry(occ.id).or_insert(idx);
+            first_of.entry(occ.component).or_insert(idx);
+        }
+        let mut changed: std::collections::BTreeMap<usize, Mat> = std::collections::BTreeMap::new();
+        for m in moves {
+            let delta = m.eval_delta(vals)?;
+            let Some(&idx) = by_id.get(&m.occurrence) else { continue };
+            let Some(occ) = self.occurrences.get(idx) else { continue };
+            let cur = transforms.get(idx).copied().unwrap_or(IDENTITY);
+            let local_delta = if m.space == MoveSpace::Local || occ.parent == 0 {
+                delta
+            } else {
+                let parent_world = m
+                    .path
+                    .as_deref()
+                    .and_then(|path| path_parent_world(&self.occurrences, &transforms, path, occ.id, occ.parent))
+                    .unwrap_or_else(|| transform_through_slice(occ.parent, &self.occurrences, &transforms, &first_of));
+                let inv = mat_inverse(&parent_world).ok_or_else(|| DocError::Invalid("parent placement is singular".into()))?;
+                mat_mul(&mat_mul(&inv, &delta), &parent_world)
+            };
+            let next = mat_mul(&local_delta, &cur);
+            if !is_placement(&next) {
+                return Err(DocError::Invalid("captured move placement is out of range".into()));
+            }
+            if let Some(slot) = transforms.get_mut(idx) {
+                *slot = next;
+            }
+            changed.insert(idx, next);
+        }
+        Ok(changed.into_iter().collect())
+    }
+
+    /// Apply one `CapturePosition` step to `self.occurrences` atomically.
+    pub fn apply_capture_position_step(
+        &mut self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        moves: &[crate::CapturedOccurrenceMove],
+    ) -> Result<()> {
+        let updates = self.compute_capture_position_step(vals, moves)?;
+        for (idx, next) in updates {
+            if let Some(occ) = self.occurrences.get_mut(idx) {
+                occ.transform = next;
+            }
+        }
+        Ok(())
+    }
+
+    /// Replay `base_transform` plus active (`!suppressed && i < marker`) `CapturePosition` steps in
+    /// timeline order and return `(resolved_occurrence_transforms, resolved_joints)`.
+    pub fn replay_occurrence_transforms(
+        &self,
+    ) -> Result<(std::collections::BTreeMap<u64, Mat>, std::collections::BTreeMap<u64, crate::CapturedJoint>)> {
+        let (vals, _) = self.param_values();
+        let mut working = self.clone();
+        for o in &mut working.occurrences {
+            if let Some(base) = o.base_transform {
+                o.transform = base;
+            }
+        }
+        let mut joints = std::collections::BTreeMap::new();
+        let marker = working.marker.unwrap_or(usize::MAX);
+        for (i, f) in self.features.iter().enumerate() {
+            if i >= marker || f.suppressed {
+                continue;
+            }
+            if let FeatureKind::CapturePosition { moves, joints: step_joints } = &f.kind {
+                working.apply_capture_position_step(&vals, moves)?;
+                for cj in step_joints {
+                    let resolved = eval_captured_joint(&working, &vals, cj)?;
+                    joints.insert(resolved.joint, resolved);
+                }
+            }
+        }
+        let occs = working.occurrences.into_iter().map(|o| (o.id, o.transform)).collect();
+        Ok((occs, joints))
+    }
+}
+
+fn transform_through_slice(component: u64, occurrences: &[Occurrence], transforms: &[Mat], first_of: &std::collections::HashMap<u64, usize>) -> Mat {
+    let mut m = IDENTITY;
+    let mut c = component;
+    for _ in 0..MAX_PLACEMENT_DEPTH {
+        if c == 0 {
+            break;
+        }
+        let Some(&idx) = first_of.get(&c) else { break };
+        let Some(o) = occurrences.get(idx) else { break };
+        let Some(t) = transforms.get(idx) else { break };
+        m = mat_mul(t, &m);
+        c = o.parent;
+    }
+    m
+}
+
+fn path_parent_world(occurrences: &[Occurrence], transforms: &[Mat], path: &[u64], occ_id: u64, occ_parent: u64) -> Option<Mat> {
+    if path.len() > MAX_PLACEMENT_DEPTH + 1 {
+        return None;
+    }
+    let (&last, prefix) = path.split_last()?;
+    if last != occ_id {
+        return None;
+    }
+    let (mut m, mut c) = (IDENTITY, 0);
+    for id in prefix {
+        let (idx, o) = occurrences.iter().enumerate().find(|(_, o)| o.id == *id && o.parent == c)?;
+        let t = transforms.get(idx)?;
+        m = mat_mul(&m, t);
+        c = o.component;
+    }
+    (c == occ_parent).then_some(m)
+}
+
+impl crate::CapturedOccurrenceMove {
+    /// Evaluate this move's rigid delta matrix against `vals`.
+    pub fn eval_delta(&self, vals: &std::collections::BTreeMap<String, crate::expr::Value>) -> Result<Mat> {
+        let t = crate::eval::point(vals, &self.translate)?;
+        if let Some(rot) = self.rotation {
+            if !is_placement(&rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9) {
+                return Err(DocError::Invalid("invalid captured move rotation".into()));
+            }
+            let mut m = rot;
+            m[3] = [t.x, t.y, t.z, 1.0];
+            if !is_placement(&m) {
+                return Err(DocError::Invalid("captured move placement is out of range".into()));
+            }
+            return Ok(m);
+        }
+        let origin = match &self.origin {
+            Some(o) => crate::eval::point(vals, o)?,
+            None => Vec3::ZERO,
+        };
+        let angle = match &self.angle {
+            Some(a) => crate::eval::val(vals, a, crate::expr::Kind::Angle)?,
+            None => 0.0,
+        };
+        if !angle.is_finite() {
+            return Err(DocError::Invalid("captured move angle must be finite".into()));
+        }
+        let axis = match self.rotate_axis {
+            Some([x, y, z]) => {
+                let v = Vec3::new(x, y, z);
+                if !v.is_finite() || (angle != 0.0 && v.x * v.x + v.y * v.y + v.z * v.z == 0.0) {
+                    return Err(DocError::Invalid("captured move rotation axis must be finite and nonzero".into()));
+                }
+                v
+            }
+            None => Vec3::Z,
+        };
+        let m = rigid(t, origin, axis, angle);
+        if !is_placement(&m) {
+            return Err(DocError::Invalid("captured move placement is out of range".into()));
+        }
+        Ok(m)
+    }
+}
+
+/// Evaluate any parameter expressions on a [`crate::CapturedJoint`] against `vals`, updating its
+/// resolved DOF values while leaving non-expressed DOFs unchanged.
+pub fn eval_captured_joint(
+    doc: &Document,
+    vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+    cj: &crate::CapturedJoint,
+) -> Result<crate::CapturedJoint> {
+    let mut out = cj.clone();
+    if !cj.exprs.is_empty()
+        && let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == cj.joint)
+    {
+        let dofs = joint.kind.dofs();
+        for (i, e) in cj.exprs.iter().enumerate().take(dofs.len()) {
+            let Some(e) = e.as_deref() else { continue };
+            let kind = if joint.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
+            let v = crate::eval::val(vals, e, kind)?;
+            if !v.is_finite() || v.abs() >= 1e9 {
+                return Err(DocError::Invalid(format!("captured joint {} expression `{e}` is out of range", joint.name)));
+            }
+            if out.values.len() <= i {
+                out.values.resize(i + 1, 0.0);
+            }
+            if let Some(slot) = out.values.get_mut(i) {
+                *slot = v;
+            }
+        }
+    }
+    if out.values.iter().any(|v| !v.is_finite() || v.abs() >= 1e9) {
+        return Err(DocError::Invalid(format!("captured joint {} value is out of range", cj.joint)));
+    }
+    Ok(out)
 }
 
 /// The names of a design's placed bodies ([`Document::world_body_name`]), with what naming one

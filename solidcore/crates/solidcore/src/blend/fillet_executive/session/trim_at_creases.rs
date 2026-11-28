@@ -50,6 +50,10 @@
 //!   round) is the certified graph over the face's profile
 //!   ([`crate::blend::blend_corner::rollover::geometry::torus_creases`]), within the body's
 //!   tolerance of the torus, not the general intersection.
+//! - **Split imprint edges (not the fork's, #12342).** The fork takes the imprint as the
+//!   edges `MergeCurvesOnSurface` names; a later imprint that splits one of them keeps only
+//!   one piece named. Here every piece of a face's edges along one of its imprint curves is
+//!   the imprint, whichever way the edge runs.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -2572,6 +2576,8 @@ impl FilletSession<'_> {
 
         // 4: the kept sheet's boundary imprinted on the target faces it lies on
         let mut imprinted: BTreeSet<EdgeId> = BTreeSet::new();
+        // each face's imprint curves, with the faces they split it into
+        let mut imprints: Vec<(Vec<FaceId>, Vec<Curve>)> = Vec::new();
         for &f in &target_faces {
             let mut on = Vec::new();
             for &e in &lamina_edges {
@@ -2606,9 +2612,38 @@ impl FilletSession<'_> {
             if on.is_empty() {
                 continue;
             }
-            let (_, on_edges) =
+            let curves = on.clone();
+            let (new_faces, on_edges) =
                 self.with_target_env(k, |k, b, env, _| merge_curves(k, b, env, f, tol, on, None))?;
             imprinted.extend(on_edges);
+            imprints.push(([vec![f], new_faces].concat(), curves));
+        }
+        // not the fork's (#12342): an edge a curve classified to can be split by a later
+        // imprint, on its face or on the face beyond, and only one of its pieces keeps its
+        // edge; which one follows the edge's direction. Every piece of a face's edges along
+        // one of its imprint curves is that imprint, so the trim does not depend on which
+        // way the body's edges run.
+        for (faces, curves) in &imprints {
+            for &g in faces {
+                for e in face::p4::edges(self.objects.target, g, None, false, None)? {
+                    if imprinted.contains(&e) {
+                        continue;
+                    }
+                    let target = &*self.objects.target;
+                    let curve = edge::curve(target, e)?
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
+                    let mid = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
+                    for c in curves {
+                        if matches!(
+                            drop_on(k, c, &c.natural_interval(), mid)?,
+                            Some((_, dist)) if dist <= tol
+                        ) {
+                            imprinted.insert(e);
+                            break;
+                        }
+                    }
+                }
+            }
         }
         // WR-706: the pieces of the body's edges a section's side lies along, cut off at
         // the rails' ends by the imprint

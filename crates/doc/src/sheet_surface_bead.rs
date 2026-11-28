@@ -309,6 +309,11 @@ impl SurfaceSheet {
                     _ => return Ok(Some("a recess")),
                 }
             }
+            for c in self.countersinks.iter().filter(|c| c.panel == b.panel) {
+                if against(&c.outer_loop(), near)? != BeadAgainst::Clear {
+                    return Ok(Some("a countersink"));
+                }
+            }
             Ok(None)
         };
         if let Some(what) = hits(0.0)? {

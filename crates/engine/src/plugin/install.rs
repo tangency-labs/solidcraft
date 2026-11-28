@@ -63,8 +63,8 @@ impl Unpacked {
         let Some(runtime) = &self.manifest.runtime else { return Vec::new() };
         craft_plugin::swatches::check(&runtime.entries, |path| {
             let file = self.files.iter().find(|file| file.path == path).ok_or_else(|| "not found in the package".to_string())?;
-            if file.bytes.len() > craft_plugin::swatches::MAX_BYTES {
-                return Err("file is larger than 64 KiB".into());
+            if file.bytes.len() > craft_plugin::swatches::IMAGE_MAX_BYTES {
+                return Err(format!("file is larger than {} KiB", craft_plugin::swatches::IMAGE_MAX_BYTES / 1024));
             }
             Ok(file.bytes.clone())
         })

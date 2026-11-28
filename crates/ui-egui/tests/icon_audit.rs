@@ -649,10 +649,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.selectOther", json!({"close":true}));
     }
 
-    // Search every command by its full label so results beyond the first page are painted.
+    // Search every command by its full label so results beyond the first page are painted. Search
+    // leaves a script-only command out of a search by name and lists it for its exact id (#9734),
+    // so such a command is searched by its id and its icon is painted too.
     for command in solidcraft_engine::command_specs() {
+        let by_label = solidcraft_ui_egui::shortcut_box::search(&h.app, command.label).iter().any(|row| row.0 == command.id);
         solidcraft_ui_egui::shortcut_box::open(&mut h.app, None);
-        h.app.sbox.text = command.label.to_owned();
+        h.app.sbox.text = if by_label { command.label } else { command.id }.to_owned();
         h.frames(2);
         collect(&mut h, command.id, &mut requested);
         escape(&mut h);
@@ -769,6 +772,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     for (name, source) in [
         ("dimensions and constraints", include_str!("scenarios/s11_sketch_constraints.json")),
         ("corner popup", include_str!("scenarios/sketch_corner_window.json")),
+        ("flange corner cards", include_str!("scenarios/sheet_flange_corner_cards.json")),
         ("sketch palette", include_str!("scenarios/sketch_palette_linetype_icons.json")),
         ("sketch Select Other", include_str!("scenarios/select_other_coincident_lines.json")),
         ("canvas calibration", include_str!("scenarios/s19_canvas_calibrate.json")),

@@ -221,8 +221,8 @@ pub(crate) fn certify_side(
 /// (other direction, and this direction's inner knots) and, for a ruled step, every
 /// control row of `s` (so the step is `s` on `s`'s domain), returning the side's
 /// finding. A knot-removed step moves the rows next to the side, so it is checked by
-/// [`certify_removed`] instead: within `MODEL_TOL` (upstream's removal tolerance) of `s`
-/// on `s`'s domain, an enclosure.
+/// [`certify_removed`] instead: within `MODEL_TOL` (G1R's removal tolerance) of `s` on
+/// `s`'s domain, an enclosure.
 pub(crate) fn certify_step(
     s: &NlSurface,
     e: &NlSurface,
@@ -339,7 +339,9 @@ pub(crate) fn extend_to_certified(
 }
 
 /// A knot-removed step `e` of `s` (the side's knot once less than the degree) agrees with
-/// `s` on `s`'s domain to within `MODEL_TOL`, an enclosure. The side's knot is inserted
+/// `s` on `s`'s domain to within `MODEL_TOL` (G1R's removal tolerance: `srf_adv::p3`'s
+/// ruled extension removes the side's knot once, at `MODEL_TOL`), an enclosure. The
+/// side's knot is inserted
 /// back once (`insert_knot`, giving the ruled step's knots: `s`'s up to `side`, `side`
 /// `p` times), so on `s`'s domain only the rows of `s`'s positions are live, with `s`'s
 /// basis functions there (each span's basis reads `p` knots past it: `side` `p` times in
@@ -351,14 +353,25 @@ pub(crate) fn extend_to_certified(
 /// and `q` columns of it (where `N_i M_j` is nonzero, `S2` is in their convex hull),
 /// `|S1 - S2| <= sum_i max N_i max_j (|dX_ij - P_ij dw_ij| + R_ij |dw_ij|) / w_min`,
 /// `w_min` the least live weight of the reinserted net (a bound of `w1` below) and
-/// `max N_i` bounded above by [`basis_max_bound`]. The insertion's convex combinations
+/// `max N_i` (on the span) bounded above by [`basis_max_bound`], span by span of `s`'s
+/// domain. The insertion's convex combinations
 /// round each component by at most gamma(10) of the larger magnitude of that component in
 /// the two points of `e` they combine (`mx` over the coordinates, `mw` the weight); the
 /// exact reinsertion is the surface of `e`, so each point's term adds
-/// `gamma(10) (sqrt 3 mx + (|P_ij| + R_ij) mw)` and its weight is lowered by
-/// `gamma(10) mw` for `w_min`; each term's own evaluation (with `P` rounded from its homogeneous form) is
-/// widened by gamma(8) of its inputs' magnitudes (`R` the largest `|P|`), and the sum by
-/// gamma(n + 4), `n` the number of rows.
+/// `gamma(10) (sqrt 3 mx + (|P_ij| + R_ij) mw)` (the reinsertion's resolution, bounded
+/// span by span like the terms but on its own) and its weight is lowered by
+/// `gamma(10) mw` for `w_min`. The resolution is relative to the net's magnitude (a
+/// net at 1e9 resolves no finer than about 1e-6, which the kernel's own removal
+/// arithmetic on that net shares), so the step is accepted when the rest of the bound is
+/// within `MODEL_TOL`: `|S1 - S2|` is then within `MODEL_TOL` plus that resolution (a
+/// rounding of the net's magnitude: its largest homogeneous coordinate, or weight times
+/// its largest point, over its least live weight, which a rational net's small weights
+/// enlarge; by construction at most 4 gamma(10) (1 + gamma) of it, about 4.4e-15, and
+/// checked against 1e-13 of it as a consistency check of the bookkeeping). Each term's
+/// own evaluation (with `P` rounded from its homogeneous form) is widened by gamma(8) of
+/// its inputs' magnitudes (`R` the largest `|P|`), and the sum by gamma(n + 4), `n` the
+/// number of rows. The bound is taken span by span ([`removed_bound`]: the live rows and
+/// least live weight of each span of `s`'s domain).
 fn certify_removed(
     s: &NlSurface,
     e: &NlSurface,
@@ -393,8 +406,37 @@ fn certify_removed(
     if mine(kr) != want {
         return Err("reinserted knots are not the ruled step's".into());
     }
-    let (sn, rn, en) = (s.cpts(), r.cpts(), e.cpts());
     let off = if end { 0 } else { p };
+    // (G1R's removal tolerance: its ruled extension removes the side's knot once, at
+    // `MODEL_TOL`), past the resolution of the reinsertion at the net's magnitude
+    let (bound, resolution) = removed_bound(s, &r, udir, off, &e.cpts())?;
+    if bound <= MODEL_TOL {
+        return Ok(());
+    }
+    Err(format!(
+        "knot-removed step off its input by up to {bound:e} > {MODEL_TOL:e} \
+         (past the reinsertion's resolution {resolution:e})"
+    ))
+}
+
+/// The bound of `|S1 - S2|` on `s`'s domain (see [`certify_removed`]) for `s` and `r` on
+/// one basis there, `s`'s row `j` (in the removal direction) `r`'s row `j + off`: the
+/// largest over the spans of that domain of the smaller of two bounds of
+/// `sum_i N_i d_i` (the live rows' `d_i`, each its largest term over the live columns):
+/// `sum_i max N_i d_i`, and `max_i d_i` (the `N_i` sum to one), over the span's least
+/// live weight. Rounding: each reinserted point's own convex combination (`en`, `e`'s
+/// net, `r` its one reinsertion: gamma(10) of its two inputs).
+fn removed_bound(
+    s: &NlSurface,
+    r: &NlSurface,
+    udir: bool,
+    off: usize,
+    en: &[Vec<CPoint>],
+) -> Result<(f64, f64), String> {
+    let (sn, rn) = (s.cpts(), r.cpts());
+    let p = if udir { s.degrees().0 } else { s.degrees().1 };
+    let kr = if udir { r.u_knots() } else { r.v_knots() };
+    let ko = if udir { s.v_knots() } else { s.u_knots() };
     let mut big_r = 0.0_f64;
     for c in sn.iter().flatten() {
         big_r = big_r.max(c.to_euclid().length());
@@ -405,21 +447,22 @@ fn certify_removed(
         .iter()
         .map(|r| r.iter().map(|c| c.to_euclid()).collect())
         .collect();
-    // `d_i` by row index (in the removal direction) of the reinserted net
-    let mut d: Vec<(usize, f64)> = Vec::new();
-    let mut w_min = f64::INFINITY;
+    // `d` and the lowered weight by (row in the removal direction of `r`, column)
+    let mut cells: Vec<(usize, usize, f64, f64, f64)> = Vec::new();
+    // the largest homogeneous coordinate and weight of `e`'s rows the reinsertion combines
+    let (mut mx_hi, mut mw_hi) = (0.0_f64, 0.0_f64);
     for (j, row) in sn.iter().enumerate() {
         for (i, b) in row.iter().enumerate() {
-            let (at, x) = if udir {
-                (j + off, rn.get(j + off).and_then(|r| r.get(i)))
+            let (at, other, x) = if udir {
+                (j + off, i, rn.get(j + off).and_then(|r| r.get(i)))
             } else {
-                (i + off, rn.get(j).and_then(|r| r.get(i + off)))
+                (i + off, j, rn.get(j).and_then(|r| r.get(i + off)))
             };
             let x = *x.ok_or("reinserted net lost a row")?;
             let (hb, hx) = (h(*b), h(x));
             let c = *eu.get(j).and_then(|r| r.get(i)).ok_or("net")?;
             let dw = hx[3] - hb[3];
-            let r = [
+            let rr = [
                 hx[0] - hb[0] - c.x * dw,
                 hx[1] - hb[1] - c.y * dw,
                 hx[2] - hb[2] - c.z * dw,
@@ -455,41 +498,105 @@ fn certify_removed(
                 }
             }
             let (ix, iw) = (gamma(10) * mx, gamma(10) * mw);
-            let di = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt()
+            let di = (rr[0] * rr[0] + rr[1] * rr[1] + rr[2] * rr[2]).sqrt()
                 + rij * dw.abs()
-                + gamma(8) * (mags + big_r * dw.abs())
-                + 3.0_f64.sqrt() * ix
-                + (c.length() + rij) * iw;
-            match d.iter_mut().find(|(k, _)| *k == at) {
-                Some((_, v)) => *v = v.max(di),
-                None => d.push((at, di)),
+                + gamma(8) * (mags + big_r * dw.abs());
+            let ri = 3.0_f64.sqrt() * ix + (c.length() + rij) * iw;
+            (mx_hi, mw_hi) = (mx_hi.max(mx), mw_hi.max(mw));
+            cells.push((at, other, di, ri, hx[3] - iw));
+        }
+    }
+    let n_rows = if udir {
+        sn.len()
+    } else {
+        sn.first().map_or(0, Vec::len)
+    };
+    let (mut worst, mut worst_r) = (0.0_f64, 0.0_f64);
+    let mut spans = 0usize;
+    // spans `k` of `r` (removal direction) whose live rows `k - p ..= k` are all `s`'s,
+    // by spans `l` of the other direction (live columns `l - q ..= l`)
+    for k in p..kr.len().saturating_sub(p + 1) {
+        let (a, b) = (*kr.get(k).ok_or("knot")?, *kr.get(k + 1).ok_or("knot")?);
+        if a.partial_cmp(&b) != Some(std::cmp::Ordering::Less) || k < p + off || k >= off + n_rows {
+            continue;
+        }
+        let maxn: Vec<f64> = (k - p..=k)
+            .map(|i| basis_max_bound(kr, p, i, (a, b)))
+            .collect::<Result<_, _>>()?;
+        for l in q..ko.len().saturating_sub(q + 1) {
+            let (c0, c1) = (*ko.get(l).ok_or("knot")?, *ko.get(l + 1).ok_or("knot")?);
+            if c0.partial_cmp(&c1) != Some(std::cmp::Ordering::Less) {
+                continue;
             }
-            w_min = w_min.min(hx[3] - iw);
+            let live = |x: &&(usize, usize, f64, f64, f64)| {
+                x.0 + p >= k && x.0 <= k && x.1 + q >= l && x.1 <= l
+            };
+            let mut w_min = f64::INFINITY;
+            let (mut by_max, mut by_sum) = (0.0_f64, 0.0_f64);
+            let (mut r_max, mut r_sum) = (0.0_f64, 0.0_f64);
+            for (n, row) in (k - p..=k).enumerate() {
+                let (d, rd) = cells
+                    .iter()
+                    .filter(live)
+                    .filter(|x| x.0 == row)
+                    .fold((0.0_f64, 0.0_f64), |m, x| (m.0.max(x.2), m.1.max(x.3)));
+                let nb = maxn.get(n).copied().unwrap_or(1.0);
+                by_sum += d * nb;
+                by_max = by_max.max(d);
+                r_sum += rd * nb;
+                r_max = r_max.max(rd);
+            }
+            for x in cells.iter().filter(live) {
+                w_min = w_min.min(x.4);
+            }
+            if w_min.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                return Err("a non-positive live weight".into());
+            }
+            spans += 1;
+            worst = worst.max(by_sum.min(by_max) / w_min * (1.0 + gamma(p + 6)));
+            worst_r = worst_r.max(r_sum.min(r_max) / w_min * (1.0 + gamma(p + 6)));
         }
     }
-    let mut num = 0.0_f64;
-    for &(i, di) in &d {
-        if di != 0.0 {
-            num += di * basis_max_bound(kr, p, i)?;
-        }
-    }
-    let den = w_min;
-    let bound = num / den * (1.0 + gamma(d.len() + 4));
-    if !(den > 0.0 && bound <= MODEL_TOL) {
+    // every span of `s`'s domain, in both directions, bounded
+    let distinct = |k: &[f64]| {
+        k.windows(2)
+            .filter(|w| matches!(w, [a, b] if a < b))
+            .count()
+    };
+    let ks = if udir { s.u_knots() } else { s.v_knots() };
+    if spans != distinct(ks) * distinct(ko) {
         return Err(format!(
-            "knot-removed step off its input by up to {bound:e} > {MODEL_TOL:e}"
+            "{spans} spans bounded of the input's {}",
+            distinct(ks) * distinct(ko)
         ));
     }
-    Ok(())
+    if spans == 0 || !worst.is_finite() || !worst_r.is_finite() {
+        return Err("no span of the input's domain bounded".into());
+    }
+    // (rounding relative to the net's magnitude, not a deviation: its largest homogeneous
+    // coordinate, or weight times its largest point, over its least live weight, which
+    // bound every resolution term; a consistency check, the terms being at most
+    // 4 gamma(10) (1 + gamma) of it by construction)
+    let w_lo = cells.iter().fold(f64::INFINITY, |m, x| m.min(x.4));
+    let scale = ((3.0_f64.sqrt() * mx_hi).max(mw_hi * big_r) / w_lo).max(big_r);
+    if worst_r > 1e-13 * scale.max(1.0) {
+        return Err(format!(
+            "the reinsertion's resolution {worst_r:e} is not rounding of a net at {scale:e}"
+        ));
+    }
+    Ok((worst, worst_r))
 }
 
-/// An upper bound of the B-spline basis function `N_i` of degree `p` on `knots`: its
-/// coefficients (the unit vector `e_i`) refined by inserting 31 equally spaced knots into
-/// each nonzero span of its support, whose largest is a bound by the convex hull property
-/// (the refined coefficients are `N_i`'s on the finer knots). Each insertion forms convex
+/// An upper bound of the B-spline basis function `N_i` of degree `p` on `knots` over the
+/// interval `on`: its coefficients (the unit vector `e_i`) refined by inserting 31 equally
+/// spaced knots into each nonzero span of its support, the largest of those whose refined
+/// functions are nonzero somewhere on `on` (on `on`, `N_i` is the sum of those functions
+/// times their coefficients, the functions non-negative and summing to at most one, so
+/// their largest coefficient bounds it; the refined coefficients are `N_i`'s on the finer
+/// knots). Each insertion forms convex
 /// combinations of values in `[0, 1]`, rounding each by at most gamma(3); the bound adds
 /// that for every insertion.
-fn basis_max_bound(knots: &[f64], p: usize, i: usize) -> Result<f64, String> {
+fn basis_max_bound(knots: &[f64], p: usize, i: usize, on: (f64, f64)) -> Result<f64, String> {
     let lo = *knots.get(i).ok_or("basis index")?;
     let hi = *knots.get(i + p + 1).ok_or("basis index")?;
     let mut k: Vec<f64> = knots.to_vec();
@@ -533,7 +640,14 @@ fn basis_max_bound(knots: &[f64], p: usize, i: usize) -> Result<f64, String> {
             inserted += 1;
         }
     }
-    let top = c.iter().fold(0.0_f64, |m, &x| m.max(x));
+    // (the refined coefficients whose functions are nonzero somewhere on `on`)
+    let mut top = 0.0_f64;
+    for (j, &x) in c.iter().enumerate() {
+        let (a, b) = (*k.get(j).ok_or("knot")?, *k.get(j + p + 1).ok_or("knot")?);
+        if a < on.1 && b > on.0 {
+            top = top.max(x);
+        }
+    }
     Ok((top + gamma(3) * inserted as f64).min(1.0))
 }
 
@@ -684,6 +798,43 @@ fn certify_growth(prev: &NlSurface, next: &NlSurface) -> Result<usize, String> {
                 ));
             }
             Err(e) => first = Some(format!("the replay toward ({u}, {v}): {e}")),
+        }
+    }
+    // `extend_from_base`'s own two evaluations, when a direction grows at both ends:
+    // toward the low corner (a side that does not grow at `prev`'s middle), then from that
+    // extension toward the high corner
+    if grew && first.is_none() {
+        let mid = |lo: f64, hi: f64| 0.5 * (lo + hi);
+        let low = (
+            if n.ul < b.ul { n.ul } else { mid(b.ul, b.ur) },
+            if n.vb < b.vb { n.vb } else { mid(b.vb, b.vt) },
+        );
+        let high = (
+            if n.ur > b.ur { n.ur } else { mid(b.ul, b.ur) },
+            if n.vt > b.vt { n.vt } else { mid(b.vb, b.vt) },
+        );
+        let inside = |x: &NlSurface, (u, v): (f64, f64)| {
+            let d = x.parameter_bounds();
+            d.ul <= u && u <= d.ur && d.vb <= v && v <= d.vt
+        };
+        let two = (|| -> Result<(NlSurface, usize), String> {
+            let (x, m0) = if inside(prev, low) {
+                (prev.clone(), 0)
+            } else {
+                replay_unbounded(prev, low.0, low.1)
+                    .map_err(|e| format!("toward the low corner {low:?}: {e}"))?
+            };
+            if inside(&x, high) {
+                return Ok((x, m0));
+            }
+            let (y, m1) = replay_unbounded(&x, high.0, high.1)
+                .map_err(|e| format!("toward the high corner {high:?}: {e}"))?;
+            Ok((y, m0 + m1))
+        })();
+        match two {
+            Ok((x, mixed)) if same_surface(&x, next) => return Ok(mixed),
+            Ok(_) => first = Some("the two-corner replay is not the offset's extension".into()),
+            Err(e) => first = Some(format!("the two-corner replay: {e}")),
         }
     }
     // several evaluations' extensions between two observations: a chain of certified
@@ -873,6 +1024,8 @@ pub(crate) struct ExtensionWatch {
     pub(crate) growths: usize,
     /// Mixed-ratio steps among them (the new row).
     pub(crate) mixed: usize,
+    /// Changes certified as a base extended as itself (`crate::as_itself_cert`).
+    pub(crate) as_itself: usize,
 }
 
 impl ExtensionWatch {
@@ -941,6 +1094,23 @@ impl ExtensionWatch {
                                 certify_growth(&tb, n)
                                     .or_else(|_| certify_growth(&base, &transposed(n)?))
                                     .map_err(|_| e)
+                            })
+                            .or_else(|e| {
+                                // (an offset's base extended as itself: no G1R replay,
+                                // certified from its own net, `crate::as_itself_cert`)
+                                crate::as_itself_cert::certify_as_itself(k, o.base_surface(), n)
+                                    .or_else(|_| {
+                                        crate::as_itself_cert::certify_as_itself(
+                                            k,
+                                            o.base_surface(),
+                                            &transposed(n)?,
+                                        )
+                                    })
+                                    .map(|_| {
+                                        self.as_itself += 1;
+                                        0
+                                    })
+                                    .map_err(|a| format!("{e}; as itself: {a}"))
                             })
                             .map_err(|e| match other {
                                 Some(Err(p)) => {

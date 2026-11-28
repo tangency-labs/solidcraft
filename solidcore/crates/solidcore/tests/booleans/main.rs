@@ -61,10 +61,14 @@ mod issue_1631_caller_keyed_ops_check;
 mod issue_1730_application_attribute_handlers;
 #[path = "../issue_18166_g2_round_cut_by_carried_body.rs"]
 mod issue_18166_g2_round_cut_by_carried_body;
+#[path = "../issue_18211_faceted_sphere_split_work.rs"]
+mod issue_18211_faceted_sphere_split_work;
 #[path = "../issue_2010_plain_brep_copy.rs"]
 mod issue_2010_plain_brep_copy;
 #[path = "../issue_2110_tangent_cylinders_union.rs"]
 mod issue_2110_tangent_cylinders_union;
+#[path = "../issue_21432_boolean_tolerance_cache.rs"]
+mod issue_21432_boolean_tolerance_cache;
 #[path = "../issue_2177_crescent_on_top_of_rim.rs"]
 mod issue_2177_crescent_on_top_of_rim;
 #[path = "../issue_2273_slit_edge_is_topological.rs"]

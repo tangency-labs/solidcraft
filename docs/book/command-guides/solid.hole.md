@@ -63,7 +63,7 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 - **Don't** expect Edit Feature to reopen a clearance hole as Clearance. The hole keeps its diameter, not the bolt size, so it opens as Simple with that diameter. The counterbore keeps its size.
 - **Do** turn off Full thread depth on blind tapped holes and set a Thread depth shorter than the drill Depth, so a standard tap doesn't bottom out.
 - **Do** type the unit with the number when the print is in another unit. In a millimetre design, typing 0.75 in enters 19.05 mm.
-- **Don't** expect every hole to work on sheet metal. Sheet metal holes must go straight into a flat panel; holes into the edge of the sheet, countersinks and drill points are refused there.
+- **Don't** expect every hole to work on sheet metal. Sheet metal holes must go straight into a flat panel (plain, counterbored, countersunk or tapped); drill points and countersinks across bends are refused there.
 
 #### See also
 

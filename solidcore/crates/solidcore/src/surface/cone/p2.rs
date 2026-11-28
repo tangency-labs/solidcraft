@@ -119,7 +119,7 @@ use crate::geom::tol::{approx_tol3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, IsoCurveOptions, LocationType, SurfParamType,
@@ -314,9 +314,19 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -466,9 +476,19 @@ fn iso_arc_from_chord(
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -1600,6 +1620,7 @@ impl Cone {
 
         // (status ignored upstream)
         ignore_status(cylinder.rebuild_cone_polar_converter(k))?;
+        cylinder.sync_sweep_domain_with_polar_curve();
 
         // (status ignored upstream)
         let gen_ivl = Extent1d::from_min_max(bot_knot, top_knot);
@@ -1608,6 +1629,27 @@ impl Cone {
         }
 
         Ok(Some(cylinder))
+    }
+
+    /// Aligns the cone's STEP U domain with the sweep interval finalized by the polar
+    /// converter against the retained NURB, so `SmSurfOfRevolution::Test #7` agrees with
+    /// the polar curve (as `Sphere::keep_tested_nurb_on` does).
+    fn sync_sweep_domain_with_polar_curve(&mut self) {
+        if !self.rev.have_polar_conversion() {
+            return;
+        }
+        let Some(ivl) = self.rev.polar_curve().map(Ellipse::step_interval) else {
+            return;
+        };
+        if ivl.length() > EFF_ZERO
+            && ivl.length() <= 360.0 + EFF_ZERO_DEG
+            && ivl.min() >= -360.0 - EFF_ZERO_DEG
+            && ivl.max() <= 360.0 + EFF_ZERO_DEG
+        {
+            let d = self.rev.anal_uv_domain;
+            self.rev.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
+        }
     }
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
@@ -2101,6 +2143,7 @@ impl Cone {
         // Build newCone PolarConverter from Nurb rotation isoParamCurve (status
         // ignored), then save the gencurve
         ignore_status(self.rebuild_cone_polar_converter(k))?;
+        self.sync_sweep_domain_with_polar_curve();
         self.rev.gen_curve = Some(Curve::from(line));
         Ok(())
     }
@@ -4046,5 +4089,59 @@ mod tests {
         let support =
             AnalyticSupport::of(&crate::surface::surface::Surface::from(cylinder)).unwrap();
         assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+    }
+
+    /// A full or partial cylinder far from the origin whose summed Bézier half-sweeps
+    /// round slightly below 360 degrees still recognises cleanly and passes
+    /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #7`).
+    #[test]
+    fn far_from_origin_cylinder_keeps_matching_polar_curve_domain() {
+        use crate::geom::assert_array::{AssertArray, ObjectKey};
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        let seam = 0.6131_f64;
+        let x = Vec3::new(seam.cos(), seam.sin(), 0.0);
+        let y = Vec3::new(-seam.sin(), seam.cos(), 0.0);
+        for (origin, radius, height, end_ang) in [
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 360.0),
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 200.0),
+            (Point3::new(40.0, 25.0, 10.0), 0.1, 20.0, 360.0),
+            (Point3::new(40.0, 25.0, 10.0), 2500.0, 20.0, 360.0),
+        ] {
+            let mut cyl = Cone::new_cylinder_bounded(
+                origin, x, y, radius, 0.0, end_ang, height, false, false, false,
+            );
+            cyl.make_nurb(&k).unwrap();
+            let nurbs = cyl.rev().base().clone();
+            let found = Cone::is_nurb_surface_cylinder(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a cylinder");
+            let u_ivl = found.rev().step_uv_domain().u_interval();
+            let polar_ivl = found
+                .rev()
+                .polar_curve()
+                .expect("polar curve")
+                .step_interval();
+            assert_eq!(u_ivl, polar_ivl, "{origin:?} r={radius} end={end_ang}");
+            if end_ang == 360.0 {
+                assert_eq!(
+                    u_ivl,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    "{origin:?} r={radius}"
+                );
+            }
+
+            let surface = Surface::from(found);
+            let mut reports = AssertArray::new();
+            let valid = surface
+                .assert_valid(&k, Some(&mut reports), 2, ObjectKey(1))
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(
+                valid && failed.is_empty(),
+                "{origin:?} r={radius} end={end_ang}: {failed:?}"
+            );
+        }
     }
 }

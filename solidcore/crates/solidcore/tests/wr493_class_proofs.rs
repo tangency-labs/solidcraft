@@ -1193,8 +1193,8 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     // (WR-450, #18923: the faces whose recognised analytic is not their B-spline's
     // parameterisation keep an exact copy, so the integrator runs on the file's B-splines
     // there; the row moved by 1 to 6 ulps, at most 7.1e-16 relative, in area, cy, Ix, Pyz,
-    // Pzx and Pxy (the goldens' `fillet_executive_p3` row `source-file-box_w_slot-all-edges`
-    // in `wr450_rows`). The reference checks below hold it as they held main's.)
+    // Pzx and Pxy (the goldens' `fillet_executive_p3` row `source-file-box_w_slot-all-edges`).
+    // The reference checks below hold it as they held main's.)
     let new_row = [
         5.9143900085495815,
         0.6807481066067114,

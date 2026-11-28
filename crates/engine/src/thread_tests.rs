@@ -23,6 +23,159 @@ fn volume(s: &mut Session, b: &str) -> f64 {
     st.body(b).map(|mb| mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().measure().volume).unwrap_or(0.0)
 }
 
+/// Inch fastener threads use the same command path as scripts/MCP, retain their callout and
+/// class, and round-trip the new form. All geometry is synthetic cylindrical stock.
+#[test]
+fn unified_shaft_threads_keep_their_size_class_and_form_after_reopen() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        for (text, major, tpi) in
+            [("1/4-20 UNC-2A", 6.35, 20.0), ("#10-32 UNF", 4.826, 32.0), ("0.25-32 UNEF-3A", 6.35, 32.0), ("3/8-20 UN-1A", 9.525, 20.0)]
+        {
+            let mut s = Session { param_check: check, ..Session::default() };
+            run(&mut s, "solid.cylinder", json!({"radius":major / 2.0,"height":10}));
+            let reply = run(&mut s, "solid.thread", json!({"face":[major / 2.0,0,5],"designation":text}));
+            assert_eq!(reply["thread"]["designation"], text);
+            assert_eq!(reply["thread"]["form"], "unified");
+            let reported = run(&mut s, "model.threads", json!({}));
+            assert_eq!(reported["threads"][0]["form"], "unified");
+            let assert_size = |session: &Session| {
+                let state = session.model.state();
+                let thread = &state.threads[0];
+                assert_eq!(thread.designation, text);
+                assert_eq!(thread.form, ThreadForm::Unified);
+                assert!((thread.major_diameter - major).abs() < 1e-12);
+                assert_eq!(thread.pitch, 25.4 / tpi);
+                assert!(!thread.internal);
+            };
+            assert_size(&s);
+            let saved = s.doc.to_json();
+            let value: Value = serde_json::from_str(&saved).unwrap();
+            assert_eq!(value["features"].as_array().unwrap().last().unwrap()["form"], "unified");
+            assert_size(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
+        }
+    }
+}
+
+/// Before Unified support, an inch callout without a stored form was refused as metric.
+/// Opening it must not opt in; creating or explicitly editing that Thread records Unified.
+#[test]
+fn unified_threads_require_a_saved_form_but_new_and_edited_threads_record_it() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":3.175,"height":10}));
+    let params = json!({"face":[3.175,0,5],"designation":"1/4-20 UNC"});
+    let made = run(&mut s, "solid.thread", params.clone());
+    let feature = made["feature"].as_u64().unwrap();
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(saved["features"].as_array().unwrap().last().unwrap()["form"], "unified");
+    let assert_unified = |session: &Session| {
+        assert!(session.model.results.last().unwrap().error.is_none());
+        let state = session.model.state();
+        assert_eq!(state.threads.len(), 1);
+        assert_eq!(state.threads[0].form, ThreadForm::Unified);
+        assert_eq!(state.threads[0].designation, "1/4-20 UNC");
+        assert_eq!((state.threads[0].major_diameter, state.threads[0].pitch), (6.35, 1.27));
+    };
+    assert_unified(&Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap()));
+
+    // Match the file before this change: no Thread form and no Unified pending-format marker.
+    let mut legacy = saved;
+    legacy["features"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap().remove("form");
+    // A released format names no pending changes, so there is no marker to take out then
+    // (`get_mut`: indexing would add a null `format_pending`, which a file may not have).
+    if let Some(pending) = legacy.get_mut("format_pending").and_then(Value::as_array_mut) {
+        pending.retain(|change| change.as_str() != Some("unified-thread-form"));
+    }
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
+    let error = reopened.model.results.last().unwrap().error.as_deref().unwrap();
+    assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
+    assert!(reopened.model.state().threads.is_empty());
+
+    // Other forms keep their historical inference from a designation with no stored form.
+    let mut trapezoidal = legacy;
+    trapezoidal["features"].as_array_mut().unwrap().last_mut().unwrap()["designation"] = json!("Tr6.35x1");
+    let trapezoidal = Session::new(solidcraft_doc::Document::from_json(&trapezoidal.to_string()).unwrap());
+    assert!(trapezoidal.model.results.last().unwrap().error.is_none());
+    assert_eq!(trapezoidal.model.state().threads[0].form, ThreadForm::Trapezoidal);
+
+    run(&mut reopened, "timeline.redefine", json!({"feature":feature,"command":"solid.thread","params":params}));
+    assert_unified(&reopened);
+    let saved = reopened.doc.to_json();
+    let value: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(value["features"].as_array().unwrap().last().unwrap()["form"], "unified");
+    assert_unified(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
+}
+
+#[test]
+fn unified_thread_takes_a_drilled_hole_and_refuses_the_wrong_side_class() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    // The catalogue's #7 cutting-tap drill for 1/4-20 UNC is 0.201 in = 5.1054 mm.
+    run(&mut s, "solid.hole", json!({"position":[10,10,10],"diameter":5.1054}));
+    let before = s.doc.to_json();
+    for modeled in [false, true] {
+        let error =
+            s.execute("solid.thread", &json!({"face":[12.5527,10,5],"designation":"1/4-20 UNC-2A","modeled":modeled})).unwrap_err().to_string();
+        assert!(error.contains("hole needs 1B, 2B or 3B"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    for designation in ["1/4-20 UNC", "1/4-20 UNC-2B"] {
+        for modeled in [false, true] {
+            let mut trial = Session::new(solidcraft_doc::Document::from_json(&before).unwrap());
+            run(&mut trial, "solid.thread", json!({"face":[12.5527,10,5],"designation":designation,"modeled":modeled}));
+            let state = trial.model.state();
+            if modeled {
+                assert!(state.bodies[0].body.validity().is_empty());
+                // The internal 60° basic groove runs from the #7 pilot to the major radius:
+                // 10/P turns times 2π∫ r w(r) dr, with minor radius d/2 - 5 P √3/16.
+                let pitch = 1.27;
+                let minor = 3.175 - 5.0 * pitch * 3f64.sqrt() / 16.0;
+                let pilot_volume = 4000.0 - PI * (5.1054_f64 / 2.0).powi(2) * 10.0;
+                let removed = 10.0 / pitch * form_turn(pitch, pitch / 4.0, minor, 30.0, 30.0, 5.1054 / 2.0, 3.175, true);
+                let actual = exact_volume(&trial, &state.bodies[0].name);
+                assert!((actual - (pilot_volume - removed)).abs() < removed * 1e-4, "{designation}: {actual}, removed {removed}");
+            } else {
+                assert_eq!(state.threads[0].designation, designation);
+                assert_eq!(state.threads[0].pitch, 1.27);
+                assert!(state.threads[0].internal);
+            }
+        }
+    }
+}
+
+#[test]
+fn unified_threads_refuse_mismatched_shafts_and_suggest_a_catalogued_size() {
+    for modeled in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":5,"height":10}));
+        let before = s.doc.to_json();
+        let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"1/4-20 UNC","modeled":modeled})).unwrap_err().to_string();
+        assert!(error.contains("does not fit a 10.00 mm shaft") && error.contains("this shaft takes 3/8-16 UNC"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"3/8-16 UNC-2B","modeled":modeled})).unwrap_err().to_string();
+        assert!(error.contains("class 2B") && error.contains("shaft needs 1A, 2A or 3A"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn automatic_thread_sizing_stays_metric_until_unified_is_selected() {
+    for (form, designation, major, pitch) in [(None, "M6", 6.0, 1.0), (Some("metric"), "M6", 6.0, 1.0), (Some("unified"), "1/4-20 UNC", 6.35, 1.27)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":3.175,"height":10}));
+        let mut params = json!({"face":[3.175,0,5]});
+        if let Some(form) = form {
+            params["form"] = json!(form);
+        }
+        run(&mut s, "solid.thread", params);
+        let state = s.model.state();
+        let thread = &state.threads[0];
+        assert_eq!(thread.designation, designation);
+        assert_eq!((thread.major_diameter, thread.pitch), (major, pitch));
+    }
+}
+
 const SIZES: [(f64, f64); 9] = [(3.0, 0.5), (4.0, 0.7), (5.0, 0.8), (6.0, 1.0), (8.0, 1.25), (10.0, 1.5), (12.0, 1.75), (16.0, 2.0), (20.0, 2.5)];
 
 fn assert_tapped_depth(state: &solidcraft_doc::ModelState, entry: Vec3, inward: Vec3, offset: f64, depth: f64) {
@@ -825,6 +978,8 @@ fn every_form_cuts_its_standard_profile() {
     let t3 = 3f64.to_radians().tan() + 30f64.to_radians().tan();
     let t7 = 7f64.to_radians().tan() + 1.0;
     let cases = [
+        ("unified", "1/4-20 UNC-2A", 6.35, 1.27, 1.27 / 8.0, (30.0, 30.0), 3.175 - 5.0 * 1.27 * 3f64.sqrt() / 16.0),
+        ("unified", "#10-32 UNF", 4.826, inch / 32.0, inch / 256.0, (30.0, 30.0), 2.413 - 5.0 * (inch / 32.0) * 3f64.sqrt() / 16.0),
         ("trapezoidal", "Tr20x4", 20.0, 4.0, 2.0 * (1.0 - 15f64.to_radians().tan()), (15.0, 15.0), 10.0 - 2.0 - tr_ac),
         (
             "acme",

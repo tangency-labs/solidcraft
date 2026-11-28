@@ -21,10 +21,13 @@
 //!   `1.0`, so it always yields a root unless `zero_tol > 1`; then upstream reads an
 //!   uninitialised `adCSol[0]` (undefined behaviour). The port uses `0.0` there
 //!   (see `plan/findings.md`, `geom.polynomial`).
+//! - A negative cubic discriminant can be small even at three distinct crossings.
+//!   Keep all three when the two extrema straddle zero beyond the zero tolerance.
 //! - The `SM_DEBUG_CODE` self-checks (disabled upstream) are not ported.
 
 use core::ops::Deref;
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::geom::vector3d::{acos, cbrt, sqrt};
 use crate::math::{EFF_ZERO_SQRT, PI};
 
@@ -123,6 +126,22 @@ pub fn solve_quadratic(coefficients: &[f64; 3], zero_tol: f64) -> Roots {
     roots
 }
 
+/// Opposite signs at the two turning points prove three distinct real roots.
+fn three_cubic_crossings(coefficients: &[f64; 4], center: f64, radius: f64, zero_tol: f64) -> bool {
+    let leading = coefficients[3];
+    let [c0, c1, c2, c3] = coefficients.map(|c| Ivl::from(c * leading.signum()));
+    let value = |x: f64| {
+        let x = Ivl::from(x);
+        ((c3 * x + c2) * x + c1) * x + c0
+    };
+    // The depressed monic cubic has extremal values 2(q ± sqrt(-p^3)).
+    // Test its half-heights against zero_tol in the original coefficient scale.
+    // Enclosing the original polynomial avoids splitting a translated double root
+    // when cancellation in p or q perturbs the discriminant.
+    let band = (Ivl::from(2.0 * zero_tol) * c3).hi;
+    value(center - radius).lo > band && value(center + radius).hi < -band
+}
+
 /// Solves `A x^3 + B x^2 + C x + D = 0` with `coefficients = [D, C, B, A]`.
 ///
 /// Falls back to [`solve_quadratic`] when `|A| < zero_tol`. Multiple roots are
@@ -146,7 +165,10 @@ pub fn solve_cubic(coefficients: &[f64; 4], zero_tol: f64) -> Roots {
     let d = q * q + cb_p;
 
     let mut roots = Roots::new();
-    if d.abs() < zero_tol {
+    // The product of the extremal half-heights can be small even when neither is near zero.
+    let near_multiple = d.abs() < zero_tol
+        && !(d < 0.0 && three_cubic_crossings(coefficients, -a / 3.0, sqrt(-p), zero_tol));
+    if near_multiple {
         if q.abs() < zero_tol {
             // One triple root.
             roots.push(0.0);
@@ -329,6 +351,14 @@ mod tests {
     }
 
     #[test]
+    fn shifting_a_cubic_with_a_double_root_does_not_split_it() {
+        // (x - 20.25)^2 (x - 20.4375) has exact binary coefficients.
+        let coefficients = [-2145447.0 / 256.0, 39609.0 / 32.0, -975.0 / 16.0, 1.0];
+        let actual = sorted(&solve_cubic(&coefficients, EFF_ZERO));
+        assert!(close(&actual, &[20.25, 20.4375], 1e-9), "{actual:?}");
+    }
+
+    #[test]
     fn cubic_falls_back_to_quadratic() {
         let r = solve_cubic(&[2.0, 3.0, 1.0, 0.0], EFF_ZERO);
         assert!(close(&sorted(&r), &[-2.0, -1.0], 1e-12));
@@ -344,6 +374,21 @@ mod tests {
         assert_eq!(r.len(), 2);
         let r = solve_quartic(&[1.0, 0.0, -2.0, 0.0, 1.0], EFF_ZERO);
         assert!(close(&sorted(&r), &[-1.0, 1.0], 1e-9));
+    }
+
+    #[test]
+    fn quartic_resolves_three_nearby_simple_roots() {
+        // (x + 11/16)(x - 1/128)(x - 1/32)(x - 3/64), with exact binary coefficients.
+        let expected = [-11.0 / 16.0, 1.0 / 128.0, 1.0 / 32.0, 3.0 / 64.0];
+        let coefficients = [
+            -33.0 / 4194304.0,
+            371.0 / 262144.0,
+            -467.0 / 8192.0,
+            77.0 / 128.0,
+            1.0,
+        ];
+        let actual = sorted(&solve_quartic(&coefficients, EFF_ZERO));
+        assert!(close(&actual, &expected, 1e-10), "{actual:?}");
     }
 
     #[test]

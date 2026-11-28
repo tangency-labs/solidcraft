@@ -35,7 +35,7 @@ knows the current format: all translation lives in the steps.
 | `container::Writer` | A ZIP container being written: `part`, `blob` (content-addressed, `blobs/<sha256>.<ext>`), `room`/`space` for optional caches, `finish` |
 | `container::Reader` | One being read over a seekable source, its directory checked on opening: `document`, `limited_part`, `blob`, `limited_blob`, `has_part`, `part_names`, `hydrated` |
 | `container::Limits` | The app's budgets: entries, expanded size, per-part limits, Deflate level, file size |
-| `container::Compression`, `container::Thumbnail`, `container::digest`, `container::is_container` | Fast or compact payloads; a PNG picture keyed to its file; the SHA-256 name of bytes; the ZIP signature |
+| `container::Compression`, `container::Thumbnail`, `container::digest`, `container::is_container` | Fast or compact payloads; a PNG picture keyed to its file's content; the SHA-256 name of bytes; the ZIP signature |
 
 ## Registering a family
 

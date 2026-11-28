@@ -54,6 +54,11 @@ macro_rules! tools_preferences {
             /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
             /// (`hole_place`). Off by default: a hole goes where it is clicked.
             hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
+            /// In Fillet and Chamfer the edges a click would take are drawn thin in `hover_edge_lit`
+            /// (orange in Light and Dark): the edge under the pointer, or the edges of the face under it.
+            /// Off (the default): the edge or face is lit as everywhere else. Switched in the tool's
+            /// Options section, never in Preferences; remembered between uses.
+            hover_edge_lit: bool = false, PAGE_TOOLS;
             /// Degrees per step near the assembly Move ring.
             joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
             /// Degrees per step after pulling the cursor outside the precision guide.
@@ -65,6 +70,10 @@ macro_rules! tools_preferences {
             /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
             /// highlight follows (`drag_layer::holds_pointer`).
             move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
+            /// A new Extrude, Revolve, Loft, Sweep or primitive (Box, Cylinder, ...) opens in New Body and
+            /// keeps it, as if New Body were picked by hand: `auto_operation` doesn't choose for it (#19870).
+            /// Off by default: the window opens and chooses as before. Editing a feature keeps its operation.
+            new_body_default: bool = false, PAGE_TOOLS => check_id("prefs.new_body_default");
             /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
             /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
             /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is

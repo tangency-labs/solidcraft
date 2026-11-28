@@ -107,7 +107,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET_CONTRACT)
         .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. view_letters_reuse?: whether a deleted view's letter is given again (true, the default) or never (false). One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
-        "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
+        "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description, material, finish and license, each its text or null. The design properties' rules (document.metadata).",
     ),
     CommandSpec::new("drawing.properties.set", "Change Drawing Properties", properties_set).in_drawing().icon("settings").doc_only().params(
         "key and value, or values: {key: value, …} (all or nothing, one undo step), as document.metadata.set takes them → metadata, changed: [keys]",

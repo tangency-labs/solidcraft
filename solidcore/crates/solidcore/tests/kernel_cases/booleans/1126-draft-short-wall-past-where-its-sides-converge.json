@@ -1,0 +1,222 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                15.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                -15.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                15.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                5.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -15.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                -5.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "draft",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "angle": 0.5235987755982988,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              -1.6666666666666672,
+              10.0,
+              13.333333333333332
+            ]
+          ],
+          "tolerance": 0.03741757386773942
+        },
+        "neutral_normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "neutral_origin": [
+          0.0,
+          0.0,
+          20.0
+        ],
+        "pull": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "1126-draft-short-wall-past-where-its-sides-converge",
+  "expected": {
+    "bbox": {
+      "max": [
+        15,
+        15,
+        20
+      ],
+      "min": [
+        -15,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "edges": 12,
+    "faces": 6,
+    "method": "t = tan 30 deg; at depth d = 20 - z the wall stands at y = min(10 + d t, 15) = Y and the section is 30 Y - Y^2; V = (1/t) [15 Y^2 - Y^3/3] from 10 to 15 + (20 - 5/t) 225 = 4500 - 125/(3 t) = 4500 - 125 sqrt(3)/3; the sides now meet along a new edge on x = 0, y = 15 from z = 0 up to z = 20 - 5/t, so still 6 faces, 12 edges, 8 vertices",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1126"
+    ],
+    "vertices": 8,
+    "volume_mm3": 4427.8312163512965,
+    "what": "a trapezoid prism (sides x = +-(15 - y), which would meet on the line x = 0, y = 15) with its short wall at y = 10 drafted 30 deg about the top: past tan = 1/4 the wall's bottom edge closes and the wall ends in a point on that line"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "1126-draft-short-wall-past-where-its-sides-converge.bodies.json.gz",
+  "result": [
+    {
+      "body": "Prism",
+      "made": "b5"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1862.2908938542782,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 4427.8312163512965
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1126"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "tagged",
+    "draft"
+  ],
+  "ungraded": [],
+  "what": "a trapezoid prism (sides x = +-(15 - y), which would meet on the line x = 0, y = 15) with its short wall at y = 10 drafted 30 deg about the top: past tan = 1/4 the wall's bottom edge closes and the wall ends in a point on that line",
+  "why_not": []
+}

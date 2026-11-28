@@ -146,7 +146,8 @@ pub enum Error {
         found: usize,
     },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
-    /// is missing, and the solidcore issue that ports it.
+    /// is missing, and the solidcore issue that ports it; or what solidcore cannot build yet, in
+    /// its words (solidcore-ops' `Unsupported`, a blend corner of a kind it has no patch for).
     Unported(&'static str),
     /// The work's token was stopped ([`stop::Stop::stop`]) before or during the call: no result,
     /// even one solidcore finished first. Never a failure of the operation on its input.
@@ -295,6 +296,22 @@ pub fn hold_a_kernel() -> core::HeldKernel {
 pub fn in_call() -> bool {
     core::in_call()
 }
+
+/// Every pooled kernel's profile (solidcore's `profile` feature), written as JSON Lines: the
+/// scopes and counted work of its calls so far (feature `solidcore-profile`).
+///
+/// # Errors
+///
+/// Those of writing to `w`.
+#[cfg(feature = "solidcore-profile")]
+pub fn write_kernel_profiles(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    core::write_kernel_profiles(w)
+}
+
+/// [`solidcore_ops::session::profiled`], re-exported so the applications can dump each
+/// solidcore-ops call's kernel profile (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcore_ops::session::profiled;
 
 /// A panic inside a solidcore call, which the call catches as it catches any
 /// ([`Error::Internal`], the kernel replaced by a fresh one): the crash-report check

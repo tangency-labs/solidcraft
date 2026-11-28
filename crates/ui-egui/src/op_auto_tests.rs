@@ -101,6 +101,34 @@ fn with_the_preference_off_the_window_keeps_its_operation() {
 }
 
 #[test]
+fn with_new_body_by_default_the_window_opens_and_stays_in_new_body() {
+    assert!(!serde_json::from_value::<crate::prefs::Prefs>(json!({})).unwrap().new_body_default, "off for saved settings without it");
+    // An extrude touching the cube would join, and a sphere inside it would cut.
+    let mut h = cube();
+    h.app.preferences.new_body_default = true;
+    rect_sketch(&mut h, [10.0, 0.0], [20.0, 10.0]);
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.frames(3);
+    assert!(!h.app.op_check.busy(), "no check runs");
+    assert_eq!(op(&mut h), NEW);
+    ok(&mut h);
+    assert_eq!(bodies(&h).len(), 2, "the touching extrude is a body of its own");
+    let mut h = cube();
+    h.app.preferences.new_body_default = true;
+    h.step(&json!({"start": "solid.sphere"})).unwrap();
+    if let Some(Kind::Primitive { fields, at, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        fields.iter_mut().for_each(|(_, v)| *v = "4 mm".into());
+        *at = Some((Vec3::new(5.0, 5.0, 5.0), Some(Vec3::Z)));
+    }
+    h.frames(3);
+    assert_eq!(op(&mut h), NEW, "the sphere inside the cube stays a new body");
+    // Picked by hand, another operation is the window's.
+    pick(&mut h, JOIN);
+    h.frames(2);
+    assert_eq!(op(&mut h), JOIN);
+}
+
+#[test]
 fn closing_the_window_stops_its_check() {
     // A larger body, so the check is still running when the window closes.
     let mut h = Harness::new();
@@ -214,6 +242,56 @@ fn hidden_bodies_take_no_part() {
     assert_eq!(op(&mut h), NEW);
 }
 
+/// Pipe and Thicken don't choose their operation, yet a Cut from their windows leaves a hidden
+/// body alone too: two 20 mm boxes, the second hidden, a path through both at half height.
+#[test]
+fn a_pipe_or_thicken_cut_from_its_window_leaves_hidden_bodies_alone() {
+    let volume = |h: &Harness, name: &str| {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        st.body(name).and_then(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume)
+    };
+    let mut found = Vec::new();
+    for tool in ["solid.pipe", "surface.thicken"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "body_name": "B"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "Mid"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[-10, 10], [70, 10]], "ids": ["path"]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut sels = vec![solidcraft_engine::Sel::SketchCurve { id: "path".into(), sketch: None }];
+        if tool == "surface.thicken" {
+            h.app.run("surface.extrude", json!({"curves": ["path"], "distance": 4, "body_name": "Sheet"})).unwrap();
+            sels = vec![solidcraft_engine::Sel::Body { name: "Sheet".into() }];
+        }
+        h.app.run("browser.visibility", json!({"items": ["B"], "visible": false})).unwrap();
+        h.app.session.selection = sels;
+        h.app.start(tool);
+        let Some(mut d) = h.app.dialog.clone() else { panic!("{tool}: no window") };
+        match &mut d.kind {
+            Kind::Pipe { diameter, operation, .. } => (*diameter, *operation) = ("6 mm".into(), CUT),
+            Kind::Surface(crate::dialogs_surface::Surf::Thicken { thickness, operation, .. }) => (*thickness, *operation) = ("2 mm".into(), CUT),
+            other => panic!("{tool}: {other:?}"),
+        }
+        for (cmd, p) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+            h.app.run(&cmd, p).unwrap();
+        }
+        // Editing it keeps the shown box as its only target.
+        let id = h.app.session.doc.features.last().map(|f| f.id);
+        let edit = id.and_then(|id| crate::dialogs::for_feature(&h.app, id, None)).and_then(|d| crate::dialogs::apply_commands(&h.app, &d).ok());
+        let kept = edit.as_ref().and_then(|c| c.first()).map(|(_, p)| p["params"]["targets"].clone());
+        found.push((tool, volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default(), kept));
+    }
+    // Pipe: 6 mm across 20 mm takes 180π (565.49 mm3); Thicken: 20 x 4 x 2 takes 160 mm3.
+    for (tool, a, b, kept) in &found {
+        let cut = if *tool == "solid.pipe" { 180.0 * std::f64::consts::PI } else { 160.0 };
+        assert!(
+            (a - (8000.0 - cut)).abs() < 1.0 && (b - 8000.0).abs() < 1e-6 && *kept == Some(json!(["A"])),
+            "the shown box A is cut, the hidden B untouched, an edit keeps A as the target: {found:?}"
+        );
+    }
+}
+
 #[test]
 fn into_a_hidden_body_with_nothing_shown_is_a_new_body_until_it_is_shown() {
     // The profile on the hidden cube's base, extruded into it (#9919).
@@ -245,4 +323,118 @@ fn an_edited_feature_keeps_its_operation() {
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Apart"}})).unwrap();
     checked(&mut h);
     assert_eq!(op(&mut h), JOIN, "the saved Join stays");
+}
+
+/// Two 10 mm cubes that a 4 mm box window set to Cut reaches: `A` in the root component and `B` in
+/// `Plate` (#20647). With `plate` false both are in the root.
+fn two_cubes(plate: bool) -> Harness {
+    let mut h = Harness::new();
+    if plate {
+        h.app.run("component.create", json!({"name": "Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, -5], "body_name": "B", "operation": "new"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+    } else {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, -5], "body_name": "B", "operation": "new"})).unwrap();
+    }
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, 1], "body_name": "A", "operation": "new"})).unwrap();
+    h.app.start("solid.box");
+    h.frames(2);
+    if let Some(d) = h.app.dialog.as_mut()
+        && let Kind::Primitive { fields, operation, .. } = &mut d.kind
+    {
+        for (_, value) in fields.iter_mut() {
+            *value = "4".into();
+        }
+        *operation = CUT;
+        d.op_auto.manual = true;
+    }
+    h.frames(2);
+    h
+}
+
+fn cut_volume(h: &Harness, body: &str) -> f64 {
+    h.app.session.world_state().unwrap().body(body).unwrap().measure().unwrap().volume
+}
+
+/// Runs the window's commands and returns the first one's parameters.
+fn run_window(h: &mut Harness) -> serde_json::Value {
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let (cmd, p) = commands.first().cloned().unwrap();
+    h.app.run(&cmd, p.clone()).unwrap();
+    p
+}
+
+#[test]
+fn a_cut_across_two_components_cuts_every_ticked_body() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A", "B"]));
+    }
+    let p = run_window(&mut h);
+    let mut targets: Vec<&str> = p["targets"].as_array().unwrap().iter().filter_map(|t| t.as_str()).collect();
+    targets.sort();
+    assert_eq!(targets, ["A", "B"], "{p}");
+    assert!((cut_volume(&h, "A") - 973.0).abs() < 0.5, "A lost the 3x3x3 the box reaches: {}", cut_volume(&h, "A"));
+    assert!((cut_volume(&h, "B") - 964.0).abs() < 0.5, "B lost the 3x3x4 the box reaches: {}", cut_volume(&h, "B"));
+}
+
+#[test]
+fn a_cut_across_two_components_leaves_an_unticked_body_alone() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A"]));
+    }
+    let p = run_window(&mut h);
+    assert_eq!(p["targets"], json!(["A"]), "{p}");
+    assert!(p.get(crate::cut_bodies::SKIPPED).is_none(), "the list is not a command parameter: {p}");
+    assert!((cut_volume(&h, "A") - 973.0).abs() < 0.5);
+    assert!((cut_volume(&h, "B") - 1000.0).abs() < 0.5, "B was not ticked: {}", cut_volume(&h, "B"));
+}
+
+#[test]
+fn a_cut_with_every_body_in_one_component_sends_no_list() {
+    let mut h = two_cubes(false);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands.iter().all(|(_, p)| p.get("targets").is_none()), "{commands:?}");
+    h.frames(1);
+}
+
+/// An untouched list sends nothing of its own: the Cut takes the bodies it took before the list,
+/// the shown scope or, without one, what the command does by itself (#20647).
+#[test]
+fn an_untouched_list_leaves_the_cut_as_it_was() {
+    let h = two_cubes(true);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let (_, p) = commands.first().cloned().unwrap();
+    match solidcraft_engine::shown_scope(&h.app.session) {
+        Some(shown) => assert_eq!(p["targets"], json!(shown), "{p}"),
+        None => assert!(p.get("targets").is_none(), "{p}"),
+    }
+}
+
+/// A changed list holds when its only ticked body is hidden while the window is open: the Cut is
+/// refused rather than run on the bodies the user did not tick (#20647).
+#[test]
+fn hiding_the_only_ticked_body_refuses_the_cut() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["B"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+}
+
+/// Hiding an unticked body keeps the ticked one cut, even when that leaves one component shown and
+/// the list with it (#20647).
+#[test]
+fn hiding_an_unticked_body_still_cuts_the_ticked_one() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().map(|(_, p)| p["targets"].clone()), Some(json!(["A"])), "{commands:?}");
 }

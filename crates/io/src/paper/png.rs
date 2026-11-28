@@ -4,7 +4,7 @@
 //!   both draw the same joints, closures and merges. Curves are flattened within 1/8 px
 //!   ([`flatten`]) and tiny-skia is given lines only: its own flattening stops at 64 lines a
 //!   curve, more than a pixel off on a large arc at a high dpi.
-//! - **Paint** as the scene says: black or a coloured paper's ink, strokes with butt caps and miter joins (limit 4), fills
+//! - **Paint** as the scene says: black or a coloured paper's ink, strokes with round caps and round joins, fills
 //!   even-odd, text as its glyphs' outlines (the scene's, as SVG draws them) filled nonzero. Each
 //!   line is stroked once, then filled band by band; a line under a pixel wide is drawn as
 //!   tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
@@ -14,9 +14,10 @@
 //! - **Bands:** the sheet is drawn [`BAND_BYTES`] of pixels at a time, with a row above and below
 //!   that isn't written, and streamed into the file, so an A0 sheet at 1200 dpi (1.6 billion
 //!   pixels) needs no more memory than an A4 one, and no band leaves a seam: where a band cuts a
-//!   shape tiny-skia may cover an edge pixel one sixteenth differently (in black and white, put it
-//!   on the other side of the threshold), so the bytes can differ with the band's height, by that
-//!   at most, at a few edge pixels (text's outlines show it, #4890 B2b).
+//!   shape tiny-skia may cover an edge pixel one sixteenth differently for each edge through it
+//!   (two where a round cap's outline crosses its line's; in black and white, put it on the other
+//!   side of the threshold), so the bytes can differ with the band's height, by that at most, at a
+//!   few edge pixels (text's outlines and round caps show it, #4890 B2b).
 //! - **Pixels** are the sheet's pixel grid ([`PixelGrid::sheet`]): anchored at its top-left corner
 //!   and rounded outward, so nothing is clipped (210 mm at 300 dpi is 2481 px) and a side over
 //!   [`MAX_SIDE_PX`] is refused.
@@ -127,8 +128,8 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                 let stroke = Stroke {
                     width: if colour == PngColour::BlackWhite { width.max(1.0) } else { width },
                     miter_limit: 4.0,
-                    line_cap: LineCap::Butt,
-                    line_join: LineJoin::Miter,
+                    line_cap: LineCap::Round,
+                    line_join: LineJoin::Round,
                     dash: None,
                 };
                 // A line under a pixel wide is drawn as tiny-skia's hairline, its coverage scaled by its

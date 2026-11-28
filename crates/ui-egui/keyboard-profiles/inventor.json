@@ -1,0 +1,15 @@
+{
+  "label": "Inventor",
+  "provenance": "Written for SolidCraft. The keys are the defaults in the keyboard shortcut reference of Autodesk's public Inventor help.",
+  "keys": {
+    "construct.axis": "/",
+    "construct.plane": "]",
+    "construct.point": ".",
+    "sketch.create": "S",
+    "solid.revolve": "R",
+    "view.isometric": "F6",
+    "view.orbit_mode": "F4",
+    "view.pan_mode": "F2",
+    "view.zoom_mode": "F3"
+  }
+}

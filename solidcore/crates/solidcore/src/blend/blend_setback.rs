@@ -139,7 +139,7 @@ pub use curved::{no_more_concave, round_end_curvature};
 pub(crate) use face_plane::{FacePlane, Hom2};
 pub use spring::{spring_curve, SpringCurve, SpringHalf};
 
-pub(crate) use scale::bisect_thousandths;
+pub(crate) use scale::{bisect_thousandths, model_rounds, unequal_radii};
 pub use scale::{certified_scale, CertifiedScale};
 
 const OP: &str = "blend::blend_setback";
@@ -1613,6 +1613,56 @@ fn round_jets(
         }
     }
     Ok(RoundJets { h, q: lq })
+}
+
+/// Whether the built round runs across its end opposite to the model.
+/// Returns no orientation if the boundary jets do not agree to working roundoff.
+pub(crate) fn model_end_reversal(
+    kernel: &Kernel,
+    model: &Round<'_>,
+    actual: &Round<'_>,
+    origin: Point3,
+) -> core::result::Result<Option<bool>, Refusal> {
+    let model_jets = round_jets(kernel, model, 1)?;
+    let actual_jets = round_jets(kernel, actual, 1)?;
+    if model_jets.q != actual_jets.q {
+        return Ok(None);
+    }
+    let at_origin = |h: &Hom| {
+        [
+            h[0] - origin.x * h[3],
+            h[1] - origin.y * h[3],
+            h[2] - origin.z * h[3],
+            h[3],
+        ]
+    };
+    let same = |a: &Hom, b: &Hom, direction: f64| {
+        at_origin(a).into_iter().zip(at_origin(b)).all(|(x, y)| {
+            x.is_finite()
+                && y.is_finite()
+                && (x - direction * y).abs() <= EFF_ZERO * (1.0 + x.abs().max(y.abs()))
+        })
+    };
+    let direction = if model.corner_above == actual.corner_above {
+        1.0
+    } else {
+        -1.0
+    };
+    Ok([false, true].into_iter().find(|&reverse| {
+        model_jets
+            .h
+            .iter()
+            .zip(&actual_jets.h)
+            .enumerate()
+            .all(|(order, (m, a))| {
+                m.iter().enumerate().all(|(i, point)| {
+                    let j = if reverse { model_jets.q - i } else { i };
+                    a.get(j).is_some_and(|other| {
+                        same(point, other, if order == 0 { 1.0 } else { direction })
+                    })
+                })
+            })
+    }))
 }
 
 /// A round's raw jets at its end (`h[d][j]`: column j's d-th homogeneous derivative along,

@@ -1552,6 +1552,66 @@ fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A saved design of boxes, one per name, side by side.
+fn named_parts(path: &Path, names: &[&str]) {
+    let mut s = Session::default();
+    for (i, name) in names.iter().enumerate() {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name, "corner": [i as f64 * 30.0, 0, 0]}));
+    }
+    run(&mut s, "file.save", json!({"path": path}));
+}
+
+fn linked_names(s: &Session, component: u64) -> Vec<String> {
+    s.model.state().bodies.iter().filter(|b| b.component == component).map(|b| b.name.clone()).collect()
+}
+
+/// #16711: a relink to a source that names its body differently keeps the names by default,
+/// and takes the new source's with `names: "sync"`, with what other features and the design keep
+/// under the old name.
+#[test]
+fn relink_keeps_body_names_by_default_and_syncs_them_on_request() {
+    let dir = folder("names");
+    let (a, b) = (dir.join("a.solidcraft"), dir.join("b.solidcraft"));
+    named_parts(&a, &["Body_A"]);
+    named_parts(&b, &["Body_B"]);
+    let mut s = Session::default();
+    let component = run(&mut s, "component.insert_design", json!({"path": a}))["component"].as_u64().unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["Body_A"], "material": "Steel"}));
+    run(&mut s, "component.relink", json!({"component": component, "path": b}));
+    assert_eq!(linked_names(&s, component), ["Body_A"], "the default keeps the names");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "component.relink", json!({"component": component, "path": b, "names": "keep"}));
+    assert_eq!(linked_names(&s, component), ["Body_A"]);
+    run(&mut s, "edit.undo", json!({}));
+    let undo = s.undo.len();
+    run(&mut s, "component.relink", json!({"component": component, "path": b, "names": "sync"}));
+    assert_eq!(linked_names(&s, component), ["Body_B"]);
+    assert_eq!(s.doc.body_material("Body_B"), "Steel", "what was kept under the old name follows the body");
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert!(s.execute("component.relink", &json!({"component": component, "path": a, "names": "both"})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(linked_names(&s, component), ["Body_A"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `keep` is what relinking always did: the names are replaced when the body count changes.
+/// `sync` takes the new source's names whatever the count.
+#[test]
+fn relink_names_when_the_body_count_changes() {
+    let dir = folder("names-count");
+    let (one, two) = (dir.join("one.solidcraft"), dir.join("two.solidcraft"));
+    named_parts(&one, &["Body_A"]);
+    named_parts(&two, &["Body_B", "Extra"]);
+    let mut s = Session::default();
+    let component = run(&mut s, "component.insert_design", json!({"path": one}))["component"].as_u64().unwrap();
+    run(&mut s, "component.relink", json!({"component": component, "path": two}));
+    assert_eq!(linked_names(&s, component), ["Body_B", "Extra"]);
+    run(&mut s, "component.relink", json!({"component": component, "path": one, "names": "keep"}));
+    assert_eq!(linked_names(&s, component), ["Body_A"]);
+    run(&mut s, "component.relink", json!({"component": component, "path": two, "names": "sync"}));
+    assert_eq!(linked_names(&s, component), ["Body_B", "Extra"]);
+}
+
 fn configured_part(path: &Path) -> (Session, u64, u64) {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "L", "expression": "25 mm"}));

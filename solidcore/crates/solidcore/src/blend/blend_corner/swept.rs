@@ -26,12 +26,14 @@
 //!
 //! Deviations: a refusal is returned ([`TurnRefusal`]) for the executive to note
 //! (`NoteError` at the vertex) instead of noted here, and so is the fork's
-//! `NoteFitRadius(0, edge)` at the concave side edge (5e8c9c1, [`TurnRefusal::fit_edge`]).
-//! `%g` in the refusal's text is `fmt_g`. The torus and its loop
+//! `NoteFitRadius(0, edge)` at the concave side edge (5e8c9c1, [`TurnRefusal::fit_edge`]);
+//! not the fork's, the refusal there carries its side edge and radius as data
+//! ([`TurnRefusal::refusal`]). `%g` in the refusal's text is `fmt_g`. The torus and its loop
 //! are kept in [`SweptTurn`] from the edge geometry until the patch takes them. With the
 //! session's swept turns (`FilletSession::set_swept_turns`, the fork's `SetSweptTurns`;
 //! WR-697). No recursion.
 
+use crate::blend::blend_refusal::BlendRefusal;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_corner::topology::{
@@ -110,7 +112,7 @@ impl SweptTurn {
 /// `sm_TurnNotBuilt`: a turn the blend corner does not build, with the error and the
 /// reason the executive notes at the corner's vertex (`NoteError(vertex, SM_FIL_FAILURE,
 /// error, why)`); no corner is made.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TurnRefusal {
     /// `eError`: [`FilletErrorType::NoRoom`] or [`FilletErrorType::CornerUnsupported`].
     pub error: FilletErrorType,
@@ -120,6 +122,10 @@ pub struct TurnRefusal {
     /// the refusal), for the executive to note: the first round's edge at a sharp side edge
     /// the ball cannot pass.
     pub fit_edge: Option<EdgeId>,
+    /// Not the fork's: the refusal as data where it names a size, at a sharp side edge the
+    /// ball cannot pass ([`BlendRefusal::SweptTurnPastSharpEdge`]); `None` for a turn not
+    /// built yet.
+    pub refusal: Option<BlendRefusal>,
 }
 
 /// The executive's solvers as the Swept turn reads them.
@@ -292,6 +298,7 @@ pub fn classify_swept(
             error,
             comment: why.to_owned(),
             fit_edge: None,
+            refusal: None,
         }))
     };
     // a closed round meeting itself at an angle (the closed Turn, #2349) has one blended edge
@@ -348,6 +355,9 @@ pub fn classify_swept(
     // variable or non-circular rounds are not swept at any side edge
     let tol = min(fs[0].approx_tol_3d, fs[1].approx_tol_3d);
     let mut radius = -1.0;
+    // the largest of the rounds' radii, equal within the tolerance: a side edge rounded at it
+    // lets each round's ball pass, whichever round comes first
+    let mut largest = 0.0_f64;
     for (f, eu) in fs.iter().zip([eu1_, eu2_]) {
         let fsg = f
             .fsg
@@ -366,20 +376,27 @@ pub fn classify_swept(
             );
         }
         radius = r0;
+        largest = largest.max(r0).max(r1);
     }
     let side_concave = is_concave_edge(k, b, side_edge)?;
     if side_concave == concave[0] {
         // no radius builds a swept turn past the side edge: its size is not the cause (the
-        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge())); the rounds' one radius, checked
-        // above, so the size named does not hang on which round comes first
+        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge())); the rounds' largest radius, so
+        // the size named does not hang on which round comes first. The side edge's other
+        // tests (below: tangent, straight, square, on a plane) are not made first
         let kind = if side_concave { "concave" } else { "convex" };
         return Ok(Some(TurnRefusal {
             error: FilletErrorType::NoRoom,
             comment: format!(
                 "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
-                fmt_g(radius)
+                fmt_g(largest)
             ),
             fit_edge: eu1::edge(b, eu1_)?,
+            refusal: Some(BlendRefusal::SweptTurnPastSharpEdge {
+                vertex,
+                side_edge,
+                least_radius: largest,
+            }),
         }));
     }
 

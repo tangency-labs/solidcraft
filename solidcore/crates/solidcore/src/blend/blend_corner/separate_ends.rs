@@ -12,7 +12,7 @@ use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError, SM_ERR};
-use crate::geom::certified::{distance, next_down, next_up};
+use crate::geom::certified::{cross_length, distance, next_down, next_up, unit, unit_error};
 use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
@@ -26,7 +26,9 @@ use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, FaceId, VertexId};
 mod corridor;
 mod selection;
 
-use corridor::{check_corridor, resolved_vertex, Clearance, Corridor};
+use corridor::{
+    check_corridor, placed_rail_limit, rail_reach, resolved_vertex, Clearance, Corridor,
+};
 pub use selection::{plan, SeparateEndPlan};
 
 /// The equal-distance chamfer or constant circular round of a separate End.
@@ -61,13 +63,11 @@ enum SeparateEndFit {
     NotApplicable,
     /// Every pair fits and the blend envelopes are disjoint.
     Fits,
-    /// The supports fit, but their trims lie outside the cardinal certificate.
-    WithinSupports,
     /// A trim or face blocks the sweep at its requested or limiting size.
     Obstructed { vertex: VertexId },
     /// A common size exceeds the certified room for the whole selection.
     Limited {
-        /// The largest representable common size allowed by the supports.
+        /// The largest representable common size certified by the supports.
         size: f64,
         /// The selected edge whose support limits the size.
         edge: EdgeId,
@@ -77,7 +77,6 @@ enum SeparateEndFit {
 struct Supports {
     corridor: Corridor,
     rails: [EdgeId; 3],
-    span: Extent3d,
 }
 
 /// Qualifies separate Ends and finds a support limit for a common size.
@@ -98,6 +97,7 @@ fn independent_separate_ends(
         .try_reserve_exact(pairs.len())
         .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
     let mut limit: Option<(f64, EdgeId)> = None;
+    let mut proved_overrun = false;
     for pair in pairs {
         k.check_cancelled(OP)?;
         let [a, z] = pair.sizes;
@@ -114,37 +114,49 @@ fn independent_separate_ends(
         let size = a.max(z);
         let [first, second] = pair.edges;
         let (_, at) = geometry.corridor.at;
-        for (((_, end), rail), (width, edge)) in geometry
+        for (((stop, end), rail), (width, edge)) in geometry
             .corridor
             .ends
             .into_iter()
             .zip(geometry.rails)
             .zip([(a, first), (z, second), (size, first)])
         {
-            match has_room(at, end, width) {
-                Some(true) => {}
-                Some(false) if common => {
-                    let Some(fit) = support_limit(at, end) else {
-                        return Ok(SeparateEndFit::NotApplicable);
-                    };
-                    if limit.is_none_or(|(old, _)| fit < old) {
-                        if !support_stops(b, rail, pair.vertex, at, end)? {
-                            return Ok(SeparateEndFit::NotApplicable);
-                        }
-                        limit = Some((fit, edge));
-                    }
-                }
-                _ => return Ok(SeparateEndFit::NotApplicable),
+            let Some(reach) = rail_reach(k, b, rail, at, end)? else {
+                return Ok(SeparateEndFit::NotApplicable);
+            };
+            let nominal = has_room(at, end, width);
+            if nominal == Some(true) && width <= reach.lo {
+                continue;
+            }
+            if !common || !support_stops(b, rail, pair.vertex, at, end)? {
+                return Ok(SeparateEndFit::NotApplicable);
+            }
+            proved_overrun |= nominal == Some(false) || width > reach.hi;
+            let Some(fit) = support_limit(at, end) else {
+                return Ok(SeparateEndFit::NotApplicable);
+            };
+            let Some(fit) = placed_rail_limit(k, b, &geometry.corridor, stop, fit.min(reach.lo))?
+            else {
+                return Ok(SeparateEndFit::NotApplicable);
+            };
+            if limit.is_none_or(|(old, _)| fit < old) {
+                limit = Some((fit, edge));
             }
         }
         supports.push((geometry, pair.sizes));
+    }
+
+    // One support must really be too short before reporting a size error.
+    // A sibling that rounds across the request may still bound the common
+    // smaller size, which every corridor below must certify.
+    if limit.is_some() && !proved_overrun {
+        return Ok(SeparateEndFit::NotApplicable);
     }
 
     let mut envelopes = Vec::new();
     envelopes
         .try_reserve_exact(supports.len())
         .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
-    let mut certified = true;
     for (geometry, requested) in supports {
         let widths = limit.map_or(requested, |(fit, _)| [fit; 2]);
         let span = match check_corridor(k, b, &geometry.corridor, widths)? {
@@ -154,10 +166,7 @@ fn independent_separate_ends(
                     vertex: geometry.corridor.at.0,
                 });
             }
-            Clearance::Unproven => {
-                certified = false;
-                geometry.span
-            }
+            Clearance::Unproven => return Ok(SeparateEndFit::NotApplicable),
         };
         let Some(envelope) = swept_envelope(span, widths[0].max(widths[1])) else {
             return Ok(SeparateEndFit::NotApplicable);
@@ -170,14 +179,12 @@ fn independent_separate_ends(
         }
         envelopes.push(envelope);
     }
-    Ok(match (limit, certified) {
-        (Some((size, edge)), true) => {
+    Ok(match limit {
+        Some((size, edge)) => {
             check_resolution(k, b, pairs, size, kind)?;
             SeparateEndFit::Limited { size, edge }
         }
-        (Some(_), false) => SeparateEndFit::NotApplicable,
-        (None, true) => SeparateEndFit::Fits,
-        (None, false) => SeparateEndFit::WithinSupports,
+        None => SeparateEndFit::Fits,
     })
 }
 
@@ -276,10 +283,16 @@ fn classify_separate_ends(
     }
 
     // With line edges and plane supports the oriented dihedral is constant.
-    if !(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?) {
+    // Classifying it may populate UV trims or raise a local zone. The plan
+    // must leave those edits to the ordinary construction and its transaction.
+    let concave = b.with_rollback_untouched(
+        |b| Ok(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?),
+        |_| false,
+    )?;
+    if !concave {
         return Ok(None);
     }
-    let (Some((vertex_a, end_a, far_a)), Some((vertex_b, end_b, far_b))) = (
+    let (Some((vertex_a, _, far_a)), Some((vertex_b, _, far_b))) = (
         square_cap(b, first, v, u, roundoff)?,
         square_cap(b, second, v, w, roundoff)?,
     ) else {
@@ -293,7 +306,6 @@ fn classify_separate_ends(
     ) else {
         return Ok(None);
     };
-    let span = Extent3d::from_points(at, end_a).union(&Extent3d::from_point(end_b));
     Ok(Some(Supports {
         corridor: Corridor {
             at: (v, at),
@@ -303,7 +315,6 @@ fn classify_separate_ends(
             far_caps: [far_a, far_b],
         },
         rails,
-        span,
     }))
 }
 
@@ -361,7 +372,7 @@ fn support_stops(b: &Brep, rail: EdgeId, start: VertexId, at: Point3, end: Point
         return Ok(false);
     };
     if varying.next().is_some() {
-        return Ok(false);
+        return rotated_support_stops(b, rail, v);
     }
     for continuation in vertex::edges(b, v, None)?
         .into_iter()
@@ -387,6 +398,57 @@ fn support_stops(b: &Brep, rail: EdgeId, start: VertexId, at: Point3, end: Point
                 p == e
             }
         }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Rule out continuations of a noncardinal rail using the analytic line directions.
+fn rotated_support_stops(b: &Brep, rail: EdgeId, at: VertexId) -> Result<bool> {
+    let Some(CurveKind::Line(line)) = edge::curve(b, rail)?.map(Curve::kind) else {
+        return Ok(false);
+    };
+    let Some(axis) = unit(line.line_vector()) else {
+        return Ok(false);
+    };
+    let at_zone = vertex::tolerance(b, at)?;
+    let rail_zone = edge::tolerance(b, rail)?;
+    for continuation in vertex::edges(b, at, None)?
+        .into_iter()
+        .filter(|&id| id != rail)
+    {
+        let Some(CurveKind::Line(line)) = edge::curve(b, continuation)?.map(Curve::kind) else {
+            return Ok(false);
+        };
+        let Some(direction) = unit(line.line_vector()) else {
+            return Ok(false);
+        };
+        let Some((end, _)) = other_end(b, continuation, at)? else {
+            return Ok(false);
+        };
+        let Some([(a, da), (z, dz)]) = line.segment_over(&edge::interval(b, continuation)?) else {
+            return Ok(false);
+        };
+        let sine = cross_length(axis, direction, unit_error(), unit_error());
+        if !sine.above(gamma(64)).is_yes() {
+            return Ok(false);
+        }
+        // Each endpoint's distance error is less than twice its coordinate error.
+        let span = distance(a, z);
+        let endpoint_error = 2.0 * next_up(da + dz);
+        let length = next_down(span.value - next_up(span.bound + endpoint_error));
+        let departure = next_down(next_down(sine.value - sine.bound) * length);
+        // The change in sideways distance must exceed the combined zones at both ends.
+        let zone = [
+            at_zone,
+            rail_zone,
+            edge::tolerance(b, continuation)?,
+            vertex::tolerance(b, end)?,
+        ]
+        .into_iter()
+        .fold(0.0, |sum, zone| next_up(sum + zone));
+        if !departure.is_finite() || !zone.is_finite() || departure <= 2.0 * zone {
             return Ok(false);
         }
     }

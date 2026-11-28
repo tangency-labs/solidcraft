@@ -441,8 +441,6 @@ fn round_d_with_block(r: f64) -> Outcome {
     // as themselves (so the rail past V is the exact circle on F)
     let mut k = kernel();
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_extension_as_itself = true;
     let mut b = d_with_block(&mut k);
     let top = Point3::new(0.0, 0.0, 12.5);
     let e = b

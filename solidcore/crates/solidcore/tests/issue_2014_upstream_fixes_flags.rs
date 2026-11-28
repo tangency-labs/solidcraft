@@ -70,8 +70,8 @@ fn default_lists_every_field_off_in_declaration_order() {
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
     let mut newest = UpstreamFixes::default();
-    newest.uv_trim_corner_end_points_only = true;
-    assert_eq!(turned_on(&newest), ["uv_trim_corner_end_points_only"]);
+    newest.linear_sweep_arc_is_cylinder = true;
+    assert_eq!(turned_on(&newest), ["linear_sweep_arc_is_cylinder"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
     // the first field by name, so retiring whichever flag is first needs no edit here

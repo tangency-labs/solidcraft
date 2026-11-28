@@ -1678,7 +1678,7 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
             .vertex_object()
             .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
-        access.set_vertex_point(this_v, point)?;
+        access.set_vertex_point(k, this_v, point)?;
     }
 
     // when asked - set EndVertex Geometry
@@ -1697,7 +1697,7 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
             .vertex_object()
             .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
-        access.set_vertex_point(this_v, point)?;
+        access.set_vertex_point(k, this_v, point)?;
     }
 
     // when asked - set MidEdge Geometry
@@ -2567,11 +2567,130 @@ trait FaceQueries<O: ClassObject> {
     ) -> Result<()>;
 }
 
+/// Not upstream (#21421): `point`, the fillet's vertex position that
+/// [`set_do_filleting_geometry_with`] gives the body's vertex `v`, put on a seam of a face of
+/// `v` when its point on that seam lies within the vertex's tolerance of `point` and
+/// `1000 * EFF_ZERO` or more from it; otherwise `point` as it is. A `point` nearer the seam
+/// than that is on it as the seam check sees it, and keeps upstream's bits.
+///
+/// The seams are those `v` is on now (its point within `1000 * EFF_ZERO` of the face's seam,
+/// `IsOnSeam`), so that taking the fillet's position does not move the vertex off a seam it
+/// is on whenever that seam passes within the vertex's tolerance of the position. When it is on none, they are the seams of the edges at `v` (an edge use's UV trim curve
+/// an iso curve on the face's seam, [`iso_curve_seam`](crate::topology::trimming_tools::iso_curve_seam)):
+/// the body's vertex is where the fillet's rail split such an edge. Of these the nearest
+/// seam point wins, the first in `GetFaces` (then `GetEdges`, `GetEdgeuses`) order on a tie.
+/// A seam's point is the surface's point at the seam's exact bound and the parameter along
+/// the seam of `point` dropped onto the surface.
+///
+/// The fillet's position is computed from the fillet's own surfaces (a round's end-cap corner)
+/// and lies off the seam by the round's solve error. Off any other edge that offset is covered
+/// by the vertex's tolerance and means nothing more; off a seam it is the face's boundary
+/// leaving the seam by a sliver, which the seam check reports as a near miss
+/// (`has_near_misses`: a vertex `1000 * EFF_ZERO` or more off it). The fillet's vertex is glued
+/// into the body's later and the body's point is kept, so the fillet's edges then end within
+/// the vertex's tolerance of it, as they do of any vertex the stitch glues. Two faces' seams
+/// through one vertex can disagree by more than that (#21421's input: an exact sphere's seam,
+/// and B-spline seams 2^-20 off it); the seam the vertex is on is kept, and the nearest one is
+/// picked otherwise, so the vertex is never moved further than the nearest seam. Keeping the
+/// seam the vertex is on keeps such a disagreement on the face the input has it on: #21421's
+/// input vertex lies on the sphere's seam and its B-spline face already reports the near miss,
+/// and upstream's position (on the B-spline's seam) would hand that near miss to the sphere.
+///
+/// # Errors
+///
+/// Those of the topology queries, of `IsIsoCurve`, `IsClosed` and `IsOnSeam`, and of the
+/// surfaces' `DropPoint` and evaluation.
+fn onto_seam(k: &Kernel, b: &Brep, v: VertexId, point: Point3) -> Result<Point3> {
+    use crate::nurbs::b_spline_surface::p1::SurfParamType;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::trimming_tools::iso_curve_seam;
+    let near_miss = 1000.0 * EFF_ZERO;
+    let tolerance = vertex::tolerance(b, v)?;
+    let old = b.vertex(v)?.point;
+    // The seams, as (face, constant direction).
+    let mut seams: Vec<(FaceId, SurfParamType)> = Vec::new();
+    for f in vertex::faces(b, v)? {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let was = surface.drop_point::<NoObject>(k, old, &domain, &DropPointOptions::default())?;
+        // Written to accept: a NaN gap is not within the near miss.
+        let on_surface = was.success && was.gap < near_miss;
+        if !on_surface {
+            continue;
+        }
+        let seam = surface.is_on_seam(k, was.result_uv, Some(near_miss))?;
+        if seam.on_seam && matches!(seam.seam_dir, SurfParamType::U | SurfParamType::V) {
+            seams.push((f, seam.seam_dir));
+        }
+    }
+    if seams.is_empty() {
+        for e in vertex::edges(b, v, None)? {
+            for eu in edge::edgeuses(b, e, None, None)? {
+                let Some(f) = eu1::face(b, eu)? else {
+                    continue;
+                };
+                let (Some(surface), Some(uv)) =
+                    (b.face(f)?.surface.as_ref(), eu1::uv_trim_curve(b, eu)?.0)
+                else {
+                    continue;
+                };
+                if let Some((side, _)) = iso_curve_seam(k, surface, uv)? {
+                    if !seams.contains(&(f, side)) {
+                        seams.push((f, side));
+                    }
+                }
+            }
+        }
+    }
+    let mut best: Option<(f64, Point3)> = None;
+    for (f, side) in seams {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let dropped =
+            surface.drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            continue;
+        }
+        let at = dropped.result_uv;
+        let (lo, hi) = (domain.min(), domain.max());
+        let nearer = |x: f64, lo: f64, hi: f64| {
+            if (x - lo).abs() <= (x - hi).abs() {
+                lo
+            } else {
+                hi
+            }
+        };
+        let on = if side == SurfParamType::U {
+            Point2::new(nearer(at.x, lo.x, hi.x), at.y)
+        } else {
+            Point2::new(at.x, nearer(at.y, lo.y, hi.y))
+        };
+        let on = surface.evaluate_point(k, on)?;
+        let d = on.distance(point);
+        // Written to accept: a NaN distance is not within the tolerance.
+        if d <= tolerance && best.is_none_or(|(c, _)| d < c) {
+            best = Some((d, on));
+        }
+    }
+    // A point already within the near miss of the seam is on it as the seam check sees it,
+    // and stays as it is: its vertex is then the fillet's exactly, as upstream's.
+    Ok(match best {
+        Some((d, on)) if d >= near_miss => on,
+        _ => point,
+    })
+}
+
 /// The mutable and read-only topology operations of [`set_do_filleting_geometry_with`].
 trait FilletAccess<O: ClassObject> {
     type Geometry: ClassGeometry<O>;
     fn geometry(&self) -> &Self::Geometry;
-    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()>;
+    fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()>;
     fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()>;
 }
 
@@ -2586,7 +2705,7 @@ impl<O: ClassObject, G: ClassGeometry<O>> FilletAccess<O> for ReadOnly<'_, G> {
     fn geometry(&self) -> &G {
         self.0
     }
-    fn set_vertex_point(&mut self, _vertex: O, _point: Point3) -> Result<()> {
+    fn set_vertex_point(&mut self, _k: &Kernel, _vertex: O, _point: Point3) -> Result<()> {
         // DISPATCH GAP: SmVertex::SetPoint (topology.vertex, green)
         // Proof (unreachable): the ReadOnly view serves queries that only make caches, and
         // 0 hits in the green difftest sweep show none met this; Mutable and the B-rep
@@ -2937,13 +3056,16 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FilletAccess<O> for Mutable<'_, G> 
     fn geometry(&self) -> &G {
         self.0
     }
-    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()> {
+    fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()> {
         match self.0.topology_entity_mut(vertex) {
             Some((b, EntityRef::Vertex(v))) => {
+                // `onto_seam` only refines upstream's `point`: a query it cannot answer
+                // leaves `point` as upstream sets it (cancellation still propagates).
+                let point = ignored(onto_seam(k, b, v, point))?.unwrap_or(point);
                 b.vertex_mut(v)?.point = point;
                 Ok(())
             }
-            _ => ReadOnly(&*self.0).set_vertex_point(vertex, point),
+            _ => ReadOnly(&*self.0).set_vertex_point(k, vertex, point),
         }
     }
     fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()> {

@@ -428,11 +428,11 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     };
     let label_display = row_text(row.label, row.name);
     let font = if row.selected { crate::type_face::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
-    // The label stops before the badges and the card's edge; a longer name ends in an ellipsis
-    // and its full text is in the tooltip.
+    // The label stops before the badges, which follow it, and the count, status and card edge
+    // after them; a longer name ends in an ellipsis and its full text is in the tooltip (#22361).
     let badges_width = row.badges.len() as f32 * 15.0;
     let end = if (row.compact || eye_end) && row.eye.is_some() { eye_r.left() - t.space_4 } else { action_left };
-    let mut right = end - badges_width;
+    let mut right = end;
     if let Some(status) = row.status {
         right -= t.space_16;
         let sr = Rect::from_center_size(pos2(right + t.space_8, cy), vec2(t.space_14, t.space_14));
@@ -464,7 +464,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         let galley = ui.painter().layout_job(job);
         ui.painter().with_clip_rect(ui.clip_rect().intersect(r)).galley(pos2(x, r.top() + ROW_H), galley, t.text_dim);
     }
-    let room = (right - name_action_width - x).max(0.0);
+    let room = (right - badges_width - name_action_width - x).max(0.0);
     out.label_rect = Some(Rect::from_min_max(pos2(x, r.top() + 1.0), pos2(x + room, cy + row_height / 2.0 - 1.0)));
     let emphasis = row.emphasis.clone().filter(|span| label_display == row.label && label_display.get(span.clone()).is_some());
     let mut job = match emphasis {
@@ -498,6 +498,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(t.space_12, t.space_12));
         badge(ui.painter(), br, b, t.text_dim);
+        solidcraft_ui_registry::publish_rect(&format!("row_badge:{b}:{handle}"), br);
         bx += 15.0;
     }
     // The name's action button sits right after the label; a press on it is not a press on the row.

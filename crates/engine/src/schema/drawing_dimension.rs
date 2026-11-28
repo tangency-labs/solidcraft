@@ -292,6 +292,19 @@ impl JsonSchema for DimensionIdParam {
     }
 }
 
+/// Which of a view's two directions an overall dimension measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OverallAxis {
+    Horizontal,
+    Vertical,
+}
+
+/// An occurrence path as `path` reads it.
+fn deserialize_path<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u64>, D::Error> {
+    path(Some(&Value::deserialize(d)?)).map_err(D::Error::custom)
+}
+
 /// What a dimension measures, as `drawing.dimension.add` takes it: the saved record's kinds, with
 /// picks for its names.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -376,6 +389,21 @@ pub enum KindParam {
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
+    },
+    /// A body's overall width or height in the view, rounded corners included: between the two
+    /// flat faces that bound it along the view's horizontal or vertical (saved as a `faces`
+    /// dimension).
+    Overall {
+        /// The body's name.
+        body: String,
+        /// The ids of the occurrences its body is placed through, from the top.
+        #[serde(default, deserialize_with = "deserialize_path", skip_serializing_if = "Vec::is_empty")]
+        #[schemars(with = "Vec<u64>")]
+        path: Vec<u64>,
+        /// `horizontal` (its width, the default) or `vertical` (its height).
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "OverallAxis")]
+        direction: Option<OverallAxis>,
     },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain {

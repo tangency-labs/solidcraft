@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld symbol</title>
+  <path d="M18.02 23L50.02 23" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58.02 31L50.02 23L58.02 15" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.02 23L9.79 40.83" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.02 49L5.98 39.07L13.6 42.59Z" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.02 23L40.02 23L26.02 37Z" fill="#b9ddf8"/>
+  <path d="M26.02 23L40.02 23L26.02 37Z" fill="none" stroke="#236ead" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

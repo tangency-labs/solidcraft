@@ -30,8 +30,6 @@ mod attributed;
 mod contract;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
-#[cfg(test)]
-pub(crate) use end_to_end::result_body_of;
 #[path = "blend_fillet_executive_p3/preview.rs"]
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]

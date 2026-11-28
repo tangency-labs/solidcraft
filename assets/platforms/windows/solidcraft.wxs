@@ -9,7 +9,7 @@
   Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
   default; an update keeps the installed folder and skips this page), Ready, progress, and a Finish page with a ticked "Launch
   SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
-  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`), and offers it under
+  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`) and of `solidcraft://` links, and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
   Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 -->
@@ -137,6 +137,14 @@
         <RegistryValue Root="HKLM" Key="Software\Classes\.iges\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.3mf\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.stl\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+
+        <!-- solidcraft:// links (a Workshop page's Open in SolidCraft button, docs/workshop-links.md):
+             the browser starts the app with the link as its open-url argument. The app looks the item up
+             in the signed Workshop index and asks before it opens or installs anything. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\solidcraft" Value="URL:SolidCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\solidcraft" Name="URL Protocol" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\solidcraft\DefaultIcon" Value="&quot;[#SolidcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\solidcraft\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; --open-url &quot;%1&quot;" Type="string" />
 
         <!-- "Open with" app list and the Run dialog (Win+R "solidcraft"). -->
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe" Name="FriendlyAppName" Value="SolidCraft" Type="string" />

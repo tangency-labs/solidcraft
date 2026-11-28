@@ -349,4 +349,4 @@
 {"case":"split-rail-actual-copy-owner-notification","deferred":null,"error":null,"ints":{"actual_identity_topology":{"blocks":[[42057,448768]],"n":31}},"topology":null,"values":{"actual_curve":{"blocks":[[4.0,4.0,42.0]],"n":21}}}
 {"case":"split_empty_intervals","deferred":null,"error":null,"ints":{},"topology":null,"values":{"flat":[0.0,1.0]}}
 {"case":"state_save_zero_replace_restore","deferred":null,"error":null,"ints":{},"topology":null,"values":{"flat":{"blocks":[[16105.110001000001,16128.110001000001,213689.230001]],"n":138}}}
-{"case":"trim_rail_mouse_rebuild_edge7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"flat":{"blocks":[[353.98040885989377,356.0112626990411,18328.348440402395]],"n":90}}}
+{"case":"trim_rail_mouse_rebuild_edge7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"flat":{"blocks":[[353.98132485996894,356.01217869911625,18328.42078035522]],"n":90}}}

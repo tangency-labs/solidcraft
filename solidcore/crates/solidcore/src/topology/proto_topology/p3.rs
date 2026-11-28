@@ -123,7 +123,10 @@
 //!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
 //!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
 //!   intersection met their lens at its two crossings, which became vertices beside the
-//!   touch (docs/booleans.md §6).
+//!   touch (docs/booleans.md §6). Not upstream either (#15049): a circle edge and a line edge
+//!   in its plane, the line a hair inside it (`line_touch`), or the two meeting at one point
+//!   that lies beside the classified point within the band where both edges lie within the
+//!   tolerance of each other (`meeting_beside`), give that one point.
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -1829,32 +1832,48 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     }
                 }
 
-                // ... and ProtoFaces have EdgeDefinitions too.
-                let pfs: Vec<ProtoFaceId> = self.proto_faces().to_vec();
-                for &this_pf in &pfs {
-                    let coinc: Vec<ProtoEdgeId> = self
+                // ... and ProtoFaces have EdgeDefinitions too. Not upstream: each coincident
+                // proto edge is taken once, however many proto faces list it, and every
+                // definition on a deleted edge goes. Upstream takes an edge once per proto
+                // face that lists it and, as above, steps past the definition that moves
+                // down after a removal, so how many of such definitions went hung on how the
+                // proto faces had been split (`update_faces` no longer splits them).
+                let mut coinc: Vec<ProtoEdgeId> = Vec::new();
+                let mut seen = std::collections::BTreeSet::new();
+                for &this_pf in self.proto_faces() {
+                    let listed = self
                         .proto_face(this_pf)
                         .ok_or(dangling("proto face is deleted"))?
-                        .coinc_proto_edges()
-                        .to_vec();
-                    for this_pe in coinc {
-                        let mut nn = 0;
-                        loop {
-                            let list = self
+                        .coinc_proto_edges();
+                    coinc.extend(listed.iter().copied().filter(|&pe| seen.insert(pe)));
+                }
+                for this_pe in coinc {
+                    let mut nn = 0;
+                    loop {
+                        let list = self
+                            .proto_edge(this_pe)
+                            .ok_or(dangling("proto edge is deleted"))?
+                            .edge_definitions();
+                        let Some(&ed) = list.get(nn) else { break };
+                        let d = self
+                            .edge_def(ed)
+                            .ok_or(dangling("edge definition is deleted"))?;
+                        let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
+                            || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
+                        if hit {
+                            self.remove_edge_definition(ed, false)?;
+                            // the next definition moved down into this slot
+                            let still = self
                                 .proto_edge(this_pe)
                                 .ok_or(dangling("proto edge is deleted"))?
-                                .edge_definitions();
-                            let Some(&ed) = list.get(nn) else { break };
-                            let d = self
-                                .edge_def(ed)
-                                .ok_or(dangling("edge definition is deleted"))?;
-                            let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
-                                || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
-                            if hit {
-                                self.remove_edge_definition(ed, false)?;
+                                .edge_definitions()
+                                .get(nn)
+                                == Some(&ed);
+                            if !still {
+                                continue;
                             }
-                            nn += 1;
                         }
+                        nn += 1;
                     }
                 }
             }
@@ -2976,7 +2995,9 @@ fn crossing_sine<O: ClassObject>(
 /// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
 /// where those two edges touch when they are circles in one plane that the contact rule
 /// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
-/// as the edge/curve intersections of the boolean read them), and the touching point lies
+/// as the edge/curve intersections of the boolean read them), or (#15049) a circle and a
+/// line in its plane a hair inside it ([`line_touch`]) or meeting it at one point near which
+/// the surface intersection put its touch ([`meeting_beside`]), and the touching point lies
 /// on both edges within their intersection tolerance. Any other pair is left as it is.
 ///
 /// # Errors
@@ -2991,25 +3012,16 @@ fn touch_of_edges<O: ClassObject>(
     if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
         return Ok(());
     }
-    // an edge's circle: centre, unit normal, radius
-    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+    // an edge's curve and interval
+    let edge_curve = |pc: &PointClassification<O>| -> Result<Option<(&Curve, Extent1d)>> {
         let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
         else {
             return Ok(None);
         };
-        let Some(curve) = b.edge(e)?.curve.as_ref() else {
-            return Ok(None);
-        };
-        let CurveKind::Ellipse(c) = curve.kind() else {
-            return Ok(None);
-        };
-        if !c.is_circle() {
-            return Ok(None);
-        }
-        let place = c.position();
-        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+        let rec = b.edge(e)?;
+        Ok(rec.curve.as_ref().map(|c| (c, rec.interval)))
     };
-    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+    let (Some((curve1, ivl1)), Some((curve2, ivl2))) = (edge_curve(pc1)?, edge_curve(pc2)?) else {
         return Ok(());
     };
     let tol = xsect_tol_3d_from_zones(
@@ -3017,15 +3029,67 @@ fn touch_of_edges<O: ClassObject>(
         pc1.obj_zone_tol_3d(k, geometry)?,
         pc2.obj_zone_tol_3d(k, geometry)?,
     );
-    // one plane: parallel normals (the angle test of the circles' own intersection) and
-    // the second centre on the first plane within the tolerance
-    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
-        return Ok(());
-    }
-    let CircleCircle::Tangent(touch) =
-        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
-    else {
-        return Ok(());
+    let touch = match (curve1.kind(), curve2.kind()) {
+        (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) if a.is_circle() && b.is_circle() => {
+            let (pa, pb) = (a.position(), b.position());
+            let (c1, n1, r1) = (pa.origin(), pa.z_axis(), a.x_radius());
+            let (c2, n2, r2) = (pb.origin(), pb.z_axis(), b.x_radius());
+            // one plane: parallel normals (the angle test of the circles' own intersection)
+            // and the second centre on the first plane within the tolerance
+            if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+                return Ok(());
+            }
+            let CircleCircle::Tangent(touch) = circle_coplanar_circle_intersect_in_contact(
+                n1,
+                c1,
+                r1,
+                c2,
+                r2,
+                tol,
+                contact_tol_3d(k),
+            )?
+            else {
+                return Ok(());
+            };
+            touch
+        }
+        // Not upstream (#15049): a circle and a line in its plane, the line a hair inside
+        // the circle, touch at one point (`Ellipse::intersect_with_line` at the contact
+        // tolerance, the point moved to an end of either on the stretch between upstream's
+        // two crossings), as the edge/curve intersections of the boolean read them.
+        (CurveKind::Ellipse(c), CurveKind::Line(l)) if c.is_circle() => {
+            match line_touch(k, (curve1, c, &ivl1), (l, &ivl2), tol)? {
+                Some(p) => p,
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve1, c, &ivl1),
+                    (curve2, l, &ivl2),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
+            }
+        }
+        (CurveKind::Line(l), CurveKind::Ellipse(c)) if c.is_circle() => {
+            match line_touch(k, (curve2, c, &ivl2), (l, &ivl1), tol)? {
+                Some(p) => p,
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve2, c, &ivl2),
+                    (curve1, l, &ivl1),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
+            }
+        }
+        _ => return Ok(()),
     };
     // the touching point on both edges' arcs: dropped onto each edge's interval within
     // their tolerance (a drop that fails leaves the point where it was)
@@ -3040,6 +3104,191 @@ fn touch_of_edges<O: ClassObject>(
     *pc1 = q1;
     *pc2 = q2;
     Ok(())
+}
+
+/// Not upstream (#15049): where the arc of `circle` over `circle_ivl` and the line `line`
+/// over `line_ivl` touch by the contact rule: their one meeting at [`contact_tol_3d`]
+/// (`Ellipse::intersect_with_line`, which takes a line a hair inside the circle for a touch
+/// and moves it to an end of the arc or the line on the stretch between the two crossings),
+/// where at zero contact they do not meet at that point (the contact rule made it). `None`
+/// for a plain crossing, a line out of the circle's plane, or anything but one meeting.
+///
+/// # Errors
+///
+/// Those of the intersections and the evaluation.
+fn line_touch(
+    k: &Kernel,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line, line_ivl): (&crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let in_contact = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [touch] = in_contact.solutions[..] else {
+        return Ok(None);
+    };
+    if touch.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    // the contact rule made it: at zero contact the two cross elsewhere, twice or not at all
+    let point = circle_curve.evaluate_point(k, touch.start.param(0)?)?;
+    let plain =
+        circle.intersect_with_line::<()>(k, circle_ivl, line, line_ivl, tol, 0.0, None, None)?;
+    if let [crossing] = plain.solutions[..] {
+        if circle_curve
+            .evaluate_point(k, crossing.start.param(0)?)?
+            .distance(point)
+            <= tol
+        {
+            return Ok(None);
+        }
+    }
+    Ok(Some(point))
+}
+
+/// Not upstream (#15049): where a point `pc` classified onto a circle edge and onto a line
+/// edge in its plane stands for their one meeting. The surface intersection of two faces
+/// tangent at a corner finds their touch wherever the rounding of the faces puts it inside
+/// the band in which the two edges at that corner lie within the tolerance of each other
+/// (√(2rτ) long for the circle's radius r: a cusp's arc running tangentially into its line,
+/// swept onto the line's face, touched it 1.5e-4 from the corner, and the line edge was split
+/// there while the arc was not). Where the two edges meet at one point by the contact rule
+/// ([`Ellipse::intersect_with_line`](crate::curve::ellipse::Ellipse::intersect_with_line) at
+/// [`contact_tol_3d`], as [`line_touch`] reads it), that meeting lies farther than `tol` from
+/// the point, but within a thousand times it, and the point and the meeting both lie within `tol` of both edges and the whole straight
+/// stretch between them lies within `tol` of both (the edges within the tolerance of each
+/// other all along it, as the cap rule reads a band, docs/booleans.md §6), the point is that
+/// meeting. The stretch is enclosed, not sampled: the distance to a line is convex, so its two
+/// ends bound it; for the circle [`stretch_within_circle`] bounds the out-of-plane and the
+/// radial deviation over the stretch in outward-rounded intervals. `None` otherwise, or when a point cannot be read or dropped.
+///
+/// # Errors
+///
+/// Those of the intersection; an unported or cancelled evaluation or drop.
+fn meeting_beside<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line_curve, line, line_ivl): (&Curve, &crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let at = match pc.find_obj_point_3d(k, geometry) {
+        Ok(p) => p,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let meetings = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [meeting] = meetings.solutions[..] else {
+        return Ok(None);
+    };
+    if meeting.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    let meeting = circle_curve.evaluate_point(k, meeting.start.param(0)?)?;
+    let apart = meeting.distance(at);
+    // (a NaN distance refuses: every comparison below is false for it)
+    let within = apart > tol && apart <= 1000.0 * tol;
+    if !within {
+        return Ok(None);
+    }
+    for point in [at, meeting] {
+        for (curve, interval) in [(circle_curve, circle_ivl), (line_curve, line_ivl)] {
+            let near = match curve.drop_point(
+                k,
+                interval,
+                point,
+                None,
+                0.0,
+                None,
+                SolverOperation::Minimize,
+            ) {
+                Ok(near) => near,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let on = near.success && near.distance <= tol;
+            if !on {
+                return Ok(None);
+            }
+        }
+    }
+    if !stretch_within_circle(circle, meeting, at, tol) {
+        return Ok(None);
+    }
+    Ok(Some(meeting))
+}
+
+/// Not upstream (#15049): whether every point of the straight stretch from `from` to `to`
+/// lies within `tol` of the full circle `circle`, by enclosure: the out-of-plane distance is
+/// linear along the stretch and the in-plane distance from the centre convex, so over the
+/// stretch the out-of-plane distance is at most that at an end, the radius exceeds the
+/// radius of the circle at most as at an end, and falls short of it at most by the least
+/// in-plane distance from the centre to the stretch's line (taken only where the foot of
+/// the perpendicular may lie on the stretch). The distance to the circle is then at most
+/// the hypotenuse of the two worst deviations. All in outward-rounded intervals; `false` for
+/// anything not finite or a stretch with no in-plane extent.
+fn stretch_within_circle(
+    circle: &crate::curve::ellipse::Ellipse,
+    from: Point3,
+    to: Point3,
+    tol: f64,
+) -> bool {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::geom::interval_vector::{dot, norm, square, unit};
+    let xyz = |p: Point3| [Ivl::from(p.x), Ivl::from(p.y), Ivl::from(p.z)];
+    let sub = |[ax, ay, az]: [Ivl; 3], [bx, by, bz]: [Ivl; 3]| [ax - bx, ay - by, az - bz];
+    let position = circle.position();
+    let Some(axis) = unit(xyz(position.z_axis())) else {
+        return false;
+    };
+    let centre = xyz(position.origin());
+    let radius = Ivl::from(circle.x_radius());
+    // an end's out-of-plane height, in-plane vector from the centre and its length
+    let end = |p: Point3| {
+        let w = sub(xyz(p), centre);
+        let height = dot(w, axis);
+        let flat = sub(w, axis.map(|v| v * height));
+        (height, flat, norm(flat))
+    };
+    let (height_from, flat_from, rho_from) = end(from);
+    let (height_to, flat_to, rho_to) = end(to);
+    let run = sub(flat_to, flat_from);
+    let run_sq = dot(run, run);
+    if !run_sq.is_finite() || run_sq.lo <= 0.0 {
+        return false;
+    }
+    let along = dot(flat_from, run);
+    let foot = (Ivl::from(0.0) - along) / run_sq;
+    let mut least = rho_from.lo.min(rho_to.lo);
+    if foot.hi > 0.0 && foot.lo < 1.0 {
+        let nearest = (dot(flat_from, flat_from) - along * along / run_sq).sqrt();
+        least = least.min(nearest.lo);
+    }
+    let over = (rho_from - radius).hi.max((rho_to - radius).hi).max(0.0);
+    let under = (radius - Ivl::from(least)).hi.max(0.0);
+    let rise = Ivl::from(height_from.mag().max(height_to.mag()));
+    let dev = Ivl::from(over.max(under));
+    let worst = square(rise) + square(dev);
+    let limit = Ivl::from(tol) * Ivl::from(tol);
+    worst.is_finite() && limit.is_finite() && worst.hi <= limit.lo
 }
 
 #[cfg(test)]
@@ -3756,6 +4005,48 @@ mod tests {
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
         crate::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), h, true)
             .unwrap()
+    }
+
+    /// The stretch between a meeting and a point is enclosed, not sampled: two ends within the
+    /// tolerance of the circle with the middle of the chord between them farther out of it
+    /// (the end a hair inside the circle, the chord's middle `1.1 tol` inside it) is refused,
+    /// and a short chord of the circle, its sagitta far below the tolerance, is taken.
+    #[test]
+    fn a_stretch_leaving_the_tolerance_of_the_circle_between_its_ends_is_refused() {
+        let k = Kernel::default();
+        let circle = crate::curve::ellipse::Ellipse::new(
+            &k,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 6.0),
+            1.0,
+            1.0,
+            &crate::curve::ellipse::EllipseOptions::default(),
+        )
+        .expect("circle");
+        let tol = 2e-5;
+        let y = 1.0 - 1.1 * tol;
+        let b = (1.0_f64 - y * y).sqrt();
+        let (meeting, at) = (Point3::new(-b, y, 0.0), Point3::new(0.35 * b, y, 0.0));
+        assert!(!stretch_within_circle(&circle, meeting, at, tol));
+        // a chord of 1e-3 on the circle: its sagitta is 1.25e-7
+        let (from, to) = (
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.999_999_5, 1e-3, 0.0),
+        );
+        assert!(stretch_within_circle(&circle, from, to, tol));
+        // the same chord lifted out of the circle's plane by more than the tolerance
+        let lifted = Point3::new(to.x, to.y, 2.0 * tol);
+        assert!(!stretch_within_circle(&circle, from, lifted, tol));
+        // not finite, or no stretch at all
+        assert!(!stretch_within_circle(
+            &circle,
+            from,
+            Point3::new(f64::NAN, 0.0, 0.0),
+            tol
+        ));
+        assert!(!stretch_within_circle(&circle, from, from, tol));
     }
 
     /// A Join of a prism into a prism of the same outline (z 1..2 into z 0..2: coincident

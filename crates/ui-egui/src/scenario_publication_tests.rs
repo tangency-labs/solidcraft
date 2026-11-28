@@ -79,3 +79,11 @@ fn widget_lookup_near_prefers_the_named_value_over_geometric_neighbours() {
     assert_eq!(widget_near_centres(&nodes, "20", "Depth"), Some([50.0, 20.0]));
     assert!(widget_near_centres(&nodes, "20", "Missing").is_none());
 }
+
+#[test]
+fn the_harness_keeps_the_app_off_the_stack() {
+    // A helper that builds or returns a harness keeps one in its frame: with the app held by
+    // value that was about 368 KB per helper, near the 2 MiB test-thread stack (#21642).
+    let size = std::mem::size_of::<Harness>();
+    assert!(size < 16 * 1024, "a Harness is {size} bytes");
+}

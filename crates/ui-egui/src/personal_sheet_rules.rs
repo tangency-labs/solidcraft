@@ -4,12 +4,12 @@
 //! design keeps its own copy, so it builds the same where the profile has no such rule.
 
 use serde::{Deserialize, Serialize, de};
-use solidcraft_engine::doc::sheet::{AngleDisplay, ReliefShape, SheetRule};
+use solidcraft_engine::doc::sheet::{AngleDisplay, BendReliefShape, ReliefShape, SheetRule, UnfoldMethod};
 use solidcraft_engine::doc::{DocError, Document, expr};
 use std::collections::BTreeMap;
 
 use crate::dialogs::{Dialog, Kind};
-use crate::dialogs_sheet::{ANGLE_DISPLAYS, RELIEF_SHAPES, RULE_FIELDS, Sm, design_rules};
+use crate::dialogs_sheet::{ANGLE_DISPLAYS, BEND_RELIEF_SHAPES, RELIEF_SHAPES, RULE_FIELDS, Sm, UNFOLD_METHODS, design_rules, unfold_index};
 use crate::ui_kit::{self, Text};
 use solidcraft_ui_text::tr;
 
@@ -34,16 +34,44 @@ struct Rule {
     relief_depth: String,
     corner_relief: String,
     corner_relief_shape: String,
+    /// Rules saved before bend relief shapes existed read as rectangular, the shape they cut;
+    /// a rectangular one is saved as they were, without the field.
+    #[serde(default = "rectangular", skip_serializing_if = "is_rectangular")]
+    bend_relief_shape: String,
     hem_gap: String,
     gap: String,
     angle_display: String,
     /// The material the rule is for (#18304); empty when none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     material: String,
+    /// Where the rule's K-factor comes from (`k_factor`, `deduction` or `allowance`). Rules saved
+    /// before it existed unfold from their K-factor, and a K-factor rule is saved without it, so
+    /// an older version still recalls it.
+    #[serde(default = "k_factor_unfold", skip_serializing_if = "is_k_factor_unfold")]
+    unfold_method: String,
+    /// The 90° bend deduction or allowance, with its unit; empty for a K-factor rule.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    unfold_value: String,
     /// Values a newer version saved. They survive renaming and are never dropped silently: a rule
     /// that has them can't be recalled or overwritten here.
     #[serde(flatten)]
     unknown: BTreeMap<String, serde_json::Value>,
+}
+
+fn k_factor_unfold() -> String {
+    UnfoldMethod::KFactor.name().into()
+}
+
+fn is_k_factor_unfold(method: &str) -> bool {
+    UnfoldMethod::parse(method) == Some(UnfoldMethod::KFactor)
+}
+
+fn rectangular() -> String {
+    BendReliefShape::Rectangular.name().into()
+}
+
+fn is_rectangular(shape: &str) -> bool {
+    BendReliefShape::parse(shape) == Some(BendReliefShape::Rectangular)
 }
 
 fn valid_text(text: &str, max: usize) -> bool {
@@ -86,6 +114,7 @@ impl Rule {
             "corner_relief" => &self.corner_relief,
             "hem_gap" => &self.hem_gap,
             "gap" => &self.gap,
+            "unfold_value" => &self.unfold_value,
             _ => return None,
         })
     }
@@ -104,10 +133,13 @@ impl Rule {
             relief_depth: self.relief_depth.clone(),
             corner_relief: self.corner_relief.clone(),
             corner_relief_shape: self.corner_relief_shape.clone(),
+            bend_relief_shape: self.bend_relief_shape.clone(),
             hem_gap: self.hem_gap.clone(),
             gap: self.gap.clone(),
             angle_display: self.angle_display.clone(),
             material: self.material.clone(),
+            unfold_method: self.unfold_method.clone(),
+            unfold_value: self.unfold_value.clone(),
         }
     }
 
@@ -122,10 +154,13 @@ impl Rule {
             relief_depth: rule.relief_depth.clone(),
             corner_relief: rule.corner_relief.clone(),
             corner_relief_shape: rule.corner_relief_shape.clone(),
+            bend_relief_shape: rule.bend_relief_shape.clone(),
             hem_gap: rule.hem_gap.clone(),
             gap: rule.gap.clone(),
             angle_display: rule.angle_display.clone(),
             material: rule.material.clone(),
+            unfold_method: rule.unfold_method.clone(),
+            unfold_value: rule.unfold_value.clone(),
             unknown: BTreeMap::new(),
         };
         row.validate()?;
@@ -143,7 +178,10 @@ impl Rule {
         }
         if self.expressions().into_iter().any(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
             || ReliefShape::parse(&self.corner_relief_shape).is_none()
+            || BendReliefShape::parse(&self.bend_relief_shape).is_none()
             || AngleDisplay::parse(&self.angle_display).is_none()
+            || UnfoldMethod::parse(&self.unfold_method).is_none()
+            || !valid_text(&self.unfold_value, MAX_EXPRESSION)
             || self.unknown.len() > 8
             || self.unknown.iter().any(|(key, value)| {
                 key.is_empty()
@@ -163,9 +201,10 @@ impl Rule {
     /// The rule the manager shows, under `name`. The design must accept it as the manager's OK
     /// would: a positive thickness and a K factor from 0 to 1.
     fn capture(sm: &Sm, name: &str, doc: &Document) -> Result<Self, &'static str> {
-        let Sm::Rules { values, relief, angles, material, .. } = sm else {
+        let Sm::Rules { values, relief, bend_relief, angles, unfold, material, .. } = sm else {
             return Err(INVALID_VALUES);
         };
+        let unfold_method = UNFOLD_METHODS.get(*unfold).copied().unwrap_or("k_factor");
         let (vals, _) = doc.param_values();
         let unit = expr::length_unit_or_mm(&doc.units);
         let lookup = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
@@ -187,10 +226,14 @@ impl Rule {
             relief_depth: length("relief_depth")?,
             corner_relief: length("corner_relief")?,
             corner_relief_shape: RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch").into(),
+            bend_relief_shape: BEND_RELIEF_SHAPES.get(*bend_relief).copied().unwrap_or("rectangular").into(),
             hem_gap: length("hem_gap")?,
             gap: length("gap")?,
             angle_display: ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend").into(),
             material: material.trim().into(),
+            unfold_method: unfold_method.into(),
+            // Only a deduction or allowance rule keeps its 90° value, with its unit.
+            unfold_value: if is_k_factor_unfold(unfold_method) { String::new() } else { length("unfold_value")? },
             unknown: BTreeMap::new(),
         };
         rule.validate()?;
@@ -215,7 +258,7 @@ impl Rule {
         if !self.unknown.is_empty() {
             return Err("sheet.personal_rules.unsupported");
         }
-        let Sm::Rules { pick, name, values, relief, angles, active, loaded, material } = sm else {
+        let Sm::Rules { pick, name, values, relief, bend_relief, angles, unfold, active, loaded, material } = sm else {
             return Err(INVALID_VALUES);
         };
         let rules = design_rules(doc);
@@ -223,8 +266,10 @@ impl Rule {
         name.clone_from(&self.name);
         *values = RULE_FIELDS.iter().map(|(key, _)| self.value(key).cloned().unwrap_or_default()).collect();
         *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(self.corner_relief_shape.trim())).unwrap_or(0);
+        *bend_relief = BEND_RELIEF_SHAPES.iter().position(|b| b.eq_ignore_ascii_case(self.bend_relief_shape.trim())).unwrap_or(0);
         *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(self.angle_display.trim())).unwrap_or(0);
         material.clone_from(&self.material);
+        *unfold = unfold_index(&self.unfold_method);
         *active = doc.sheet_rule(None).name == self.name || *pick >= rules.len();
         // The manager loads a rule's values only when its Rule box changes: these are now its own.
         *loaded = Some(*pick);

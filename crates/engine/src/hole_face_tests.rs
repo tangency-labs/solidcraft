@@ -870,7 +870,7 @@ fn a_saved_hole_turned_towards_a_touching_part_drills_its_own_part_when_opened()
 
 fn hole_direction(s: &Session, name: &str) -> Vec3 {
     match &s.doc.find_feature(name).unwrap().kind {
-        solidcraft_doc::FeatureKind::Hole { direction, .. } => direction.0,
+        solidcraft_doc::FeatureKind::Hole { direction, .. } => solidcraft_doc::literal_dir(direction).unwrap(),
         other => panic!("{name} is not a hole: {}", other.type_name()),
     }
 }
@@ -1190,4 +1190,213 @@ fn holes_drilled_out_from_a_tubes_axis_start_on_its_bore() {
         let faces = run(&mut s, "model.faces", json!({"body": "Tube"}))["faces"].as_array().map_or(0, Vec::len);
         assert_eq!(faces, 6, "mirrored {mirrored}: the tube's 4 faces and one bore per hole");
     }
+}
+
+/// Mirrored parts at `x = +407` and `x = -407` (and `x = 0..100` vs `x = -100..0`) drilled from
+/// an explicit sketch plane on their outer planar face with the same axes `{x_dir: [0, 1, 0],
+/// y_dir: [0, 0, 1]}` (normal `+X`, pointing outward on `+x` and inward on `-x`) must all drill
+/// into the material with no warnings.
+#[test]
+fn mirrored_parts_on_opposite_x_faces_drill_into_material_with_same_plane_axes() {
+    let mut s = Session::default();
+    let expected_removed = 2.0 * pi() * 16.0 * 16.0;
+    let base_vol = 30.0 * 80.0 * 60.0;
+    let specs = [("RightFront", 1.0_f64, 1.0_f64), ("LeftFront", -1.0, 1.0), ("RightRear", 1.0, -1.0), ("LeftRear", -1.0, -1.0)];
+    for (body, sx, sy) in specs {
+        let x0 = if sx > 0.0 { 407.0 - 30.0 } else { -407.0 };
+        let y0 = sy * 200.0 - 40.0;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [x0, y0, 0.0], "length": 30.0, "width": 80.0, "height": 60.0, "body_name": body, "operation": "new"}),
+        );
+        let sk = format!("Sk_{body}");
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [sx * 407.0, 0.0, 0.0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": sk}));
+        let y_mid = sy * 200.0;
+        run(&mut s, "sketch.point", json!({"point": [y_mid - 15.0, 30.0], "id": "p1"}));
+        run(&mut s, "sketch.point", json!({"point": [y_mid + 15.0, 30.0], "id": "p2"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let hole = format!("Hole_{body}");
+        run(&mut s, "solid.hole", json!({"sketch": sk, "points": ["p1", "p2"], "diameter": 8, "depth": 16, "targets": [body], "name": hole}));
+        assert_eq!(said(&s, &hole), "", "{body} should drill cleanly with no warning");
+        near(base_vol - body_volume(&mut s, body), expected_removed);
+        for dy in [-15.0, 15.0] {
+            assert!(!solid_at(&s, sx * 399.0, y_mid + dy, 30.0), "{body}: bore at y = {}", y_mid + dy);
+            assert!(solid_at(&s, sx * 385.0, y_mid + dy, 30.0), "{body}: solid past depth at y = {}", y_mid + dy);
+        }
+    }
+
+    // Both `x = 0..100` and `x = -100..0`, with explicit plane normal pointing either `+X` or `-X`.
+    for (body, x0, face_x, sx) in [("RightBlock", 0.0, 100.0, 1.0_f64), ("LeftBlock", -100.0, -100.0, -1.0)] {
+        for (tag, x_dir, y_dir) in [("pos_n", [0, 1, 0], [0, 0, 1]), ("neg_n", [0, 0, 1], [0, 1, 0])] {
+            let mut s = Session::default();
+            run(
+                &mut s,
+                "solid.box",
+                json!({"corner": [x0, -30.0, 0.0], "length": 100.0, "width": 60.0, "height": 50.0, "body_name": body, "operation": "new"}),
+            );
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [face_x, 0.0, 0.0], "x_dir": x_dir, "y_dir": y_dir}, "name": "Pts"}));
+            let (p1, p2) = if tag == "pos_n" { ([-10.0, 25.0], [10.0, 25.0]) } else { ([25.0, -10.0], [25.0, 10.0]) };
+            run(&mut s, "sketch.point", json!({"point": p1, "id": "p1"}));
+            run(&mut s, "sketch.point", json!({"point": p2, "id": "p2"}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["p1", "p2"], "diameter": 8, "depth": 16, "targets": [body], "name": "H"}));
+            assert_eq!(said(&s, "H"), "", "{body} {tag}");
+            near(100.0 * 60.0 * 50.0 - body_volume(&mut s, body), expected_removed);
+            for y in [-10.0, 10.0] {
+                assert!(!solid_at(&s, sx * 92.0, y, 25.0), "{body} {tag}: bore at y = {y}");
+                assert!(solid_at(&s, sx * 75.0, y, 25.0), "{body} {tag}: solid past depth at y = {y}");
+            }
+        }
+    }
+}
+
+/// Sketch-point holes on edges, corners and small bodies (where a tiny `size * 1e-6` probe lies
+/// inside the boundary tolerance band) drill into the material symmetrically on every side.
+#[test]
+fn sketch_holes_on_all_edges_corners_and_small_bodies_drill_symmetrically() {
+    let half = pi() * 25.0 * 8.0 / 2.0;
+    let quarter = pi() * 25.0 * 8.0 / 4.0;
+    // Edges on both `-X`/`+X` and `-Y`/`+Y` faces from the underside (`z = 0`, normal `+Z`).
+    for (pt, probe) in [([0.0, 20.0], [2.0, 20.0]), ([40.0, 20.0], [38.0, 20.0]), ([20.0, 0.0], [20.0, 2.0]), ([20.0, 40.0], [20.0, 38.0])] {
+        let mut s = Session::default();
+        box_part(&mut s);
+        let ids = points_sketch(&mut s, 0.0, &[pt]);
+        drill(&mut s, &ids, json!({"depth": 8}));
+        assert_eq!(said(&s, "H"), "", "edge {pt:?}");
+        near(removed(&mut s), half);
+        assert!(!solid_at(&s, probe[0], probe[1], 4.0) && solid_at(&s, probe[0], probe[1], 14.0), "edge {pt:?}");
+    }
+    // All four corners from the underside (`z = 0`, normal `+Z`).
+    for (pt, probe) in [([0.0, 0.0], [2.0, 2.0]), ([40.0, 0.0], [38.0, 2.0]), ([0.0, 40.0], [2.0, 38.0]), ([40.0, 40.0], [38.0, 38.0])] {
+        let mut s = Session::default();
+        box_part(&mut s);
+        let ids = points_sketch(&mut s, 0.0, &[pt]);
+        drill(&mut s, &ids, json!({"depth": 8}));
+        assert_eq!(said(&s, "H"), "", "corner {pt:?}");
+        near(removed(&mut s), quarter);
+        assert!(!solid_at(&s, probe[0], probe[1], 4.0) && solid_at(&s, probe[0], probe[1], 14.0), "corner {pt:?}");
+    }
+    // A small 10 mm cube at `x = -407..-397` (diagonal ~17 mm, where `size * 1e-6` is inside the
+    // B-rep boundary zone tolerance): explicit plane with normal `+X` must still drill `+X`.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-407.0, -5.0, 0.0], "length": 10.0, "width": 10.0, "height": 10.0, "body_name": "SmallBlock", "operation": "new"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-407.0, 0.0, 0.0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [0.0, 5.0], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["p1"], "diameter": 4, "depth": 5, "targets": ["SmallBlock"], "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    near(1000.0 - body_volume(&mut s, "SmallBlock"), pi() * 4.0 * 5.0);
+    assert!(!solid_at(&s, -405.0, 0.0, 5.0) && solid_at(&s, -400.0, 0.0, 5.0));
+}
+
+/// `flip: true` reverses the auto-detected drill direction: into the other side when material
+/// exists on both sides, or into empty air (with a no-material warning rather than silent zero
+/// removal) when material lies on only one side.
+#[test]
+fn sketch_hole_flip_reverses_direction_and_warns_when_removing_no_material() {
+    // Material on one side only (`x = -407..-377`): default drills `+X`, `flip: true` drills `-X`
+    // into empty air and warns.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-407.0, -40.0, 0.0], "length": 30.0, "width": 80.0, "height": 60.0, "body_name": "LeftArm", "operation": "new"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-407.0, 0.0, 0.0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [-15.0, 30.0], "id": "p1"}));
+    run(&mut s, "sketch.point", json!({"point": [15.0, 30.0], "id": "p2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"sketch": "Pts", "points": ["p1", "p2"], "diameter": 8, "depth": 16, "flip": true, "targets": ["LeftArm"], "name": "AirHole"}),
+    );
+    near(body_volume(&mut s, "LeftArm"), 30.0 * 80.0 * 60.0);
+    assert!(said(&s, "AirHole").contains("2 of 2 holes remove no material"), "{}", said(&s, "AirHole"));
+
+    // Material on both sides (offset sketch inside a box at z = 10): default drills down (-Z),
+    // `flip: true` drills up (+Z).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "10 mm", "name": "Mid"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Mid", "points": ["p1"], "diameter": 10, "depth": 6, "flip": true, "name": "UpHole"}));
+    assert_eq!(said(&s, "UpHole"), "");
+    assert!(!solid_at(&s, 20.0, 20.0, 13.0) && solid_at(&s, 20.0, 20.0, 7.0) && solid_at(&s, 20.0, 20.0, 18.0));
+}
+
+/// On a C-shaped body at `x = -407` with another flange standing further along `-X` (across an air
+/// gap), a sketch on the `x = -407` face (exact or within the B-rep boundary tolerance) drills
+/// `+X` into that face, not `-X` across the air gap.
+#[test]
+fn sketch_hole_on_face_with_flange_across_gap_drills_its_own_face() {
+    for x_plane in [-407.0_f64, -407.0 - 1e-6] {
+        let mut s = Session::default();
+        // Main wall at x = -407..-380, joined at z = 0..10 to a parallel flange at x = -440..-430.
+        run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [-407.0, -30.0, 0.0], "length": 27.0, "width": 60.0, "height": 50.0, "body_name": "Bracket", "operation": "new"}),
+        );
+        run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [-440.0, -30.0, 0.0], "length": 33.0, "width": 60.0, "height": 10.0, "operation": "join", "targets": ["Bracket"]}),
+        );
+        run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [-440.0, -30.0, 10.0], "length": 10.0, "width": 60.0, "height": 40.0, "operation": "join", "targets": ["Bracket"]}),
+        );
+        let base = body_volume(&mut s, "Bracket");
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [x_plane, 0.0, 0.0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Pts"}));
+        run(&mut s, "sketch.point", json!({"point": [0.0, 30.0], "id": "p1"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["p1"], "diameter": 8, "depth": 16, "targets": ["Bracket"], "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "plane x = {x_plane}");
+        near(base - body_volume(&mut s, "Bracket"), pi() * 16.0 * 16.0);
+        assert!(!solid_at(&s, -399.0, 0.0, 30.0), "plane x = {x_plane}: drilled into main wall");
+        assert!(solid_at(&s, -435.0, 0.0, 30.0), "plane x = {x_plane}: far flange untouched");
+    }
+}
+
+/// Existing designs keep the legacy sketch-hole priority order: any spot touching `-n` wins over
+/// spots touching `+n` (even when more spots touch `+n`), and when no spot touches either side,
+/// look-ahead along `-n` wins over `+n` (even when material lies closer along `+n`).
+#[test]
+fn saved_sketch_holes_keep_legacy_tie_break_and_look_ahead_order() {
+    // 1. Mixed-side touching spots: two spots touch `+Z` on `High`, one spot touches `-Z` on
+    // `Low`. Legacy rule: any `-n` touch wins, so the hole drills `-Z` into `Low`.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 40, "height": 10, "body_name": "Low", "operation": "new"}));
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 10], "length": 20, "width": 40, "height": 10, "body_name": "High", "operation": "new"}));
+    let low_base = body_volume(&mut s, "Low");
+    let high_base = body_volume(&mut s, "High");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "10 mm", "name": "Split"}));
+    run(&mut s, "sketch.point", json!({"point": [30, 10], "id": "p_up1"}));
+    run(&mut s, "sketch.point", json!({"point": [30, 30], "id": "p_up2"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p_down"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Split", "points": ["p_up1", "p_up2", "p_down"], "diameter": 6, "depth": 5, "name": "H"}));
+    near(low_base - body_volume(&mut s, "Low"), pi() * 9.0 * 5.0);
+    near(body_volume(&mut s, "High"), high_base);
+    assert!(!solid_at(&s, 10.0, 20.0, 7.5) && solid_at(&s, 10.0, 20.0, 2.0));
+    assert!(solid_at(&s, 30.0, 10.0, 12.5) && solid_at(&s, 30.0, 30.0, 12.5));
+
+    // 2. Floating look-ahead: sketch at z = 12 between plates at z = 0..6 and z = 14..20 is
+    // closer to the upper plate (+Z, 2 mm) than the lower plate (-Z, 6 mm), touching neither.
+    // Legacy rule: `-n` ahead wins over `+n`, so the hole still drills `-Z` into the lower plate.
+    let mut s = Session::default();
+    slotted_part(&mut s, 6.0, 14.0);
+    let base = volume(&mut s);
+    let ids = points_sketch(&mut s, 12.0, &[[20.0, 20.0]]);
+    drill(&mut s, &ids, json!({"depth": 4}));
+    near(base - volume(&mut s), pi() * 25.0 * 4.0);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 20.0, 20.0, 16.0));
 }

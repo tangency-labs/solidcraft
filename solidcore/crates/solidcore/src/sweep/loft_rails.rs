@@ -14,6 +14,7 @@
 //! | [`RailSection`]      | (none; SolidCraft's `Section`) |
 //! | [`RailLoftOptions`]  | (none) |
 //! | `station_map` (private) | (none; SolidCraft's `station_map`) |
+//! | `warp` (private)     | (none; SolidCraft's `warp_station`/`refine`, PR #12188) |
 //! | [`certificate`]      | (none) |
 //!
 //! **The stations (SolidCraft's construction, carried over).** The sections are at loft
@@ -33,7 +34,10 @@
 //! shifted along the loft as far as the rail leads or lags; with two it moves with the first,
 //! turns and sizes with the line between them, and leans to follow the second. The loft's
 //! direction at a station is the central difference of the plain loft's middles over `1e-4`
-//! of the loft parameter, SolidCraft's convention.
+//! of the loft parameter, SolidCraft's convention. With three or more rails ([`MAX_RAILS`] at
+//! most) each station is warped instead ([`warp`]): the curves are refined to
+//! [`warp::WARP_SPANS`] spans or one per rail, whichever is more, one affine move fits the guided points, and an
+//! inverse-multiquadric field takes up the rest, solved through the curves.
 //!
 //! **Where the stations go, and the certificate.** Each span between two sections starts with
 //! one station at its middle. The stations and sections are skinned
@@ -50,7 +54,7 @@
 //! the span is bounded on the surface both lie nearest at once (a rail along an edge between two
 //! faces lies on both).
 //!
-//! **Refused**, naming why: no section or one, no rail or more than two; sections whose curves
+//! **Refused**, naming why: no section or one, no rail or more than sixteen; sections whose curves
 //! do not pair (counts, degrees, knots or weights differing by more than `1e-9` relative,
 //! SolidCraft's convention); two sections on top of each other; a rail not crossing a section's
 //! plane exactly once, or crossing it farther than the body tolerance from its curves; two
@@ -81,6 +85,10 @@
 //! places a fixed count of stations evenly and does not bound the skin between them; here they
 //! are placed where the certificate asks. No recursion: the refinement is a loop.
 
+mod warp;
+
+use warp::{refine_column, warp_station, WARP_SPANS};
+
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
@@ -104,6 +112,8 @@ pub const DEFAULT_MAX_WIRES: usize = 257;
 pub const MAX_SECTIONS: usize = 100;
 /// Most curves in a section.
 pub const MAX_CURVES: usize = 1000;
+/// Most guide rails.
+pub const MAX_RAILS: usize = 16;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -127,6 +137,38 @@ pub struct RailSection<'a> {
     pub curves: Vec<&'a Curve>,
 }
 
+/// The floor of a [`Tolerance::Relative`] certificate, mm: a loft's size never makes it finer.
+pub const RELATIVE_TOLERANCE_FLOOR: f64 = 1e-6;
+
+/// The most a guided edge may stray from its rail.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Tolerance {
+    /// A length, mm.
+    Absolute(f64),
+    /// A fraction of the loft's own size (the diagonal of its sections' control points),
+    /// at least [`RELATIVE_TOLERANCE_FLOOR`].
+    Relative(f64),
+}
+
+impl Tolerance {
+    /// Whether the number it holds is finite and positive.
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        match self {
+            Self::Absolute(t) | Self::Relative(t) => t.is_finite() && t > 0.0,
+        }
+    }
+
+    /// The tolerance in mm for a loft of `size`.
+    #[must_use]
+    pub fn resolve(self, size: f64) -> f64 {
+        match self {
+            Self::Absolute(t) => t,
+            Self::Relative(r) => (r * size).max(RELATIVE_TOLERANCE_FLOOR),
+        }
+    }
+}
+
 /// How a railed loft is built.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RailLoftOptions {
@@ -140,7 +182,7 @@ pub struct RailLoftOptions {
     pub cap: bool,
     /// The most a guided edge may stray from its rail: the certificate's tolerance, the
     /// caller's (finite and positive).
-    pub tolerance: f64,
+    pub tolerance: Tolerance,
     /// The most wires, sections and stations together, the loft is skinned through: a
     /// resource bound ([`DEFAULT_MAX_WIRES`]).
     pub max_wires: usize,
@@ -156,8 +198,17 @@ impl RailLoftOptions {
             closed: false,
             degree: 3,
             cap: false,
-            tolerance,
+            tolerance: Tolerance::Absolute(tolerance),
             max_wires: DEFAULT_MAX_WIRES,
+        }
+    }
+
+    /// As [`RailLoftOptions::new`], certified to `fraction` of the loft's size.
+    #[must_use]
+    pub const fn relative(fraction: f64) -> Self {
+        Self {
+            tolerance: Tolerance::Relative(fraction),
+            ..Self::new(0.0)
         }
     }
 }
@@ -218,6 +269,13 @@ impl Plain {
             points,
             ..self.clone()
         }
+    }
+
+    /// Whether its weights are not all one.
+    fn is_rational(&self) -> bool {
+        self.weights
+            .as_ref()
+            .is_some_and(|w| w.iter().any(|x| (x - 1.0).abs() > 1e-12))
     }
 
     /// Whether `other` pairs with it (SolidCraft's `pairs`): the same degree, counts, and
@@ -282,6 +340,101 @@ impl Plain {
         };
         nurb.eval(t0 + (t1 - t0) * f.clamp(0.0, 1.0), Side::Left)
     }
+}
+
+/// Whether `points` are collinear, to `1e-9` of their extent (a point not finite is not).
+fn collinear(points: &[Point3]) -> bool {
+    let Some(&a) = points.first() else {
+        return true;
+    };
+    if !points
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+    {
+        return false;
+    }
+    let (mut lo, mut hi) = (a, a);
+    for p in points {
+        lo = Point3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+        hi = Point3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+    }
+    let extent = lo.distance(hi);
+    if extent == 0.0 {
+        return true;
+    }
+    // the far end from `a` fixes the direction; every point's distance from that line
+    let far = points
+        .iter()
+        .copied()
+        .max_by(|p, q| a.distance(*p).total_cmp(&a.distance(*q)))
+        .unwrap_or(a);
+    let d = far - a;
+    let Ok(u) = d.unitize() else {
+        return true;
+    };
+    points.iter().all(|p| {
+        let v = *p - a;
+        (v - u * v.dot(u)).length() <= 1e-9 * extent
+    })
+}
+
+/// Gives each straight curve (collinear control points, unit weights) the weights of its
+/// column's rational curve: the same line, only its parametrization changes. Solidcore pairs
+/// curves by their weights; any other curve is left as it is and refused as not pairing.
+fn take_partner_weights(sections: &mut [Vec<(Plain, NurbCurve)>]) -> Result<()> {
+    let n = sections.first().map_or(0, Vec::len);
+    for k in 0..n {
+        let partner = sections
+            .iter()
+            .filter_map(|s| s.get(k))
+            .map(|(p, _)| p)
+            .find(|p| p.is_rational())
+            .and_then(|p| p.weights.clone());
+        let Some(w) = partner else {
+            continue;
+        };
+        for s in sections.iter_mut() {
+            let Some((plain, nurb)) = s.get_mut(k) else {
+                continue;
+            };
+            if !plain.is_rational() && plain.points.len() == w.len() && collinear(&plain.points) {
+                plain.weights = Some(w.clone());
+                *nurb = plain.nurb()?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A rail through `points` in order, as a guide rail takes it: a degree-1 curve through them,
+/// its knots spaced as the points are in order.
+///
+/// # Errors
+///
+/// `InvalidInput` for fewer than two points or a point not finite.
+#[allow(clippy::cast_precision_loss)] // indices of a rail's points: far fewer than 2^52
+pub fn polyline(points: &[Point3]) -> Result<Curve> {
+    let n = points.len();
+    if n < 2 {
+        return Err(invalid("a guide rail has two or more points"));
+    }
+    if !points
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+    {
+        return Err(invalid("a guide rail's point is not finite"));
+    }
+    let spans = (n - 1) as f64;
+    let mut knots = vec![0.0, 0.0];
+    knots.extend((1..n - 1).map(|i| i as f64 / spans));
+    knots.extend([1.0, 1.0]);
+    Plain {
+        degree: 1,
+        knots,
+        points: points.to_vec(),
+        weights: None,
+    }
+    .curve()
 }
 
 /// A knot vector as its distinct knots and their multiplicities.
@@ -462,6 +615,8 @@ struct Loft<'a> {
     normals: Vec<Vec3>,
     anchors: Vec<Vec<Anchor>>,
     size: f64,
+    /// The certificate's tolerance in mm, from `opts.tolerance` at this loft's size.
+    tolerance: f64,
 }
 
 impl<'a> Loft<'a> {
@@ -475,10 +630,10 @@ impl<'a> Loft<'a> {
         if !(2..=MAX_SECTIONS).contains(&count) {
             return Err(invalid("a railed loft runs through 2 to 100 sections"));
         }
-        if !(1..=2).contains(&rails.len()) {
-            return Err(invalid("a loft takes one or two guide rails"));
+        if !(1..=MAX_RAILS).contains(&rails.len()) {
+            return Err(invalid("a loft takes 1 to 16 guide rails"));
         }
-        if !(opts.tolerance.is_finite() && opts.tolerance > 0.0) {
+        if !opts.tolerance.is_valid() {
             return Err(invalid("a railed loft's tolerance is finite and positive"));
         }
         if !(1..=3).contains(&opts.degree) {
@@ -497,6 +652,7 @@ impl<'a> Loft<'a> {
             }
             sections.push(curves);
         }
+        take_partner_weights(&mut sections)?;
         let lead = sections.first().ok_or_else(|| invalid("sections"))?;
         let n = lead.len();
         if sections
@@ -519,6 +675,32 @@ impl<'a> Loft<'a> {
             }
         }
         let size = lo.distance(hi);
+        let tolerance = opts.tolerance.resolve(size);
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return Err(invalid("a railed loft's tolerance is finite and positive"));
+        }
+        // three or more rails warp their stations: each curve is given the spans the warp moves,
+        // and at least one control point per rail, or the solve through the curves is singular
+        if rails.len() >= 3 {
+            let spans = WARP_SPANS.max(rails.len());
+            let columns = sections.first().map_or(0, Vec::len);
+            for k in 0..columns {
+                let at: Vec<usize> = (0..sections.len())
+                    .filter(|&i| sections.get(i).is_some_and(|s| s.len() > k))
+                    .collect();
+                let column: Vec<Plain> = at
+                    .iter()
+                    .filter_map(|&i| sections.get(i).and_then(|s| s.get(k)))
+                    .map(|(p, _)| p.clone())
+                    .collect();
+                for (&i, plain) in at.iter().zip(refine_column(&column, spans)?) {
+                    if let Some((p, nurb)) = sections.get_mut(i).and_then(|s| s.get_mut(k)) {
+                        *nurb = plain.nurb()?;
+                        *p = plain;
+                    }
+                }
+            }
+        }
         // the sections' parameters: the mean distance between their curves' starts
         let mut along = vec![0.0];
         for w in sections.windows(2) {
@@ -548,6 +730,7 @@ impl<'a> Loft<'a> {
         for u in &mut along {
             *u /= total;
         }
+        let lead = sections.first().ok_or_else(|| invalid("sections"))?;
         // the plain loft across more than two sections: each control point's curve
         let mut across = Vec::new();
         if count > 2 {
@@ -590,6 +773,7 @@ impl<'a> Loft<'a> {
             normals,
             anchors: Vec::new(),
             size,
+            tolerance,
         };
         loft.anchors = loft.anchor_rails(k)?;
         Ok(loft)
@@ -631,12 +815,17 @@ impl<'a> Loft<'a> {
             }
             out.push(anchors);
         }
-        if let [a, b] = out.as_slice() {
-            for (p, q) in a.iter().zip(b) {
-                if (p.g - q.g).abs() <= 0.0 {
-                    return Err(invalid(
-                        "the two guide rails meet a section at the same point",
-                    ));
+        let two = out.len() == 2;
+        for (r, a) in out.iter().enumerate() {
+            for b in out.iter().skip(r + 1) {
+                for (p, q) in a.iter().zip(b) {
+                    if (p.g - q.g).abs() <= 0.0 {
+                        return Err(invalid(if two {
+                            "the two guide rails meet a section at the same point"
+                        } else {
+                            "the guide rails meet a section at the same point"
+                        }));
+                    }
                 }
             }
         }
@@ -705,22 +894,30 @@ impl<'a> Loft<'a> {
             .map_err(|_| invalid("section planes turning through each other"))?;
         let n = station.len();
         let mut pairs = Vec::new();
+        let mut gs = Vec::new();
         let mut hits = Vec::new();
         for (rail, anchors) in self.rails.iter().zip(&self.anchors) {
             let (Some(a0), Some(a1)) = (anchors.get(i), anchors.get(i + 1)) else {
                 return Err(invalid("a rail's anchors"));
             };
-            let anchor = wire_point(&station, interpolate_g(a0.g, a1.g, f, n, self.opts.closed))?;
+            let g = interpolate_g(a0.g, a1.g, f, n, self.opts.closed);
+            let anchor = wire_point(&station, g)?;
+            gs.push(g);
             let (t, hit) = rail_crossing(k, rail, anchor, normal)?;
             let target = hit + a0.nudge * (1.0 - f) + a1.nudge * f;
             pairs.push((anchor, target));
             hits.push((t, hit));
         }
-        let map = station_map(&pairs, mid, dir, self.opts.fit, self.size)?;
-        let moved = station
-            .iter()
-            .map(|(c, _)| c.with(c.points.iter().map(|p| map.apply(*p)).collect()))
-            .collect();
+        let moved = if pairs.len() >= 3 {
+            let plains: Vec<Plain> = station.iter().map(|(c, _)| c.clone()).collect();
+            warp_station(&plains, &gs, &pairs, normal, self.size)?
+        } else {
+            let map = station_map(&pairs, mid, dir, self.opts.fit, self.size)?;
+            station
+                .iter()
+                .map(|(c, _)| c.with(c.points.iter().map(|p| map.apply(*p)).collect()))
+                .collect()
+        };
         Ok((moved, hits))
     }
 }
@@ -782,6 +979,7 @@ pub fn loft_rails(
         spans,
         rails,
         opts,
+        loft.tolerance,
         &mut |k: &Kernel, i: usize, f: f64| loft.station(k, i, f),
     )
 }
@@ -804,7 +1002,7 @@ pub fn sweep_two_rails(
     rails: [&Curve; 2],
     opts: &RailLoftOptions,
 ) -> Result<RailedLoft> {
-    if !(opts.tolerance.is_finite() && opts.tolerance > 0.0) {
+    if !opts.tolerance.is_valid() {
         return Err(invalid("a sweep's tolerance is finite and positive"));
     }
     if !(1..=3).contains(&opts.degree) {
@@ -877,6 +1075,10 @@ pub fn sweep_two_rails(
     }
     let chord = b.1 - a.1;
     let size = lo.distance(hi).max(chord.length());
+    let tolerance = opts.tolerance.resolve(size);
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(invalid("a sweep's tolerance is finite and positive"));
+    }
     let (across, d) = chord_frame(chord, a.2, b.2, size)?;
     let sweep = Birail {
         profile: curves.iter().map(|(p, _)| p.clone()).collect(),
@@ -908,6 +1110,7 @@ pub fn sweep_two_rails(
         1,
         &rail_list,
         opts,
+        tolerance,
         &mut |k: &Kernel, _span: usize, f: f64| sweep.station(k, f),
     )?;
     if swapped {
@@ -1019,6 +1222,7 @@ fn skin_and_certify(
     spans: usize,
     rails: &[&Curve],
     opts: &RailLoftOptions,
+    tolerance: f64,
     station: &mut dyn FnMut(&Kernel, usize, f64) -> Result<StationAt>,
 ) -> Result<RailedLoft> {
     // one station at each span's middle
@@ -1030,7 +1234,7 @@ fn skin_and_certify(
             return Err(crate::error::Failure::new(
                 OP,
                 crate::error::sweep::SweepFailure::RailPastStationCap {
-                    asked: opts.tolerance,
+                    asked: tolerance,
                     reached,
                     wires: wires.len(),
                 },
@@ -1048,7 +1252,7 @@ fn skin_and_certify(
         }
         wires.sort_by(|a, b| a.span.cmp(&b.span).then(a.f.total_cmp(&b.f)));
         let skin = skin_of(k, &wires, opts)?;
-        let (bounds, failing) = certify(k, &skin, &wires, rails, opts.tolerance)?;
+        let (bounds, failing) = certify(k, &skin, &wires, rails, tolerance)?;
         reached = bounds.iter().copied().fold(0.0_f64, f64::max);
         if failing.is_empty() {
             return Ok(RailedLoft {
@@ -1168,4 +1372,49 @@ fn certify(
     }
     failing.sort_unstable();
     Ok((bounds, failing))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_relative_tolerance_is_its_fraction_of_the_size_at_least_the_floor() {
+        assert!((Tolerance::Relative(1e-4).resolve(40.0) - 4e-3).abs() < 1e-15);
+        assert_eq!(
+            Tolerance::Relative(1e-4).resolve(1e-3),
+            RELATIVE_TOLERANCE_FLOOR
+        );
+        assert_eq!(Tolerance::Absolute(0.5).resolve(1e6), 0.5);
+        assert!(!Tolerance::Relative(f64::NAN).is_valid());
+        assert!(!Tolerance::Absolute(0.0).is_valid());
+    }
+
+    #[test]
+    fn a_polyline_keeps_its_points_in_order_as_a_degree_one_curve() {
+        let pts = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 2.0, 0.0),
+        ];
+        let c = polyline(&pts).unwrap();
+        let plain = Plain::of(&c).unwrap();
+        assert_eq!(plain.degree, 1);
+        assert_eq!(plain.points, pts);
+        assert_eq!(plain.knots.len(), pts.len() + 2);
+        assert!(plain.weights.is_none());
+        assert!(polyline(&pts[..1]).is_err());
+    }
+
+    #[test]
+    fn collinear_points_are_the_straight_ones() {
+        let line = [
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(5.0, 5.0, 0.0),
+            Point3::new(0.0, 10.0, 0.0),
+        ];
+        assert!(collinear(&line));
+        let bent = [line[0], Point3::new(10.0, 10.0, 0.0), line[2]];
+        assert!(!collinear(&bent));
+    }
 }

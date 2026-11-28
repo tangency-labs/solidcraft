@@ -1,5 +1,6 @@
 //! The Design Properties window (#1015): the design's project, part number, revision, author,
-//! organization, description and licence, and a read-only list of the data other tools keep in
+//! organization, description, material, finish (with a list of common finishes to pick from; a
+//! design that is one part carries them itself, #20114) and licence, and a read-only list of the data other tools keep in
 //! the design. OK applies the edited fields through one `document.metadata.set` (one undo step);
 //! Cancel and the close button change nothing. File → Design Properties…, the Browser's
 //! Document Settings, the root component's menu and `ui.start` of `document.metadata` or
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
+use solidcraft_engine::doc::metadata::{DESCRIPTION, FINISH, Owner, keys};
 use solidcraft_engine::doc::progress::Progress;
 
 use crate::SolveApp;
@@ -109,6 +110,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
+            } else if key == FINISH {
+                ui_kit::row(ui, label, |ui| crate::finish_field::editor(ui, "design_properties", field));
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
@@ -407,7 +410,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 
 /// Draw the Properties window of the body or component the menu asked about (mass, volume,
 /// area, centre of mass, bounding box and counts; a component's first moments and moment of
-/// inertia), when it is open. Close dismisses it.
+/// inertia; an occurrence's position and rotation), when it is open. Close dismisses it.
 pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     show_measuring(app, ctx);
     let Some((title, v)) = app.menu.props.clone() else { return };
@@ -450,6 +453,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     rows.push(("Faces / edges / vertices", format!("{} / {} / {}", total["faces"], total["edges"], total["vertices"])));
+    let placement = v.get("placement").cloned();
     let (k, unit) = crate::prefs::unit_scale(&app.session.doc.units);
     let first = point(&total["first_moment_g_mm"]).filter(|_| number(total, "mass_g") > 0.0).map(|m| {
         let m: Vec<String> = [m.x, m.y, m.z].iter().map(|x| number_text(app, x * k)).collect();
@@ -477,6 +481,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                 let label = solidcraft_ui_text::tr_label(label);
                 let name = format!("{label}: {value}");
                 ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
+            }
+            if let Some(placement) = &placement {
+                copied |= show_placement(app, ui, placement, &copy_hint);
             }
             if let Some(first) = &first {
                 let name = format!("{first_label}: {first}");
@@ -520,6 +527,57 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     if closed || action == ui_kit::Action::Cancel {
         close_object(app);
     }
+}
+
+/// Position and rotation of an occurrence, in its parent or in the world, and a copy of the
+/// 3×4 matrix `occurrence.move` takes. Each value copies itself when clicked, as the rows above
+/// do; whether one was copied.
+fn show_placement(app: &SolveApp, ui: &mut egui::Ui, placement: &Value, copy_hint: &str) -> bool {
+    let id = ui.make_persistent_id("sc_props_placement_frame");
+    let mut frame = ui.data(|d| d.get_temp(id).unwrap_or(0usize)).min(1);
+    let frames = [app.tr("ui.properties.frame_in_parent").to_string(), app.tr("ui.properties.frame_world").to_string()];
+    ui_kit::row(ui, app.tr("ui.properties.frame"), |ui| {
+        ui_kit::dropdown(ui, "sc_props_frame", &mut frame, &[frames[0].as_str(), frames[1].as_str()]);
+    });
+    ui.data_mut(|d| d.insert_temp(id, frame));
+    let Some(pose) = placement.get(if frame == 0 { "in_parent" } else { "world" }) else { return false };
+    let mut copied = false;
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    if let Some(p) = point(&pose["position"]) {
+        let label = app.tr("ui.properties.position");
+        let text = format!("({}) {unit}", [p.x, p.y, p.z].map(|x| crate::prefs::show_mm_bare(app, x)).join(", "));
+        let name = format!("{label}: {text}");
+        ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, &text, &name, false, copy_hint));
+    }
+    if let (Some(axis), Some(angle)) = (point(&pose["axis"]), pose.get("angle_deg").and_then(Value::as_f64)) {
+        let label = app.tr("ui.properties.rotation");
+        let a = [axis.x, axis.y, axis.z].map(|x| number_text(app, x)).join(", ");
+        let text = format!("{}° · ({a})", number_text(app, angle));
+        let name = format!("{label}: {text}");
+        ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, &text, &name, false, copy_hint));
+    }
+    let Some(text) = matrix_copy(&pose["matrix"]) else { return copied };
+    let copy_label = app.tr("ui.properties.copy_matrix").to_string();
+    ui_kit::row(ui, "", |ui| {
+        let button = ui_kit::button(ui, &copy_label, ui_kit::Button::Small);
+        crate::scenario::publish_handle("properties:copy_placement", button.rect.center());
+        if button.clicked() {
+            ui.ctx().copy_text(text.clone());
+        }
+    });
+    copied
+}
+
+/// The 3×4 matrix as `occurrence.move` takes it: three rows, translation in the last column.
+fn matrix_copy(m: &Value) -> Option<String> {
+    let rows = m.as_array().filter(|rows| rows.len() == 3)?;
+    let mut out = Vec::with_capacity(3);
+    for row in rows {
+        let cells = row.as_array().filter(|cells| cells.len() == 4)?;
+        let cells: Vec<String> = cells.iter().map(|n| n.as_f64().map(|x| x.to_string()).unwrap_or_else(|| "NaN".to_string())).collect();
+        out.push(format!("[{}]", cells.join(", ")));
+    }
+    Some(format!("[{}]", out.join(", ")))
 }
 
 #[cfg(test)]
@@ -647,7 +705,7 @@ mod tests {
         h.step(&json!({"start": "document.metadata"})).unwrap();
         h.frames(2);
         let labels: Vec<&str> = keys(Owner::Design).map(|k| english.text(k.label)).collect();
-        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "License"]);
+        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "Material", "Finish", "License"]);
         for label in &labels {
             assert!(h.widget(label).is_some(), "{label}");
         }
@@ -778,6 +836,57 @@ mod tests {
         assert!(progress.is_cancelled(), "Close stops the worker");
     }
 
+    /// #12721: Properties of an occurrence shows its position and rotation, in the parent or in
+    /// the world, and copies the 3×4 matrix.
+    #[test]
+    fn occurrence_properties_show_position_and_rotation_in_the_parent_or_the_world() {
+        let mut h = Harness::new();
+        let arm = h.app.run("component.create", json!({"name": "arm", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+        let bracket = h.app.run("component.create", json!({"name": "bracket", "parent": "arm"})).unwrap()["occurrence"].as_u64().unwrap();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 8})),
+            ("component.activate", json!({"component": 0})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.app.run("occurrence.move", json!({"occurrence": arm, "matrix": [[1, 0, 0, 116], [0, 1, 0, 235], [0, 0, 1, 1492]]})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": bracket, "matrix": [[0, 0, 1, 0], [0, 1, 0, -120], [-1, 0, 0, 0]]})).unwrap();
+        let measured = h.app.run("occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]})).unwrap();
+        h.app.menu.props = Some(("bracket:1".into(), measured));
+        h.frames(2);
+        for label in ["Frame", "In parent", "Position", "Rotation"] {
+            assert!(h.widget(label).is_some(), "{label}");
+        }
+        let parent = format!("({}) mm", [0.0, -120.0, 0.0].map(|x| crate::prefs::show_mm_bare(&h.app, x)).join(", "));
+        assert!(h.widget(&parent).is_some(), "{parent}");
+        // A quarter turn about +Y, the angle first.
+        let n = |x: f64| super::number_text(&h.app, x);
+        let turn = format!("{}° · ({}, {}, {})", n(90.0), n(0.0), n(1.0), n(0.0));
+        assert!(h.widget(&turn).is_some(), "{turn}");
+        let copy = crate::scenario::handle_at("properties:copy_placement").expect("copy");
+        let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": copy.x, "y": copy.y}));
+        crate::control::handle(&mut h.app, &h.ctx, &request);
+        let mut copied = Vec::new();
+        for _ in 0..4 {
+            h.frame();
+            copied.extend(h.output.commands.iter().filter_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            }));
+        }
+        let text = copied.last().expect("Copy matrix puts the placement on the clipboard");
+        assert!(text.contains("-120"), "{text}");
+        h.step(&json!({"widget": "In parent"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "World"})).unwrap();
+        h.frames(2);
+        let world_at = format!("({}) mm", [116.0, 115.0, 1492.0].map(|x| crate::prefs::show_mm_bare(&h.app, x)).join(", "));
+        assert!(h.widget(&world_at).is_some(), "{world_at}");
+    }
+
     /// #8706: Properties of an assembly from the Browser's menu returns at once with the card
     /// measuring on a copy, and the result (the same a script gets) fills it in.
     #[test]
@@ -842,6 +951,27 @@ mod tests {
         h.step(&json!({"click": {"chevron": "Document Settings"}})).unwrap();
         h.step(&json!({"click": {"browser": "Design Properties"}})).unwrap();
         assert!(h.app.design_properties.is_some());
+    }
+
+    /// The window lists a material and a finish, so a single-part design can carry them; OK sets them
+    /// with the other properties in one `document.metadata.set`.
+    #[test]
+    fn the_window_edits_the_designs_material_and_finish() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        crate::design_properties::open(&mut h.app);
+        h.frames(2);
+        assert!(h.widget("Material").is_some() && h.widget("Finish").is_some());
+        let d = h.app.design_properties.as_mut().unwrap();
+        use solidcraft_engine::doc::metadata::{Owner, keys};
+        let at = |key: &str| keys(Owner::Design).position(|k| k.name == key).unwrap();
+        d.fields[at("material")] = "5052-H32, 0.090 in".into();
+        d.fields[at("finish")] = "Powder coat, RAL 9005, matt".into();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let m = &h.app.session.doc.metadata;
+        assert_eq!((m.text("material"), m.text("finish")), (Some("5052-H32, 0.090 in"), Some("Powder coat, RAL 9005, matt")));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
     }
 
     /// #12218: an inertia cell reads as its entry and value; a row whose label does not name each

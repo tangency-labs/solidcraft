@@ -104,6 +104,32 @@ Press Pull, Delete Face and Move Face.
 - **Elsewhere:** base feature, dumb solid, imported body.
 - **For translators:** not a base flange of sheet metal, and not a base sketch.
 
+### bend allowance
+
+The flat length a bend takes in a sheet's flat pattern, measured along the bend's neutral axis.
+
+For bend angle θ, inner radius R, thickness T and K-factor K, it is θ · (R + K·T). A press brake
+chart often gives it for a 90° bend. Compare *bend deduction*.
+
+- **In SolidCraft:** `allowance_mm` in `sheet.export_bend_table`; the `allowance` value of a sheet
+  metal rule's `unfold_method` (Sheet Metal Rules › Unfold › Bend Allowance), with the 90° value
+  in `unfold_value`.
+- **Elsewhere:** BA.
+- **For translators:** a length added for the bend, not a permission or a tolerance.
+
+### bend deduction
+
+How much shorter a sheet's flat blank is than its flange lengths measured to the outside of the
+bend.
+
+At 90° it is 2·(R + T) less the bend allowance, for inner radius R and thickness T. A press brake
+chart often gives it for a 90° bend. Compare *bend allowance*.
+
+- **In SolidCraft:** the `deduction` value of a sheet metal rule's `unfold_method` (Sheet Metal
+  Rules › Unfold › Bend Deduction), with the 90° value in `unfold_value`.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -272,6 +298,23 @@ and circular bends.
 - **For translators:** a member group can contain several separate stock pieces; selecting a
   group does not join those pieces into one length of stock.
 
+### cope
+
+A shaped member end that fits against the outside of one or more mating members.
+
+- **In SolidCraft:** `frame.cope` saves the round-tube member, mating members and original path
+  end in a `FrameCope` feature. The mating bores do not leave material inside the joint.
+- **Elsewhere:** fishmouth, saddle cut, tube notch.
+- **For translators:** a physical end treatment, rather than a drawing of nominal uncut stock.
+
+### cope template
+
+A full-size development of a member's actual end-cut profile onto its outer cylindrical surface.
+
+- **In SolidCraft:** `frame.export_cope_dxf` writes a millimetre DXF with an explicit seam,
+  axial datum, inward direction and scale check.
+- **For translators:** a printable cutting guide; it does not flatten the tube's bends.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.
@@ -316,6 +359,25 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### dogbone
+
+A round relief, of a router bit's diameter, cut into an inside corner so that a square part seats
+where the bit would leave a round.
+
+A dogbone runs the length of the corner edge. Its normal style is centred on the corner's
+bisector with its circle through the sharp corner; minimal stops a gap short of the corner.
+T-bone: the relief is centred on one wall's line, the longer or the shorter one. At a square
+corner it bites that wall only; at a sharper corner it also bites the other wall.
+
+- **In SolidCraft:** the `solid.dogbone` command; its `diameter`, `style` (`normal`, `minimal`,
+  `t_bone`), `gap`, `side` (`longer`, `shorter`), `max_angle` and `along` parameters; the
+  `dogbone` feature type in a design file.
+- **Don't use:** relief cut, corner relief (sheet metal's word for the cut where two flanges meet),
+  overcut.
+- **Elsewhere:** dog-bone fillet, T-bone, mortise relief.
+- **For translators:** not a fillet or a round (those add material or round an edge off); the
+  relief removes material beyond the corner.
+
 ### end cap
 
 A plate that closes the open end of a frame member, shaped like the member profile's outer outline
@@ -355,6 +417,16 @@ construction plane.
 - **Elsewhere:** feature, operation.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
+
+### finger joint
+
+A connection made by alternating rectangular projections on two parts.
+
+- **In SolidCraft:** `solid.finger_joint`; the `FingerJointFeature` timeline feature and its
+  `bodies`, `count`, `clearance`, `inverted` and `edge_offset` parameters.
+- **Don't use:** dovetail joint.
+- **Elsewhere:** box joint, finger joint.
+- **For translators:** a woodworking connection, not an anatomical joint.
 
 ### folder
 
@@ -406,6 +478,29 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### keyboard profile
+
+A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
+
+A keyboard profile sits under the user's own keys: a key the user changes always wins, and stays
+when another keyboard profile is chosen. Each one is a file that maps keys to existing commands,
+and it never adds a command. It is an app setting, not part of a design, and a settings profile
+carries the chosen one.
+
+- **In SolidCraft:** Preferences › Shortcuts › Keyboard profile; the `keyboard_profile`
+  preference; the files in `crates/ui-egui/keyboard-profiles/`.
+- **Don't use:** keymap, key scheme, preset (for the set of keys).
+- **Elsewhere:** keyboard profile, keyboard scheme, keymap.
+- **For translators:** a set of keyboard shortcuts, not a settings profile, a sketch profile or a
+  frame profile (see *Words with more than one meaning*, "Profile").
+
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -442,6 +537,16 @@ its provenance, not its place.
 - **Don't use:** source (that is where the data came from), location, path.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
+
+### master spline
+
+One tooth left out, or one space filled, in a shaft spline, so that the hub goes on in one position only.
+
+- **In SolidCraft:** the `master_spline` parameter of `shaft_spline.insert` (`none`, `tooth_out`,
+  `wide_tooth`) and its `master_angle`.
+- **Don't use:** key, keyway (for the odd tooth).
+- **Elsewhere:** master spline, indexing spline.
+- **For translators:** not a sketch spline, which is a curve through points.
 
 ### material
 
@@ -497,6 +602,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### motion model
+
+What a 3D mouse's cap moves: the model, or a camera that looks at the point the view turns about.
+
+With **Object** the model goes the way the cap is pushed, tilted or twisted. With **Target camera**
+the camera goes that way, so the model goes the other way along every axis.
+
+- **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
+  Preferences › Input › 3D mouse › Motion model.
+- **Don't use:** navigation mode (the mouse mappings), camera mode.
+- **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
+- **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
 
 ### movable corridor
 
@@ -626,6 +744,14 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
 
+### press-in hardware
+
+A nut, stud or standoff that is pressed into a punched hole in sheet metal and holds there without welding or a loose nut.
+
+- **In SolidCraft:** `sheet.hardware` cuts its mounting hole and records it in a Hole's `hardware` (`kind`: `nut`, `flush_nut`, `stud`, `standoff`; `thread`; `length`; `part`); sizes in `docs/hardware-catalogue.md`.
+- **Don't use:** insert, and a maker's product names.
+- **For translators:** a fastener fixed in the sheet itself, not a loose screw or a standard part inserted as a component (`parts.fastener`).
+
 ### print face
 
 The flat face of a body that lies on the print bed when the body is sent to a slicer.
@@ -726,6 +852,19 @@ computer (the 3D mouse, graphics, units) stay out. It is an app setting, not par
 - **For translators:** not a sketch profile and not a frame profile (see *Words with more than
   one meaning*, "Profile"), and not a design configuration.
 
+### shaft spline
+
+A ring of teeth along a round shaft that fits spaces in a hub, so that the hub turns with the shaft.
+
+A shaft spline is one feature that cuts the teeth into a picked shaft or bore, or makes a new
+splined shaft and hub.
+
+- **In SolidCraft:** `shaft_spline.insert` ("Shaft Spline"); the `shaft_spline` feature kind.
+- **Don't use:** gear (for a spline), keyed shaft.
+- **Elsewhere:** spline shaft, splined shaft, spline.
+- **For translators:** not a sketch spline, which is a curve through points, and not a gear that
+  transmits motion between two shafts.
+
 ### sketch
 
 A set of points and curves, with their constraints, on one plane, that features use as profiles,
@@ -771,6 +910,16 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
 
 ### thin-film interference
 
@@ -853,6 +1002,26 @@ The space left between frame members where they meet, for a weld to fill.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
 
+### weld symbol
+
+A mark identifying the type of weld required at a joint.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Kind` and the elementary strokes drawn by
+  `Weld::draw`.
+- **For translators:** ISO calls this an elementary symbol; it forms part of a *welding symbol*.
+
+### welding symbol
+
+A drawing annotation giving the location and requirements for joining parts by welding.
+
+The arrow side and other side describe joint requirements; the selected convention controls
+their placement. The backend record needs no modelled weld bead. A leader and sheet/view
+placement complete the annotation later.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Weld` backend records; see the
+  [supported subset and limits](../../../weld-symbols.md).
+- **For translators:** the whole annotation, including its reference line and any elementary marks.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -872,12 +1041,15 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
 | | the cross-section a frame member follows | frame profile | `frame.profile.*` |
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
+| | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
+| | the clearance between two flanges at a sheet corner | *corner gap* | the Gap row in a Flange corner card or the Corner Join dialog |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
-| | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
@@ -899,6 +1071,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 

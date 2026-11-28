@@ -193,4 +193,56 @@ mod tests {
         let expected: Vec<usize> = known.iter().map(|&(_, n)| n).collect();
         assert_eq!(counts, expected, "{lines:#?}");
     }
+
+    /// WR-441 (`crate::bstuv_trim_rows`): `remove_topo_edges_mouse_two_struts`, whose joined
+    /// edge's trim keeps its short end spans. Every UV trim of the result is certified on
+    /// its edge within the edge's tolerance (`trims_on_edges::certify_edgeuse`, a
+    /// rounded-interval bound both ways, refined to an eighth of the tolerance). Upstream's
+    /// cleanup cut the joined edge's trim down to 7 spans: `N_CrvRemoveDegenSegs` measured
+    /// the UV span lengths against the 3D zone tolerance. That trim had points 7.8 off its
+    /// edge, past the 3.67 tolerance (measured when the PR retiring the flag was written).
+    #[test]
+    fn bstuv_mouse_two_struts_trims_lie_on_their_edges() {
+        let mut k = Kernel::default();
+        let mut b = mouse(&mut k);
+        remove_topo_edges(
+            &mut k,
+            &mut b,
+            &[Some(EdgeId::from_index(1)), Some(EdgeId::from_index(2))],
+        )
+        .unwrap();
+        let trims: Vec<_> = b
+            .edgeuses()
+            .iter()
+            .filter(|(_, r)| r.uv_trim_curve.is_some())
+            .map(|(x, _)| x)
+            .collect();
+        let joined = solidcore::topology::EdgeuseId::from_index(23);
+        assert!(trims.contains(&joined), "the joined edge's edge use has a trim");
+        for x in trims {
+            let e = b.edgeuse(x).unwrap().edge.unwrap();
+            let tol = b.edge(e).unwrap().tolerance;
+            let cert =
+                crate::trims_on_edges::certify_edgeuse(&Kernel::default(), &b, x, 0.125 * tol)
+                    .unwrap();
+            let trim = b.edgeuse(x).unwrap().uv_trim_curve.as_ref().unwrap();
+            let spans = match trim.kind() {
+                solidcore::curve::curve::CurveKind::BSpline(bs) => {
+                    let mut d = bs.gw_nurb().unwrap().knots().to_vec();
+                    d.dedup();
+                    d.len() - 1
+                }
+                _ => 0,
+            };
+            eprintln!("BSTUV mouse two struts: {spans} spans, {cert:?}");
+            if x == joined {
+                assert_eq!(spans, 77, "the joined edge's trim keeps its spans");
+            }
+            assert!(
+                cert.holds(),
+                "edge use {x:?}'s trim is {:e} off edge {e:?} (tolerance {tol:e})",
+                cert.bound
+            );
+        }
+    }
 }

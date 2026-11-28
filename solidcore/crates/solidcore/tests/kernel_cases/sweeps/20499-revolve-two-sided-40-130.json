@@ -1,0 +1,127 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "angle": 2.9670597283903604,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "20499-revolve-two-sided-40-130",
+  "expected": {
+    "body_count": 1,
+    "edges": 3,
+    "faces": 3,
+    "method": "Pappus: the circle's area pi r^2 = 25 pi times the path of its centre, 2 pi R (170/360) with R = 30: V = 2 pi^2 R r^2 (170/360) = 6990.969784104961. Faces: the torus sector and two caps = 3; edges: the two cap circles and the seam = 3; vertices: 2.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20499"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "vertices": 2,
+    "volume_mm3": 6990.969784104961,
+    "what": "a circle of radius 5, its centre 30 from the Z axis, revolved about Z two-sided by 40 and 130 degrees: a 170 degree sector of a torus with two flat caps (the mirror of 130 and 40, which built)"
+  },
+  "expressible": false,
+  "gallery_note": "The mirror of the two-sided 130 and 40 degrees: it built before, its ray reaching the aimed cap edge first.",
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "records": "20499-revolve-two-sided-40-130.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "operand": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2953.4675463214753,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 6990.969784104964
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#20499"
+  ],
+  "traced_ops": [
+    "revolve",
+    "copy"
+  ],
+  "ungraded": [],
+  "what": "a circle of radius 5, its centre 30 from the Z axis, revolved about Z two-sided by 40 and 130 degrees: a 170 degree sector of a torus with two flat caps (the mirror of 130 and 40, which built)",
+  "why_not": [
+    "no kernel operation made a body the case ends with"
+  ]
+}

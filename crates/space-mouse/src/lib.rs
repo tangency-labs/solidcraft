@@ -10,10 +10,12 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod button_set;
 pub mod buttons;
 mod calibration;
 mod descriptor;
 
+pub use button_set::ButtonSet;
 pub use calibration::AxisCalibration;
 pub use calibration::Calibration;
 pub use calibration::FEATHER_SHARE;

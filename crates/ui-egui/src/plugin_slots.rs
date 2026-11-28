@@ -22,7 +22,7 @@ use solidcraft_engine::plugin::UiSlot;
 pub(crate) struct Item {
     pub command: String,
     pub plugin: String,
-    pub entry: String,
+    pub button_label: String,
     pub label: String,
     pub slot: Slot,
     /// An importer chooses its own file, so it needs no open design.
@@ -123,14 +123,14 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
     let mut items = Vec::new();
     for entry in &plugin.entries {
         for slot in &entry.slots {
-            let slot = match slot {
-                UiSlot::Menu { name } => {
+            let (slot, slot_label) = match slot {
+                UiSlot::Menu { name, label } => {
                     let Some(name) = menu_name(name) else { continue };
-                    Slot::Menu(name)
+                    (Slot::Menu(name), label.as_deref())
                 }
-                UiSlot::Ribbon { name } => {
+                UiSlot::Ribbon { name, label, .. } => {
                     let Some(name) = ribbon_name(name) else { continue };
-                    Slot::Ribbon(name)
+                    (Slot::Ribbon(name), label.as_deref())
                 }
             };
             let command = format!("{}.{}", plugin.id, entry.name);
@@ -140,11 +140,17 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
             if items.iter().any(|item: &Item| item.command == command && item.slot == slot) {
                 continue;
             }
+            let button_label = slot_label
+                .filter(|l| !l.trim().is_empty())
+                .map(str::trim)
+                .or_else(|| (!entry.label.trim().is_empty()).then(|| entry.label.trim()))
+                .unwrap_or(entry.name.as_str())
+                .to_owned();
             items.push(Item {
                 command,
                 plugin: plugin.name.clone(),
-                entry: entry.name.clone(),
-                label: format!("{} · {}", plugin.name, entry.name),
+                button_label: button_label.clone(),
+                label: format!("{} · {}", plugin.name, button_label),
                 slot,
                 importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
                 icon: crate::plugin_menu::command_icon(plugin, entry).to_owned(),
@@ -439,10 +445,10 @@ impl RibbonGroup {
                 .map(|entry| ribbon::Button {
                     id: &entry.command,
                     run: &entry.command,
-                    label: &entry.entry,
+                    label: &entry.button_label,
                     name: &entry.label,
                     icon: &entry.icon,
-                    size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.button_label), min_width: ribbon::BUTTON_MIN_WIDTH },
                     planned: false,
                     enabled: true,
                     pressed: false,
@@ -560,6 +566,7 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
             updates: None,

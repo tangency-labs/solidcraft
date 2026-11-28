@@ -64,3 +64,32 @@ fn a_clearance_check_replies_with_its_schema() {
     matches(&run(&mut s, "inspect.clearance", json!({"against": ["A"], "skip_within": null})), false);
     matches(&run(&mut s, "inspect.clearance", json!({"clearence": 3})), true);
 }
+
+/// #22050: unchecked entries with optional non-boolean `distance_mm` and mesh-derived `exact: false`
+/// match the `inspect.clearance` output schema.
+#[test]
+fn unchecked_distance_and_exact_conform_to_output_schema() {
+    use super::Unchecked;
+
+    let schema = output_schema_for::<Clearance>();
+    let schema = schema.as_value();
+    let reply = Clearance {
+        overlaps: Vec::new(),
+        near: Vec::new(),
+        nearest: Default::default(),
+        unchecked: vec![
+            Unchecked { a: "A".into(), b: Some("B".into()), reason: "relate".into(), distance_mm: Some(0.0), exact: None },
+            Unchecked { a: "C".into(), b: Some("D".into()), reason: "gaps".into(), distance_mm: Some(0.25), exact: Some(false) },
+            Unchecked { a: "Mesh".into(), b: None, reason: "mesh body: not checked".into(), distance_mm: None, exact: None },
+        ],
+        bodies: 4,
+        pairs_checked: 2,
+        pairs_reused: 0,
+        pairs_pruned: 0,
+        truncated: false,
+        ms: 1.0,
+        param_warnings: Vec::new(),
+    };
+    let v = serde_json::to_value(&reply).unwrap();
+    assert!(conforms(schema, schema, &v), "{v} doesn't match {schema}");
+}

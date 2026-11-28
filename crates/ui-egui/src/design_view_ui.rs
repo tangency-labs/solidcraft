@@ -136,6 +136,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> boo
                 documents::view_activate(app, id);
             }
         }
+        TabAction::CollapseViews(collapsed) => documents::view_collapse(app, collapsed),
         TabAction::ReturnView(i) => {
             if let Some(id) = view_id(app, i) {
                 let window = app.view_windows.current_window();

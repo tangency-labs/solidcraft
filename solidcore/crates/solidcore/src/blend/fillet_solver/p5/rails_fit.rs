@@ -26,9 +26,7 @@
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
 //! `SmFilletCorner::Create`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
-//! the face's edge order, as the fork's strict `<` does. A closed rail's isolated contact
-//! with a sharp rim is reported separately: keeping both loops would intersect them
-//! (#20282). There is no recursion.
+//! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
 use super::{RailClassificationContext, LENT_CLASSIFICATION, OP};
 use crate::blend::fillet_classification::FilletClassObject;
@@ -38,17 +36,16 @@ use crate::blend::fillet_solver::p1::{
 };
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, CrossingInput, FilletSetUp, SolverFailure};
-use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
-use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
+use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p2 as eu2;
-use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 
@@ -60,9 +57,6 @@ pub struct RailsFit {
     /// `rbFit`: every rail stays on its face (`false` = a rail leaves its face between
     /// the filleted edge's ends, or is nowhere on it).
     pub fit: bool,
-    /// A closed rail stays on its face but touches a sharp boundary at isolated points.
-    /// Keeping both loops would make them intersect, rather than bound a face.
-    pub touches_rim: bool,
     /// `rbRollsOver`: a rail rolls over a tangent edge onto the next face.
     pub rolls_over: bool,
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
@@ -87,134 +81,6 @@ pub struct RailsFit {
     /// on a closed edge the labels instead refer to its periodic seam. Only a certified
     /// concave crash on a closed edge may trim such a run at both boundaries.
     pub wraps_past_both_ends: bool,
-}
-
-/// Compare the adjacent face-use normals at this boundary contact, not elsewhere
-/// along the edge: a curved boundary can be smooth at one point and sharp at another.
-fn rim_is_smooth_at(
-    k: &Kernel,
-    target: &mut Brep,
-    e: EdgeId,
-    parameter: f64,
-    tangency_tol: f64,
-) -> Result<bool> {
-    let primary = eu::primary_edgeuse(target, e)?.ok_or_else(|| {
-        Failure::new(
-            OP,
-            BlendFailure::Defect {
-                why: "the rail classifier identified a solid rim without the primary edge use \
-                      that the kernel's solid topology must retain",
-            },
-        )
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
-    })?;
-    let radial = eu::radial(target, primary)?.ok_or_else(|| {
-        Failure::new(
-            OP,
-            BlendFailure::Defect {
-                why: "the rail classifier identified a solid rim without the radial partner \
-                      required to bound its material sector",
-            },
-        )
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
-    })?;
-    let options = BinormalOptions::default();
-    let first = evaluate_binormal(k, target, primary, parameter, false, &options)?.face_normal;
-    let second = evaluate_binormal(k, target, radial, parameter, false, &options)?.face_normal;
-    Ok(first.angle_between(second)? <= tangency_tol)
-}
-
-/// A closed rail touching a sharp rim without crossing it leaves two touching loops.
-/// Classification includes the modelling tolerance. A rail wholly on a boundary, a
-/// smooth seam, or one crossing the rim is handled by the existing trim/overflow paths.
-fn closed_rail_touches_rim(
-    k: &Kernel,
-    target: &mut Brep,
-    face: FaceId,
-    filleted: EdgeId,
-    intervals: &[CurveInterval<FilletClassObject>],
-    tangency_tol: f64,
-) -> Result<bool> {
-    if !edge::is_closed(target, filleted)?
-        || !intervals
-            .iter()
-            .any(|i| i.mid.point_class() == PointClassType::Face)
-        || intervals
-            .iter()
-            .any(|i| i.mid.point_class() == PointClassType::Unknown)
-    {
-        return Ok(false);
-    }
-    let mut previous = intervals.last();
-    for ivl in intervals {
-        let before = previous;
-        previous = Some(ivl);
-        let Some(before) = before else {
-            continue;
-        };
-        // Only an isolated contact: a stretch along the rim has an Edge midpoint
-        // and belongs to the existing trim path.
-        if before.mid.point_class() != PointClassType::Face
-            || ivl.mid.point_class() != PointClassType::Face
-        {
-            continue;
-        }
-        for point in [&before.end, &ivl.start] {
-            if !matches!(
-                point.point_class(),
-                PointClassType::Edge | PointClassType::Vertex
-            ) {
-                continue;
-            }
-            let Some(object) = point.object() else {
-                continue;
-            };
-            let edges = match (point.point_class(), object.target_entity()?) {
-                (PointClassType::Edge, EntityRef::Edge(e)) => {
-                    if !point.are_parameters_set() {
-                        return Err(Failure::new(
-                            OP,
-                            BlendFailure::Defect {
-                                why: "the rail classifier reported an edge contact without \
-                                      locating its parameter, which classification must supply",
-                            },
-                        )
-                        .with_status(SM_ERR_NULL_POINTER)
-                        .into_error());
-                    }
-                    // The classifier has already located the contact on this edge.
-                    vec![(e, point.t_param())]
-                }
-                (PointClassType::Vertex, EntityRef::Vertex(v)) => {
-                    let mut incident = Vec::new();
-                    for e in face_p4::edges(target, face, None, false, None)? {
-                        let (a, b) = edge::start_end_vertices(target, e)?;
-                        let interval = edge::interval(target, e)?;
-                        if a == Some(v) {
-                            incident.push((e, interval.min()));
-                        }
-                        // At a closed edge's seam, check both one-sided endpoints.
-                        if b == Some(v) {
-                            incident.push((e, interval.max()));
-                        }
-                    }
-                    incident
-                }
-                _ => continue,
-            };
-            for (e, parameter) in edges {
-                if e != filleted
-                    && !edge::face_on_both_sides(target, e, face)?
-                    && !rim_is_smooth_at(k, target, e, parameter, tangency_tol)?
-                {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
 }
 
 /// `SmFilletSolver::IsKnifeEdge` (the fork's, tangency-labs/smlib `e418750`, WR-665):
@@ -817,8 +683,7 @@ impl FilletSolver {
     /// rollover onto the next face). A rail that is nowhere on its face, or that leaves it
     /// between its ends across an edge that is not tangent (a wall, an opening's rim)
     /// means the blend is larger than the faces: `false`. Touching or running along the
-    /// face's boundary is on the face. An isolated contact of a closed rail with a sharp
-    /// rim is also reported in [`RailsFit::touches_rim`]: keeping both loops is invalid.
+    /// face's boundary is on the face.
     ///
     /// The classification is made as `TestRollOver`'s is and is not kept: each rail's
     /// attached classification is as it was.
@@ -859,7 +724,6 @@ impl FilletSolver {
         judge_material: bool,
     ) -> Result<RailsFit> {
         let mut fit = true;
-        let mut touches_rim = false;
         let mut rolls_over = false;
         let mut into_material = false;
         let mut boundaries_into_material = judge_material;
@@ -879,7 +743,6 @@ impl FilletSolver {
             if !edge_bounds_material(target, e)? {
                 return Ok(RailsFit {
                     fit: true,
-                    touches_rim: false,
                     rolls_over: false,
                     into_material: false,
                     boundaries_into_material: false,
@@ -940,19 +803,6 @@ impl FilletSolver {
                 classified?;
                 let intervals = intervals
                     .ok_or_else(|| SolidError::blend_null_defect(OP, LENT_CLASSIFICATION))?;
-                if let Some(e) = filleted {
-                    let tolerance = solver.solver().approx_tol_3d;
-                    let closed = curve.is_closed(k, &curve.natural_interval(), tolerance)?;
-                    touches_rim |= closed
-                        && closed_rail_touches_rim(
-                            k,
-                            target,
-                            face,
-                            e,
-                            &intervals,
-                            solver.solver().tangency_tolerance,
-                        )?;
-                }
 
                 let n = intervals.len();
                 let off_face = |j: usize| {
@@ -1176,7 +1026,6 @@ impl FilletSolver {
         }
         Ok(RailsFit {
             fit,
-            touches_rim,
             rolls_over,
             into_material,
             boundaries_into_material,

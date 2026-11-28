@@ -7,7 +7,7 @@ d = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.pat
 pal = tomllib.load(open(d + '/palette.toml', 'rb'))
 light = {r.get('source', r['light']) for r in pal['roles'].values()}
 OK_TAGS = {'svg', 'title', 'path', 'circle', 'defs', 'mask', 'clipPath', 'g'}
-FAMILIES = {'model', 'small', 'flat', 'workspace'}
+FAMILIES = {'model', 'small', 'flat', 'workspace', 'help'}
 bad = []
 def err(f, m): bad.append('%s: %s' % (os.path.relpath(f, d), m))
 files = sorted(glob.glob(d + '/svg/*/*.svg'))

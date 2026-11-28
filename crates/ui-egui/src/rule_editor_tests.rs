@@ -7,8 +7,10 @@ const SHEET_ROWS: &[&str] = &[
     "Rule",
     "Material",
     "Thickness",
+    "Unfold",
     "K Factor",
     "Bend Radius",
+    "Bend Relief Shape",
     "Relief Width",
     "Relief Depth",
     "Corner Relief Shape",
@@ -38,7 +40,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, kind: &mut Kind, labels: &[&st
     scenario::clear_handles();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         crate::ui_kit::scope(ui, |ui| match kind {
-            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut Vec::new())),
+            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut Vec::new(), &Default::default())),
             Kind::Plastic(k) => assert!(!crate::dialogs_plastic::rows(app, ui, k, &[])),
             _ => panic!("rule dialog"),
         });
@@ -68,7 +70,8 @@ fn sheet_rule_editor_contract() {
     let (mut kind, _) = crate::dialogs_sheet::start(&app, "sheet.manage_rules").unwrap();
     frame(&mut app, &ctx, &mut kind, SHEET_ROWS);
     let mut expected = json!({"name":"Steel (mm)","active":true,"corner_relief_shape":"notch","thickness":"2.5 mm","k_factor":"0.44",
-        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness","angle_display":"bend"});
+        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","bend_relief_shape":"rectangular","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness","angle_display":"bend",
+        "unfold_method":"k_factor"});
     assert_eq!(commands(&app, &kind), vec![("sheet.manage_rules".into(), expected.clone())]);
     let Kind::Sheet(Sm::Rules { pick, values, relief, .. }) = &mut kind else { panic!() };
     *pick = 1;
@@ -97,6 +100,18 @@ fn sheet_rule_editor_contract() {
     frame(&mut app, &ctx, &mut kind, SHEET_ROWS);
     assert_eq!(commands(&app, &kind)[0].1["thickness"], "2.5 mm");
     assert_eq!(commands(&app, &kind)[0].1["active"], true);
+    // A chart unfold: the 90° value's row takes the K Factor row's place, and OK sends both.
+    for (index, method, label) in [(1, "deduction", "Bend Deduction at 90°"), (2, "allowance", "Bend Allowance at 90°")] {
+        let Kind::Sheet(Sm::Rules { unfold, values, .. }) = &mut kind else { panic!() };
+        *unfold = index;
+        if let Some(last) = values.last_mut() {
+            *last = "3.2 mm".into();
+        }
+        let rows: Vec<&str> = SHEET_ROWS.iter().map(|r| if *r == "K Factor" { label } else { *r }).collect();
+        frame(&mut app, &ctx, &mut kind, &rows);
+        let p = &commands(&app, &kind)[0].1;
+        assert_eq!((&p["unfold_method"], &p["unfold_value"]), (&json!(method), &json!("3.2 mm")), "{p}");
+    }
 }
 
 #[test]

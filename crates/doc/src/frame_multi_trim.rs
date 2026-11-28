@@ -39,7 +39,7 @@ fn squared(outline: &Loop2) -> Loop2 {
     };
     // Only an outside corner's arc is squared: squaring an inside corner's (an angle's or a channel's root fillet)
     // would cut into the member's material.
-    let inside = solidcraft_kernel::services::section_corners::inside_corner_arcs(outline);
+    let inside = solidcraft_kernel::planar::inside_corner_arcs(outline);
     // The corner replacing segment k, when it is an outside corner's arc between two lines that meet near it.
     let corner = |k: usize| {
         let at = k.checked_rem(n)?;
@@ -76,7 +76,7 @@ fn meet((a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)) -> Option<Vec2> {
 /// Whether the section is open, like an angle, a channel or a beam: some corner of an outer outline turns inward
 /// (a line meeting the next at an inside corner, or an inside corner's fillet). A tube's or a bar's never does.
 pub fn is_open(regions: &[Region2]) -> bool {
-    regions.iter().any(|r| solidcraft_kernel::services::section_corners::is_open(&r.outer))
+    regions.iter().any(|r| solidcraft_kernel::planar::is_open(&r.outer))
 }
 
 /// The corners of the rectangle round each of the section's outer outlines (an arc's whole circle's box, a curve's
@@ -198,6 +198,9 @@ fn gone(id: &str) -> DocError {
 fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tools: &[&Traced], id: &str, far: bool) -> Result<Option<Traced>> {
     let toward = toward.normalized().ok_or_else(|| DocError::Invalid(format!("the member on line `{id}` has no direction")))?;
     let w = diagonal(&member.body, end_point, toward, middle);
+    // The zone runs `w` past the member's own end: an end built past its line's end (an open section fitted at an
+    // angle) is cut over the whole crossing it reaches, and every tool that far off is looked at.
+    let out = w + kernel::reach_past(&member.body, end_point, toward)?;
     let half = end_point.dist(middle);
     // The tools that reach the end zone, each with how deep its crossing may run: the section plus the tool's
     // own size.
@@ -205,12 +208,12 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     for &tool in tools {
         let b = tool.body.exact_bounds()?;
         // A cheap first look at the tool's box; fails closed on a non-finite distance.
-        if !(end_point.dist(end_point.max(b.min).min(b.max)) <= w) {
+        if !(end_point.dist(end_point.max(b.min).min(b.max)) <= out) {
             continue;
         }
         let size = b.max - b.min;
         let depth = w + size.x.min(size.y).min(size.z);
-        let gate = zone(end_point, toward, w, depth.min(half / 2.0))?;
+        let gate = zone(end_point, toward, (w, out), depth.min(half / 2.0))?;
         if kernel::boolean(&tool.body, &gate, BoolOp::Intersect)?.is_some() {
             reach.push((tool, depth));
         }
@@ -220,7 +223,7 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     }
     // A tool that reaches the end is cut over its whole crossing, an oblique brace's included, and nowhere else.
     // Its faces are named for the zone, apart from the member's own `face:<k>`, where it leaves one on the member.
-    let clip = zone(end_point, toward, w, 2.0 * reach.iter().map(|r| r.1).fold(0.0, f64::max))?;
+    let clip = zone(end_point, toward, (w, out), 2.0 * reach.iter().map(|r| r.1).fold(0.0, f64::max))?;
     let roles = (0..clip.face_count()).map(|k| vec![format!("fit_zone:{k}")]).collect();
     let clip = Traced::made(clip, Some(roles));
     let mut fitted: Option<Traced> = None;
@@ -275,14 +278,14 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     Ok(rest.map(|_| piece))
 }
 
-/// The end zone: a box `w` out from the member's line each way, from `w` past `end` back `depth` into the
-/// member, `toward` pointing out of it.
-fn zone(end: Vec3, toward: Vec3, w: f64, depth: f64) -> Result<kernel::Body> {
+/// The end zone: a box `w` out from the member's line each way, from `out` past `end` (its line's end; `out` is `w`
+/// past as far as the member is built past it) back `depth` into the member, `toward` pointing out of it.
+fn zone(end: Vec3, toward: Vec3, (w, out): (f64, f64), depth: f64) -> Result<kernel::Body> {
     let u = toward.any_perp();
     // x × y = u × (-toward × u) = -toward: the box runs back into the member.
-    let plane = Plane::new(end + toward * w, u, (-toward).cross(u)).ok_or_else(|| DocError::Invalid("a tube end has no zone".into()))?;
+    let plane = Plane::new(end + toward * out, u, (-toward).cross(u)).ok_or_else(|| DocError::Invalid("a tube end has no zone".into()))?;
     let square = [Vec2::new(-w, -w), Vec2::new(w, -w), Vec2::new(w, w), Vec2::new(-w, w)];
-    let mut bodies = kernel::extrude(&plane, &[Region2 { outer: Loop2::polygon(&square), holes: Vec::new() }], 0.0, depth + w)?;
+    let mut bodies = kernel::extrude(&plane, &[Region2 { outer: Loop2::polygon(&square), holes: Vec::new() }], 0.0, depth + out)?;
     match (bodies.pop(), bodies.is_empty()) {
         (Some(body), true) => Ok(body),
         _ => Err(DocError::Invalid("a tube end's zone is not one solid".into())),

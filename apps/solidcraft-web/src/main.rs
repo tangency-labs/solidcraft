@@ -152,6 +152,81 @@ fn closes_design(key: &str, command: bool, shift: bool, alt: bool, design_shown:
     design_shown && command && !shift && !alt && key.eq_ignore_ascii_case("w")
 }
 
+/// The Leave journal keeps the most recent intents in a fixed number of slots.
+#[cfg(any(target_arch = "wasm32", test))]
+const RECOVERY_LEAVE_SLOTS: usize = 64;
+
+/// Page ids come from `keep::page_id`; browser storage is untrusted.
+#[cfg(any(target_arch = "wasm32", test))]
+fn valid_recovery_owner(owner: &str) -> bool {
+    !owner.is_empty() && owner.len() <= 64 && owner.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn recovery_owner(meta: &serde_json::Value) -> Option<&str> {
+    meta.get("recovery_owner").and_then(serde_json::Value::as_str).filter(|owner| valid_recovery_owner(owner))
+}
+
+/// Exact payload identity keeps a new payload with older metadata recoverable after a partial
+/// write. This is browser metadata, not a change to the design container.
+#[cfg(any(target_arch = "wasm32", test))]
+fn recovery_digest(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    format!("{:x}", sha2::Sha256::digest(bytes))
+}
+
+/// Whether this browser explicitly opted out of offering the single autosave after departure.
+#[cfg(any(target_arch = "wasm32", test))]
+fn suppress_recovery_after_leave(prefs: &solidcraft_ui_egui::prefs::Prefs) -> bool {
+    !prefs.recover_after_browser_leave && !prefs.keep_unsaved_in_browser
+}
+
+/// Suppress only coherent recovery from the page that left. No files are deleted: another tab
+/// may write the shared recovery while this page is starting. Reload exempts only its own prior
+/// page, identified by this tab's session storage, rather than every abandoned recovery.
+#[cfg(any(target_arch = "wasm32", test))]
+fn autosave_given_up(meta: &serde_json::Value, bytes: &[u8], left: Option<&str>, reload_owner: Option<&str>, suppress: bool) -> bool {
+    let Some(owner) = recovery_owner(meta) else { return false };
+    suppress
+        && left == Some(owner)
+        && reload_owner != Some(owner)
+        && meta.get("recovery_sha256").and_then(serde_json::Value::as_str) == Some(recovery_digest(bytes).as_str())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LeaveMarker {
+    owner: String,
+    order: u64,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl LeaveMarker {
+    fn parse(text: &str) -> Option<Self> {
+        if text.len() > 256 {
+            return None;
+        }
+        let value: serde_json::Value = serde_json::from_str(text).ok()?;
+        let owner = value.get("owner")?.as_str().filter(|owner| valid_recovery_owner(owner))?;
+        Some(Self { owner: owner.to_string(), order: value.get("order")?.as_u64()? })
+    }
+}
+
+/// Reuse this page's record, an empty slot, or the oldest observed record. Losing an old intent
+/// can cause an extra prompt, but must never hide recovery belonging to a different page.
+#[cfg(any(target_arch = "wasm32", test))]
+fn next_leave_marker(markers: &[Option<LeaveMarker>], owner: &str) -> Option<(usize, LeaveMarker)> {
+    if !valid_recovery_owner(owner) {
+        return None;
+    }
+    let slots = markers.iter().take(RECOVERY_LEAVE_SLOTS);
+    let slot = slots.clone().position(|m| m.as_ref().is_some_and(|m| m.owner == owner)).or_else(|| slots.clone().position(Option::is_none)).or_else(
+        || slots.clone().enumerate().filter_map(|(i, m)| m.as_ref().map(|m| (i, m.order))).min_by_key(|(_, order)| *order).map(|(i, _)| i),
+    )?;
+    let order = slots.flatten().map(|m| m.order).max().unwrap_or(0).saturating_add(1);
+    Some((slot, LeaveMarker { owner: owner.to_string(), order }))
+}
+
 /// The settings a tab last wrote to the browser's storage, or loaded from another tab (#8644).
 /// Every open tab of the app shares that storage, and eframe saves each tab's whole copy every
 /// 30 s and when the page loses focus, so a tab still holding old settings put them back over a
@@ -283,6 +358,20 @@ mod web {
         let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
         // The listener lives as long as the page.
         on_unload.forget();
+    }
+
+    /// Record non-cached departures only when recovery was disabled by the user. Browsers do
+    /// not reveal whether their Leave prompt was shown, so this also applies when it was skipped.
+    fn give_up_autosave_on_leave(window: &web_sys::Window, files: Rc<Files>) {
+        let on_hide = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            let kept = js_sys::Reflect::get(&e, &"persisted".into()).ok().and_then(|p| p.as_bool()).unwrap_or(false);
+            if !kept {
+                files::leaving(&files);
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        // The listener lives as long as the page.
+        on_hide.forget();
     }
 
     /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
@@ -1238,6 +1327,7 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
@@ -1277,6 +1367,7 @@ mod web {
             }
             self.app.ui(ui);
             self.app.retain_view_pictures(frame.wgpu_render_state());
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);
@@ -1408,9 +1499,6 @@ mod web {
                     Box::new(move |cc| {
                         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
                         let files = Rc::new(Files::default());
-                        if launch.persists() {
-                            files::start(&files);
-                        }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
@@ -1472,6 +1560,10 @@ mod web {
                         }
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
+                        }
+                        if launch.persists() {
+                            files::start(&files, crate::suppress_recovery_after_leave(&app.preferences));
+                            give_up_autosave_on_leave(&window, files.clone());
                         }
                         #[cfg(feature = "usage-stats")]
                         if launch.persists() {
@@ -1699,6 +1791,97 @@ mod tests {
         assert!(!closes_design("w", true, false, true, true));
         assert!(!closes_design("w", false, false, false, true));
         assert!(!closes_design("s", true, false, false, true));
+    }
+
+    #[test]
+    fn browser_leave_recovery_requires_an_explicit_opt_in_even_for_old_markers() {
+        let mut prefs = solidcraft_ui_egui::prefs::Prefs::default();
+        let meta = serde_json::json!({"recovery_owner": "a1", "recovery_sha256": recovery_digest(b"abc")});
+        assert!(!suppress_recovery_after_leave(&prefs));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.recover_after_browser_leave = false;
+        assert!(suppress_recovery_after_leave(&prefs));
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = true;
+        assert!(!suppress_recovery_after_leave(&prefs), "per-design kept copies have a separate recovery policy");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = false;
+        prefs.recover_after_browser_leave = true;
+        assert!(
+            !autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)),
+            "turning recovery back on ignores a prior departure"
+        );
+    }
+
+    /// With recovery explicitly disabled, a non-cached departure suppresses its own autosave offer.
+    #[test]
+    fn leaving_without_saving_gives_up_the_autosave() {
+        // SHA-256("abc"), independently specified by the standard test vector.
+        let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert_eq!(recovery_digest(b"abc"), digest);
+        let meta = serde_json::json!({"saved_at": 1, "recovery_owner": "a1", "recovery_sha256": digest});
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, true));
+        // A later attempted write can fail: the earlier committed payload has the same owner.
+        let mut earlier = meta.clone();
+        earlier["saved_at"] = serde_json::json!(0);
+        assert!(autosave_given_up(&earlier, b"abc", Some("a1"), None, true));
+        assert!(!autosave_given_up(&meta, b"abc", None, None, true), "Cancel or a crash leaves no intent");
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, true), "another page's Leave cannot hide this one");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), true), "reload keeps its own prior page's recovery");
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), Some("b2"), true), "reloading a different tab grants no exemption");
+        // A new payload and old metadata may remain after an interrupted two-file write.
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, true));
+        // A newer coherent payload from another page is still offered.
+        let newer = serde_json::json!({"recovery_owner": "b2", "recovery_sha256": digest});
+        assert!(!autosave_given_up(&newer, b"abc", Some("a1"), None, true));
+        for legacy in [serde_json::json!({"saved_at": 1}), serde_json::json!(null), serde_json::json!({})] {
+            assert!(!autosave_given_up(&legacy, b"abc", Some("a1"), None, true));
+        }
+        let long_owner = "a".repeat(65);
+        for owner in ["", "../a1", "NaN", "a1\n", &long_owner] {
+            let hostile = serde_json::json!({"recovery_owner": owner, "recovery_sha256": digest});
+            assert!(!autosave_given_up(&hostile, b"abc", Some(owner), None, true));
+        }
+        for invalid in [serde_json::json!(null), serde_json::json!(2), serde_json::json!("bad"), serde_json::json!(digest.to_uppercase())] {
+            let mut hostile = meta.clone();
+            hostile["recovery_sha256"] = invalid;
+            assert!(!autosave_given_up(&hostile, b"abc", Some("a1"), None, true));
+        }
+    }
+
+    #[test]
+    fn leave_intents_have_a_bounded_owner_journal() {
+        let mut markers = vec![None; RECOVERY_LEAVE_SLOTS];
+        let (slot, first) = next_leave_marker(&markers, "a1").unwrap();
+        assert_eq!(slot, 0);
+        assert_eq!(first.order, 1);
+        markers[slot] = Some(first);
+        assert_eq!(next_leave_marker(&markers, "a1").unwrap().0, 0);
+        assert_eq!(next_leave_marker(&markers, "b2").unwrap().0, 1);
+        // More than one lifetime of slots still records new Leave intents, evicting oldest.
+        for n in 0..RECOVERY_LEAVE_SLOTS * 3 {
+            let owner = format!("c{n:x}");
+            let (slot, marker) = next_leave_marker(&markers, &owner).unwrap();
+            assert!(slot < RECOVERY_LEAVE_SLOTS);
+            assert_eq!(marker.owner, owner);
+            markers[slot] = Some(marker);
+        }
+        assert_eq!(markers.iter().flatten().count(), RECOVERY_LEAVE_SLOTS);
+        assert!(!markers.iter().flatten().any(|m| m.owner == "a1"));
+        assert!(markers.iter().flatten().any(|m| m.owner == format!("c{:x}", RECOVERY_LEAVE_SLOTS * 3 - 1)));
+        // A hostile maximum order must not overflow or grow the journal.
+        markers[0] = Some(LeaveMarker { owner: "a1".into(), order: u64::MAX });
+        assert_eq!(next_leave_marker(&markers, "d1").unwrap().1.order, u64::MAX);
+        markers.push(None);
+        assert!(next_leave_marker(&markers, "d1").unwrap().0 < RECOVERY_LEAVE_SLOTS);
+        assert_eq!(next_leave_marker(&markers, "invalid"), None);
+        assert_eq!(LeaveMarker::parse(r#"{"owner":"a1","order":2}"#), Some(LeaveMarker { owner: "a1".into(), order: 2 }));
+        for text in ["null", "{}", r#"{"owner":"a1","order":-1}"#, r#"{"owner":"../a1","order":1}"#] {
+            assert_eq!(LeaveMarker::parse(text), None);
+        }
     }
 
     /// A tab writes its settings when they change, and not again while they stay the same; the

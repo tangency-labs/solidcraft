@@ -692,6 +692,15 @@ impl<'a> Reference<'a> {
             Reference::Face(face) => &face.path,
         }
     }
+
+    /// Its body's name, as its definition names it.
+    pub fn body(self) -> &'a str {
+        match self {
+            Reference::Edge(edge) => &edge.body,
+            Reference::Point(point) => &point.body,
+            Reference::Face(face) => &face.body,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name
@@ -725,6 +734,14 @@ impl Document {
         let (body, edge) = picker.edge(pick)?;
         let (body, origin_feature, mut names) = picker.names(body, &[edge])?;
         Ok(ModelEdge { body, origin_feature, name: names.remove(0), path: path.to_vec() })
+    }
+
+    /// How far along `edge` (found on `model`, this design's) the point nearest `at` lies, as a
+    /// part of its length from its start: where a balloon's arrow or a note's leader picked on it
+    /// ends (#22195). `None` when the edge isn't found as one edge, or has no length.
+    pub fn along_edge(&self, model: &Model, edge: &ModelEdge, at: Vec3) -> Option<f64> {
+        let found = Lookup::new(self, model).edges(edge).ok().filter(|found| found.whole)?;
+        found.pieces.first().and_then(|(_, line)| solidcraft_kernel::polyline_fraction_at(line, at))
     }
 
     /// The face `pick` names, by its persistent name, as [`Document::edge_reference`] names an edge:
@@ -766,6 +783,66 @@ impl Document {
         let plane = b.body.planar_face(face).ok_or_else(|| DocError::Invalid(format!("face {face} of `{}` isn't flat: give a flat face", b.name)))?;
         let frame = self.body_frame_at(b, path)?;
         Ok((apply_point(&frame, plane.origin), apply_vector(&frame, plane.normal())))
+    }
+
+    /// The dimension for the overall width (`vertical` false: along the view's horizontal) or height
+    /// of body `body`, placed through `path`, on the view through `basis`, rounded corners included:
+    /// a dimension between the two flat faces that bound it, each found by name, so it is the
+    /// `faces` kind. Exact: the faces are the body's planar faces square to the view's axis, and the
+    /// body's exact box must reach no farther than the two (a rounded side, whose bulge a flat face
+    /// doesn't bound, is refused).
+    pub fn overall_kind(&self, model: &Model, body: &str, path: &[u64], basis: &Plane, vertical: bool) -> Result<DimensionKind> {
+        let state = model.state();
+        let b = state
+            .bodies
+            .iter()
+            .find(|b| b.name == body && !b.body.is_mesh())
+            .ok_or_else(|| DocError::Invalid(format!("no body `{body}` to measure (a mesh body has no exact faces)")))?;
+        let frame = self.body_frame_at(b, path)?;
+        let axis: [f64; 3] = (if vertical { basis.y } else { basis.x }).into();
+        let tol = surface_tolerance(b);
+        // The flat faces square to the axis, by where they cut it.
+        let mut square: Vec<(usize, f64)> = Vec::new();
+        for f in 0..b.body.face_count() {
+            let Some(plane) = b.body.planar_face(f) else { continue };
+            match solidcraft_kernel::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
+                Ok(Some(offset)) => square.push((f, offset)),
+                Ok(None) => {}
+                Err(why) => return Err(axis_refusal(why)),
+            }
+        }
+        let way = if vertical { "height" } else { "width" };
+        let by_offset = |p: &&(usize, f64), q: &&(usize, f64)| p.1.total_cmp(&q.1);
+        let (Some(low), Some(high)) = (square.iter().min_by(by_offset), square.iter().max_by(by_offset)) else {
+            return Err(DocError::Invalid(format!(
+                "body `{body}` has no flat face square to the view's {way}: its overall {way} is not between two faces"
+            )));
+        };
+        let gap = high.1 - low.1;
+        require(gap > tol, || {
+            format!("body `{body}`'s flat faces square to the view's {way} are one plane: there is no overall {way} between them")
+        })?;
+        let extent = body_extent(b, &frame, axis)?;
+        require((extent - gap).abs() <= tol * 10.0, || {
+            format!(
+                "body `{body}` reaches {:.3} mm past its two flat faces along the view's {way}: dimension what bounds it there (silhouettes), or turn the view square to the part",
+                (extent - gap).abs()
+            )
+        })?;
+        let face = |f: usize| self.face_reference(model, &EdgePick::Index { body: body.to_string(), index: f }, path);
+        Ok(DimensionKind::Faces { a: face(low.0)?, b: face(high.0)?, direction: LinearDirection::Aligned })
+    }
+
+    /// How far body `body` (placed through `path`) reaches along the unit vector `axis` of the design's
+    /// frame, from its exact box, when `axis` runs along one of the body's own axes (so the box is
+    /// tight there); none otherwise, or when the body has no exact box. Used to tell a straight
+    /// edge shorter than the body it belongs to.
+    pub fn body_extent_along(&self, model: &Model, body: &str, path: &[u64], axis: Vec3) -> Option<f64> {
+        let state = model.state();
+        let b = state.bodies.iter().find(|b| b.name == body && !b.body.is_mesh())?;
+        let frame = self.body_frame_at(b, path).ok()?;
+        let along_one = solidcraft_kernel::affine::along_own_axes(&frame, axis.into()).ok()?;
+        if along_one { body_extent(b, &frame, axis.into()).ok() } else { None }
     }
 
     /// What a dimension between silhouettes `a` and `b` is on `model` (this design's): when both
@@ -1216,14 +1293,15 @@ impl<'a> Lookup<'a> {
         Ok(self.named.entry(i).or_insert_with(|| BodyEdges::new(b)))
     }
 
-    /// The middle of the edge `edge` names, in the design's frame, where a balloon's arrow or a note's
-    /// leader ends: how it stands, the point, and whether it was found by exact history. A split edge
-    /// has no one middle: the pieces are listed, and none is chosen.
-    pub(super) fn middle(&mut self, edge: &ModelEdge) -> (Status, Option<Vec3>, bool) {
+    /// Where a balloon's arrow or a note's leader ends on the edge `edge` names, in the design's
+    /// frame: `along` its length (0 at its start, 1 at its end), else its middle. How it stands, the
+    /// point, and whether it was found by exact history. A split edge has no one place along it: the
+    /// pieces are listed, and none is chosen.
+    pub(super) fn along(&mut self, edge: &ModelEdge, along: Option<f64>) -> (Status, Option<Vec3>, bool) {
         match self.edges(edge) {
             Ok(found) if !found.whole => (Status::Ambiguous(edge_candidates(&edge.body, &found)), None, false),
             Ok(found) => {
-                let point = found.pieces.first().and_then(|(_, line)| crate::joints::edge::middle(line)).map(|(p, _)| p);
+                let point = found.pieces.first().and_then(|(_, line)| solidcraft_kernel::polyline_point_at(line, along.unwrap_or(0.5)));
                 let status = if point.is_some() { Status::Ok } else { Status::lost(format!("edge `{}` has no length", edge.name)) };
                 (status, point, found.exact)
             }
@@ -1287,13 +1365,19 @@ impl<'a> Lookup<'a> {
         let pieces = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
         let not_round = || Status::Unmeasurable(format!("edge `{}` isn't a circle or an arc", edge.name));
         // A spline piece is no arc: only the pieces the kernel gives as segments can be one.
-        let segs: Option<Vec<Seg2>> = pieces
-            .into_iter()
-            .map(|piece| match piece {
-                crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
-                crate::kernel::PlanarPiece::Spline(_) => None,
-            })
-            .collect();
+        let segments = |pieces: Vec<crate::kernel::PlanarPiece>| -> Option<Vec<Seg2>> {
+            pieces
+                .into_iter()
+                .map(|piece| match piece {
+                    crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
+                    crate::kernel::PlanarPiece::Spline(_) => None,
+                })
+                .collect()
+        };
+        // An edge held only as a spline, such as where a countersink meets its bore (#22308), is
+        // still the circle of a cylinder it bounds when the view looks along that cylinder's axis:
+        // the kernel's certified circular reading of it.
+        let segs = segments(pieces).or_else(|| body.body.cylinder_edge_projection(&local, *index).and_then(segments));
         let (radius, points) = segs.as_deref().and_then(one_arc).ok_or_else(not_round)?;
         Ok((radius, points.map(|p| apply_point(&found.frame, local.to_world(p)))))
     }
@@ -1531,6 +1615,26 @@ impl<'a> Lookup<'a> {
         let points = [ends(&on_a, a)?, ends(&on_b, b)?].concat();
         Ok(Found::new(measured, points, on_a.exact && on_b.exact))
     }
+}
+
+/// How far `b`'s exact box, placed by `frame`, reaches along `axis`, a direction of the design's
+/// frame (any length), by solidcore's `extent_along`. Tight when `axis` runs along the body's own axes.
+fn body_extent(b: &ModelBody, frame: &Mat, axis: [f64; 3]) -> Result<f64> {
+    let bounds = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
+    solidcraft_kernel::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
+}
+
+/// The refusal of one of solidcore's axis ops, in the words of a dimension on a view.
+fn axis_refusal(why: solidcraft_kernel::affine::AxisRefusal) -> DocError {
+    use solidcraft_kernel::affine::AxisRefusal;
+    DocError::Invalid(
+        match why {
+            AxisRefusal::ZeroAxis => "the view's axis is zero",
+            AxisRefusal::FlatMap => "the occurrence its body is placed through flattens it",
+            AxisRefusal::NotFinite => "the body's box is not finite",
+        }
+        .into(),
+    )
 }
 
 /// The faces of `b` that `name` finds: the ones with that name, else the pieces of it; and whether

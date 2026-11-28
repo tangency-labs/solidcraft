@@ -17,7 +17,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
+use wasmtime::{CallHook, Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
 
 mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit", world: "command-plugin" });
@@ -58,9 +58,8 @@ fn link_host_query<H: PluginHost + 'static>(linker: &mut Linker<State<H>>, grant
 include!(concat!(env!("OUT_DIR"), "/panels.rs"));
 include!(concat!(env!("OUT_DIR"), "/exporter.rs"));
 
-const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
-const MAX_IMPORT_CALLS: usize = 1 << 20;
+const MAX_IMPORT_CALLS: u64 = 1 << 20;
 /// Files an importer may look at beside the one it imports, and names a folder listing reads.
 const MAX_IMPORT_FILES: usize = 4096;
 /// `O_NONBLOCK` for the platforms the runtime targets (the flag is not in `std`).
@@ -77,7 +76,25 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 /// A stalled regular-file read cannot be interrupted portably. Limit detached reads globally;
 /// their permits remain occupied until the OS returns, even after the dialog stops waiting.
 const MAX_PREFIX_READS: usize = 2;
+#[cfg(not(test))]
 static PREFIX_READS: std::sync::OnceLock<Arc<AtomicUsize>> = std::sync::OnceLock::new();
+
+// Each unit test runs its dialog hooks on its own thread. Detached reads retain
+// their Arc, so their permits still count until the read completes.
+#[cfg(test)]
+std::thread_local! {
+    static PREFIX_READS: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+}
+
+#[cfg(not(test))]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone()
+}
+
+#[cfg(test)]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    PREFIX_READS.with(Arc::clone)
+}
 
 struct PrefixPermit(Arc<AtomicUsize>);
 impl Drop for PrefixPermit {
@@ -171,6 +188,34 @@ fn host_error(error: PluginError) -> HostError {
         PluginError::Unsupported(reason) => HostError::Unsupported { reason },
     }
 }
+/// Accumulates only time spent executing Wasm, including instantiation and post-return.
+/// A duration budget avoids overflowing an Instant for large user-approved deadlines.
+struct GuestDeadline {
+    remaining: Duration,
+    running_since: Option<Instant>,
+}
+impl GuestDeadline {
+    fn new(milliseconds: u64) -> Self {
+        Self { remaining: Duration::from_millis(milliseconds), running_since: None }
+    }
+    /// The budget that is left until `end`: a dialog's source reads and guest hook share one deadline.
+    fn until(end: Instant) -> Self {
+        Self { remaining: end.saturating_duration_since(Instant::now()), running_since: None }
+    }
+    fn transition(&mut self, hook: CallHook, now: Instant) {
+        if hook.entering_host() {
+            if let Some(started) = self.running_since.take() {
+                self.remaining = self.remaining.saturating_sub(now.saturating_duration_since(started));
+            }
+        } else {
+            self.running_since.get_or_insert(now);
+        }
+    }
+    fn expired(&self, now: Instant) -> bool {
+        self.running_since.map_or(Duration::ZERO, |started| now.saturating_duration_since(started)) >= self.remaining
+    }
+}
+
 struct Folder {
     dir: Dir,
     path: PathBuf,
@@ -179,7 +224,7 @@ struct Folder {
 }
 struct PendingWrite {
     temporary: PathBuf,
-    order: usize,
+    order: u64,
 }
 struct State<H> {
     host: H,
@@ -202,10 +247,10 @@ struct State<H> {
     forms: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
-    calls: usize,
-    max_calls: usize,
+    calls: u64,
+    max_calls: u64,
     log_bytes: usize,
-    deadline: Instant,
+    deadline: GuestDeadline,
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
     panels: Option<craft_plugin::ui::Declarations>,
@@ -238,13 +283,17 @@ impl<H: PluginHost> State<H> {
         if self.host.is_cancelled() {
             return Err(self.fail(HostError::Cancelled));
         }
-        if Instant::now() >= self.deadline {
+        if self.deadline.expired(Instant::now()) {
             return Err(self.fail(deadline()));
         }
-        self.calls = self.calls.saturating_add(1);
-        if self.calls > self.max_calls {
-            return Err(self.fail(limit("host call count")));
+        if self.calls >= self.max_calls {
+            let error = match self.effect {
+                Effect::Open => limit("host call count"),
+                _ => HostError::Exhausted { limit: "host_calls".into(), allowed: self.max_calls },
+            };
+            return Err(self.fail(error));
         }
+        self.calls = self.calls.saturating_add(1);
         Ok(())
     }
     fn file_path(&mut self, grant: &str, path: &str, write: bool) -> std::result::Result<(), PluginError> {
@@ -398,7 +447,7 @@ impl<H: PluginHost> design_state::Host for State<H> {
     }
 }
 impl<H: PluginHost> log::Host for State<H> {
-    fn log(&mut self, _level: log::Level, message: String) {
+    fn log(&mut self, level: log::Level, message: String) {
         if self.check().is_err() {
             return;
         }
@@ -407,7 +456,20 @@ impl<H: PluginHost> log::Host for State<H> {
             self.fail(limit("log size"));
             return;
         }
-        self.host.log(&message.chars().filter(|c| !c.is_control()).collect::<String>());
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
+        match level {
+            log::Level::Debug => ::log::debug!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Info => ::log::info!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Warn => ::log::warn!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Error => ::log::error!(target: "craft_plugin_wasm", "{clean}"),
+        }
+        let host_level = match level {
+            log::Level::Debug => craft_plugin::LogLevel::Debug,
+            log::Level::Info => craft_plugin::LogLevel::Info,
+            log::Level::Warn => craft_plugin::LogLevel::Warn,
+            log::Level::Error => craft_plugin::LogLevel::Error,
+        };
+        self.host.log_level(host_level, &clean);
     }
 }
 impl<H: PluginHost> control::Host for State<H> {
@@ -1131,8 +1193,12 @@ fn execute<H: PluginHost + 'static>(
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
-    // A long job runs for its fixed deadline, and reports its progress as often as it likes.
-    let (deadline_ms, max_calls) = if entry.job { (options.job_deadline_ms, MAX_JOB_CALLS) } else { (limits.deadline_ms, MAX_CALLS) };
+    // A long job runs for its fixed deadline, and reports its progress as often as it likes. The
+    // deadline counts guest (Wasm) running time like every other entry's, so one mechanism covers
+    // both. The manifest's host-call budget, already held under the user's ceiling, still applies
+    // and a job never has fewer calls than its progress reports need.
+    let (deadline_ms, max_calls) =
+        if entry.job { (options.job_deadline_ms, limits.host_calls.max(MAX_JOB_CALLS as u64)) } else { (limits.deadline_ms, limits.host_calls) };
     let state = State {
         host,
         commands,
@@ -1153,7 +1219,7 @@ fn execute<H: PluginHost + 'static>(
         calls: 0,
         max_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(deadline_ms),
+        deadline: GuestDeadline::new(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
         panels: runtime.ui.clone(),
@@ -1207,7 +1273,7 @@ fn execute<H: PluginHost + 'static>(
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         let value = if dialog {
@@ -1229,7 +1295,7 @@ fn execute<H: PluginHost + 'static>(
     })();
     // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
     // the typed timeout even when the fuel trap was the first opportunity to stop it.
-    let expired = dialog && Instant::now() >= store.data().deadline;
+    let expired = dialog && store.data().deadline.expired(Instant::now());
     (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, deadline_ms)))
 }
 
@@ -1249,13 +1315,17 @@ fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &
     store.limiter(|s| &mut s.limits);
     store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
     store.set_epoch_deadline(1);
+    store.call_hook(|mut context, hook| {
+        context.data_mut().deadline.transition(hook, Instant::now());
+        Ok(())
+    });
     store.epoch_deadline_callback(|mut context| {
         let state = context.data_mut();
         if state.host.is_cancelled() {
             state.failed.get_or_insert(HostError::Cancelled);
             return Err(wasmtime::Error::msg("plugin cancelled"));
         }
-        if Instant::now() >= state.deadline {
+        if state.deadline.expired(Instant::now()) {
             state.failed.get_or_insert_with(deadline);
             return Err(wasmtime::Error::msg("plugin deadline exceeded"));
         }
@@ -1864,7 +1934,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             Ok((dir, size, prefix))
         };
         let (dir, size, prefix) = if let Some(end) = dialog_deadline {
-            let reply = start_prefix_read(PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone(), open)?;
+            let reply = start_prefix_read(prefix_reads(), open)?;
             wait_prefix(&reply, end).map_err(|e| with_limits(e, runtime.limits.deadline_ms))?
         } else {
             open()?
@@ -1914,9 +1984,9 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         forms: false,
         failed: None,
         calls: 0,
-        max_calls: if dialog { MAX_CALLS } else { MAX_IMPORT_CALLS },
+        max_calls: if dialog { limits.host_calls } else { MAX_IMPORT_CALLS },
         log_bytes: 0,
-        deadline: dialog_deadline.unwrap_or_else(|| Instant::now() + Duration::from_millis(limits.deadline_ms)),
+        deadline: dialog_deadline.map_or_else(|| GuestDeadline::new(limits.deadline_ms), GuestDeadline::until),
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
@@ -1965,7 +2035,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             if text.len() > craft_plugin::dialog::MAX_UPDATE_BYTES {
                 return Err(limit("dialog reply exceeds 64 KiB"));
             }
-            if Instant::now() >= store.data().deadline {
+            if store.data().deadline.expired(Instant::now()) {
                 return Err(deadline());
             }
             let fields = serde_json::from_str(&text).map_err(|e| component_error(format!("dialog reply is not JSON: {e}")))?;
@@ -1978,8 +2048,8 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         if design.is_empty() {
             return Err(HostError::InvalidInput { field: "design".into(), reason: "the importer wrote no design".into() });
         }
-        // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        // Check guest compute since the last epoch, including guest post-return work.
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(ImportOutput::Design(Imported { design, report }))
@@ -2069,7 +2139,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         limits: store_limits(limits, 1_000_000),
         import: None,
         panels: None,
@@ -2097,7 +2167,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(file)

@@ -78,15 +78,20 @@ fn lists(l: &[&[u64]]) -> Vec<Vec<u64>> {
     l.iter().map(|x| x.to_vec()).collect()
 }
 
-// The expected origins (ids less `BASE_ID`; edges from 500) are those the C++
-// reference gives (`fixtures/boolean.api_brep/with_attributes_nm_sweeps.json`,
-// `attributed_sweep_face0` and `attributed_rotational_sweep_face0`).
+// The expected origins (ids less `BASE_ID`; edges from 500) are those of
+// `fixtures/boolean.api_brep/with_attributes_nm_sweeps.json`'s
+// `attributed_sweep_negative_dist` and `attributed_rotational_sweep_face0`. (The C++
+// reference's `attributed_sweep_face0` sweeps face 0 into the box, which solidcore
+// refuses, #21673.)
 
 /// Box faces keep their origins; the swept block's cap and four sides have none.
 const LINEAR_FACES: &[&[u64]] = &[&[], &[], &[], &[], &[], &[0], &[1], &[2], &[3], &[4], &[5]];
-/// The four vertical box edges the stitch splits where the block meets them keep their
-/// origin on both pieces (505, 506, 508, 510); the block's own edges have none.
+/// Each box edge keeps its origin; the block's own eight edges have none.
 const LINEAR_EDGES: &[&[u64]] = &[
+    &[],
+    &[],
+    &[],
+    &[],
     &[],
     &[],
     &[],
@@ -97,14 +102,10 @@ const LINEAR_EDGES: &[&[u64]] = &[
     &[503],
     &[504],
     &[505],
-    &[505],
-    &[506],
     &[506],
     &[507],
     &[508],
-    &[508],
     &[509],
-    &[510],
     &[510],
     &[511],
 ];
@@ -136,8 +137,9 @@ fn tagged_box(k: &mut Kernel) -> Brep {
     b
 }
 
-/// A linear sweep of one tagged face of a box (in place): the box's faces keep their
-/// origins, and the faces the sweep builds from them carry those origins too.
+/// A linear sweep of one tagged face of a box (in place), out of the box along its
+/// outward normal `-z`: the box's faces and edges keep their origins, and the block the
+/// sweep builds carries none.
 #[test]
 fn linear_sweep_of_a_tagged_face_carries_its_origins() {
     let mut k = Kernel::default();
@@ -152,7 +154,7 @@ fn linear_sweep_of_a_tagged_face_carries_its_origins() {
         &mut k,
         &mut b,
         None,
-        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, -1.0),
         5.0,
         true,
         false,

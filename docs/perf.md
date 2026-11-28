@@ -14,6 +14,7 @@ What it records, as nested spans on each thread:
 | `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
 | `feature` | each feature computed, by its type; `doc evaluate` around them |
 | `command` | each `Session::execute`, by command id |
+| `sketch` | the stages of a sketch feature's evaluation: its clone, links, offsets, solve, profiles, 3D profiles, loose ends |
 | `io` | import, export, design read and write |
 
 Self time is a span's time less the spans inside it; its total counts only its outermost run
@@ -33,6 +34,87 @@ work, then `diagnostics.profile {"top": 30, "trace": "trace.json"}`. A STEP or I
 reply carries its own profile while recording.
 
 # Design loading
+
+## An imported SVG: one search, and a preview imported once (2026-11-25)
+
+A 55 mm emblem imported from a 52 KB SVG (5,256 straight segments in 70 outlines) took 70 ms to
+insert, and every change of its position or angle in the Insert SVG window took as long again:
+the window previews a placement by running `sketch.insert_svg` on a scratch session and
+evaluating the result, so it reads the file, adds the geometry, solves the sketch and finds its
+profiles each time. `--profile` put 55 ms of that insert (78 %) in one span, `sketch profiles`,
+the search for the closed regions the sketch draws; changing the angle once the sketch already
+holds the drawing put 76 ms of 119 ms there. That span is where the time goes for any change to a
+sketch holding an imported drawing, not only an import.
+
+Two parts of that search were slower than they needed to be:
+
+1. `without_lobes_of_no_area` walks each traced loop looking for a stretch that comes back to the
+   node it left (a lobe of no area, which is not a region). It scanned forward from every edge to
+   find the next edge leaving its node, so a loop that visits each of its own nodes once — every
+   imported outline — cost the square of its length. It now takes the next edge from the node's
+   list of them, and a loop where no node is left twice has no lobe to look for at all.
+2. `islands` groups the curves into islands whose boxes touch, to search each group on its own.
+   Every line became 16 boxes whatever its length: 84,000 boxes to sort and sweep for this
+   emblem. The parts are now a 64th of the drawing's extent: a short segment is one box, a long
+   line is still cut up.
+
+`sketch.insert_svg` through `solidcraft-cli run`, alternating the old and the new search in one
+build, three runs each, medians (Apple M2 Max, `profiling` build, machine with a load average of 42 from other
+work, so the times are high; the ratio is what the change is):
+
+| Drawing | Before | After | |
+|---|---:|---:|---:|
+| the emblem, 5,256 segments | 120 ms | 79 ms | 1.5× |
+| a drawn outline, 12,000 segments | 713 ms | 166 ms | 4.3× |
+| a drawn outline, 19,800 segments | 1,717 ms | 301 ms | 5.7× |
+
+Both columns come from the same alternating runs, so the machine's load counts in both. Timed
+once more with the change in and nothing else running, the three take 48 ms, 107 ms and 190 ms.
+
+Nothing changed in what the search finds: the profiles, their order and their curve ids are the
+same, which the sketch crate's tests check by comparing an island-by-island search with one over
+the whole sketch, and two new tests cover the loop that visits each node once and an imported
+outline of 3,000 segments as one profile.
+
+The Insert SVG window used to re-import and re-evaluate the drawing for every change of X, Y,
+scale or angle: 59 ms a change for this emblem, 120 ms once the sketch already held the drawing.
+It now imports the drawing once, as drawn with its middle at the sketch's origin, and draws that
+preview moved by the window's placement: the similarity goes on each piece before it is sampled
+(`sketch_display::curve_with_budget_placed`), so it is exact — an arc keeps its sweep, a conic its
+weight. Each change costs a frame, 4-6 ms, and starts no worker at all. The drawing's box follows
+the placement, so Fit and the view's depth range see where it is, and OK still imports it once
+more with the placement shown.
+
+Painting the drawing was never the cost: a frame of the window over the 5,256-curve preview costs
+1.3 ms still, and 4-6 ms while it moves. Its segment count is what the region search reads, so
+fewer segments make imports and every later edit of the sketch cheaper too.
+
+### Simplifying a dense drawing on the way in
+
+The insert now takes `simplify`, the Simplify box of the Insert SVG/DXF window: a distance in mm
+of the drawing as it is drawn (the same at any size factor, so the window's preview at scale 1
+and the confirmed insert retain the same edges), within which runs of lines that meet end to end
+are followed by fewer lines (Douglas-Peucker, each removed vertex no further than that from the
+outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves the outline by up to its value — and the
+window starts it at a two-hundredth of the drawing's size when the file has more edges than the
+largest sketch takes, showing it so it can be lowered to 0.
+
+`sketch.insert_svg` through `solidcraft-cli run`, `profiling` build, a quiet machine (load 17),
+three runs each, medians:
+
+| Drawing | As drawn | Simplify 0.05 mm |
+|---|---:|---:|
+| the emblem, 5,256 edges | 49 ms, 5,256 curves | 19 ms, 1,807 curves |
+| a circle of 30,000 edges | refused (a sketch takes 20,000) | 9 ms, 64 curves |
+| a circle of 200,000 edges | refused (a sketch takes 20,000) | 54 ms, 64 curves |
+| a circle of 500,000 edges, 8.7 MB | refused (a sketch takes 20,000) | 130 ms, 64 curves |
+
+The reader took at most 200,000 drawn entities; it now takes 1,000,000 (about 80 MB of geometry,
+on top of the 64 MB file cap), so a very dense drawing can be simplified on the way in instead of
+being refused. Nothing else about the import changed: every edge as drawn at 0, the same arcs,
+circles, splines and text whatever the distance, and the sketch's own point cap still applies to
+the curves added. A run too complex for the simplifier's work budget is kept as drawn, with a
+warning, never coarser than the distance asked for.
 
 ## Building for measurements: the `profiling` profile (2026-10-29, #8185)
 
@@ -894,6 +976,16 @@ errors) through edits, suppression, roll-back, undo and redo. Setting a sketch d
 can still recompute (oracle 61, 62): solving the sketch moves its points by rounding noise, so
 its inputs are not exactly the old ones. Oracle 59's first parameter edit fails (a recipe
 expression the bench's `* 1.02` can't scale) and is left out.
+
+Renaming a parameter changes no value, so it recomputes no feature (#611): as for a body or a
+feature rename (#3044), the model keeps every result and takes the renamed design's fingerprints.
+A sketch the rename reaches (a dimension's parameter, a point's or a pattern's expression) keeps
+its solve: the solved copies the model keeps of it take the new name, as solving the renamed
+sketch gives them, and their cache keys follow. A rename that reaches sheet metal or plastic
+rules, canvases or placements, or a message that quotes the old name, is still evaluated. On the
+20 x 20 hole plate (`parameters.rename` of the box length) the step went from 22413 ms (every
+feature evaluated) to 1.2 ms (none); with the plate's width a sketch dimension's parameter, from
+18660 ms to 1.4 ms.
 
 
 ## Prism pairs, body measurements and the evaluation cache budget (2026-10-13)

@@ -3,10 +3,11 @@
 //! The kernel's [`solidcore::sweep::member`] computes every geometric quantity. This facade
 //! converts the record, guards kernel calls and returns their values or typed refusals.
 
-use solidcore::curve::path::Segment as KSegment;
 use solidcore::sweep::member as km;
 use solidcore_convert as convert;
 use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+
+pub use solidcore_record::frame::{PieceData, Segment};
 
 use crate::session::{run, Answer};
 use crate::Error;
@@ -48,44 +49,6 @@ fn query<T>(f: impl FnOnce() -> Result<T, Refusal>) -> Result<T, Failure> {
         .map_err(Failure::Geometry)
 }
 
-/// An exact segment, as data for an application's existing sweep boundary.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Segment {
-    /// A straight run between its two ends.
-    Line {
-        /// Start.
-        a: Vec3,
-        /// End.
-        b: Vec3,
-    },
-    /// An open circular arc.
-    Arc {
-        /// Start.
-        a: Vec3,
-        /// Centre.
-        center: Vec3,
-        /// Unit normal of the positive turn.
-        axis: Vec3,
-        /// Positive turn, radians.
-        angle: f64,
-    },
-}
-
-/// The terminal and sweep data of one validated piece.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PieceData {
-    /// Start.
-    pub a: Vec3,
-    /// End.
-    pub b: Vec3,
-    /// Unit start tangent.
-    pub t0: Vec3,
-    /// Unit end tangent.
-    pub t1: Vec3,
-    /// Its exact sweep segment.
-    pub segment: Segment,
-}
-
 /// One validated stock-path piece. Construction and calculations stay in the kernel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Piece(km::Piece);
@@ -94,31 +57,27 @@ impl Piece {
     /// Its terminal and sweep data, field for field.
     #[must_use]
     pub fn data(&self) -> PieceData {
-        let p = self.0;
-        let segment = match p.segment {
-            KSegment::Line { start, end } => Segment::Line {
-                a: convert::record_vec3(start),
-                b: convert::record_vec3(end),
-            },
-            KSegment::Arc {
-                start,
-                centre,
-                axis,
-                angle,
-            } => Segment::Arc {
-                a: convert::record_vec3(start),
-                center: convert::record_vec3(centre),
-                axis: convert::record_vec3(axis),
-                angle,
-            },
-        };
-        PieceData {
-            a: convert::record_vec3(p.a),
-            b: convert::record_vec3(p.b),
-            t0: convert::record_vec3(p.t0),
-            t1: convert::record_vec3(p.t1),
-            segment,
-        }
+        convert::frame::record_piece(&self.0)
+    }
+
+    /// The piece whose data is `data`, checked as the kernel checks its own pieces
+    /// (`solidcore::sweep::member::Piece::from_parts`): every piece's own [`Piece::data`] makes
+    /// that piece again, field for field.
+    ///
+    /// # Errors
+    /// [`Refusal::Line`] or [`Refusal::Arc`] for data no line or arc of the kernel has, or a
+    /// guarded kernel-call failure.
+    pub fn from_data(data: &PieceData) -> Result<Self, Failure> {
+        query(|| {
+            km::Piece::from_parts(
+                convert::vec3(data.a),
+                convert::vec3(data.b),
+                convert::vec3(data.t0),
+                convert::vec3(data.t1),
+                convert::frame::segment(&data.segment),
+            )
+            .map(Piece)
+        })
     }
 
     /// The line's length; `None` for a bend.
@@ -247,4 +206,53 @@ pub fn check_bend_clearance(
     }
     let path: Vec<km::Piece> = path.iter().map(|p| p.0).collect();
     query(|| km::check_bend_clearance(&path, &convert::region2(region), convert::vec2(at), turn))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+
+    #[test]
+    fn a_pieces_data_makes_it_again_and_other_data_is_refused() {
+        let v = Vec3::new;
+        let mut path = vec![
+            line(v(100.0, -200.0, 0.0), v(100.0, 0.0, 0.0)).unwrap(),
+            spatial_arc(
+                v(100.0, 0.0, 0.0),
+                v(0.0, 100.0, 0.0),
+                Vec3::ZERO,
+                v(0.0, 0.0, 1.0),
+                100.0,
+            )
+            .unwrap(),
+        ];
+        // Picked back to front: orienting reverses both.
+        path.reverse();
+        orient(&mut path).unwrap();
+        for p in &path {
+            let data = p.data();
+            let again = Piece::from_data(&data).unwrap();
+            assert_eq!(&again, p);
+            assert_eq!(again.data(), data);
+        }
+        let data = path[0].data();
+        let moved = PieceData {
+            a: v(0.0, 0.0, 5.0),
+            ..data
+        };
+        assert!(matches!(
+            Piece::from_data(&moved),
+            Err(Failure::Geometry(Refusal::Arc))
+        ));
+        let data = path[1].data();
+        let turned = PieceData {
+            t0: -data.t1,
+            ..data
+        };
+        assert!(matches!(
+            Piece::from_data(&turned),
+            Err(Failure::Geometry(Refusal::Line))
+        ));
+    }
 }

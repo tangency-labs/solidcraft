@@ -8,22 +8,7 @@ use solidcore_record::{Region2, Seg2, Vec2};
 
 pub use kernel::MAX_FAMILIES;
 
-/// One complete mark in millimetres.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Mark {
-    /// A stroke between its clipped endpoints.
-    Line {
-        /// First clipped endpoint in millimetres.
-        a: Vec2,
-        /// Last clipped endpoint in millimetres.
-        b: Vec2,
-    },
-    /// A dot at its centre.
-    Dot {
-        /// Centre in millimetres.
-        at: Vec2,
-    },
-}
+pub use solidcore_record::profile::line_family::Mark;
 
 /// Clip each family's lines, in turn, to the region, under one work budget, or refuse
 /// without partial geometry.

@@ -1665,6 +1665,27 @@ pub struct Distance {
     pub bound: f64,
 }
 
+/// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
+/// `max` (in any order), each side counting `share` of the box's size beyond it
+/// ([`Extent3d::meets_line`]). Never for a zero `dir`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a coordinate, or a `share`, that is not finite.
+pub fn line_meets_box(
+    min: Point3,
+    max: Point3,
+    origin: Point3,
+    dir: Vec3,
+    share: f64,
+) -> Result<bool> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if ![min, max, origin, dir].into_iter().all(finite) || !share.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite line or box"));
+    }
+    Ok(Extent3d::from_points(min, max).meets_line(origin, dir, share))
+}
+
 /// The distance between `a` and `b` with a proved bound on its rounding (not
 /// upstream). The value is `a.distance(b)` bit for bit; the bound comes from the same
 /// sum of squares in rounded interval arithmetic
@@ -2334,6 +2355,45 @@ pub fn face_normal_at_vertex(
     face_normal_at_clamped_uv(k, brep, f, uv, faceuse)
 }
 
+/// The unit direction into face `f` from the middle of its edge `e`'s interval: in the face's
+/// tangent plane there, square to the edge, pointing into the face (not upstream: the side a
+/// face lies on from its edge, read from its loop). It is the binormal of the face's use of the
+/// edge ([`evaluate_binormal`]: the face use's normal crossed with the edge use's tangent), so the
+/// side comes from the loop's orientation and the normal, not from where the face's points lie.
+/// The vector is rounded, not certified.
+///
+/// A seam (an edge a use of `f` runs along twice, such as a cylinder's) has the face on both of
+/// its sides, so it has no one direction into the face; it is refused.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge that does not bound `f`, a seam of `f`, or an edge
+/// interval that is not finite; those of [`evaluate_binormal`].
+pub fn edge_inward(k: &Kernel, brep: &mut Brep, e: EdgeId, f: FaceId) -> Result<Vec3> {
+    let eu = edge::edgeuse_of_face(brep, e, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the edge does not bound the face"))?;
+    let mut uses: Vec<Option<FaceuseId>> = Vec::new();
+    for u in edge::edgeuses(brep, e, None, None)? {
+        if eu::face(brep, u)? == Some(f) {
+            let fu = eu::faceuse(brep, u)?;
+            if uses.contains(&fu) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a seam: the face lies on both sides",
+                ));
+            }
+            uses.push(fu);
+        }
+    }
+    let ivl = brep.edge(e)?.interval;
+    // halves first: no overflow for a huge finite interval (brett19 on #22066)
+    let t = 0.5 * ivl.min() + 0.5 * ivl.max();
+    if !t.is_finite() {
+        return Err(SolidError::invalid_input(OP, "edge interval not finite"));
+    }
+    Ok(evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?.binormal)
+}
+
 /// Where a planar face lies along `direction` when it is square to it: the signed distance from
 /// `origin` to the face's plane along the unit `direction`, measured at `on_face`, a point of the
 /// face (its centroid). `normal` is the face's unit normal with its proved `normal_bound`.
@@ -2386,6 +2446,103 @@ mod face_square_level_tests {
             None
         );
         assert!(face_square_level(n, 1e-16, c, Vec3::new(0.0, 0.0, 0.0), o).is_err());
+    }
+}
+
+/// How far from unit length a unit direction may be.
+const UNIT_AXIS_TOL: f64 = 1e-9;
+
+/// Whether `v` is a unit direction: finite, its squared length within [`UNIT_AXIS_TOL`] of 1.
+fn is_unit_direction(v: Vec3) -> bool {
+    [v.x, v.y, v.z].iter().all(|c| c.is_finite())
+        && (v.length_squared() - 1.0).abs() <= UNIT_AXIS_TOL
+}
+
+/// The unit direction along `v`, of any length (not upstream: an application's direction, as a
+/// sketch plane's normal carries it).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `v` that is not finite or has no length.
+pub fn unit_direction(v: Vec3) -> Result<Vec3> {
+    let refused =
+        || SolidError::invalid_input(OP, "a direction that is not finite or has no length");
+    if ![v.x, v.y, v.z].iter().all(|c| c.is_finite()) {
+        return Err(refused());
+    }
+    let unit = v.unitize().map_err(|_| refused())?;
+    if is_unit_direction(unit) {
+        Ok(unit)
+    } else {
+        Err(refused())
+    }
+}
+
+/// The distance within which a point given by an application matches a vertex of a body:
+/// ten times the larger of the body's largest tolerance (`largest_tolerance`, its own or an
+/// edge's) and 1e-9 of its `size` (not upstream: the matching of a surface extrude's start
+/// corners to the vertices of its walls).
+pub fn vertex_match_tolerance(largest_tolerance: f64, size: f64) -> f64 {
+    largest_tolerance.max(size * 1e-9) * 10.0
+}
+
+/// The part of edge use `eu`'s binormal (pointing into its face) that leads away from `foot`, at
+/// the fraction `fraction` of its edge's interval: along the unit direction from `foot` to the
+/// edge's point there ([`evaluate_binormal`], 3D only). `None` where that point is `foot`, so
+/// nothing leads away from it. Not upstream (whether a face runs on away from a point across one
+/// of its edges).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `fraction` or `foot` that is not finite, or a binormal that
+/// is not; those of [`evaluate_binormal`].
+pub fn edgeuse_binormal_away_from(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    fraction: f64,
+    foot: Point3,
+) -> Result<Option<f64>> {
+    if !(fraction.is_finite() && [foot.x, foot.y, foot.z].iter().all(|c| c.is_finite())) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a fraction or point that is not finite",
+        ));
+    }
+    let e = brep
+        .edgeuse(eu)?
+        .edge
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge use without an edge"))?;
+    let t = brep.edge(e)?.interval.evaluate(fraction);
+    let at = evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?;
+    let Ok(away) = unit_direction(at.point - foot) else {
+        return Ok(None);
+    };
+    let part = at.binormal.dot(away);
+    if !part.is_finite() {
+        return Err(SolidError::invalid_input(OP, "binormal not finite"));
+    }
+    Ok(Some(part))
+}
+
+#[cfg(test)]
+mod unit_direction_tests {
+    use super::*;
+
+    /// A direction of any length is made unit; one of no length or not finite is refused. The
+    /// match tolerance is ten times the larger of the body's tolerance and 1e-9 of its size.
+    #[test]
+    fn unit_directions_and_the_match_tolerance() {
+        for v in [Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 2.0)] {
+            let unit = unit_direction(v).unwrap();
+            assert!((unit - Vec3::Z).length_squared() < 1e-30, "{unit:?}");
+        }
+        assert!(unit_direction(Vec3::ZERO).is_err());
+        assert!(unit_direction(Vec3::new(f64::NAN, 0.0, 1.0)).is_err());
+        assert!(unit_direction(Vec3::new(f64::INFINITY, 0.0, 1.0)).is_err());
+        assert!(!is_unit_direction(Vec3::new(0.0, 0.0, 2.0)));
+        assert!((vertex_match_tolerance(1e-6, 10.0) - 1e-5).abs() < 1e-18);
+        assert!((vertex_match_tolerance(0.0, 1e3) - 1e-5).abs() < 1e-18);
     }
 }
 

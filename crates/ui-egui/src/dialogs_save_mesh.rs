@@ -1,7 +1,8 @@
 //! The Save as mesh dialog (`file.save_mesh`): which bodies and the mesh format, then a file dialog.
-//! Send to Slicer (`file.send_to_slicer`) shares the dialog without the format and with a slicer to
-//! send the bodies to: it always asks, and pre-selects the slicer used last time. The list also has
-//! a plain text row for EasyPrint (`file.open_in_easyprint`), which works in a browser too.
+//! Send to Slicer (`file.send_to_slicer`) shares the dialog with a slicer to send the bodies to: it
+//! pre-selects the slicer used last time and its default format (such as STL for ChiTuBox or 3MF
+//! for PrusaSlicer). The list also has a plain text row for EasyPrint (`file.open_in_easyprint`,
+//! which works in a browser too and sends 3MF).
 //!
 //! Send to Slicer also has a Print face input (#8429): it shows the print face of each body being
 //! sent, takes a flat face picked in the viewport as its body's print face (in place of the one it
@@ -17,7 +18,7 @@
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::choice_row;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use egui::{Color32, Sense, vec2};
 use serde_json::{Value, json};
@@ -32,6 +33,9 @@ use solidcraft_theme::Tokens;
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
 const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf")];
+/// The formats Send to Slicer offers, as shown and as `file.send_to_slicer` names them: those of
+/// Save As Mesh and STEP. Each slicer is offered the ones it takes ([`offered_formats`]) (#16089).
+const SEND_FORMATS: [(&str, &str); 4] = [("STL", "stl"), ("3MF", "3mf"), ("3MF with face tags", "3mf-tagged"), ("STEP", "step")];
 /// The list key of the EasyPrint row (no slicer has it: ids are words, programs are paths).
 const EASYPRINT: &str = "easyprint";
 /// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh`'s `quality`.
@@ -45,17 +49,25 @@ const MAX_CUSTOM: usize = 24;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
     format: usize,
-    /// Send to Slicer: only the bodies and the slicer are asked.
+    /// Send to Slicer: bodies, slicer and format are asked (no quality row).
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
     quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
+    /// Send to Slicer: the format to send, as `file.send_to_slicer` names it. Empty until a slicer
+    /// is chosen; 3MF is then sent.
+    send_format: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
     /// Send to Slicer: the bodies and the print faces the Print face input last showed, to tell
     /// a pick or a clear in it from a change of the bodies.
     shown: Option<(Vec<String>, Vec<Sel>)>,
+    /// Send to Slicer: keep the file in `copy_folder` instead of the slicer folder (#18311).
+    copy: bool,
+    copy_folder: String,
+    /// With `copy`: one file replaced each time, not a new version each time.
+    copy_overwrite: bool,
 }
 
 impl SaveMesh {
@@ -87,6 +99,8 @@ pub struct SlicerMenu {
     icons: HashMap<String, Option<egui::TextureHandle>>,
     /// A program chosen in the Custom… file dialog, waiting for the open dialog to take it.
     picked: Option<String>,
+    /// A folder chosen for the kept file, waiting for the dialog to take it.
+    picked_folder: Option<String>,
 }
 
 impl SlicerMenu {
@@ -142,7 +156,22 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    // The folder this design's file was last kept in, if it was (#18311).
+    // Only a saved design remembers one: unsaved designs are not told apart by anything but a counter.
+    let copy_folder = app.session.path.as_ref().and_then(|path| p.slicer_copy_folders.get(path)).cloned().unwrap_or_default();
+    let copy = open && id == "file.send_to_slicer" && !copy_folder.is_empty();
+    let kind = Kind::SaveMesh(SaveMesh {
+        format,
+        quality,
+        open,
+        slicer,
+        send_format: String::new(),
+        stale: true,
+        shown: None,
+        copy,
+        copy_folder,
+        copy_overwrite: p.slicer_copy_overwrite,
+    });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
     // The design's only body is the one to export (#13098); with more, nothing says which.
     let only = body_picks(app, false);
@@ -376,6 +405,51 @@ fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]
     k.shown = Some((bodies, current));
 }
 
+/// The formats a slicer takes, in [`SEND_FORMATS`] order: what its row of the target table lists.
+fn offered_formats(target: Option<&slicers::Target>) -> Vec<(&'static str, &'static str)> {
+    SEND_FORMATS.into_iter().filter(|(_, f)| target.is_some_and(|t| t.accepts(f))).collect()
+}
+
+/// The format a slicer starts from: the one it was last sent, else its own default, else the first
+/// it takes; each only when the slicer takes it.
+fn first_format(remembered: Option<&str>, default: &str, offered: &[(&str, &str)]) -> String {
+    [remembered, Some(default)]
+        .into_iter()
+        .flatten()
+        .find(|f| offered.iter().any(|o| o.1 == *f))
+        .or_else(|| offered.first().map(|o| o.1))
+        .unwrap_or("3mf")
+        .to_string()
+}
+
+/// Preselect the format for the active slicer: the one it was last sent (`remembered`, by the
+/// slicer's list key), else its default (#16089). EasyPrint is always sent 3MF.
+fn preselect_format(k: &mut SaveMesh, entries: &[Entry], remembered: &BTreeMap<String, String>) {
+    if k.slicer == EASYPRINT {
+        k.send_format = "3mf".into();
+        return;
+    }
+    let target = entries.iter().find(|e| e.key == k.slicer).map(|e| e.slicer.target());
+    let last = remembered.get(&k.slicer).map(String::as_str);
+    k.send_format = first_format(last, target.map_or("3mf", |t| t.default_format), &offered_formats(target));
+}
+
+/// Send to Slicer's Format row: the formats the chosen slicer takes. A slicer that takes one
+/// format only has no row.
+fn send_format_row(app: &SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
+    let target = app.slicer_menu.entries().into_iter().find(|e| e.key == k.slicer).map(|e| e.slicer.target());
+    let offered = offered_formats(target);
+    if offered.len() < 2 {
+        return;
+    }
+    let labels: Vec<&str> = offered.iter().map(|f| f.0).collect();
+    let mut i = offered.iter().position(|f| f.1 == k.send_format).unwrap_or(0);
+    choice_row(ui, "Format", "sm_format", &mut i, &labels);
+    if let Some(f) = offered.get(i) {
+        k.send_format = f.1.to_string();
+    }
+}
+
 /// The rows after the Bodies input; true when Enter was pressed in a field.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
     if k.open {
@@ -400,6 +474,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         // Look at the machine once per opening, then settle on a slicer that exists.
         k.stale = false;
         app.slicer_menu.picked = None;
+        // A folder chosen for another opening is not this one's.
+        app.slicer_menu.picked_folder = None;
         app.slicer_menu.refresh(&app.preferences.custom_slicers);
         let entries = app.slicer_menu.entries();
         let easyprint = crate::easyprint_ui::available(app);
@@ -412,19 +488,50 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
                 .or_else(|| easyprint.then(|| EASYPRINT.to_string()))
                 .unwrap_or_default()
         };
+        preselect_format(k, &entries, &app.preferences.send_formats);
     }
 
     form_row(ui, "Slicer", |ui| {
         if let Some(path) = app.slicer_menu.picked.take() {
             match add_custom(app, &path) {
-                Ok(()) => k.slicer = path,
+                Ok(()) => {
+                    k.slicer = path;
+                    preselect_format(k, &app.slicer_menu.entries(), &app.preferences.send_formats);
+                }
                 Err(e) => app.set_status(e, true),
             }
         }
         let choosing = app.file_picker_busy();
         ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
     });
+    if k.slicer != EASYPRINT {
+        send_format_row(app, ui, k);
+    }
+    // A browser has no folder dialog, and EasyPrint keeps no file.
+    if k.slicer != EASYPRINT && app.services.pick_folder.is_some() {
+        copy_rows(app, ui, k);
+    }
     false
+}
+
+/// Keep the file in a folder of the user's (#18311): the choice, the folder, and whether each send
+/// replaces the file or adds a version.
+fn copy_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
+    form_row(ui, "", |ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.send_copy_keep"), &mut k.copy));
+    if !k.copy {
+        return;
+    }
+    if let Some(folder) = app.slicer_menu.picked_folder.take() {
+        k.copy_folder = folder;
+    }
+    form_row(ui, solidcraft_ui_text::tr("ui.send_copy_folder"), |ui| {
+        let busy = app.file_picker_busy();
+        if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_copy_choose"), crate::ui_kit::Button::Small).clicked() && !busy {
+            app.pick_folder(&k.copy_folder, |app, path| app.slicer_menu.picked_folder = path);
+        }
+        ui.add(egui::Label::new(k.copy_folder.as_str()).truncate());
+    });
+    form_row(ui, "", |ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.send_copy_replace"), &mut k.copy_overwrite));
 }
 
 fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
@@ -524,14 +631,18 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         let at = egui::Rect::from_min_size(rect.left_center() + vec2(ui.spacing().button_padding.x + 1.0, -ICON / 2.0), vec2(ICON, ICON));
         paint_icon(ui, at, tex, &e.slicer.name);
     }
-    if let Some(key) = chosen {
+    if let Some(key) = chosen
+        && k.slicer != key
+    {
         k.slicer = key;
+        preselect_format(k, &entries, &app.preferences.send_formats);
     }
     if let Some(key) = delete {
         app.preferences.custom_slicers.retain(|p| *p != key);
         app.slicer_menu.set_custom(&app.preferences.custom_slicers);
         if k.slicer == key {
             k.slicer = app.slicer_menu.entries().first().map(|e| e.key.clone()).unwrap_or_default();
+            preselect_format(k, &app.slicer_menu.entries(), &app.preferences.send_formats);
         }
     }
     if pick_custom {
@@ -571,11 +682,21 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         if k.slicer.is_empty() {
             return Err(solidcraft_ui_text::tr("ui.save_mesh_no_slicer_open").into());
         }
-        p["format"] = json!("3mf");
         if k.slicer == EASYPRINT {
+            p["format"] = json!("3mf");
             return Ok(vec![("file.open_in_easyprint".into(), p)]);
         }
+        p["format"] = json!(if k.send_format.is_empty() { "3mf" } else { k.send_format.as_str() });
         p["slicer"] = json!(k.slicer);
+        if k.copy {
+            if k.copy_folder.trim().is_empty() {
+                return Err(solidcraft_ui_text::tr("ui.send_copy_no_folder").into());
+            }
+            p["copy_to"] = json!(k.copy_folder);
+            if k.copy_overwrite {
+                p["copy_overwrite"] = json!(true);
+            }
+        }
         return Ok(vec![("file.send_to_slicer".into(), p)]);
     }
     Ok(vec![("file.save_mesh".into(), p)])
@@ -602,9 +723,23 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     let (_, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
     if k.open {
         app.preferences.send_slicer = k.slicer.clone();
+        if k.slicer != EASYPRINT && !k.send_format.is_empty() {
+            app.preferences.send_formats.insert(k.slicer.clone(), k.send_format.clone());
+        }
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
         } else {
+            // The folder is remembered for a saved design; turned off, it is forgotten.
+            if let Some(key) = app.session.path.clone() {
+                if k.copy {
+                    app.preferences.slicer_copy_folders.insert(key, k.copy_folder.clone());
+                } else {
+                    app.preferences.slicer_copy_folders.remove(&key);
+                }
+            }
+            if k.copy {
+                app.preferences.slicer_copy_overwrite = k.copy_overwrite;
+            }
             send_to_slicer(app, params);
         }
         return Ok(());
@@ -635,7 +770,7 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 
 /// The status line after a save or a send.
 fn report(app: &mut SolveApp, result: &Value) {
-    let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
+    let path = crate::display_user_path(result.get("path").and_then(Value::as_str).unwrap_or_default());
     let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
     // Bodies left out of the file: said plainly, naming each one, in a warning that stays until it is dismissed.
     let skipped_suffix = if skipped.is_empty() {
@@ -647,6 +782,11 @@ fn report(app: &mut SolveApp, result: &Value) {
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
+            // A file kept in the user's folder: say where, and skip the hint about the slicer's own folder.
+            Some(s) if result.get("copy").and_then(Value::as_bool) == Some(true) => {
+                let line = solidcraft_ui_text::format("ui.sent_to_slicer_saved", &[("slicer", s), ("path", path)]);
+                app.set_status(line, false);
+            }
             Some(s) => {
                 let mut line = match (result.get("numbered").and_then(Value::as_bool), std::path::Path::new(path).file_name()) {
                     (Some(true), Some(file)) => {
@@ -742,6 +882,54 @@ mod tests {
         app.run("file.send_to_slicer", params).unwrap();
         assert!(app.dialog.is_none());
         assert_eq!(sent(&seen), 1);
+        let _ = std::fs::remove_dir_all(seen.parent().unwrap());
+        solidcraft_engine::slicers::set_chosen_programs(&[]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_for_the_file_is_asked_kept_per_design_and_forgotten_when_turned_off() {
+        let (mut app, seen, _) = app_with_fake_slicer("folder");
+        let keep = seen.parent().unwrap().join("kept");
+        // Only a saved design remembers its folder.
+        let saved = "/designs/plate.solidcraft";
+        app.session.path = Some(saved.into());
+        let key = app.preferences.custom_slicers[0].clone();
+        app.preferences.send_slicer = key.clone();
+        let (Kind::SaveMesh(mut k), mut inputs) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        inputs[0].items = body_picks(&app, false);
+        assert!(!k.copy && k.copy_folder.is_empty(), "nothing remembered for a design that has none");
+        k.slicer = key;
+        // Off: the command has no folder; on without one: refused; on with one: named, numbered by default.
+        let (_, plain) = commands(&k, &inputs).unwrap().remove(0);
+        assert!(plain.get("copy_to").is_none());
+        k.copy = true;
+        assert!(commands(&k, &inputs).is_err());
+        k.copy_folder = keep.to_string_lossy().into_owned();
+        let (_, kept) = commands(&k, &inputs).unwrap().remove(0);
+        assert_eq!((kept["copy_to"].as_str(), kept.get("copy_overwrite")), (Some(keep.to_str().unwrap()), None));
+        k.copy_overwrite = true;
+        assert_eq!(commands(&k, &inputs).unwrap().remove(0).1["copy_overwrite"], json!(true));
+        // Sending keeps the file in the folder and remembers the folder for this design.
+        run(&mut app, &k, &inputs).unwrap();
+        assert_eq!(std::fs::read_dir(&keep).unwrap().count(), 1);
+        let (Kind::SaveMesh(again), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert_eq!((again.copy, again.copy_folder.as_str(), again.copy_overwrite), (true, keep.to_str().unwrap(), true));
+        // Another design does not take it, and an unsaved one neither takes nor leaves one.
+        for other in [Some("/elsewhere/other.solidcraft"), None] {
+            app.session.path = other.map(Into::into);
+            let (Kind::SaveMesh(k), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+            assert!(!k.copy, "{other:?}");
+        }
+        let before = app.preferences.slicer_copy_folders.clone();
+        run(&mut app, &SaveMesh { copy: true, copy_folder: keep.to_string_lossy().into_owned(), ..again.clone() }, &inputs).unwrap();
+        assert_eq!(app.preferences.slicer_copy_folders, before, "an unsaved design leaves no folder behind");
+        app.session.path = Some(saved.into());
+        // Turned off, it is forgotten.
+        k.copy = false;
+        run(&mut app, &k, &inputs).unwrap();
+        let (Kind::SaveMesh(off), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert!(!off.copy && off.copy_folder.is_empty());
         let _ = std::fs::remove_dir_all(seen.parent().unwrap());
         solidcraft_engine::slicers::set_chosen_programs(&[]);
     }
@@ -966,13 +1154,40 @@ mod tests {
     }
 
     #[test]
-    fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+    fn send_to_slicer_asks_for_bodies_and_a_slicer_and_uses_chosen_format() {
+        let k = SaveMesh {
+            format: 1,
+            quality: 0,
+            open: true,
+            slicer: "prusa".into(),
+            send_format: "3mf".into(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
         let cmds = commands(&k, std::slice::from_ref(&input)).unwrap();
         assert_eq!(cmds, [("file.send_to_slicer".to_string(), json!({"slicer": "prusa", "bodies": ["Part"], "format": "3mf"}))]);
+
+        // When STL is chosen, file.send_to_slicer sends STL; STEP likewise (#16089).
+        let k_stl = SaveMesh { send_format: "stl".into(), ..k.clone() };
+        let cmds_stl = commands(&k_stl, std::slice::from_ref(&input)).unwrap();
+        assert_eq!(cmds_stl, [("file.send_to_slicer".to_string(), json!({"slicer": "prusa", "bodies": ["Part"], "format": "stl"}))]);
+        let (_, step) = commands(&SaveMesh { send_format: "step".into(), ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(step["format"], "step");
+        // No slicer chosen yet in the window: 3MF, as before the Format row.
+        let (_, unset) = commands(&SaveMesh { send_format: String::new(), ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(unset["format"], "3mf");
+
+        // EasyPrint always sends 3mf regardless of the format chosen
+        let k_ep = SaveMesh { slicer: EASYPRINT.into(), send_format: "stl".into(), ..k.clone() };
+        let cmds_ep = commands(&k_ep, std::slice::from_ref(&input)).unwrap();
+        assert_eq!(cmds_ep, [("file.open_in_easyprint".to_string(), json!({"bodies": ["Part"], "format": "3mf"}))]);
+
         // Save as mesh is a plain export in the chosen format: no slicer in it, whatever was set.
         let save = SaveMesh { format: 2, open: false, slicer: "prusa".into(), ..k.clone() };
         let (id, p) = commands(&save, std::slice::from_ref(&input)).unwrap().remove(0);
@@ -982,11 +1197,106 @@ mod tests {
         assert!(commands(&SaveMesh { slicer: String::new(), ..k }, &[input]).is_err());
     }
 
+    fn entries(ids: &[&str]) -> Vec<Entry> {
+        let slicer = |id: &str| slicers::Slicer { id: id.into(), name: id.into(), command: vec![id.into()], icon: None, prusa_major: None };
+        ids.iter().map(|id| Entry { key: (*id).into(), slicer: slicer(id), user: false }).collect()
+    }
+
+    fn sending(slicer: &str) -> SaveMesh {
+        SaveMesh {
+            format: 1,
+            quality: 0,
+            open: true,
+            slicer: slicer.into(),
+            send_format: String::new(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        }
+    }
+
+    #[test]
+    fn preselect_format_defaults_to_stl_for_chitubox_and_3mf_for_prusa() {
+        let entries = entries(&["chitubox", "prusa"]);
+        let none = BTreeMap::new();
+        let mut k = sending("chitubox");
+        preselect_format(&mut k, &entries, &none);
+        assert_eq!(k.send_format, "stl", "ChiTuBox should default to STL");
+
+        k.slicer = "prusa".into();
+        preselect_format(&mut k, &entries, &none);
+        assert_eq!(k.send_format, "3mf", "PrusaSlicer should default to 3MF");
+
+        k.slicer = EASYPRINT.into();
+        preselect_format(&mut k, &entries, &none);
+        assert_eq!(k.send_format, "3mf", "EasyPrint should preselect 3MF");
+    }
+
+    /// #16089: a slicer starts from the format it was last sent. A remembered format the slicer
+    /// no longer takes is not used, and EasyPrint keeps 3MF.
+    #[test]
+    fn preselect_format_takes_the_format_each_slicer_was_last_sent() {
+        let entries = entries(&["orca", "bambu", "cura"]);
+        let remembered: BTreeMap<String, String> =
+            [("orca", "step"), ("cura", "step"), (EASYPRINT, "stl")].map(|(a, b)| (a.to_string(), b.to_string())).into();
+        let mut k = sending("orca");
+        preselect_format(&mut k, &entries, &remembered);
+        assert_eq!(k.send_format, "step");
+        k.slicer = "bambu".into();
+        preselect_format(&mut k, &entries, &remembered);
+        assert_eq!(k.send_format, "3mf", "never sent to: its default");
+        k.slicer = "cura".into();
+        preselect_format(&mut k, &entries, &remembered);
+        assert_eq!(k.send_format, "3mf", "Cura does not take STEP");
+        k.slicer = EASYPRINT.into();
+        preselect_format(&mut k, &entries, &remembered);
+        assert_eq!(k.send_format, "3mf");
+    }
+
+    /// #16089: each slicer is offered the formats it takes: STEP for the slicers that read it,
+    /// STL alone for a resin slicer (which then has no Format row).
+    #[test]
+    fn the_format_row_offers_what_the_slicer_takes() {
+        let names = |id: &str| {
+            let e = entries(&[id]);
+            offered_formats(e.first().map(|e| e.slicer.target())).into_iter().map(|f| f.1).collect::<Vec<_>>()
+        };
+        for id in ["orca", "bambu", "prusa", "superslicer", "qidi"] {
+            assert_eq!(names(id), ["stl", "3mf", "3mf-tagged", "step"], "{id}");
+        }
+        assert_eq!(names("cura"), ["stl", "3mf", "3mf-tagged"]);
+        assert_eq!(names("chitubox"), ["stl"]);
+        assert!(offered_formats(None).is_empty());
+    }
+
+    #[test]
+    fn a_slicer_starts_from_the_first_format_it_takes() {
+        let all = SEND_FORMATS;
+        assert_eq!(first_format(Some("step"), "3mf", &all), "step");
+        assert_eq!(first_format(None, "3mf", &all), "3mf");
+        assert_eq!(first_format(Some("step"), "3mf", &all[..3]), "3mf");
+        assert_eq!(first_format(None, "3mf", &[("STL", "stl")]), "stl");
+        assert_eq!(first_format(None, "3mf", &[]), "3mf");
+    }
+
     #[test]
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh {
+            format: 0,
+            quality: 2,
+            open: true,
+            slicer: "prusa".into(),
+            send_format: String::new(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
@@ -1009,7 +1319,18 @@ mod tests {
         h.app.session.doc_mut().name = "Bracket".into();
         let mut bodies = SelInput::new("Bodies", BODIES, true);
         bodies.items = vec![Sel::Body { name: "Base".into() }];
-        let stl = SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: false, shown: None };
+        let stl = SaveMesh {
+            format: 0,
+            quality: 0,
+            open: false,
+            slicer: String::new(),
+            send_format: String::new(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let offer = |h: &mut crate::scenario::Harness| {
             // One file picker at a time: the STEP export finishes before the mesh asks.
             crate::toolbar::export(&mut h.app, "step");
@@ -1130,7 +1451,18 @@ mod tests {
             assert_eq!(bodies(&mut h, id), one, "{id}");
         }
         let (_, p) = commands(
-            &SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
+            &SaveMesh {
+                format: 0,
+                quality: 0,
+                open: false,
+                slicer: String::new(),
+                send_format: String::new(),
+                stale: true,
+                shown: None,
+                copy: false,
+                copy_folder: String::new(),
+                copy_overwrite: false,
+            },
             &h.app.dialog.as_ref().unwrap().inputs,
         )
         .map(|mut c| c.remove(0))

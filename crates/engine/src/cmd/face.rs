@@ -499,7 +499,9 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
     let tris: Vec<[Vec3; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, tf)| **tf == f).filter_map(|(t, _)| m.tri(t)).collect();
     let normal = tris.iter().find_map(|[a, b, c]| (*b - *a).cross(*c - *a).normalized()).ok_or_else(|| bad(cmd, "degenerate face"))?;
     if tris.iter().any(|[a, b, c]| (*b - *a).cross(*c - *a).normalized().is_some_and(|n| n.dot(normal) < 1.0 - 1e-6)) {
-        return Err(bad(cmd, "only planar faces can be extruded"));
+        // Offset Face is the way to move a curved face, so an extrude says so.
+        let hint = if cmd == "solid.extrude" { "; to move a curved face, use Offset Face" } else { "" };
+        return Err(bad(cmd, format!("only planar faces can be extruded{hint}")));
     }
     // A point well inside the face: the centroid of its largest triangle.
     let inside = tris

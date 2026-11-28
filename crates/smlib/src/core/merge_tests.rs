@@ -20,7 +20,7 @@ use solidcore::primitive::api_trim_ops::trim_surface_with_3d_curves;
 use solidcore::surface::plane::p1::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::Brep;
-use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p2::{ArenaNotifyState, copy_source_ref};
 use solidcore::topology::brep::p3::{merge_brep, new_brep};
 use solidcore::topology::brep::p8::create_face_from_surface;
 
@@ -246,7 +246,7 @@ fn cube_and_sheet(sheet: impl FnOnce(&mut Kernel) -> solidcore::Result<Brep>) ->
         let sheet = sheet(k)?;
         let mut state = ArenaNotifyState::new(&cube);
         let mut env = state.env(None);
-        merge_brep(k, &mut env, &mut cube, &sheet, &solidcore::topology::brep::p2::copy_source_ref, None, None, true)?;
+        merge_brep(k, &mut env, &mut cube, &sheet, &copy_source_ref, None, None, true)?;
         cube.refresh_cached_topology();
         Ok(cube)
     })
@@ -353,4 +353,89 @@ fn the_body_stays_as_it_was() {
     let was = counts(&block).unwrap();
     let _ = merge_faces(&block, &[], TOL).unwrap();
     assert_eq!(counts(&block).unwrap(), was);
+}
+
+/// Index-based `merge_faces_keeping_edges` keeps only the named edges, refuses out-of-range
+/// indices, deduplicates repeats, and handles more than `MAX_POINTS` distinct kept edges (#21834).
+#[test]
+fn merge_faces_keeping_edges_keeps_named_edges_and_exceeds_max_points() {
+    use super::merge::merge_faces_keeping_edges;
+
+    // On a split cube, keeping the seam edge by its index keeps all 7 faces; empty merges to 6.
+    let split = split_cube();
+    let edge_count = counts(&split).unwrap()[1];
+    assert_eq!(counts(&merge_faces_keeping_edges(&split, &[]).unwrap()).unwrap()[0], 6);
+
+    let seam = (0..edge_count)
+        .find(|&idx| counts(&merge_faces_keeping_edges(&split, &[idx]).unwrap()).unwrap()[0] == 7)
+        .expect("split cube must have a topological seam edge");
+    // Duplicates (even exceeding MAX_POINTS entries) deduplicate and keep the seam.
+    let dupes = vec![seam; crate::MAX_POINTS + 17];
+    assert_eq!(counts(&merge_faces_keeping_edges(&split, &dupes).unwrap()).unwrap()[0], 7);
+    // Out-of-range indices are refused without modifying or panicking.
+    assert_eq!(merge_faces_keeping_edges(&split, &[edge_count]).err(), Some(Error::Argument));
+    assert_eq!(merge_faces_keeping_edges(&split, &[usize::MAX]).err(), Some(Error::Argument));
+
+    // A compound body of 350 disjoint boxes has 4,200 distinct edges (> MAX_POINTS = 4,096):
+    // keeping every distinct edge index succeeds, whereas point-based `merge_faces` caps at 4,096.
+    let many_boxes = run("350 boxes", |k| {
+        let mut combined = create_box(k, Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for i in 1..350usize {
+            let next = create_box(k, Vec3::new((i as f64) * 2.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+            let mut state = ArenaNotifyState::new(&combined);
+            let mut env = state.env(None);
+            merge_brep(k, &mut env, &mut combined, &next, &copy_source_ref, None, None, true)?;
+        }
+        combined.refresh_cached_topology();
+        Ok(combined)
+    })
+    .map(Body::from_kernel)
+    .unwrap();
+    let n_edges = counts(&many_boxes).unwrap()[1];
+    assert_eq!(n_edges, 350 * 12);
+    assert!(n_edges > crate::MAX_POINTS);
+    let all_indices: Vec<usize> = (0..n_edges).collect();
+    let merged = merge_faces_keeping_edges(&many_boxes, &all_indices).unwrap();
+    assert_eq!(counts(&merged).unwrap(), [350 * 6, 350 * 12, 350 * 8]);
+}
+
+/// Parity: SolidCraft's merges are solidcore-ops' `merge_faces_with` under the capi's contract
+/// (closed, tolerances grown), bit for bit. Each case runs through this crate's entry point and
+/// straight through ops on a copy of the same body: the results' native bytes are the same, and
+/// so is a pick that misses or a refused index.
+#[test]
+fn routed_merges_are_solidcore_ops() {
+    use super::merge::merge_faces_keeping_edges;
+    use solidcore_ops::stitch::{KeptEdges, MergeOptions, merge_faces_with};
+    let capi = MergeOptions { contract: solidcore_ops::Contract::Closed, grow_tolerances: true };
+    let bytes = |b: &Body| b.to_smb(false).unwrap();
+    let direct = |body: &Body, keep: KeptEdges<'_>| merge_faces_with(body.copy().unwrap(), keep, capi);
+    let mut merged = 0;
+    let marginal = stitch(&loose_faces(ALL, 0.005), TOL).unwrap().0;
+    for body in [split_cube(), two_boxes(), make_box([0.0; 3], [10.0; 3]).unwrap(), loose_faces(OPEN, 0.0), marginal] {
+        let edges = counts(&body).unwrap()[1];
+        for i in 0..=edges {
+            let keep = [i];
+            match (merge_faces_keeping_edges(&body, &keep), direct(&body, KeptEdges::Native(&keep))) {
+                (Ok(ours), Ok(Ok(ops))) => {
+                    assert_eq!(bytes(&ours), bytes(&ops), "edge {i}");
+                    merged += 1;
+                }
+                (Err(Error::Argument), Err(solidcore_ops::Error::Argument)) => assert_eq!(i, edges),
+                (ours, ops) => panic!("edge {i}: {:?} against {:?}", ours.map(|b| counts(&b)), ops.map(|r| r.map(|b| counts(&b).unwrap()))),
+            }
+        }
+        for points in [&[][..], &[[5.0, 5.0, 10.0]], &[[5.0, 0.0, 0.0], [0.0, 5.0, 10.0]], &[[50.0, 50.0, 50.0]]] {
+            let ours = merge_faces(&body, points, TOL);
+            match direct(&body, KeptEdges::Nearest { points, tolerance: TOL }).unwrap() {
+                Ok(ops) => {
+                    assert_eq!(bytes(&ours.unwrap()), bytes(&ops), "{points:?}");
+                    merged += 1;
+                }
+                Err(solidcore_ops::pick::Miss::None(point)) => assert_eq!(ours.err(), Some(Error::NoMatch { point })),
+                Err(solidcore_ops::pick::Miss::Ambiguous(point)) => assert_eq!(ours.err(), Some(Error::Ambiguous { point })),
+            }
+        }
+    }
+    assert!(merged > 60, "{merged} merges compared");
 }

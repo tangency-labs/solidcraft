@@ -101,14 +101,15 @@ pub enum LinkSource {
         /// Bold or italic, alignment, spacing and the curve the text follows.
         #[serde(default, skip_serializing_if = "crate::text::TextStyle::is_plain")]
         style: crate::text::TextStyle,
-        /// The expressions behind the numbers above that were typed as expressions.
+        /// The expressions behind the numbers above that were typed as expressions (boxed: most
+        /// texts have none, and the other links stay small).
         #[serde(default, skip_serializing_if = "TextExprs::is_empty")]
-        exprs: TextExprs,
+        exprs: Box<TextExprs>,
     },
 }
 
 /// The expressions behind a text's numbers that were typed as expressions: its place (`x`, `y`),
-/// its height and its angle; and behind its words (`text`), an expression of the design's text
+/// its height, its angle and its spacing (`letter_spacing` in mm, `line_spacing` a factor); and behind its words (`text`), an expression of the design's text
 /// parameters. A number or text without an expression is the one typed. The numbers and words
 /// of `LinkSource::Text` are what the expressions gave last: the document evaluates them against
 /// its parameters before the text's outlines are rebuilt (`Document::apply_text_values`), and
@@ -123,6 +124,10 @@ pub struct TextExprs {
     pub height: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<String>,
     /// The words: text parameters and quoted texts joined by `+` (`Label + '-L'`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -136,14 +141,24 @@ impl TextExprs {
     /// The expressions of numbers set, each with what it sets (the words' expression is of
     /// texts, not numbers: [`TextExprs::text`]).
     pub fn list(&self) -> Vec<(&'static str, &String)> {
-        [("Text X", &self.x), ("Text Y", &self.y), ("Text height", &self.height), ("Text angle", &self.angle)]
-            .into_iter()
-            .filter_map(|(what, e)| e.as_ref().map(|e| (what, e)))
-            .collect()
+        [
+            ("Text X", &self.x),
+            ("Text Y", &self.y),
+            ("Text height", &self.height),
+            ("Text angle", &self.angle),
+            ("Text letter spacing", &self.letter_spacing),
+            ("Text line spacing", &self.line_spacing),
+        ]
+        .into_iter()
+        .filter_map(|(what, e)| e.as_ref().map(|e| (what, e)))
+        .collect()
     }
 
     pub fn list_mut(&mut self) -> Vec<&mut String> {
-        [&mut self.x, &mut self.y, &mut self.height, &mut self.angle].into_iter().filter_map(Option::as_mut).collect()
+        [&mut self.x, &mut self.y, &mut self.height, &mut self.angle, &mut self.letter_spacing, &mut self.line_spacing]
+            .into_iter()
+            .filter_map(Option::as_mut)
+            .collect()
     }
 }
 
@@ -623,6 +638,38 @@ const SAME_TOL: f64 = 1e-6;
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
+    same_geometry_map(a, b).is_some()
+}
+
+/// How far, relative to their size, a spline's points, knots and weights read again may lie from
+/// the ones a link holds and still be the same spline. A face's edge is fitted afresh on every
+/// reading, so the numbers move by rounding (#22919: 5.5e-12 mm at 380 mm from the origin, knots
+/// by 1e-11 over a 34 mm span) and by nothing more while the face is unchanged; a spline that
+/// really changed moves by far more than this.
+const SPLINE_SAME_TOL: f64 = 1e-9;
+
+fn close_within(x: f64, y: f64, scale: f64) -> bool {
+    (x - y).abs() <= SPLINE_SAME_TOL * (1.0 + scale)
+}
+
+/// The same knot vector and weights, up to rounding ([`SPLINE_SAME_TOL`]).
+fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            let span = a.knots.iter().chain(&b.knots).fold(0.0f64, |m, k| m.max(k.abs()));
+            a.knots.len() == b.knots.len()
+                && a.weights.len() == b.weights.len()
+                && a.knots.iter().zip(&b.knots).all(|(x, y)| close_within(*x, *y, span))
+                // A weight only means anything relative to the others: compare it to its own size.
+                && a.weights.iter().zip(&b.weights).all(|(x, y)| (x - y).abs() <= SPLINE_SAME_TOL * x.abs().max(y.abs()))
+        }
+        _ => false,
+    }
+}
+
+/// [`same_geometry`], and for each curve of `a` the index of the curve of `b` it is.
+fn same_geometry_map(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> Option<Vec<usize>> {
     let near = near_point;
     let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
@@ -642,33 +689,30 @@ fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
                 ca == cb
                     && da == db
                     && periodic_a == periodic_b
-                    && ka == kb
-                    && pa.iter().zip(pb).all(|(p, q)| p.dist(*q) <= f64::EPSILON * 64. * (1.0 + p.len().max(q.len())))
+                    && same_nurbs(ka.as_ref(), kb.as_ref())
+                    && pa.iter().zip(pb).all(|(p, q)| p.dist(*q) <= SPLINE_SAME_TOL * (1.0 + p.len().max(q.len())))
             }
             _ => false,
         }
     };
     if a.len() != b.len() {
-        return false;
+        return None;
     }
     // Unchanged ordered links are common; avoid a quadratic permutation scan.
     if a.iter().zip(b).all(|(x, y)| matches(x, y)) {
-        return true;
+        return Some((0..a.len()).collect());
     }
     if a.len() > 512 {
-        return false;
+        return None;
     }
     let mut used = vec![false; b.len()];
-    a.iter().all(|x| {
-        let hit = b.iter().enumerate().find(|(j, y)| !used.get(*j).copied().unwrap_or(true) && matches(x, y)).map(|(j, _)| j);
-        match hit.and_then(|j| used.get_mut(j)) {
-            Some(u) => {
-                *u = true;
-                true
-            }
-            None => false,
-        }
-    })
+    a.iter()
+        .map(|x| {
+            let j = b.iter().enumerate().find(|(j, y)| !used.get(*j).copied().unwrap_or(true) && matches(x, y)).map(|(j, _)| j)?;
+            *used.get_mut(j)? = true;
+            Some(j)
+        })
+        .collect()
 }
 
 /// The point indices a layout curve uses, in order.
@@ -983,6 +1027,9 @@ impl Sketch {
 
     /// Make the entities of link `id` for `lay`. Returns the point each layout point became.
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<Vec<Option<usize>>> {
+        if self.curves.len().saturating_add(lay.curves.len()) > crate::limits::max_curves() {
+            return Err(SketchError::TooLarge);
+        }
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
             if let Some(Some(i)) = idx.get(li) {
@@ -1026,6 +1073,7 @@ impl Sketch {
                 fixed: false,
                 infinite: false,
                 spline_handle_of: None,
+                spline_control_polygon_of: None,
             });
         }
         for li in &lay.lone {
@@ -1413,6 +1461,11 @@ impl Sketch {
         if let Some(l) = self.links.iter_mut().find(|l| l.id == id) {
             l.lost = false;
         }
+        // Which fresh curve each held curve is, when the reading is the same geometry curve for
+        // curve: the pieces of a face's edge can be numbered afresh (#22919: 0.49.1 numbers a
+        // cut rim's pieces by their exact centroids), so the names may call the held curves by
+        // each other's names while the curves are where they were. Their places decide then.
+        let mut geometric: Option<Vec<usize>> = None;
         // The same geometry walked in another order or direction (e.g. a face loop re-read after
         // a rollback) is not a change: keep the entities, and the constraints on them.
         if let Some(cur) = &cur {
@@ -1429,10 +1482,15 @@ impl Sketch {
                 .map(|c| curve_points(c).into_iter().map(|li| lay.pts.get(li).copied()).collect::<Option<Vec<_>>>().map(|ps| (c.clone(), ps)))
                 .collect();
             let lone_old: Vec<Vec2> = points.iter().filter_map(|pi| pos(*pi)).collect();
+            if let (Some(old), Some(fresh)) = (&old, &fresh)
+                && lay.lone.is_empty()
+            {
+                geometric = same_geometry_map(old, fresh);
+            }
             if let (Some(old), Some(fresh)) = (old, fresh)
                 && lay.lone.is_empty()
                 && lone_old.len() == points.len()
-                && (points.len() == lay.pts.len() && same_geometry(&old, &fresh) || only_stations_gone(&old, &fresh))
+                && (points.len() == lay.pts.len() && geometric.is_some() || only_stations_gone(&old, &fresh))
             {
                 // Read with the same curves in the same order, each point where it was: the
                 // fresh reading is the same entities where the model puts them now, which a
@@ -1462,12 +1520,15 @@ impl Sketch {
                                 (Some(CurveKind::Circle { r, .. }), LCurve::Circle(_, value))
                                 | (Some(CurveKind::Ellipse { r, .. }), LCurve::Ellipse(.., value)) => *r = *value,
                                 (Some(CurveKind::Conic { rho, .. }), LCurve::Conic(.., value)) => *rho = *value,
+                                // A spline read again takes its fresh knots and weights, as its
+                                // points take their fresh places.
+                                (Some(CurveKind::Spline { nurbs, .. }), LCurve::Spline(.., value)) => nurbs.clone_from(value),
                                 _ => {}
                             }
                         }
                     }
                 }
-                return Ok((LinkUpdate { rebuilt: false, dropped: Vec::new() }, if same { in_order() } else { None }));
+                return Ok((LinkUpdate { rebuilt: false, dropped: Vec::new() }, if same { in_order() } else { geometric.clone().and_then(read) }));
             }
         }
         // A resized face can enumerate the same boundary in another order. Match the
@@ -1487,9 +1548,9 @@ impl Sketch {
             let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
             let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
             parameters_agree
-                && old.zip(fresh).is_some_and(|(old, fresh)| {
-                    solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false)
-                })
+                && old
+                    .zip(fresh)
+                    .is_some_and(|(old, fresh)| solidcraft_kernel::curves::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
         } else {
             false
         };
@@ -1749,6 +1810,10 @@ impl Sketch {
             })
             .collect();
         let before: std::collections::BTreeSet<String> = self.constraints.iter().map(|c| c.id.clone()).collect();
+        // Curves that are the same geometry as held ones are those (a junction the reading left
+        // open is still made again, #20280), whatever their names say.
+        let by_place: Vec<(usize, usize)> = geometric.iter().flat_map(|map| map.iter().copied().enumerate()).collect();
+        let identities = if geometric.is_some() { by_place.as_slice() } else { identities };
         self.rebuild_link(id, &lay, &points, &curves, cur.as_deref(), if one_for_one { identities } else { &[] })?;
         // What the rebuild could not move to a matching new entity went: those constraints are
         // reported, so the sketch's warning can name them.

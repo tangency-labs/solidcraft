@@ -846,6 +846,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                             pc.combine_in_brep(
                                 &other,
                                 CombineBrep {
+                                    k: &k,
                                     brep: &mut pool.topo.brep,
                                     target: t,
                                     handle: &handle,

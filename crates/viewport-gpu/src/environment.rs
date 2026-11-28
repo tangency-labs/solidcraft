@@ -1,19 +1,18 @@
-//! The studio the modeling viewport lights finished faces with: model-viewer's default
-//! "neutral" environment (google/model-viewer `EnvironmentScene.ts`, Apache-2.0, the same room as
-//! three.js `RoomEnvironment`), drawn once on the CPU ([`room`]) and prefiltered for image-based
-//! lighting (split-sum): a specular map whose mip `k` is the room seen through a GGX lobe of
-//! perceptual roughness `k / (SPECULAR_LEVELS - 1)`, and a small diffuse irradiance map
-//! (cosine-weighted), plus the GGX environment-BRDF table (`dfg`) the shader weights them with.
-//! The room is used as is (no scale, no turn); the shader applies model-viewer's exposure for it.
+//! The studio the modeling viewport lights finished faces with: dark walls, a lighter floor, a
+//! softbox over the part and two upright strip lights ([`studio`]), drawn once on the CPU and
+//! prefiltered for image-based lighting (split-sum): a specular map whose mip `k` is the studio
+//! seen through a GGX lobe of perceptual roughness `k / (SPECULAR_LEVELS - 1)`, and a small diffuse
+//! irradiance map (cosine-weighted), plus the GGX environment-BRDF table (`dfg`) the shader weights
+//! them with. A face looking up gets about unit light, upright faces a quarter to a half of it, and
+//! a metal reflects bright panels against dark walls, so a part reads by its shading (#19994).
 //!
 //! Both maps are equirectangular in the shader's frame, the view's (x right, y up, z toward the
-//! eye): a direction `(x, y, z)` sits at `u = 0.5 + atan2(x, -z) / 2π`, `v = acos(y) / π`. The
-//! room's frame is model-viewer's default view (camera on +z looking down -z), so it maps 1:1.
+//! eye): a direction `(x, y, z)` sits at `u = 0.5 + atan2(x, -z) / 2π`, `v = acos(y) / π`.
 
 use std::f32::consts::PI;
 
-/// The room's map width, sampled 2 × 2 per texel: twice the specular map's, as `prefilter` reads.
-const ROOM_WIDTH: usize = 2 * SPECULAR_WIDTH;
+/// The studio's map width, sampled 2 × 2 per texel: twice the specular map's, as `prefilter` reads.
+const STUDIO_WIDTH: usize = 2 * SPECULAR_WIDTH;
 
 /// The environment-BRDF table: `DFG_SIZE` × `DFG_SIZE` over (n·v, perceptual roughness), at
 /// texel centres as the Khronos glTF-IBL-Sampler writes its `LUT`; the size is Filament's (`FILAMENT_DFG_LUT_SIZE`).
@@ -173,123 +172,53 @@ fn irradiance(source: &Equirect, width: usize) -> Equirect {
     Equirect { width, rgb }
 }
 
-/// A box of model-viewer's room: centre, size, turn about +y (radians, as three.js
-/// `rotation.y`), and its radiance when it is a light panel (`MeshBasicMaterial` colour =
-/// intensity) or `None` for a white diffuse surface (`MeshStandardMaterial` defaults).
-struct Block {
-    centre: [f32; 3],
-    size: [f32; 3],
-    turn: f32,
-    glow: Option<f32>,
+/// The studio's dark walls (above the horizon) and its grey floor, lit by the panels.
+const STUDIO_WALL: f32 = 0.05;
+const STUDIO_FLOOR: f32 = 0.3;
+/// The softbox over the part, on the ceiling plane y = 1 (x right, z toward the eye): x from -0.8
+/// to 0.8, z from -0.6 to 0.9, so it leans toward the eye; and its radiance.
+const SOFTBOX: ([f32; 2], [f32; 2], f32) = ([-0.8, 0.8], [-0.6, 0.9], 1.58);
+/// Upright panels: azimuth centre and half width (degrees from the eye's direction, + to the
+/// right), elevation range (degrees) and radiance. A key strip in front on the left, and a wide
+/// backdrop behind the part, which flat faces seen from above reflect, and the floor the key
+/// strip lights, which gives upright curves a light band.
+const PANELS: [(f32, f32, [f32; 2], f32); 3] = [(-71.0, 9.0, [-5.0, 55.0], 2.1), (180.0, 70.0, [8.0, 60.0], 0.5), (-55.0, 30.0, [-60.0, -12.0], 0.3)];
+/// Panel edges fade over this much (in the panel's own measure) so the mirror map has no stair steps.
+const SOFT: f32 = 0.03;
+
+/// 1 inside `lo..hi`, 0 outside, fading over `soft` at each end.
+fn inside(t: f32, [lo, hi]: [f32; 2], soft: f32) -> f32 {
+    let ramp = |e: f32| (e / soft + 0.5).clamp(0.0, 1.0);
+    ramp(t - lo) * ramp(hi - t)
 }
 
-/// The whole scene sits this far down (`EnvironmentScene`: `this.position.y = -3.5`).
-const ROOM_DROP: f32 = -3.5;
-/// The `neutral` top light: a three.js `PointLight` of this intensity, range 28, decay 2.
-const ROOM_LIGHT: ([f32; 3], f32) = ([0.5, 14.0, 0.5], 400.0);
-const ROOM_LIGHT_RANGE: f32 = 28.0;
-/// The `neutral` room (seen from inside), boxes and light panels: `EnvironmentScene.ts` verbatim.
-const ROOM: ([f32; 3], [f32; 3]) = ([0.0, 13.2, 0.0], [31.5, 28.5, 31.5]);
-const ROOM_BOXES: [([f32; 3], f32, [f32; 3]); 6] = [
-    ([-10.906, -1.0, 1.846], -0.195, [2.328, 7.905, 4.651]),
-    ([-5.607, -0.754, -0.758], 0.994, [1.970, 1.534, 3.955]),
-    ([6.167, -0.16, 7.803], 0.561, [3.927, 6.285, 3.687]),
-    ([-2.017, 0.018, 6.124], 0.333, [2.002, 4.566, 2.064]),
-    ([2.291, -0.756, -2.621], -0.286, [1.546, 1.552, 1.496]),
-    ([-2.193, -0.369, -5.547], 0.516, [3.875, 3.487, 2.986]),
-];
-const ROOM_PANELS: [(f32, [f32; 3], [f32; 3]); 7] = [
-    (80.0, [-14.0, 10.0, 8.0], [0.1, 2.5, 2.5]),
-    (80.0, [-14.0, 14.0, -4.0], [0.1, 2.5, 2.5]),
-    (23.0, [14.0, 12.0, 0.0], [0.1, 5.0, 5.0]),
-    (16.0, [0.0, 9.0, 14.0], [5.0, 5.0, 0.1]),
-    (80.0, [7.0, 8.0, -14.0], [2.5, 2.5, 0.1]),
-    (80.0, [-7.0, 16.0, -14.0], [2.5, 2.5, 0.1]),
-    (1.0, [0.0, 20.0, 0.0], [0.1, 0.1, 0.1]),
-];
-
-fn dropped(p: [f32; 3]) -> [f32; 3] {
-    [p[0], p[1] + ROOM_DROP, p[2]]
-}
-
-/// Where the ray from the origin along `d` meets `block` (from inside when `inside`): its
-/// distance and the face's normal (toward the ray), or `None`.
-fn hit(block: &Block, d: [f32; 3], inside: bool) -> Option<(f32, [f32; 3])> {
-    // Into the block's frame: three.js rotation.y maps local (x, z) to (x c + z s, -x s + z c).
-    let (s, c) = block.turn.sin_cos();
-    let local = |p: [f32; 3]| [p[0] * c - p[2] * s, p[1], p[0] * s + p[2] * c];
-    let o = local(block.centre.map(|v| -v));
-    let dl = local(d);
-    let (mut near, mut far, mut near_axis, mut far_axis) = (f32::NEG_INFINITY, f32::INFINITY, 0, 0);
-    for k in 0..3 {
-        let h = block.size[k] / 2.0;
-        if dl[k].abs() < 1e-9 {
-            if o[k].abs() > h {
-                return None;
-            }
-            continue;
-        }
-        let (a, b) = ((-h - o[k]) / dl[k], (h - o[k]) / dl[k]);
-        let (a, b) = (a.min(b), a.max(b));
-        if a > near {
-            (near, near_axis) = (a, k);
-        }
-        if b < far {
-            (far, far_axis) = (b, k);
-        }
+/// The radiance the studio shows along the unit direction `d` (the view's frame, see the module).
+fn studio_radiance(d: [f32; 3]) -> f32 {
+    let mut l = if d[1] < 0.0 { STUDIO_FLOOR } else { STUDIO_WALL };
+    if d[1] > 1e-3 {
+        let (x, z) = (d[0] / d[1], d[2] / d[1]);
+        l += SOFTBOX.2 * inside(x, SOFTBOX.0, SOFT * 4.0) * inside(z, SOFTBOX.1, SOFT * 4.0);
     }
-    let (t, axis) = if inside { (far, far_axis) } else { (near, near_axis) };
-    if near > far || t <= 0.0 {
-        return None;
+    let azimuth = d[0].atan2(d[2]).to_degrees();
+    let elevation = d[1].clamp(-1.0, 1.0).asin().to_degrees();
+    for (centre, half, el, glow) in PANELS {
+        let off = (azimuth - centre + 540.0).rem_euclid(360.0) - 180.0;
+        l += glow * inside(off, [-half, half], SOFT * 60.0) * inside(elevation, el, SOFT * 60.0);
     }
-    // The face's normal faces back along the ray; out of the block's frame again.
-    let mut n = [0.0f32; 3];
-    n[axis] = -dl[axis].signum();
-    Some((t, [n[0] * c + n[2] * s, n[1], -n[0] * s + n[2] * c]))
+    l
 }
 
-/// three.js `getDistanceAttenuation` (physically based lights): inverse square, faded to zero at
-/// the light's range.
-fn attenuation(distance: f32) -> f32 {
-    let fade = (1.0 - (distance / ROOM_LIGHT_RANGE).powi(4)).clamp(0.0, 1.0);
-    fade * fade / (distance * distance).max(0.01)
-}
-
-/// The radiance the camera at the room's origin sees along `d`: a panel's own, or a white
-/// Lambertian surface lit by the top light (three.js `BRDF_Lambert` × the light's irradiance; the
-/// light casts no shadow, and the panels light nothing, as in model-viewer's render of the room).
-fn room_radiance(blocks: &[Block], d: [f32; 3]) -> f32 {
-    let nearest = blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(k, b)| hit(b, d, k == 0).map(|(t, n)| (t, n, b.glow)))
-        .fold(None, |best: Option<(f32, [f32; 3], Option<f32>)>, h| if best.is_some_and(|b| b.0 <= h.0) { best } else { Some(h) });
-    let Some((t, n, glow)) = nearest else { return 0.0 };
-    if let Some(glow) = glow {
-        return glow;
-    }
-    let p = d.map(|c| c * t);
-    let to_light: [f32; 3] = std::array::from_fn(|k| dropped(ROOM_LIGHT.0)[k] - p[k]);
-    let distance = dot(to_light, to_light).sqrt();
-    let cos = (dot(n, to_light) / distance.max(1e-6)).max(0.0);
-    ROOM_LIGHT.1 * attenuation(distance) * cos / PI
-}
-
-/// model-viewer's neutral room as an equirectangular map in the view's frame (see the module).
-fn room() -> Equirect {
-    let mut blocks = vec![Block { centre: dropped(ROOM.0), size: ROOM.1, turn: 0.0, glow: None }];
-    blocks.extend(ROOM_BOXES.iter().map(|&(p, turn, size)| Block { centre: dropped(p), size, turn, glow: None }));
-    blocks.extend(ROOM_PANELS.iter().map(|&(glow, p, size)| Block { centre: dropped(p), size, turn: 0.0, glow: Some(glow) }));
-    let fine = 2 * ROOM_WIDTH;
-    let mut rgb = Vec::with_capacity(ROOM_WIDTH * ROOM_WIDTH / 2);
-    for y in 0..ROOM_WIDTH / 2 {
-        for x in 0..ROOM_WIDTH {
-            let l = [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|(i, j)| room_radiance(&blocks, direction(2 * x + i, 2 * y + j, fine))).sum::<f32>()
-                / 4.0;
+/// The studio as an equirectangular map in the view's frame, each texel the mean of 2 × 2 samples.
+fn studio() -> Equirect {
+    let fine = 2 * STUDIO_WIDTH;
+    let mut rgb = Vec::with_capacity(STUDIO_WIDTH * STUDIO_WIDTH / 2);
+    for y in 0..STUDIO_WIDTH / 2 {
+        for x in 0..STUDIO_WIDTH {
+            let l = [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|(i, j)| studio_radiance(direction(2 * x + i, 2 * y + j, fine))).sum::<f32>() / 4.0;
             rgb.push([l; 3]);
         }
     }
-    Equirect { width: ROOM_WIDTH, rgb }
+    Equirect { width: STUDIO_WIDTH, rgb }
 }
 
 /// The specular mips (`SPECULAR_LEVELS`, mip 0 at `SPECULAR_WIDTH`) and the irradiance map of
@@ -383,10 +312,10 @@ pub(crate) struct Tables {
     dfg: Vec<[f32; 3]>,
 }
 
-/// Draw and prefilter the room and build the environment-BRDF table: about 0.23 s of CPU (M-series,
+/// Draw and prefilter the studio and build the environment-BRDF table: about 0.23 s of CPU (M-series,
 /// release), so the renderer builds them beside its pipelines ([`Environment::set`]).
 pub(crate) fn tables() -> Tables {
-    let (levels, diffuse) = prefilter(room());
+    let (levels, diffuse) = prefilter(studio());
     Tables { levels, diffuse, dfg: dfg() }
 }
 
@@ -556,43 +485,36 @@ mod tests {
     }
 
     #[test]
-    fn the_room_is_model_viewers() {
-        let blocks: Vec<Block> = std::iter::once(Block { centre: dropped(ROOM.0), size: ROOM.1, turn: 0.0, glow: None })
-            .chain(ROOM_BOXES.iter().map(|&(p, turn, size)| Block { centre: dropped(p), size, turn, glow: None }))
-            .chain(ROOM_PANELS.iter().map(|&(glow, p, size)| Block { centre: dropped(p), size, turn: 0.0, glow: Some(glow) }))
-            .collect();
-        // Each wall panel is seen at its own radiance, from where the scene puts it.
-        for (glow, p, _) in &ROOM_PANELS[..6] {
-            assert_eq!(room_radiance(&blocks, normalized(dropped(*p))), *glow, "{p:?}");
-        }
-        // The floor straight below (4.55 down), lit by the light at (0.5, 10.5, 0.5): 400 / π ×
-        // three.js attenuation × cos.
-        let (h, d) = (10.5f32 + 4.55, (15.05f32 * 15.05 + 0.5).sqrt());
-        let fade = (1.0 - (d / 28.0).powi(4)).powi(2);
-        let want = 400.0 / PI * fade / (d * d) * h / d;
-        assert!((room_radiance(&blocks, [0.0, -1.0, 0.0]) - want).abs() < 1e-4, "{want}");
-        // The box at (2.291, -4.256, -2.621) turned -0.286 is hit on the side facing the eye.
-        let (t, n) = hit(
-            &Block { centre: [2.291, -4.256, -2.621], size: [1.546, 1.552, 1.496], turn: -0.286, glow: None },
-            normalized([2.291, -4.256, -2.621]),
-            false,
-        )
-        .unwrap_or_default();
-        assert!(t > 0.0 && t < 5.5 && dot(n, normalized([2.291, -4.256, -2.621])) < 0.0, "{t} {n:?}");
+    fn the_studio_lights_a_part_from_above_and_leaves_its_sides_darker() {
+        // A face looking up gets about unit light, so PBR Neutral shows it in its assigned colour;
+        // upright faces the eye can see get a third to a half of that, the bottom less (#19994: the
+        // old room lit every side alike, 0.92 to 0.98, and parts looked flat and self-lit).
+        let (_, diffuse) = prefilter(studio());
+        let at = |d: [f32; 3]| diffuse.sample(normalized(d))[0];
+        let up = at([0.0, 1.0, 0.0]);
+        let sides = [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]].map(at);
+        let down = at([0.0, -1.0, 0.0]);
+        eprintln!("STUDIO up {up} sides {sides:?} down {down}");
+        assert!((0.9..1.1).contains(&up), "{up}");
+        assert!(sides.iter().all(|s| (0.25..0.6).contains(s)), "{sides:?}");
+        assert!(down < 0.4, "{down}");
     }
 
     #[test]
-    fn the_rooms_light_reaches_what_an_upright_mirror_face_sees() {
-        // In the iso view an upright mirror face reflects about 35° below the horizon; the
-        // product-photo studio gave it 0.026 of a white face's light there, black on screen.
-        let (levels, diffuse) = prefilter(room());
-        let up = diffuse.sample([0.0, 1.0, 0.0])[0];
+    fn a_mirror_sees_bright_panels_on_dark_walls() {
+        // Metals look like metal when what they reflect has contrast: panels many times the walls.
+        // An upright mirror in the iso view looks about 35° below the horizon, at the floor, which
+        // stays above black so its edges still read.
+        let (levels, _) = prefilter(studio());
+        let mirror = &levels[0].rgb;
+        let (lo, hi) = mirror.iter().fold((f32::MAX, 0.0f32), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
         let e = (-35f32).to_radians();
         let seen: f32 =
             (0..16).map(|k| k as f32 * PI / 8.0).map(|a| levels[0].sample([e.cos() * a.sin(), e.sin(), e.cos() * a.cos()])[0]).sum::<f32>() / 16.0;
-        let side = diffuse.sample([0.0, 0.0, 1.0])[0];
-        eprintln!("irradiance/π up {up}, toward the eye {side}; mirror at -35° {seen}");
-        assert!(seen > 0.1 * up, "{seen} vs {up}");
+        let top = levels[0].sample([0.0, (35f32).to_radians().sin(), -(35f32).to_radians().cos()])[0];
+        eprintln!("mirror from {lo} to {hi}; at -35° {seen}; a flat top reflects {top}");
+        assert!(hi > 20.0 * lo, "{lo} {hi}");
+        assert!(seen > 0.05, "{seen}");
     }
 
     #[test]
@@ -624,7 +546,7 @@ mod tests {
 
     #[test]
     fn the_studio_prefilters_to_finite_levels() {
-        let (levels, diffuse) = prefilter(room());
+        let (levels, diffuse) = prefilter(studio());
         assert_eq!(levels.first().map(|l| l.width), Some(SPECULAR_WIDTH));
         assert!(levels.iter().chain([&diffuse]).all(|l| l.rgb.iter().flatten().all(|c| c.is_finite() && *c >= 0.0)));
     }

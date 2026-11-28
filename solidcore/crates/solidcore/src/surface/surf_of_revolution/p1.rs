@@ -41,6 +41,10 @@
 //! - **Meridians keep their kind (not upstream).** `IntersectWithPlane` through the axis
 //!   rotates a circle generator (a torus's) as the circle it is, where upstream rotates its
 //!   `SmBSplineCurve` part (WR-721, #2405).
+//! - **Meridians tangent to a side stay whole (not upstream, #15049).** Where both surfaces
+//!   are faces' (`revolved_contact_tol`), `IntersectWithPlane` trims a meridian to the plane's
+//!   domain without breaking it where it stays inside on both sides
+//!   (`Plane::trim_curve_to_plane_domain_joined`).
 //! - **Derived class.** `SmSurfOfRevolution` derives from `SmBSplineSurface`; the base
 //!   object is the [`SurfOfRevolution::base`] field. The surface joins
 //!   [`crate::surface::surface::SurfaceKind`] with the units porting its remaining
@@ -1661,6 +1665,7 @@ impl SurfOfRevolution {
             other_uv_domain,
             approx_tol_3d,
             iso,
+            0.0,
             &mut out,
         )?;
         Ok((more, out))
@@ -1668,7 +1673,12 @@ impl SurfOfRevolution {
 
     /// [`Self::intersect_with_plane_owned_using`] into `out` (reset first). On an error
     /// `out` keeps what was appended before it, as upstream leaves its output arrays.
+    ///
+    /// Not upstream (#15049): `contact_tol` (`revolved_contact_tol`, nonzero where both
+    /// surfaces are faces') trims a meridian to the plane's domain without breaking it
+    /// where it stays inside on both sides (`Plane::trim_curve_to_plane_domain_joined`).
     #[allow(clippy::too_many_lines)] // one upstream function
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn intersect_with_plane_owned_using_into(
         &self,
         k: &Kernel,
@@ -1677,6 +1687,7 @@ impl SurfOfRevolution {
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
         iso: SweepIsoFn<'_>,
+        contact_tol: f64,
         out: &mut SurfaceIntersection,
     ) -> Result<bool> {
         *out = SurfaceIntersection::default();
@@ -1721,10 +1732,14 @@ impl SurfOfRevolution {
             if plane_pbox.are_disjoint(&curve_pbox, None) {
                 return Ok(Vec::new());
             }
-            Ok(
-                ignored(plane.trim_curve_to_plane_domain(k, other_uv_domain, crv, tol))?
-                    .unwrap_or_default(),
-            )
+            // (not upstream, #15049) where both surfaces are faces', a meridian a hair
+            // outside a side of the plane's domain that it is tangent to stays one curve
+            let pieces = if contact_tol > 0.0 {
+                plane.trim_curve_to_plane_domain_joined(k, other_uv_domain, crv, tol)
+            } else {
+                plane.trim_curve_to_plane_domain(k, other_uv_domain, crv, tol)
+            };
+            Ok(ignored(pieces)?.unwrap_or_default())
         };
 
         // when RevolutionAxis is perpendicular to the plane normal

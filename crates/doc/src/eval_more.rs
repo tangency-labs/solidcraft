@@ -11,9 +11,13 @@ use solidcraft_geom::{Aabb3, ArcMap, Ring};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
-        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face } => {
+        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face, offset_x, offset_y, angle } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-            let regions = select_profiles(ss, profiles)?;
+            // The profiles are placed before anything is built from them (#20386), so the wrap, the
+            // projection and the plain emboss all get the offsets and the angle the same way.
+            let given = |e: &Option<crate::Expr>, kind: Kind| e.as_deref().map_or(Ok(0.0), |e| val(vals, e, kind));
+            let shift = Vec2::new(given(offset_x, Kind::Length)?, given(offset_y, Kind::Length)?);
+            let regions = emboss_placement(select_profiles(ss, profiles)?, shift, given(angle, Kind::Angle)?)?;
             let d = val(vals, depth, Kind::Length)?;
             if !(d > 0.0) {
                 return Err(DocError::Invalid("the emboss depth must be positive".into()));
@@ -92,7 +96,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // stops the wall.
             let shown = targets_as_shown(st, f, &["*".to_string()])?;
             let tools = rib_tools(vals, &shown, f, None)?;
-            apply_op(doc, st, f, tools, Operation::Join, &[])
+            apply_traced(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
             let tp = doc.resolve_plane_in(vals, target, 0, f.component, Some(st))?;
@@ -228,7 +232,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// The walls of rib `f` (one per curve for a web), each run until it meets the bodies. `at`
 /// moves the rib's sketch first: a pattern's or mirror's copy of the rib is built again where
 /// the copy is, against the bodies there (#4593), as a hole is drilled again at each copy.
-pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Body>> {
+pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Traced>> {
     let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, extend } = &f.kind else {
         return Err(DocError::Invalid(format!("{} is not a rib", f.name)));
     };
@@ -412,7 +416,7 @@ fn contour_profile(ss: &SolvedSketch, ids: &[String]) -> Result<(Vec<Seg2>, Vec<
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
 /// `t` thick about the sketch plane.
-fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Body> {
+fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Traced> {
     let mut pts = chain_points(ss, ids)?;
     let meshes: Vec<_> = st.bodies.iter().map(|b| b.mesh()).collect();
     let reach = meshes.iter().map(|m| m.bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
@@ -563,8 +567,11 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
         lp = lp.reversed();
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
-    let tools = kernel::extrude(&ss.plane, &[region], -t / 2.0, t / 2.0)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), -t / 2.0, t / 2.0)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its two walls are the extrude's caps, `start` and `end`; its top, along the curve, the
+    // curve's `side:<curve>` (#20622).
+    Ok(crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)).tool(body, None))
 }
 
 /// Run a rib curve's open ends (`pts`, in sketch coordinates) on in their own direction until they
@@ -618,7 +625,7 @@ fn extend_rib_ends(st: &ModelState, ss: &SolvedSketch, pts: &mut Vec<Vec2>, t: f
 
 /// A rib wall along the sketch normal: the curves widened to `t` in the sketch plane, run from
 /// the sketch toward the body by `depth` (or until the whole wall reaches the body).
-fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Body> {
+fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Traced> {
     let pts = chain_points(ss, ids)?;
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     if !(len > 1e-9) {
@@ -704,8 +711,13 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
     let (a, b) = if sign > 0.0 { (0.0, h) } else { (-h, 0.0) };
-    let tools = kernel::extrude(&ss.plane, &[region], a, b)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), a, b)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its walls lie half the thickness beside its curves: named as a thin extrude's are, by the
+    // curve and the side (#20622). Its ends are the extrude's caps.
+    let thin = crate::lineage::ThinWallRoles { curves: ids.to_vec(), distances: [half, half] };
+    let roles = crate::lineage::ProfileRoles { thin: Some(&thin), ..crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)) };
+    Ok(roles.tool(body, None))
 }
 
 /// Where the material begins and ends along a ray, from where the ray crosses the bodies'
@@ -815,6 +827,7 @@ fn convert_rule(rv: &crate::sheet::RuleValues) -> crate::ConvertRule {
         corner_relief_size: rv.corner_relief,
         relief_width: rv.relief_width,
         relief_depth: rv.relief_depth,
+        bend_relief: rv.bend_relief_shape,
     }
 }
 
@@ -862,7 +875,8 @@ fn convert_to_sheet(
             let (read, _) = crate::sheet_surface_cuts::engraved(&as_modelled, &built, &mb.body)?;
             let mut sheet = sheet;
             sheet.recesses = read.recesses;
-            let solid = if sheet.recesses.is_empty() { solid } else { sheet.build()? };
+            sheet.countersinks = read.countersinks;
+            let solid = if sheet.recesses.is_empty() && sheet.countersinks.is_empty() { solid } else { sheet.build()? };
             (sheet, solid)
         }
     };
@@ -1259,7 +1273,7 @@ pub(super) fn sheet_eval(
             }
             Ok(())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             // The profile as the sketch draws it, exactly, end to end, and the sketch curve each
             // of its pieces was drawn on with the piece's key, the curves put in chain order first
@@ -1270,20 +1284,70 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let rule = convert_rule(&doc.rule_values(vals, &r)?);
+            let mut rv = doc.rule_values(vals, &r)?;
+            if let Some(radius) = radius {
+                rv.bend_radius = val(vals, radius, Kind::Length)?;
+                if !(rv.bend_radius >= 0.0 && rv.bend_radius < 1e4) {
+                    return Err(DocError::Invalid("the contour flange bend radius must be non-negative".into()));
+                }
+            }
+            let rule = convert_rule(&rv);
+            // Where the sketched profile lies across the sheet's thickness, as its depth into the
+            // material from the face the sheet's surfaces are (`side1`): on that face, through the
+            // middle (`center`) or on the other face (`side2`).
+            let depth = match orientation.as_deref() {
+                None | Some("side1") => 0.0,
+                Some("center") => rule.thickness / 2.0,
+                Some("side2") => rule.thickness,
+                Some(_) => return Err(DocError::Invalid("contour flange orientation must be center, side1 or side2".into())),
+            };
+            // `reverse` (Other side) mirrors the sketch, taking the width to the other side of
+            // its plane, with an orientation saved or not.
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
             let segs: Vec<Seg2> = if *reverse { segs.iter().map(mirrored_y).collect() } else { segs };
             // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748):
             // each piece pushed out along the normal is a panel of it.
             let name = new_name(st, f, 0);
-            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, *flip != *reverse, f.id, &drawn)?;
+            let (sheet, solid) =
+                crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, depth, *symmetric, *flip != *reverse, f.id, &drawn)?;
             st.bodies.push(new_sheet_body(name, &sheet, solid, f.id));
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
-            if surface_flange_sheet(st, body, f, edges).is_some() =>
-        {
+        FeatureKind::SheetCornerJoin { body, corner } => {
+            let mut candidates = st.surface_sheets.iter().enumerate().filter(|(_, sheet)| match body {
+                Some(name) => &sheet.body == name,
+                None => st.body(&sheet.body).is_some_and(|built| corner.joint_pair(|source| sheet.bend_joint_for_edge_name(source, built)).is_ok()),
+            });
+            let Some((i, before)) = candidates.next() else {
+                return Err(DocError::reselect(body.as_ref().map(|name| name.to_string()).unwrap_or_else(|| corner.covering.to_string())));
+            };
+            if candidates.next().is_some() {
+                return Err(DocError::Invalid("select a sheet body; these corner sources match more than one sheet".into()));
+            }
+            let mut next = before.clone();
+            let built = st.body(&before.body).ok_or_else(|| DocError::reselect(&before.body))?;
+            corner.apply(&mut next, |source| before.bend_joint_for_edge_name(source, built), |expr| val(vals, expr, Kind::Length))?;
+            *st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))? = next;
+            rebuild_surface_sheet(st, i)
+        }
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            height_from,
+            corner_relief_shape,
+            corner_relief,
+            bend_relief_shape,
+            corners,
+        } if surface_flange_sheet(st, body, f, edges).is_some() => {
+            if corners.len() > 2000 {
+                return Err(DocError::Invalid("at most 2000 flange corner choices are supported".into()));
+            }
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1358,6 +1422,14 @@ pub(super) fn sheet_eval(
                         },
                     )),
                 };
+            // The bend relief these flanges ask for in place of the rule's, at their bends' free ends.
+            let own_bend = match bend_relief_shape {
+                Some(name) => Some(
+                    sheet::BendReliefShape::parse(name)
+                        .ok_or_else(|| DocError::Invalid(format!("unknown bend relief shape `{name}` (rectangular, obround or tear)")))?,
+                ),
+                None => None,
+            };
             let n0 = sk.sheet.panels.len();
             let several = picks.len() > 1;
             // Each edge's error names it, among several.
@@ -1383,6 +1455,9 @@ pub(super) fn sheet_eval(
                         sk.corner_reliefs.push((joint, relief, size, order));
                     }
                 }
+                if let Some(shape) = own_bend {
+                    sk.bend_reliefs.extend(joints.iter().map(|&joint| (joint, shape)));
+                }
                 made.push(joints);
             }
             let mut open = Vec::new();
@@ -1402,6 +1477,33 @@ pub(super) fn sheet_eval(
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            if !corners.is_empty() {
+                let prev = std::mem::take(&mut sk.parts);
+                let solid = sk.build()?;
+                let mut built = st.body(&before.body).cloned().ok_or_else(|| DocError::reselect(&before.body))?;
+                let depth = built.names.depth().unwrap_or(0).saturating_add(1);
+                let lineage =
+                    crate::lineage::SheetBefore::of(&built, &prev).and_then(|previous| crate::lineage::sheet_lineage(Some(previous), &sk, &solid));
+                replace_traced_sheet_body(&mut built, solid, lineage.clone(), &sk.frames);
+                built.names = crate::naming::NameCell::traced(
+                    Some(std::sync::Arc::new(crate::naming::NamingOrigin {
+                        feature: f.clone(),
+                        before: std::sync::Arc::new(st.clone()),
+                        depth,
+                        mats: Vec::new(),
+                    })),
+                    lineage.map(std::sync::Arc::new),
+                );
+                let sources = sk.clone();
+                for corner in corners {
+                    let joints = corner.joint_pair(|source| sources.bend_joint_for_edge_name(source, &built))?;
+                    if !joints.iter().any(|joint| made.contains(joint)) {
+                        return Err(DocError::Invalid("a flange corner choice must include one of this feature's bends".into()));
+                    }
+                    corner.apply(&mut sk, |source| sources.bend_joint_for_edge_name(source, &built), |expr| val(vals, expr, Kind::Length))?;
+                }
+                sk.parts = prev;
+            }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
@@ -2015,6 +2117,7 @@ pub(super) fn surface_prism_cut(
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
                 || out.loose.iter().any(|l| l.panel == p && near(&l.region))
                 || !out.sheet.cuts.is_empty()
             {
@@ -2179,11 +2282,14 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super:
                 let mut past = (0.0, 0.0);
                 let meets = if across {
                     let (z0, z1) = (b.z.min(b.z + a.z * height), b.z.max(b.z + a.z * height));
-                    let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
-                    if own.contains(Vec2::new(b.x, b.y)) && !(z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)) {
+                    let through = z0 <= tol && z1 >= t - tol && {
+                        let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
+                        crate::sheet_surface::holds_clear(own, &circle)
+                    };
+                    if own.contains(Vec2::new(b.x, b.y)) && !through {
                         return Ok(Vec::new());
                     }
-                    z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)
+                    through
                 } else if a.z.abs() <= 1e-9 {
                     // Along the panel: its line through the panel's material, inside its thickness.
                     // A drill clear of the panel's slab meets nothing of it: one square across
@@ -2229,7 +2335,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super:
                 let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
-            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
+            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region))
+                || out
+                    .countersinks
+                    .iter()
+                    .any(|c| c.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &Region2 { outer: c.outer_loop(), holes: Vec::new() }))
+            {
                 return Ok(Vec::new());
             }
             if !out.sheet.cuts.is_empty() {
@@ -3249,5 +3360,47 @@ mod tests {
                 && matches!(arc, Seg2::Arc { center, radius, .. } if (*center - Vec2::new(40.0, -30.0)).len() < 1e-12 && *radius == 10.0)
         );
         assert!((arc.mid() - Vec2::new(40.0, -40.0)).len() < 1e-9, "{:?}", arc.mid());
+    }
+
+    /// An Emboss's placement (#20386) turns the picked regions about the middle of their bounds
+    /// and then shifts them along the sketch's own axes. A hole goes with its outline, an arc
+    /// stays an arc, a shift alone is exact, and with nothing asked the regions come back as
+    /// they are.
+    #[test]
+    fn an_emboss_placement_turns_about_the_middle_of_the_bounds_then_shifts() {
+        let square =
+            |x: f64, y: f64| Loop2::polygon(&[Vec2::new(x, y), Vec2::new(x + 10.0, y), Vec2::new(x + 10.0, y + 10.0), Vec2::new(x, y + 10.0)]);
+        // Two squares over x 0..30 and y 0..10, the first with a round hole: the middle is (15, 5).
+        let regions = vec![
+            Region2 { outer: square(0.0, 0.0), holes: vec![Loop2::circle(Vec2::new(5.0, 5.0), 2.0)] },
+            Region2 { outer: square(20.0, 0.0), holes: vec![] },
+        ];
+        assert_eq!(emboss_placement(regions.clone(), Vec2::ZERO, 0.0).unwrap(), regions);
+        // A quarter turn about (15, 5) takes (x, y) to (20 - y, x - 10); then 100 along x.
+        let placed = emboss_placement(regions.clone(), Vec2::new(100.0, 0.0), std::f64::consts::FRAC_PI_2).unwrap();
+        let want = |p: Vec2| Vec2::new(120.0 - p.y, p.x - 10.0);
+        assert_eq!(placed.len(), 2);
+        for (was, now) in regions.iter().zip(&placed) {
+            assert_eq!(was.holes.len(), now.holes.len());
+            for (a, b) in was.loops().zip(now.loops()) {
+                assert_eq!(a.segs.len(), b.segs.len());
+                for (s, t) in a.segs.iter().zip(&b.segs) {
+                    assert_eq!(std::mem::discriminant(s), std::mem::discriminant(t), "{s:?} became {t:?}");
+                    for (p, q) in [(s.start(), t.start()), (s.mid(), t.mid()), (s.end(), t.end())] {
+                        assert!((want(p) - q).len() < 1e-12, "{p:?} went to {q:?}");
+                    }
+                }
+            }
+        }
+        // A whole turn more is the same placement.
+        let again = emboss_placement(regions.clone(), Vec2::new(100.0, 0.0), 2.5 * std::f64::consts::PI).unwrap();
+        assert!((again[1].outer.segs[0].start() - placed[1].outer.segs[0].start()).len() < 1e-9);
+        let shifted = emboss_placement(regions.clone(), Vec2::new(3.0, -4.0), 0.0).unwrap();
+        assert_eq!(shifted[1].outer.segs[0].start(), Vec2::new(23.0, -4.0));
+        assert!(
+            matches!(shifted[0].holes[0].segs[0], Seg2::Arc { center, radius, start, .. } if center == Vec2::new(8.0, 1.0) && radius == 2.0 && start == 0.0)
+        );
+        assert!(emboss_placement(regions.clone(), Vec2::new(f64::NAN, 0.0), 0.0).is_err());
+        assert!(emboss_placement(regions, Vec2::ZERO, f64::INFINITY).is_err());
     }
 }

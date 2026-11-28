@@ -754,6 +754,29 @@ fn trim_circle_makes_an_arc_and_a_profile() {
     assert!(close(a[0], std::f64::consts::PI * 50.0), "{a:?}");
 }
 
+/// The same break given as `points` (the point the picked line ends at) separates the curves too.
+#[test]
+fn break_points_at_a_shared_point_separates_the_curves_that_meet_there() {
+    let mut s = new_sketch();
+    let chain = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]]}))["curves"]);
+    let (first, second) = (chain[0].clone(), chain[1].clone());
+    let shared_end = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap()
+    };
+    let (_, shared) = shared_end(&s, &first);
+    assert_eq!(shared_end(&s, &second).0, shared, "the chain shares its corner");
+
+    let out = run(&mut s, "sketch.break", json!({"curve": second, "points": [[20, 0]]}));
+    assert_eq!(ids(&out["curves"]), vec![second.clone()], "{out}");
+    let (own, _) = shared_end(&s, &second);
+    let (_, kept) = shared_end(&s, &first);
+    assert_eq!(kept, shared, "the first line keeps the point");
+    assert_ne!(own, shared, "the second line has its own end");
+    let sk = sketch(&s);
+    assert!(sk.point(own).unwrap().dist(Vec2::new(20.0, 0.0)) < 1e-9, "the second line stays put");
+}
+
 /// Trimming half of a center rectangle's diagonal left two points at the centre, one held by
 /// nothing: dragging a corner pulled them apart. Either diagonal, the half that stays ends on the
 /// one centre point, which stays where the diagonals cross.
@@ -1141,14 +1164,9 @@ fn arc_extend_joins_an_end_that_already_carries_geometry_with_a_new_arc() {
     let before = sketch(&s);
     let end = before.resolve_point(&format!("{arc}.end")).expect("the arc's end");
     let line_start = before.resolve_point(&format!("{line}.start")).expect("the line's start");
-    // `connect` ties the line's own point to the arc's end, so the end carries geometry there.
+    // `connect` merges the line's start into the arc's end, so the end carries geometry there.
     assert!(before.point(end).zip(before.point(line_start)).is_some_and(|(a, b)| a.dist(b) < 1e-9));
-    assert!(
-        before
-            .constraints
-            .iter()
-            .any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, line_start) || (p, q) == (line_start, end)))
-    );
+    assert_eq!(end, line_start, "connect merges the line's start into the arc's end");
     run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0, 10]}));
     let sk = sketch(&s);
     let ci = sk.curve_index(&arc).unwrap();

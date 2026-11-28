@@ -173,6 +173,12 @@ user parameter `width` and dimensions with it, as when [placing a dimension](par
 box that does not become a dimension (a polygon's sides, a rounded rectangle's corner radius)
 takes a value only.
 
+To move or resize [imported SVG or DXF curves](files.md), edit their sketch and box-select
+the curves. Choose **Sketch tab → Modify → Move/Copy Sketch Entities** (`sketch.move`) to
+move or copy them, or **Sketch Scale** (`sketch.scale`) in the same panel to resize them.
+The Model tab's Move/Copy moves bodies. In scripts, `sketch.insert_svg` and
+`sketch.insert_dxf` also accept `at: [x, y]` and `scale` to position and size curves during import.
+
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
 is selectable. The option belongs to one sketch and is saved with the design. Centerlines are
@@ -235,12 +241,18 @@ becomes a dimension of that side, and the other sides stay equal to it.
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
 of a `.ttf` / `.otf` file, and the **Edit Text** dialog has a **Font** field for it. An unknown font is an
 error, and the font is kept with the text in the design, so the text stays editable in it. `SOLIDCRAFT_FONT_DIRS`
-adds folders to the ones searched for installed fonts. A text's `height`, its `angle` and each coordinate of
-its `at` can be expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
-`"at": ["plate_width / 2", 5]`): the text keeps the expression and follows the parameters when they change, and
+adds folders to the ones searched for installed fonts. On Windows, SolidCraft also reads installed
+font files from the current user's and machine's `Software\Microsoft\Windows NT\CurrentVersion\Fonts`
+registry keys, including absolute file paths outside the standard Windows and per-user Fonts
+folders. Restart SolidCraft after installing fonts to refresh the cached list. A text's `height`, its
+`angle`, each coordinate of its `at`, its `letter_spacing` and its `line_spacing` (a factor) can be
+expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
+`"at": ["plate_width / 2", 5]`, `"line_spacing": "leading"`), in the commands and in the **Edit Text**
+dialog's fields: the text keeps the expression and follows the parameters when they change, and
 saves it with the design. A number takes the place of an expression, and so does moving the text or dragging its
-handles (what moves becomes a number; turning a text leaves its height as it was). A string that names no
-parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
+handles (what moves becomes a number; turning a text leaves its height as it was). A value typed as
+`name = value` (`"letter_spacing": "gap = 2 mm"`) adds that parameter and the text follows it. Any other string
+that names no parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
 not two numbers or expressions, a `height` or `angle` that is neither (or a `height` that is not positive) and an
 expression that cannot be worked out with a message, instead of drawing the text with a default; left out, they
 keep their defaults.
@@ -483,6 +495,20 @@ point: the curve stays smooth along its whole length. The Control Point Spline t
 tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
 kind of spline as a path or a rail.
 
+**3D Sketch**, in the menu of the Model tab's Sketch panel, starts such a sketch in one step: it
+asks for no plane, turns 3D Sketch on and starts 3D Line, and the view stays as it is. The sketch
+rests on the XY origin plane of the active component, so a click in empty space lands there. To
+leave that plane, snap to a vertex, edge or face of the model or to a point already drawn in 3D,
+or finish the line, click one of its points and drag the X, Y or Z arrow.
+
+**Fillet** rounds the corner where two 3D lines share an end point, for the bends of a tube or
+pipe path: pick the two lines and give the radius. Both lines are shortened and a 3D arc in
+their plane joins them, tangent to both. The radius is a dimension with its own parameter, so
+you can change it later. A constraint that held the sharp corner (a fixed point, a dimension to
+it, a third curve joined there) holds a 3D point that stays at the corner on both lines. Fillet
+takes no other 3D curve, and Chamfer takes none. Scripts call `sketch.fillet` with the two lines
+as `a` and `b`.
+
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.
 For example, choose **Offset Plane**, select its base plane, then select a spline point in
@@ -518,6 +544,12 @@ pick reuses or creates a sketch point with an ordinary Midpoint constraint, then
 constraint in one undo step. Both constraints can be selected and deleted independently; deleting
 either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
 full side, retained as construction geometry, just like a manually constrained midpoint.
+
+**Horizontal** and **Vertical**, in the Constrain drop-down, take the same picks but always go the
+way they say, whichever way the line or the points run now; a line running the other way is turned
+keeping its length. While either is on, a thin dashed guide runs along its direction through the
+cursor. Scripts call them as `sketch.constraint.horizontal` and `sketch.constraint.vertical`, with
+`line` or `points` and no `mode`.
 
 Scripts use the same command, with a midpoint reference in the `points` array:
 

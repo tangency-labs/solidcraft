@@ -145,19 +145,38 @@ fn turned_by(m: u32, n: vec3<f32>) -> vec3<f32> {
     return turned(n + vec3<f32>(dot(motion_row(m, 0).xyz, n), dot(motion_row(m, 1).xyz, n), dot(motion_row(m, 2).xyz, n)));
 }
 
-// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
-// entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
+// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 4r holds each
+// entry's linear base colour and a PBR flag, row 4r + 1 its metallic fraction, roughness and IOR,
+// row 4r + 2 a point on its turn axis (w 1 when it has one) and row 4r + 3 the axis's direction.
 @group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+
+/// Where palette entry `i`'s first material texel is.
+fn material_at(i: u32) -> vec2<u32> {
+    return vec2<u32>(i & 2047u, (i >> 11u) * 4u);
+}
 
 /// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
 /// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
 /// past the material texture has none (a load out of range is not defined).
 fn finish_h(i: u32, hatch: u32) -> u32 {
-    let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
-    if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
+    let at = material_at(i);
+    if (at.y + 3u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
     let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
     let q = vec2<u32>(round(p * 255.0));
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
+}
+
+/// Palette entry `i`'s turn axis in the scene's frame: a point on it (w 1 when the entry has one,
+/// 0 for none) and its direction.
+struct Turn {
+    at: vec4<f32>,
+    along: vec3<f32>,
+}
+
+fn turn_of(i: u32) -> Turn {
+    let at = material_at(i);
+    if (at.y + 3u >= textureDimensions(pbr_materials).y) { return Turn(vec4<f32>(0.0), vec3<f32>(0.0)); }
+    return Turn(textureLoad(pbr_materials, at + vec2<u32>(0u, 2u), 0), textureLoad(pbr_materials, at + vec2<u32>(0u, 3u), 0).xyz);
 }
 
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
@@ -191,6 +210,10 @@ struct TOut {
     // every vertex shader that gives none: a struct's fields start at zero).
     @location(4) v: f32,
     @location(5) @interpolate(flat) hv: u32,
+    // The face's turn axis in the world (`turn_of`): a point on it, w 1 when it has one (0 for
+    // every vertex shader that gives none), and its direction.
+    @location(6) @interpolate(flat) turn_at: vec4<f32>,
+    @location(7) @interpolate(flat) turn_along: vec3<f32>,
 };
 
 /// A built triangle's vertex: its value word is an f32's bits, or all ones for none
@@ -221,7 +244,22 @@ fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y & 255u);
     o.wp = p;
+    let t = turn_of(c);
+    o.turn_at = vec4<f32>(placed_by(m, t.at.xyz), t.at.w);
+    o.turn_along = turned_by(m, t.along);
     return o;
+}
+
+/// The bit of a placement's palette word that marks the whole hovered body (`HOVER_FLAG` in
+/// view.rs): never part of a palette index.
+const HOVER_FLAG: u32 = 0x80000000u;
+
+/// A placement's colour: its palette entry's, with the hover tint added (as `hover_color` adds
+/// it) when its word carries `HOVER_FLAG`.
+fn placement_color(word: u32, e: vec2<u32>) -> vec4<f32> {
+    let c = unpack_color(e.x);
+    if ((word & HOVER_FLAG) != 0u) { return vec4<f32>(c.rgb + u.tint.rgb, c.a); }
+    return c;
 }
 
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
@@ -235,10 +273,11 @@ fn vs_tri_inst(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
     @location(9) s: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
+    let c = word & ~HOVER_FLAG;
     let e = palette_entry(c);
     let m = placement_motion(s, e);
     let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
@@ -246,9 +285,12 @@ fn vs_tri_inst(
     var o: TOut;
     o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.n = turned_by(m, pn);
-    o.c = unpack_color(e.x);
+    o.c = placement_color(word, e);
     o.h = finish_h(c, e.y & 255u);
     o.wp = wp;
+    // shortcut: no turn axis (a copy's brushing picks a world axis), since the palette's axis is
+    // in the first copy's frame; move it from the definition's frame if copies of turned metal
+    // parts need rings.
     return o;
 }
 
@@ -271,16 +313,17 @@ fn vs_tri_inst_flat(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
     @location(9) s: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
+    let c = word & ~HOVER_FLAG;
     let e = palette_entry(c);
     let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
     o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.rp = wp - u.eye.xyz;
-    o.c = unpack_color(e.x);
+    o.c = placement_color(word, e);
     o.h = finish_h(c, e.y & 255u);
     return o;
 }
@@ -931,10 +974,9 @@ fn finishes() -> bool {
     return (u32(u.sky.w) & 2u) != 0u && dot(u.sky.xyz, u.sky.xyz) > 0.25;
 }
 
-// The studio finished faces are lit by (`Environment` in environment.rs): model-viewer's neutral
-// room, as is, at model-viewer's exposure for it (`STUDIO_EXPOSURE`), prefiltered for image-based
-// lighting (split-sum). Mip k of the specular map
-// is the studio through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
+// The studio finished faces are lit by (`Environment` in environment.rs), as is (exposure 1),
+// prefiltered for image-based lighting (split-sum). Mip k of the specular map is the studio
+// through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
 // cosine-weighted irradiance / π; the DFG table is the GGX environment BRDF's scale and bias.
 @group(0) @binding(3) var studio_specular: texture_2d<f32>;
 @group(0) @binding(4) var studio_diffuse: texture_2d<f32>;
@@ -942,8 +984,6 @@ fn finishes() -> bool {
 @group(0) @binding(6) var studio_dfg: texture_2d<f32>;
 /// The specular map's mips (`SPECULAR_LEVELS`; WebGL2 cannot ask a texture for its count).
 const STUDIO_MIPS: f32 = 6.0;
-/// model-viewer's exposure for its neutral room under Khronos PBR Neutral (`COMMERCE_EXPOSURE`).
-const STUDIO_EXPOSURE: f32 = 1.3;
 
 /// Where the direction `d` (in the studio's frame, y up) lands on its equirectangular maps.
 fn studio_uv(d: vec3<f32>) -> vec2<f32> {
@@ -982,6 +1022,135 @@ fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
     return fss_ess + fms_ems;
 }
 
+/// A satin metal's brushing, worked out from the face and its turn axis (the viewport's meshes
+/// carry no UVs or tangents). A face with a turn axis is turned: the grooves run around the axis,
+/// rings on a round face and circles about the centre on a flat face across it. Elsewhere they run
+/// around the world axis the normal is most across, so an upright cylinder still gets rings and a
+/// flat face straight strokes. `across` points across the grooves, `grain` is -0.5..0.5 per
+/// groove, `strength` is 0 off satin metals.
+struct Brush {
+    across: vec3<f32>,
+    grain: f32,
+    strength: f32,
+}
+
+/// Line widths (mm) of the three octaves, and their weights: hairlines, as an abrasive belt
+/// leaves them, not bands.
+const BRUSH_PERIODS: vec3<f32> = vec3<f32>(0.3, 0.12, 0.05);
+const BRUSH_WEIGHTS: vec3<f32> = vec3<f32>(0.45, 0.35, 0.2);
+/// How long a scratch runs before it fades, in its octave's line widths (the noise along a line
+/// changes once per this much, so scratches come out about this long, some shorter).
+const BRUSH_LENGTHS: vec3<f32> = vec3<f32>(45.0, 70.0, 110.0);
+/// How much a line lightens or darkens the metal, roughens it, tilts its normal across the
+/// grooves (what makes a scratch catch the light), and stretches the reflection along them.
+const BRUSH_SHADE: f32 = 0.1;
+const BRUSH_ROUGHNESS: f32 = 0.1;
+const BRUSH_TILT: f32 = 0.12;
+const BRUSH_ANISOTROPY: f32 = 0.55;
+/// An octave fades out between these many pixels per line, so distant metal never shimmers.
+const BRUSH_MIN_PX: vec2<f32> = vec2<f32>(1.0, 3.0);
+
+fn brush_hash(x: f32) -> f32 {
+    return fract(sin(x * 12.9898) * 43758.5453);
+}
+
+/// Smooth value noise on the line: 0..1, one random level per unit. With `cells` above zero it
+/// repeats every `cells` units (a groove that closes on itself has no seam).
+fn brush_noise(x: f32, cells: f32) -> f32 {
+    let k = floor(x);
+    let f = x - k;
+    var k0 = k;
+    var k1 = k + 1.0;
+    if (cells > 0.0) {
+        k0 = k0 - cells * floor(k0 / cells);
+        k1 = k1 - cells * floor(k1 / cells);
+    }
+    return mix(brush_hash(k0), brush_hash(k1), f * f * (3.0 - 2.0 * f));
+}
+
+/// Where along the grooves a point is: a length (`closed` 0), or for grooves that close on
+/// themselves the turn about the axis, 0..1, with `closed` 1 (`radius` is then the groove's
+/// radius on a round face, or 0 when it is the groove's own radius, a flat face's circles).
+struct Along {
+    at: f32,
+    closed: f32,
+    radius: f32,
+}
+
+/// One groove's scratch, -0.5..0.5: a level of its own, shown along stretches where its noise
+/// along the groove is high, so scratches start and stop.
+fn scratch(groove: f32, seed: f32, period: f32, length: f32, along: Along) -> f32 {
+    let level = brush_hash((groove + seed) * 1.618 + 0.5) - 0.5;
+    let shift = brush_hash(groove + seed + 0.37);
+    var shown = 0.0;
+    if (along.closed > 0.5) {
+        let radius = select(along.radius, (groove + 0.5) * period, along.radius <= 0.0);
+        let cells = max(1.0, round(6.2831853 * radius / (period * length)));
+        shown = brush_noise(along.at * cells + floor(shift * cells), cells);
+    } else {
+        shown = brush_noise(along.at / (period * length) + shift * 97.0, 0.0);
+    }
+    return level * smoothstep(0.35, 0.75, shown);
+}
+
+/// Pixels on screen per millimetre along `d` at `p`.
+fn px_per_mm(p: vec3<f32>, d: vec3<f32>) -> f32 {
+    let a = u.vp * vec4<f32>(p, 1.0);
+    let b = u.vp * vec4<f32>(p + d, 1.0);
+    return length((b.xy / b.w - a.xy / a.w) * 0.5 * u.screen.xy);
+}
+
+fn brushing(p: vec3<f32>, n: vec3<f32>, metallic: f32, roughness: f32, turn_at: vec4<f32>, turn_along: vec3<f32>) -> Brush {
+    // shortcut: no appearance says "brushed", so every metal between polished and blasted is; a
+    // brushed flag in the look is the upgrade if polished-but-rough metals need to stay plain.
+    let strength = smoothstep(0.5, 1.0, metallic) * smoothstep(0.18, 0.28, roughness) * (1.0 - smoothstep(0.6, 0.75, roughness));
+    // Ties go to Z, then Y: an upright face's strokes run level, a flat face's along X.
+    let m = abs(n) + vec3<f32>(2e-3, 1e-3, 0.0);
+    var axis = vec3<f32>(0.0, 0.0, 1.0);
+    if (m.y < m.z && m.y <= m.x) { axis = vec3<f32>(0.0, 1.0, 0.0); }
+    if (m.x < m.z && m.x < m.y) { axis = vec3<f32>(1.0, 0.0, 0.0); }
+    var across = cross(n, normalize(cross(n, axis)));
+    var s = dot(p, across);
+    var along = Along(dot(p, cross(across, n)), 0.0, 0.0);
+    if (turn_at.w > 0.5 && dot(turn_along, turn_along) > 1e-12) {
+        let a = normalize(turn_along);
+        let r = p - turn_at.xyz;
+        let radial = r - a * dot(r, a);
+        let flat_across = radial - n * dot(radial, n);
+        let round_across = a - n * dot(a, n);
+        // The turn about the axis, 0..1, from a frame square to it.
+        let e1 = normalize(cross(a, select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(a.x) > 0.9)));
+        let turn = atan2(dot(radial, cross(a, e1)), dot(radial, e1)) / 6.2831853 + 0.5;
+        if (abs(dot(n, a)) > 0.7 && dot(flat_across, flat_across) > 1e-8) {
+            // A face across the axis, faced on the lathe: circles about the centre.
+            across = normalize(flat_across);
+            s = length(radial);
+            along = Along(turn, 1.0, 0.0);
+        } else if (dot(round_across, round_across) > 1e-8) {
+            // A face around the axis (a cylinder, cone or torus): rings along it.
+            across = normalize(round_across);
+            s = dot(r, a);
+            along = Along(turn, 1.0, length(radial));
+        }
+    }
+    let px = px_per_mm(p, across);
+    var grain = 0.0;
+    for (var k = 0; k < 3; k++) {
+        let period = BRUSH_PERIODS[k];
+        let fade = smoothstep(BRUSH_MIN_PX.x, BRUSH_MIN_PX.y, px * period);
+        if (fade <= 0.0) { continue; }
+        // Each line has its own scratch; a pixel between two blends them over a sharp step, so
+        // lines read as lines, not as soft bands.
+        let x = s / period;
+        let g = floor(x);
+        let w = smoothstep(0.3, 0.7, x - g);
+        let seed = 7919.0 * f32(k);
+        let line = mix(scratch(g, seed, period, BRUSH_LENGTHS[k], along), scratch(g + 1.0, seed, period, BRUSH_LENGTHS[k], along), w);
+        grain += fade * BRUSH_WEIGHTS[k] * line;
+    }
+    return Brush(across, grain * 2.0 * strength, strength);
+}
+
 /// An opaque face with a material finish, lit by the studio (image-based, split-sum, as the
 /// Khronos glTF Sample Renderer): the PBR appearance's metallic and roughness (`finish_h`), else
 /// a plain dielectric of roughness 0.5 (a product choice: satin). The studio turns with
@@ -992,7 +1161,9 @@ fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
 fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     let pbr = (i.h >> 24u) != 0u;
     let metallic = select(0.0, f32((i.h >> 8u) & 255u) / 255.0, pbr);
-    let roughness = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
+    let satin = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
+    let brush = brushing(i.wp, n, metallic, satin, i.turn_at, i.turn_along);
+    let roughness = clamp(satin + BRUSH_ROUGHNESS * brush.grain, 0.045, 1.0);
     let a = roughness * roughness;
     // The view per pixel in perspective: a flat face then reflects a gradient, not one colour.
     let back = normalize(u.back.xyz);
@@ -1004,8 +1175,14 @@ fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32
     if (dot(front, front) < 1e-6) { front = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(up.x) > 0.9); }
     front = normalize(front);
     let side = cross(up, front);
+    // Brushed metal reflects a streak across its grooves: Filament's bent normal for anisotropy
+    // (getReflectedVector), along the grooves' cross direction.
+    let streak = cross(brush.across, v);
+    // A scratch tilts the surface a little across the grooves, so it catches the light on its own.
+    let scratched = normalize(n + brush.across * (BRUSH_TILT * brush.grain));
+    let bent = normalize(mix(scratched, cross(streak, brush.across), BRUSH_ANISOTROPY * brush.strength));
     // Filament getSpecularDominantDirection, whose roughness is a (perceptual squared).
-    let r = normalize(mix(reflect(-v, n), n, a * a));
+    let r = normalize(mix(reflect(-v, bent), n, a * a));
     let rl = vec3<f32>(dot(r, side), dot(r, up), dot(r, front));
     let nl = vec3<f32>(dot(n, side), dot(n, up), dot(n, front));
     // Khronos getIBLRadianceGGX: lod = perceptual roughness × (mips - 1).
@@ -1013,12 +1190,12 @@ fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32
     // Filament SpecularAO_Lagarde, whose roughness is a.
     let specular_ao = clamp(pow(nv + visibility, exp2(-16.0 * a - 1.0)) - 1.0 + visibility, 0.0, 1.0);
     let specular = textureSampleLevel(studio_specular, studio_s, studio_uv(rl), lod).rgb * specular_ao;
-    let albedo = srgb_decode(base.rgb);
+    let albedo = srgb_decode(base.rgb) * (1.0 + BRUSH_SHADE * brush.grain);
     let diffuse = textureSampleLevel(studio_diffuse, studio_s, studio_uv(nl), 0.0).rgb * albedo * visibility;
     // Khronos pbr.frag: a dielectric (F0 0.04, glTF's IOR 1.5) and a metal, mixed by metallic.
     let dielectric = mix(diffuse, specular, ibl_ggx_fresnel(nv, roughness, vec3<f32>(0.04)));
     let metal = specular * ibl_ggx_fresnel(nv, roughness, albedo);
-    let mapped = pbr_neutral(mix(dielectric, metal, metallic) * STUDIO_EXPOSURE);
+    let mapped = pbr_neutral(mix(dielectric, metal, metallic));
     if (u.back.w > 0.5) { return vec4<f32>(mapped, base.a); }
     return vec4<f32>(srgb_encode(mapped), base.a);
 }

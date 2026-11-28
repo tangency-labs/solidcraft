@@ -27,6 +27,7 @@
 //! | `cylinder_piece` (private)   | `cylinder_piece`                    |
 //! | `screw_wall` (private)       | `screw_wall`                        |
 //! | `sweep` (private)            | `screw_sweep`                       |
+//! | [`screw_sweep_with`], [`screw_sweep_with_body`], [`Walls`] | none (SolidCraft's screw sweep's joined walls) |
 //!
 //! Deviations:
 //! - **Inputs.** The profile is a slice of [`Curve`]s (the fork parses a flat curve
@@ -36,10 +37,12 @@
 //!   is not a closed manifold solid is `SM_ERR` (`SMLIB_ERR_NOT_SOLID`). The `_body`
 //!   variants stop where the fork hands the body to its `finish`, without that check,
 //!   so a C API port can give `SMLIB_ERR_EMPTY` / `SMLIB_ERR_NOT_SOLID` itself.
-//! - **Bounds.** As the fork: at most [`MAX_TURNS`] turns, [`MAX_STATIONS`] spans in all
-//!   and [`MAX_LAW`] law pairs. Added: the span width's shrinking loop stops after
-//!   [`MAX_SHRINK`] steps, and a wall's control net holds at most [`MAX_NET_POINTS`]
-//!   points; past either the sweep is `InvalidInput`.
+//! - **Bounds.** As the fork: at most [`MAX_STATIONS`] spans in all and [`MAX_LAW`] law
+//!   pairs. The turns are bounded by the spans: at most [`MAX_TURNS`], as many as the spans
+//!   hold at a span of an eighth of a turn (the fork's 200 is no bound of the work). Added:
+//!   the span width's shrinking loop stops after [`MAX_SHRINK`] steps, and a wall's control
+//!   net holds at most [`MAX_NET_POINTS`] points; past either the sweep is `InvalidInput`.
+//!   The sweep checks for cancellation before each wall face.
 //! - **The caps.** A point at turn 0 is the point itself (moved by the radial shift), and
 //!   one at the last turn is the end cap's placement applied to it, so a wall's first and
 //!   last stations and the caps are the same points by construction; the fork computes
@@ -47,6 +50,11 @@
 //! - **Faces.** Faces are made under arena notification identities and stitched under
 //!   them, as the kernel's own primitives are; the result's cached topology is
 //!   refreshed ([`Brep::refresh_cached_topology`]).
+//! - **Joined walls (not the fork's).** With [`Walls::Joined`] a B-spline wall is one
+//!   face across the half turns the cylinders break at (SolidCraft's screw sweep's
+//!   `join_spline_walls`, which made a thread's flanks continuous): the pieces' nets
+//!   joined at their shared stations, each span keeping its piece's width, and its
+//!   definition one half angle per span. The fork's layout is [`Walls::Pieces`].
 //! - **Definitions (#2572, not the fork's).** Each B-spline wall's surface carries its
 //!   definition, the profile curve under the screw motion over the wall's stations, and
 //!   the wall's certified distance from it. The wall itself is built as before; an exact
@@ -76,10 +84,13 @@ use crate::topology::{Brep, FaceId};
 
 const OP: &str = "sweep::screw::screw_sweep";
 
-/// The most turns a screw sweep takes (`SMLIB_SCREW_MAX_TURNS`).
-pub const MAX_TURNS: f64 = 200.0;
 /// The most spans a screw sweep's walls take in all (`SMLIB_SCREW_MAX_STATIONS`).
 pub const MAX_STATIONS: f64 = 12000.0;
+/// The most turns a screw sweep takes: as many as [`MAX_STATIONS`] spans hold at the widest
+/// span, an eighth of a turn, so more turns always take more spans. It only refuses early
+/// what the span bound refuses anyway (the fork's `SMLIB_SCREW_MAX_TURNS`, 200, has no
+/// reason of its own).
+pub const MAX_TURNS: f64 = MAX_STATIONS / 8.0;
 /// The most `(turn, offset)` pairs of a radial law (`SMLIB_SCREW_MAX_LAW`).
 pub const MAX_LAW: usize = 1024;
 /// The most steps the span width shrinks by 1% to meet the tolerance (not in the fork,
@@ -529,14 +540,17 @@ fn cylinder_piece(
     Ok(())
 }
 
-/// The wall one profile curve sweeps over `st`: across the profile curve its NURBS,
-/// across the turns each control point's path, the weights the curve's times the
-/// arcs'. A wall's point is the curve's weighted mean of its control points' paths at
-/// the same parameter, which all turn and lift alike, so the wall is the profile curve
-/// turned and lifted as one.
-fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
+/// The wall one profile curve sweeps over the consecutive pieces `pieces` (one, unless
+/// the walls are joined): across the profile curve its NURBS, across the turns each
+/// control point's path, the weights the curve's times the arcs'. A wall's point is the
+/// curve's weighted mean of its control points' paths at the same parameter, which all
+/// turn and lift alike, so the wall is the profile curve turned and lifted as one. The
+/// pieces' paths are joined at their shared stations as they are, each span keeping its
+/// piece's width (nothing is refitted): the knots are the pieces' stations, double inside
+/// and triple at the ends.
+fn screw_wall(m: &Screw, c: &Nurbs, pieces: &[Stations]) -> Result<BSplineSurface> {
     let count = c.points.len();
-    let across = 2 * st.spans() + 1;
+    let across = 2 * pieces.iter().map(Stations::spans).sum::<usize>() + 1;
     // `path` gives each control point `2 * spans + 1` points: the net has `count * across`
     count
         .checked_mul(across)
@@ -546,12 +560,19 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
     let mut weights = Vec::new();
     for (l, &p) in c.points.iter().enumerate() {
         let w = c.weights.get(l).copied().unwrap_or(1.0);
-        for (j, q) in path(m, p, st).into_iter().enumerate() {
-            net.push(q);
-            weights.push(w * st.weight(j));
+        for (i, st) in pieces.iter().enumerate() {
+            // a later piece's first point is the one before it ended on
+            for (j, q) in path(m, p, st)
+                .into_iter()
+                .enumerate()
+                .skip(usize::from(i > 0))
+            {
+                net.push(q);
+                weights.push(w * st.weight(j));
+            }
         }
     }
-    let (vknots, vmult) = st.knots();
+    let (vknots, vmult) = joined_knots(pieces);
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
         u_degree: c.degree,
         v_degree: 2,
@@ -565,6 +586,22 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
         weights: Some(&weights),
         uv_domain: None,
     })
+}
+
+/// The knots across consecutive pieces' stations, as unique values and multiplicities:
+/// each piece's stations, a shared one once, double inside and triple at the ends (one
+/// piece's are [`Stations::knots`]).
+fn joined_knots(pieces: &[Stations]) -> (Vec<f64>, Vec<usize>) {
+    let knots: Vec<f64> = pieces
+        .iter()
+        .enumerate()
+        .flat_map(|(i, st)| st.t.iter().copied().skip(usize::from(i > 0)))
+        .collect();
+    let n = knots.len();
+    let mult = (0..n)
+        .map(|i| if i == 0 || i + 1 == n { 3 } else { 2 })
+        .collect();
+    (knots, mult)
 }
 
 /// Stitches and orients the B-rep under the identities its faces were made with.
@@ -663,8 +700,17 @@ pub fn screw_sweep_body(
     turns: f64,
     tolerance: f64,
 ) -> Result<Brep> {
-    let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
-    sweep(k, profile, &mut m, tolerance)
+    screw_sweep_with_body(
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        None,
+        tolerance,
+        Walls::Pieces,
+    )
 }
 
 /// [`screw_sweep`] with the section moved off the axis as it turns: a thread's groove
@@ -710,7 +756,79 @@ pub fn screw_sweep_radial_body(
     law: &[(f64, f64)],
     tolerance: f64,
 ) -> Result<Brep> {
+    screw_sweep_with_body(
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        Some(law),
+        tolerance,
+        Walls::Pieces,
+    )
+}
+
+/// How a screw sweep lays its B-spline walls out in faces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Walls {
+    /// A face per piece: the walls break wherever any wall does, at a radial law's
+    /// angles and, when a profile line along the axis sweeps a cylinder, every half
+    /// turn ([`screw_sweep`]'s faces).
+    #[default]
+    Pieces,
+    /// A B-spline wall runs on as one face across the half turns, which only the
+    /// cylinders need: it breaks at a radial law's angles only (where its tangent may
+    /// turn). Its spans are the pieces' own, joined where they meet (nothing is refitted),
+    /// so the wall is the same surface and the edges it shares with the cylinder pieces
+    /// beside it are the same curves. A cylinder wall keeps its half-turn faces.
+    Joined,
+}
+
+/// [`screw_sweep`] or, with a `law`, [`screw_sweep_radial`], its B-spline walls laid out
+/// as `walls` says.
+///
+/// # Errors
+///
+/// Those of [`screw_sweep`], or of [`screw_sweep_radial`] with a `law`.
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_with(
+    k: &mut Kernel,
+    profile: &[Curve],
+    origin: Point3,
+    axis: Vec3,
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    walls: Walls,
+) -> Result<Brep> {
+    solid(screw_sweep_with_body(
+        k, profile, origin, axis, pitch, turns, law, tolerance, walls,
+    )?)
+}
+
+/// [`screw_sweep_with`] up to the fork's `finish`, as [`screw_sweep_body`].
+///
+/// # Errors
+///
+/// Those of [`screw_sweep_with`] but the closed-solid check.
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_with_body(
+    k: &mut Kernel,
+    profile: &[Curve],
+    origin: Point3,
+    axis: Vec3,
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    walls: Walls,
+) -> Result<Brep> {
     let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
+    let Some(law) = law else {
+        return sweep(k, profile, &mut m, tolerance, walls);
+    };
     if law.is_empty() || law.len() > MAX_LAW {
         return Err(bad("radial law size out of range"));
     }
@@ -731,12 +849,18 @@ pub fn screw_sweep_radial_body(
         m.angles.push(TAU * turn);
         m.offsets.push(offset);
     }
-    sweep(k, profile, &mut m, tolerance)
+    sweep(k, profile, &mut m, tolerance, walls)
 }
 
 /// `screw_sweep` of the fork: both entry points, the motion `m` set but for its radial
 /// direction.
-fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Result<Brep> {
+fn sweep(
+    k: &mut Kernel,
+    profile: &[Curve],
+    m: &mut Screw,
+    tolerance: f64,
+    walls_layout: Walls,
+) -> Result<Brep> {
     if profile.is_empty() {
         return Err(bad("empty profile"));
     }
@@ -843,7 +967,9 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         let n = ((b1 - b0) / piece).ceil();
         spans += n;
         if !(spans <= MAX_STATIONS) {
-            return Err(bad("too many spans"));
+            return Err(bad(
+                "too many turns for the tolerance: more spans than a screw sweep takes",
+            ));
         }
         pieces.push(Stations::new(b0, b1, n as usize));
     }
@@ -861,22 +987,40 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         crate::geom::tol::USE_DEFAULT,
         crate::geom::tol::USE_DEFAULT,
     )?;
-    for st in &pieces {
-        let (t0, t1) = (st.start, st.end);
+    // Joined walls run on across the pieces' breaks that are only half turns (the
+    // cylinders' seams); a law's angle, where the wall's tangent may turn, still ends a
+    // face. A cylinder wall keeps its half-turn faces either way.
+    let joined = walls_layout == Walls::Joined;
+    for group in pieces.chunk_by(|a, _| joined && !m.angles.contains(&a.end)) {
+        let (Some(first), Some(last)) = (group.first(), group.last()) else {
+            continue;
+        };
+        let (t0, t1) = (first.start, last.end);
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
+            // A long thread is thousands of faces: a cancelled call stops between them.
+            k.check_cancelled(OP)?;
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
-                cylinder_piece(k, &mut brep, m, ends.start, ends.end, r + m.offset(t0), st)?;
+                for st in group {
+                    k.check_cancelled(OP)?;
+                    let at = r + m.offset(st.start);
+                    cylinder_piece(k, &mut brep, m, ends.start, ends.end, at, st)?;
+                }
                 continue;
             }
-            let net = screw_wall(m, wall, st)?;
+            let net = screw_wall(m, wall, group)?;
             let domain: Extent2d = net.natural_uv_domain();
+            let (stations, _) = joined_knots(group);
+            let halves: Vec<f64> = group
+                .iter()
+                .flat_map(|st| std::iter::repeat_n(st.half, st.spans()))
+                .collect();
             let mut surface = Surface::from(net);
             surface.set_sweep_definition(ProceduralSweep::create(
                 nurbs,
                 motion.clone(),
-                &st.t,
-                st.half,
+                &stations,
+                &halves,
             )?);
             with_face_env(k, &mut brep, |k, brep, fenv| {
                 p8::create_face_from_surface(k, brep, Some(surface), &domain, fenv)

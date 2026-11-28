@@ -250,6 +250,15 @@ pub struct InsertDesignKeys {
     /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// An installed importer plugin's `plugin.entry`, to read `path` with it instead of as a
+    /// design (default: the importer that claims the file's extension, when `path` is not a
+    /// design). The link keeps the plugin's id and version, so Update Links reads the file again
+    /// with it. Not with `configuration`.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// The importer's declared options, as `file.import` takes them. Kept with the link.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
 }
 
 /// `component.insert_design` parameters: [`InsertDesignKeys`].
@@ -473,6 +482,33 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "placement", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "u64")]
     pub occurrence: Option<u64>,
+    /// `keep` (the default) leaves the body names as relinking always did (replaced only when
+    /// the new source has another number of bodies); `sync` takes the new source's body names,
+    /// also in the materials, appearances and features that name those bodies, and gives the
+    /// linked feature the source design's name when it still has its component's. The
+    /// component's own name stays yours. Not used when `occurrence` relinks one of several
+    /// placements: that placement then shows a component made from the new source.
+    #[serde(default, deserialize_with = "names_mode", skip_serializing_if = "Option::is_none")]
+    pub names: Option<RelinkNames>,
+}
+
+/// Which names `component.relink` leaves on the linked bodies: `keep` (the names they have) or
+/// `sync` (the new source's names). The variants carry no docs of their own, so the schema is a
+/// plain `enum` of the two strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RelinkNames {
+    Keep,
+    Sync,
+}
+
+/// `names`, `keep` or `sync`, with the handler's message for anything else.
+fn names_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RelinkNames>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) if s == "keep" => Ok(Some(RelinkNames::Keep)),
+        Value::String(s) if s == "sync" => Ok(Some(RelinkNames::Sync)),
+        _ => Err(D::Error::custom(whole("`names` must be \"keep\" or \"sync\""))),
+    }
 }
 
 /// What `component.relink` returns.
@@ -551,6 +587,30 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The reader a linked file comes through, as `component.links` lists it: what Update Links asks
+/// to read the file again.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkSource {
+    /// `step` for the built-in STEP reader, else an importer plugin's `plugin.entry`.
+    pub format: String,
+    /// The importer plugin's id; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The version of the plugin that read the file last; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Plugin only: whether the plugin is installed and on, so Update Links can read the file again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available: Option<bool>,
+    /// Plugin only: the version installed now, when it differs from `version` or the plugin is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Plugin only, when it is not available: which plugin and version the link needs, and why it
+    /// can't be used. The component keeps the bodies it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<String>,
+}
+
 /// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
 /// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
 /// `state` and a `reason`.
@@ -567,6 +627,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.
@@ -592,6 +656,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
@@ -609,6 +677,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,

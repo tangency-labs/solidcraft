@@ -215,6 +215,7 @@ fn tap_drill_label(size: &TappedThread) -> String {
 /// refuses it ([`ThreadForm::refused`]).
 const FORMS: &[(&str, ThreadForm)] = &[
     ("ISO metric", ThreadForm::Metric),
+    ("thread.form_unified", ThreadForm::Unified),
     ("Trapezoidal (ISO 2904)", ThreadForm::Trapezoidal),
     ("Acme (ASME B1.5)", ThreadForm::Acme),
     ("Buttress (DIN 513)", ThreadForm::Buttress),
@@ -240,7 +241,7 @@ const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
 const FLANKS: &[(&str, SteepFlank)] = &[("End", SteepFlank::End), ("Start", SteepFlank::Start)];
 
 /// The pick of the end the thread is measured from (`from`).
-const START_END: &str = "Start end (optional)";
+const START_END: &str = "Start side (optional)";
 /// The face or plane an Up To extent runs to (`up_to`).
 const UP_TO: &str = "Up to";
 const UP_TO_ACCEPT: Accept = FACES | PLANES;
@@ -293,6 +294,8 @@ pub struct Options {
     /// An index into the extents (full, length, up to).
     pub extent: usize,
     pub ease_out: Ease,
+    /// A modelled internal thread runs down to a blind hole's bottom (#22616).
+    pub to_bottom: bool,
     pub tip: ThreadTip,
     pub chamfer_angle: String,
     pub chamfer_depth: String,
@@ -307,6 +310,7 @@ impl Default for Options {
             starts: 1,
             extent: FULL,
             ease_out: Ease::default(),
+            to_bottom: false,
             tip: ThreadTip::default(),
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
@@ -330,7 +334,7 @@ fn is_buttress(form: ThreadForm) -> bool {
 /// Sizes in inches are listed by designation, and their pitch is part of it (threads per inch):
 /// the inch forms and the pipe threads, whose nominal sizes are pipe sizes.
 fn inch(form: ThreadForm) -> bool {
-    matches!(form, ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
+    matches!(form, ThreadForm::Unified | ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
 }
 
 /// A pipe thread: one start, turning one way.
@@ -486,8 +490,8 @@ pub(crate) fn rows(
     }
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
-        // The start, a free end: plain or chamfered. A thread saved chamfered at both ends
-        // keeps that.
+        // The start, a free end: plain or chamfered; and with it chamfered, every other free end
+        // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
         choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
         o.tip = match (chamfered, o.tip) {
@@ -496,12 +500,19 @@ pub(crate) fn rows(
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
+            let mut both = o.tip == ThreadTip::Both;
+            crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2);
+            o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
         }
         enter |= end_rows(ui, &mut o.ease_out);
+        // A square end of a modelled thread can run down to a blind hole's bottom (#22616).
+        if *modeled && !o.ease_out.fade {
+            crate::ui_kit::checkbox_grid(ui, &mut [("Run to the hole's bottom", &mut o.to_bottom)], 2);
+        }
     });
     (enter, reset)
 }
@@ -522,6 +533,28 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
 /// The Size choice of a form with a size table, and the Pitch choice of the metric ones (an
 /// inch designation names its threads per inch).
 fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggested: &mut Option<String>) {
+    if f == ThreadForm::Unified {
+        let mut labels = f.designations();
+        if !designation.trim().is_empty() && !labels.iter().any(|s| s == designation) {
+            labels.push(designation.clone());
+        }
+        let mut selected = labels.iter().position(|s| s == designation).unwrap_or(labels.len());
+        let before = selected;
+        if selected == labels.len() {
+            labels.push("Select size".into());
+        }
+        form_row(ui, "Size", |ui| {
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            combo(ui, "thread_diameter", &labels, &mut selected);
+        });
+        if selected != before
+            && let Some(label) = labels.get(selected)
+        {
+            *designation = label.clone();
+            *suggested = None;
+        }
+        return;
+    }
     let table = f.sizes();
     let current = parse(f, designation);
     // ISO 7-1 writes the internal taper thread Rc: a size picked for a hole the dialog sized Rc
@@ -627,6 +660,9 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if let Some(e) = o.ease_out.param() {
         p["ease_out"] = e;
     }
+    if o.to_bottom && !o.ease_out.fade && p.get("modeled").and_then(Value::as_bool).unwrap_or(false) {
+        p["to_bottom"] = json!(true);
+    }
     if o.tip != ThreadTip::None {
         p["tip"] = json!(o.tip);
         put(p, &[("chamfer_angle", o.chamfer_angle.as_str()), ("chamfer_depth", o.chamfer_depth.as_str())]);
@@ -691,6 +727,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         hand,
         starts,
         ease_out,
+        to_bottom,
         tip,
         chamfer_angle,
         chamfer_depth,
@@ -720,6 +757,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
             FULL
         },
         ease_out: Ease::of(ease_out),
+        to_bottom: *to_bottom,
         tip: *tip,
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
@@ -814,7 +852,7 @@ mod contribution_tests {
     fn custom_hole_widget() -> crate::scenario::Harness {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -897,7 +935,7 @@ mod contribution_tests {
     fn a_tapped_hole_is_modelled_with_the_threads_end() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -930,7 +968,7 @@ mod contribution_tests {
     fn a_tapped_holes_drill_is_the_tap_makers_or_one_within_its_range() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -973,7 +1011,7 @@ mod contribution_tests {
     fn manual_designation_keeps_keyboard_focus_when_custom_fields_appear() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -1162,7 +1200,7 @@ mod contribution_tests {
     }
 
     #[test]
-    fn expanded_catalogue_rejects_external_taper_holes_and_nonmetric_thread_features() {
+    fn expanded_catalogue_rejects_external_taper_holes_and_mismatched_thread_forms() {
         let (mut app, _) = hole();
         let before = app.session.doc.to_json();
         for name in ["R1/4", "1/4-20 UNF"] {
@@ -1171,7 +1209,7 @@ mod contribution_tests {
         }
         app.run("solid.hole", json!({"position":[10,10,10],"thread":"M8"})).unwrap();
         let before = app.session.doc.to_json();
-        for designation in ["1/4-20 UNC", "G 1/4", "Rp 1/4"] {
+        for designation in ["G 1/4", "Rp 1/4"] {
             for modeled in [false, true] {
                 assert!(app.run("solid.thread", json!({"face":[13.4,10,5],"designation":designation,"modeled":modeled})).is_err());
                 assert_eq!(app.session.doc.to_json(), before);
@@ -1189,7 +1227,7 @@ mod contribution_tests {
         let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
         // The thread is metric (the M8 it was made as): a unified designation is not one of its.
         let error = reopened.model.results.last().unwrap().error.clone().unwrap();
-        assert!(error.contains("unknown metric thread `1/4-20 UNC`"), "{error}");
+        assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
     }
 
     #[test]

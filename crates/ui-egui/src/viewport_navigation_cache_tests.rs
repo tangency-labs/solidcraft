@@ -122,6 +122,33 @@ fn shadow_cache_follows_visibility_and_world_up() {
 }
 
 #[test]
+fn projected_shadow_visibility_reuses_model_batches_and_projection_geometry() {
+    let ctx = crate::fonts::test_context();
+    let mut app = app();
+    app.preferences.ground_shadow_style = crate::prefs::GroundShadowStyle::Projected;
+    frame(&mut app, &ctx);
+    let model_key = app.viewport.key;
+    let state = app.session.world_state().unwrap();
+    let projection = shadow_geometry(&app, &state).projection.unwrap();
+    app.viewport.slot.lock().unwrap().take();
+    for pitch in [-0.7, 0.7] {
+        app.cam.pitch = pitch;
+        frame(&mut app, &ctx);
+        assert_eq!(app.viewport.key, model_key);
+        assert!(app.viewport.slot.lock().unwrap().is_none());
+        assert!(std::sync::Arc::ptr_eq(&projection, &shadow_geometry(&app, &state).projection.unwrap()));
+    }
+    app.ui.ground_shadow = false;
+    frame(&mut app, &ctx);
+    assert!(app.viewport.slot.lock().unwrap().is_none());
+    assert!(app.viewport.sketch_slot.lock().unwrap().take().unwrap().projected_shadow.is_none());
+    app.ui.ground_shadow = true;
+    frame(&mut app, &ctx);
+    assert!(app.viewport.slot.lock().unwrap().is_none());
+    assert!(std::sync::Arc::ptr_eq(&projection, &shadow_geometry(&app, &state).projection.unwrap()));
+}
+
+#[test]
 fn face_feedback_reuses_geometry_but_retains_fresh_pick_points() {
     let mut app = app();
     app.viewport.hover = Some(Hit::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 5.0) });
@@ -434,4 +461,160 @@ fn wireframe_silhouette_preparation_survives_orbits_and_cancels_incrementally() 
         None
     });
     assert_eq!(discovered, 7, "hidden and empty bodies cannot bypass the discovery budget");
+}
+
+#[test]
+fn orbit_skips_origin_occlusion_raycasts_and_recomputes_when_rested() {
+    use std::sync::atomic::Ordering;
+    let ctx = crate::fonts::test_context();
+    let mut app = app();
+    app.set_origin_shown(true);
+    app.ui.show_grid = true;
+    app.fit_view();
+    // First resting frame computes exact origin occlusion once.
+    frame(&mut app, &ctx);
+    let after_first = app.viewport.origin_hidden_evals.load(Ordering::Relaxed);
+    assert_eq!(after_first, 1, "first resting frame evaluates origin occlusion once");
+    // Repeated still frames reuse the cached occlusion without re-running raycasts.
+    frame(&mut app, &ctx);
+    frame(&mut app, &ctx);
+    assert_eq!(app.viewport.origin_hidden_evals.load(Ordering::Relaxed), after_first, "still frames reuse cached origin occlusion");
+    // Actively orbiting with the right mouse button skips origin occlusion raycasts every frame.
+    let rect = app.viewport.rect.unwrap();
+    let at = rect.center();
+    let none = egui::Modifiers::NONE;
+    frame_events(&mut app, &ctx, vec![egui::Event::PointerMoved(at)]);
+    frame_events(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: none }],
+    );
+    let yaw_before = app.cam.yaw;
+    let evals_before_drag = app.viewport.origin_hidden_evals.load(Ordering::Relaxed);
+    for i in 1..=10 {
+        let p = at + vec2(i as f32 * 8.0, 0.0);
+        frame_events(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+    }
+    assert_ne!(app.cam.yaw, yaw_before, "right drag orbited the camera");
+    assert_eq!(
+        app.viewport.origin_hidden_evals.load(Ordering::Relaxed),
+        evals_before_drag,
+        "orbiting frames must not raycast bodies for the origin dot"
+    );
+    // Releasing the mouse button ends navigation and immediately recomputes exact occlusion.
+    let end = at + vec2(80.0, 0.0);
+    frame_events(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Secondary, pressed: false, modifiers: none }],
+    );
+    assert_eq!(
+        app.viewport.origin_hidden_evals.load(Ordering::Relaxed),
+        evals_before_drag + 1,
+        "releasing orbit recomputes exact origin occlusion once"
+    );
+    // Hovering without moving the camera still reuses the new cached result.
+    frame_events(&mut app, &ctx, vec![egui::Event::PointerMoved(end + vec2(10.0, 5.0))]);
+    assert_eq!(
+        app.viewport.origin_hidden_evals.load(Ordering::Relaxed),
+        evals_before_drag + 1,
+        "pointer motion over a still view reuses cached origin occlusion"
+    );
+}
+
+#[test]
+fn origin_hidden_by_body_culls_bodies_behind_origin_and_keeps_front_occluders() {
+    let mut s = solidcraft_engine::Session::default();
+    // With yaw = 0, pitch = 0, Camera::back() is -Y, so the eye sits at (0, -80, 0) looking along +Y.
+    // Place a body strictly behind the origin along the view ray (y in [30, 40]).
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [-5, 30, -5], "operation": "new"})).unwrap();
+    let mut app = SolveApp::new(s, crate::Services::default());
+    app.cam.target = Vec3::ZERO;
+    app.cam.yaw = 0.0;
+    app.cam.pitch = 0.0;
+    app.cam.distance = 80.0;
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+    let proj = projection(&app, rect);
+    assert!(!origin_hidden_by_body(&app, &proj, None), "body behind the origin does not hide it");
+    // Now add a body strictly in front of the origin (y in [-30, -20], between eye at -80 and origin at 0).
+    app.session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [-5, -30, -5], "operation": "new"})).unwrap();
+    let proj = projection(&app, rect);
+    assert!(origin_hidden_by_body(&app, &proj, None), "body in front of the origin hides it");
+}
+
+#[test]
+fn horizontal_orbit_with_grid_reuses_sketch_scene_and_rebuilds_on_grid_or_ground_change() {
+    let ctx = crate::fonts::test_context();
+    let mut app = app();
+    app.ui.show_grid = true;
+    app.ui.ground_shadow = true;
+    app.ui.perspective = false;
+    app.cam.target = Vec3::ZERO;
+    app.cam.pitch = 0.6;
+    app.cam.yaw = 0.4;
+    app.cam.distance = 120.0;
+    frame(&mut app, &ctx);
+    let first = app.viewport.sketch_slot.lock().unwrap().take();
+    assert!(first.is_some(), "initial frame publishes the grid and shadow scene");
+    let first_key = app.viewport.sketch_key;
+    // Horizontal yaw orbit with steady pitch and zoom keeps the snapped ground grid identical.
+    for step in 1..=10 {
+        app.cam.yaw += 0.15;
+        frame(&mut app, &ctx);
+        assert_eq!(app.viewport.sketch_key, first_key, "step {step}: horizontal orbit keeps sketch scene key stable");
+        assert!(
+            app.viewport.sketch_slot.lock().unwrap().take().is_none(),
+            "step {step}: horizontal orbit must not rebuild or re-upload the sketch scene"
+        );
+    }
+    // Zooming changes the grid extent/fade and rebuilds the sketch scene.
+    app.cam.distance = 40.0;
+    frame(&mut app, &ctx);
+    assert_ne!(app.viewport.sketch_key, first_key, "zooming invalidates the grid key");
+    assert!(app.viewport.sketch_slot.lock().unwrap().take().is_some(), "zooming publishes the updated grid");
+    // Flipping below the ground hides the ground shadow and rebuilds the sketch scene.
+    let before_flip = app.viewport.sketch_key;
+    app.cam.pitch = -0.6;
+    frame(&mut app, &ctx);
+    assert_ne!(app.viewport.sketch_key, before_flip, "crossing the ground invalidates the sketch scene");
+    let below = app.viewport.sketch_slot.lock().unwrap().take().expect("ground flip publishes updated shadow visibility");
+    assert!(below.shadow.is_empty(), "ground shadow stays hidden from below");
+}
+
+#[test]
+fn highlight_key_distinguishes_selections_and_stays_stable_during_orbit() {
+    let mut app = app();
+    let base = highlight_geometry_key(&app);
+    let base_full = highlight_key(&app);
+    app.cam.yaw += 0.5;
+    app.cam.pitch += 0.2;
+    assert_eq!(highlight_geometry_key(&app), base, "orbiting leaves highlight geometry key unchanged");
+    assert_eq!(highlight_key(&app), base_full, "orbiting leaves highlight key unchanged when no sketches or long axes are active");
+
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    let body_key = highlight_geometry_key(&app);
+    assert_ne!(body_key, base, "selecting a body changes highlight key");
+
+    app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::ZERO }];
+    let face0_key = highlight_geometry_key(&app);
+    assert_ne!(face0_key, body_key, "selecting a face differs from selecting its body");
+
+    app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 1, point: Vec3::ZERO }];
+    let face1_key = highlight_geometry_key(&app);
+    assert_ne!(face1_key, face0_key, "different face indices hash differently");
+
+    app.session.selection = vec![Sel::Edge { body: "Body1".into(), index: 1, point: Vec3::ZERO }];
+    let edge1_key = highlight_geometry_key(&app);
+    assert_ne!(edge1_key, face1_key, "edge selection differs from face selection with same index");
+}
+
+#[test]
+fn feature_names_cache_reuses_arc_across_frames_and_invalidates_on_edit() {
+    let mut app = app();
+    let first = FeatureNames::cached(&app);
+    let again = FeatureNames::cached(&app);
+    assert!(std::sync::Arc::ptr_eq(&first, &again), "unchanged document reuses cached FeatureNames");
+    app.session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new"})).unwrap();
+    let after_edit = FeatureNames::cached(&app);
+    assert!(!std::sync::Arc::ptr_eq(&first, &after_edit), "editing the document invalidates cached FeatureNames");
 }

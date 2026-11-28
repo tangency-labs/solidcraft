@@ -18,9 +18,9 @@
 //! A cut whose walls cross a joint is read the same way in the sheet as a whole ([`Folded`]):
 //! each point in whichever piece of the flat holds its fiber (a panel, a tab, or a bend's zone,
 //! unwrapped round its axis), its outline drawn in the flat, one curve across tangent lines and
-//! seams. Refused: walls that don't run through the thickness from face to face (a countersink, a
-//! rounded or chamfered face edge, a recess, a cut that stops inside a bend), walls that reach the
-//! sheet's outline, and walls whose shapes in the flat overlap.
+//! seams. Refused: walls that don't run through the thickness from face to face (a rounded or
+//! chamfered face edge, a drill point, a recess, a cut that stops inside a bend), walls that reach
+//! the sheet's outline, and walls whose shapes in the flat overlap.
 
 use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
@@ -318,28 +318,12 @@ pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> 
     Ok(out)
 }
 
-/// Whether faces `a` and `b` lie on one surface within `tol`: a cut leaves the faces it didn't
-/// make on the surfaces they had.
-fn same_surface(a: (Option<FaceSurface>, &Record), b: (Option<FaceSurface>, &Record), tol: f64) -> bool {
-    let parallel = |x: Vec3, y: Vec3| x.cross(y).len() <= 1e-9;
-    let off_line = |p: Vec3, o: Vec3, d: Vec3| ((p - o) - d * (p - o).dot(d)).len();
+/// Whether faces `a` and `b` lie on one surface within `tol` inside `region`
+/// ([`solidcraft_kernel::same_surface`]), or on the same record surface where neither is
+/// analytic: a cut leaves the faces it didn't make on the surfaces they had.
+fn same_surface(a: (Option<FaceSurface>, &Record), b: (Option<FaceSurface>, &Record), tol: f64, region: &solidcraft_geom::Aabb3) -> bool {
     match (a.0, b.0) {
-        (Some(FaceSurface::Plane { normal: n, point: p }), Some(FaceSurface::Plane { normal: m, point: q })) => {
-            parallel(*n, *m) && (q - p).dot(*n).abs() <= tol
-        }
-        (Some(FaceSurface::Cylinder { origin: o, axis: d, radius: r }), Some(FaceSurface::Cylinder { origin: p, axis: e, radius: s })) => {
-            parallel(*d, *e) && (r - s).abs() <= tol && off_line(p, o, *d) <= tol
-        }
-        (Some(FaceSurface::Cone { apex: o, axis: d, half_angle: h }), Some(FaceSurface::Cone { apex: p, axis: e, half_angle: k })) => {
-            d.dot(*e) > 0.0 && parallel(*d, *e) && (h - k).abs() <= 1e-9 && o.dist(p) <= tol
-        }
-        (Some(FaceSurface::Sphere { center: o, radius: r }), Some(FaceSurface::Sphere { center: p, radius: s })) => {
-            o.dist(p) <= tol && (r - s).abs() <= tol
-        }
-        (
-            Some(FaceSurface::Torus { center: o, axis: d, major: r, minor: m }),
-            Some(FaceSurface::Torus { center: p, axis: e, major: s, minor: n }),
-        ) => parallel(*d, *e) && o.dist(p) <= tol && (r - s).abs() <= tol && (m - n).abs() <= tol,
+        (Some(x), Some(y)) => solidcraft_kernel::same_surface(&x, &y, tol, region),
         (None, None) => a.1 == b.1,
         _ => false,
     }
@@ -355,6 +339,8 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
     let (ra, rb) = (was.record(), now.record());
     let (qa, qb) = (Query::new(ra), Query::new(rb));
     let (sag, accept) = ((was.size() * 1e-4).max(1e-4), tol * 10.0);
+    let bounds = |b: &Body| b.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
+    let region = bounds(was).union(&bounds(now));
     let edges_of = |loops: &[Bounds]| -> Vec<usize> {
         loops
             .iter()
@@ -374,7 +360,7 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
         .filter(|(f, face)| {
             let here = (face_surface(now, *f), &face.surface);
             let under: Vec<(usize, &[Bounds])> =
-                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol)).map(|(o, (_, loops))| (o, *loops)).collect();
+                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol, &region)).map(|(o, (_, loops))| (o, *loops)).collect();
             if under.is_empty() {
                 return true;
             }
@@ -808,7 +794,7 @@ pub(crate) fn shadow(
                 format!("leaves a recess in {name}: not supported yet at a slant, on a roll or in a bend")
             } else {
                 format!(
-                    "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a countersink, a rounded or chamfered face edge)"
+                    "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a rounded or chamfered face edge, a drill point)"
                 )
             });
         }

@@ -170,6 +170,7 @@ impl TabThemeState {
         let mut view = if environment.viewport.is_none() { tokens } else { target.view };
         view.viewport_top = tokens.viewport_top;
         view.viewport_bottom = tokens.viewport_bottom;
+        view.viewport_middle = tokens.viewport_middle;
         let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
         (PublishedTab { environment, tokens, view, tab_surfaces }, target.accent, self.fade.is_some())
     }
@@ -493,7 +494,7 @@ mod tests {
         assert_eq!(publish().0.tokens.axis_x, before.with_vision(true, ColorVision::Tritan).axis_x);
         set_viewport_dark(Some(false));
         assert_eq!(publish().0.tokens.viewport_top, Tokens::light().viewport_top);
-        set_viewport_background(Some([3, 7, 11]));
+        set_viewport_background(Some(solidcraft_theme::ViewBackground::flat([3, 7, 11])));
         assert_eq!(publish().0.tokens.viewport_top, Color32::from_rgb(3, 7, 11));
         set_viewport_background(None);
         set_viewport_dark(None);
@@ -514,7 +515,7 @@ mod tests {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
                 publish_tab("SKETCH", false, false, ui.ctx());
                 let t = Tokens::get();
-                solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
+                solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom);
             });
             let colors: Vec<_> = out
                 .shapes

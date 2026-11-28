@@ -785,6 +785,15 @@ pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64
         swept += step;
         last = angle;
     }
+    // The arc must bow out of its chord by more than 1e-6 of the spline's size. A spline that
+    // straight lies within the proof's reach of a circle of almost any radius through three of
+    // its points, so that circle is not the spline's: a straight 3 mm edge was read as an arc
+    // of radius 8.8e8 mm, and its NURBS form's middle point, 1e9 mm out, made SMLib refuse the
+    // face (#20805). Refused, the spline stays the file's spline, which it is exactly.
+    let sagitta = 2.0 * radius * (0.25 * swept.min(PI)).sin().powi(2);
+    if !(sagitta > 1e-6 * (hi - lo).len()) {
+        return None;
+    }
     Some((Curve::Circle { position: Placement { origin: p3(centre), axis: p3(axis), ref_direction: p3(x) }, radius }, swept))
 }
 

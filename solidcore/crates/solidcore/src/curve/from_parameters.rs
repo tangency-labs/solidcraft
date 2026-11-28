@@ -14,9 +14,10 @@
 //!
 //! **Exact classes at bound 0** (owner rule 13564): a circle or ellipse is made as that conic,
 //! and is returned only once its NURBS form is proved to lie on the plane and the quadric
-//! (sphere or elliptic cylinder) of the record's own numbers ([`curve_on_quadrics`], to the
-//! rounding of checking it). A conic given with its NURBS form keeps that NURBS, proved on the
-//! record's conic the same way. A line is the record's two points; a spline its own definition.
+//! (sphere or elliptic cylinder) of the record's own numbers
+//! ([`curve_on_quadrics_with_constants`], to the rounding of checking it). A conic given with
+//! its NURBS form keeps that NURBS, proved on the record's conic the same way. A line is the
+//! record's two points; a spline its own definition.
 //!
 //! The record's numbers are taken as they are: a frame's axes are the record's (not rebuilt by
 //! cross products), a rational spline's homogeneous points are copied (not divided by their
@@ -41,7 +42,9 @@ use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::implicit::{conic_turn, curve_on_quadrics, QuadricEquation};
+#[cfg(test)]
+use crate::surface::implicit::curve_on_quadrics;
+use crate::surface::implicit::{conic_turn, curve_on_quadrics_with_constants, QuadricEquation};
 
 const OP: &str = "curve::from_parameters::from_parameters";
 const OP_TRIM: &str = "curve::from_parameters::uv_trim";
@@ -181,9 +184,9 @@ pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
-/// record's conic (proved, [`curve_on_quadrics`]) and turn anticlockwise about the frame's z,
-/// at most once round (certified per Bézier segment, [`conic_turn`]); the kernel's conic is
-/// over the angles from the form's start through the angle it turns.
+/// record's conic (proved, [`curve_on_quadrics_with_constants`]) and turn anticlockwise about
+/// the frame's z, at most once round (certified per Bézier segment, [`conic_turn`]); the
+/// kernel's conic is over the angles from the form's start through the angle it turns.
 ///
 /// # Errors
 ///
@@ -209,7 +212,7 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
         return Err(bad("a radius is not finite and positive"));
     }
     let (o, x, y) = axes(frame)?;
-    if !curve_on_quadrics(&nurbs, &quadrics(o, x, y, rx, ry, circle))? {
+    if !on_conic(&nurbs, o, x, y, rx, ry, circle)? {
         return Err(bad("a conic's NURBS form is off the record's conic"));
     }
     let domain = form_angles(&nurbs, o, x, y, rx, ry)?.ok_or_else(|| {
@@ -357,7 +360,7 @@ pub struct RecordCurve {
 ///   product), its y axis reversed where the conic's NURBS runs against its angle (its own
 ///   `inside_out`, no sampling), with that NURBS as its form, over the kernel's interval.
 ///   Exact class at bound 0: returned only once the form is proved on the label's plane and
-///   sphere or elliptic cylinder ([`curve_on_quadrics`]).
+///   sphere or elliptic cylinder ([`curve_on_quadrics_with_constants`]).
 /// - **B-spline, hyperbola, parabola:** its NURBS as a spline or rational spline, homogeneous
 ///   points copied, over the kernel's interval; an interval past the knots by the rounding of
 ///   the kernel's parameter (10⁻¹² of its size) ends on them.
@@ -419,7 +422,7 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
                 made = copy;
                 made.base()
             };
-            if !curve_on_quadrics(nurbs, &quadrics(o, x, y, rx, ry, circle))? {
+            if !on_conic(nurbs, o, x, y, rx, ry, circle)? {
                 return Err(bad("a conic's NURBS is off its own frame and radii"));
             }
             let frame = Frame {
@@ -643,7 +646,49 @@ pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
             point.z = 0.0;
         }
     }
-    curve_on_quadrics(&form, &quadrics(o, x, y, rx, ry, false))
+    on_conic(&form, o, x, y, rx, ry, false)
+}
+
+/// Whether `nurbs` lies on the plane and the sphere or elliptic cylinder of a conic
+/// ([`quadrics`]), to the rounding of checking it ([`curve_on_quadrics_with_constants`]). Each
+/// quadric's constant counts at the size of the terms it is computed from (`|n_i o_i|` summed;
+/// `|o|^2 + r^2`, or `|o_i a_ij o_j|` summed and 1): the constant cancels to far below that
+/// rounding, and that of the form's points built from the centre, when the conic passes near
+/// the world origin (#3384).
+///
+/// # Errors
+///
+/// Those of [`curve_on_quadrics_with_constants`].
+fn on_conic(
+    nurbs: &BSplineCurve,
+    o: Point3,
+    x: Vec3,
+    y: Vec3,
+    rx: f64,
+    ry: f64,
+    circle: bool,
+) -> Result<bool> {
+    let q = quadrics(o, x, y, rx, ry, circle);
+    let oa = [o.x, o.y, o.z];
+    let plane = q[0]
+        .1
+        .iter()
+        .zip(oa)
+        .map(|(b, p)| 2.0 * (b * p).abs())
+        .sum::<f64>();
+    let (a, _, _) = q[1];
+    let form = a
+        .iter()
+        .zip(oa)
+        .map(|(row, p)| {
+            row.iter()
+                .zip(oa)
+                .map(|(aij, q)| (p * aij * q).abs())
+                .sum::<f64>()
+        })
+        .sum::<f64>();
+    let shape = form + if circle { rx * rx } else { 1.0 };
+    curve_on_quadrics_with_constants(nurbs, &q, [plane, shape])
 }
 
 /// The plane of a conic and its sphere (a circle) or elliptic cylinder (an ellipse), as
@@ -756,7 +801,7 @@ fn conic(
         Ellipse::create_canonical(k, &placement, rx, ry, Some(&deg), None)?
     };
     e.edit_parameterization(k, &deg, true, None)?;
-    if !curve_on_quadrics(e.base(), &quadrics(o, x, y, rx, ry, circle))? {
+    if !on_conic(e.base(), o, x, y, rx, ry, circle)? {
         return Err(bad("the conic's NURBS is off the record's conic"));
     }
     Ok(EdgeCurve {

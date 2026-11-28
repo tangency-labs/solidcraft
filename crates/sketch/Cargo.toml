@@ -29,5 +29,9 @@ thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 unicode-bidi = "0.3"
 
+[target.'cfg(windows)'.dependencies]
+# Installed font files outside the standard folders (MIT; already in Cargo.lock).
+winreg = "0.56"
+
 [dev-dependencies]
 serde_json = { workspace = true }

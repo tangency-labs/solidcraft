@@ -673,3 +673,14 @@ fn the_global_sections_native_system_becomes_the_originating_system() {
     let imp = round_trip(&box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap());
     assert_eq!(imp.system, "SolidCraft");
 }
+
+#[test]
+fn iges_max_bytes_follows_set_max_bytes() {
+    let initial = max_bytes();
+    assert_eq!(initial, MAX_IGES_BYTES);
+    set_max_bytes(1 << 30);
+    assert_eq!(max_bytes(), 1 << 30);
+    set_max_bytes(100);
+    assert_eq!(max_bytes(), MAX_IGES_BYTES);
+    set_max_bytes(initial);
+}

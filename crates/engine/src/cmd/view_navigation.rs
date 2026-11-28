@@ -18,6 +18,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const GROUND_SHADOW_CONTRACT: TypedContract<crate::schema::view_navigation::GroundShadowParams> = TypedContract::new();
 const DISPLAY_TOGGLE_CONTRACT: TypedContract<DisplayToggleParams> = TypedContract::new();
 const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
@@ -121,8 +122,8 @@ CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
     .params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
 CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
     .icon("style").noundo().doc_only()
-    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
-    .params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+    .contract(&GROUND_SHADOW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::GroundShadowReply>)
+    .params("mode: off|ellipse|projected; or on?: bool (omitted: toggle) → mode? or on?; display only, independent of ambient occlusion"),
 CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.navigation_bar", navigation_bar))
     .icon("pan").noundo().doc_only()
     .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
@@ -428,6 +429,13 @@ fn grid(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.grid", "on")
 }
 fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(mode) = p.get("mode") {
+        view_params(p, "view.ground_shadow", &["mode"])?;
+        return match mode.as_str() {
+            Some(mode @ ("off" | "ellipse" | "projected")) => Ok(json!({"mode":mode})),
+            _ => Err(bad("view.ground_shadow", "mode must be off, ellipse or projected")),
+        };
+    }
     view_toggle(p, "view.ground_shadow", "on")
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -651,11 +659,10 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|v| v.is_finite() && v.len() <= 2.0)
             .and_then(|v| v.normalized())
             .ok_or_else(|| bad(cmd, "direction must be a finite nonzero vector of length at most 2"))?;
-        let heading = cam.yaw;
-        cam = cam.looking_from(cam.from_frame(dir));
-        if dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9 {
-            cam.yaw = square_heading(heading);
-        }
+        // The view turns the shortest way, so how the screen is turned carries over; a view
+        // along an axis squares up to a quarter turn (#21480).
+        let along_an_axis = [dir.x, dir.y, dir.z].iter().filter(|c| c.abs() > 1e-9).count() == 1;
+        cam = cam.turned_to(cam.from_frame(dir), along_an_axis);
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
@@ -753,24 +760,6 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "motion produced an invalid camera"));
     }
     typed_reply(cmd, NavigateResult { camera: cam, fit: false, continuous: Some(true), param_warnings: Vec::new() })
-}
-
-/// At a halfway tie prefer the heading nearer the front plan view.
-pub(crate) fn square_heading(yaw: f64) -> f64 {
-    if !yaw.is_finite() {
-        return 0.0;
-    }
-    let q = std::f64::consts::FRAC_PI_2;
-    let lo = (yaw / q).floor() * q;
-    let hi = lo + q;
-    if ((yaw - lo) - (hi - yaw)).abs() < 1e-6 {
-        let off_front = |a: f64| ((a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs();
-        if off_front(lo) <= off_front(hi) { lo } else { hi }
-    } else if yaw - lo < hi - yaw {
-        lo
-    } else {
-        hi
-    }
 }
 
 #[cfg(test)]
@@ -1241,6 +1230,38 @@ mod tests {
         }
     }
 
+    /// #21480: a direction chosen on a navigator turns the view the shortest way, so how the
+    /// screen is turned carries over. A direction along an axis squares up; a slanted one keeps
+    /// the exact tilt. The issue's case: from Front rolled 90°, Top keeps world X where it was.
+    #[test]
+    fn a_chosen_direction_turns_the_view_the_shortest_way() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut s = Session::default();
+        let mut look = |cam: Camera, dir: [f64; 3]| -> Camera {
+            let result = navigate(&mut s, &json!({"camera": cam, "direction": dir})).unwrap();
+            serde_json::from_value(result["camera"].clone()).unwrap()
+        };
+        let rolled = Camera { yaw: 0.0, pitch: 0.0, roll: FRAC_PI_2, ..Default::default() };
+        // Rolled on its side, world X runs up the screen, and still does after the turn.
+        let (_, up, _) = rolled.basis();
+        assert!(up.cross(Vec3::X).len() < 1e-9, "{up:?}");
+        let (_, u, b) = look(rolled, [0.0, 0.0, 1.0]).basis();
+        assert!(b.dist(Vec3::Z) < 1e-9 && u.dist(up) < 1e-9, "{u:?} {b:?}");
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (-0.785, 0.615), (0.4, FRAC_PI_2), (2.0, -FRAC_PI_2)] {
+                for roll in [0.0, FRAC_PI_2, PI, 0.3, -0.7] {
+                    let cam = Camera { up, yaw, pitch, roll, ..Default::default() };
+                    for dir in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.3, -0.9]] {
+                        let along_an_axis = dir.iter().filter(|c| **c != 0.0).count() == 1;
+                        let to = look(cam, dir);
+                        let want = cam.turned_to(cam.from_frame(Vec3::new(dir[0], dir[1], dir[2])), along_an_axis);
+                        assert_eq!(to, want, "{dir:?} from {cam:?}");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn turn_around_reverses_the_view_about_screen_up_without_editing_the_design() {
         for up in [UpAxis::Z, UpAxis::Y] {
@@ -1479,6 +1500,25 @@ mod ambient_occlusion_tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none(), "a display setting leaves the view where it is");
+    }
+    #[test]
+    fn ground_shadow_modes_validate_without_editing_the_design_or_history() {
+        use crate::schema::ParamCheck;
+        for param_check in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+            let mut s = Session { param_check, ..Session::default() };
+            let before = s.doc.to_json();
+            for mode in ["off", "ellipse", "projected"] {
+                assert_eq!(s.execute("view.ground_shadow", &json!({"mode":mode})).unwrap(), json!({"mode":mode}));
+            }
+            for params in
+                [json!({"mode":true}), json!({"mode":2}), json!({"mode":"height_bands"}), json!({"mode":null}), json!({"mode":"projected","on":true})]
+            {
+                assert!(s.execute("view.ground_shadow", &params).is_err());
+            }
+            assert_eq!(s.execute("view.ground_shadow", &Value::Null).unwrap(), json!({}));
+            assert_eq!(s.doc.to_json(), before);
+            assert!(s.undo.is_empty());
+        }
     }
     #[test]
     fn validates_display_setting_without_editing_design_or_history() {

@@ -66,6 +66,11 @@ fn the_check_takes_what_the_schema_allows() {
     for (p, takes) in [
         (json!({}), true),
         (json!({"body": "Mesh"}), true),
+        (json!({"legacy_names": true}), false),
+        (json!({"legacy_names": false}), false),
+        (json!({"legacy_names": null}), false),
+        (json!({"legacy_names": "true"}), false),
+        (json!({"legacy_names": 1}), false),
         (json!({"body": "Mesh", "tolerance": "0.01 mm", "name": "Rebuilt", "participants": ["Mesh"]}), true),
         (json!({"body": "", "tolerance": 0.02, "participants": "*"}), true),
         (json!({"body": null, "tolerance": null, "name": null, "participants": null}), true),

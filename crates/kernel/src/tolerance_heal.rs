@@ -88,6 +88,25 @@ pub fn heal_preference_for_tests(on: bool) -> HealPreferenceForTests {
     HealPreferenceForTests { before, _thread: PhantomData }
 }
 
+/// The calling thread's held heal preference override (`None` outside tests that hold one),
+/// so worker threads started by [`crate::par::map_on_threads`] inherit the same setting.
+pub(crate) fn held_current() -> Option<bool> {
+    HELD.with(Cell::get)
+}
+
+/// Run `f` with this thread's held heal preference set to `held`, restoring it on exit.
+pub(crate) fn within_held<R>(held: Option<bool>, f: impl FnOnce() -> R) -> R {
+    let before = HELD.with(|h| h.replace(held));
+    struct Restore(Option<bool>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            HELD.with(|h| h.set(self.0));
+        }
+    }
+    let _restore = Restore(before);
+    f()
+}
+
 /// What [`heal_tolerance_defects`] did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToleranceHeal {

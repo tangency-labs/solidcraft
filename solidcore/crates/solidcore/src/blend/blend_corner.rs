@@ -72,6 +72,7 @@ use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 pub mod ball;
 pub mod chamfer;
+pub mod crossing_ends;
 pub mod end;
 pub mod join_gap;
 pub mod mixed;

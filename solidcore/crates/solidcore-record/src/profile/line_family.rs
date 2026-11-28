@@ -1,6 +1,6 @@
 //! A family of parallel lines with a repeating dash sequence, as data: lengths in millimetres,
-//! angles in radians. The kernel clips families to a region (`solidcore_ops::profile`); a
-//! named pattern of families is the application's.
+//! angles in radians. The kernel clips families to a region (`solidcore_ops::profile`) into
+//! [`Mark`]s; a named pattern of families is the application's.
 //!
 //! A family's origin is in the region's XY frame. With tangent `u` at its angle and
 //! left normal `n`, member `k` passes through `origin + k * (delta_x * u + delta_y * n)`.
@@ -41,6 +41,24 @@ pub struct LineFamily {
     pub delta_y: f64,
     /// Signed draw/gap lengths and zero dots; empty means continuous.
     pub dashes: Vec<f64>,
+}
+
+/// One complete mark in millimetres.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mark {
+    /// A stroke between its clipped endpoints.
+    Line {
+        /// First clipped endpoint in millimetres.
+        a: Vec2,
+        /// Last clipped endpoint in millimetres.
+        b: Vec2,
+    },
+    /// A dot at its centre.
+    Dot {
+        /// Centre in millimetres.
+        at: Vec2,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

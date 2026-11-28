@@ -55,6 +55,7 @@ pub use curve_display::SamplingBudget;
 pub use curve_display::SamplingQuality;
 pub use curve_display::sample_segment;
 pub use curve_display::sample_segment_unclipped;
+pub use gif::delays as gif_delays;
 pub use gif::gif;
 pub use model_bounds::view_bounds;
 pub use product::FaceAppearance;

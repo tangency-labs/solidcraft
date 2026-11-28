@@ -492,6 +492,30 @@ fn optional_scale(p: Option<&Param>, what: &str) -> R<Option<f64>> {
     }
 }
 
+/// The attributes of a `CARTESIAN_TRANSFORMATION_OPERATOR_3D` (or `_NON_UNIFORM`) from `axis1`
+/// on: `axis1, axis2, local_origin, scale, axis3` (then `scale2, scale3`).
+///
+/// Writers put one or two labels before them. The operator inherits a name from
+/// `representation_item` and a name and an optional description from
+/// `functionally_defined_transformation` (ISO 10303-43). Most files write a name and the
+/// description (`'','',#1,...`); some write the name only (`'',#1,...`). The second parameter
+/// says which: a reference is `axis1`, anything else the description. When it is unset (`$` or
+/// `*`), the count says: the form without the description has one parameter fewer.
+pub fn operator_attributes(e: &Entity) -> &[Param] {
+    let p = e.params();
+    let with_description = if e.name().ends_with("NON_UNIFORM") {
+        9
+    } else {
+        7
+    };
+    let labels = match p.get(1) {
+        Some(Param::Ref(_)) => 1,
+        Some(Param::Null | Param::Derived) if p.len() + 1 == with_description => 1,
+        _ => 2,
+    };
+    p.get(labels..).unwrap_or_default()
+}
+
 /// A placement or a transformation operator, in `units`.
 fn frame(ex: &Exchange, id: u64, units: Units) -> R<Frame> {
     let e = entity(ex, id)?;
@@ -499,21 +523,21 @@ fn frame(ex: &Exchange, id: u64, units: Units) -> R<Frame> {
     match e.name() {
         "CARTESIAN_TRANSFORMATION_OPERATOR_3D"
         | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM" => {
-            let p = e.params();
+            let p = operator_attributes(e);
             let non_uniform = e.name().ends_with("NON_UNIFORM");
             Ok(Frame::Operator(Operator {
-                axis1: optional_direction(&reader, p.get(2), "operator axis1")?,
-                axis2: optional_direction(&reader, p.get(3), "operator axis2")?,
-                origin: reader.point(reference(p.get(4), "operator origin")?)?,
-                scale: optional_scale(p.get(5), "operator scale")?,
-                axis3: optional_direction(&reader, p.get(6), "operator axis3")?,
+                axis1: optional_direction(&reader, p.first(), "operator axis1")?,
+                axis2: optional_direction(&reader, p.get(1), "operator axis2")?,
+                origin: reader.point(reference(p.get(2), "operator origin")?)?,
+                scale: optional_scale(p.get(3), "operator scale")?,
+                axis3: optional_direction(&reader, p.get(4), "operator axis3")?,
                 scale2: if non_uniform {
-                    optional_scale(p.get(7), "operator scale2")?
+                    optional_scale(p.get(5), "operator scale2")?
                 } else {
                     None
                 },
                 scale3: if non_uniform {
-                    optional_scale(p.get(8), "operator scale3")?
+                    optional_scale(p.get(6), "operator scale3")?
                 } else {
                     None
                 },

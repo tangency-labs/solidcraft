@@ -9,7 +9,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 use serde_json::Value;
 use solidcraft_doc::drawing::centre_mark::CentreMark;
-use solidcraft_doc::drawing::dimension::Status;
+use solidcraft_doc::drawing::dimension::{Reference, Status};
 use solidcraft_doc::ids;
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     crate::drawing_view::check_centre_view(&record, view, "centre marks", ADD)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|e| bad(ADD, e.to_string()))?;
-    check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
+    check_drawn(s, &record, view, [Reference::Edge(&edge)], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let mark = CentreMark { id, view, edge, overshoot_mm: request.overshoot_mm };
     let mut probe = (*record).clone();
@@ -125,7 +125,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         radius_mm: r.radius_mm,
         exact: r.exact,
         candidates,
-        warnings: centre_warning(d, mark.view, [mark.edge.path.as_slice()]),
+        warnings: centre_warning(s, d, mark.view, [Reference::Edge(&mark.edge)]),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(EngineError::from)

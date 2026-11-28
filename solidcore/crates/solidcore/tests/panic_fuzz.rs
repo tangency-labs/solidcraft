@@ -1705,7 +1705,7 @@ fn part_brep(k: &Kernel, b: &Brep, ascii: bool) -> Option<Vec<u8>> {
         FileType::Binary
     };
     let mut all = Vec::new();
-    let mut data = BrepData::from_brep(b, &env, &mut all).ok()?;
+    let mut data = BrepData::from_brep(k, b, &env, &mut all).ok()?;
     // (makes the missing NURBs)
     data.write_to_file_with_nurbs(k, file_type).ok()?;
     let mut map = std::collections::BTreeSet::new();

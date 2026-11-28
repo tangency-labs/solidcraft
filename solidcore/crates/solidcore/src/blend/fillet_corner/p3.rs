@@ -1820,7 +1820,22 @@ impl FilletCorner {
             )?;
 
             // store New FilletSurface in m_vSurfaces
-            self.surfaces.extend(blends.into_iter().map(Surface::from));
+            let free_end = !self.extended_surface_patch
+                && self
+                    .blend
+                    .is_some_and(super::super::blend_corner::BlendCorner::is_end);
+            for blend in blends {
+                let surface = Surface::from(blend);
+                // A three-sided cap can have parallel parametric tangents at a corner.
+                // When the full control net is planar, trim the same boundary on its
+                // regular plane before computing pcurves for the cap.
+                let plane = if free_end {
+                    crate::sweep::skin_flat_walls::flat_spline_plane(env.k, &surface)
+                } else {
+                    None
+                };
+                self.surfaces.push(plane.unwrap_or(surface));
+            }
         }
 
         // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()

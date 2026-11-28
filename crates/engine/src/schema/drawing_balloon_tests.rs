@@ -4,7 +4,7 @@ use crate::schema::tests::assert_keys;
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<AddParams>(), &["at", "edge", "parts_list", "view"]);
+    assert_keys(input_schema_for::<AddParams>(), &["at", "at_edge", "edge", "parts_list", "view"]);
     assert_keys(input_schema_for::<InspectParams>(), &["balloon"]);
     assert_keys(input_schema_for::<EditParams>(), &["balloon", "set"]);
     assert_keys(input_schema_for::<RepairParams>(), &["balloon", "pick"]);

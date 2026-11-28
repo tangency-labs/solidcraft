@@ -116,7 +116,7 @@ pub struct Recent<'a, A> {
     pub kind: Label<'a>,
     /// What hovering the row says about the file's signing provenance, when it has any.
     pub security: Option<Label<'a>>,
-    pub thumbnail: Option<(egui::TextureId, egui::Vec2)>,
+    pub thumbnail: Option<crate::PreviewArt>,
     /// No picture could be made: a dimmed placeholder rather than a loading one.
     pub thumbnail_failed: bool,
     pub chosen: A,
@@ -134,7 +134,7 @@ pub struct Sample<'a, A> {
     pub title: Label<'a>,
     pub description: Label<'a>,
     pub icon: Icon<'a>,
-    pub thumbnail: Option<(egui::TextureId, egui::Vec2)>,
+    pub thumbnail: Option<crate::PreviewArt>,
     pub chosen: A,
 }
 

@@ -533,6 +533,12 @@ fn pipe_root_rounds_are_the_fork_s() {
 /// Every round is its definition: the box edge solves 2 roots, one for the net's stations
 /// (u from the radii's cosine) and one for the definition's (u from its station's wedge
 /// jet), the same pi/4 rounded two ways; each is solved once (roots solved = roots kept).
+/// Its certificate sums I(w) once per distinct guess w (the memo is keyed by w's bits).
+/// With the offset's extension the definition's u (bits 4605249457297304846) is 10 ulps
+/// from pi/4 (bits ...856) and solves to w = -0.5252124045875555 against
+/// -0.5252124045875581, so the certificate sums at two guesses: the midpoint of the two
+/// roots, -0.5252124045875568, and pi/4's root, -0.5252124045875581: 2 sums. Before it, that u
+/// (bits ...851) solved to the same bits as pi/4, and one sum served both.
 #[test]
 fn equal_area_roots_and_sums_are_solved_once_each() {
     fn box_edge(k: &mut Kernel) -> solidcore::Result<Brep> {
@@ -559,7 +565,7 @@ fn equal_area_roots_and_sums_are_solved_once_each() {
             pick: [20.0, 30.0, 20.0],
             r: 3.0,
             most_roots: 2,
-            most_sums: 1,
+            most_sums: 2,
         },
         Case {
             name: "boss root",

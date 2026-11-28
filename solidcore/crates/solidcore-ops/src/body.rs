@@ -272,6 +272,26 @@ impl Body {
         (std::mem::replace(&mut held.brep, Brep::new()), proof)
     }
 
+    /// `other`'s B-rep, proof and template put in this body's place (its own dropped), under
+    /// one lock: for an operation whose result was built as another body.
+    pub(crate) fn take_from(&self, other: &Body) {
+        let (brep, proof) = other.take_held();
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        held.brep = brep;
+        held.outward = proof.outward;
+        held.primitive = proof.primitive;
+    }
+
+    /// Whether the body holds the proof that it is valid and faces out (tests only).
+    #[cfg(test)]
+    pub(crate) fn holds_proof(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .outward
+            .is_some()
+    }
+
     /// Whether a panic interrupted an edit of this body.
     #[must_use]
     pub(crate) fn is_poisoned(&self) -> bool {

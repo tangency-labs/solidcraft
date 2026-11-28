@@ -23,7 +23,10 @@ Extent, Copy at the end adds one more copy exactly at the end of the extent when
 the spacing doesn't divide it, so only the last gap is shorter. A centred
 direction set by Spacing and Extent reaches half the extent each way from the
 original, with as many copies on each side; Copy at the end then adds a copy at
-either end. Directions can meet at any angle. A missing second direction
+either end. Quantity and List takes the gaps between neighbours as a
+list separated by semicolons and uses them in turn, then from the start again:
+`10 mm; 20 mm; 30 mm` with Quantity 5 puts copies at 10, 30, 60 and 70 mm.
+Centred, the list runs out from the original on both sides. Directions can meet at any angle. A missing second direction
 produces a single row. Direction vectors are saved with the
 feature; editing a picked guide later does not change these saved vectors.
 

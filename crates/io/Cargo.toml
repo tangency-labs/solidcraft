@@ -55,6 +55,9 @@ cavalier_contours = { version = "0.9.0", default-features = false }
 # Sheet PDFs (src/paper/pdf.rs).
 pdf-writer = { workspace = true }
 flate2 = { workspace = true }
+# The zstd frames of a KiCad board's embedded files (src/kicad_in.rs); pure Rust, MIT, already in
+# the tree through cadmpeg.
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 # Exported mesh file names in NFC, so one name in two Unicode forms is one file (src/urdf.rs);
 # MIT OR Apache-2.0.
 unicode-normalization = { version = "0.1.26", default-features = false }

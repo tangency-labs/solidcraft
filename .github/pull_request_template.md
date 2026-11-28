@@ -6,7 +6,7 @@ Start with what this is, in plain words someone new to the project would underst
 
 Changes a default: no
 
-<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour; a UX default only, a kernel result change is 'no'):
+<!-- Required line. Fixing janky or unintended behaviour is a bug fix, so it stays "no" (example: a drag that cancelled now floats). Don't add a setting to keep old behaviour nobody would choose. Use "yes" only for a deliberate change to established, intentional behaviour users rely on: a default value, key binding, setting or tool behaviour (example: sketch endpoints now merge instead of getting a coincident constraint). UX only; a kernel result change is 'no'.
 Changes a default: yes — <what>, old behaviour kept behind preference <name>
 Docs-only and bot PRs are exempt. -->
 

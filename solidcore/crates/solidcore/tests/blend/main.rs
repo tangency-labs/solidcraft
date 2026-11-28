@@ -123,6 +123,8 @@ mod issue_1580_middle_off_face_run_past_edge_end;
 mod issue_16686_fillet_surface_not_skinned;
 #[path = "../issue_16735_volume_moves_are_the_old_leak.rs"]
 mod issue_16735_volume_moves_are_the_old_leak;
+#[path = "../issue_16922_smb_round_trip_keeps_cover_raises.rs"]
+mod issue_16922_smb_round_trip_keeps_cover_raises;
 #[path = "../issue_17633_crease_along_edge_geometry.rs"]
 mod issue_17633_crease_along_edge_geometry;
 #[path = "../issue_1945_fork_1207_step4.rs"]
@@ -251,6 +253,8 @@ mod setback_on_an_arc_is_certified;
 mod solidcraft_1986_join_cylindrical_wall;
 #[path = "../variable_round_law_corner_refused.rs"]
 mod variable_round_law_corner_refused;
+#[path = "../wr21288_mirrored_sections_once.rs"]
+mod wr21288_mirrored_sections_once;
 #[path = "../wr212_refusal_keeps_owners.rs"]
 mod wr212_refusal_keeps_owners;
 #[path = "../wr300_variable_rounds_meet_at_law_radii.rs"]

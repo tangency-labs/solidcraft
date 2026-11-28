@@ -1,6 +1,8 @@
 //! JSON-RPC 2.0 framing and the MCP lifecycle / tools / resources / prompts / completion methods.
 
 use std::io::{BufRead, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
@@ -22,6 +24,102 @@ const RESOURCE_NOT_FOUND: i64 = -32002;
 const MAX_BATCH: usize = 1000;
 /// Most suggestions in one `completion/complete` reply (the MCP limit).
 const MAX_COMPLETIONS: usize = 100;
+
+/// Valid MCP `RequestId` or `ProgressToken`: a string or an integer (not a float, bool or null).
+fn is_token(v: &Value) -> bool {
+    matches!(v, Value::String(_)) || matches!(v, Value::Number(n) if n.is_i64() || n.is_u64())
+}
+
+/// Parsed MCP `notifications/cancelled` payload (`requestId` and optional `reason`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Cancelled {
+    pub request_id: Value,
+    pub reason: Option<String>,
+}
+
+fn cancelled_from_params(params: &Value) -> Option<Cancelled> {
+    let request_id = params.get("requestId").filter(|id| is_token(id))?.clone();
+    let reason = params.get("reason").and_then(Value::as_str).map(str::to_owned);
+    Some(Cancelled { request_id, reason })
+}
+
+/// Parse a single newline-delimited JSON-RPC `notifications/cancelled` message, returning its
+/// `requestId` and optional `reason`. Returns `None` for requests (messages carrying an `id`),
+/// other methods, or notifications without a valid string or integer `requestId`.
+pub fn cancelled_notification(line: &str) -> Option<Cancelled> {
+    let msg: Value = serde_json::from_str(line.trim()).ok()?;
+    let o = msg.as_object()?;
+    if o.contains_key("id") || o.get("method").and_then(Value::as_str) != Some("notifications/cancelled") {
+        return None;
+    }
+    cancelled_from_params(o.get("params")?)
+}
+
+/// Extract `_meta.progressToken` (string or integer per MCP spec) from request `params`.
+pub fn progress_token(params: &Value) -> Option<Value> {
+    params.get("_meta").and_then(|meta| meta.get("progressToken")).filter(|t| is_token(t)).cloned()
+}
+
+fn progress_number(n: f64) -> Value {
+    const MAX_EXACT_INT: f64 = (1u64 << 53) as f64;
+    if !n.is_finite() {
+        return json!(0);
+    }
+    if n.fract() == 0.0 && (0.0..=MAX_EXACT_INT).contains(&n) { json!(n as u64) } else { json!(n) }
+}
+
+/// Build a standard MCP `notifications/progress` JSON-RPC 2.0 notification.
+pub fn progress_notification(token: &Value, progress: f64, total: Option<f64>, message: Option<&str>) -> Value {
+    let mut params = serde_json::Map::new();
+    params.insert("progressToken".into(), token.clone());
+    params.insert("progress".into(), progress_number(progress));
+    if let Some(total) = total.filter(|t| t.is_finite()) {
+        params.insert("total".into(), progress_number(total));
+    }
+    if let Some(message) = message.filter(|m| !m.is_empty()) {
+        params.insert("message".into(), Value::String(message.to_owned()));
+    }
+    json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": params})
+}
+
+/// Thread-safe helper that emits standard MCP `notifications/progress` JSON-RPC notifications for
+/// a request carrying `_meta.progressToken`.
+#[derive(Clone)]
+pub struct ProgressReporter {
+    token: Value,
+    emit: Arc<dyn Fn(Value) + Send + Sync>,
+    emitted: Arc<AtomicU64>,
+}
+
+impl std::fmt::Debug for ProgressReporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProgressReporter").field("token", &self.token).field("emitted", &self.count()).finish_non_exhaustive()
+    }
+}
+
+impl ProgressReporter {
+    /// Create a reporter for `token` (string or integer) sending each notification to `emit`.
+    /// Returns `None` if `token` is not a valid MCP progress token.
+    pub fn new(token: Value, emit: Arc<dyn Fn(Value) + Send + Sync>) -> Option<Self> {
+        is_token(&token).then(|| Self { token, emit, emitted: Arc::new(AtomicU64::new(0)) })
+    }
+
+    /// The request's `_meta.progressToken`.
+    pub fn token(&self) -> &Value {
+        &self.token
+    }
+
+    /// How many `notifications/progress` messages this reporter has emitted so far.
+    pub fn count(&self) -> u64 {
+        self.emitted.load(Ordering::Relaxed)
+    }
+
+    /// Emit one `notifications/progress` JSON-RPC notification.
+    pub fn report(&self, progress: f64, total: Option<f64>, message: Option<&str>) {
+        self.emitted.fetch_add(1, Ordering::Relaxed);
+        (self.emit)(progress_notification(&self.token, progress, total, message));
+    }
+}
 
 /// What `completion/complete` asks about: a prompt by its name, or a resource by its URI or URI
 /// template.
@@ -47,6 +145,17 @@ pub trait Tools {
     /// it. Failures are tool results with `isError: true` ([`crate::text_result`]); it never
     /// panics on hostile arguments.
     fn call(&mut self, name: &str, args: &Value) -> Value;
+    /// Run tool `name` with an optional [`ProgressReporter`] when the client supplied
+    /// `_meta.progressToken`. Default delegates to [`Tools::call`].
+    fn call_with_progress(&mut self, name: &str, args: &Value, progress: Option<&ProgressReporter>) -> Value {
+        let _ = progress;
+        self.call(name, args)
+    }
+    /// Called when the client sends `notifications/cancelled` for `request_id` (with an optional
+    /// `reason`). Default does nothing.
+    fn cancel(&mut self, request_id: &Value, reason: Option<&str>) {
+        let _ = (request_id, reason);
+    }
     /// The resources `resources/list` serves (MCP `Resource`: uri, name, description, mimeType).
     fn resources(&self) -> Vec<Value> {
         Vec::new()
@@ -98,6 +207,8 @@ pub struct Server<T: Tools> {
     info: Info,
     tools: T,
     initialized: bool,
+    notifier: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    on_cancel: Option<Box<dyn FnMut(&Value, Option<&str>) + Send>>,
 }
 
 fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
@@ -162,7 +273,21 @@ pub fn response(id: Value, result: Value) -> Value {
 
 impl<T: Tools> Server<T> {
     pub fn new(info: Info, tools: T) -> Self {
-        Self { info, tools, initialized: false }
+        Self { info, tools, initialized: false, notifier: None, on_cancel: None }
+    }
+    /// Install a thread-safe sink for server-to-client notifications (`notifications/progress`).
+    pub fn with_notifier(mut self, emit: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
+        self.notifier = Some(emit);
+        self
+    }
+    /// Replace or clear the sink for server-to-client notifications (`notifications/progress`).
+    pub fn set_notifier(&mut self, emit: Option<Arc<dyn Fn(Value) + Send + Sync>>) {
+        self.notifier = emit;
+    }
+    /// Install a hook invoked when `notifications/cancelled` is handled in-band.
+    pub fn with_on_cancel(mut self, handler: impl FnMut(&Value, Option<&str>) + Send + 'static) -> Self {
+        self.on_cancel = Some(Box::new(handler));
+        self
     }
     pub fn tools(&mut self) -> &mut T {
         &mut self.tools
@@ -175,18 +300,44 @@ impl<T: Tools> Server<T> {
     /// `output`; diagnostics belong on stderr. Consume oversized lines in bounded space so a
     /// client cannot exhaust memory by sending an arbitrarily long request without a newline.
     pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        while let Some(incoming) = read_message(&mut input, self.info.max_line)? {
-            let reply = match incoming {
-                Incoming::Line(line) => self.handle_line(&line),
-                Incoming::Refused(reply) => Some(reply),
-            };
-            if let Some(reply) = reply {
-                output.write_all(reply.as_bytes())?;
-                output.write_all(b"\n")?;
-                output.flush()?;
+        let buffered = if self.notifier.is_none() {
+            let queue: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&queue);
+            self.notifier = Some(Arc::new(move |msg| {
+                if let Ok(mut q) = sink.lock() {
+                    q.push(msg);
+                }
+            }));
+            Some(queue)
+        } else {
+            None
+        };
+        let result = (|| -> std::io::Result<()> {
+            while let Some(incoming) = read_message(&mut input, self.info.max_line)? {
+                let reply = match incoming {
+                    Incoming::Line(line) => self.handle_line(&line),
+                    Incoming::Refused(reply) => Some(reply),
+                };
+                if let Some(queue) = &buffered {
+                    let notes = queue.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
+                    for note in notes {
+                        output.write_all(note.to_string().as_bytes())?;
+                        output.write_all(b"\n")?;
+                        output.flush()?;
+                    }
+                }
+                if let Some(reply) = reply {
+                    output.write_all(reply.as_bytes())?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                }
             }
+            Ok(())
+        })();
+        if buffered.is_some() {
+            self.notifier = None;
         }
-        Ok(())
+        result
     }
 
     /// One line in, at most one line out (notifications get no reply).
@@ -224,8 +375,17 @@ impl<T: Tools> Server<T> {
         };
         let params = o.get("params").cloned().unwrap_or(Value::Null);
         let Some(id) = id else {
-            if method == "notifications/initialized" {
-                self.initialized = true;
+            match method {
+                "notifications/initialized" => self.initialized = true,
+                "notifications/cancelled" => {
+                    if let Some(c) = cancelled_from_params(&params) {
+                        self.tools.cancel(&c.request_id, c.reason.as_deref());
+                        if let Some(handler) = self.on_cancel.as_mut() {
+                            handler(&c.request_id, c.reason.as_deref());
+                        }
+                    }
+                }
+                _ => {}
             }
             return None;
         };
@@ -258,7 +418,9 @@ impl<T: Tools> Server<T> {
                 };
                 let definition = self.tools.definition(name);
                 check_arguments(definition.as_slice(), name, &args).map_err(|e| (INVALID_PARAMS, e))?;
-                Ok(self.tools.call(name, &args))
+                let progress =
+                    progress_token(params).and_then(|token| self.notifier.as_ref().and_then(|emit| ProgressReporter::new(token, Arc::clone(emit))));
+                Ok(self.tools.call_with_progress(name, &args, progress.as_ref()))
             }
             "resources/list" => Ok(json!({"resources": self.tools.resources()})),
             "resources/templates/list" => Ok(json!({"resourceTemplates": self.tools.resource_templates()})),

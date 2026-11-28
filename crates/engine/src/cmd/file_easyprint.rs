@@ -25,8 +25,9 @@ pub(super) struct Exported {
     pub laid: super::print_face::Laid,
 }
 
-/// Export the bodies (the selected ones when none are named), each laid on its print face. A
-/// 3MF that can't be written is written as an STL, and `fell_back` says so.
+/// Export the bodies (the selected ones when none are named), each laid on its print face (a STEP
+/// file too: the bodies are turned before they are written). A 3MF that can't be written is
+/// written as an STL, and `fell_back` says so.
 pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format) -> Result<Exported> {
     let mut bodies = named.to_vec();
     if bodies.is_empty() {
@@ -43,7 +44,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     };
     let mut fell_back = false;
     let ((bytes, notes), ext) = match (format, write(format)) {
-        (_, Ok(b)) => (b, if format == Format::StlBinary { "stl" } else { "3mf" }),
+        (_, Ok(b)) => (b, extension(format)),
         (Format::ThreeMf, Err(_)) => {
             fell_back = true;
             (write(Format::StlBinary)?, "stl")
@@ -52,6 +53,15 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     };
     laid.warnings.extend(notes);
     Ok(Exported { bytes, ext, fell_back, bodies, laid })
+}
+
+/// The file extension a sent file gets.
+fn extension(format: Format) -> &'static str {
+    match format {
+        Format::StlBinary | Format::StlAscii => "stl",
+        Format::Step => "step",
+        _ => "3mf",
+    }
 }
 
 pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {

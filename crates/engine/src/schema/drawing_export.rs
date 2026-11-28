@@ -41,6 +41,10 @@ pub struct ExportParams {
     /// PNG is rgb.
     #[serde(default)]
     pub paper: ExportPaper,
+    /// PDF only: how its text is written (text when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExportText")]
+    pub text: Option<ExportText>,
 }
 
 /// Print the whole open drawing: its PDF, written to a file or returned.
@@ -121,6 +125,27 @@ impl From<ExportColour> for solidcraft_io::paper::PngColour {
             ExportColour::BlackWhite => Self::BlackWhite,
             ExportColour::Rgb => Self::Rgb,
             ExportColour::Transparent => Self::Transparent,
+        }
+    }
+}
+
+/// How a sheet PDF carries its text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportText {
+    /// Real text in an embedded font, with a map back to Unicode: it looks as outlines do, and a
+    /// viewer selects, searches and copies it.
+    #[default]
+    Text,
+    /// Glyph outlines only, as earlier versions wrote: the file holds no text.
+    Outlines,
+}
+
+impl From<ExportText> for solidcraft_io::paper::PdfText {
+    fn from(text: ExportText) -> Self {
+        match text {
+            ExportText::Text => Self::Text,
+            ExportText::Outlines => Self::Outlines,
         }
     }
 }

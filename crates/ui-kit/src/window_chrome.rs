@@ -153,6 +153,9 @@ pub struct TitleBar {
     pub traffic_lights: bool,
     /// No OS decorations (Windows, Linux): the bar has its own caption buttons at the right end.
     pub caption_buttons: bool,
+    /// With `caption_buttons`, leave the buttons out (a tiling window manager handles the window,
+    /// #20385): the bar still moves the window and its contents take the buttons' room.
+    pub hide_caption_buttons: bool,
 }
 
 /// Where a [`TitleBar`] puts things in the bar's rect.
@@ -169,12 +172,17 @@ pub struct TitleBarLayout {
 impl TitleBar {
     pub fn layout(self, bar: Rect) -> TitleBarLayout {
         let left = bar.left() + if self.traffic_lights { TRAFFIC_LIGHTS } else { 0.0 };
-        let right = bar.right() - if self.caption_buttons { WIDTH } else { 0.0 };
+        let right = bar.right() - if self.shows_caption_buttons() { WIDTH } else { 0.0 };
         TitleBarLayout {
             drag: (self.traffic_lights || self.caption_buttons).then_some(bar),
             content: Rect::from_min_max(pos2(left, bar.top()), pos2(right, bar.bottom())),
-            captions: self.caption_buttons.then(|| Rect::from_min_max(pos2(right, bar.top()), bar.right_bottom())),
+            captions: self.shows_caption_buttons().then(|| Rect::from_min_max(pos2(right, bar.top()), bar.right_bottom())),
         }
+    }
+
+    /// Whether the bar draws its own caption buttons.
+    pub fn shows_caption_buttons(self) -> bool {
+        self.caption_buttons && !self.hide_caption_buttons
     }
 
     /// Lays out the bar in `bar`: the drag area first (so the contents' widgets, registered
@@ -186,7 +194,7 @@ impl TitleBar {
             drag_area(ui, r);
         }
         contents(ui, layout.content);
-        if self.caption_buttons { caption_buttons(ui, bar) } else { None }
+        if self.shows_caption_buttons() { caption_buttons(ui, bar) } else { None }
     }
 }
 
@@ -248,6 +256,20 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct StaleInput {
+    buttons: [bool; 3],
+}
+
+fn button_index(button: PointerButton) -> Option<usize> {
+    match button {
+        PointerButton::Primary => Some(0),
+        PointerButton::Secondary => Some(1),
+        PointerButton::Middle => Some(2),
+        _ => None,
+    }
+}
+
 fn stale_input_id() -> Id {
     Id::unique("window-chrome-stale-input")
 }
@@ -255,7 +277,7 @@ fn stale_input_id() -> Id {
 /// Note that a native dialog (a file picker) just closed: the OS may have kept a button release
 /// or a modifier release for itself, so [`release_stale_input`] lets go of what is still held.
 pub fn mark_input_stale(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(stale_input_id(), true));
+    ctx.data_mut(|d| d.insert_temp(stale_input_id(), StaleInput { buttons: [true; 3] }));
 }
 
 /// Let go of a pointer button whose release the app never received, before the frame's own
@@ -288,29 +310,78 @@ pub fn release_stale_input_with_tracked_buttons(ctx: &egui::Context, raw: &mut e
 fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput, release_buttons: bool) {
     let last_lost = raw.events.iter().rposition(|e| matches!(e, egui::Event::WindowFocused(false)));
     let regained = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
-    let marked = ctx.data(|d| d.get_temp::<bool>(stale_input_id())).unwrap_or(false);
-    // Focus ends the frame lost: recover when it is back. Otherwise recover now: at the loss when
-    // the batch also regains focus (later events, a fresh press among them, stay as they are), or
-    // at the start of the frame for a marked dialog.
-    let at = match last_lost {
-        Some(_) if !raw.focused => {
-            mark_input_stale(ctx);
+    let stale = ctx.data(|d| d.get_temp::<StaleInput>(stale_input_id()));
+    let (was_focused, current_modifiers) = ctx.input(|i| (i.focused, i.modifiers));
+    // Focus loss already cleared egui's modifiers; any non-empty modifiers present while unfocused
+    // arrived after that loss (for example Ctrl held while moving into an unfocused window) and
+    // must survive focus return, or the platform will not resend them until the key is re-pressed.
+    let clear_modifiers = was_focused || current_modifiers.is_none();
+    // Focus ends the frame lost: record which buttons were held at loss so a fresh press while
+    // unfocused is not mistaken for a stale one when focus returns. Otherwise recover now: at the
+    // loss when the batch also regains focus (later events, a fresh press among them, stay as they
+    // are), or at the start of the frame for a marked dialog or returned focus.
+    let (at, stale_buttons) = match last_lost {
+        Some(lost) if !raw.focused => {
+            let mut buttons = [false; 3];
+            for (idx, b) in BUTTONS.into_iter().enumerate() {
+                buttons[idx] = ctx.input(|i| i.pointer.button_down(b));
+            }
+            for (index, event) in raw.events.iter().enumerate() {
+                if let egui::Event::PointerButton { button, pressed, .. } = event
+                    && let Some(idx) = button_index(*button)
+                {
+                    buttons[idx] = if index <= lost { *pressed } else { false };
+                }
+            }
+            ctx.data_mut(|d| d.insert_temp(stale_input_id(), StaleInput { buttons }));
             return;
         }
-        Some(i) => i + 1,
-        None if raw.focused && marked => 0,
+        Some(i) => {
+            let mut buttons = [false; 3];
+            for (idx, b) in BUTTONS.into_iter().enumerate() {
+                buttons[idx] = ctx.input(|input| input.pointer.button_down(b));
+            }
+            for event in raw.events.iter().take(i + 1) {
+                if let egui::Event::PointerButton { button, pressed, .. } = event
+                    && let Some(idx) = button_index(*button)
+                {
+                    buttons[idx] = *pressed;
+                }
+            }
+            (i + 1, buttons)
+        }
+        None if raw.focused && stale.is_some() => (0, stale.map_or([false; 3], |s| s.buttons)),
         None => {
-            if regained {
+            if !raw.focused
+                && let Some(mut s) = stale
+            {
+                let mut changed = false;
+                for event in &raw.events {
+                    if let egui::Event::PointerButton { button, .. } = event
+                        && let Some(idx) = button_index(*button)
+                        && s.buttons[idx]
+                    {
+                        s.buttons[idx] = false;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    ctx.data_mut(|d| d.insert_temp(stale_input_id(), s));
+                }
+            }
+            if regained && clear_modifiers {
                 raw.events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
             return;
         }
     };
-    ctx.data_mut(|d| d.remove_temp::<bool>(stale_input_id()));
+    ctx.data_mut(|d| d.remove_temp::<StaleInput>(stale_input_id()));
     let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
-    let held: Vec<PointerButton> = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle]
+    let held: Vec<PointerButton> = BUTTONS
         .into_iter()
-        .filter(|b| release_buttons && ctx.input(|i| i.pointer.button_down(*b)))
+        .enumerate()
+        .filter(|&(idx, b)| release_buttons && stale_buttons[idx] && (last_lost.is_some() || ctx.input(|i| i.pointer.button_down(b))))
+        .map(|(_, b)| b)
         .collect();
     let mut recovery = Vec::new();
     if !held.is_empty() {
@@ -321,7 +392,9 @@ fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput, release_bu
         recovery.extend(held.into_iter().map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers }));
         recovery.push(egui::Event::PointerGone);
     }
-    recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    if last_lost.is_some() || clear_modifiers {
+        recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    }
     raw.events.splice(at..at, recovery);
 }
 
@@ -517,7 +590,7 @@ pub fn resize_zones(ui: &mut Ui) {
     let layer = LayerId::new(Order::Foreground, Id::unique("titlebar-resize"));
     let zui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
     for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
-        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
+        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             hand_press_to_os(&ctx, ViewportCommand::BeginResize(dir));
         }
@@ -833,19 +906,19 @@ mod tests {
     fn title_bar_from_plain_inputs_insets_for_the_traffic_lights_and_drags_from_empty_space() {
         let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
         // macOS: the OS draws the traffic lights over the bar's left end; no caption buttons.
-        let mac = TitleBar { traffic_lights: true, caption_buttons: false };
+        let mac = TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false };
         let layout = mac.layout(bar);
         assert_eq!(layout.drag, Some(bar));
         assert_eq!(layout.content, Rect::from_min_max(pos2(TRAFFIC_LIGHTS, 0.0), pos2(1200.0, BAR)));
         assert_eq!(layout.captions, None);
         // Windows and Linux without OS decorations: caption buttons at the right end.
-        let own = TitleBar { traffic_lights: false, caption_buttons: true };
+        let own = TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false };
         let layout = own.layout(bar);
         assert_eq!(layout.drag, Some(bar));
         assert_eq!(layout.content, Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0 - WIDTH, BAR)));
         assert_eq!(layout.captions, Some(Rect::from_min_max(pos2(1200.0 - WIDTH, 0.0), pos2(1200.0, BAR))));
         // The OS's own title bar: the bar is plain content and moves nothing.
-        let os = TitleBar { traffic_lights: false, caption_buttons: false };
+        let os = TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false };
         assert_eq!(os.layout(bar), TitleBarLayout { drag: None, content: bar, captions: None });
 
         let mut w = Bar::new(mac, 1200.0);
@@ -859,7 +932,7 @@ mod tests {
         cmds.extend(w.gesture(&[empty]).0);
         assert!(cmds.contains(&ViewportCommand::Maximized(true)), "double-click maximizes: {cmds:?}");
 
-        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: false }, 1200.0);
+        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false }, 1200.0);
         w.frame(vec![]);
         let (cmds, _) = w.gesture(&[empty, empty + vec2(30.0, 8.0)]);
         assert!(cmds.is_empty(), "no drag area under the OS's own title bar: {cmds:?}");
@@ -867,7 +940,7 @@ mod tests {
 
     #[test]
     fn caption_buttons_return_actions_and_leave_close_to_the_app() {
-        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: true }, 1200.0);
+        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false }, 1200.0);
         w.frame(vec![]);
         let at = |c: Caption| w.ctx.read_response(caption_id(c)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
         let (min, max, close) = (at(Caption::Minimize), at(Caption::Maximize), at(Caption::Close));
@@ -927,7 +1000,7 @@ mod tests {
         }
     }
 
-    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true };
+    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false };
 
     #[test]
     fn a_window_that_draws_the_bar_publishes_it_for_the_systems_hit_test() {
@@ -954,7 +1027,7 @@ mod tests {
         assert_eq!((bar.min_x, bar.min_y, bar.max_x, bar.max_y), (0, 0, (1200.0 * ppp).ceil() as i32, (BAR * ppp).ceil() as i32));
         assert!(maximize.is_some_and(|m| m.min_x > bar.min_x && m.max_x < bar.max_x), "{maximize:?} in {bar:?}");
         // A pass that draws no bar (the system's own title bar, full screen): no caption.
-        w.bar = TitleBar { traffic_lights: false, caption_buttons: false };
+        w.bar = TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false };
         w.frame(vec![]);
         assert_eq!((hit(bare), caption::title_bar(window)), (CaptionHit::Outside, None));
         // And the bar again as soon as it is drawn again.
@@ -1417,5 +1490,60 @@ mod tests {
         assert!(reapplies(&run(vec![Event::PointerMoved(pos2(5.0, 5.0))])), "pointer back in the window");
         assert!(!reapplies(&run(vec![Event::PointerMoved(pos2(6.0, 6.0))])), "an ordinary move changes nothing");
         assert!(!reapplies(&run(vec![Event::WindowFocused(false)])), "focus lost");
+    }
+
+    #[test]
+    fn modifiers_reported_while_unfocused_survive_focus_return() {
+        let ctrl = egui::Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+        let at = pos2(80.0, 90.0);
+        for tracked in [false, true] {
+            let ctx = crate::test_support::context();
+            let mut time = 0.0;
+            let mut frame = |events: Vec<Event>, focused: bool| {
+                time += 0.05;
+                let mut raw = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                    time: Some(time),
+                    focused,
+                    events,
+                    ..Default::default()
+                };
+                if tracked {
+                    release_stale_input_with_tracked_buttons(&ctx, &mut raw);
+                } else {
+                    release_stale_input(&ctx, &mut raw);
+                }
+                ctx.run_ui(raw, |_| {}).textures_delta.clear();
+            };
+            frame(vec![Event::WindowFocused(true)], true);
+            frame(vec![Event::WindowFocused(false)], false);
+            assert!(ctx.input(|i| !i.focused && i.modifiers.is_none()));
+            // Hovering over the unfocused window while holding Ctrl updates egui's modifiers.
+            frame(vec![Event::ModifiersChanged(ctrl), Event::PointerMoved(at)], false);
+            assert!(ctx.input(|i| !i.focused && i.modifiers.ctrl));
+            // Clicking into the window regains focus without a duplicate ModifiersChanged.
+            frame(
+                vec![Event::WindowFocused(true), Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: ctrl }],
+                true,
+            );
+            assert!(ctx.input(|i| i.focused && i.modifiers.ctrl), "tracked={tracked}: Ctrl must stay held");
+            assert!(ctx.input(|i| i.pointer.middle_down()), "tracked={tracked}: fresh middle press stays held");
+        }
+    }
+
+    #[test]
+    fn a_fresh_button_press_while_unfocused_is_not_released_when_focus_arrives() {
+        let mut h = Hooked::new();
+        let at = pos2(80.0, 90.0);
+        h.frame(vec![Event::WindowFocused(true), Event::PointerMoved(at)], true, |_| {});
+        h.frame(vec![Event::WindowFocused(false)], false, |_| {});
+        // User presses the middle button while the window is still unfocused.
+        h.frame(vec![Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Default::default() }], false, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.middle_down()));
+        // Focus and held modifiers arrive on the following frame.
+        let ctrl = egui::Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+        h.frame(vec![Event::WindowFocused(true), Event::ModifiersChanged(ctrl)], true, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.middle_down()), "fresh unfocused press must not be killed on focus gain");
+        assert!(h.ctx.input(|i| i.modifiers.ctrl), "modifiers arriving with focus must apply");
     }
 }

@@ -182,6 +182,7 @@ fn shell_planar_format13_keeps_v12_documents_and_refuses_future() {
     crate::format::pieces_in_shell_order(&mut legacy["features"]);
     for f in legacy["features"].as_array_mut().into_iter().flatten() {
         f["kernel_piece_order"] = json!(true);
+        f["least_face_piece_order"] = json!(true);
     }
     assert_eq!(legacy, current, "the migration preserves every prior field");
     legacy["format"] = json!(crate::format::format_string(crate::format::FORMAT + 1));
@@ -416,7 +417,16 @@ fn saved_stepped_tab_cut_piece_projection_is_named_lost_without_expanding_materi
         doc.feature_mut(id).unwrap().body_names = vec![name.into()];
     }
     doc.add_feature(
-        FeatureKind::Combine { target: "Case".into(), tools: vec!["Tab".into()], operation: crate::Operation::Join, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Case".into(),
+            tools: vec!["Tab".into()],
+            operation: crate::Operation::Join,
+            keep_tools: false,
+            offset: None,
+            offset_edges: crate::OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         None,
     )
     .unwrap();
@@ -431,7 +441,16 @@ fn saved_stepped_tab_cut_piece_projection_is_named_lost_without_expanding_materi
         .unwrap();
     doc.feature_mut(tool).unwrap().body_names = vec!["Pocket tool".into()];
     doc.add_feature(
-        FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Case".into(),
+            tools: vec!["Pocket tool".into()],
+            operation: crate::Operation::Cut,
+            keep_tools: false,
+            offset: None,
+            offset_edges: crate::OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         Some("Pocket"),
     )
     .unwrap();

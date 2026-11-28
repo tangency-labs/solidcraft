@@ -127,6 +127,9 @@ pub enum PathStyle {
     /// Collect consecutive lines and circular arcs into polylines with signed bulges.
     /// Other curves retain their exact representation and interrupt the polyline run.
     /// An arc that cannot preserve its support as a bulge retains its ARC entity instead.
+    /// A line or free-form piece whose support points the encoding writes as one point,
+    /// though they differ in storage, adds no vertex and no entity: the run goes on from its
+    /// end, written where its start is. Alone it draws nothing, so it yields no entity.
     Polyline,
     /// Fit free-form pieces with the existing bounded line/arc fitter.
     /// Its sampling is not an analytic, uniform error certificate.
@@ -205,7 +208,8 @@ pub fn admit_path(path: PlanarPath<'_>, style: PathStyle) -> Result<()> {
     Ok(())
 }
 
-/// Convert a path without mutating it, dropping pieces, or changing their order.
+/// Convert a path without mutating it, dropping pieces, or changing their order, except that
+/// [`PathStyle::Polyline`] merges a piece written as one point into its neighbours.
 ///
 /// Invalid options are rejected even for empty paths. Input pieces, output entities and
 /// accumulated polyline vertices each have a separate limit of 200,000. The caller handles
@@ -640,6 +644,9 @@ struct Polylines {
     run: Run,
     vertices: usize,
     uninterrupted: bool,
+    /// Pieces written as one point before the first vertex of an uninterrupted path: the first
+    /// one's start and the last one's end. A closed path may close through them.
+    lead: Option<(Vec2, Vec2)>,
 }
 
 impl Polylines {
@@ -671,6 +678,8 @@ impl Polylines {
             // incoming endpoint with the outgoing one, or bridge them with a straight edge.
             self.flush(false)?;
             self.uninterrupted = false;
+        } else if self.run.vertices.is_empty() && self.lead.is_some_and(|(_, end)| end != a) {
+            self.uninterrupted = false;
         }
         if !(a.is_finite() && b.is_finite() && bulge.is_finite()) {
             return Err(piece.invalid("non-finite polyline vertex or bulge"));
@@ -700,6 +709,70 @@ impl Polylines {
         self.uninterrupted = false;
         push_shape(&mut self.shapes, shape)
     }
+
+    /// A piece from `a` to `b` that is written as one point ([`written_as_one_point`]). It adds
+    /// no vertex: a run ending at `a` goes on from `b`, which is written where `a` is, so the
+    /// file holds the same polyline without two vertices on one written point.
+    fn point(&mut self, a: Vec2, b: Vec2) {
+        match self.run.end {
+            Some(end) if end == a => self.run.end = Some(b),
+            None if self.uninterrupted
+                && self.run.vertices.is_empty()
+                && self.shapes.is_empty() =>
+            {
+                self.lead = match self.lead {
+                    None => Some((a, b)),
+                    Some((start, end)) if end == a => Some((start, b)),
+                    Some(_) => {
+                        self.uninterrupted = false;
+                        None
+                    }
+                };
+            }
+            // Apart from the run or after another entity: nothing to draw, but the path is no
+            // longer one run.
+            Some(_) | None => self.uninterrupted = false,
+        }
+    }
+}
+
+/// Whether the caller writes every support point of `seg` as one and the same point although
+/// they are not all equal in storage: a line whose ends meet on the writer's grid, or a
+/// free-form piece whose controls (and so, inside their hull, the whole curve) do. Written as
+/// its own entity it would be a zero-length one. An arc is never one: its written ends can
+/// meet while it sweeps a whole turn, and its centre, radius and angles are certified
+/// separately. A point that cannot be encoded is left to the exact conversion's refusal.
+fn written_as_one_point(seg: &Seg2, encoding: ScalarEncoding) -> bool {
+    let (line, conic, cubic);
+    let support: &[Vec2] = match *seg {
+        Seg2::Line { a, b } => {
+            line = [a, b];
+            &line
+        }
+        Seg2::Conic { a, apex, b, .. } => {
+            conic = [a, apex, b];
+            &conic
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => {
+            cubic = [p0, p1, p2, p3];
+            &cubic
+        }
+        Seg2::Bezier { n, ref p } => match p.get(..=usize::from(n)) {
+            Some(p) => p,
+            None => return false,
+        },
+        Seg2::Arc { .. } => return false,
+    };
+    let Some(first) = support.first() else {
+        return false;
+    };
+    let Some(written) = encoded_point(*first, encoding) else {
+        return false;
+    };
+    support.iter().any(|p| p != first)
+        && support
+            .iter()
+            .all(|p| encoded_point(*p, encoding) == Some(written))
 }
 
 fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Vec<Shape>> {
@@ -708,12 +781,18 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
         run: Run::default(),
         vertices: 0,
         uninterrupted: true,
+        lead: None,
     };
     for (index, seg) in segs.iter().enumerate() {
         let piece = Piece {
             index,
             total: segs.len(),
         };
+        if written_as_one_point(seg, encoding) {
+            // Its own entity would have zero length as written: it joins its neighbours.
+            out.point(seg.start(), seg.end());
+            continue;
+        }
         match *seg {
             Seg2::Line { a, b } => {
                 // The exact conversion refuses endpoints that cannot be written or collapse.
@@ -772,14 +851,17 @@ fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Ve
     // outgoing bulge stays on the final vertex; the first vertex is not appended a second time.
     // A single authored zero-length line stays an open two-vertex entity; it cannot form a
     // writable one-vertex closed polyline. Exact preserves the original LINE unchanged.
+    // Pieces written as one point before the first vertex close the loop when they lead from
+    // the run's end to its first vertex.
     let close = closed
         && out.uninterrupted
         && out.run.vertices.len() >= 2
-        && out
-            .run
-            .vertices
-            .first()
-            .is_some_and(|first| Some(first.at) == out.run.end);
+        && out.run.vertices.first().is_some_and(|first| {
+            Some(first.at) == out.run.end
+                || out
+                    .lead
+                    .is_some_and(|(start, end)| end == first.at && Some(start) == out.run.end)
+        });
     out.flush(close)?;
     Ok(out.shapes)
 }

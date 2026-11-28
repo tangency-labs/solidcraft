@@ -467,11 +467,30 @@ fn groups(t: &Tokens) -> Vec<Group> {
     out.push(group("preferences note", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]));
     out.push(group("preferences success", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]));
     out.push(group("preferences accent ink", &[("pref_on_accent", t.pref_on_accent)], &[("form_primary", t.form_primary)]));
+    // Each kind of drawing line (#18989) and the ink, on a white and a dark sheet: one set for every eye, so no
+    // mode changes them (`each_kind_of_sheet_line_reads_on_its_paper` in the theme crate).
+    for (name, paper, ink, lines) in [
+        ("white sheet lines", ("paper_white", t.paper_white), ("paper_ink", t.paper_ink), ("paper_lines", t.paper_lines)),
+        ("dark sheet lines", ("paper_dark", t.paper_dark), ("paper_dark_ink", t.paper_dark_ink), ("paper_dark_lines", t.paper_dark_lines)),
+    ] {
+        let kinds = sheet_line_names(lines.0);
+        let mut members: Vec<(&'static str, Color32)> = kinds.iter().zip(lines.1).map(|(n, c)| (*n, c)).collect();
+        members.push(ink);
+        out.push(group(name, &members, &[paper]));
+    }
     // The removed part of a cut preview is translucent over the body.
     if let Some(sel) = out.iter_mut().find(|g| g.name == "selection") {
         sel.members.push(("preview_cut", over(t.preview_cut, t.body)));
     }
     out
+}
+
+/// The names of a set of sheet line colours, in `PaperLine` order (`paper_lines[0]`…).
+fn sheet_line_names(set: &'static str) -> [&'static str; 5] {
+    match set {
+        "paper_lines" => ["paper_lines[0]", "paper_lines[1]", "paper_lines[2]", "paper_lines[3]", "paper_lines[4]"],
+        _ => ["paper_dark_lines[0]", "paper_dark_lines[1]", "paper_dark_lines[2]", "paper_dark_lines[3]", "paper_dark_lines[4]"],
+    }
 }
 
 /// Measured by the shaded check in `every_mode_keeps_colours_apart_for_its_eye`.
@@ -480,14 +499,10 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
-    ("paper_white", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
     ("paper_blueprint", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
     ("paper_blueprint_ink", "the drawing's one ink on a blueprint sheet; no category is told by its colour"),
     ("paper_prussian_blue", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
     ("paper_prussian_blue_ink", "the drawing's one ink on a Prussian blue sheet; no category is told by its colour"),
-    ("paper_dark", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
-    ("paper_ink", "the drawing's one ink on a light sheet, as printed; no category is told by its colour"),
-    ("paper_dark_ink", "the drawing's one ink on a dark sheet; no category is told by its colour"),
     ("library_highlights", "user-assigned named labels, not application status; menu/tooltip name each colour and library tests guard card contrast"),
     ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
     ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
@@ -503,6 +518,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("nav_tip_ink", "neutral tooltip text; words identify the control and value"),
     ("nav_tip_key_border", "neutral keycap outline; its key label carries the meaning"),
     ("nav_viewport", "neutral preview-stage background, not model or status colour"),
+    ("viewport_middle", "the user's own background colour halfway down the view (#9230); themes have none"),
     ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
@@ -628,6 +644,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("sel_edge_rim", "selection highlight"),
     ("hover_edge", "hover highlight"),
     ("hover_edge_halo", "hover highlight"),
+    ("hover_edge_lit", "hover highlight"),
     ("sel_profile", "selection highlight"),
     ("sel_profile_edge", "selection highlight"),
     ("hover_profile", "hover highlight"),

@@ -626,7 +626,8 @@ fn hostile_arguments_are_refused() {
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3]), flat], Ends::Capped).err(), Some(Error::Argument), "a singular map");
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3])], Ends::Capped).err(), Some(Error::Argument), "one station");
     assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 0.0, 1.0, None, 1e-3, false).err(), Some(Error::Argument), "no pitch");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
+    let past = solidcore_ops::sweep::SCREW_MAX_TURNS + 1.0;
+    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, past, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
     assert_eq!(
         screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3, false).err(),
         Some(Error::Argument),
@@ -637,4 +638,74 @@ fn hostile_arguments_are_refused() {
     assert_eq!(project_curves(&b, [0.5; 3], 0.01, &sq, [0.0; 3], 1e-6).err(), Some(Error::Argument), "no direction");
     assert_eq!(project_curves(&b, [0.5; 3], 0.0, &sq, Z, 1e-6).err(), Some(Error::Argument), "no pick tolerance");
     assert_eq!(face_section(&b, [0.5; 3], 0.01, [0.5; 3], [0.0; 3], 1e-6).err(), Some(Error::Argument), "no plane normal");
+}
+
+/// Parity: SolidCraft's sweep along a path none of its exact sweeps takes (a closed path, a
+/// corner, a curve) is solidcore-ops' `curve_sweep` under the capi's contract, bit for bit: the
+/// body's native bytes and the three placements, or a refusal from both. Round a closed path the
+/// profiles with holes are swept loop by loop there, the holes' tubes taken away.
+#[test]
+fn routed_curve_sweeps_are_solidcore_ops() {
+    use super::sweep::ops_curves;
+    use solidcore_ops::sweep as ops;
+    // a w x h rectangle square to the paths' start (0, -20, 0), either way round
+    let rect = |w: f64, h: f64, backwards: bool| {
+        let (y, z) = (w / 2.0, h / 2.0);
+        let mut p = vec![[0.0, -20.0 - y, -z], [0.0, -20.0 + y, -z], [0.0, -20.0 + y, z], [0.0, -20.0 - y, z]];
+        if backwards {
+            p.reverse();
+        }
+        polygon(&p)
+    };
+    let disc = |r: f64, axis: f64| circle([0.0, -20.0, 0.0], [axis, 0.0, 0.0], [0.0, 1.0, 0.0], r);
+    let profiles = [
+        rect(4.0, 3.0, false),
+        [rect(4.0, 3.0, false), rect(2.0, 1.0, true)].concat(),
+        [rect(6.0, 3.0, false), rect(1.0, 1.0, false), rect(1.0, 1.0, true)].concat(),
+        vec![disc(2.0, 1.0), disc(1.0, -1.0)],
+    ];
+    let arc8 = |c: [f64; 3], r: [f64; 3]| Curve::Arc { center: c, axis: Z, reference: r, radius: 8.0, start: 0.0, end: FRAC_PI_2 };
+    let rounded = vec![
+        line([0.0, -20.0, 0.0], [22.0, -20.0, 0.0]),
+        arc8([22.0, -12.0, 0.0], [0.0, -1.0, 0.0]),
+        line([30.0, -12.0, 0.0], [30.0, 12.0, 0.0]),
+        arc8([22.0, 12.0, 0.0], [1.0, 0.0, 0.0]),
+        line([22.0, 20.0, 0.0], [-22.0, 20.0, 0.0]),
+        arc8([-22.0, 12.0, 0.0], [0.0, 1.0, 0.0]),
+        line([-30.0, 12.0, 0.0], [-30.0, -12.0, 0.0]),
+        arc8([-22.0, -12.0, 0.0], [-1.0, 0.0, 0.0]),
+        line([-22.0, -20.0, 0.0], [0.0, -20.0, 0.0]),
+    ];
+    let corner = vec![line([0.0, -20.0, 0.0], [20.0, -20.0, 0.0]), line([20.0, -20.0, 0.0], [20.0, 10.0, 0.0])];
+    let curve = vec![Curve::Nurbs {
+        degree: 3,
+        points: vec![[0.0, -20.0, 0.0, 1.0], [10.0, -20.0, 0.0, 1.0], [20.0, -15.0, 5.0, 1.0], [30.0, -5.0, 5.0, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    }];
+    let bits = |m: &[Affine; 3]| m.iter().flat_map(|a| a.m.iter().flatten().chain(&a.t).map(|x| x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let ops_bits =
+        |m: &[ops::Affine; 3]| m.iter().flat_map(|a| a.m.iter().flatten().chain(&a.t).map(|x| x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let mut swept = 0;
+    for path in [&rounded, &corner, &curve] {
+        for profile in &profiles {
+            for (frame, of) in [(SweepFrame::Follow, ops::SweepFrame::Follow), (SweepFrame::Translate, ops::SweepFrame::Translate)] {
+                for cap in [true, false] {
+                    let ours = sweep_placed(profile, path, frame, cap);
+                    let direct = ops::curve_sweep(&ops_curves(profile), &ops_curves(path), of, cap, solidcore_ops::Contract::Closed);
+                    match (ours, direct) {
+                        (Ok((b, m)), Ok((ob, om))) => {
+                            assert_eq!(b.to_smb(false).unwrap(), ob.to_smb(false).unwrap(), "{frame:?} {cap} {profile:?} {path:?}");
+                            assert_eq!(bits(&m), ops_bits(&om));
+                            swept += 1;
+                        }
+                        (Err(_), Err(_)) => {}
+                        (ours, direct) => {
+                            panic!("{frame:?} {cap}: {:?} against {:?}", ours.map(|(b, _)| counts(&b)), direct.map(|(b, _)| counts(&b).unwrap()))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(swept >= 24, "{swept} sweeps compared");
 }

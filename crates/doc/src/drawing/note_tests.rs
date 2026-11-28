@@ -35,10 +35,11 @@ fn noted() -> (Drawing, [u64; 3]) {
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
-    let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge, along: None }];
     let mut added = [0; 3];
     for (anchor, id) in anchors.into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
@@ -231,7 +232,7 @@ fn an_anchor_moves_to_a_view() {
     let edge = ModelEdge { body: "B".into(), origin_feature: 4, name: "e".into(), path: vec![] };
     assert_eq!(Anchor::Sheet(1).on_view(9), Anchor::Sheet(1));
     assert_eq!(Anchor::View(1).on_view(9), Anchor::View(9));
-    assert_eq!(Anchor::Edge { view: 1, edge: edge.clone() }.on_view(9), Anchor::Edge { view: 9, edge });
+    assert_eq!(Anchor::Edge { view: 1, edge: edge.clone(), along: None }.on_view(9), Anchor::Edge { view: 9, edge, along: None });
     assert_eq!(Anchor::Sheet(1).view(), None);
     assert_eq!(Anchor::View(2).view(), Some(2));
 }
@@ -245,7 +246,7 @@ fn a_note_is_on_its_sheet_or_its_views() {
     let second = d.allocate_id(&mut id_source).unwrap();
     d.sheets.insert(0, Arc::new(crate::drawing::Sheet { id: second, name: "Sheet 0".into(), ..(*d.sheets[0]).clone() }));
     let edge = ModelEdge { body: "B".into(), origin_feature: 4, name: "e".into(), path: vec![] };
-    let anchors = [Anchor::Sheet(second), Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    let anchors = [Anchor::Sheet(second), Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge, along: None }];
     assert_eq!(anchors.map(|anchor| d.sheet_of(&anchor)), [Some(0), Some(1), Some(1), Some(1)]);
     assert_eq!([Anchor::Sheet(99), Anchor::View(99)].map(|anchor| d.sheet_of(&anchor)), [None, None]);
 }

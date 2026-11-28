@@ -7,7 +7,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
 use solidcore_record::{Region2, Seg2, Vec3};
-use solidcraft_doc::sheet::ReliefShape;
+use solidcraft_doc::sheet::{BendReliefShape, ReliefShape};
 use solidcraft_doc::{ConvertRule, SheetFaces, SurfaceConversion, convert_surfaces};
 use solidcraft_geom::Aabb3;
 
@@ -82,6 +82,7 @@ const TEST: ConvertRule = ConvertRule {
     corner_relief_size: 8.0,
     relief_width: 2.0,
     relief_depth: 1.0,
+    bend_relief: BendReliefShape::Rectangular,
 };
 
 /// A channel whose bends are modeled with the rule's radius, one thickness inside: recognized
@@ -675,6 +676,7 @@ fn a_tombstone_rips_along_its_round_as_along_its_sides() {
         corner_relief_size: 10.0,
         relief_width: 0.1,
         relief_depth: 1.25,
+        bend_relief: BendReliefShape::Rectangular,
     };
     let outside = tombstone_body("Outside", 27.5, -23.0, 0.0, 36.0);
     let inside = tombstone_body("Inside", 25.0, -20.5, 2.5, 33.5);

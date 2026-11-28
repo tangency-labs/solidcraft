@@ -462,7 +462,7 @@ pub fn read_part_from_db(
         // not upstream: every UV trim curve the part keeps is held to its edge by a proved
         // bound, as a B-rep file's read holds it after its end check
         // (`p2::cover_kept_uv_trim_curves`)
-        crate::topology::brep::p2::cover_kept_uv_trim_curves(k, &mut b)?;
+        crate::topology::brep::p2::cover_kept_uv_trim_curves(k, &mut b, false)?;
         breps.push(b);
         after_item(db, start, OP_PART)?;
     }

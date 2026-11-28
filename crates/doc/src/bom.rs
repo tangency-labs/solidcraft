@@ -23,7 +23,8 @@
 //! material typed in for a component ([`metadata::MATERIAL`](crate::metadata::MATERIAL)) is what
 //! its rows say instead, in every view and at every level ([`Row::statics`]), and what it stands
 //! for in the one material an assembly around it shares: the bill of materials says one thing
-//! about the part everywhere. It only names: mass still comes from the bodies.
+//! about the part everywhere. It only names: mass still comes from the bodies. A design that is
+//! one part (its own bodies, nothing placed) holds its static material, and its finish, itself.
 //!
 //! A row's [`Quantity`] adds up what each of its placements means ([`quantity`]): each definition's
 //! quantity is evaluated once for every list made from the [`Tree`].
@@ -227,6 +228,9 @@ pub struct Row {
     pub part_number: String,
     pub description: String,
     pub revision: String,
+    /// Its finish: the first of its definitions' finish properties, else the first free property
+    /// named `finish` (what a part had before it was a property of its own).
+    pub finish: String,
     /// The definitions' free properties; where several give one name, the first's.
     pub properties: BTreeMap<String, String>,
     /// The physical materials of what one of its parts stands for, each once, in body order: a
@@ -285,9 +289,10 @@ pub enum Unlisted {
     NotFound,
     /// It counts as a reference, or is inside one: no bill of materials counts it.
     Reference,
-    /// It has no row of its own and isn't inside one: a phantom without bodies, a part a
-    /// configuration switches off, or in parts only a subassembly listed through its parts (the
-    /// assembly listed, an empty path, is none either).
+    /// It has no row of its own and isn't part of what the row around it stands for: a phantom
+    /// without bodies, a part a configuration switches off, or in parts only a subassembly listed
+    /// through its parts, even inside a subassembly whose own bodies are a row (the assembly listed,
+    /// an empty path, is none either).
     NoRow,
 }
 
@@ -309,29 +314,30 @@ impl Bom {
     }
 
     /// The row a placement is counted in, by its occurrence path from the assembly listed: the row
-    /// that lists it, else the row of the part it is inside (a nut inside a purchased bolt is
-    /// counted in the bolt's), but none for a part switched off that the list doesn't list. `tree`
-    /// is the one the list was made from, with its members
-    /// (`list_with`).
+    /// that lists it, else the row of the part it is inside when it is part of what that row stands
+    /// for ([`Tree::adds_to`]: a nut inside a purchased bolt is counted in the bolt's), else none.
+    /// `tree` is the one the list was made from, with its members (`list_with`).
     pub(crate) fn row_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<(Vec<u32>, &Row), Unlisted> {
         if path.len() > MAX_PLACEMENT_DEPTH {
             return Err(Unlisted::NotFound);
         }
+        let mut members = Vec::with_capacity(path.len());
         let mut component = self.source;
         for id in path {
             let placed = tree.contents(component).iter().find(|p| p.occurrence == *id).ok_or(Unlisted::NotFound)?;
             if placed.member.bom_type == BomType::Reference {
                 return Err(Unlisted::Reference);
             }
+            members.push(placed.member);
             component = placed.member.component;
         }
-        // A part switched off counts nowhere unless the list lists it: not in the row it is inside.
-        if tree.switched_off(component) && !self.index.contains_key(path) {
-            return Err(Unlisted::NoRow);
-        }
-        // Each placement is in one row or none, so the longest member path it starts with is its row's.
-        let at = (1..=path.len()).rev().find_map(|n| path.get(..n).and_then(|start| self.index.get(start)));
-        at.and_then(|at| self.row_at(at)).ok_or(Unlisted::NoRow)
+        // Each placement is in one row or none, so the longest member path it starts with is the row
+        // it may count in; it does when everything below that row is part of what the row stands for.
+        let found = (1..=path.len()).rev().find_map(|n| Some((n, self.index.get(path.get(..n)?)?)));
+        let (n, at) = found.ok_or(Unlisted::NoRow)?;
+        let (item, row) = self.row_at(at).ok_or(Unlisted::NoRow)?;
+        let below = members.get(n..).unwrap_or_default();
+        if below.iter().all(|m| tree.adds_to(row.stands_for, *m)) { Ok((item, row)) } else { Err(Unlisted::NoRow) }
     }
 
     /// The row at `at` (its position among the rows, then among each one's children), with its item
@@ -466,6 +472,7 @@ impl<'a> Tree<'a> {
             part_number: metadata.part_number().unwrap_or_default().to_string(),
             description: metadata.description().unwrap_or_default().to_string(),
             revision: metadata.revision().unwrap_or_default().to_string(),
+            finish: metadata.finish().unwrap_or_default().to_string(),
             properties: BTreeMap::new(),
             // Filled in by `name_materials`.
             materials: Vec::new(),
@@ -499,17 +506,27 @@ impl<'a> Tree<'a> {
         None
     }
 
-    /// The components placed in `id` whose parts are part of what `id` stands for as `holds` says
-    /// (see `adds`), one for each placement, with the type each counts as there. A part switched off
-    /// isn't, whatever the list shows: it weighs nothing, and its static material names nothing.
-    fn adding(&self, id: u64, holds: Holds) -> Vec<Member> {
-        let adds_here = |p: &&Placed| adds(holds, p.member.bom_type) && !self.switched_off(p.member.component);
-        self.contents(id).iter().filter(adds_here).map(|p| p.member).collect()
+    /// A placement of `member` inside a part is part of what the part stands for as `holds` says (see
+    /// `adds`). A part switched off isn't, whatever the list shows: it weighs nothing, and its static
+    /// material names nothing. What a row weighs and is made of, and the row a placement below it
+    /// counts in ([`Bom::row_of`]), all follow this.
+    fn adds_to(&self, holds: Holds, member: Member) -> bool {
+        adds(holds, member.bom_type) && !self.switched_off(member.component)
     }
 
-    /// The static material typed in for a component, if any.
+    /// The components placed in `id` that are part of what `id` stands for as `holds` says
+    /// ([`Tree::adds_to`]), one for each placement, with the type each counts as there.
+    fn adding(&self, id: u64, holds: Holds) -> Vec<Member> {
+        self.contents(id).iter().map(|p| p.member).filter(|m| self.adds_to(holds, *m)).collect()
+    }
+
+    /// The static material typed in for a component (0: the design), if any.
     fn static_material(&self, id: u64) -> Option<&'a str> {
-        self.components.get(&id).and_then(|c| c.metadata.material())
+        match id {
+            // The design: a single part holds its own.
+            0 => self.doc.metadata.material(),
+            _ => self.components.get(&id).and_then(|c| c.metadata.material()),
+        }
     }
 
     fn own_bodies(&self, id: u64) -> &[&'a ModelBody] {
@@ -607,6 +624,7 @@ impl<'a> Tree<'a> {
             part_number: String::new(),
             description: String::new(),
             revision: String::new(),
+            finish: String::new(),
             properties: BTreeMap::new(),
             count,
             // Rows with different kits are different rows, to any depth, so every part of the parent
@@ -635,6 +653,15 @@ impl<'a> Tree<'a> {
                 row.properties.entry(k.clone()).or_insert_with(|| v.clone());
             }
         }
+        // A finish property wins over a free property of that name, whichever definition has it.
+        row.finish = row
+            .components
+            .iter()
+            .filter_map(|id| self.components.get(id))
+            .find_map(|c| c.metadata.finish())
+            .map(str::to_string)
+            .or_else(|| row.properties.get(crate::metadata::FINISH).filter(|f| !f.is_empty()).cloned())
+            .unwrap_or_default();
         Some(row)
     }
 
@@ -700,6 +727,48 @@ impl<'a> Tree<'a> {
         }
         self.made_of.insert((id, holds), names.clone());
         Ok(names)
+    }
+
+    /// Measure the volumes of every uncached body reachable from `seeds` in parallel so that
+    /// [`Tree::weigh`] reads warm caches in deterministic tree order.
+    fn warm_volumes(&self, seeds: &[(u64, Holds)]) {
+        let mut visited: HashSet<(u64, Holds)> = HashSet::new();
+        let mut stack: Vec<(u64, Holds, usize)> = Vec::new();
+        for &(id, holds) in seeds {
+            if !self.weighed.contains_key(&(id, holds)) && visited.insert((id, holds)) {
+                stack.push((id, holds, 0));
+            }
+        }
+        let mut seen_bodies: HashSet<usize> = HashSet::new();
+        let mut cold: Vec<&ModelBody> = Vec::new();
+        while let Some((id, holds, depth)) = stack.pop() {
+            if depth > MAX_PLACEMENT_DEPTH {
+                continue;
+            }
+            if holds == Holds::Own {
+                for &body in self.own_bodies(id) {
+                    if !body.has_cached_volume() && seen_bodies.insert(std::ptr::from_ref(body) as usize) {
+                        cold.push(body);
+                    }
+                }
+            } else {
+                if !self.weighed.contains_key(&(id, Holds::Own)) && visited.insert((id, Holds::Own)) {
+                    stack.push((id, Holds::Own, depth));
+                }
+                for child in self.adding(id, holds) {
+                    if !self.weighed.contains_key(&(child.component, holds)) && visited.insert((child.component, holds)) {
+                        stack.push((child.component, holds, depth + 1));
+                    }
+                }
+            }
+        }
+        if cold.len() > 1 {
+            solidcraft_kernel::for_each_on_threads(&cold, 16, |body| {
+                if !solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+                    let _ = body.volume();
+                }
+            });
+        }
     }
 
     /// Each row's mass, and its children's.
@@ -943,6 +1012,7 @@ impl Tree<'_> {
         if id != 0 && !self.components.contains_key(&id) {
             return Err(DocError::Unknown(format!("component {id}")));
         }
+        self.warm_volumes(&[(id, Holds::All)]);
         let mass = agree(&[self.weigh(id, Holds::All, 0)?]);
         Ok((mass, self.made_of(id, Holds::All, 0)?))
     }
@@ -983,6 +1053,13 @@ pub fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Result<Bo
     }
     tree.name_materials(&mut bom.rows)?;
     if request.mass {
+        let mut seeds: Vec<(u64, Holds)> = vec![(request.source, Holds::All)];
+        for (_, row) in bom.rows_deep() {
+            for &c in &row.components {
+                seeds.push((c, row.stands_for));
+            }
+        }
+        tree.warm_volumes(&seeds);
         tree.weigh_rows(&mut bom.rows)?;
         // After the rows, so what their definitions weigh is kept: only what no row holds (the
         // assembly's own bodies) is measured again.

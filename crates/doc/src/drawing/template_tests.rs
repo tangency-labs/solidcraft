@@ -26,7 +26,7 @@ fn note(d: &Drawing) -> Option<&str> {
     d.sheets[0].title_block_overrides.get("general_tolerances").map(String::as_str)
 }
 
-/// Every built-in is a template on its ISO paper (A4 upright, the rest flat) with the ISO border
+/// Every built-in is a template on its ISO paper, lying flat (A4 too), with the ISO border
 /// and the built-in title block, a part's with the part note typed over its general tolerances and
 /// an assembly's with the assembly note, the same bytes each time it is made. Each size comes as
 /// both. Another name is none.
@@ -46,8 +46,7 @@ fn every_built_in_is_a_template_on_its_paper() {
         assert_eq!(d.sheets[0].title_block_overrides.get("document_type").map(String::as_str), Some(want), "{name}: its document type");
         let SheetSize::Standard(paper) = sheet.sheet.size else { panic!("{name}: a standard size") };
         assert_eq!(serde_json::to_value(paper).unwrap(), serde_json::json!(size), "{name}");
-        let upright = if size == "a4" { Orientation::Portrait } else { Orientation::Landscape };
-        assert_eq!((sheet.sheet.orientation, &sheet.border), (upright, &Some(DrawingBorderProfile::iso())), "{name}");
+        assert_eq!((sheet.sheet.orientation, &sheet.border), (Orientation::Landscape, &Some(DrawingBorderProfile::iso())), "{name}");
         assert_eq!(sheet.title_block, Some(title_block::default_block()), "{name}: the built-in block");
         assert_eq!(d.name, format!("ISO {}", size.to_uppercase()));
         assert_eq!(title(name), Some(d.name.clone()), "{name}: its title without making it");

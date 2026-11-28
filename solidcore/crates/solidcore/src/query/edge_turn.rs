@@ -10,6 +10,7 @@
 //! | [`turn_at`]   | (none)   |
 //! | [`convex_at`] | (none)   |
 //! | [`joint_turn`] | (none)  |
+//! | [`turn_to_parallel`] | (none) |
 //!
 //! Deviations: no upstream counterpart.
 
@@ -18,7 +19,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::interval_vector::{cross as cross_ivl, dot as dot_ivl, norm as norm_ivl};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Vec3, PI};
 use crate::nurbs::math::UNIT;
 use crate::query::tangent_edge::face_use_normal;
 use crate::topology::edgeuse::p1 as eu1;
@@ -246,4 +247,46 @@ pub fn joint_turn(before: [f64; 2], after: [f64; 2]) -> Result<f64> {
         return Err(invalid("direction is not finite"));
     }
     Vec2::from(before).angle_between(Vec2::from(after))
+}
+
+/// The turn about an axis that makes a plane normal's tangent parallel to a line, with the two
+/// measures a caller compares with tolerances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareTurnMeasure {
+    /// [`Vec3::square_turn`] of the axis, normal and line, in radians. `0.0` when the line or
+    /// the normal is along the axis (the turn means nothing then; the other two measures say so).
+    pub turn: f64,
+    /// `|n·a|` for the unit normal `n` and unit axis `a`: 0 when the normal is square to the axis.
+    pub normal_along_axis: f64,
+    /// The angle between the line and the axis, in [0, PI/2] (the line has no sense).
+    pub line_off_axis: f64,
+}
+
+/// Measure the turn about `axis` that makes a direction square to `axis` (given by its normal
+/// `normal`) parallel to `line`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a zero or non-finite vector.
+pub fn turn_to_parallel(axis: Vec3, normal: Vec3, line: Vec3) -> Result<SquareTurnMeasure> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(axis) && finite(normal) && finite(line)) {
+        return Err(invalid("non-finite vector"));
+    }
+    let axis = axis.unitize()?;
+    let normal = normal.unitize()?;
+    let line = line.unitize()?;
+    let normal_along_axis = normal.dot(axis).abs();
+    let angle = axis.angle_between(line)?;
+    let line_off_axis = if angle > PI / 2.0 { PI - angle } else { angle };
+    let turn = if line_off_axis < 1e-9 || normal_along_axis > 1.0 - 1e-9 {
+        0.0
+    } else {
+        axis.square_turn(normal, line)?
+    };
+    Ok(SquareTurnMeasure {
+        turn,
+        normal_along_axis,
+        line_off_axis,
+    })
 }

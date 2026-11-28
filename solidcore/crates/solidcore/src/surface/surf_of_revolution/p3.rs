@@ -65,6 +65,10 @@
 //!   `SmBSplineSurface::CalculateBoundingBox`); the NURB has no owner, so its zone
 //!   tolerance expansion finds no face (`GetFace()` is `NULL`), as for a surface of
 //!   revolution outside a face upstream.
+//! - **Coaxial faces in contact** (not upstream, #15049). Where both surfaces are faces'
+//!   (`revolved_contact_tol`), the generators of `intersect_revolved_into` are intersected
+//!   at the contact tolerance, so generators a hair less than tangent touch at one point
+//!   and the surfaces along one circle; bare surfaces keep upstream's crossings.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::CurvePropertyType;
@@ -86,7 +90,7 @@ use crate::geom::global_solver::{
 use crate::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, contact_tol_3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -99,7 +103,7 @@ use crate::nurbs::b_spline_surface::{
 };
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::srf_basic::Direction;
-use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
+use crate::surface::surface::p2::{Surface, SurfaceIntersection, TsectCurveType};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 use super::p1::{
@@ -182,7 +186,7 @@ fn surface_local_point_solve<O: Copy>(
     guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
     // the SmSurface body (surface.surface_p5), on a Surface holding a copy
-    let surface = crate::surface::surface::Surface::from(surface.clone_exact());
+    let surface = Surface::from(surface.clone_exact());
     let r = surface.local_point_solve::<O>(k, domain, operation, point, guess)?;
     Ok((r.found, r.solution))
 }
@@ -976,13 +980,23 @@ impl SurfOfRevolution {
         cone: &R,
         cone_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
+        contact_tol: f64,
         out: &mut SurfaceIntersection,
     ) -> Result<bool> {
         if !self.planar_generator {
             *out = SurfaceIntersection::default();
             return Ok(true);
         }
-        intersect_revolved_into(self, k, uv_domain, cone, cone_uv_domain, approx_tol_3d, out)
+        intersect_revolved_into(
+            self,
+            k,
+            uv_domain,
+            cone,
+            cone_uv_domain,
+            approx_tol_3d,
+            contact_tol,
+            out,
+        )
     }
 
     /// [`Self::intersect_with_sphere`] into `out` (reset first). On an error `out` keeps
@@ -994,6 +1008,7 @@ impl SurfOfRevolution {
         sphere: &R,
         sphere_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
+        contact_tol: f64,
         out: &mut SurfaceIntersection,
     ) -> Result<bool> {
         // Can not intersect things with non planar generator curves here
@@ -1008,6 +1023,7 @@ impl SurfOfRevolution {
             sphere,
             sphere_uv_domain,
             approx_tol_3d,
+            contact_tol,
             out,
         )
     }
@@ -1345,6 +1361,21 @@ fn sweep_arc(
     }
 }
 
+/// Not upstream (#15049): the contact tolerance of a coaxial intersection
+/// ([`intersect_revolved_into`]): [`contact_tol_3d`] where both surfaces are faces' (each
+/// has its owner's zone tolerance), as the walls of parallel cylinders read it
+/// (`Cone::intersect_with_cone_on_into`, WR-787); bare surfaces keep upstream's zero.
+pub(crate) fn revolved_contact_tol(k: &Kernel, surfaces: [Option<&Surface>; 2]) -> f64 {
+    if surfaces
+        .iter()
+        .all(|s| s.is_some_and(|s| s.owner_zone_tol_3d().is_some()))
+    {
+        contact_tol_3d(k)
+    } else {
+        0.0
+    }
+}
+
 /// [`SurfOfRevolution::intersect_with_surf_of_revolution`] of the surface of revolution
 /// part of `this`, whose virtual `ConvertDomainFromNURBSToSTEP` converts this side's
 /// domain (an `SmTorus` calling the inherited `IntersectWithSurfOfRevolution`).
@@ -1368,6 +1399,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
         other,
         other_uv_domain,
         approx_tol_3d,
+        0.0,
         &mut out,
     )?;
     Ok((more, out))
@@ -1375,6 +1407,19 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
 
 /// [`intersect_revolved`] into `out` (reset first). On an error `out` keeps what was appended
 /// before it, as upstream leaves its output arrays.
+///
+/// Not upstream (#15049): `contact_tol` is the contact tolerance of the generator
+/// intersection ([`revolved_contact_tol`]). Two coaxial surfaces meet in one circle per
+/// meeting of their generators in a plane through the axis, so where those generators are
+/// a circle and a circle or a line in its plane a hair less than tangent, by less than
+/// `contact_tol`, they touch at one point and the surfaces along one circle (the contact
+/// rule of `docs/booleans.md` §6). Upstream's two crossings lie `2√(2rδ)` apart across the
+/// contact, wherever the rounding of the two surfaces puts them, while the surfaces stay
+/// within δ of each other between them: a cut whose arc runs tangentially into its line at
+/// a corner, swept round the axis of a cylinder that line sweeps onto, crossed that
+/// cylinder a few hundredths of a millimetre from the corner's edge, within the tolerance
+/// of both of the tool's faces there, and the imprint failed (#15049). Zero keeps
+/// upstream's crossings.
 pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized>(
     this: &T,
     k: &Kernel,
@@ -1382,6 +1427,7 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
     other: &R,
     other_uv_domain: &Extent2d,
     approx_tol_3d: Option<f64>,
+    contact_tol: f64,
     out: &mut SurfaceIntersection,
 ) -> Result<bool> {
     // init output
@@ -1502,8 +1548,15 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
         handles: [Some(GenHandle(0, this_ivl)), Some(GenHandle(1, other_ivl))],
         analytic_handles: [Some(GenHandle(2, this_ivl)), Some(GenHandle(3, other_ivl))],
     };
-    let solutions =
-        this_gen.global_curve_intersect(k, &this_ivl, &other_gen, &other_ivl, tol, &opts)?;
+    let solutions = this_gen.global_curve_intersect_in_contact(
+        k,
+        &this_ivl,
+        &other_gen,
+        &other_ivl,
+        tol,
+        &opts,
+        contact_tol,
+    )?;
 
     // for every genCurve/genCurve solution
     for solution in solutions.as_slice() {

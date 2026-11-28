@@ -13,13 +13,15 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]).
+//!   the feature's `targets` ([`scope_targets`]). Pipe and Thicken don't choose, but this holds
+//!   for them too.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, OPS};
+use crate::dialogs_surface::Surf;
 
 /// Operation indices (see [`OPS`]).
 pub const NEW: usize = 0;
@@ -60,6 +62,12 @@ fn rule(kind: &Kind) -> Option<Rule> {
     }
 }
 
+/// Whether the window's Join, Cut or Intersect takes only the shown bodies: every window that
+/// chooses, and Pipe and Thicken, which don't.
+fn scoped(kind: &Kind) -> bool {
+    rule(kind).is_some() || matches!(kind, Kind::Pipe { .. } | Kind::Surface(Surf::Thicken { .. }))
+}
+
 fn operation(kind: &mut Kind) -> Option<&mut usize> {
     match kind {
         Kind::Extrude { operation, .. }
@@ -69,6 +77,21 @@ fn operation(kind: &mut Kind) -> Option<&mut usize> {
         | Kind::Primitive { operation, .. } => Some(operation),
         _ => None,
     }
+}
+
+/// Preferences › Tools › "Start in New Body" (`new_body_default`, #19870): a new window that
+/// chooses its operation opens in New Body instead, and keeps it as if it were picked by hand.
+pub fn start_new_body(app: &SolveApp, d: &mut Dialog) {
+    if !app.preferences.new_body_default || d.editing.is_some() || rule(&d.kind).is_none() {
+        return;
+    }
+    if let Some(op) = operation(&mut d.kind) {
+        *op = NEW;
+    }
+    if let Kind::Extrude { auto_op, .. } = &mut d.kind {
+        *auto_op = false;
+    }
+    d.op_auto.manual = true;
 }
 
 /// What a check found, with the Join it evaluated when the material joins.
@@ -308,7 +331,7 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 /// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
 /// nothing to change.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if rule(&d.kind).is_none() || d.editing.is_some() {
+    if !scoped(&d.kind) || d.editing.is_some() {
         return Ok(());
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };

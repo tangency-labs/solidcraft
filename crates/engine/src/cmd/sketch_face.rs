@@ -5,6 +5,7 @@ use serde_json::Value;
 use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::SketchPlane;
 
 pub(in crate::cmd) fn is_face(p: &Value) -> bool {
     p.get("plane").and_then(|plane| plane.get("face")).is_some()
@@ -145,6 +146,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
     let mut curved = false;
     // The first body whose faces the kernel could not be asked, for when no other body has the face.
     let mut unread: Option<String> = None;
+    // A flat face that a default placement cannot anchor: refused only when no other face is chosen.
+    let mut needs_fixed: Option<String> = None;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -196,13 +199,35 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
                 if requested_index.is_some_and(|requested| requested != index) {
                     continue;
                 }
-                let Some(exact_plane) = (if fixed {
+                let known = if fixed {
                     body.body.planar_face(index).or_else(|| body.body.face_plane(index))
                 } else {
                     body.body.face_plane(index).or_else(|| body.body.planar_face(index))
-                }) else {
-                    curved = true;
-                    continue;
+                };
+                // A blend or a revolution the kernel finds flat is a plane too, as New Sketch's
+                // picker takes it (`Body::sketch_plane_of_face`); the other faces are as before.
+                let exact_plane = match known {
+                    Some(plane) => plane,
+                    None => match body.body.sketch_plane_of_face(index) {
+                        SketchPlane::Flat(plane) => {
+                            // A default placement anchors to the face's history, which a flat blend
+                            // or revolution gives no exact anchor for; a fixed plane takes the plane.
+                            if !fixed {
+                                needs_fixed
+                                    .get_or_insert_with(|| "this face is flat but has no exact plane it can follow; use a fixed plane".to_string());
+                                continue;
+                            }
+                            plane
+                        }
+                        SketchPlane::NotFlat => {
+                            curved = true;
+                            continue;
+                        }
+                        SketchPlane::Undecided => {
+                            unread.get_or_insert_with(|| "the kernel could not decide this face just now".to_string());
+                            continue;
+                        }
+                    },
                 };
                 let normal = exact_plane.normal();
                 let on_plane = exact_plane.origin;
@@ -224,6 +249,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
         }
     }
     let Some((body, index, path, plane)) = chosen else {
+        if let Some(message) = needs_fixed {
+            return Err(bad(cmd, message));
+        }
         if curved {
             return Err(bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane"));
         }
@@ -312,10 +340,12 @@ pub(in crate::cmd) fn capture_positions(s: &mut Session, plane: &PlaneRef) -> Re
             .iter_mut()
             .find(|occurrence| occurrence.id == *id)
             .ok_or_else(|| bad("sketch attachment", "pending author/source path disappeared"))?;
+        let prev = occurrence.transform;
         occurrence.transform = *matrix;
+        occurrence.adjust_base_for_direct_move(&prev, matrix);
     }
     for (id, _) in changes {
-        s.pending_moves.remove(&id);
+        s.clear_pending_move(id);
     }
     Ok(())
 }

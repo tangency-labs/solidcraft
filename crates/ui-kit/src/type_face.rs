@@ -122,6 +122,8 @@ pub const ARABIC_FALLBACK: &str = "arabic_fallback";
 /// built-in faces have no Asomtavruli or Mtavruli, and only Hack's monospace Mkhedruli.
 pub const GEORGIAN_FALLBACK: &str = "georgian_fallback";
 
+pub const LAO_FALLBACK: &str = "lao_fallback";
+
 /// egui's built-in monospace face, also the last fallback of every sans family (#2955).
 pub const SYMBOL_FALLBACK: &str = "Hack";
 
@@ -272,12 +274,15 @@ impl CjkFontLoader {
 /// Thai, Hebrew, Arabic and Georgian come last whatever the language: no other face draws them. Arabic
 /// goes first for `ar` instead: a CJK font such as Arial Unicode also has Arabic letters, without
 /// the shaping data that joins them.
-pub fn fallback_order(language: &str) -> [&'static str; 7] {
+pub fn fallback_order(language: &str) -> [&'static str; 8] {
     match language {
-        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
-        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
-        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, GEORGIAN_FALLBACK],
-        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        "zh" | "zh-TW" => {
+            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK]
+        }
+        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK],
+        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK],
+        "lo" => [LAO_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK],
     }
 }
 

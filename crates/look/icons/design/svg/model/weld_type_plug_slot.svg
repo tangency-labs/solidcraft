@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: plug or slot</title>
+  <path d="M6 20L24 20L24 30L6 30Z" fill="#b8c3cf"/>
+  <path d="M6 20L24 20L24 30L6 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40 20L58 20L58 30L40 30Z" fill="#b8c3cf"/>
+  <path d="M40 20L58 20L58 30L40 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 30L58 30L58 44L6 44Z" fill="#b8c3cf"/>
+  <path d="M6 30L58 30L58 44L6 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 20L40 20L40 32L24 32Z" fill="#328bd3"/>
+  <path d="M24 20L40 20L40 32L24 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -248,7 +248,7 @@ fn cone_crossing_at_mid_height() {
 /// tolerance: the validity contract lets an edge curve lie `τ_e + τ_f` from its face
 /// (invariant 6 of docs/validity-and-tolerances.md), while the exact edge stays on the face's
 /// plane. The top face of a block against itself, with one edge curve lifted 3e-5 off the plane
-/// under an edge tolerance of 3e-5 (past the faces' band of 2e-5, within it with the edge's
+/// under an edge tolerance of 3e-5 (past the faces' coincidence band, within it with the edge's
 /// tolerance): not parted. The top faces of two blocks whose heights differ by 1.5 times the
 /// faces' band part; by half of it they do not.
 #[test]
@@ -301,6 +301,59 @@ fn an_edge_within_its_own_tolerance_does_not_part_one_plane() {
     let (k, low, fl) = top(5.0);
     let band = 2.0 * face_tol;
     for (d, parts) in [(1.5 * band, true), (0.5 * band, false)] {
+        let (_, high, fh) = top(5.0 + d);
+        assert_eq!(
+            faces_on_other_surfaces(&k, &low, fl, &high, fh).unwrap(),
+            parts,
+            "{d}"
+        );
+        assert_eq!(
+            faces_on_other_surfaces(&k, &high, fh, &low, fl).unwrap(),
+            parts,
+            "{d}"
+        );
+    }
+}
+
+/// Two planar faces at an angle part past their coincidence tolerance (the larger of their
+/// zone tolerances and the contact tolerance, docs/booleans.md §5, the coincidence rule): an
+/// insert's side 1.1e-5 outside a chamfered block's facet, within the two zone tolerances'
+/// sum, was one wall with it in the radial sector, and the intersect lost the chamfer under it
+/// (#21687, the kernel case `booleans/21687-insert-intersect-chamfered-block-corner`). Two
+/// parallel faces, whose gap cannot change by the coincidence tolerance over them, stand at an
+/// offset: their common edge was placed on both at the intersection tolerance
+/// (`edge_solutions`), so they part only past the sum. The top faces of two blocks 1.5 times
+/// the coincidence tolerance apart, within the sum, do not part (read apart, two boxes 1.98e-5
+/// apart lost their intersection: goldens `boolean.api_brep` `more0080`); 2.5 zone
+/// tolerances apart they part, half the coincidence tolerance apart they do not.
+#[test]
+fn parallel_planar_faces_part_only_past_the_intersection_tolerance() {
+    use solidcore::geom::tol::{coincidence_tol_3d, zone_tol3d};
+    use solidcore::topology::topology_traverser::face_edges;
+
+    // a block of height h, and its top face (every edge at height h)
+    let top = |h: f64| {
+        let (k, brep) = kernel_copy(&make_box([0.0; 3], [5.0, 5.0, h]).unwrap());
+        let f = *brep
+            .face_list()
+            .iter()
+            .find(|&&f| {
+                face_edges(&brep, f).unwrap().into_iter().all(|e| {
+                    let rec = brep.edge(e).unwrap();
+                    let c = rec.curve.as_ref().unwrap();
+                    [rec.interval.min(), rec.interval.max()]
+                        .into_iter()
+                        .all(|t| (c.evaluate_point(&k, t).unwrap().z - h).abs() < 1e-12)
+                })
+            })
+            .unwrap();
+        (k, brep, f)
+    };
+    let (k, low, fl) = top(5.0);
+    let zone = zone_tol3d(&k, face::tolerance(&low, fl).unwrap());
+    let tol = coincidence_tol_3d(&k, zone, zone);
+    assert!(1.5 * tol < 2.0 * zone, "{tol} {zone}");
+    for (d, parts) in [(2.5 * zone, true), (1.5 * tol, false), (0.5 * tol, false)] {
         let (_, high, fh) = top(5.0 + d);
         assert_eq!(
             faces_on_other_surfaces(&k, &low, fl, &high, fh).unwrap(),

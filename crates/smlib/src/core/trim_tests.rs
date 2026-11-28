@@ -318,6 +318,16 @@ fn hostile_extend_arguments_are_refused() {
     }
     let cube = make_box([0.0; 3], [10.0; 3]).unwrap();
     assert_eq!(extend_sheet(&cube, p, TOL, 5.0, Continuation::Natural).err(), Some(Error::Unsupported));
-    // A face that is not its surface's whole box: a square with a hole.
-    assert_eq!(extend_sheet(&holed_sheet(), [20.0, 5.0, 0.0], TOL, 5.0, Continuation::Natural).err(), Some(Error::Unsupported));
+}
+
+/// A plane face that is not its plane's whole box, a 20 mm square with a 3 mm hole, grows its trim
+/// within the plane: the edge through (20, 5) moves 5 mm out, the hole is kept, so the area is
+/// 25 x 20 less the hole.
+#[test]
+fn a_holed_plane_sheet_grows_its_trim() {
+    let grown = extend_sheet(&holed_sheet(), [20.0, 5.0, 0.0], TOL, 5.0, Continuation::Natural).unwrap();
+    let want = 25.0 * 20.0 - PI * 9.0;
+    let got = area(&grown, 1e-8).unwrap();
+    assert!(rel(got, want) < 1e-6, "area {got}, {want}");
+    assert_eq!(counts(&grown).unwrap()[0], 1);
 }

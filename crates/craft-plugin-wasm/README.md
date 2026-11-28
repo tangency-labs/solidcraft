@@ -33,6 +33,7 @@ and merges successful data updates once per frame. Existing command and importer
 worlds, including the frozen 0.1 interfaces, retain their original behavior.
 
 The caller owns approval and must enforce `HostLimits::check` before calling `run`.
+Use `HostLimits::check_importer` before `run_import` to retain the importer's separate defaults.
 The runtime validates the runtime declaration and applies its requested budgets; it does
 not obtain user consent or install packages.
 
@@ -62,11 +63,15 @@ shared map budgets (128 keys and 64 KiB), persistence and commit/rollback policy
 0.1 and 0.2 components continue linking without importing the new interface.
 
 Fuel, epoch interruption and store limits bound guest execution. Defaults are
-10,000,000 fuel, 64 MiB memory and 5000 ms. One linear memory is allowed; memory64 is
+10,000,000 fuel, 64 MiB memory, 256 host calls and 5000 ms of guest compute.
+Call and deadline budgets come from the manifest and are checked against user host ceilings
+by the caller. One linear memory is allowed; memory64 is
 disabled. Components are capped at 16 MiB and JSON parameters/results at 1 MiB each.
 `RuntimeOptions` defaults to a 512 KiB stack and accepts 64 KiB..64 MiB.
-Compilation and app-native command work are outside guest fuel accounting. The deadline
-cannot forcibly interrupt an arbitrary native host call.
+Compilation and app-native host work are outside guest fuel and deadline accounting.
+Instantiation and guest execution share the guest compute deadline; native host work pauses
+that deadline. Native commands keep their existing limits and cancellation behavior.
+A refused host call discards the transaction even if the guest catches its error.
 
 ## Validation
 

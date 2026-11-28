@@ -22,13 +22,18 @@ pub use schema::check_arguments;
 pub use schema::object;
 pub use schema::string;
 pub use schema::tool;
+pub use server::Cancelled;
 pub use server::Incoming;
 pub use server::Info;
 pub use server::PROTOCOL_VERSION;
+pub use server::ProgressReporter;
 pub use server::Reference;
 pub use server::SUPPORTED_VERSIONS;
 pub use server::Server;
 pub use server::Tools;
+pub use server::cancelled_notification;
+pub use server::progress_notification;
+pub use server::progress_token;
 pub use server::read_message;
 pub use server::response;
 

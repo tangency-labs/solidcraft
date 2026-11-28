@@ -8,11 +8,13 @@
   },
   "calls": [
     {
-      "error": "solidcore failed (status 1001)",
       "inputs": [
         "b1"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -72,28 +74,31 @@
   ],
   "case": "12342-round-wall-and-ledge-edges-r5-refused",
   "expected": {
-    "method": "the ledge's round ends on the ledge's top face z = -40, which is 3 mm wide from the wall (x 20..23); past R3 its rail on y = 20 leaves that face. The wall's round takes the 4 mm wide strip of y = 20 beside the wall whole at R4. The smaller bound is 3",
-    "outcome": "refused",
-    "refusal": "the largest radius that fits is 3",
+    "body_count": 1,
+    "method": "the two rounds take material off in z apart, the wall's in (-40, 2) and the ledge's in (-50, -40), so their volumes add. The wall's round R5 is centred on x = y = 15 and its rail on y = 20 lands at x = 15, past the wall's inner face x = 16: a cliff overflow, trimmed at its crease with x = 16 (docs/generic-blend.md section 3.4). Each section loses the square [16, 20] x [15, 20] less the disc's part in it, A(r) = 4 r - int_{r - 4}^{r} sqrt(r^2 - t^2) dt = 5.331510 at r = 5, over the wall's 42: 223.923406. The ledge's round R5 is centred on x = 18, y = 15 and takes its whole corner off the base, (1 - pi/4) 25 * 10 = 53.650459; its part under the wall (x 18..20) lies below the wall's round, which takes more off above it, so nothing is undercut. V = 9520 - 223.923406 - 53.650459 = 9242.426134804866 (R4.5 9294.219072181522, R6 9127.760779854028)",
+    "outcome": "solid",
     "source": "invariants",
     "sources": [
       "tangency-labs/solidcraft#12342",
       "tangency-labs/solidcore#2845"
     ],
-    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): past the 3 mm ledge and the 4 mm wall, so it must be refused naming the largest radius that fits, 3; it fails with status 1001. Each edge alone is refused (the ledge naming 3) or builds up to its fit, and the pair at R3.5 or R4 is refused naming 3"
+    "volume_mm3": 9242.426134804866,
+    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): the wall's round overflows the 4 mm wall and is trimmed at its crease with the wall's inner face; the ledge's runs past the 3 mm ledge under the wall, where the wall's round takes the material off above it. It failed with status 1001: of the wall's foot edge on the ledge's top, split by the ledge round's end arc after it was imprinted, the piece from the wall's rail to that arc was not taken for the imprint, and the trim took every face"
   },
   "expressible": true,
-  "gallery_note": "the back face y = 20 and the 3 mm ledge top highlighted: both vertical edges at R5 should be refused naming 3, and fail with status 1001",
+  "gallery_note": "the wall's and the ledge's rounds R5 (highlighted): the wall's overflows the 4 mm wall and ends on a crease with its inner face x = 16; the ledge's runs past the 3 mm ledge under the wall's round",
   "operation_expressible": true,
   "records": "12342-round-wall-and-ledge-edges-r5-refused.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#12342",
     "tangency-labs/solidcore#2845"
   ],
-  "ungraded": [
-    "refusal \"the largest radius that fits is 3\""
-  ],
-  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): past the 3 mm ledge and the 4 mm wall, so it must be refused naming the largest radius that fits, 3; it fails with status 1001. Each edge alone is refused (the ledge naming 3) or builds up to its fit, and the pair at R3.5 or R4 is refused naming 3",
+  "ungraded": [],
+  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): the wall's round overflows the 4 mm wall and is trimmed at its crease with the wall's inner face; the ledge's runs past the 3 mm ledge under the wall, where the wall's round takes the material off above it. It failed with status 1001: of the wall's foot edge on the ledge's top, split by the ledge round's end arc after it was imprinted, the piece from the wall's rail to that arc was not taken for the imprint, and the trim took every face",
   "why_not": []
 }

@@ -1,6 +1,6 @@
 [
  {
-  "note": "#289: drag a command from a panel's drop-down onto the toolbar to pin it (a drop line shows where), drag a button off the toolbar or back into the drop-down to unpin it, the pin icon on a hovered drop-down row, and Customize Toolbar… in the toolbar's own menu. Kept with the preferences."
+  "note": "#289: drag a command from a panel's drop-down onto the toolbar to pin it (a drop line shows where), drag a button off the toolbar or back into the drop-down to unpin it, Pin to Toolbar in a drop-down row's ⋯ menu, and Customize Toolbar… in the toolbar's own menu. Kept with the preferences."
  },
  {
   "expect": {
@@ -38,7 +38,7 @@
   }
  },
  {
-  "note": "The pin icon on a hovered drop-down row pins the command."
+  "note": "Pin to Toolbar in a hovered drop-down row's ⋯ menu pins the command; the row has no pin of its own."
  },
  {
   "click": {"handle": "panel:MODEL:CREATE"}
@@ -48,16 +48,18 @@
  },
  {
   "expect": {
-   "shown_handles": ["dropdown_pin:solid.torus"],
-   "hidden_handles": ["dropdown_pin:solid.box"]
+   "shown_handles": ["dropdown_more:solid.torus"],
+   "hidden_handles": ["dropdown_pin:solid.torus", "dropdown_more:solid.box"]
   }
  },
  {
-  "click": {"handle": "dropdown_pin:solid.torus"}
+  "click": {"handle": "dropdown_more:solid.torus"}
+ },
+ {
+  "widget": "Pin to Toolbar"
  },
  {
   "expect": {
-   "shown_handles": ["dropdown:solid.box"],
    "tool": null,
    "dialog": null
   }
@@ -98,6 +100,16 @@
  {
   "call": "ui.menuPick",
   "params": {"item": "Customize Toolbar…"}
+ },
+ {
+  "note": "The list scrolls. Sphere is far down it, below the Sketch panel's rows, so bring its row into view before the click."
+ },
+ {
+  "call": "ui.scroll",
+  "params": {"x": 800, "y": 400, "delta": -200}
+ },
+ {
+  "frames": 3
  },
  {
   "click": {"handle": "customize:solid.sphere"}

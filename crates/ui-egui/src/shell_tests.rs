@@ -994,7 +994,8 @@ fn actual_host_document_switch_and_lost_pointer_cancel_pending_drag() {
         } else {
             h.frame_with(vec![egui::Event::PointerGone]);
         }
-        panel_host_pointer(&mut h, drop, false);
+        // Let go outside the window: empty canvas inside it floats the panel.
+        panel_host_pointer(&mut h, egui::pos2(-20.0, -20.0), false);
         h.frames(2);
         assert!(h.app.universal_panel_frame().unwrap().preview.is_none());
         assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
@@ -1791,6 +1792,37 @@ fn sketch_status_shows_in_the_panel_and_not_over_the_view() {
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
         assert!(h.widget("No geometry yet").is_some(), "undoing the geometry restores the empty status");
+    }
+}
+
+/// Tile and mode chrome only tells views apart (`ui_kit::disambiguates`): with one view, sketching
+/// draws no green frame round the view, no "Model · Sketch1" label and no "Editing" pill, and the
+/// view's tab keeps its own name and colour. Overlay removed by owner decision.
+#[test]
+fn a_single_view_shows_no_tile_or_sketch_mode_chrome() {
+    fn walk<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            shape => out.push(shape),
+        }
+    }
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(crate::view_windows::strip_views(&h.app).len(), 1, "{mode:?}: one view");
+        assert!(!crate::ui_kit::disambiguates(1) && crate::ui_kit::disambiguates(2));
+        let texts = painted_texts(&h);
+        assert!(!texts.iter().any(|t| t == "Editing" || t.contains(" · Sketch1")), "{mode:?}: no sketch label or pill: {texts:?}");
+        let t = solidcraft_theme::Tokens::get();
+        let mut shapes = Vec::new();
+        h.shapes.iter().for_each(|s| walk(&s.shape, &mut shapes));
+        let frame = shapes.iter().find(|shape| {
+            matches!(shape, egui::Shape::Rect(rect) if rect.stroke.color == t.sketch_accent && rect.rect.width() > 300.0 && rect.rect.height() > 200.0)
+        });
+        assert!(frame.is_none(), "{mode:?}: no green frame round the view: {frame:?}");
+        assert!(rect_of(&format!("view:title:{}", h.app.docs.views.active().id)).is_none(), "{mode:?}: no view name pill");
     }
 }
 

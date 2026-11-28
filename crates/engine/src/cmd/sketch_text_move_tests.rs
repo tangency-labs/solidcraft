@@ -229,7 +229,8 @@ fn text_style_parameters_are_checked() {
         (json!({"link":link,"vertical_align":"above"}), "`vertical_align` must be baseline, top, middle or bottom"),
         (json!({"link":link,"vertical_align":1}), "`vertical_align` must be baseline, top, middle or bottom"),
         (json!({"link":link,"line_spacing":0}), "`line_spacing` must be a positive factor"),
-        (json!({"link":link,"letter_spacing":"wide"}), "`letter_spacing` must be a length"),
+        (json!({"link":link,"letter_spacing":"wide"}), "`letter_spacing`: "),
+        (json!({"link":link,"letter_spacing":true}), "`letter_spacing` must be a length"),
         (json!({"link":link,"path":"no-such-curve"}), "not a curve of this sketch"),
     ] {
         let before = s.doc.to_json();
