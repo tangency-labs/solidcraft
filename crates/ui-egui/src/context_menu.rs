@@ -1373,6 +1373,11 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
+        if crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| m.body.is_mesh()) {
+            v.push(Item::sep());
+            v.push(cmd(app, "mesh.convert", "Convert Mesh").with(json!({ "body": b })).on(!locked));
+            v.push(cmd(app, "mesh.reduce", "Reduce Mesh").with(json!({ "body": b })).on(!locked));
+        }
         v.push(collision_menu(app, json!({ "body": b })));
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
@@ -3042,6 +3047,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
+        "mesh.convert" | "mesh.reduce" if item.params.is_some() => {
+            if let Some(body) = p.get("body").and_then(Value::as_str)
+                && app.run("select.set", json!({ "items": [{"type": "body", "name": body}] })).is_ok()
+            {
+                app.start(&item.id);
+            }
+        }
         // A plane's Create Sketch is the toolbar's with that plane picked first: it replaces a
         // dialog in progress, and the dialog starts the sketch at once, facing the plane.
         "sketch.create" if item.params.is_some() => {
