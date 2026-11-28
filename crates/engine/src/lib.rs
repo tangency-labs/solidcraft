@@ -4037,15 +4037,25 @@ impl Session {
     /// `marker` restores an editor's original marker before recording its undo snapshot.
     /// The source remains untouched, including its history and recovery journal.
     pub fn compute_commands(self, commands: &[(String, Value)], marker: Option<Option<usize>>) -> Result<ComputedCommands> {
-        self.compute_commands_inner(commands, marker, None)
+        self.compute_commands_inner(commands, marker, None, None)
     }
 
     /// Start an edit from its pinned original model, so restoring the original marker cannot
     /// recompute the obsolete suffix even when previews have evicted its evaluation cache.
+    ///
+    /// The design may have gained a parameter while the editor was open (#9223): the edit the
+    /// user is making may use the parameter just added, and no feature that was already built
+    /// reads it, so the editor's model still describes the design. The edit is then computed on
+    /// the design as it is now, and the parameter it uses is there. Every other change leaves
+    /// the editor stale, and the edit is refused.
     pub fn compute_editor_commands(self, commands: &[(String, Value)], source: &Session, original: Session) -> Result<ComputedCommands> {
-        if !self.same_document_context(source) {
+        let base = if self.same_document_context(source) {
+            None
+        } else if self.same_editor_context_with_gained_parameters(source) {
+            Some(self.editor_base(&original))
+        } else {
             return Err(EngineError::Other("the design changed while the feature editor was open".into()));
-        }
+        };
         let mut expected = (*original.doc).clone();
         // The temporary rollback is another revision of the same model inputs.
         expected.marker = source.doc.marker;
@@ -4085,7 +4095,7 @@ impl Session {
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
-        self.compute_commands_inner(commands, Some(original.doc.marker), Some(original))
+        self.compute_commands_inner(commands, Some(original.doc.marker), Some(original), base)
     }
 
     fn compute_commands_inner(
@@ -4093,9 +4103,10 @@ impl Session {
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
+        base: Option<Session>,
     ) -> Result<ComputedCommands> {
         let stop = self.stop.clone();
-        stop.within(|| self.compute_commands_under(commands, marker, original))
+        stop.within(|| self.compute_commands_under(commands, marker, original, base))
     }
 
     fn compute_commands_under(
@@ -4103,6 +4114,7 @@ impl Session {
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
+        base: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
@@ -4115,11 +4127,14 @@ impl Session {
             let before = computed.doc.clone();
             let params = marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
             let reply = if let Some(original) = original {
-                computed.doc = original.doc;
-                computed.model = original.model;
-                computed.world_cache = original.world_cache;
-                computed.pending_joint_bases = original.pending_joint_bases;
-                computed.last_capture_state = original.last_capture_state;
+                // The editor's own model, or the design as it is now when it gained a parameter
+                // while the editor was open (#9223).
+                let base = base.unwrap_or(original);
+                computed.doc = base.doc;
+                computed.model = base.model;
+                computed.world_cache = base.world_cache;
+                computed.pending_joint_bases = base.pending_joint_bases;
+                computed.last_capture_state = base.last_capture_state;
                 serde_json::json!({"marker":marker.unwrap_or(computed.doc.features.len()),"features":computed.doc.features.len()})
             } else {
                 let undo = std::mem::take(&mut computed.undo);
@@ -4260,6 +4275,52 @@ impl Session {
             && self.pending_moves == source.pending_moves
             && self.pending_move_records == source.pending_move_records
             && self.pending_joint_bases == source.pending_joint_bases
+    }
+
+    /// The editor's context is the one it was opened in, and the design only gained parameters
+    /// since (#9223): the parameters the user added are part of the edit the editor is making,
+    /// and no feature that was already built reads them, so the editor's model still describes
+    /// the design. Every other change leaves the editor stale.
+    fn same_editor_context_with_gained_parameters(&self, source: &Session) -> bool {
+        self.document_id == source.document_id
+            && self.ids.seed() == source.ids.seed()
+            && self.active_sketch == source.active_sketch
+            && self.sketching_view == source.sketching_view
+            && self.active_sheet_sketch == source.active_sheet_sketch
+            && self.open_drawing == source.open_drawing
+            && self.active_component == source.active_component
+            && self.active_occurrence_path == source.active_occurrence_path
+            && self.pending_moves == source.pending_moves
+            && self.pending_move_records == source.pending_move_records
+            && self.pending_joint_bases == source.pending_joint_bases
+            && self
+                .revision
+                .checked_sub(source.revision)
+                .is_some_and(|delta| self.visibility_revision.checked_sub(source.visibility_revision).is_some_and(|shown| delta >= shown))
+            && self.design_gained_only_parameters(source)
+    }
+
+    /// The design is the one the editor was opened on, plus the parameters it gained: the
+    /// parameters it gained are the last ones, and nothing else about it moved.
+    fn design_gained_only_parameters(&self, source: &Session) -> bool {
+        let gained = &self.doc.params;
+        let pinned = &source.doc.params;
+        if gained.len() <= pinned.len() || !gained.starts_with(pinned) {
+            return false;
+        }
+        let mut design = (*self.doc).clone();
+        design.params = pinned.clone();
+        design == *source.doc
+    }
+
+    /// The design as it is now, with the editor's own marker: what the editor's edit is
+    /// computed on when the design gained a parameter while the editor was open (#9223).
+    fn editor_base(&self, original: &Session) -> Session {
+        let mut base = original.scratch();
+        let mut design = (*self.doc).clone();
+        design.marker = original.doc.marker;
+        base.doc = Arc::new(design);
+        base
     }
 
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
