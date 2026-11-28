@@ -45,6 +45,7 @@ pub mod develop;
 pub mod frame;
 pub mod round_face;
 pub mod shaft_spline;
+pub mod sweep;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;

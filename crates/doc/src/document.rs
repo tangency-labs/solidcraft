@@ -1638,12 +1638,22 @@ pub enum FeatureKind {
         /// the tool's body (#13303). Each cuts the pieces it crosses.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_bodies: Vec<BodyName>,
-        /// A straight line of this sketch as the tool (#1552): the plane through it along the
-        /// sketch's normal, which follows the sketch.
+        /// Curves of this sketch as the tool (#1552), which follow the sketch: one straight line
+        /// splits as the plane through it along the sketch's normal; any other curve, or the
+        /// chain `line` and `curves` join into, is swept along the normal through the body, its
+        /// open ends continued past it, and cuts as that sheet.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line: Option<String>,
+        /// More curves of `sketch`, joined end to end with `line` into one chain (#7492).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        curves: Vec<String>,
+        /// With sketch curves: an open chain's ends run on along their tangents past the body (the
+        /// default, and one straight line is its plane), or, false, the curves cut as drawn and are
+        /// refused where they do not cut the body through.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        extend: bool,
     },
     /// A construction axis (CONSTRUCT axes).
     ConstructionAxis {
@@ -5797,7 +5807,12 @@ impl Document {
         // Borrowed names: every command that changes the design asks, and most rename nothing.
         fn names(d: &Document) -> std::collections::BTreeSet<&str> {
             let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
-            stored.chain(d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str))).collect()
+            let feature_inputs = d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str));
+            let driven = d.features.iter().flat_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => sketch.driven_dimension_params().into_iter().map(String::as_str).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            });
+            stored.chain(feature_inputs).chain(driven).collect()
         }
         let (before, after) = (names(previous), names(self));
         let mut gone = before.difference(&after);
@@ -6774,6 +6789,9 @@ impl Document {
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
         }
+        if self.is_driven_param(name) {
+            return Err(DocError::Invalid(format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
+        }
         if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
             return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
@@ -6809,6 +6827,7 @@ impl Document {
         if let Some(e) = errors.get(name) {
             return Err(DocError::Expr(e.clone()));
         }
+        next.check_driven_timeline()?;
         *self = next;
         Ok(())
     }
@@ -7013,7 +7032,7 @@ impl Document {
         self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
         for c in &mut sk.constraints {
-            if let Some(p) = &c.param {
+            if let (Some(p), false) = (&c.param, c.driven) {
                 let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
                 let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
                 c.kind.set_value(v);

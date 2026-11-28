@@ -336,6 +336,7 @@ impl PanelController for PluginController {
             status: Some(solidcraft_ui_text::tr("ui.plugin_panel_badge").into()),
             attention: false,
             actions: Vec::new(),
+            menu_heading: None,
         }
     }
     fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {

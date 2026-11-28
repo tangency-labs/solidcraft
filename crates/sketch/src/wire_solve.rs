@@ -689,6 +689,9 @@ pub struct WireConstraint {
     /// A driven (reference) dimension: it measures, it does not constrain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub driven: bool,
+    /// For a driven dimension: the read-only parameter name exposing its measured value (#14426).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driven_param: Option<String>,
 }
 
 /// How a 3D solve went: apart from the planar sketch's report, whose freedoms and failures it
@@ -1086,7 +1089,7 @@ impl Sketch {
         }
         let id = self.fresh("k")?;
         let param = if driven || !kind.is_dimension() { None } else { param };
-        self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven });
+        self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven, driven_param: None });
         Ok(id)
     }
 
@@ -1181,6 +1184,42 @@ impl Sketch {
             .iter()
             .filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p)))
             .chain(self.wire_constraints.iter().filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p))))
+            .collect()
+    }
+
+    /// Read-only parameter names exposed by driven dimensions, planar and 3D (#14426).
+    pub fn driven_dimension_params(&self) -> Vec<&String> {
+        self.constraints
+            .iter()
+            .filter(|c| c.driven)
+            .filter_map(|c| c.driven_param.as_ref())
+            .chain(self.wire_constraints.iter().filter(|c| c.driven).filter_map(|c| c.driven_param.as_ref()))
+            .collect()
+    }
+
+    /// Mutable view of [`Sketch::driven_dimension_params`] (for renaming them).
+    pub fn driven_dimension_params_mut(&mut self) -> Vec<&mut Option<String>> {
+        self.constraints
+            .iter_mut()
+            .filter(|c| c.driven)
+            .map(|c| &mut c.driven_param)
+            .chain(self.wire_constraints.iter_mut().filter(|c| c.driven).map(|c| &mut c.driven_param))
+            .collect()
+    }
+
+    /// Named driven dimensions as `(constraint_id, param_name, measured_value, is_angle)`, planar
+    /// and 3D (#14426).
+    pub fn driven_dimensions(&self) -> Vec<(&str, &str, Option<f64>, bool)> {
+        self.constraints
+            .iter()
+            .filter(|c| c.driven)
+            .filter_map(|c| c.driven_param.as_deref().map(|name| (c.id.as_str(), name, c.kind.value(), c.kind.is_angle())))
+            .chain(
+                self.wire_constraints
+                    .iter()
+                    .filter(|c| c.driven)
+                    .filter_map(|c| c.driven_param.as_deref().map(|name| (c.id.as_str(), name, c.kind.value(), c.kind.is_angle()))),
+            )
             .collect()
     }
 

@@ -25,7 +25,9 @@ impl Kind {
 }
 
 /// The attachment boxes. Everything about the design is off until ticked; the design file
-/// is off by default.
+/// is off by default. A crash report's details (`crash`, the report's JSON, never its minidump)
+/// start ticked, as the log does: they are what makes a crash fixable, the person sees them and can
+/// untick them, and nothing is sent until they press Submit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticks {
     pub system: bool,
@@ -38,7 +40,7 @@ pub struct Ticks {
 
 impl Default for Ticks {
     fn default() -> Self {
-        Self { system: true, repro: true, log: true, screenshot: true, design: false, crash: false }
+        Self { system: true, repro: true, log: true, screenshot: true, design: false, crash: true }
     }
 }
 

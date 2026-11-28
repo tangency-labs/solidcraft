@@ -1751,7 +1751,10 @@ fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
                 let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
                 assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
                 assert!(
-                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
+                    matches!(
+                        shaft.body.record().faces[face].surface,
+                        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Sweep { .. }
+                    ),
                     "{tip}: {name} must not select a cylinder"
                 );
             }
@@ -1791,7 +1794,10 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
             .faces
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|(_, f)| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .map(|(i, _)| i)
             .collect();
         assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
@@ -1811,7 +1817,10 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
         for (name, point) in picks {
             let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
             assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
-            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
+            assert!(matches!(
+                shaft.body.record().faces[face].surface,
+                Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Sweep { .. }
+            ));
         }
     }
 }

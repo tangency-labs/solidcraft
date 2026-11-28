@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.browser_fold_other_components": "Fold other components on activate"
+  },
+  "de": {
+    "prefs.browser_fold_other_components": "Andere Komponenten beim Aktivieren einklappen"
+  },
+  "ja": {
+    "prefs.browser_fold_other_components": "アクティブ化時に他のコンポーネントを折りたたむ"
+  },
+  "zh": {
+    "prefs.browser_fold_other_components": "激活时折叠其他组件"
+  },
+  "ko": {
+    "prefs.browser_fold_other_components": "활성화할 때 다른 구성요소 접기"
+  },
+  "vi": {
+    "prefs.browser_fold_other_components": "Thu gọn các thành phần khác khi kích hoạt"
+  },
+  "ar": {
+    "prefs.browser_fold_other_components": "طي المكونات الأخرى عند التنشيط"
+  },
+  "he": {
+    "prefs.browser_fold_other_components": "קיפול רכיבים אחרים בהפעלה"
+  }
+}
