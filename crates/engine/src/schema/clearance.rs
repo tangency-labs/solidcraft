@@ -140,6 +140,9 @@ pub struct Clearance {
     /// Pairs whose overlap couldn't be worked out, and each mesh body, which isn't measured
     /// (`b` is then `null`).
     pub unchecked: Vec<Unchecked>,
+    /// Number of entries in `unchecked`: non-zero means the check is incomplete, so empty
+    /// `overlaps` must not be read as clean while this is greater than 0.
+    pub unchecked_count: usize,
     /// How many solid bodies were checked.
     pub bodies: usize,
     pub pairs_checked: usize,

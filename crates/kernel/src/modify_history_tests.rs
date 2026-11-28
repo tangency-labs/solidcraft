@@ -329,6 +329,32 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+#[test]
+fn transform_face_tracks_the_retrimmed_cap_and_the_stationary_floor() {
+    let b = cube();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let floor = Vec3::new(20.0, 15.0, 0.0);
+    let raised = crate::transform_face(&b, top, Vec3::Z * 2.0, top, Vec3::Z, 0.0).unwrap();
+    let h = verified(&raised, &b, Reach { made: 0.0, moved: 2.1 });
+    for (before, after, change) in [(top, top + Vec3::Z * 2.0, Change::Modified), (floor, floor, Change::Kept)] {
+        let i = raised.face_at_point(after).unwrap().unwrap();
+        assert_eq!(h.faces[i].origins, [face(b.face_at_point(before).unwrap().unwrap())]);
+        assert_eq!(h.faces[i].change, change);
+    }
+}
+
+#[test]
+fn transform_face_noop_records_identity_over_the_rounded_input() {
+    let b = cube();
+    let rounded = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+    assert!(rounded.rounds().is_some() && rounded.face_count() > b.face_count());
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let slide = crate::transform_face(&rounded, top, Vec3::X, top, Vec3::Z, 0.0).unwrap();
+    assert!(slide.same(&rounded));
+    assert_eq!(slide.history(), Some(&History::identity(&rounded)));
+    assert!(slide.rounds().is_none());
+}
+
 /// A narrow annular end must be picked on its exact trims, independently of the body's length
 /// (and hence the chord tolerance of the old picking mesh).
 #[test]
@@ -499,6 +525,7 @@ fn painted_cube() -> Body {
         opacity: 1.,
         faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }))
 }
 
@@ -751,5 +778,18 @@ mod smlib {
         assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
         let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
         assert!(e.to_string().contains("not supported yet"), "{e}");
+    }
+
+    /// #22807: drafting an Ø20 x 100 mm cylinder by 6° about XY closes the cone to an apex at
+    /// z = 10 / tan(6°) ≈ 95.14 mm < 100 mm. The refusal names that geometric reason and is
+    /// `KernelError::Invalid`, not "not supported yet".
+    #[test]
+    fn draft_cylinder_closing_below_top_is_refused_with_reason() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 100.0).unwrap();
+        let e = offset_backend::draft(&rod, &[Vec3::new(10.0, 0.0, 50.0)], &Plane::XY, Vec3::Z, 6.0_f64.to_radians()).unwrap_err();
+        assert!(matches!(e, crate::KernelError::Invalid(_)), "{e:?}");
+        let text = e.to_string();
+        assert!(text.contains("a drafted cone would close within the face"), "{text}");
+        assert!(!text.contains("not supported yet"), "{text}");
     }
 }

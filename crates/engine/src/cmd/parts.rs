@@ -68,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .read_only()
         .contract(&SEATS_CONTRACT)
         .output(output_schema_for::<PartsSeats>)
-        .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
+        .params("picks: face or edge selections on bore walls, countersinks or their rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
@@ -1546,16 +1546,30 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
-    for step in [0.2, 0.5, 1.0, 2.0] {
-        for b in &st.bodies {
+    let steps = [0.2, 0.5, 1.0, 2.0];
+    // Each probe meshes the body it looks at (`cylinder_face_at`): only the bodies a probe can
+    // reach are looked at, each through a copy that keeps its mesh for the next probe, so a pick
+    // meshes a body once rather than once per probe and leaves the bodies far away alone (#6552).
+    // A probe is on a wall only when it lies on the body's surface, inside its exact box.
+    let reach = steps.iter().copied().fold(0.0, f64::max);
+    let bodies: Vec<_> = st
+        .bodies
+        .iter()
+        .filter(|b| {
+            b.body.is_mesh() || b.body.exact_bounds().map_or(true, |bb| bb.inflated(reach + 1e-3 + 2.0 * b.body.record().tolerance).contains(a))
+        })
+        .map(|b| b.body.keeping_meshes())
+        .collect();
+    for step in steps {
+        for b in &bodies {
             for d in dirs {
                 let q = a + d * step;
-                if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(&b.body, q) {
+                if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(b, q) {
                     let v = q - c.axis_point;
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        return Some(wall_from_cylinder(&b.body, c, q));
+                        return Some(wall_from_cylinder(b, c, q));
                     }
                 }
             }
@@ -1592,6 +1606,32 @@ fn wall_from_cylinder(body: &solidcraft_kernel::Body, c: solidcraft_kernel::Cyli
     }
 }
 
+/// Follow the narrow rim of an internal cone to the bore that shares it.
+/// A blind drill tip meets the bore only at its wide rim.
+fn countersink_bore(body: &solidcraft_kernel::Body, face: usize) -> Option<(usize, solidcraft_kernel::CylinderFace, Vec3)> {
+    let (cone, _) = solidcraft_kernel::cone_face(body, face).filter(|(cone, _)| cone.internal)?;
+    let record = body.record();
+    for index in solidcraft_kernel::face_edge_indices(body, face) {
+        let edge = record.edges.get(index)?;
+        let Some(rim) = solidcraft_kernel::edge_circle(body, index) else { continue };
+        let tolerance = edge.tolerance.max(record.tolerance);
+        if rim.radius + tolerance >= cone.radius {
+            continue;
+        }
+        for u in &edge.uses {
+            let neighbour = u.face as usize;
+            if neighbour != face
+                && let Some(bore) = solidcraft_kernel::cylinder_between_rims(body, neighbour)
+                && bore.internal
+                && (bore.radius - rim.radius).abs() <= tolerance
+            {
+                return Some((neighbour, bore, rim.start));
+            }
+        }
+    }
+    None
+}
+
 /// A structured pick identifies the surface and placement, including coincident copies.
 fn picked_wall(body: &solidcraft_doc::ModelBody, pick: &BorePick) -> Option<(HoleWall, usize)> {
     let tol = body.display_tol().max(1e-6);
@@ -1606,16 +1646,25 @@ fn picked_wall(body: &solidcraft_doc::ModelBody, pick: &BorePick) -> Option<(Hol
             body.body.record().edges.get(pick.index)?.uses.iter().map(|u| u.face as usize).collect()
         }
     };
-    for face in faces {
-        let Some(c) = solidcraft_kernel::cylinder_between_rims(&body.body, face).filter(|c| c.internal) else { continue };
-        let Some(on) = body.body.point_lies_on_face(face, pick.point.0, tol).ok().flatten() else { continue };
-        let along = (on - c.axis_point).dot(c.axis);
-        // A point just inside the wall makes a rim pick unambiguous for the circle joint.
-        let inset = (c.end - c.start).min(1.0) * 0.1;
-        let q = on + c.axis * (along.clamp(c.start + inset, c.end - inset) - along);
-        return Some((wall_from_cylinder(&body.body, c, q), face));
-    }
-    None
+    let on_face = |face| body.body.point_lies_on_face(face, pick.point.0, tol).ok().flatten();
+    // A recessed countersink shares its outer rim with the wider cylinder above it.
+    // Either pick on the countersink refers to the narrower bore below.
+    let countersink = faces.iter().find_map(|&face| {
+        let seat = countersink_bore(&body.body, face)?;
+        on_face(face)?;
+        Some(seat)
+    });
+    let (face, c, on) = countersink.or_else(|| {
+        faces.into_iter().find_map(|face| {
+            let c = solidcraft_kernel::cylinder_between_rims(&body.body, face).filter(|c| c.internal)?;
+            Some((face, c, on_face(face)?))
+        })
+    })?;
+    let along = (on - c.axis_point).dot(c.axis);
+    // A point just inside the wall makes a rim pick unambiguous for the circle joint.
+    let inset = (c.end - c.start).min(1.0) * 0.1;
+    let q = on + c.axis * (along.clamp(c.start + inset, c.end - inset) - along);
+    Some((wall_from_cylinder(&body.body, c, q), face))
 }
 
 fn resolve_seats(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1812,6 +1861,35 @@ mod tests {
         let frame = s.doc.origin_world(&st, &origin).unwrap();
         assert_eq!(seat["point"], json!(&frame[3][..3]));
         assert_eq!(seat["x_dir"], json!(&frame[0][..3]));
+    }
+
+    #[test]
+    fn countersink_face_and_outer_rim_resolve_the_same_seat_as_the_bore() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "clearance":"M6", "head":"ISO 10642", "depth":12, "tip_angle":90}));
+        let faces = run(&mut s, "model.faces", json!({"body":"Block"}));
+        let edges = run(&mut s, "model.edges", json!({"body":"Block"}));
+        let face_pick = |name: &str, point: [f64; 3]| {
+            let face = faces["faces"].as_array().unwrap().iter().find(|f| f["name"] == name).unwrap();
+            json!({"body":"Block", "type":"face", "index":face["index"], "point":point})
+        };
+        let rim = edges["edges"].as_array().unwrap().iter().find(|e| e["name"] == "F1:+z|F2:csink:side:0").unwrap();
+        let rim = json!({"body":"Block", "type":"edge", "index":rim["index"], "point":rim["mid"]});
+        // The 90-degree cone runs from radius 3.3 at z=16.08 to radius 7.22 at z=20.
+        let bore = face_pick("F2:bore:side:1", [23.3, 15., 14.]);
+        let cone = face_pick("F2:csink:side:0", [25.3, 15., 18.08]);
+        let mut seats = |picks: Value| run(&mut s, "parts.seats", json!({"picks":picks, "countersunk_shank_diameter":6.0}));
+        let expected = seats(json!([bore]));
+        let seat = &expected["seats"][0];
+        assert!(vec3(&seat["point"]).unwrap().dist(Vec3::new(20., 15., 16.08)) < 1e-6);
+        assert!((seat["shank_offset"].as_f64().unwrap() + 0.3).abs() < 1e-6);
+        assert_eq!(seats(json!([cone])), expected);
+        assert_eq!(seats(json!([rim])), expected);
+        assert_eq!(seats(json!([rim, cone, bore])), expected);
+        // The blind drill tip also meets the bore, but it narrows away from it.
+        let tip = face_pick("F2:bore:side:2", [22.3, 15., 7.]);
+        assert!(s.execute("parts.seats", &json!({"picks":[tip]})).is_err());
     }
 
     #[test]
@@ -2680,6 +2758,26 @@ mod tests {
         assert_eq!(s.undo.len(), undo + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (comps, occs));
+    }
+
+    /// #6552: finding the hole under a pick looks only at the bodies the pick can reach. Each
+    /// probe meshed every body in the design, 24 probes per pick, so a fastener inserted beside
+    /// a large imported part spent seconds meshing it again and again. A pick away from every
+    /// body meshes none of them; a pick on a hole's rim still finds the hole.
+    #[test]
+    fn finding_a_hole_meshes_no_body_out_of_the_picks_reach() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "diameter": 3.4}));
+        run(&mut s, "solid.box", json!({"corner": [500, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Far"}));
+        run(&mut s, "solid.hole", json!({"position": [520, 15, 10], "diameter": 3.4}));
+        let (wall, work) = solidcraft_kernel::profile::capture(|| super::hole_wall(&s, Vec3::new(250.0, 15.0, 5.0)));
+        assert!(wall.is_none());
+        assert_eq!(work.tessellate_ms, 0.0, "a pick away from every body meshes none of them");
+        let wall = super::hole_wall(&s, Vec3::new(21.7, 15.0, 10.0)).unwrap_or_else(|| panic!("the rim pick finds the hole"));
+        assert!((wall.radius - 1.7).abs() < 1e-3 && (wall.seat - Vec3::new(20.0, 15.0, wall.seat.z)).len() < 1e-3, "{wall:?}");
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": [21.7, 15, 10]}));
+        assert!(r["joint"].is_number(), "{r}");
     }
 
     /// #12191: a hole picked at both ends (a blind hole's rim and its floor edge, a through

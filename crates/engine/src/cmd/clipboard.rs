@@ -304,10 +304,30 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             for param in sketch.dimension_params_mut() {
                 if let Some(pn) = param.clone() {
                     let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
-                    *param = Some(doc.new_model_param(&e, &u));
+                    *param = Some(doc.new_model_param(&e, &u)?);
                 }
             }
-            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift);
+            let mut taken_driven = std::collections::BTreeSet::new();
+            for param in sketch.driven_dimension_params_mut() {
+                if let Some(pn) = param.clone() {
+                    let mut n = 2usize;
+                    let fresh = loop {
+                        let cand = format!("{pn}_{n}");
+                        let taken = doc.param(&cand).is_some()
+                            || doc.text_param(&cand).is_some()
+                            || doc.is_driven_param(&cand)
+                            || doc.features.iter().any(|x| x.param_names.iter().any(|y| y == &cand))
+                            || taken_driven.contains(&cand);
+                        if !taken {
+                            break cand;
+                        }
+                        n += 1;
+                    };
+                    taken_driven.insert(fresh.clone());
+                    *param = Some(fresh);
+                }
+            }
+            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift)?;
         }
         if moved {
             if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {

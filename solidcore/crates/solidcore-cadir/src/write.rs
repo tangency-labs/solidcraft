@@ -822,8 +822,9 @@ impl Writer<'_> {
 
 /// The deviation a face written as its NURBS form carries: a procedural blend's net is within
 /// its definition's certified bound ε of the definition, which CADIR cannot hold, so ε is the
-/// face's tolerance (CADIR's `Face::tolerance`, the most its geometry is off the face). An exact
-/// round's net is its definition, and every other face is written exactly: `None`.
+/// face's tolerance (CADIR's `Face::tolerance`, the most its geometry is off the face), and so is a
+/// screw sweep's bound. An exact round's net is its definition, and every other face is written
+/// exactly: `None`.
 fn certified(face: &solidcore_record::brep::Face) -> Option<PositiveReal> {
     match &face.surface {
         solidcore_record::brep::Surface::Blend { definition } => match definition.as_ref() {
@@ -832,6 +833,10 @@ fn certified(face: &solidcore_record::brep::Face) -> Option<PositiveReal> {
             }
             solidcore_record::brep::blend::BlendDefinition::ExactRound(_) => None,
         },
+        // A screw sweep's net is within its bound of the wall.
+        solidcore_record::brep::Surface::Sweep { definition } => {
+            PositiveReal::new(definition.bound)
+        }
         _ => None,
     }
 }

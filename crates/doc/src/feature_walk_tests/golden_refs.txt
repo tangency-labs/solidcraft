@@ -117,6 +117,8 @@ scale
   remap_bodies: bodies[0]
 offset_face
   remap_bodies: body
+transform_face
+  remap_bodies: body
 delete_face
   remap_bodies: body
 bounding_solid
@@ -256,6 +258,8 @@ surface_match
   remap_bodies: body
 surface_fair
   remap_bodies: body
+surface_morph
+  remap_bodies: base, body, control
 unstitch
   remap_bodies: body
 reverse_normal
@@ -269,6 +273,8 @@ surface_extend_to_plane
   remap_bodies: body
 surface_extend_to_face
   remap_bodies: body, up_to.face.body
+surface_extend_law
+  remap_bodies: body
 surface_ruled
   remap_bodies: body
 surface_trim

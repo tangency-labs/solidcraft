@@ -65,7 +65,7 @@ impl JsonSchema for RenderCamera {
         }
         let bounds = if given { " Lengths are at most 1e9 mm in size, and angles at most 1e6 radians." } else { "" };
         json_schema!({
-            "description": format!("A render camera orbiting a target point. Lengths are in mm and angles in radians, measured in the frame of the up axis.{bounds}"),
+            "description": format!("A render camera orbiting a target point. Lengths are in mm and angles in radians, about the design frame in `frame` when there is one, else about the up axis.{bounds}"),
             "type": "object",
             "properties": {
                 "target": {
@@ -80,7 +80,8 @@ impl JsonSchema for RenderCamera {
                 "roll": roll,
                 "distance": distance,
                 "fov": {"description": "Vertical field of view; 0 is orthographic.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI},
-                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
+                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"},
+                "frame": {"description": "The design's own frame the angles are in (#6455): {front, top}, two world axes at right angles. Omitted or null: the up axis. A frame that is not two principal axes at right angles reads as none.", "type": ["object", "null"]}
             },
             "required": ["target", "yaw", "pitch", "distance", "fov"],
             "additionalProperties": false
@@ -123,8 +124,8 @@ fn name_required(schema: &mut Schema) {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = camera_required)]
 pub struct SetParams {
-    /// The camera: `target`, `yaw`, `pitch`, `distance` and `fov`, and optionally `roll` and
-    /// `up`.
+    /// The camera: `target`, `yaw`, `pitch`, `distance` and `fov`, and optionally `roll`, `up`
+    /// and `frame`.
     // Optional in the type, required in the schema: left out, the handler refuses the call
     // with its own message.
     #[serde(default, deserialize_with = "render_camera")]

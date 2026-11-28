@@ -285,13 +285,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let open = frame_multi_trim::is_open(&regions).then(|| frame_multi_trim::box_corners(&regions));
     let extend = |m: usize, at_start: bool, member: &Traced| -> Result<Traced> {
         let (Some(corners), Some((id, a, b))) = (open.as_ref(), segments.get(m)) else { return Ok(member.clone()) };
-        let reach = open_reach((*a, *b), at_start, &placed(m, if at_start { *a } else { *b }), corners, &earlier_reach);
+        let reach = open_reach((*a, *b), at_start, &placed(m, if at_start { *a } else { *b }), corners, &earlier_reach)?;
         if reach <= 0.0 {
             return Ok(member.clone());
         }
-        let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
-        let at = ats.get(m).copied().unwrap_or(at);
-        let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
+        let plane = placed(m, *a);
         let length = a.dist(*b);
         let span = if at_start { (-reach, 0.0) } else { (length, length + reach) };
         let more = member_body(plane, unreversed(m, *a), &regions, *b - *a, span, id)?;
@@ -1487,10 +1485,10 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
     let (end, toward) = if f.at_start { (*a, *a - *b) } else { (*b, *b - *a) };
     let length = a.dist(*b);
     let corners = frame_multi_trim::box_corners(regions);
-    // The end is square to the member, so at an angle one side of it trails the line's end: each corner of the
+    // The end is square to the member, so at an angle one side of it trails the line's end: every point of the
     // member's own section box runs on until it too leaves the far side, and the end reaches the farthest of them.
     let own = placed(f.member, end);
-    let starts: Vec<Vec3> = corners.iter().map(|q| end + (own.to_world(*q) - own.to_world(Vec2::ZERO))).chain([end]).collect();
+    let sections: Vec<[Vec3; 4]> = corners.as_chunks::<4>().0.iter().map(|r| r.map(|q| own.to_world(q))).collect();
     let reach = f
         .against
         .iter()
@@ -1498,11 +1496,12 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let (_, c, d) = segments.get(t)?;
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
-            let exits = corners.as_chunks::<4>().0.iter().flat_map(|r| {
-                let rect = r.map(|q| plane.to_world(q));
-                starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_box(*s, toward, rect))
-            });
-            exits.reduce(f64::max)
+            corners
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter_map(|r| solidcraft_kernel::planar::reach_through_box(end, toward, &sections, r.map(|q| plane.to_world(q))))
+                .reduce(f64::max)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.
@@ -1510,21 +1509,15 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
 }
 
 /// How far past its line's end (`at_start`: its start) a member on `line` is built to fit the earlier members (`earlier`,
-/// each its line and the room its section takes about it) on an open section: until each corner of its own section box
-/// (`corners`, placed square to the line at that end by `own`) has left the far side of the room of an earlier member
-/// the end lies in. At most the member's length; 0 where the end meets none.
-fn open_reach((a, b): (Vec3, Vec3), at_start: bool, own: &Plane, corners: &[Vec2], earlier: &[Reach]) -> f64 {
+/// each its line and the room its section takes about it) on an open section: until every point of its own section box
+/// (`corners`, four to a box, placed square to the line at that end by `own`) has left the far side of the room of an
+/// earlier member the end lies in (a point along an edge can leave a round room later than the corners). At most the
+/// member's length; 0 where the end meets none.
+fn open_reach((a, b): (Vec3, Vec3), at_start: bool, own: &Plane, corners: &[Vec2], earlier: &[Reach]) -> Result<f64> {
     let (end, toward) = if at_start { (a, a - b) } else { (b, b - a) };
-    let starts: Vec<Vec3> = corners.iter().map(|q| end + (own.to_world(*q) - own.to_world(Vec2::ZERO))).chain([end]).collect();
-    let reach = earlier
-        .iter()
-        .filter(|(c, d, r)| {
-            let (p, q) = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d);
-            p.dist(q) <= *r
-        })
-        .flat_map(|&(c, d, r)| starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_round(*s, toward, (c, d), r)))
-        .fold(0.0, f64::max);
-    if reach.is_finite() { reach.clamp(0.0, a.dist(b)) } else { 0.0 }
+    let sections: Vec<[Vec3; 4]> = corners.as_chunks::<4>().0.iter().map(|r| r.map(|q| own.to_world(q))).collect();
+    solidcraft_kernel::planar::reach_through_rounds(end, toward, &sections, earlier, a.dist(b))
+        .map_err(|e| DocError::Invalid(format!("how far a fitted end reaches can't be measured: {e}")))
 }
 
 /// Auto's ends (#4003 spec A4-A6), as [`corner_ends`] gives stage 1's, and the ends cut to fit, in laying order:

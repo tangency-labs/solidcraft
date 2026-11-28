@@ -8,6 +8,8 @@
 //! - [`offset_faces`]: the faces named moved along their outward normals
 //!   ([`solidcore::offset::offset_faces::OffsetFacesExecutive`]), the same room test first for a
 //!   move inward.
+//! - [`transform_face`]: one support moved rigidly, its neighbours retrimmed on their own
+//!   supports, without rebuilding tangent blends.
 //! - [`thicken`]: a sheet thickened, or moved back by half first.
 //! - [`offset_sheet`]: every face of a sheet moved onto its surface's offset
 //!   (`SmApiOffsetBrepFull`).
@@ -32,6 +34,7 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::brep::local_operation::{transformed_face_surface, FaceMotion};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 
@@ -273,7 +276,7 @@ fn offset_refused(
         OffsetFailure::Folds { largest, .. } => {
             return Error::WallFolds {
                 largest: Some(largest),
-            }
+            };
         }
         // a rounded offset's tube that folds (#13685): the wall is the tube's radius
         OffsetFailure::TubeFolds { largest, .. } => return Error::WallFolds { largest },
@@ -546,32 +549,88 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
         }
         let mut exec = OffsetFacesExecutive::new();
         if let Err(e) = exec.offset_faces(k, b, &picked, distance) {
-            // where the kernel says why the blends cannot follow, the refusal says it too
-            let why = exec.reason().trim();
-            let not_followed = |exact: bool, bare: Error| {
-                if why.is_empty() {
-                    bare
-                } else {
-                    Error::BlendsNotFollowed {
-                        exact,
-                        why: why.to_owned(),
-                    }
-                }
-            };
-            return Ok(Err(match exec.refusal() {
-                OffsetFacesRefusal::NoRoom => Error::NoRoom,
-                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
-                    false,
-                    Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
-                ),
-                OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
-                OffsetFacesRefusal::NoEffect => Error::NoEffect,
-                OffsetFacesRefusal::None => status(e, &in_order(order)),
-            }));
+            return Ok(Err(
+                faces_move_refused(&exec).unwrap_or_else(|| status(e, &in_order(order)))
+            ));
         }
         let moved = std::mem::take(b);
         replace(k, b, moved, expect)
     })?
+}
+
+/// Rotate one face's supporting surface about `axis` through `origin` by `angle` radians,
+/// then translate it. Lengths are in mm. The remaining faces stay on their supports and
+/// extend or trim to meet it. Returns `false` without rebuilding for an invariant support.
+///
+/// # Errors
+/// [`Error::Argument`] for an invalid record face, a body that is not an outward solid,
+/// or invalid motion parameters; the local operation's refusal or a result that fails
+/// the solid check. A failure rolls back the edit, including topology and provenance.
+pub fn transform_face(
+    body: &Body,
+    order: &Order,
+    face: usize,
+    translate: [f64; 3],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+) -> Result<bool> {
+    let picked = order::face(order, face)?;
+    let motion = FaceMotion::new(
+        Vec3::from_array(translate),
+        Vec3::from_array(origin),
+        Vec3::from_array(axis),
+        angle,
+    )
+    .map_err(|_| Error::Argument)?;
+    with_body("TransformFace", body, |k, b| {
+        if !b.face_list().contains(&picked) {
+            return Ok(Err(Error::Argument));
+        }
+        let expect = Expect::of(k, b)?;
+        if !expect.solid() {
+            return Ok(Err(Error::Argument));
+        }
+        let surface = match transformed_face_surface(k, b, picked, &motion) {
+            Ok(Some(s)) => s,
+            Ok(None) => return Ok(Ok(false)),
+            Err(e) => return Ok(Err(status(e, &in_order(order)))),
+        };
+        if let Err(e) = local_operation_simple(k, b, &[picked], vec![surface]) {
+            return Ok(Err(status(e, &in_order(order))));
+        }
+        let moved = std::mem::take(b);
+        Ok(replace(k, b, moved, expect)?.map(|()| true))
+    })?
+}
+
+/// Why the kernel's face move whose blends follow ([`OffsetFacesExecutive`], a face offset's or
+/// a draft's) refused, as the operation's error, where it refused (`None` for a failure of its
+/// own, to be mapped from its status): where the kernel says why the blends cannot follow,
+/// the refusal says it too.
+#[must_use]
+pub fn faces_move_refused(exec: &OffsetFacesExecutive) -> Option<Error> {
+    let why = exec.reason().trim();
+    let not_followed = |exact: bool, bare: Error| {
+        if why.is_empty() {
+            bare
+        } else {
+            Error::BlendsNotFollowed {
+                exact,
+                why: why.to_owned(),
+            }
+        }
+    };
+    Some(match exec.refusal() {
+        OffsetFacesRefusal::NoRoom => Error::NoRoom,
+        OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
+            false,
+            Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
+        ),
+        OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
+        OffsetFacesRefusal::NoEffect => Error::NoEffect,
+        OffsetFacesRefusal::None => return None,
+    })
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
@@ -670,33 +729,47 @@ fn moved_faces(b: &mut Brep) -> solidcore::Result<bool> {
 }
 
 /// A face the kernel cannot draft, as the operation's error: a pull in the neutral plane is
-/// the draft's own argument ([`Error::Argument`]); any other refusal names what the face is
-/// ([`Error::Unsupported`]). The app's own draft words the same refusals with it.
+/// the draft's own argument ([`Error::Argument`]); a cone that would close within the face or a
+/// neutral plane at or past its apex is a geometric refusal ([`Error::OffsetRefused`]); any other
+/// refusal names what the face is ([`Error::Unsupported`]). The app's own draft words the same
+/// refusals with it.
 pub fn draft_refused(r: DraftRefusal) -> Error {
-    Error::Unsupported(match r {
-        DraftRefusal::PullInNeutralPlane => return Error::Argument,
-        DraftRefusal::NotPlaneOrCone => "a drafted face is neither a plane nor a cone or cylinder",
-        DraftRefusal::PlaneAcrossPull => "a drafted plane is not parallel to the pull",
-        DraftRefusal::PlaneParallelToNeutral => {
+    match r {
+        DraftRefusal::PullInNeutralPlane => Error::Argument,
+        DraftRefusal::ConeCloses => Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::DraftConeCloses,
+        },
+        DraftRefusal::NeutralPlanePastApex => Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::DraftNeutralPlanePastApex,
+        },
+        DraftRefusal::NotPlaneOrCone => {
+            Error::Unsupported("a drafted face is neither a plane nor a cone or cylinder")
+        }
+        DraftRefusal::PlaneAcrossPull => {
+            Error::Unsupported("a drafted plane is not parallel to the pull")
+        }
+        DraftRefusal::PlaneParallelToNeutral => Error::Unsupported(
             "a drafted plane is parallel, or too near parallel, to the neutral plane: it has no \
-             line on it to turn about"
+             line on it to turn about",
+        ),
+        DraftRefusal::HingeAlongPull => {
+            Error::Unsupported("a drafted plane meets the neutral plane along the pull")
         }
-        DraftRefusal::HingeAlongPull => "a drafted plane meets the neutral plane along the pull",
-        DraftRefusal::AngleBeyondHinge => {
-            "a drafted plane's line on the neutral plane is too near the pull for the draft angle"
+        DraftRefusal::AngleBeyondHinge => Error::Unsupported(
+            "a drafted plane's line on the neutral plane is too near the pull for the draft angle",
+        ),
+        DraftRefusal::AxisNotAlongPull => {
+            Error::Unsupported("a drafted cone or cylinder's axis is not along the pull")
         }
-        DraftRefusal::AxisNotAlongPull => "a drafted cone or cylinder's axis is not along the pull",
         DraftRefusal::AxisInNeutralPlane => {
-            "a drafted cone or cylinder's axis lies in the neutral plane"
+            Error::Unsupported("a drafted cone or cylinder's axis lies in the neutral plane")
         }
-        DraftRefusal::SenseNotProved => {
-            "whether a drafted cone or cylinder faces away from its axis is not proved"
-        }
-        DraftRefusal::NeutralPlanePastApex => {
-            "the neutral plane is at or past a drafted cone's apex"
-        }
-        DraftRefusal::ConeCloses => "a drafted cone would close within the face",
-    })
+        DraftRefusal::SenseNotProved => Error::Unsupported(
+            "whether a drafted cone or cylinder faces away from its axis is not proved",
+        ),
+    }
 }
 
 /// The faces of the solid `body` with record indices `faces` (through `order`, its record's
@@ -704,7 +777,9 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
 /// normal `neutral_normal`, so that they lean in going along `pull` (a negative angle leans
 /// them out): a plane parallel to the pull turns about the line where it meets the neutral
 /// plane, a cone or cylinder about the pull about its circle on it ([`draft_surface`]), and the
-/// faces around them are extended or trimmed to meet them.
+/// faces around them are extended or trimmed to meet them. The tangent blends on the drafted
+/// faces follow them, as they follow [`offset_faces`]: taken off, the faces drafted, put back at
+/// their sizes ([`OffsetFacesExecutive::move_onto`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for a neutral normal or pull not finite or not longer than 1e-12 (the
@@ -713,12 +788,15 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
 /// face the body does not have, a body that is not a valid solid facing out, or a pull in the
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
-/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
+/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face; those of
+/// [`faces_move_refused`] for blends that cannot follow;
 /// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
-/// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
-/// the wall); [`Error::DraftCutsThrough`] for a draft the kernel refuses without a reason of its
-/// own whose drafted face would cut through a face it does not meet ([`drafted_through`]); the
-/// kernel's other errors, its typed refusals passed on as they are;
+/// would close within the face: [`OffsetRefusal::DraftConeCloses`]; a neutral plane at or past a
+/// cone's apex: [`OffsetRefusal::DraftNeutralPlanePastApex`]; a drafted cone that would reach a
+/// cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps the wall);
+/// [`Error::DraftCutsThrough`] for a draft the kernel refuses without a reason of its own whose
+/// drafted face would cut through a face it does not meet ([`drafted_through`]); the kernel's
+/// other errors, its typed refusals passed on as they are;
 /// those of [`finish`].
 pub fn draft(
     body: &Body,
@@ -770,7 +848,13 @@ pub fn draft(
         // a draft the kernel builds
         let through = drafted_through(k, b, &picked, &surfaces).ok().flatten();
         mark_moved(b, &picked)?;
-        if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
+        // the tangent blends on the drafted faces follow them: taken off, the faces drafted,
+        // put back (the kernel's face move whose blends follow; with none, the local operation)
+        let mut exec = OffsetFacesExecutive::new();
+        if let Err(e) = exec.move_onto(k, b, &picked, surfaces) {
+            if let Some(refused) = faces_move_refused(&exec) {
+                return Ok(Err(refused));
+            }
             // the cut through is named only where the kernel gives no reason of its own (a bare
             // status): any refusal it words or types is its answer, passed on as it is
             return Ok(Err(match (status(e, &in_order(order)), through) {

@@ -40,6 +40,8 @@ pub(super) struct Saved {
     pub rolled_results: HashMap<u64, (u64, Option<u64>, FeatureResult)>,
     pub occurrence_transforms: Option<Vec<crate::Mat>>,
     pub joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
+    pub joints_dirty: bool,
+    pub all_joints_resolved: bool,
     pub resolved_joints: std::collections::BTreeMap<u64, crate::CapturedJoint>,
 }
 
@@ -327,6 +329,8 @@ mod tests {
             rolled_results: HashMap::new(),
             occurrence_transforms: None,
             joint_states: None,
+            joints_dirty: false,
+            all_joints_resolved: true,
             resolved_joints: Default::default(),
         }
     }

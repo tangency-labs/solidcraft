@@ -77,8 +77,18 @@ fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)
 
 /// The convex polyhedron bounded by the half-spaces.
 pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
+    convex_polyhedron_sides(hs).map(|(b, _)| b)
+}
+
+/// [`convex_polyhedron`], with the half-space each of its faces lies on (an index into `hs`), face
+/// by face in the body's face order: a half-space that bounds no face of it has none.
+pub(crate) fn convex_polyhedron_sides(hs: &[HalfSpace]) -> Result<(Body, Vec<usize>)> {
     let (verts, faces) = combinatorics(hs)?;
-    crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")
+    let body = crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")?;
+    if body.record().faces.len() != faces.len() {
+        return Err(KernelError::Failed("polyhedron: the solid made has other faces than its planes".into()));
+    }
+    Ok((body, faces.iter().map(|(hi, _)| *hi).collect()))
 }
 
 /// The record of the closed polyhedron with corners `verts` whose faces are `faces` (the
@@ -295,10 +305,7 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     }
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
     let mut chosen: Vec<usize> = Vec::new();
-    // The reach of the earlier mesh pick (a point near a display triangle of a face), widened by
-    // that mesh's chord deviation, since the distance is now to the exact face. The nearest
-    // exact face wins, so a point near a rim still picks the face it lies on.
-    let reach = 2.0 * healed.size() * 1e-3 + 2e-6;
+    let reach = crate::offset_backend::exact_pick_reach(&healed);
     for p in at {
         match healed.face_within(*p, reach)? {
             Some(f) => {

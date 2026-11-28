@@ -643,7 +643,7 @@ pub fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
     let galley = ui.painter().layout_no_wrap(text.to_owned(), crate::type_face::semibold(t.font_small), ink);
     let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_16, t.space_24), Sense::hover());
     ui.painter().rect_filled(r, t.radius_xl, fill);
-    ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
+    ui.painter().galley(crate::text::centred_in(ui.painter(), &galley, r.center()), galley, ink);
 }
 
 pub use super::preferences_figure_data::{
@@ -761,7 +761,8 @@ fn centred_text_rows(p: &egui::Painter, rect: Rect, label: &str, font: FontId, i
     job.wrap.max_rows = rows;
     job.halign = egui::Align::Center;
     let galley = p.layout_job(job);
-    p.with_clip_rect(rect).galley(rect.center() - galley.rect.center().to_vec2(), galley, ink);
+    let rise = egui::galley_cap_ink_rise(p, &galley);
+    p.with_clip_rect(rect).galley(rect.center() - galley.rect.center().to_vec2() - egui::vec2(0.0, rise), galley, ink);
 }
 
 fn point(r: Rect, x: f32, y: f32) -> Pos2 {

@@ -150,6 +150,8 @@ pub struct Draft {
     /// Said with the next screenshot: the technical details were rebuilt for it.
     rebuilt: Option<&'static str>,
     pub note: String,
+    /// What became of saving the design for the report (#6878).
+    design_note: String,
     source_signature: u64,
     /// The description has taken the focus it gets on opening; Continue finding it empty clears
     /// this, so it takes the focus once more (#7190).
@@ -189,6 +191,7 @@ impl Draft {
             built_body: String::new(),
             rebuilt: None,
             note: String::new(),
+            design_note: String::new(),
             source_signature,
             focus_requested: false,
             missing_description: false,
@@ -1077,6 +1080,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::sketch3d::drag_end();
         crate::drag_snap::clear();
         crate::gizmo::cancel(ctx, egui::Id::unique("sc_move_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_transform_face_triad"));
         crate::gizmo::cancel(ctx, egui::Id::unique("sc_occ_triad"));
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));
@@ -1932,6 +1936,45 @@ mod tests {
         assert!(h.app.issue_report.draft.as_ref().unwrap().image.is_none());
         assert!(h.widget("Screenshot removed from this draft.").is_some());
         assert!(h.widget("Report text copied. Paste it into GitHub and submit your report there.").is_some());
+    }
+
+    /// #6878: Save design… writes the whole design as one `.json` file for the report, a copy:
+    /// the open design keeps its own file and nothing goes on the undo stack.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn issue_report_save_design_writes_a_copy_to_attach() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":20,"height":30,"body_name":"Stock"})).unwrap();
+        h.app.session.doc_mut().name = "Bracket: v2".into();
+        let path = h.dir.join("bracket-report.json");
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert_eq!(name, "Bracket_ v2.json", "named after the design, without characters files can't hold");
+            assert_eq!(extensions, &["json"]);
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(16);
+        assert!(h.widget("Design (optional)").is_some());
+        let before = (h.app.session.path.clone(), h.app.session.undo.len());
+        click_commands(&mut h, "Save design…");
+        assert!(h.widget("Design saved. Drag the .json file into the GitHub draft to attach it.").is_some());
+        assert_eq!((h.app.session.path.clone(), h.app.session.undo.len()), before, "a copy: the design keeps its file");
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(reopened.model.state().body("Stock").is_some(), "the saved design holds the body");
+        let volume = reopened.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - 6000.0).abs() < 1e-6, "{volume}");
+    }
+
+    #[test]
+    fn design_file_stems_are_safe_file_names() {
+        assert_eq!(form::design_file_stem("Battery Caddy"), "Battery Caddy");
+        assert_eq!(form::design_file_stem("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(form::design_file_stem("  ..  "), "solidcraft-design");
+        assert_eq!(form::design_file_stem(""), "solidcraft-design");
+        assert_eq!(form::design_file_stem(&"x".repeat(200)).len(), 80);
     }
 
     #[test]
@@ -3335,7 +3378,7 @@ mod tests {
     #[test]
     fn ticket_report_review_fixes_hold() {
         use tickets::api::{allowed_url, answer, on_server};
-        // A crash report is offered, never ticked to start with.
+        // A crash report's details are offered ticked; the design is not.
         let (mut app, _, _, _) = ticket_app(true, None);
         let ctx = crate::fonts::test_context();
         begin_crash(
@@ -3345,7 +3388,21 @@ mod tests {
         );
         let draft = app.issue_report.draft.take().unwrap();
         let t = ticket::new_ticket(&mut app, &draft, None);
-        assert!(t.evidence.crash.is_some() && !t.ticks.crash && !t.ticks.design);
+        assert!(t.evidence.crash.is_some() && t.ticks.crash && !t.ticks.design);
+        // Building the report is what Submit does: ticked, the crash report's JSON goes (never a
+        // minidump); unticked, nothing of it, and the consent record says so.
+        let crash_form = payload::Form { title: "Crash".into(), ..Default::default() };
+        let ticked = payload::build(&crash_form, t.ticks, &t.evidence, "test");
+        assert!(ticked.files.iter().any(|f| f.kind == "crash" && f.name == "crash-c1.json"), "{:?}", ticked.files);
+        assert!(ticked.files.iter().all(|f| !f.name.ends_with(".dmp")), "the minidump stays local");
+        assert!(ticked.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")));
+        let unticked = payload::build(&crash_form, payload::Ticks { crash: false, ..t.ticks }, &t.evidence, "test");
+        assert!(unticked.files.iter().all(|f| f.kind != "crash"), "{:?}", unticked.files);
+        assert!(!unticked.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")));
+        // A crash report that names its run gets that run's log or none, never this run's instead.
+        let named = json!({"id": "c2", "kind": "command_panic", "message": "boom", "run": {"pid": 1, "start": "2020-01-01T00:00:00Z"}});
+        let evidence = ticket::evidence(&app, None, None, Some(("c2".into(), named.to_string())));
+        assert!(evidence.log.is_empty(), "{:?}", evidence.log);
         assert_eq!(t.evidence.failing.as_ref().and_then(|f| f.origin.as_deref()), Some("app"), "from the crash's kind");
 
         // Only a refusal of the report itself is final; a busy or broken server is tried again.
@@ -3560,6 +3617,95 @@ mod tests {
         let now = lines.iter().position(|l| l == crate::log_file::RUN_MARK).map_or(0, |i| i + 1);
         assert!(lines[now..].iter().all(|l| l.len() == 1005) && lines.last().unwrap().starts_with("0399"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each start keeps the last few runs' logs, not one (`log_file::rotate`): two failed starts
+    /// and the safe-mode start after them still leave the first failure's log. The oldest go first,
+    /// past `KEEP` runs or past `MAX_KEPT_BYTES`.
+    #[test]
+    fn ticket_report_logs_of_several_failed_starts_are_kept() {
+        use crate::log_file::{FILE, KEEP, MAX_KEPT_BYTES, previous_name, rotate};
+        let dir = temp_dir("log-rotate");
+        std::fs::create_dir_all(&dir).unwrap();
+        for run in 0..KEEP + 2 {
+            rotate(&dir);
+            std::fs::write(dir.join(FILE), format!("run {run}\n")).unwrap();
+        }
+        let last = KEEP + 1;
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), format!("run {last}\n"));
+        for n in 1..=KEEP {
+            assert_eq!(std::fs::read_to_string(dir.join(previous_name(n))).unwrap(), format!("run {}\n", last - n), "{}", previous_name(n));
+        }
+        assert!(!dir.join(previous_name(KEEP + 1)).exists(), "no more than KEEP earlier runs");
+        // Big older logs: the oldest go until the rest fit.
+        let big = "x".repeat(usize::try_from(MAX_KEPT_BYTES / 3).unwrap());
+        for _ in 0..KEEP {
+            rotate(&dir);
+            std::fs::write(dir.join(FILE), &big).unwrap();
+        }
+        rotate(&dir);
+        let older: u64 = (2..=KEEP).filter_map(|n| std::fs::metadata(dir.join(previous_name(n))).ok()).map(|m| m.len()).sum();
+        assert!(older <= MAX_KEPT_BYTES, "{older} bytes");
+        assert!(dir.join(previous_name(1)).exists() && dir.join(previous_name(2)).exists(), "the newest stay");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A crash report's log is the crashed run's own, found by the run it names, even after more
+    /// starts: not this run's, nor the run before's.
+    #[test]
+    fn ticket_report_crash_log_is_the_crashed_runs_own() {
+        use crate::log_file::{FILE, previous_name, run_header, run_tail_in};
+        let dir = temp_dir("log-run");
+        std::fs::create_dir_all(&dir).unwrap();
+        let crashed = format!("{}\ncrashed 1\ncrashed 2\n", run_header(4242, "2026-11-27T10:00:01Z"));
+        std::fs::write(dir.join(previous_name(3)), crashed).unwrap();
+        std::fs::write(dir.join(previous_name(2)), format!("{}\nfailed again\n", run_header(4243, "2026-11-27T10:01:00Z"))).unwrap();
+        std::fs::write(dir.join(previous_name(1)), format!("{}\nsafe mode\n", run_header(4244, "2026-11-27T10:02:00Z"))).unwrap();
+        // Two windows' processes in one file (Windows refused the move): only the run's own lines.
+        let now = format!("{}\nthis run\n{}\nanother window\n", run_header(5000, "2026-11-27T10:03:00Z"), run_header(4242, "2026-11-20T10:00:00Z"));
+        std::fs::write(dir.join(FILE), now).unwrap();
+        // The crash journal starts a moment after the log.
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-27T10:00:03Z", 500, 1 << 20).unwrap(), ["crashed 1", "crashed 2"]);
+        assert_eq!(run_tail_in(&dir, 5000, "2026-11-27T10:03:00Z", 500, 1 << 20).unwrap(), ["this run"]);
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-27T10:00:03Z", 1, 1 << 20).unwrap(), ["crashed 2"], "the end of it");
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-28T10:00:03Z", 500, 1 << 20), None, "same process number, another day");
+        assert_eq!(run_tail_in(&dir, 9, "2026-11-27T10:00:03Z", 500, 1 << 20), None);
+        assert_eq!(run_tail_in(&dir, 4242, "yesterday", 500, 1 << 20), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A report about a crash says which GPU, driver and graphics API the run that crashed had,
+    /// not the safe-mode start that sends it; that start's stay beside it as `reported_from`.
+    #[test]
+    fn ticket_report_about_a_crash_names_the_crashed_runs_graphics() {
+        let report = json!({
+            "app": {"version": "0.50.0"},
+            "system": {"environment": "Renderer: Vulkan Intel(R) UHD Graphics 620 (IntegratedGpu, driver Intel Corporation 31.0.101.2111)"},
+        });
+        let mut fields = serde_json::Map::new();
+        fields.insert("renderer".into(), json!("GPU"));
+        fields.insert("gpu".into(), json!("Microsoft Basic Render Driver (Dx12, Cpu)"));
+        fields.insert("graphics_api".into(), json!("dx12"));
+        let mut text = "SolidCraft 0.51.0\nRenderer: GPU, Microsoft Basic Render Driver (Dx12, Cpu)\nGraphics API: dx12\n".to_string();
+        ticket::crashed_system(&report, &mut fields, &mut text);
+        assert_eq!(fields["gpu"], json!("Intel(R) UHD Graphics 620 (Vulkan, IntegratedGpu)"));
+        assert_eq!(fields["graphics_api"], json!("vulkan"));
+        assert_eq!(fields["renderer"], json!("GPU"));
+        assert_eq!(fields["driver"], json!("Intel Corporation 31.0.101.2111"));
+        assert_eq!(fields["crashed_run"]["version"], json!("0.50.0"));
+        assert_eq!(fields["reported_from"]["gpu"], json!("Microsoft Basic Render Driver (Dx12, Cpu)"));
+        assert_eq!(
+            text,
+            "SolidCraft 0.51.0\n\
+             Renderer: GPU, Intel(R) UHD Graphics 620 (Vulkan, IntegratedGpu), driver Intel Corporation 31.0.101.2111 (the run that crashed)\n\
+             Graphics API: vulkan (the run that crashed)\n\
+             Reported from: GPU, Microsoft Basic Render Driver (Dx12, Cpu), dx12\n",
+            "one set of graphics lines, the crashed run's; this run's only as reported from"
+        );
+        // A crash report without a renderer leaves this start's as they are.
+        let (mut same, mut said) = (fields.clone(), text.clone());
+        ticket::crashed_system(&json!({"system": {"environment": ""}}), &mut same, &mut said);
+        assert_eq!((same, said), (fields, text));
     }
 
     /// The error in a report's title and description is cut at a word, with "…", never mid-word

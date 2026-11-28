@@ -149,6 +149,13 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             other => other.to_string(),
         })
         .collect();
+    for workspace in plugin.get("workspaces").and_then(Value::as_array).into_iter().flatten() {
+        let name = workspace.get("name").and_then(Value::as_str).unwrap_or_default();
+        lines.push(format("ui.plugin_workspace.install", &[("name", name)]));
+        if workspace.get("on_enter").and_then(Value::as_str).is_some() || workspace.get("on_exit").and_then(Value::as_str).is_some() {
+            lines.push(tr("ui.plugin_workspace.hooks").to_owned());
+        }
+    }
     for folder in permissions.and_then(|p| p.get("files")).and_then(Value::as_array).into_iter().flatten() {
         let name = folder.get("name").and_then(Value::as_str).unwrap_or_default();
         let read = folder.get("read").and_then(Value::as_bool).unwrap_or(false);
@@ -211,6 +218,16 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if !themes.is_empty() {
         lines.push(format("plugin_install.themes", &[("names", &themes.join(", "))]));
     }
+    // Review every declaration, including capabilities a newer host might grant.
+    let granted = list(plugin.get("granted_capabilities"));
+    for capability in list(plugin.get("optional_capabilities")) {
+        let key = if granted.contains(&capability) {
+            "plugin_install.optional_capability_supported"
+        } else {
+            "plugin_install.optional_capability_unavailable"
+        };
+        lines.push(format(key, &[("capability", &capability)]));
+    }
     lines
 }
 
@@ -233,6 +250,44 @@ fn replacement_comparison(plugin: &Value) -> Option<String> {
     Some(format("plugin_install.version_comparison", &[("installed", previous), ("new", &next)]))
 }
 
+/// Compare named requests with the stored approval, not the selected host paths.
+fn permission_changes(old: &solidcraft_engine::plugin::Grants, new: &solidcraft_engine::plugin::Grants) -> (Vec<String>, Vec<String>) {
+    use std::collections::BTreeMap;
+    fn entries(grants: &solidcraft_engine::plugin::Grants) -> BTreeMap<(u8, String), String> {
+        let mut entries = BTreeMap::new();
+        for group in &grants.command_groups {
+            let label = match group.as_str() {
+                "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_{group}")).to_string(),
+                _ => group.clone(),
+            };
+            entries.insert((0, group.clone()), label);
+        }
+        for folder in &grants.folders {
+            // Read and write are separate permissions, including write without read.
+            for (enabled, kind, key) in [(folder.read, 1, "prefs.plugin_folder_read"), (folder.write, 2, "prefs.plugin_folder_write")] {
+                if enabled {
+                    entries.insert((kind, folder.name.clone()), format("prefs.plugin_folder", &[("name", &folder.name), ("access", tr(key))]));
+                }
+            }
+        }
+        if grants.input_folder {
+            entries.insert((3, String::new()), tr("plugin_install.input_folder").to_string());
+        }
+        if let Some(fuel) = grants.fuel {
+            entries.insert((4, fuel.to_string()), format("plugin_install.comparison_fuel", &[("value", &fuel.to_string())]));
+        }
+        if let Some(memory) = grants.memory_mib {
+            entries.insert((5, memory.to_string()), format("plugin_install.comparison_memory", &[("value", &memory.to_string())]));
+        }
+        entries
+    }
+    let old = entries(old);
+    let new = entries(new);
+    let added = new.iter().filter(|(key, _)| !old.contains_key(*key)).map(|(_, label)| label.clone()).collect();
+    let removed = old.iter().filter(|(key, _)| !new.contains_key(*key)).map(|(_, label)| label.clone()).collect();
+    (added, removed)
+}
+
 /// The question, while a plugin waits for it.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut ask) = app.plugin_install.ask.take() else { return };
@@ -241,6 +296,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (name, version, summary) = (text(plugin, "name"), text(plugin, "version"), text(plugin, "description"));
     let replaces = plugin.get("replaces").and_then(Value::as_str).map(str::to_string);
     let lines = permission_lines(plugin);
+    let changes = replaces
+        .as_ref()
+        .and_then(|_| plugin.get("id").and_then(Value::as_str))
+        .and_then(|id| app.session.plugin_state.grants.get(id))
+        .map(|old| permission_changes(old, &ask.grants));
     let title = tr(if ask.update { "plugin_update.title" } else { "plugin_install.title" }).to_string();
     let install = tr(if ask.update { "plugin_update.update" } else { install_action(plugin) }).to_string();
     let cancel = tr("plugin_install.cancel").to_string();
@@ -255,6 +315,27 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, &std::format!("{name} {version}"), ui_kit::Text::Heading("plugin_install_name"));
                 if let Some(comparison) = replacement_comparison(plugin) {
                     ui_kit::text(ui, &comparison, ui_kit::Text::Report("plugin_install_version_comparison", false));
+                }
+                if replaces.is_some() {
+                    ui_kit::text(ui, tr("plugin_install.comparison_heading"), ui_kit::Text::Heading("plugin_install_changes"));
+                    match &changes {
+                        Some((added, removed)) => {
+                            if added.is_empty() && removed.is_empty() {
+                                ui_kit::text(ui, tr("plugin_install.comparison_unchanged"), ui_kit::Text::Hint("plugin_install_unchanged"));
+                            }
+                            for (key, lines) in [("plugin_install.comparison_added", added), ("plugin_install.comparison_removed", removed)] {
+                                for (i, line) in lines.iter().enumerate() {
+                                    ui.push_id((key, i), |ui| {
+                                        let line = format(key, &[("permission", line)]);
+                                        ui_kit::text(ui, &line, ui_kit::Text::Report("plugin_install_change", false));
+                                    });
+                                }
+                            }
+                        }
+                        None => {
+                            ui_kit::text(ui, tr("plugin_install.comparison_unavailable"), ui_kit::Text::Hint("plugin_install_unavailable"));
+                        }
+                    }
                 }
                 if !summary.is_empty() {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
@@ -419,6 +500,18 @@ mod tests {
     }
 
     #[test]
+    fn plugin_install_lists_workspaces_and_read_only_hooks_before_approval() {
+        crate::i18n::install();
+        let lines = permission_lines(&json!({"workspaces":[
+            {"name":"Machining", "on_enter":"refresh"}, {"name":"Review"}
+        ]}));
+        assert!(lines.iter().any(|line| line.contains("Machining")));
+        assert!(lines.iter().any(|line| line.contains("Review")));
+        assert!(lines.iter().any(|line| line == tr("ui.plugin_workspace.hooks")));
+        assert!(permission_lines(&json!({})).is_empty());
+    }
+
+    #[test]
     fn install_review_shows_swatch_warnings_and_keeps_install_available() {
         let mut h = crate::scenario::Harness::new();
         let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
@@ -466,6 +559,24 @@ mod tests {
                 "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_review_names_all_optional_capabilities() {
+        crate::i18n::install();
+        let plugin = json!({
+            "capabilities": ["commands@0.2"],
+            "optional_capabilities": ["user-storage@0.1", "future@0.1"],
+            "granted_capabilities": ["commands@0.2", "user-storage@0.1"]
+        });
+        assert_eq!(
+            permission_lines(&plugin),
+            [
+                "Optional capability: user-storage@0.1 (supported by this app)",
+                "Optional capability: future@0.1 (not supported by this app; may be enabled by a later version)",
+            ]
+        );
+        assert!(permission_lines(&json!({"capabilities":["commands@0.2"]})).is_empty());
     }
 
     #[test]
@@ -816,4 +927,29 @@ mod tests {
         assert!(h.app.status.as_ref().is_some_and(|s| s.2), "the plugin review reports the invalid archive");
         assert_eq!(h.app.docs.count(), tabs);
     }
+}
+
+#[test]
+fn permission_comparison_checks_exact_access_and_ignores_paths() {
+    crate::i18n::install();
+    let _language = solidcraft_ui_text::scope("en");
+    use solidcraft_engine::plugin::{FileGrant, Grants};
+    let old = Grants {
+        command_groups: ["doc".to_string()].into_iter().collect(),
+        folders: vec![FileGrant { name: "data".into(), folder: "/private/old".into(), read: true, write: false }],
+        ..Default::default()
+    };
+    let mut new = old.clone();
+    new.folders[0].folder = "/private/new".into();
+    assert_eq!(permission_changes(&old, &new), (vec![], vec![]));
+    new.folders[0].read = false;
+    new.folders[0].write = true;
+    new.command_groups.insert("file".into());
+    new.input_folder = true;
+    let (added, removed) = permission_changes(&old, &new);
+    assert_eq!(added.len(), 3);
+    assert_eq!(removed.len(), 1);
+    assert!(added.iter().any(|line| line.contains("data") && line.contains("write")));
+    assert!(removed[0].contains("data") && removed[0].contains("read"));
+    assert!(added.iter().chain(&removed).all(|line| !line.contains("/private/")));
 }

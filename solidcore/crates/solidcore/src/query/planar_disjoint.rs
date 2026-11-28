@@ -14,6 +14,7 @@
 //!   non-manifold, warped off its plane, or fails strict classification. Any uncertainty
 //!   yields [`Verdict::Undecided`], never a false clearance.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::CurveKind;
@@ -102,6 +103,30 @@ impl Aabb {
             && self.hi.z >= other.lo.z
     }
 
+    fn union(self, other: Self) -> Self {
+        Self {
+            lo: Point3::new(
+                self.lo.x.min(other.lo.x),
+                self.lo.y.min(other.lo.y),
+                self.lo.z.min(other.lo.z),
+            ),
+            hi: Point3::new(
+                self.hi.x.max(other.hi.x),
+                self.hi.y.max(other.hi.y),
+                self.hi.z.max(other.hi.z),
+            ),
+        }
+    }
+
+    fn contains(self, p: Point3) -> bool {
+        p.x >= self.lo.x
+            && p.x <= self.hi.x
+            && p.y >= self.lo.y
+            && p.y <= self.hi.y
+            && p.z >= self.lo.z
+            && p.z <= self.hi.z
+    }
+
     fn from_segment(a: Point3, b: Point3, margin: f64) -> Self {
         Self {
             lo: Point3::new(
@@ -126,6 +151,9 @@ struct PlanarEdge {
     end: Point3,
     start_2d: [f64; 2],
     end_2d: [f64; 2],
+    /// True when this segment is a straight chord substituting for a curved edge whose
+    /// certified bounding box lies strictly outside the other body's inflated bounding box.
+    synthetic: bool,
 }
 
 /// A planar face in the overlap region, extracted as exact 3D and 2D polygon loops.
@@ -139,6 +167,9 @@ struct PlanarFace {
     loops_3d: Vec<Vec<Point3>>,
     loops_2d: Vec<Vec<[f64; 2]>>,
     edges: Vec<PlanarEdge>,
+    /// Certified bounding boxes of curved loops or curved edges outside the other body's
+    /// inflated bounding box that were omitted or replaced by chords.
+    omitted_boxes: Vec<Aabb>,
 }
 
 impl PlanarFace {
@@ -221,11 +252,13 @@ pub(crate) fn planar_interiors_disjoint(
     let tol_max = tol_a.max(tol_b).max(1e-5);
     let eps = 1e-9 * scale;
     let region = overlap.inflated(16.0 * tol_max);
+    let other_region_a = bb.inflated(16.0 * tol_max);
+    let other_region_b = ba.inflated(16.0 * tol_max);
 
-    let Some(faces_a) = extract_planar_faces(k, a, region, eps)? else {
+    let Some(faces_a) = extract_planar_faces(k, a, region, other_region_a, eps)? else {
         return Ok(Verdict::Undecided);
     };
-    let Some(faces_b) = extract_planar_faces(k, b, region, eps)? else {
+    let Some(faces_b) = extract_planar_faces(k, b, region, other_region_b, eps)? else {
         return Ok(Verdict::Undecided);
     };
 
@@ -294,13 +327,52 @@ pub(crate) fn planar_interiors_disjoint(
     })
 }
 
+/// Certified 3D bounding box of edge `e_id` between vertices `p0` and `p1`, expanded by the
+/// edge tolerance and `pad`, always containing the chord `p0..p1`. Returns `Ok(None)` if the
+/// curve lacks a certified bounding box.
+fn edge_certified_aabb(
+    k: &Kernel,
+    brep: &Brep,
+    e_id: EdgeId,
+    p0: Point3,
+    p1: Point3,
+    pad: f64,
+) -> Result<Option<Aabb>> {
+    let ed = brep.edge(e_id)?;
+    let Some(curve) = ed.curve.as_ref() else {
+        return Ok(None);
+    };
+    if !ed.tolerance.is_finite() {
+        return Ok(None);
+    }
+    let expand = ed.tolerance.max(0.0) + pad;
+    if matches!(curve.kind(), CurveKind::Line(_)) {
+        return Ok(Some(Aabb::from_segment(p0, p1, expand)));
+    }
+    let Some(ext) = curve.certified_bounding_box(k, &ed.interval)? else {
+        return Ok(None);
+    };
+    if !ext.is_defined() {
+        return Ok(None);
+    }
+    let Some(curve_box) = Aabb::from_pair(ext.min(), ext.max()) else {
+        return Ok(None);
+    };
+    let chord_box = Aabb::from_segment(p0, p1, 0.0);
+    Ok(Some(curve_box.union(chord_box).inflated(expand)))
+}
+
 /// Extracts all faces of `brep` whose bounding boxes meet `region`. Returns `Ok(None)` if
-/// any such face is non-planar, has curved edges, is non-manifold, deviates from its plane,
-/// or exceeds [`MAX_OVERLAP_FACES`].
+/// any such face is non-planar, has curved edges meeting `other_region`, is non-manifold,
+/// deviates from its plane, or exceeds [`MAX_OVERLAP_FACES`]. Curved loops or curved edges
+/// whose certified 3D bounding boxes stay strictly outside `other_region` are omitted or
+/// replaced by straight chords (preserving exact inside/outside parity for every point of the
+/// other solid).
 fn extract_planar_faces(
     k: &Kernel,
     brep: &mut Brep,
     region: Aabb,
+    other_region: Aabb,
     eps: f64,
 ) -> Result<Option<Vec<PlanarFace>>> {
     let face_ids: Vec<FaceId> = brep.face_list().to_vec();
@@ -317,7 +389,7 @@ fn extract_planar_faces(
         if out.len() >= MAX_OVERLAP_FACES {
             return Ok(None);
         }
-        let Some(pf) = extract_single_planar_face(k, brep, f, bbox, eps)? else {
+        let Some(pf) = extract_single_planar_face(k, brep, f, bbox, other_region, eps)? else {
             return Ok(None);
         };
         out.push(pf);
@@ -341,12 +413,15 @@ fn void_side_faceuse(brep: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
     Ok(if m0 { fu1 } else { fu0 })
 }
 
-/// Extracts one planar face with straight line edges and a verified outward unit normal.
+/// Extracts one planar face with straight line edges inside `other_region` and a verified
+/// outward unit normal. Any curved inner hole loop strictly outside `other_region` is dropped,
+/// and any curved edge strictly outside `other_region` is replaced by a synthetic chord.
 fn extract_single_planar_face(
     k: &Kernel,
     brep: &mut Brep,
     f: FaceId,
     bbox: Aabb,
+    other_region: Aabb,
     eps: f64,
 ) -> Result<Option<PlanarFace>> {
     let (support_origin, support_normal) = {
@@ -384,13 +459,16 @@ fn extract_single_planar_face(
     }
 
     let mut first_edge: Option<EdgeId> = None;
-    let mut raw_loops: Vec<Vec<(EdgeId, Point3)>> = Vec::new();
+    let mut fallback_edge: Option<EdgeId> = None;
+    let mut raw_loops: Vec<Vec<(EdgeId, Point3, bool)>> = Vec::new();
+    let mut omitted_boxes: Vec<Aabb> = Vec::new();
     for lu in loopuses {
         let eus = loopuse::edgeuses(brep, lu, None, None)?;
-        if eus.len() < 3 {
+        if eus.is_empty() {
             return Ok(None);
         }
-        let mut loop_items = Vec::new();
+        let mut loop_items: Vec<(EdgeId, Point3, bool)> = Vec::new();
+        let mut has_curved = false;
         for eu in eus {
             let eu_rec = brep.edgeuse(eu)?;
             let (Some(e_id), Some(vu_id)) = (eu_rec.edge, eu_rec.vertexuse) else {
@@ -403,22 +481,82 @@ fn extract_single_planar_face(
             let Some(curve) = ed.curve.as_ref() else {
                 return Ok(None);
             };
-            if !matches!(curve.kind(), CurveKind::Line(_)) {
-                return Ok(None);
+            let is_line = matches!(curve.kind(), CurveKind::Line(_));
+            if !is_line {
+                has_curved = true;
             }
             let pt = brep.vertex(v_id)?.point;
             if !(pt.x.is_finite() && pt.y.is_finite() && pt.z.is_finite()) {
                 return Ok(None);
             }
-            if first_edge.is_none() {
+            if fallback_edge.is_none() {
+                fallback_edge = Some(e_id);
+            }
+            if is_line && first_edge.is_none() {
                 first_edge = Some(e_id);
             }
-            loop_items.push((e_id, pt));
+            loop_items.push((e_id, pt, !is_line));
+        }
+
+        let n_pts = loop_items.len();
+        if !has_curved && n_pts >= 3 {
+            raw_loops.push(loop_items);
+            continue;
+        }
+
+        // Loop has curved edges or fewer than 3 edges (e.g. a full-circle bolt hole or a
+        // filleted outer corner): certify exact 3D bounding boxes for its edges.
+        let mut edge_boxes: Vec<Aabb> = Vec::new();
+        let mut loop_box: Option<Aabb> = None;
+        for i in 0..n_pts {
+            let next = if i + 1 < n_pts { i + 1 } else { 0 };
+            let (Some(&(e_id, p0, _)), Some(&(_, p1, _))) =
+                (loop_items.get(i), loop_items.get(next))
+            else {
+                return Ok(None);
+            };
+            let Some(eb) = edge_certified_aabb(k, brep, e_id, p0, p1, eps)? else {
+                return Ok(None);
+            };
+            loop_box = Some(match loop_box {
+                Some(acc) => acc.union(eb),
+                None => eb,
+            });
+            edge_boxes.push(eb);
+        }
+        let Some(loop_box) = loop_box else {
+            return Ok(None);
+        };
+        if !loop_box.meets(other_region) {
+            // Entire closed loop lies strictly outside `other_region`: dropping it leaves
+            // inside/outside parity unchanged for every point of the other solid.
+            omitted_boxes.push(loop_box);
+            continue;
+        }
+        if n_pts < 3 {
+            return Ok(None);
+        }
+        for i in 0..n_pts {
+            let next = if i + 1 < n_pts { i + 1 } else { 0 };
+            let (Some(&(_, p0, synthetic)), Some(&(_, p1, _)), Some(&eb)) =
+                (loop_items.get(i), loop_items.get(next), edge_boxes.get(i))
+            else {
+                return Ok(None);
+            };
+            if synthetic {
+                if eb.meets(other_region) || p0.distance(p1) <= 1e-12 {
+                    return Ok(None);
+                }
+                omitted_boxes.push(eb);
+            }
         }
         raw_loops.push(loop_items);
     }
 
-    let Some(e0) = first_edge else {
+    if raw_loops.is_empty() {
+        return Ok(None);
+    }
+    let Some(e0) = first_edge.or(fallback_edge) else {
         return Ok(None);
     };
     let Ok(frame) = face_normal_at_edge(k, brep, e0, f, fu) else {
@@ -446,7 +584,7 @@ fn extract_single_planar_face(
     let anchor = raw_loops
         .first()
         .and_then(|l| l.first())
-        .map_or(support_origin, |&(_, p)| p);
+        .map_or(support_origin, |&(_, p, _)| p);
     let plane_origin = anchor - normal * (anchor - support_origin).dot(normal);
     let mut loops_3d = Vec::new();
     let mut loops_2d = Vec::new();
@@ -455,7 +593,7 @@ fn extract_single_planar_face(
         let n_pts = loop_items.len();
         let mut pts_3d = Vec::new();
         let mut pts_2d = Vec::new();
-        for &(_, p) in &loop_items {
+        for &(_, p, _) in &loop_items {
             if (p - support_origin).dot(normal).abs() > eps
                 || (p - plane_origin).dot(normal).abs() > eps
             {
@@ -467,7 +605,7 @@ fn extract_single_planar_face(
         }
         for i in 0..n_pts {
             let next = if i + 1 < n_pts { i + 1 } else { 0 };
-            let (Some(&(edge_id, start)), Some(&(_, end))) =
+            let (Some(&(edge_id, start, synthetic)), Some(&(_, end, _))) =
                 (loop_items.get(i), loop_items.get(next))
             else {
                 return Ok(None);
@@ -484,6 +622,7 @@ fn extract_single_planar_face(
                 end,
                 start_2d,
                 end_2d,
+                synthetic,
             });
         }
         loops_3d.push(pts_3d);
@@ -500,6 +639,7 @@ fn extract_single_planar_face(
         loops_3d,
         loops_2d,
         edges,
+        omitted_boxes,
     }))
 }
 
@@ -507,6 +647,9 @@ fn index_edge_faces(faces: &[PlanarFace]) -> BTreeMap<EdgeId, Vec<usize>> {
     let mut map: BTreeMap<EdgeId, Vec<usize>> = BTreeMap::new();
     for (idx, face) in faces.iter().enumerate() {
         for edge in &face.edges {
+            if edge.synthetic {
+                continue;
+            }
             let list = map.entry(edge.edge_id).or_default();
             if !list.contains(&idx) {
                 list.push(idx);
@@ -636,7 +779,7 @@ fn check_edges(
     let mut undecided = false;
     for face in from_faces {
         for edge in &face.edges {
-            if !seen_edges.insert(edge.edge_id) {
+            if edge.synthetic || !seen_edges.insert(edge.edge_id) {
                 continue;
             }
             k.check_cancelled("query::contact::planar_interiors_disjoint")?;
@@ -1018,7 +1161,7 @@ fn point_to_face_distance_3d(face: &PlanarFace, p: Point3) -> f64 {
             d_edge = d_edge.min(dist_point_to_segment_2d(uv, a, b));
         }
     }
-    h.hypot(d_edge)
+    det::hypot(h, d_edge)
 }
 
 fn scanline_intervals_2d(loops: &[Vec<[f64; 2]>], y: f64) -> Vec<(f64, f64)> {
@@ -1057,6 +1200,31 @@ fn face_interior_point_3d(k: &Kernel, face: &PlanarFace, eps: f64) -> Result<Opt
             ys.push(p[1]);
         }
     }
+    // Split scanline bands around any omitted outside-region boxes so a centred omitted hole
+    // never hides valid interior bands of the face.
+    for ob in &face.omitted_boxes {
+        let xs = [ob.lo.x, ob.hi.x];
+        let y_coords = [ob.lo.y, ob.hi.y];
+        let zs = [ob.lo.z, ob.hi.z];
+        let (mut v_lo, mut v_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &x in &xs {
+            for &y in &y_coords {
+                for &z in &zs {
+                    let v = face.project_2d(Point3::new(x, y, z))[1];
+                    v_lo = v_lo.min(v);
+                    v_hi = v_hi.max(v);
+                }
+            }
+        }
+        for v in [v_lo, v_hi] {
+            if v.is_finite() {
+                if ys.len() >= MAX_Y_EVENTS {
+                    return Ok(None);
+                }
+                ys.push(v);
+            }
+        }
+    }
     ys.sort_by(f64::total_cmp);
     let ys = dedup_sorted(&ys, eps);
     let mut best: Option<(f64, [f64; 2])> = None;
@@ -1076,6 +1244,12 @@ fn face_interior_point_3d(k: &Kernel, face: &PlanarFace, eps: f64) -> Result<Opt
                 continue;
             }
             let cand = [0.5 * (x0 + x1), y_mid];
+            if !face.omitted_boxes.is_empty() {
+                let pt3 = face.lift_3d(cand);
+                if face.omitted_boxes.iter().any(|ob| ob.contains(pt3)) {
+                    continue;
+                }
+            }
             let mut clearance = f64::INFINITY;
             for lp in &face.loops_2d {
                 let n = lp.len();
@@ -1268,7 +1442,7 @@ fn clip_line_to_face_2d(
                         && db.abs() <= eps
                         && dist_point_to_segment_2d(mid, edge.start_2d, edge.end_2d) <= eps
                     {
-                        if found_edge.is_some() {
+                        if edge.synthetic || found_edge.is_some() {
                             return None;
                         }
                         found_edge = Some(edge.edge_id);
@@ -1454,7 +1628,7 @@ mod tests {
             let pts = (0..n)
                 .map(|i| {
                     let ang = std::f64::consts::TAU * (i as f64) / (n as f64);
-                    [ox + r * ang.cos(), r * ang.sin()]
+                    [ox + r * det::cos(ang), r * det::sin(ang)]
                 })
                 .collect();
             vec![pts]
@@ -1464,5 +1638,137 @@ mod tests {
         // 300 * 300 = 90_000 > MAX_SEG_PAIRS (65_536)
         let res = polygons_2d_interiors_overlap(&k, &a, &b, 1e-9).unwrap();
         assert_eq!(res, None);
+    }
+
+    /// An 18 mm tenon flush inside an 18 mm square window of a plate that also has circular
+    /// bolt holes outside the overlap region is certified disjoint, while a 0.05 mm wall
+    /// penetration is rejected as `Verdict::No`.
+    #[test]
+    fn flush_tenon_in_window_of_plate_with_bolt_holes_is_certified_disjoint() {
+        let mut k = kernel();
+        let make_plate = |k: &mut Kernel| {
+            let outer = make_box(k, [-40.0, -40.0, 0.0], [100.0, 100.0, 12.0]);
+            let window = make_box(k, [0.0, 0.0, -2.0], [18.0, 18.0, 16.0]);
+            let with_window = boolean_difference(k, outer, window).unwrap();
+            let hole1 = create_cylinder(k, Point3::new(-20.0, 9.0, -2.0), 3.0, 16.0).unwrap();
+            let with_h1 = boolean_difference(k, with_window, hole1).unwrap();
+            let hole2 = create_cylinder(k, Point3::new(38.0, 9.0, -2.0), 3.0, 16.0).unwrap();
+            boolean_difference(k, with_h1, hole2).unwrap()
+        };
+
+        let mut plate = make_plate(&mut k);
+        let mut tenon = make_box(&mut k, [0.0, 0.0, 3e-5], [18.0, 18.0, 12.0]);
+        assert_eq!(
+            interiors_disjoint(&k, &mut plate, &mut tenon).unwrap(),
+            Verdict::Yes
+        );
+
+        let mut plate = make_plate(&mut k);
+        let mut penetrating = make_box(&mut k, [-0.05, 0.0, 0.0], [18.0, 18.0, 12.0]);
+        assert_eq!(
+            interiors_disjoint(&k, &mut plate, &mut penetrating).unwrap(),
+            Verdict::No
+        );
+    }
+
+    /// A spacer rotated 180 degrees with a through bolt hole flush against a side plate with
+    /// a matching hole is certified disjoint by exact analytic half-space separation, while a
+    /// sub-micron or 0.05 mm penetration is never certified disjoint.
+    #[test]
+    fn flush_plates_with_holes_on_contact_face_and_180_rotation_certify_disjoint() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::topology::brep::p5::transform;
+
+        let mut k = kernel();
+        let make_drilled_block = |k: &mut Kernel, z0: f64, height: f64| {
+            let block = make_box(k, [-20.0, -20.0, z0], [40.0, 40.0, height]);
+            let bore =
+                create_cylinder(k, Point3::new(0.0, 0.0, z0 - 2.0), 3.0, height + 4.0).unwrap();
+            boolean_difference(k, block, bore).unwrap()
+        };
+
+        let mut plate = make_drilled_block(&mut k, 0.0, 10.0);
+        let mut spacer = make_drilled_block(&mut k, 10.0, 5.0);
+        // Rotate spacer 180 degrees around Z using sin(pi)/cos(pi) to exercise transform rounding.
+        let (s, c) = std::f64::consts::PI.sin_cos();
+        let rot_180 = Axis2Placement::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(c, s, 0.0),
+            Vec3::new(-s, c, 0.0),
+        );
+        transform(&mut k, &mut spacer, &rot_180, None, false).unwrap();
+        assert_eq!(
+            interiors_disjoint(&k, &mut plate, &mut spacer).unwrap(),
+            Verdict::Yes
+        );
+
+        for depth in [5e-7, 0.05] {
+            let mut plate = make_drilled_block(&mut k, 0.0, 10.0);
+            let mut pen = make_drilled_block(&mut k, 10.0 - depth, 5.0);
+            assert_ne!(
+                interiors_disjoint(&k, &mut plate, &mut pen).unwrap(),
+                Verdict::Yes,
+                "penetration {depth} must never be certified disjoint"
+            );
+        }
+    }
+
+    /// A dowel pin seated flush inside a matching cylindrical bore is certified disjoint by
+    /// exact coaxial-cylinder separation, while radial interference, eccentricity, or a blind
+    /// bore floor penetration is never certified disjoint.
+    #[test]
+    fn coaxial_dowel_pin_in_matching_bore_certifies_disjoint_and_rejects_interference() {
+        let mut k = kernel();
+        let make_bored_plate = |k: &mut Kernel| {
+            let block = make_box(k, [-20.0, -20.0, 0.0], [40.0, 40.0, 10.0]);
+            let bore = create_cylinder(k, Point3::new(0.0, 0.0, -2.0), 3.0, 14.0).unwrap();
+            let with_bore = boolean_difference(k, block, bore).unwrap();
+            let other_hole = create_cylinder(k, Point3::new(12.0, 0.0, -2.0), 2.0, 14.0).unwrap();
+            boolean_difference(k, with_bore, other_hole).unwrap()
+        };
+
+        // Flush dowel pin (r = 3) in matching bore (r = 3).
+        let mut plate = make_bored_plate(&mut k);
+        let mut pin = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), 3.0, 20.0).unwrap();
+        assert_eq!(
+            interiors_disjoint(&k, &mut plate, &mut pin).unwrap(),
+            Verdict::Yes
+        );
+
+        // Oversized pin (r = 3.01) -> real radial interference.
+        let mut plate = make_bored_plate(&mut k);
+        let mut oversize =
+            create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), 3.01, 20.0).unwrap();
+        assert_ne!(
+            interiors_disjoint(&k, &mut plate, &mut oversize).unwrap(),
+            Verdict::Yes
+        );
+
+        // Eccentric pin (5e-4 mm off axis) -> real crescent overlap.
+        let mut plate = make_bored_plate(&mut k);
+        let mut eccentric =
+            create_cylinder(&mut k, Point3::new(5e-4, 0.0, -5.0), 3.0, 20.0).unwrap();
+        assert_ne!(
+            interiors_disjoint(&k, &mut plate, &mut eccentric).unwrap(),
+            Verdict::Yes
+        );
+
+        // Dowel pin tangent to a planar side plate (x = 10, pin centered at x = 13, r = 3).
+        let mut side = make_box(&mut k, [0.0, -20.0, 0.0], [10.0, 40.0, 10.0]);
+        let mut tangent_pin =
+            create_cylinder(&mut k, Point3::new(13.0, 0.0, -2.0), 3.0, 14.0).unwrap();
+        assert_eq!(
+            interiors_disjoint(&k, &mut side, &mut tangent_pin).unwrap(),
+            Verdict::Yes
+        );
+
+        // Dowel pin penetrating the side plate by 1e-4 mm must never be certified disjoint.
+        let mut side = make_box(&mut k, [0.0, -20.0, 0.0], [10.0, 40.0, 10.0]);
+        let mut biting_pin =
+            create_cylinder(&mut k, Point3::new(13.0 - 1e-4, 0.0, -2.0), 3.0, 14.0).unwrap();
+        assert_ne!(
+            interiors_disjoint(&k, &mut side, &mut biting_pin).unwrap(),
+            Verdict::Yes
+        );
     }
 }

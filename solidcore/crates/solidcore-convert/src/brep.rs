@@ -34,6 +34,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::face_surface;
 use solidcore::surface::procedural_blend::convert::adopt_definitions;
+use solidcore::surface::procedural_sweep::record::adopt_sweeps;
 use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
 use solidcore::topology::brep::p10::{
     heal_made, make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
@@ -503,12 +504,19 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
             return Err(Unsupported::NotYet("traced intersection curves"));
         }
         let (curve, interval): (KernelCurve, Extent1d) = match (&e.curve, &e.nurbs) {
+            // a conic label its form is not proved on is dropped, and the edge is its exact
+            // NURBS, as a face's is (#23062: a circle labelled on a torus found from its form,
+            // 2e-11 off the form's exact circle): a valid body is never refused
             (r::Curve::Circle { .. } | r::Curve::Ellipse { .. }, Some(n)) => {
-                let [lo, hi] = e.interval;
-                (
-                    curves::conic_on_form(k, &crate::curve(&e.curve)?, &crate::curve(n)?)?,
-                    Extent1d::from_raw(lo, hi),
-                )
+                let form = crate::curve(n)?;
+                let label = crate::curve(&e.curve)?;
+                if let Some(c) = curves::conic_on_form_if_proved(k, &label, &form)? {
+                    let [lo, hi] = e.interval;
+                    (c, Extent1d::from_raw(lo, hi))
+                } else {
+                    let c = curves::from_parameters(k, &form, e.interval)?;
+                    (c.curve, c.interval)
+                }
             }
             (_, Some(n)) => {
                 let c = curves::from_parameters(k, &crate::curve(n)?, e.interval)?;
@@ -576,10 +584,10 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
     for (fi, f) in rec.faces.iter().enumerate() {
-        // A blend face is built on its net, its NURBS form; its definition is given back once
-        // the body is built ([`adopt`]).
+        // A blend or sweep face is built on its net, its NURBS form; a blend's definition is
+        // given back once the body is built ([`adopt`]).
         let made = match (&f.surface, &f.nurbs) {
-            (r::Surface::Blend { .. }, Some(net)) => {
+            (r::Surface::Blend { .. } | r::Surface::Sweep { .. }, Some(net)) => {
                 face_surface(k, &crate::surface(net)?, None, f.domain, &[])?
             }
             _ => face_surface(
@@ -777,6 +785,25 @@ fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> 
     }
     if !definitions.is_empty() {
         adopt_definitions(k, b, &notify_ref, &definitions)?;
+    }
+    // A screw-swept wall's net carries its definition again as its label, which no evaluation
+    // reads: the kernel works on the net as before. A face whose net it does not describe keeps
+    // its net alone ([`adopt_sweeps`]).
+    let mut sweeps = Vec::new();
+    for (i, f) in record.faces.iter().enumerate() {
+        let r::Surface::Sweep { definition } = &f.surface else {
+            continue;
+        };
+        let Some(sweep) = crate::sweep::sweep(definition) else {
+            continue;
+        };
+        let face = *faces
+            .get(i)
+            .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+        sweeps.push((face, sweep));
+    }
+    if !sweeps.is_empty() {
+        adopt_sweeps(k, b, &sweeps)?;
     }
     Ok(())
 }

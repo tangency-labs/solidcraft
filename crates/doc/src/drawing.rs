@@ -81,6 +81,7 @@ pub mod fields;
 mod fill;
 pub mod fold;
 pub mod hatch;
+pub mod hole_callout;
 pub mod image;
 pub mod line_maths;
 pub mod measure;
@@ -342,6 +343,12 @@ pub struct SheetComponent {
     pub source: u64,
     /// The component's id in that design, as the design writes it (0: the design itself).
     pub component: u64,
+}
+
+impl SheetComponent {
+    /// A template parts list waiting for the design chosen when a drawing is created.
+    /// Only a drawing with no sources can carry this value on a parts list.
+    pub const UNBOUND: Self = Self { source: 0, component: 0 };
 }
 
 /// What a sheet is left out of.
@@ -768,9 +775,7 @@ impl Drawing {
         })?;
         solidcraft_sketch::check_family(&self.font).map_err(|e| DocError::Invalid(format!("the drawing's font: {e}")))?;
         if let Units::Fixed { unit } = &self.units {
-            // A length unit of the expression unit table, written as the table writes it.
-            let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
-            require(length, || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
+            require(is_length_unit(unit), || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
         }
         for record in &self.sketches {
             require(self.sketch_sheet(record).is_some(), || "drawing sketch owner is not one of this drawing's sheets or views".into())?;
@@ -1025,6 +1030,12 @@ fn check_name(name: &str, whose: &str) -> Result<()> {
     require(!name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && !name.chars().any(char::is_control), || {
         format!("{whose} name is 1 to {MAX_NAME_BYTES} bytes, not only spaces, without control characters")
     })
+}
+
+/// Whether `unit` is a length unit of the expression unit table, written as the table writes it:
+/// what a drawing may fix its unit to, and what a hole callout's text takes.
+pub(crate) fn is_length_unit(unit: &str) -> bool {
+    unit.trim() == unit && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length)
 }
 
 /// A well-formed language tag, as far as a drawing needs (RFC 5646 §2.1): 2 to

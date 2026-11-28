@@ -16,12 +16,13 @@ Put a thread on a round face: an external thread on a shaft or stud, or an inter
 | Modeled | On: the thread groove is cut into the part. Off: the thread is carried as a callout only. | Leave it off unless you need to see the thread or 3D print it. A modeled thread makes the part slower to rebuild. |
 | Automatic size | On by default: picks the standard size that fits the face you selected; ISO metric by default, or the nearest catalogued UNC size when Form is Unified. | Leave it on when the shaft is a standard diameter. |
 | Size and Pitch | The thread size from the standard's table, and for metric threads the pitch. | M12 with the standard 1.75 mm pitch, or 1.25 mm for M12 fine. |
-| Designation | The thread callout. You can type it directly. | M12, M12x1.25, 1/4-20 UNC-2A, #10-32 UNF. Unified classes ending in A need a shaft; classes ending in B need a hole. |
+| Designation | The thread callout. You can type it directly. | M12, M12x1.25, M12-6g, 1/4-20 UNC-2A, #10-32 UNF. An ISO metric class with a lowercase letter (6g) needs a shaft, an uppercase one (6H) a hole. Unified classes ending in A need a shaft; classes ending in B need a hole. The class is kept in the callout and does not change the thread's shape. |
 | Hand | Right, Left, or Both. Pipe threads offer Right or Left only. | Right unless the print calls for LH. |
 | Starts | Number of thread starts, 1 to 8. | 1 for fasteners. 2 or more for a fast-moving lead screw: each turn advances the pitch times the number of starts. |
 | Steep Flank (Buttress only) | Which end the steep, load-carrying flank faces. | Point it toward the load. |
 | Extent | Full runs the whole face. Length runs a set distance. Up to stops at a face or plane you pick. | Length for a threaded end on a longer shaft. Up to for a thread that stops at a shoulder. |
-| Start side (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to. | Pick it when the thread starts at the wrong end. |
+| Offset (optional) | How far in from the start side the thread starts, leaving that much of the face plain. Length and Up to are measured from there. Empty starts at the end. | A plain lead-in on a bolt, or a plain stretch below a hole's mouth. |
+| Start side (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to, or an Offset is typed. | Pick it when the thread starts at the wrong end. |
 | Start (Ends) | None leaves the thread's free end plain. Chamfer adds a lead-in chamfer and shows Chamfer Angle and Chamfer Depth; left blank, they use the ISO 4753 standard chamfer. | Chamfer the start of any thread that has to take a nut or go into a tapped hole by hand. |
 | End (Ends) | Square stops the thread sharp. Fade runs it out over a length (ISO 3508 runout, 2.5 pitches standard). | Fade for a thread cut with a die or single-point tool that stops short of a shoulder. |
 

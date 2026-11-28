@@ -37,6 +37,7 @@ pub use ops::Hole;
 pub use ops::HoleEdge;
 pub use ops::MAX_POINTS;
 pub use ops::MAX_UNION_BREPS;
+pub use ops::PickedFace;
 pub use ops::Turn;
 
 /// Why an SMLib call failed.

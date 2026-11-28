@@ -46,18 +46,20 @@ extrude
     Distance 2 = extrude.distance2 (Length)
     Start offset = extrude.start_offset (Length)
     Taper angle = extrude.taper (Angle)
+    Taper angle 2 = extrude.taper2 (Angle)
     To offset = extrude.to_offset (Length)
-  expressions: extrude.distance, extrude.distance2, extrude.start_offset, extrude.taper, extrude.to_offset
+  expressions: extrude.distance, extrude.distance2, extrude.start_offset, extrude.taper, extrude.taper2, extrude.to_offset
 extrude_thin
   inputs:
     Distance = thin.distance (Length)
     Distance 2 = thin.distance2 (Length)
     Start offset = thin.start_offset (Length)
     Taper angle = thin.taper (Angle)
+    Taper angle 2 = thin.taper2 (Angle)
     To offset = thin.to_offset (Length)
     Thickness = thin.thickness (Length)
     Thickness 2 = thin.thickness2 (Length)
-  expressions: thin.distance, thin.distance2, thin.start_offset, thin.taper, thin.to_offset, thin.thickness, thin.thickness2
+  expressions: thin.distance, thin.distance2, thin.start_offset, thin.taper, thin.taper2, thin.to_offset, thin.thickness, thin.thickness2
 revolve
   inputs:
     Angle = revolve.angle (Angle)
@@ -305,6 +307,13 @@ offset_face
   inputs:
     Distance = offset_face.distance (Length)
   expressions: offset_face.distance
+transform_face
+  inputs:
+    X distance = tx (Length)
+    Y distance = ty (Length)
+    Z distance = tz (Length)
+    Angle = turn (Angle)
+  expressions: tx, ty, tz, turn, ox, oy, oz
 delete_face
 bounding_solid
   inputs:
@@ -503,8 +512,9 @@ surface_extrude
     Distance 2 = surface_extrude.distance2 (Length)
     Start offset = surface_extrude.start_offset (Length)
     Taper angle = surface_extrude.taper (Angle)
+    Taper angle 2 = surface_extrude.taper2 (Angle)
     To offset = surface_extrude.to_offset (Length)
-  expressions: surface_extrude.distance, surface_extrude.distance2, surface_extrude.start_offset, surface_extrude.taper, surface_extrude.to_offset
+  expressions: surface_extrude.distance, surface_extrude.distance2, surface_extrude.start_offset, surface_extrude.taper, surface_extrude.taper2, surface_extrude.to_offset
 surface_revolve
   inputs:
     Angle = srev.angle (Angle)
@@ -537,6 +547,11 @@ surface_fair
   inputs:
     Tolerance = sfair.tolerance (Length)
   expressions: sfair.tolerance
+surface_morph
+  inputs:
+    Scale factor = smorph.scale (Unitless)
+    Tolerance = smorph.tolerance (Length)
+  expressions: smorph.scale, smorph.tolerance
 unstitch
 reverse_normal
 surface_untrim
@@ -554,6 +569,11 @@ surface_extend_to_face
   inputs:
     Distance = extend.distance (Length)
   expressions: extend.distance
+surface_extend_law
+  inputs:
+    Distance = extend.distance (Length)
+    Angle = extend.law_angle (Angle)
+  expressions: extend.distance, extend.law_angle
 surface_ruled
   inputs:
     Distance = ruled.distance (Length)
