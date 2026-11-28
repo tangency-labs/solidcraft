@@ -2,11 +2,12 @@
 //! [`solidcore::sweep::loft_rails`] and [`solidcore::sweep::section_blend`] behind ops. Ops
 //! converts and checks shapes and maps the kernel's refusals; it computes no geometry.
 
+use solidcore::geom::geom_utility::p2::segment_segment_closest_point;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, loft_rails_space as kernel_loft_rails_space, polyline,
-    RailLoftOptions, RailSection as KernelSection, SpaceRailSection as KernelSpaceSection,
-    DEFAULT_MAX_WIRES,
+    arc_nurbs as kernel_arc_nurbs, loft_rails as kernel_loft_rails,
+    loft_rails_space as kernel_loft_rails_space, polyline, RailLoftOptions,
+    RailSection as KernelSection, SpaceRailSection as KernelSpaceSection, DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
 use solidcore::sweep::stations::RailFit as KernelRailFit;
@@ -257,6 +258,54 @@ pub fn polyline_rail(points: &[[f64; 3]]) -> Result<Curve> {
         points,
         knots,
     })
+}
+
+/// A 3D circular arc from `start` about `center` and `axis` turning by `sweep` radians as a
+/// clamped rational quadratic NURBS curve on `[0, 1]`: `(knots, ctrl)` where each control point
+/// is homogeneous `[x * w, y * w, z * w, w]` ([`solidcore::sweep::loft_rails::arc_nurbs`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a non-finite coordinate or sweep; the kernel's refusal otherwise.
+pub fn arc_nurbs(
+    start: [f64; 3],
+    center: [f64; 3],
+    axis: [f64; 3],
+    sweep: f64,
+) -> Result<(Vec<f64>, Vec<[f64; 4]>)> {
+    if ![start, center, axis]
+        .iter()
+        .flatten()
+        .all(|x| x.is_finite())
+        || !sweep.is_finite()
+    {
+        return Err(Error::Argument);
+    }
+    let v = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    kernel_arc_nurbs(v(start), v(center), v(axis), sweep).map_err(refused)
+}
+
+/// Closest normalised parameter on segment `[a0, a1]` to segment `[b0, b1]` and the distance
+/// between them ([`solidcore::geom::geom_utility::p2::segment_segment_closest_point`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a non-finite coordinate; the kernel's refusal otherwise.
+pub fn segment_segment_closest(
+    a0: [f64; 3],
+    a1: [f64; 3],
+    b0: [f64; 3],
+    b1: [f64; 3],
+) -> Result<(f64, f64)> {
+    if ![a0, a1, b0, b1].iter().flatten().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    let v = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let hits = segment_segment_closest_point(v(a0), v(a1), v(b0), v(b1), 0.0).map_err(status)?;
+    if hits.count == 0 {
+        return Err(Error::Argument);
+    }
+    let [s, _] = hits.params1;
+    let [d, _] = hits.distances;
+    Ok((s, d))
 }
 
 /// The continuity a blend holds at an end.

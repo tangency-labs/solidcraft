@@ -17,7 +17,7 @@
 //! those of an arc or a spline against it (#12512); a station's control points then go straight
 //! between the sections' and its weights with them, so the weights need not agree either.
 
-use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::bspline::{CurveN, HPoint};
 use solidcraft_geom::prelude::*;
 
@@ -82,14 +82,9 @@ pub(crate) fn path_seg_nurbs(s: &crate::PathSeg) -> Result<CurveN<4>> {
             Ok(CurveN { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
         }
         crate::PathSeg::Arc { a, center, axis, angle } => {
-            let k = axis.normalized().ok_or_else(|| KernelError::Invalid("a loft section arc axis has no length".into()))?;
-            let r_vec = a - center;
-            let radius = r_vec.len();
-            let x = r_vec.normalized().ok_or_else(|| KernelError::Invalid("a loft section arc has no radius".into()))?;
-            let y = k.cross(x);
-            let plane = Plane { origin: center, x, y };
-            let seg = Seg2::Arc { center: Vec2::ZERO, radius, start: 0.0, sweep: angle };
-            nurbs(&crate::freeform::segment(&plane, &seg)?.0)
+            let (knots, ctrl) = solidcore_ops::sweep::railed::arc_nurbs(a.into(), center.into(), axis.into(), angle)
+                .map_err(|e| KernelError::Invalid(e.to_string()))?;
+            Ok(CurveN { degree: 2, knots, ctrl })
         }
         crate::PathSeg::Curve { plane, seg } => nurbs(&crate::freeform::segment(&plane, &seg)?.0),
         crate::PathSeg::Bezier(b) => {
@@ -722,43 +717,6 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
     }
 }
 
-/// Closest fraction `s` on segment `[a0, a1]` to segment `[b0, b1]`, and the distance between
-/// them.
-fn seg_seg_closest(a0: Vec3, a1: Vec3, b0: Vec3, b1: Vec3) -> (f64, f64) {
-    let d1 = a1 - a0;
-    let d2 = b1 - b0;
-    let r = a0 - b0;
-    let a = d1.dot(d1);
-    let e = d2.dot(d2);
-    let f = d2.dot(r);
-    let (s, t) = if a <= 1e-24 && e <= 1e-24 {
-        (0.0, 0.0)
-    } else if a <= 1e-24 {
-        (0.0, (f / e).clamp(0.0, 1.0))
-    } else {
-        let c = d1.dot(r);
-        if e <= 1e-24 {
-            ((-c / a).clamp(0.0, 1.0), 0.0)
-        } else {
-            let b = d1.dot(d2);
-            let denom = a * e - b * b;
-            let mut s = if denom > 1e-24 { ((b * f - c * e) / denom).clamp(0.0, 1.0) } else { 0.0 };
-            let mut t = (b * s + f) / e;
-            if t < 0.0 {
-                t = 0.0;
-                s = (-c / a).clamp(0.0, 1.0);
-            } else if t > 1.0 {
-                t = 1.0;
-                s = ((b - c) / a).clamp(0.0, 1.0);
-            }
-            (s, t)
-        }
-    };
-    let p = a0 + d1 * s;
-    let q = b0 + d2 * t;
-    (s, p.dist(q))
-}
-
 /// Where a rail polyline first passes within `tol` of a 3D section's curves at or after `from`:
 /// the refined point on the rail, its `(segment, fraction)` cursor, the section wire parameter
 /// `g`, and the closest point on the section.
@@ -807,7 +765,9 @@ fn rail_curve_hit(rail: &[Vec3], curves: &[CurveN<4>], from: (usize, f64), tol: 
         let mut approx: Option<(f64, f64)> = None;
         for poly in &polys {
             for w in poly.windows(2) {
-                let (s, d) = seg_seg_closest(a, b, w[0], w[1]);
+                let Ok((s, d)) = solidcore_ops::sweep::railed::segment_segment_closest(a.into(), b.into(), w[0].into(), w[1].into()) else {
+                    continue;
+                };
                 if approx.is_none_or(|(_, bd)| d < bd) {
                     approx = Some((s, d));
                 }

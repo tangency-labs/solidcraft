@@ -91,8 +91,10 @@ use warp::{refine_column, warp_station, WARP_SPANS};
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
+use crate::geom::geom_utility::p2::segment_segment_closest_point;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::certificate;
@@ -446,6 +448,74 @@ pub fn polyline(points: &[Point3]) -> Result<Curve> {
         weights: None,
     }
     .curve()
+}
+
+/// A 3D circular arc from `start` about `center` and `axis` turning by `sweep` radians as a
+/// clamped rational quadratic NURBS curve on `[0, 1]`: `(knots, ctrl)` where each control point
+/// is homogeneous `[x * w, y * w, z * w, w]`.
+///
+/// # Errors
+///
+/// `InvalidInput` for a non-finite coordinate or sweep, a zero axis or radius, a radius vector
+/// parallel to the axis, or a zero or more-than-full-turn sweep.
+pub fn arc_nurbs(
+    start: Point3,
+    center: Point3,
+    axis: Vec3,
+    sweep: f64,
+) -> Result<(Vec<f64>, Vec<[f64; 4]>)> {
+    if ![
+        start.x, start.y, start.z, center.x, center.y, center.z, axis.x, axis.y, axis.z, sweep,
+    ]
+    .iter()
+    .all(|v| v.is_finite())
+    {
+        return Err(invalid("a loft section arc is not finite"));
+    }
+    let k = axis
+        .unitize()
+        .map_err(|_| invalid("a loft section arc axis has no length"))?;
+    let r_vec = start - center;
+    let radius = r_vec.length();
+    let x = r_vec
+        .unitize()
+        .map_err(|_| invalid("a loft section arc has no radius"))?;
+    let y = k.cross(x);
+    let tau = std::f64::consts::TAU;
+    let half_pi = std::f64::consts::FRAC_PI_2;
+    if radius <= 0.0 || sweep == 0.0 || sweep.abs() > tau * (1.0 + 1e-9) {
+        return Err(invalid(
+            "an arc with no radius or turn, or turning more than once",
+        ));
+    }
+    if y.length() <= 1e-12 {
+        return Err(invalid("a loft section arc axis lies along its radius"));
+    }
+    let sweep = sweep.abs().min(tau).copysign(sweep);
+    let m = (sweep.abs() / half_pi - 1e-9).ceil().max(1.0) as usize;
+    let d = sweep / m as f64;
+    let w = det::cos(d / 2.0);
+    let at = |a: f64, r: f64| {
+        let (s, c) = det::sin_cos(a);
+        center + x * (r * c) + y * (r * s)
+    };
+    let p0 = at(0.0, radius);
+    let mut ctrl = vec![[p0.x, p0.y, p0.z, 1.0]];
+    let mut knots = vec![0.0, 0.0, 0.0];
+    for j in 0..m {
+        let a0 = d * j as f64;
+        let pm = at(a0 + d / 2.0, radius / w);
+        ctrl.push([pm.x * w, pm.y * w, pm.z * w, w]);
+        let p1 = at(a0 + d, radius);
+        ctrl.push([p1.x, p1.y, p1.z, 1.0]);
+        let u = (j + 1) as f64 / m as f64;
+        if j + 1 < m {
+            knots.extend([u, u]);
+        } else {
+            knots.extend([1.0, 1.0, 1.0]);
+        }
+    }
+    Ok((knots, ctrl))
 }
 
 /// A knot vector as its distinct knots and their multiplicities.
@@ -1006,47 +1076,6 @@ fn closest_on_section(
     best.ok_or_else(|| invalid("a section's curves"))
 }
 
-/// Closest fraction `s` on segment `[a0, a1]` to segment `[b0, b1]`, and the distance between
-/// the two segments.
-fn seg_seg_closest(a0: Point3, a1: Point3, b0: Point3, b1: Point3) -> (f64, f64) {
-    let d1 = a1 - a0;
-    let d2 = b1 - b0;
-    let r = a0 - b0;
-    let a = d1.dot(d1);
-    let e = d2.dot(d2);
-    let f = d2.dot(r);
-    let (s, t) = if a <= 1e-24 && e <= 1e-24 {
-        (0.0, 0.0)
-    } else if a <= 1e-24 {
-        (0.0, (f / e).clamp(0.0, 1.0))
-    } else {
-        let c = d1.dot(r);
-        if e <= 1e-24 {
-            ((-c / a).clamp(0.0, 1.0), 0.0)
-        } else {
-            let b = d1.dot(d2);
-            let denom = a * e - b * b;
-            let mut s = if denom > 1e-24 {
-                ((b * f - c * e) / denom).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            let mut t = (b * s + f) / e;
-            if t < 0.0 {
-                t = 0.0;
-                s = (-c / a).clamp(0.0, 1.0);
-            } else if t > 1.0 {
-                t = 1.0;
-                s = ((b - c) / a).clamp(0.0, 1.0);
-            }
-            (s, t)
-        }
-    };
-    let p = a0 + d1 * s;
-    let q = b0 + d2 * t;
-    (s, p.distance(q))
-}
-
 /// Where a rail passes closest to a 3D section's curves.
 struct RailHit {
     t: f64,
@@ -1082,14 +1111,14 @@ fn anchor_rail_to_curves(
     // Sample the section curves into chords and bound them.
     let mut sec_lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut sec_hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-    let mut polys: Vec<Vec<Point3>> = Vec::with_capacity(curves.len());
+    let mut polys: Vec<Vec<Point3>> = Vec::new();
     let mut max_step = 0.0_f64;
     for (plain, nurb) in curves {
         for p in &plain.points {
             sec_lo = Point3::new(sec_lo.x.min(p.x), sec_lo.y.min(p.y), sec_lo.z.min(p.z));
             sec_hi = Point3::new(sec_hi.x.max(p.x), sec_hi.y.max(p.y), sec_hi.z.max(p.z));
         }
-        let mut pts = Vec::with_capacity(SEC_SAMPLES + 1);
+        let mut pts = Vec::new();
         for j in 0..=SEC_SAMPLES {
             #[allow(clippy::cast_precision_loss)]
             let f = j as f64 / SEC_SAMPLES as f64;
@@ -1159,8 +1188,10 @@ fn anchor_rail_to_curves(
         for poly in &polys {
             for w in poly.windows(2) {
                 if let [q0, q1] = *w {
-                    let (s, d) = seg_seg_closest(pa, pb, q0, q1);
-                    if approx.is_none_or(|(_, bd)| d < bd) {
+                    let hits = segment_segment_closest_point(pa, pb, q0, q1, 0.0)?;
+                    let [s, _] = hits.params1;
+                    let [d, _] = hits.distances;
+                    if hits.count > 0 && approx.is_none_or(|(_, bd)| d < bd) {
                         approx = Some((s, d));
                     }
                 }
@@ -1283,7 +1314,7 @@ pub fn loft_rails_space(
             .iter()
             .map(|(c, _)| c.clone())
             .collect();
-        let mut hits = Vec::with_capacity(rails.len());
+        let mut hits = Vec::new();
         for anchors in &loft.anchors {
             let a = anchors.get(i).ok_or_else(|| invalid("a rail's anchors"))?;
             hits.push((a.t, a.hit));
@@ -1743,5 +1774,38 @@ mod tests {
         assert!(collinear(&line));
         let bent = [line[0], Point3::new(10.0, 10.0, 0.0), line[2]];
         assert!(!collinear(&bent));
+    }
+
+    #[test]
+    fn arc_nurbs_builds_exact_rational_quadratic_arcs() {
+        let (knots, ctrl) = arc_nurbs(
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 2.0),
+            std::f64::consts::FRAC_PI_2,
+        )
+        .unwrap();
+        assert_eq!(knots, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(ctrl.len(), 3);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((ctrl[0][0] - 10.0).abs() < 1e-12 && ctrl[0][1].abs() < 1e-12);
+        assert!((ctrl[1][3] - w).abs() < 1e-12);
+        assert!((ctrl[1][0] / w - 10.0).abs() < 1e-12 && (ctrl[1][1] / w - 10.0).abs() < 1e-12);
+        assert!(ctrl[2][0].abs() < 1e-12 && (ctrl[2][1] - 10.0).abs() < 1e-12);
+
+        let (k2, c2) = arc_nurbs(
+            Point3::new(5.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::Z,
+            std::f64::consts::PI,
+        )
+        .unwrap();
+        assert_eq!(c2.len(), 5);
+        assert_eq!(k2.len(), 8);
+
+        assert!(arc_nurbs(Point3::ZERO, Point3::ZERO, Vec3::Z, 1.0).is_err());
+        assert!(arc_nurbs(Point3::new(1.0, 0.0, 0.0), Point3::ZERO, Vec3::ZERO, 1.0).is_err());
+        assert!(arc_nurbs(Point3::new(1.0, 0.0, 0.0), Point3::ZERO, Vec3::X, 1.0).is_err());
+        assert!(arc_nurbs(Point3::new(1.0, 0.0, 0.0), Point3::ZERO, Vec3::Z, 0.0).is_err());
     }
 }
