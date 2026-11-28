@@ -5,7 +5,7 @@
 //! with their paper, Brettel on white and its own anchors.
 //!
 //! When a token edit breaks a mode here, adjust its measured variant. Shared icon accents live
-//! in `assets/icons/ui/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
+//! in `crates/look/icons/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
 //! strokes the UI tokens share with them (`icon_strokes`, held equal by an icon test) and owns the remaining UI-only colour-vision adjustments.
 
 use std::collections::BTreeSet;
@@ -334,7 +334,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("validation status", &[("form_success", t.form_success), ("error", t.error)], &[("panel", t.panel)]),
         group("validation surfaces", &[("form_success_fill", t.form_success_fill), ("form_error_fill", t.form_error_fill)], &[]),
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
-        // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
+        // Every axis drawn: origin, view triad, navigator, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
         group(
             "assembly Move",
@@ -467,11 +467,30 @@ fn groups(t: &Tokens) -> Vec<Group> {
     out.push(group("preferences note", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]));
     out.push(group("preferences success", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]));
     out.push(group("preferences accent ink", &[("pref_on_accent", t.pref_on_accent)], &[("form_primary", t.form_primary)]));
+    // Each kind of drawing line (#18989) and the ink, on a white and a dark sheet: one set for every eye, so no
+    // mode changes them (`each_kind_of_sheet_line_reads_on_its_paper` in the theme crate).
+    for (name, paper, ink, lines) in [
+        ("white sheet lines", ("paper_white", t.paper_white), ("paper_ink", t.paper_ink), ("paper_lines", t.paper_lines)),
+        ("dark sheet lines", ("paper_dark", t.paper_dark), ("paper_dark_ink", t.paper_dark_ink), ("paper_dark_lines", t.paper_dark_lines)),
+    ] {
+        let kinds = sheet_line_names(lines.0);
+        let mut members: Vec<(&'static str, Color32)> = kinds.iter().zip(lines.1).map(|(n, c)| (*n, c)).collect();
+        members.push(ink);
+        out.push(group(name, &members, &[paper]));
+    }
     // The removed part of a cut preview is translucent over the body.
     if let Some(sel) = out.iter_mut().find(|g| g.name == "selection") {
         sel.members.push(("preview_cut", over(t.preview_cut, t.body)));
     }
     out
+}
+
+/// The names of a set of sheet line colours, in `PaperLine` order (`paper_lines[0]`…).
+fn sheet_line_names(set: &'static str) -> [&'static str; 5] {
+    match set {
+        "paper_lines" => ["paper_lines[0]", "paper_lines[1]", "paper_lines[2]", "paper_lines[3]", "paper_lines[4]"],
+        _ => ["paper_dark_lines[0]", "paper_dark_lines[1]", "paper_dark_lines[2]", "paper_dark_lines[3]", "paper_dark_lines[4]"],
+    }
 }
 
 /// Measured by the shaded check in `every_mode_keeps_colours_apart_for_its_eye`.
@@ -480,6 +499,11 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("paper_blueprint", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_blueprint_ink", "the drawing's one ink on a blueprint sheet; no category is told by its colour"),
+    ("paper_prussian_blue", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_prussian_blue_ink", "the drawing's one ink on a Prussian blue sheet; no category is told by its colour"),
+    ("library_highlights", "user-assigned named labels, not application status; menu/tooltip name each colour and library tests guard card contrast"),
     ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
     ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
     ("pref_well", "neutral well behind a labelled control or illustration"),
@@ -494,6 +518,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("nav_tip_ink", "neutral tooltip text; words identify the control and value"),
     ("nav_tip_key_border", "neutral keycap outline; its key label carries the meaning"),
     ("nav_viewport", "neutral preview-stage background, not model or status colour"),
+    ("viewport_middle", "the user's own background colour halfway down the view (#9230); themes have none"),
     ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
@@ -619,6 +644,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("sel_edge_rim", "selection highlight"),
     ("hover_edge", "hover highlight"),
     ("hover_edge_halo", "hover highlight"),
+    ("hover_edge_lit", "hover highlight"),
     ("sel_profile", "selection highlight"),
     ("sel_profile_edge", "selection highlight"),
     ("hover_profile", "hover highlight"),
@@ -633,17 +659,18 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("origin_point", "the origin, alone"),
     ("construction_plane", "a plane"),
     ("body_edge", "the model's edges"),
+    ("isoparm", "a surface's flow lines: a lighter shade of its edges, told apart by width"),
     ("sketch_halo", "neutral rim beneath sketch curves; the curves carry the state colours"),
     ("grid", "the grid"),
     ("grid_major", "the grid"),
     ("profile_fill", "a closed profile's tint"),
     ("glyph_bg", "a constraint glyph's ground"),
     ("glyph_edge", "a constraint glyph's edge"),
-    // The navigation cube: labelled faces.
-    ("cube_face", "labelled"),
-    ("cube_border", "labelled"),
-    ("cube_text", "labelled"),
-    ("cube_hover", "hover highlight"),
+    // The navigator: labelled faces.
+    ("navigator_face", "labelled"),
+    ("navigator_border", "labelled"),
+    ("navigator_text", "labelled"),
+    ("navigator_hover", "hover highlight"),
     // Not a colour.
     ("analysis.hatch", "a flag: stripes on the failing faces"),
     // Icon colours that are a shade of a measured one, or one mark alone.
@@ -997,7 +1024,9 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
-    use crate::theme_files::{builtin, is_two_colour, resolve};
+    crate::test_support::host_data();
+    use crate::test_support::is_two_colour;
+    use crate::theme_files::{builtin, resolve};
     use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
         .into_iter()
@@ -1038,6 +1067,7 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
 
 #[test]
 fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
+    crate::test_support::host_data();
     use crate::theme_files::{OptionValue, builtin, resolve_with};
     let onyx = builtin().iter().find(|theme| theme.id == "onyx").unwrap();
     for (foreground, gold, driven) in [("muted", [199, 178, 139], [165, 148, 116]), ("vibrant", [255, 209, 102], [255, 177, 102])] {
@@ -1085,7 +1115,7 @@ fn the_sections_messages_are_in_every_catalog() {
     let ids: Vec<&str> = ColorVision::ALL
         .into_iter()
         .flat_map(|m| [m.label_id(), m.help_id()])
-        .chain(crate::ui_kit::COLOUR_VISION_SAMPLE)
+        .chain(crate::prefs::figures::COLOUR_VISION_SAMPLE)
         .chain(["ui.colour_vision", "ui.colour_vision_mode", "ui.colour_vision_sample", "ui.colour_vision_note"])
         .collect();
     for (lang, text) in [

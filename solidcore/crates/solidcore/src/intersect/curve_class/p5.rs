@@ -49,10 +49,16 @@
 //! Debug drawing/assertions are omitted. Ignored ordinary Trim failures stay ignored;
 //! failed Copy returns an error rather than dereferencing a null native result.
 //! `insert_topology_intersections` rejects `object_index > 1`, which upstream accepts.
+//! With tangency ignored, `sm_InsertSolutions` drops a run shorter than a twentieth of
+//! the classified interval as a tangent touch; a run that reaches an end of the
+//! classified interval or of the edge at each of its ends is inserted instead: the curve
+//! runs along the edge there ([`run_reaches_ends`]; SolidCraft #17345's lobes).
 //! `p5_closed` errors on an unresolved curve, where upstream returns FALSE.
 //! The differential runner's face zone tolerance of zero is not compared against C++.
 
-use super::p1::{out_of_bounds, set_xsect_curve_through_point};
+use super::p1::{
+    missing_defect, out_of_bounds, set_xsect_curve_through_point, EDGE_NO_VERTEX, EVAL_1ST,
+};
 use super::p2::{refine_cci_to_surfaces_in, refine_cci_to_surfaces_mut, RefineCci};
 use super::p6::{
     FilletPeer, Imprint, MergeIntervalBrep, Mutable as MutableImprint, ReadOnly as ReadOnlyImprint,
@@ -60,10 +66,13 @@ use super::p6::{
 use super::{
     make_consistent_classifications, src_zone_tol_3d_of, CurveClassification, CurveInterval,
 };
+use crate::curve::contact::NativeSupport;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType,
@@ -72,12 +81,14 @@ use crate::geom::tol::{
     map_to_1d_on_curve, xsect_tol3d, xsect_tol_3d_from_zones, ANG_TOL_DEG, USE_DEFAULT,
 };
 use crate::intersect::point_class::{
-    object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
-    PointClassification,
+    object_zone_tol_3d, periodic_trim_witness, ClassGeometry, ClassObject, ClassObjectKind,
+    PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max3, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::math::NOW;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::Brep;
 use crate::EntityRef;
@@ -400,6 +411,75 @@ fn append_unique<O: PartialEq>(dst: &mut Vec<O>, src: impl IntoIterator<Item = O
     }
 }
 
+/// Not upstream (with `Kernel::memoize_curve_caches`): an axis aligned box holding every
+/// point the vertex drop of [`CurveClassification::intersect_vertices_in`] can find on
+/// `curve` over `interval`, so that a vertex farther from it than the drop's tolerance
+/// has no solution there and can be passed over. `None` (no vertex is passed over)
+/// where that cannot be given:
+///
+/// - The drop finds only points within its tolerance of the vertex: every path of
+///   `Curve::global_point_solve_cached` with the target distance 0 (the line and circle
+///   drops drop a solution farther than the target distance plus the tolerance, the
+///   global solver culls one farther than the best answer, 0, plus the tolerance, and
+///   the analytic polish only takes a nearer point).
+/// - The points are the curve's own or its analytic replacement's. A line is its segment
+///   over `interval`. A conic and a B-spline the replacement cannot be made from
+///   (`create_analytic_curve`: only a degree 1 curve of two control points, whose
+///   replacement meets it within the scaled zero the margin of the caller covers, or a
+///   rational quadratic) are evaluated on their B-spline form, which lies in the convex
+///   hull of its control points (positive weights): the box is that of the control points
+///   themselves, not [`Curve::calculate_bounding_box`], which gives a Bezier span it takes
+///   for a line (sampled, for a rational one or uneven control points) the box of its ends
+///   only, and a span whose middle control points lie past its ends reaches farther. A
+///   rational quadratic, whose circle is checked at samples only, and every other kind
+///   give `None`.
+/// - `interval` lies in the natural interval, so nothing is evaluated past its ends.
+fn drop_reach_box(k: &Kernel, curve: &Curve, interval: &Extent1d) -> Option<Extent3d> {
+    let spline = match curve.kind() {
+        CurveKind::BSpline(c) => {
+            if c.degree().ok()? == 2 && c.is_rational().ok()? {
+                return None;
+            }
+            Some(c)
+        }
+        CurveKind::Ellipse(c) => Some(c.base()),
+        CurveKind::Hyperbola(c) => Some(c.base()),
+        CurveKind::Parabola(c) => Some(c.base()),
+        CurveKind::Line(_) => None,
+        _ => return None,
+    };
+    let natural = curve.natural_interval();
+    if !(interval.min() >= natural.min() && interval.max() <= natural.max()) {
+        return None;
+    }
+    let b = if let Some(c) = spline {
+        let cpts = c.nurb.as_ref()?.cpts();
+        if cpts.is_empty() || !cpts.iter().all(|p| p.w == NOW || p.w > 0.0) {
+            return None;
+        }
+        let mut b = Extent3d::new();
+        for p in cpts {
+            b.add_point(p.to_euclid());
+        }
+        b
+    } else {
+        let req = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: false,
+        };
+        curve
+            .calculate_bounding_box(k, interval, req, true)
+            .ok()?
+            .normal?
+    };
+    let (lo, hi) = (b.min(), b.max());
+    let finite = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
+        .iter()
+        .all(|v| v.is_finite());
+    (finite && lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(b)
+}
+
 /// Native `sBigGapXSectTol3d`: a face gap overrides the default constructor only
 /// when both large-gap processing and a face are present.
 fn vertex_big_gap_tolerance<O: Copy>(
@@ -427,6 +507,30 @@ fn vertex_big_gap_tolerance<O: Copy>(
             SolidError::invalid_input(OP, "unresolved classification vertex/face gap")
         })?;
     Ok(if gap > tolerance { gap } else { tolerance })
+}
+
+/// Not upstream: whether `vertex` is a pole of `face`, the face around it on every side
+/// ([`crate::topology::vertex::inside_face`]); `false` where the adapter resolves either
+/// to no topology or the two lie in different B-reps.
+fn pole_of_face<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    vertex: O,
+    face: Option<O>,
+) -> Result<bool> {
+    let Some(face) = face else {
+        return Ok(false);
+    };
+    match (
+        geometry.topology_entity(vertex),
+        geometry.topology_entity(face),
+    ) {
+        (Some((b, EntityRef::Vertex(v))), Some((fb, EntityRef::Face(f))))
+            if std::ptr::eq(b, fb) =>
+        {
+            crate::topology::vertex::inside_face(b, v, f)
+        }
+        _ => Ok(false),
+    }
 }
 
 impl<O: ClassObject> CurveClassification<O> {
@@ -535,7 +639,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut out = ExtractedGeometry::default();
         self.cleanup_and_validate(k, geometry, other)?;
         if self.size() != other.size() {
-            return Err(SolidError::sm_err(OP));
+            return Err(counts_differ(self, other));
         }
         let mut found = Vec::new();
         for i in 0..self.size() {
@@ -566,10 +670,10 @@ impl<O: ClassObject> CurveClassification<O> {
             found.push(common);
         }
         let mut found_last = self.p5_closed(k, geometry)? && found.last().copied().unwrap_or(false);
-        for j in 0..self.size() {
+        // one flag for each interval: the loop above pushed one per index
+        for (j, &found_current) in found.iter().enumerate() {
             let (this, _) = Self::p5_point_class_by_index(self, j)?;
             let (that, _) = Self::p5_point_class_by_index(other, j)?;
-            let found_current = found.get(j).copied().ok_or(SolidError::sm_err(OP))?;
             if contained_point(this.point_class())
                 && contained_point(that.point_class())
                 && !found_current
@@ -602,7 +706,8 @@ impl<O: ClassObject> CurveClassification<O> {
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
     ) -> Result<()> {
-        let mut restarts = self.size().saturating_mul(3).saturating_add(1);
+        let allowed = self.size().saturating_mul(3).saturating_add(1);
+        let mut restarts = allowed;
         'restart: loop {
             for i in 0..self.size() {
                 if self.at(i)?.mid.point_class() == PointClassType::Unknown {
@@ -615,7 +720,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 if self.fix_end_point_class(k, geometry, i, start)?
                     || self.fix_end_point_class(k, geometry, i + 1, end)?
                 {
-                    restarts = restarts.checked_sub(1).ok_or(SolidError::sm_err(OP))?;
+                    restarts = restarts.checked_sub(1).ok_or_else(|| {
+                        SolidError::intersect(
+                            OP,
+                            IntersectFailure::RepairDidNotSettle { restarts: allowed },
+                        )
+                    })?;
                     continue 'restart;
                 }
             }
@@ -807,10 +917,38 @@ impl<O: ClassObject> CurveClassification<O> {
         // the classification curve's cache, kept across the vertex drops as upstream keeps
         // it on the curve; dropped when the surf/surf/surf block may edit the curve
         let mut curve_cache = None;
+        // (not upstream) the box the drops below can reach ([`drop_reach_box`]), taken
+        // again after the surf/surf/surf block may edit the curve; `None` until taken
+        let mut reach: Option<Option<Extent3d>> = None;
         for &vertex in vertices {
             let geometry = access.geometry();
             let vertex_zone = object_zone_tol_3d(k, geometry, Some(vertex))?;
-            let tolerance = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // Not upstream: a vertex the face surrounds on every side (a pole) bounds no
+            // material, so its tolerance adds nothing; the curve meets it only within its
+            // own reach (docs/booleans.md, "Seams and poles")
+            let summed = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // whether a contact is held to the curve's region: at a pole, for every curve
+            // but the face's own seam curve (checked as upstream does)
+            let mut regional = false;
+            // (#18705) on a face known to have no seam no vertex is a pole
+            let pole = if self.face_known_seam_free() {
+                false
+            } else {
+                k.work_counters.add_seam_test();
+                pole_of_face(geometry, vertex, self.face())?
+            };
+            let tolerance = if pole {
+                let working = match &wrapped {
+                    Some(lifted) => lifted,
+                    None => self.curve_geometry(geometry)?,
+                };
+                let reach = self.source_reach_in(k, geometry, working)?;
+                self.set_source_reach(reach);
+                regional = reach.has_region();
+                reach.contact_tolerance(xsect_tol3d(k, source_zone), summed)
+            } else {
+                summed
+            };
             // The curve may carry a larger approximation allowance than its body.
             // Using that allowance alone captures a nearby corner and splits the
             // blend arc there, even though the retained vertex cannot satisfy the
@@ -841,6 +979,58 @@ impl<O: ClassObject> CurveClassification<O> {
                 has_big_gaps,
                 tolerance,
             )?;
+            let ordinary_contact =
+                !has_big_gaps && !self.doing_fillets() && !pole && wrapped.is_none();
+            // (not upstream, with `Kernel::memoize_curve_caches`) a vertex farther from the
+            // curve's reach than the drop's tolerance has no solution: it is passed over
+            // after everything above, which may fail, and before anything that may edit
+            if k.memoize_curve_caches {
+                let curve = match &wrapped {
+                    Some(c) => c,
+                    None => self.curve_geometry(geometry)?,
+                };
+                let b = *reach.get_or_insert_with(|| {
+                    if wrapped.is_some() {
+                        None
+                    } else {
+                        drop_reach_box(k, curve, &self.interval())
+                    }
+                });
+                if let Some(b) = b {
+                    // The box holds the curve exactly, so the drop's tolerance alone would do
+                    // in exact arithmetic. On top of it: the analytic replacement meets the
+                    // curve within its scaled zero, `EFF_ZERO * (1 + |x|)` (1e-12 at part
+                    // scale), and the box's corners (control points out of their homogeneous
+                    // form) and the point the solve would compare are each a few ulps of
+                    // their coordinates off. Both are below 1e-11 * (1 + |x|); 1e-9 leaves a
+                    // hundredfold of that, and too wide a margin only costs a drop, never
+                    // passes over a contact.
+                    let margin = tolerance
+                        + 1e-9 * (1.0 + b.max_dimension().abs() + point.max_dimension().abs());
+                    if !b.contains_point(point, margin) {
+                        continue;
+                    }
+                }
+            }
+            // A periodic marker is excluded only with its whole material rim.
+            // Other vertices keep the existing tolerant classification.
+            if ordinary_contact {
+                if let Some(marker) = periodic_trim_witness(k, geometry, vertex)? {
+                    let curve = self.curve_geometry(geometry)?;
+                    if NativeSupport::curve(curve, &self.interval()).is_some_and(|source| {
+                        marker.excluded_by(
+                            k,
+                            &source,
+                            source_zone,
+                            vertex_zone,
+                            self.native_foreign_support(),
+                        )
+                    }) {
+                        continue;
+                    }
+                }
+            }
+            k.work_counters.add_vertex_drop();
             let mut solutions = {
                 let curve = match &wrapped {
                     Some(c) => c,
@@ -875,6 +1065,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         })))
             {
                 curve_cache = None;
+                reach = None;
                 self.refine_vertex_solutions(
                     k,
                     access,
@@ -899,6 +1090,20 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(c) => c,
                     None => self.curve_geometry(geometry)?,
                 };
+                // not upstream: the curve reaches a pole across itself by its reach, along
+                // itself by its own tolerance (docs/booleans.md, "Seams and poles")
+                if regional
+                    && !super::p1::in_reach_region(
+                        k,
+                        curve,
+                        solution.start.param(0)?,
+                        point,
+                        xsect_tol3d(k, source_zone),
+                        tolerance,
+                    )?
+                {
+                    continue;
+                }
                 if solution.start.solution_value > tolerance {
                     if !has_big_gaps || solution.start.solution_value > big_tolerance {
                         continue;
@@ -1280,7 +1485,7 @@ impl<O: ClassObject> CurveClassification<O> {
         link: PairLink,
     ) -> Result<(MergedTopology<O>, MergedTopology<O>)> {
         if self.size() != other.size() {
-            return Err(SolidError::sm_err(OP));
+            return Err(counts_differ(self, other));
         }
         let mut out = MergedTopology::default();
         let mut out_other = MergedTopology::default();
@@ -1450,6 +1655,9 @@ impl<O: ClassObject> CurveClassification<O> {
 /// Converts sub-tolerance ranges to points and inserts curve/edge/plane intersections,
 /// over a read-only adapter: where an edge-end vertex tolerance would be raised to the
 /// edge's (`SmVertex::SetTolerance`), this defers ([`insert_solutions_mut`] raises it).
+/// With tangency ignored, a run under a twentieth of the classified interval is a tangent
+/// touch (only its ends on the interval's ends are inserted) unless it reaches an end of
+/// the interval or of the edge at each of its ends ([`run_reaches_ends`]).
 ///
 /// `xsect_tolerance` defaults to the sum of source and target zones. Solutions are
 /// modified in place when a range collapses; their end records are preserved.
@@ -1539,8 +1747,12 @@ fn insert_solutions_in<O: ClassObject>(
         && geometry
             .surface(object)
             .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
+    // an edge without a curve was refused in target_curve, so this is any other object
     if !has_target && !plane {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::intersect(
+            OP,
+            IntersectFailure::UnsupportedObjectKind,
+        ));
     }
     for sol in solutions {
         collapse_short_range(k, access.geometry(), sol, tol)?;
@@ -1588,8 +1800,12 @@ fn insert_solutions_in<O: ClassObject>(
                 if let Some(target) = target {
                     let a = source.evaluate(k, sol.start.param(0)?, 1, true, true)?;
                     let b = target.evaluate(k, sol.start.param(1)?, 1, true, true)?;
-                    let ta = a.get(1).copied().ok_or(SolidError::sm_err(OP))?;
-                    let tb = b.get(1).copied().ok_or(SolidError::sm_err(OP))?;
+                    let (Some(&ta), Some(&tb)) = (a.get(1), b.get(1)) else {
+                        return Err(SolidError::intersect(
+                            OP,
+                            IntersectFailure::Defect { why: EVAL_1ST },
+                        ));
+                    };
                     let mut angle = tb.angle_between(ta).unwrap_or(1.0);
                     if angle > PI / 2.0 {
                         angle = PI - angle;
@@ -1651,12 +1867,20 @@ fn insert_solutions_in<O: ClassObject>(
                 // cancel the scheduled insertion; check for end point intersections and
                 // insert them here (upstream maps the tolerance on pEdgeCurve, which a
                 // curve or plane target leaves NULL)
-                let (Some(_), Some(e_curve)) = (edge, target) else {
+                let (Some(e), Some(e_curve)) = (edge, target) else {
                     return Err(SolidError::invalid_input(
                         OP,
                         "native short-range tangency filtering requires an edge",
                     ));
                 };
+                // Not upstream: a run that reaches an end of the classified interval or of
+                // the edge at each of its ends is the curve running along the edge, not a
+                // tangent touch, and is inserted whatever its length
+                // ([`run_reaches_ends`]).
+                if run_reaches_ends(k, geometry, classification, sol, e, e_curve, tol)? {
+                    classification.insert_curve_interval(k, geometry, &ivl)?;
+                    continue;
+                }
                 let cc_ivl = classification.interval();
                 let start_tol = map_to_1d_on_curve(k, tol, sol.start.param(0)?, e_curve)?;
                 if cc_ivl
@@ -1689,6 +1913,63 @@ fn insert_solutions_in<O: ClassObject>(
         }
     }
     Ok(())
+}
+
+/// Not upstream: whether the run `sol` (a range of the classification's curve within `tol`
+/// of `edge`, whose curve is `edge_curve`) runs along the edge: its pieces of both curves are
+/// longer than `tol` end to end, and each of its ends lies on an end of the classification's
+/// interval or of the edge's interval, within `tol` mapped to that curve's parameter there.
+///
+/// The intersector reports a run where the two curves lie within `tol` of each other, and
+/// ends it where they part or where one of the two intervals ends. A tangent touch parts
+/// the curves at both ends of its run, inside both intervals: there the distance between
+/// them reaches `tol`. A run that ends at each end on an end of one of the intervals has no
+/// end where the curves part: over its whole extent the curve runs within `tol` along the
+/// edge (an arc of a circle split at a seam vertex and at a rail's vertex, along the edge
+/// between those vertices), so it is the edge's coincidence, not a tangency, whatever its
+/// length against the classified interval's. A run whose piece of either curve has its ends
+/// within `tol` of each other (both ends dropping onto one end of the edge) is a touch at a
+/// point, not a run along the edge.
+///
+/// # Errors
+///
+/// Those of the edge's interval lookup and of the curves' evaluations.
+fn run_reaches_ends<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    sol: &Solution<O>,
+    edge: O,
+    edge_curve: &Curve,
+    tol: f64,
+) -> Result<bool> {
+    let source = classification.curve_geometry(geometry)?;
+    let source_ivl = classification.interval();
+    let edge_ivl = super::p3::edge_interval(geometry, edge)?;
+    for (curve, i) in [(source, 0), (edge_curve, 1)] {
+        let a = curve.evaluate_point(k, sol.start.param(i)?)?;
+        let b = curve.evaluate_point(k, sol.end.param(i)?)?;
+        let length = a.distance(b);
+        if length.is_nan() || length <= tol {
+            return Ok(false);
+        }
+    }
+    for end in [&sol.start, &sol.end] {
+        let (t, s) = (end.param(0)?, end.param(1)?);
+        let on_source = source_ivl
+            .is_value_on_boundary(t, map_to_1d_on_curve(k, tol, t, source)?)
+            .0;
+        if on_source {
+            continue;
+        }
+        let on_edge = edge_ivl
+            .is_value_on_boundary(s, map_to_1d_on_curve(k, tol, s, edge_curve)?)
+            .0;
+        if !on_edge {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The vertex check of `sm_InsertSolutions` for an edge target: a point solution within
@@ -1733,7 +2014,7 @@ fn edge_end_vertex_snap<O: ClassObject>(
         } else {
             start_vertex
         };
-        let vertex = vertex.ok_or(SolidError::null_pointer(OP))?;
+        let vertex = vertex.ok_or_else(|| missing_defect(OP, EDGE_NO_VERTEX))?;
         let vtx = geometry
             .topology_handle_in(eb, EntityRef::Vertex(vertex))
             .ok_or(SolidError::invalid_input(OP, "vertex without handle"))?;
@@ -1755,10 +2036,28 @@ fn edge_end_vertex_snap<O: ClassObject>(
 
         // check the EdgeEnd/Vertex distance (EvaluatePoint's status is ignored)
         let edge_end_pt = ignored(edge_curve.evaluate_point(k, param))?.unwrap_or(Point3::UNDEF);
-        let dist = edge_end_pt.distance(super::p3::vertex_point(geometry, vtx)?);
+        let vertex_point = super::p3::vertex_point(geometry, vtx)?;
+        let dist = edge_end_pt.distance(vertex_point);
 
         // if EdgeEnd/Vertex distance < XSectTol3d(Vtx,ClassCurve) - snap to vertex
         if dist < cc_vtx_xsect_tol {
+            if classification.native_material_contacts() {
+                if let Some(marker) = periodic_trim_witness(k, geometry, vtx)? {
+                    if NativeSupport::curve(source, &classification.interval()).is_some_and(
+                        |support| {
+                            marker.excluded_by(
+                                k,
+                                &support,
+                                source_zone,
+                                vtx_zone,
+                                classification.native_foreign_support(),
+                            )
+                        },
+                    ) {
+                        continue;
+                    }
+                }
+            }
             // Don't add this vertex as a PointClassification if it would make a
             // sub-tolerant CurveInterval, where both ends are this vertex [B678]
             let touches = classification.point_classifies_connected_to(geometry, &[vtx])?;
@@ -1833,6 +2132,22 @@ fn collapse_short_range<O: ClassObject>(
         }
     }
     Ok(())
+}
+
+/// The two classifications combined interval by interval have different numbers of
+/// intervals (upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn counts_differ<O: ClassObject>(
+    this: &CurveClassification<O>,
+    other: &CurveClassification<O>,
+) -> SolidError {
+    SolidError::intersect(
+        OP,
+        IntersectFailure::IntervalCountsDiffer {
+            this: this.size(),
+            other: other.size(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -2159,7 +2474,12 @@ mod tests {
             let other_before = other.intervals().to_vec();
             assert!(matches!(
                 cc.merge_classifications(&k, &g, &mut other, true),
-                Err(SolidError::Upstream { code: 1001, .. })
+                Err(ref e) if e.intersect_failure()
+                    == Some(&IntersectFailure::IntervalCountsDiffer {
+                        this: 2,
+                        other: other_count,
+                    })
+                    && e.sm_status() == Some(1001)
             ));
             assert_eq!(cc.intervals(), before);
             assert_eq!(other.intervals(), other_before);
@@ -2380,5 +2700,59 @@ mod tests {
             "{fresh}"
         );
         assert_eq!(classify(true), fresh);
+    }
+
+    /// The box the vertex drops can reach holds the whole curve where a cubic Bezier's middle
+    /// control points lie past its ends on the line through them, rational or not: there
+    /// the curve runs past its ends, which the B-spline's own box, taking such a span for a
+    /// line, does not reach (#7942).
+    #[test]
+    fn drop_reach_box_holds_a_cubic_running_past_its_ends() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let xs = [0.0, 4.0, -3.0, 1.0];
+        for weights in [[1.0; 4], [1.0, 2.0, 0.5, 1.0], [1.0, 0.5, 3.0, 1.0]] {
+            for (dy, dz) in [(0.0, 0.0), (1e-9, 0.0), (0.5, 0.25)] {
+                let pw = xs
+                    .iter()
+                    .zip(weights)
+                    .enumerate()
+                    .map(|(i, (&x, w))| {
+                        let (y, z) = if i == 1 || i == 2 {
+                            (dy, dz)
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        CPoint::new(x * w, y * w, z * w, w)
+                    })
+                    .collect();
+                let nl = NlCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+                let spline = BSplineCurve::from_nurb(nl, 3, false);
+                let curve = Curve::from(spline.clone());
+                let natural = curve.natural_interval();
+                let b = drop_reach_box(&k, &curve, &natural).unwrap();
+                let (lo, hi) = (b.min(), b.max());
+                let (mut least, mut most) = (f64::INFINITY, f64::NEG_INFINITY);
+                for i in 0..=200 {
+                    let p = spline.evaluate_point(f64::from(i) / 200.0).unwrap();
+                    least = least.min(p.x);
+                    most = most.max(p.x);
+                    for (v, l, h) in [(p.x, lo.x, hi.x), (p.y, lo.y, hi.y), (p.z, lo.z, hi.z)] {
+                        assert!(
+                            v >= l - 1e-12 && v <= h + 1e-12,
+                            "{p:?} outside {b:?} ({weights:?}, {dy}, {dz})"
+                        );
+                    }
+                }
+                // the curve does run past its ends
+                assert!(
+                    least < -1e-3 || most > 1.0 + 1e-3,
+                    "{least} {most} ({weights:?})"
+                );
+            }
+        }
     }
 }

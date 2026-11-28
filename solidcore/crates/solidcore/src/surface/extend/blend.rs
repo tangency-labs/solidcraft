@@ -68,7 +68,8 @@ use crate::blend::fillet_section::recertify::{
 };
 use crate::blend::fillet_section::section::{param, param_in, GN_THUMBWEIGHT_EQUAL_AREA};
 use crate::blend::fillet_section::station::GnStation;
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -97,7 +98,12 @@ pub(super) fn blend_extended(
     let order = pb.order();
     // the section's degree in t: the chord's 1, the circle's 2, a G^n section's 3 n + 1
     let section_deg = section_degree(order);
-    let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    // the caller's blend's net (`ProceduralBlend::create` copies the net it is given as is)
+    let source_net = pb.net.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     // a distance below the net side's resolution: none (the blend as it is)
     let Some(grown) = Surface::from(pb.net.clone()).extended_by_distance(
         k,
@@ -115,7 +121,14 @@ pub(super) fn blend_extended(
             "the net's extension is not a B-spline",
         ));
     };
-    let out_net = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let out_net = net.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net's extension has no NURB, though the extension built it from a NURB",
+            },
+        )
+    })?;
     let (lo, hi) = if side.is_u() {
         (dom.min().x, dom.max().x)
     } else {
@@ -208,19 +221,20 @@ fn along(
         });
     }
     let def = pb.definition();
-    let sigma = def
-        .seeds
-        .first()
-        .ok_or_else(|| SolidError::sm_err(OP))?
-        .knots(None)?
-        .0;
+    let [seed, _] = &def.seeds;
+    let sigma = seed.knots(None)?.0;
     let s_side = a[0] + b[0] * side.at(dom);
     // outward from the side, s grows (`up`) or falls
     let up = side.is_high() == (b[0] > 0.0);
     // the side on the definition's spine: at its end station, or inside it (extended by
     // the definition's spans already there, then past its end)
     let (Some(&first), Some(&last)) = (sigma.first(), sigma.last()) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the seed curve's knots are empty, though `knots` read them from its NURB, whose knot vector holds degree + 1 knots at each end",
+            },
+        ));
     };
     let end = if up { last } else { first };
     if !(s_side == end || (s_side > first && s_side < last)) {
@@ -229,7 +243,12 @@ fn along(
             reason: "the side is not on the definition's spine",
         });
     }
-    let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    // the caller's blend's net (`ProceduralBlend::create` copies the net it is given as is)
+    let source_net = pb.net.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let source = Local::of(source_net, side)?;
     if source.p != 3 {
         return Err(SolidError::Unsupported {
@@ -261,14 +280,11 @@ fn along(
             if y <= x {
                 continue;
             }
-            // a station that does not solve, a foot off its support or a span not proved:
-            // an ask that does not work, as a weight not positive
-            let span = match span_of_definition(k, &next, idx, target) {
-                Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
-                Ok(_) | Err(SolidError::InvalidInput { .. } | SolidError::Upstream { .. }) => {
-                    return Ok(None)
-                }
-                Err(e) => return Err(e),
+            let Some(span) = span_of_ask(span_of_definition(k, &next, idx, target), |span| {
+                feet_on(k, &next, span)
+            })?
+            else {
+                return Ok(None);
             };
             let length = (y - x) / rate;
             // a piece clipped shorter than a span the knot fixup keeps (the side just before a
@@ -331,7 +347,14 @@ fn along(
             "the extension is not a B-spline",
         ));
     };
-    let out_net = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let out_net = net.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the blend's extension has no NURB, though `made` built it from a NURB",
+            },
+        )
+    })?;
     if !keeps(source_net, out_net, side)? {
         return Err(SolidError::port_invariant(
             OP,
@@ -382,6 +405,24 @@ struct Piece {
     span: DefinitionSpan,
     part: [f64; 2],
     length: f64,
+}
+
+/// The span an ask along the spine runs (`span`, [`span_of_definition`]'s), or `None` for an
+/// ask that does not work, as a weight not positive: a station that does not solve, a foot
+/// off its support (`feet`, [`feet_on`]) or a span not proved. Work given up (a
+/// cancellation, or a certificate that spent its work budget:
+/// [`SolidError::is_unported_or_cancelled`]) is passed on, never another ask.
+pub(super) fn span_of_ask(
+    span: Result<DefinitionSpan>,
+    feet: impl FnOnce(&DefinitionSpan) -> Result<bool>,
+) -> Result<Option<DefinitionSpan>> {
+    Ok(Some(match span {
+        Ok(span) if span.certified.is_finite() && feet(&span)? => span,
+        Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(e) if e.upstream_status().is_some() => return Ok(None),
+        Err(e) => return Err(e),
+    }))
 }
 
 /// The knots after the source's joint for `pieces` from `end` by `e` in all: each part's

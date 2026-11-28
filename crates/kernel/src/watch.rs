@@ -20,7 +20,12 @@ thread_local! {
 
 /// Run `f` with `watch` seeing the kernel work it does on this thread.
 pub fn watching<R>(watch: Arc<dyn Watch>, f: impl FnOnce() -> R) -> R {
-    let previous = CURRENT.with(|c| c.replace(Some(watch)));
+    scoped(Some(watch), f)
+}
+
+/// Run `f` with `watch` installed (or cleared when `None`), restoring the previous watch on exit.
+pub(crate) fn scoped<R>(watch: Option<Arc<dyn Watch>>, f: impl FnOnce() -> R) -> R {
+    let previous = CURRENT.with(|c| c.replace(watch));
     struct Restore(Option<Option<Arc<dyn Watch>>>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -36,6 +41,11 @@ pub fn watching<R>(watch: Arc<dyn Watch>, f: impl FnOnce() -> R) -> R {
 /// The watch over this thread's work, to hand to the worker threads it starts.
 pub fn current() -> Option<Arc<dyn Watch>> {
     CURRENT.with(|c| c.borrow().clone())
+}
+
+/// Whether the watch over this thread's work asked it to stop.
+pub fn cancelled() -> bool {
+    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|w| w.cancelled()))
 }
 
 /// The error long work returns when its watch cancelled it.

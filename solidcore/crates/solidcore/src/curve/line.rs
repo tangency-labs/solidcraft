@@ -114,10 +114,12 @@
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
+use crate::error::curve::{CurveFailure, FastDropBlock, JoinCheck};
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::{self, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::assert_array::{AssertArray, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -138,7 +140,7 @@ use crate::nurbs::b_spline_curve::{
 };
 use crate::nurbs::b_spline_curve_n_lib::{InValueType, TrimMode};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
-use crate::nurbs::math::NOW;
+use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
@@ -489,6 +491,21 @@ impl Line {
         self.clone()
     }
 
+    /// Not upstream: the same line by definition, exactly (IEEE `==`; a NaN refuses):
+    /// the same B-spline part
+    /// ([`BSplineCurve::same_definition`](crate::nurbs::b_spline_curve::BSplineCurve::same_definition))
+    /// and point, vector,
+    /// domain, scale and `inside_out` equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.point == other.point
+            && self.vector == other.vector
+            && self.anal_domain == other.anal_domain
+            && self.scale == other.scale
+            && self.inside_out == other.inside_out
+    }
+
     /// `operator==`: same B-spline part (dimension and NURB within `SM_EFF_ZERO`), and
     /// point, vector, domain, scale (within the scaled zero) and `inside_out` equal.
     #[must_use]
@@ -807,6 +824,170 @@ impl Line {
         self.point + step_param * self.scale * self.vector
     }
 
+    /// The exact analytic point at a NURB parameter, when the conversion to STEP
+    /// is known exactly and every coordinate is representable. A bounded line's
+    /// natural endpoints map directly to the analytic endpoints, avoiding a
+    /// rounded interpolation.
+    pub(crate) fn exact_point_at_parameter(&self, t: f64) -> Option<Point3> {
+        let [x, y, z] = self.point_expansions_at_parameter(t)?.map(|terms| {
+            let coordinate = expansion::to_f64(&terms);
+            (coordinate.is_finite() && expansion::is_zero(&expansion::sub(&terms, &[coordinate])))
+                .then_some(coordinate)
+        });
+        Some(Point3::new(x?, y?, z?))
+    }
+
+    /// Exact coordinates of a line point when the parameter conversion is exact.
+    pub(crate) fn point_expansions_at_parameter(&self, t: f64) -> Option<[Vec<f64>; 3]> {
+        let step = self.exact_step_parameter_at(t)?;
+        let parameter = expansion::product(step, self.scale)?;
+        let [x, y, z] = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(origin, direction)| {
+            Some(expansion::add(
+                &expansion::scale(&parameter, direction)?,
+                &[origin],
+            ))
+        });
+        Some([x?, y?, z?])
+    }
+
+    /// The STEP parameter when conversion from the line's NURB domain is exact.
+    pub(crate) fn exact_step_parameter_at(&self, t: f64) -> Option<f64> {
+        if !t.is_finite() {
+            return None;
+        }
+        let step = if self.is_bounded() {
+            let nurb = self.natural_interval();
+            let length = nurb.length();
+            if !length.is_finite()
+                || length < 0.0
+                || !self.anal_domain.length().is_finite()
+                || self.anal_domain.has_negative_length()
+            {
+                return None;
+            }
+            let [first, last] = if self.inside_out {
+                [nurb.max(), nurb.min()]
+            } else {
+                [nurb.min(), nurb.max()]
+            };
+            if is_zero(length) {
+                t
+            } else if t == first {
+                self.anal_domain.min()
+            } else if t == last {
+                self.anal_domain.max()
+            } else {
+                return None;
+            }
+        } else if self.inside_out {
+            -t
+        } else {
+            t
+        };
+
+        Some(step)
+    }
+
+    /// Not upstream: the STEP parameter of NURB parameter `t` as
+    /// [`Self::convert_t_from_nurbs_to_step`] rounds it, with a bound on its distance from
+    /// the exact one. `None` for numbers not finite.
+    ///
+    /// On a bounded line with a NURB domain of nonzero length, `s = a0 + r` with
+    /// `r = (t - n) / L * A` (`n` the NURB end the parameter is measured from, `L` and `A`
+    /// the NURB and analytic lengths; the negation of an inside-out line is exact). The
+    /// difference, `L`, `A`, the quotient and the product round once each, so the computed
+    /// `r` is the exact one times at most five factors `(1 + δ)^±1`, off by at most
+    /// `5u / (1 - 10u) <= γ_6` of itself. The sum rounds once more: `|a0 + r| <= |s| /
+    /// (1 - u)` and `|r| <= |a0 + r| + |a0|`, so `s` is within `(u + γ_6) |s| / (1 - u) +
+    /// γ_6 |a0| <= γ_8 (|s| + |a0|)` of the exact parameter; the bound's own two roundings
+    /// are covered by `1 + γ_2`. That model is relative only: a quotient or product that
+    /// lands in the subnormal range is also off by up to half the smallest subnormal,
+    /// `η = 2^-1075` (sums and differences are exact there). The quotient's `η` is then
+    /// multiplied by `A`, the product's is not, so `(1 + |A|) · 2^-1074` covers both with
+    /// room for the bound's own rounding. The other branches copy or negate `t`, exactly.
+    pub(crate) fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
+        let s = self.convert_t_from_nurbs_to_step(t);
+        let err = if self.is_bounded() && !is_zero(self.natural_interval().length()) {
+            let subnormal = (1.0 + self.anal_domain.length().abs()) * f64::from_bits(1);
+            gamma(8) * (s.abs() + self.anal_domain.min().abs()) * (1.0 + gamma(2)) + subnormal
+        } else {
+            0.0
+        };
+        (s.is_finite() && err.is_finite()).then_some((s, err))
+    }
+
+    /// Not upstream: the points of the line at the ends of `interval` (NURB domain), each
+    /// with the error bound of its coordinates, whose segment holds the line over
+    /// `interval`. A point is `P + s scale V` with `s` the STEP parameter. The computed `s`
+    /// is within `δs` of the exact one ([`Self::step_param_enclosure`]), which moves the
+    /// point along the line by at most `δs |scale| |V|`; the product and the sum round each
+    /// coordinate by at most `γ_3 (|P| + |s scale V|)`. Both terms are widened by their own
+    /// rounding. `None` for numbers not finite.
+    #[must_use]
+    pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
+        let end = |t: f64| {
+            let q = self.evaluate_point(t);
+            let e = self.point_error(t)?;
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite()).then_some((q, e))
+        };
+        Some([end(interval.min())?, end(interval.max())?])
+    }
+
+    /// Not upstream: the error bound of each coordinate of [`Self::evaluate_point`] at
+    /// NURB parameter `t`, as derived for [`Self::segment_over`]. `None` for numbers not
+    /// finite.
+    #[must_use]
+    pub(crate) fn point_error(&self, t: f64) -> Option<f64> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let error = self.point_evaluation_error(s, ds, size(self.point), size(self.vector));
+        error.is_finite().then_some(error)
+    }
+
+    /// The separate Cartesian rounding bounds of the line evaluation at this endpoint.
+    pub(crate) fn point_coordinate_errors(&self, t: f64) -> Option<[f64; 3]> {
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let errors = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(point, vector)| self.point_evaluation_error(s, ds, point.abs(), vector.abs()));
+        errors
+            .iter()
+            .all(|error| error.is_finite())
+            .then_some(errors)
+    }
+
+    fn point_evaluation_error(&self, s: f64, ds: f64, point: f64, vector: f64) -> f64 {
+        (gamma(3) * (point + (s * self.scale).abs() * vector) + ds * self.scale.abs() * vector)
+            * (1.0 + gamma(3))
+    }
+
+    /// Not upstream: an upper bound on the speed of [`Self::evaluate_point`] in its NURB
+    /// parameter. The point is `P + s(t) scale V` with `s` affine in `t`
+    /// ([`Self::convert_t_from_nurbs_to_step`]): slope `A / L` (analytic over NURB domain
+    /// length) on a bounded line with `L` not zero, otherwise `±1`. So the speed is
+    /// `|scale| |V| |A / L|` exactly; the computed lengths, quotient, norm and products
+    /// are each within a few roundings, covered by widening by `1 + γ_8`. `None` for
+    /// numbers not finite.
+    #[must_use]
+    pub(crate) fn speed_bound(&self) -> Option<f64> {
+        let nurb_ivl = self.natural_interval();
+        let slope = if self.is_bounded() && !is_zero(nurb_ivl.length()) {
+            (self.anal_domain.length() / nurb_ivl.length()).abs()
+        } else {
+            1.0
+        };
+        let b = self.scale.abs() * self.vector.length() * slope * (1.0 + gamma(8));
+        b.is_finite().then_some(b)
+    }
+
     /// The point at the analytic domain start and the line vector over the domain
     /// (`scale * V`, times the domain length for a bounded line) (`IsLine`; always a
     /// line).
@@ -1101,7 +1282,12 @@ impl Line {
     ) -> Result<Vec<Solution<O>>> {
         // only good for MINIMIZE and INTERSECT operations
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve(
+                OP_DROP,
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::Operation,
+                },
+            ));
         }
 
         // init output
@@ -1272,9 +1458,9 @@ impl Line {
 
     /// Intersections of this line over `interval` with the ellipse `other` over
     /// `other_interval` (`IntersectWithEllipse`: [`Ellipse::intersect_with_line`] with
-    /// the objects and parameters of every solution swapped). Solutions name
-    /// `this_obj` and `other_obj`; `start.parameters` holds `[this param, other
-    /// param]`.
+    /// the objects and parameters of every solution swapped; `contact_tol` as there).
+    /// Solutions name `this_obj` and `other_obj`; `start.parameters` holds `[this param,
+    /// other param]`.
     ///
     /// # Errors
     ///
@@ -1286,6 +1472,7 @@ impl Line {
         other: &Ellipse,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         other_obj: Option<O>,
     ) -> Result<LineLineIntersection<O>> {
@@ -1296,6 +1483,7 @@ impl Line {
             self,
             interval,
             tol,
+            contact_tol,
             other_obj,
             this_obj,
         )?;
@@ -1313,6 +1501,32 @@ impl Line {
             }
         }
         Ok(r)
+    }
+
+    /// Whether [`Line::intersect_with_line`] of these segments stops at its first test,
+    /// with no solution: the box of this segment grown by `tol` misses the other
+    /// segment's box. A caller that intersects many pairs of lines can skip those
+    /// pairs up front (#14329).
+    #[must_use]
+    pub fn segments_apart(
+        &self,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        tol: f64,
+    ) -> bool {
+        !core::ptr::eq(self, other)
+            && segment_boxes_apart(
+                [
+                    self.evaluate_point(interval.min()),
+                    self.evaluate_point(interval.max()),
+                ],
+                [
+                    other.evaluate_point(other_interval.min()),
+                    other.evaluate_point(other_interval.max()),
+                ],
+                tol,
+            )
     }
 
     /// Intersections of this line over `interval` with `other` over `other_interval`
@@ -1351,12 +1565,7 @@ impl Line {
         let vec1 = end1 - start1;
 
         // check for disjoint solution
-        let mut bbox1 = Extent3d::from_point(start1);
-        bbox1.add_point(end1);
-        bbox1.expand_absolute(tol);
-        let mut bbox2 = Extent3d::from_point(start2);
-        bbox2.add_point(end2);
-        if bbox1.are_disjoint(&bbox2, 0.0) {
+        if segment_boxes_apart([start1, end1], [start2, end2], tol) {
             return Ok(out);
         }
 
@@ -1734,19 +1943,36 @@ impl Line {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve(
+                OP_JOIN,
+                CurveFailure::JoinMismatch {
+                    check: JoinCheck::JoinPoint,
+                    off: this_common.distance(other_common),
+                    tolerance: tol,
+                },
+            ));
         }
 
         // Other curve must be linear.
         if !other_is_line(other, 5, tol)? {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve(
+                OP_JOIN,
+                CurveFailure::JoinOtherNotStraight { tolerance: tol },
+            ));
         }
 
         // And it must be collinear with us.
         let whole_line_vec = other_end - this_end;
         let (dist, _) = line_point_distance(this_end, whole_line_vec, this_common);
         if dist > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve(
+                OP_JOIN,
+                CurveFailure::JoinMismatch {
+                    check: JoinCheck::Collinear,
+                    off: dist,
+                    tolerance: tol,
+                },
+            ));
         }
 
         // Length of other curve's param range will be ours, scaled by the 3d lengths.
@@ -1874,6 +2100,25 @@ impl Line {
             self.base.transform(rotate_n_move, scale)?;
         }
         Ok(())
+    }
+
+    /// A copy mirrored about the XY plane of `mirror_plane`, still a line: its point and unit
+    /// vector mirrored, its domain, scale and `inside_out` as they were, an existing NURB
+    /// mirrored with it, so each parameter is the mirror of the same point. Not upstream
+    /// (#15862): `SmBSplineCurve::CreateMirrorCurve`, which a line inherits, gives the plain
+    /// B-spline of the line's NURB, over the whole domain of an infinite line.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::create_mirror_curve`].
+    pub fn create_mirror_curve(&self, mirror_plane: &Axis2Placement) -> Result<Self> {
+        let mut line = self.copy();
+        line.point = mirror_plane.mirror_point(self.point);
+        line.vector = mirror_plane.mirror_vector(self.vector);
+        if self.base.nurb.is_some() {
+            line.base = self.base.create_mirror_curve(mirror_plane)?;
+        }
+        Ok(line)
     }
 
     /// Moves the line ends to `tgt_start` / `tgt_end` (`DeformToEndPointTargets`). With
@@ -2036,8 +2281,7 @@ impl Line {
     }
 
     /// [`Line::assert_valid`] of a UV trim on `trim_surface`, its face's surface: the
-    /// `SmBSplineCurve` checks measure the trim on it with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// `SmBSplineCurve` checks measure the trim on it (WR-560, see
     /// [`BSplineCurve::assert_valid_on`]).
     ///
     /// # Errors
@@ -2051,17 +2295,37 @@ impl Line {
         key: ObjectKey,
         trim_surface: Option<&Surface>,
     ) -> Result<bool> {
+        if !level_given {
+            self.ensure_nurb_for_assert()?;
+        }
+        self.assert_valid_on_prepared(k, list, level_given, key, trim_surface)
+    }
+
+    /// Materializes the cached NURB representation if missing (the only mutation
+    /// [`Self::assert_valid_on`] performs).
+    pub(crate) fn ensure_nurb_for_assert(&mut self) -> Result<()> {
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb())?;
+        }
+        Ok(())
+    }
+
+    /// Read-only body of [`Self::assert_valid_on`], once [`Self::ensure_nurb_for_assert`]
+    /// has run (when `!level_given`).
+    pub(crate) fn assert_valid_on_prepared(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         let mut rtn = true;
 
         // call the base class AssertValid
         if !level_given {
-            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb,
-            // status ignored)
-            if self.base.nurb.is_none() {
-                ignore_status(self.make_nurb())?;
-            }
-            let this = &*self;
+            let this = self;
             let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol, None));
             rtn &= this.base.assert_valid_with(
                 k,
@@ -2197,7 +2461,11 @@ impl Line {
                     line.convert_to_2d()?;
                 }
             }
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
         Ok(line)
@@ -2270,9 +2538,87 @@ fn value_report(
     Ok(false)
 }
 
+/// The disjoint test of `IntersectWithLine`: the box of segment `a` grown by `tol`
+/// misses the box of segment `b`.
+fn segment_boxes_apart(a: [Point3; 2], b: [Point3; 2], tol: f64) -> bool {
+    let mut bbox1 = Extent3d::from_point(a[0]);
+    bbox1.add_point(a[1]);
+    bbox1.expand_absolute(tol);
+    let mut bbox2 = Extent3d::from_point(b[0]);
+    bbox2.add_point(b[1]);
+    bbox1.are_disjoint(&bbox2, 0.0)
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Line {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            point,
+            vector,
+            anal_domain,
+            scale,
+            inside_out,
+        } = self;
+        d.tag(0x11E);
+        base.content(d)?;
+        point.content(d)?;
+        vector.content(d)?;
+        anal_domain.content(d)?;
+        d.f64(*scale);
+        d.bool(*inside_out);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `segments_apart` says "apart" only where `intersect_with_line` finds nothing, on
+    /// segments of every relative placement: crossing, touching, overlapping, within
+    /// and beyond the tolerance, parallel and skew (#14329).
+    #[test]
+    fn segments_apart_only_where_line_line_finds_nothing() {
+        let tol = 1e-3;
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let (mut apart, mut near) = (0, 0);
+        for _ in 0..20_000 {
+            let mut point =
+                |scale: f64| Vec3::new(next() * scale, next() * scale, (next() - 0.5) * 4.0 * tol);
+            let (a, b) = (point(4.0), point(4.0));
+            let (c, d) = (point(4.0), point(4.0));
+            let line = |p: Vec3, q: Vec3| {
+                let domain = Extent1d::from_min_max(0.0, (q - p).length());
+                Line::bounded(p, q - p, &domain, &BoundedLineOptions::default())
+            };
+            let (l1, l2) = (line(a, b), line(c, d));
+            let i1 = l1.natural_interval();
+            let i2 = l2.natural_interval();
+            let found = l1
+                .intersect_with_line::<u8>(&i1, &l2, &i2, tol, None, None)
+                .unwrap();
+            if l1.segments_apart(&i1, &l2, &i2, tol) {
+                apart += 1;
+                assert!(found.solutions.is_empty(), "{a:?} {b:?} / {c:?} {d:?}");
+                assert!(!found.needs_more_intersections);
+            } else {
+                near += 1;
+            }
+        }
+        // both answers occur
+        assert!(apart > 1_000 && near > 1_000, "{apart} apart, {near} near");
+        // a line is never apart from itself
+        let l = seg();
+        let ivl = l.natural_interval();
+        assert!(!l.segments_apart(&ivl, &l, &ivl, tol));
+    }
 
     fn seg() -> Line {
         Line::bounded(
@@ -2373,6 +2719,61 @@ mod tests {
     }
 
     #[test]
+    fn line_join_refusals_name_the_check() {
+        // seg() runs from (4, 0, 0) to (14, 0, 0); its end 1 is joined
+        let x = |a: f64, b: f64| Vec3::new(a, b, 0.0);
+        // a line that starts 1 past the end
+        let apart = Curve::from(Line::from_points(x(15.0, 0.0), x(20.0, 0.0), 3));
+        let err = seg().join_with(1, &apart, 0, Some(1e-7)).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::JoinMismatch {
+                check: JoinCheck::JoinPoint,
+                off: 1.0,
+                tolerance: 1e-7
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a line from the end that turns off the line through both
+        let bent = Curve::from(Line::from_points(x(14.0, 0.0), x(20.0, 1.0), 3));
+        let err = seg().join_with(1, &bent, 0, Some(1e-7)).unwrap_err();
+        // the join point's distance from the line from (4, 0, 0) to (20, 1, 0)
+        let off = 10.0 / 257f64.sqrt();
+        match err.curve_failure() {
+            Some(&CurveFailure::JoinMismatch {
+                check: JoinCheck::Collinear,
+                off: o,
+                tolerance,
+            }) => {
+                assert!((o - off).abs() < 1e-12, "{o} {off}");
+                assert_eq!(tolerance, 1e-7);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a quarter circle from the end
+        let k = Kernel::default();
+        let arc = Ellipse::new_circle(
+            &k,
+            x(14.0, 1.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Extent1d::from_min_max(0.0, 90.0),
+            1.0,
+            &crate::curve::ellipse::EllipseOptions::default(),
+        )
+        .unwrap();
+        let err = seg()
+            .join_with(1, &Curve::from(arc), 0, Some(1e-7))
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::JoinOtherNotStraight { tolerance: 1e-7 })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+    }
+
+    #[test]
     fn drop_and_solve() {
         let l = seg();
         let s = l
@@ -2387,6 +2788,23 @@ mod tests {
             .unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].start.parameters[0], 7.0);
+        let err = l
+            .drop_point_fast::<u8>(
+                &l.natural_interval(),
+                SolverOperation::Maximize,
+                Vec3::new(20.0, 1.0, 0.0),
+                1e-6,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::FastDropUnavailable {
+                reason: FastDropBlock::Operation
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
         let g = l.global_point_solve_step::<u8>(
             &l.step_interval(),
             SolverOperation::Maximize,
@@ -2443,5 +2861,70 @@ mod tests {
         .unwrap();
         assert_eq!(s.natural_interval(), Extent1d::from_min_max(0.0, 4.0));
         assert_eq!(s.step_interval(), Extent1d::from_min_max(0.0, 1.0));
+    }
+
+    #[test]
+    fn an_exact_line_point_requires_an_exact_parameter_and_coordinates() {
+        let analytic_domain = Extent1d::from_min_max(0.0, 1.0);
+        let natural_domain = Extent1d::from_min_max(1.0, 7.0);
+        let start = Vec3::new(10.0, 5.0, 4.0);
+        let end = Vec3::new(15.0, 5.0, 4.0);
+        for inside_out in [false, true] {
+            let mut line = Line::bounded(
+                start,
+                Vec3::X,
+                &analytic_domain,
+                &BoundedLineOptions {
+                    scale: 5.0,
+                    inside_out,
+                    ..BoundedLineOptions::default()
+                },
+            );
+            line.edit_parameterization(&natural_domain).unwrap();
+            let (first, last) = if inside_out {
+                (end, start)
+            } else {
+                (start, end)
+            };
+            assert_eq!(line.exact_point_at_parameter(1.0), Some(first));
+            assert_eq!(line.exact_point_at_parameter(7.0), Some(last));
+            assert_eq!(line.exact_point_at_parameter(4.0), None);
+        }
+
+        let line = Line::infinite(Vec3::X, Vec3::X, 3, true);
+        assert_eq!(line.exact_point_at_parameter(1.0), Some(Vec3::ZERO));
+        // The exact coordinate 1 - 2^-54 lies between adjacent doubles.
+        assert_eq!(line.exact_point_at_parameter(f64::EPSILON / 4.0), None);
+    }
+
+    /// A parameter whose conversion to the STEP domain rounds away (review on
+    /// #16146): on `[-1, 1]` both ways, `t = 2^-54` gives `t + 1 = 1` and the STEP
+    /// parameter `0`, while the exact one is `2^-54`; at scale `1e12` the exact end is
+    /// `5.55e-5` from the computed one. Its error bound covers that distance (it was `0`).
+    #[test]
+    fn segment_over_encloses_the_parameter_conversion() {
+        let domain = Extent1d::from_min_max(-1.0, 1.0);
+        let l = Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &domain,
+            &BoundedLineOptions {
+                scale: 1e12,
+                ..BoundedLineOptions::default()
+            },
+        );
+        assert_eq!(l.natural_interval(), domain);
+        let t = 2f64.powi(-54);
+        assert_eq!(l.convert_t_from_nurbs_to_step(t), 0.0);
+        let [lo, hi] = l
+            .segment_over(&Extent1d::from_min_max(0.0, t))
+            .expect("finite line");
+        // the exact ends: x = 0 and x = 1e12 * 2^-54
+        let exact_hi = 1e12 * t;
+        assert_eq!(hi.0, Vec3::ZERO);
+        assert!(hi.1 >= exact_hi, "bound {} below the miss {exact_hi}", hi.1);
+        assert!(lo.0.x.abs() <= lo.1);
+        // still tight: about 8 ulps of the parameter, times the scale
+        assert!(hi.1 < 1e-2);
     }
 }

@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 
 use egui::Color32;
 use serde::{Deserialize, Serialize};
-use solidcraft_theme::{
-    Custom, Environment, Fade, PublishedTab, Surfaces, TAB_NAMES, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
-};
+use solidcraft_theme::{AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, set_custom, set_published};
 
 #[derive(Clone)]
 struct PreparedTheme {
@@ -110,7 +108,7 @@ impl TabThemeState {
             self.fade = None;
         }
         // Bound the cache even if an internal caller supplies an unknown tab name.
-        let tab = if TAB_NAMES.contains(&tab) { tab } else { "MODEL" };
+        let tab = if crate::workspace::TAB_ACCENTS.contains(tab) { tab } else { "MODEL" };
         // Borrow the key on resting frames; own a name only when caching a new target.
         let target = if let Some(target) = self.targets.get(tab) {
             *target
@@ -124,11 +122,12 @@ impl TabThemeState {
             } else {
                 Tokens::themed(environment.dark, environment.vision)
             };
-            let accent = TabAccent::for_tab(&window, tab);
-            let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
+            let accent = crate::workspace::tab_accent(&window, tab);
+            let own = Tokens::viewport_own(environment.vision);
+            let window = own.map_or(window, |view| window.with_viewport(view));
             let target = TabTarget {
                 tokens: window.with_background(environment.background),
-                view: Tokens::themed(viewport_dark(), vision()).with_background(environment.background),
+                view: own.unwrap_or_else(|| Tokens::themed(environment.dark, environment.vision)).with_background(environment.background),
                 accent,
             };
             self.targets.insert(tab.to_owned(), target);
@@ -168,9 +167,10 @@ impl TabThemeState {
             tokens.protect_tab_panel();
         }
         self.shown = Some(Surfaces::of(tokens));
-        let mut view = if viewport_dark() == is_dark() { tokens } else { target.view };
+        let mut view = if environment.viewport.is_none() { tokens } else { target.view };
         view.viewport_top = tokens.viewport_top;
         view.viewport_bottom = tokens.viewport_bottom;
+        view.viewport_middle = tokens.viewport_middle;
         let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
         (PublishedTab { environment, tokens, view, tab_surfaces }, target.accent, self.fade.is_some())
     }
@@ -190,8 +190,36 @@ pub struct FilePalette {
 /// through this only: `set_custom` alone would keep the previous theme's icon colours.
 pub fn set_file_palette(file: Option<FilePalette>) -> bool {
     let tokens = set_custom(file.map(|f| Custom { dark: f.dark, tokens: f.tokens }));
-    let icons = crate::icon_svg::set_theme_palette(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    FILE_ICONS.set(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    let icons = apply_icon_palette();
     tokens | icons
+}
+
+thread_local! {
+    /// The applied theme file's icon palette, before a chosen accent ([`set_accent`]) recolours its base ramp.
+    static FILE_ICONS: std::cell::Cell<Option<(bool, crate::icon_svg::Palette)>> = const { std::cell::Cell::new(None) };
+}
+
+pub use solidcraft_theme::parse_accent;
+
+/// Use `accent` over the theme's own (`None`: the theme's) in the tokens and the icons' base ramp; returns whether that changed anything.
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    let tokens = solidcraft_theme::set_accent(accent);
+    let icons = apply_icon_palette();
+    tokens | icons
+}
+
+/// The icon palette of the theme file with the chosen accent's shades as its base ramp.
+fn accent_icon_palette(file: Option<(bool, crate::icon_svg::Palette)>, accent: Option<Color32>) -> Option<(bool, crate::icon_svg::Palette)> {
+    let Some(accent) = accent.map(Color32::to_opaque) else { return file };
+    let rgb = |c: Color32| [c.r(), c.g(), c.b()];
+    let (dark, mut palette) = file.unwrap_or((solidcraft_theme::is_dark(), Default::default()));
+    palette.accents[0] = Some([rgb(accent.lerp_to_gamma(Color32::WHITE, 0.15)), rgb(accent), rgb(accent.lerp_to_gamma(Color32::BLACK, 0.25))]);
+    Some((dark, palette))
+}
+
+fn apply_icon_palette() -> bool {
+    crate::icon_svg::set_theme_palette(accent_icon_palette(FILE_ICONS.get(), solidcraft_theme::accent()))
 }
 
 /// Isolated tests draw with a theme file's palettes, restored even when an assertion fails.
@@ -201,13 +229,14 @@ pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
     impl Drop for Restore {
         fn drop(&mut self) {
             set_custom(self.0);
+            FILE_ICONS.set(None);
             crate::icon_svg::set_theme_palette(self.1);
         }
     }
     let restore = Restore(solidcraft_theme::custom(), crate::icon_svg::theme_palette_state());
     let values = BTreeMap::new();
     let tokens = crate::theme_files::resolve_with(file, &values);
-    set_file_palette(Some(FilePalette { dark: is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
+    set_file_palette(Some(FilePalette { dark: solidcraft_theme::is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
     restore
 }
 
@@ -238,12 +267,7 @@ pub fn publish_tab(tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::
     if fading {
         ctx.request_repaint();
     }
-    accent.set_current(tab, sketch_open, tool_active, ctx);
-}
-
-/// The common conversion boundary for compiled icon palette data.
-pub(crate) const fn icon_color(rgb: [u8; 3]) -> Color32 {
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+    accent.set_current(crate::workspace::TAB_ACCENTS.icon_accent(tab), sketch_open.then_some(AccentRamp::Sketch), tool_active, ctx);
 }
 
 /// The 3D view's colours (#4146): the theme's own, or the built-in Light or Dark theme's whatever
@@ -313,7 +337,7 @@ mod tests {
     use solidcraft_theme::{ColorVision, apply, composite, contrast_ratio, set_dark, set_viewport_background, set_viewport_dark, set_vision};
 
     fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         let values = crate::theme_files::effective_values(&file, &overrides).0;
         let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
         let base = FilePalette {
@@ -331,6 +355,7 @@ mod tests {
 
     #[test]
     fn tabs_fade_retargets_from_displayed_surfaces_and_stops_resolving_at_rest() {
+        crate::test_support::host_data();
         for opacity in [40.0, 100.0] {
             let mut state = tabs_state("dark", BTreeMap::from([("opacity".into(), crate::theme_files::OptionValue::Num(opacity))]));
             let (model, _, repaint) = state.publish("MODEL", 0.0);
@@ -360,6 +385,7 @@ mod tests {
 
     #[test]
     fn tabs_panel_text_contrast_holds_at_five_fade_steps_with_opacity() {
+        crate::test_support::host_data();
         use crate::theme_files::OptionValue;
         for base in ["dark", "light"] {
             for percent in [40.0, 75.0, 100.0] {
@@ -391,6 +417,7 @@ mod tests {
 
     #[test]
     fn blur_intent_cache_resolves_only_when_theme_or_raw_values_change() {
+        crate::test_support::host_data();
         let ctx = egui::Context::default();
         let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
         let mut file = crate::theme_files::from_value(&source).unwrap();
@@ -436,8 +463,9 @@ mod tests {
 
     #[test]
     fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
+        crate::test_support::host_data();
         let ctx = egui::Context::default();
-        let mut file = crate::theme_files::tab_fixture("dark");
+        let mut file = crate::test_support::tab_fixture("dark");
         let normalizations = Cell::new(0);
         let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
             let custom = prepare_tabs(&ctx, Some(file), raw, || {
@@ -466,7 +494,7 @@ mod tests {
         assert_eq!(publish().0.tokens.axis_x, before.with_vision(true, ColorVision::Tritan).axis_x);
         set_viewport_dark(Some(false));
         assert_eq!(publish().0.tokens.viewport_top, Tokens::light().viewport_top);
-        set_viewport_background(Some([3, 7, 11]));
+        set_viewport_background(Some(solidcraft_theme::ViewBackground::flat([3, 7, 11])));
         assert_eq!(publish().0.tokens.viewport_top, Color32::from_rgb(3, 7, 11));
         set_viewport_background(None);
         set_viewport_dark(None);
@@ -486,7 +514,8 @@ mod tests {
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
                 publish_tab("SKETCH", false, false, ui.ctx());
-                crate::gpu::paint_background(ui.painter(), ui.max_rect(), &Tokens::get());
+                let t = Tokens::get();
+                solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom);
             });
             let colors: Vec<_> = out
                 .shapes
@@ -522,12 +551,13 @@ mod tests {
 
     #[test]
     fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
-            for tab in super::TAB_NAMES.iter().copied() {
-                let accent = super::TabAccent::for_tab(&tokens, tab);
+            for tab in crate::workspace::TAB_ACCENTS.names() {
+                let accent = crate::workspace::tab_accent(&tokens, tab);
                 let ratio = contrast_ratio(accent.ink, accent.soft);
                 if ratio < 4.5 {
                     failures.push(format!("{name} {tab}: {ratio:.4}:1 ({:?} on {:?})", accent.ink, accent.soft));
@@ -558,7 +588,7 @@ mod tests {
         use crate::theme_files::{OptionValue, ThemeFile};
         for base in ["dark", "light"] {
             let ctx = crate::fonts::test_context();
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             set_dark(file.base.is_dark());
             set_vision(ColorVision::Off);
             set_viewport_dark(None);
@@ -612,6 +642,49 @@ mod tests {
             assert_eq!(solidcraft_theme::custom(), base_custom);
             publish("SKETCH", 2.1);
             assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
+        }
+    }
+
+    /// A Preferences accent over each theme that accepts one: its family takes it, ink on it reads (4.5:1), tab accents stay.
+    #[test]
+    fn a_chosen_accent_replaces_the_accent_family_and_stays_readable() {
+        crate::workspace::install_tabs();
+        let mut bases: Vec<(String, Tokens, bool, Option<crate::icon_svg::Palette>)> =
+            vec![("dark".into(), Tokens::dark(), true, None), ("light".into(), Tokens::light(), false, None)];
+        for f in crate::theme_files::builtin().iter().filter(|f| f.accepts_accent) {
+            let values = BTreeMap::new();
+            bases.push((f.id.clone(), crate::theme_files::resolve(f), f.base.is_dark(), crate::theme_files::resolve_icon_palette(f, &values)));
+        }
+        let mut accents: Vec<Color32> =
+            ["#3b82f6", "#22c55e", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"].iter().filter_map(|h| parse_accent(h)).collect();
+        accents.extend([Color32::WHITE, Color32::BLACK, Color32::from_gray(118), Color32::from_rgb(255, 255, 0)]);
+        for (id, base, dark, icons) in &bases {
+            for a in &accents {
+                let t = base.with_accent(*a, *dark);
+                assert_eq!((t.accent, t.form_primary, t.sel_edge, t.file_primary_border), (*a, *a, *a, *a), "{id} {a:?}");
+                assert_eq!(t.selected_bg, t.accent_soft, "{id} {a:?}");
+                for (name, ink, ground) in [("selected_ink", t.selected_ink, t.accent_soft), ("on_accent", t.on_accent, t.accent)] {
+                    let ratio = contrast_ratio(ink, ground);
+                    assert!(ratio >= 4.5, "{id} {a:?}: {name} is {ratio:.2}:1");
+                }
+                // The primary button's label: the best of the ink candidates the button uses (see ui-kit's actions).
+                let label =
+                    [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().map(|ink| contrast_ratio(ink, t.form_primary_fill)).fold(0.0, f64::max);
+                assert!(label >= 4.5, "{id} {a:?}: the primary button's text is {label:.2}:1");
+                assert_eq!(t.file_primary, t.accent_soft, "{id} {a:?}: the File view's primary action follows");
+                for tab in ["SKETCH", "SURFACE", "SHEET METAL"] {
+                    assert_eq!(
+                        crate::workspace::tab_accent(&t, tab).color,
+                        crate::workspace::tab_accent(base, tab).color,
+                        "{id}: {tab} keeps its own accent"
+                    );
+                }
+                // The icons' base ramp is the accent's shades; the tabs' ramps and roles stay.
+                let own = icons.unwrap_or_default();
+                let (_, themed) = accent_icon_palette(icons.map(|p| (*dark, p)), Some(*a)).expect("an accent gives the icons a palette");
+                assert_eq!(themed.accents[0].expect("base ramp")[1], [a.r(), a.g(), a.b()], "{id} {a:?}: the icons take the accent");
+                assert_eq!((&themed.accents[1..], themed.roles), (&own.accents[1..], own.roles), "{id} {a:?}");
+            }
         }
     }
 }

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="900" viewBox="0 0 1120 900">
+  <title>layers</title>
+  <rect x="0" y="0" width="1120" height="900" fill="#ffffff"/>
+  <text x="40" y="44" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000">One click through the layers</text>
+  <rect x="120" y="80" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="104" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">Apps: solidcraft, solidcraft-cli</text>
+  <text x="132" y="124" font-family="Helvetica" font-size="12" fill="#000000">Start the window or the headless CLI. Exempt from the layer rules.</text>
+  <rect x="120" y="164" width="580" height="72" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="188" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L5  ui-egui, gpu, mcp</text>
+  <text x="132" y="208" font-family="Helvetica" font-size="12" fill="#000000">The host. It hands each component plain data and runs what the component returns:</text>
+  <text x="132" y="225" font-family="Helvetica" font-size="12" fill="#000000">the ribbon returns the Fillet button the user clicked.</text>
+  <path d="M120 250 L700 250" fill="none" stroke="#999999" stroke-width="1.5" stroke-dasharray="2 4"/>
+  <text x="690" y="247" font-family="Helvetica" font-size="11" text-anchor="end" fill="#555555">egui and wgpu stop here: nothing below reaches them, at any depth</text>
+  <rect x="120" y="264" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="288" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L4  engine</text>
+  <text x="132" y="308" font-family="Helvetica" font-size="12" fill="#000000">The session and the command registry: everything the user does is a command.</text>
+  <rect x="120" y="348" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="372" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L3  io</text>
+  <text x="132" y="392" font-family="Helvetica" font-size="12" fill="#000000">Design files, import and export.</text>
+  <rect x="120" y="432" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="456" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L2  doc</text>
+  <text x="132" y="476" font-family="Helvetica" font-size="12" fill="#000000">The feature timeline and its evaluation; it plans each body's display mesh.</text>
+  <rect x="120" y="516" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="540" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L1  sketch, kernel, render, dynamics</text>
+  <text x="132" y="560" font-family="Helvetica" font-size="12" fill="#000000">The constraint solver, the kernel boundary, view maths, dynamics.</text>
+  <rect x="120" y="600" width="580" height="56" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="132" y="624" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">L0  geom</text>
+  <text x="132" y="644" font-family="Helvetica" font-size="12" fill="#000000">Vectors, planes, profiles, meshes and their measures.</text>
+  <rect x="764" y="164" width="316" height="492" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="776" y="188" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">Shared crates</text>
+  <text x="776" y="216" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">viewport-gpu</text>
+  <text x="776" y="230" font-family="Helvetica" font-size="11" fill="#333333">the wgpu pipelines; evaluates display plans</text>
+  <text x="776" y="252" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">viewport-egui</text>
+  <text x="776" y="266" font-family="Helvetica" font-size="11" fill="#333333">the viewport in an egui window</text>
+  <text x="776" y="288" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">viewport</text>
+  <text x="776" y="302" font-family="Helvetica" font-size="11" fill="#333333">camera, pictures, CPU rasterizer</text>
+  <text x="776" y="324" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">theme</text>
+  <text x="776" y="338" font-family="Helvetica" font-size="11" fill="#333333">the tokens every component draws with</text>
+  <text x="776" y="360" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">ui-text</text>
+  <text x="776" y="374" font-family="Helvetica" font-size="11" fill="#333333">message catalogs and their lookup</text>
+  <text x="776" y="396" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">ui-registry</text>
+  <text x="776" y="410" font-family="Helvetica" font-size="11" fill="#333333">where components publish their handles</text>
+  <text x="776" y="432" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">color</text>
+  <text x="776" y="446" font-family="Helvetica" font-size="11" fill="#333333">the sRGB rule and analysis palette</text>
+  <text x="776" y="468" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">control, control-egui</text>
+  <text x="776" y="482" font-family="Helvetica" font-size="11" fill="#333333">the control channel</text>
+  <text x="776" y="504" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000">mcp-server</text>
+  <text x="776" y="518" font-family="Helvetica" font-size="11" fill="#333333">the MCP server machinery</text>
+  <text x="776" y="572" font-family="Helvetica" font-size="11" fill="#555555">Any crate may use them. They use only each</text>
+  <text x="776" y="589" font-family="Helvetica" font-size="11" fill="#555555">other, solidcore's public crates and external</text>
+  <text x="776" y="606" font-family="Helvetica" font-size="11" fill="#555555">crates (UI toolkits included). Each builds and</text>
+  <text x="776" y="623" font-family="Helvetica" font-size="11" fill="#555555">tests on its own: cargo xtask shared.</text>
+  <path d="M30 690 L1090 690" fill="none" stroke="#999999" stroke-width="1.5" stroke-dasharray="8 6"/>
+  <text x="40" y="682" font-family="Helvetica" font-size="12" font-weight="bold" fill="#555555">SolidCraft</text>
+  <text x="40" y="710" font-family="Helvetica" font-size="12" font-weight="bold" fill="#555555">solidcore</text>
+  <text x="560" y="682" font-family="Helvetica" font-size="12" text-anchor="middle" fill="#555555">crossed only through solidcore-ops, -tess and -record</text>
+  <rect x="100" y="726" width="240" height="64" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="112" y="750" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">solidcore-ops</text>
+  <text x="112" y="770" font-family="Helvetica" font-size="12" fill="#000000">every modelling operation, as kernel calls</text>
+  <rect x="370" y="726" width="240" height="64" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="382" y="750" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">solidcore-record</text>
+  <text x="382" y="770" font-family="Helvetica" font-size="12" fill="#000000">geometry as data</text>
+  <rect x="640" y="726" width="240" height="64" rx="8" fill="#f0f0f0" stroke="#000000" stroke-width="1.5"/>
+  <text x="652" y="750" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000">solidcore-tess</text>
+  <text x="652" y="770" font-family="Helvetica" font-size="12" fill="#000000">the display mesher and its plans</text>
+  <rect x="100" y="812" width="780" height="48" rx="8" fill="#ffffff" stroke="#999999" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="112" y="841" font-family="Helvetica" font-size="12" fill="#555555">solidcore and solidcore-convert: the kernel and its conversions, private to solidcore. Never used here directly.</text>
+  <path d="M180 236 L180 264" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M180 264 L174 254 L186 254 Z" fill="#000000"/>
+  <circle cx="205" cy="250" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="205" y="254" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">1</text>
+  <path d="M120 300 L96 300 L96 460 L120 460" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M120 460 L110 454 L110 466 Z" fill="#000000"/>
+  <circle cx="96" cy="380" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="96" y="384" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">2</text>
+  <path d="M120 476 L70 476 L70 758 L100 758" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M100 758 L90 752 L90 764 Z" fill="#000000"/>
+  <circle cx="70" cy="620" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="70" y="624" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">3</text>
+  <path d="M700 460 L732 460 L732 726" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M732 726 L726 716 L738 716 Z" fill="#000000"/>
+  <circle cx="732" cy="600" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="732" y="604" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">4</text>
+  <path d="M700 192 L764 192" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M764 192 L754 186 L754 198 Z" fill="#000000"/>
+  <circle cx="732" cy="192" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="732" y="196" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">5</text>
+  <path d="M764 226 L700 226" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <path d="M700 226 L710 220 L710 232 Z" fill="#000000"/>
+  <circle cx="732" cy="226" r="11" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="732" y="230" font-family="Helvetica" font-size="12" font-weight="bold" text-anchor="middle" fill="#000000">6</text>
+</svg>

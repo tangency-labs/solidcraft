@@ -6,7 +6,11 @@
 //! each may be set (the design, a component or both), how its value is checked and its label.
 //! It keeps every other key exactly as it was through open, edit and save. Other tools keep
 //! their own data under one reverse-DNS key each (`com.example.tool`), holding an object.
-//! A component's part properties have one more key: its bill of materials type (`bom_type`).
+//! A part's material (`material`: what it is made of as ordered, "5052-H32, 0.090 in") and finish
+//! (`finish`: free text such as "powder coat, RAL 9005, matt") are keys of both: a design with
+//! no component of its own to hold them (a single part) carries them itself. A component's part
+//! properties have three more keys ([`PART_ONLY`]): its bill of materials type (`bom_type`), its
+//! quantity (`bom_quantity`) and whether it is virtual (`virtual`).
 //!
 //! Reading never validates: a well-known key holding something other than text is kept as it
 //! is and reads as absent, so a file another tool wrote always opens. Writing through
@@ -30,6 +34,17 @@ pub const AUTHOR: &str = "author";
 pub const ORGANIZATION: &str = "organization";
 pub const DESCRIPTION: &str = "description";
 pub const LICENSE: &str = "license";
+
+/// What a part is made of as it is ordered (alloy, temper, thickness or gauge), typed in by hand in
+/// place of the materials worked out from its bodies (any text). It names, it doesn't weigh: mass
+/// still comes from the bodies' materials. A component holds it, and so does a design that is one
+/// part (a design has no component of its own).
+pub const MATERIAL: &str = "material";
+
+/// A part's finish, free text: the coating or surface treatment, with its colour, grade or gloss
+/// ("zinc plate, clear"). A component holds it, and so does a design that is one part.
+/// The windows offer common values to pick from, never enforced.
+pub const FINISH: &str = "finish";
 
 /// Where a key may be set: on the design, on a component, or on both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +100,8 @@ pub static KEYS: &[Key] = &[
     Key { name: AUTHOR, scope: Scope::Both, label: "ui.design_properties.author", check: text },
     Key { name: ORGANIZATION, scope: Scope::Both, label: "ui.design_properties.organization", check: text },
     Key { name: DESCRIPTION, scope: Scope::Both, label: "ui.design_properties.description", check: text },
+    Key { name: MATERIAL, scope: Scope::Both, label: "ui.design_properties.material", check: text },
+    Key { name: FINISH, scope: Scope::Both, label: "ui.design_properties.finish", check: text },
     Key { name: LICENSE, scope: Scope::Both, label: "ui.design_properties.license", check: text },
 ];
 
@@ -97,6 +114,20 @@ pub static BOM_KEYS: &[&str] = &[PART_NUMBER, DESCRIPTION, REVISION];
 /// a part property of a component only, not a row of [`KEYS`], so the Design Properties dialog
 /// doesn't list it and a design refuses it.
 pub const BOM_TYPE: &str = "bom_type";
+
+/// What one placement of a component means in a bill of materials: an expression evaluated with
+/// the design's parameters, a length or (without a unit) a number of pieces. Without it, a
+/// placement is one piece. The bill of materials evaluates it (`bom::Amount`).
+pub const BOM_QUANTITY: &str = "bom_quantity";
+
+/// A virtual component: one with no geometry (grease, paint, a label), listed in the bill of
+/// materials with its quantity. It holds `true`; it never holds bodies, sketches or placed
+/// components.
+pub const VIRTUAL: &str = "virtual";
+
+/// The part properties only a component holds, none of them a row of [`KEYS`]: the Design
+/// Properties dialog doesn't list them and `document.metadata.set` refuses them.
+pub const PART_ONLY: [&str; 3] = [BOM_TYPE, BOM_QUANTITY, VIRTUAL];
 
 /// Longest key, in bytes.
 pub const MAX_KEY_BYTES: usize = 128;
@@ -120,10 +151,10 @@ pub fn keys(owner: Owner) -> impl Iterator<Item = &'static Key> {
     KEYS.iter().filter(move |k| k.scope.covers(owner))
 }
 
-/// The names of [`keys`]`(owner)`, and a component's [`BOM_TYPE`], as refusals list them.
+/// The names of [`keys`]`(owner)`, and a component's [`PART_ONLY`] keys, as refusals list them.
 pub fn key_list(owner: Owner) -> String {
-    let bom_type = (owner == Owner::Component).then_some(BOM_TYPE);
-    keys(owner).map(|k| k.name).chain(bom_type).collect::<Vec<_>>().join(", ")
+    let part_only = PART_ONLY.iter().copied().filter(|_| owner == Owner::Component);
+    keys(owner).map(|k| k.name).chain(part_only).collect::<Vec<_>>().join(", ")
 }
 
 /// One of SolidCraft's keys, by name.
@@ -133,7 +164,7 @@ pub fn key(name: &str) -> Option<&'static Key> {
 
 /// A key SolidCraft reads as a design or part property.
 pub fn is_well_known(name: &str) -> bool {
-    key(name).is_some() || name == BOM_TYPE
+    key(name).is_some() || PART_ONLY.contains(&name)
 }
 
 /// A reverse-DNS key another tool keeps its data under: two or more dot-separated labels of
@@ -248,6 +279,22 @@ impl Metadata {
     pub fn bom_type(&self) -> BomType {
         self.text(BOM_TYPE).and_then(BomType::parse).unwrap_or_default()
     }
+    /// The static material, when one is typed in (a component's, or the design's own).
+    pub fn material(&self) -> Option<&str> {
+        self.text(MATERIAL)
+    }
+    /// The finish, when one is typed in (a component's, or the design's own).
+    pub fn finish(&self) -> Option<&str> {
+        self.text(FINISH)
+    }
+    /// The component's quantity expression, when it has one.
+    pub fn bom_quantity(&self) -> Option<&str> {
+        self.text(BOM_QUANTITY)
+    }
+    /// The component is virtual: anything but `true` reads as not.
+    pub fn is_virtual(&self) -> bool {
+        self.0.get(VIRTUAL) == Some(&Value::Bool(true))
+    }
 
     /// The keys SolidCraft doesn't read (other tools' data, or keys a newer SolidCraft added),
     /// kept as they are.
@@ -285,8 +332,19 @@ impl Metadata {
 
 /// `value` as `key` may hold it in `owner`'s metadata (`None`: remove the key), or why it can't.
 fn check(owner: Owner, key: &str, value: Value) -> Result<Option<Value>> {
-    if key == BOM_TYPE && owner == Owner::Component {
-        return bom_type(value);
+    if owner == Owner::Component {
+        match key {
+            BOM_TYPE => return bom_type(value),
+            VIRTUAL => {
+                return match value {
+                    Value::Bool(true) => Ok(Some(value)),
+                    Value::Bool(false) | Value::Null => Ok(None),
+                    _ => Err(invalid(format!("`{VIRTUAL}` is true or false"))),
+                };
+            }
+            BOM_QUANTITY => return text(key, value),
+            _ => {}
+        }
     }
     if let Some(k) = self::key(key).filter(|k| k.scope.covers(owner)) {
         return (k.check)(key, value);
@@ -361,6 +419,40 @@ mod tests {
         assert_eq!(m.0.keys().collect::<Vec<_>>(), ["description"]);
     }
 
+    /// A material and a finish are free text on a part and on the design itself (a single-part
+    /// design has no component to hold them): the same size and character rules as every text key,
+    /// any script, and empty text or null removes them.
+    #[test]
+    fn material_and_finish_are_free_text_on_a_design_and_on_a_part() {
+        let unicode = "Passiv\u{e9} \u{2014} #4 brushed \u{7814}\u{78e8} \u{2713}";
+        for owner in [Design, Component] {
+            let mut m = Metadata::default();
+            for (key, text) in [("material", "5052-H32, 0.090 in"), ("finish", "Powder coat, RAL 9005, matt"), ("finish", unicode)] {
+                assert!(m.set(owner, key, json!(text)).unwrap(), "{owner:?} {key}");
+                assert_eq!(m.text(key), Some(text));
+            }
+            assert!(!m.set(owner, "finish", json!(unicode)).unwrap(), "the same value is no change");
+            for bad in [json!(7), json!(true), json!(["a"]), json!({"a": 1}), json!("a\u{7}b"), json!("x".repeat(MAX_TEXT_BYTES + 1))] {
+                for key in ["material", "finish"] {
+                    assert!(m.set(owner, key, bad.clone()).is_err(), "{owner:?} {key} {bad}");
+                }
+            }
+            assert_eq!(m.text("finish"), Some(unicode), "a refused value leaves the old one");
+            assert!(m.set(owner, "finish", json!("two\nlines")).unwrap());
+            assert!(m.set(owner, "finish", json!("f".repeat(MAX_TEXT_BYTES))).unwrap(), "the longest text");
+            assert!(m.set(owner, "finish", json!("")).unwrap());
+            assert!(m.set(owner, "material", Value::Null).unwrap());
+            assert!(m.is_empty(), "{owner:?}: both removed");
+        }
+        let names = |owner| keys(owner).map(|k| k.name).collect::<Vec<_>>();
+        for owner in [Design, Component] {
+            assert!(names(owner).contains(&"material") && names(owner).contains(&"finish"), "{owner:?} lists them");
+        }
+        let kept: Metadata = serde_json::from_value(json!({"finish": 5, "material": ["x"]})).unwrap();
+        assert_eq!((kept.text("finish"), kept.text("material")), (None, None), "not text: kept, read as absent");
+        assert_eq!(kept.others().count(), 0, "they are SolidCraft's keys, not another tool's data");
+    }
+
     #[test]
     fn a_bom_type_takes_one_of_its_words_and_reads_as_normal_otherwise() {
         let mut m = Metadata::default();
@@ -383,6 +475,57 @@ mod tests {
         assert_eq!(newer.get(BOM_TYPE), Some(&json!("kit")));
         assert!(!keys(Design).any(|k| k.name == BOM_TYPE), "the Design Properties dialog doesn't list it");
         assert!(Metadata::default().set(Design, BOM_TYPE, json!("phantom")).is_err(), "a design has no bill of materials type");
+    }
+
+    #[test]
+    fn a_static_material_takes_any_text_and_reads_as_absent_otherwise() {
+        let mut m = Metadata::default();
+        assert_eq!(m.material(), None);
+        let longest = "é".repeat(MAX_TEXT_BYTES / 2);
+        for text in ["Stainless steel 1.4301", "Mixed: see drawing", "鋼", longest.as_str()] {
+            assert!(m.set(Component, MATERIAL, json!(text)).unwrap(), "{text}");
+            assert_eq!(m.material(), Some(text));
+        }
+        for bad in
+            [json!("x".repeat(MAX_TEXT_BYTES + 1)), json!(7.85), json!({"name": "Steel"}), json!(["Steel"]), json!(format!("a{}b", char::from(7)))]
+        {
+            assert!(m.set(Component, MATERIAL, bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(m.material(), Some(longest.as_str()), "a refused value leaves the old one");
+        assert!(m.set(Component, MATERIAL, Value::Null).unwrap(), "null removes it");
+        assert_eq!(m.material(), None);
+        // Another tool's number is kept as it is and reads as no static material.
+        let other: Metadata = serde_json::from_value(json!({"material": 42})).unwrap();
+        assert_eq!((other.material(), other.get(MATERIAL)), (None, Some(&json!(42))));
+        assert!(other.others().next().is_none(), "SolidCraft reads it, so it isn't another tool's key");
+        assert!(keys(Design).any(|k| k.name == MATERIAL), "a design that is one part holds its own: the dialog lists it");
+        assert!(Metadata::default().set(Design, MATERIAL, json!("Steel")).is_ok());
+    }
+
+    #[test]
+    fn virtual_takes_true_or_false_and_a_quantity_takes_text() {
+        let mut m = Metadata::default();
+        assert!(!m.is_virtual());
+        assert!(m.set(Component, VIRTUAL, json!(true)).unwrap());
+        assert!(m.is_virtual());
+        assert_eq!(m.get(VIRTUAL), Some(&json!(true)));
+        for bad in [json!("true"), json!(1), json!({}), json!([true])] {
+            assert!(m.set(Component, VIRTUAL, bad.clone()).is_err(), "{bad}");
+        }
+        assert!(m.is_virtual(), "a refused value leaves the old one");
+        assert!(m.set(Component, VIRTUAL, json!(false)).unwrap(), "false removes it");
+        assert!(!m.set(Component, VIRTUAL, Value::Null).unwrap());
+        assert!(m.get(VIRTUAL).is_none());
+        // Another tool's text is kept and reads as not virtual.
+        let other: Metadata = serde_json::from_value(json!({"virtual": "yes"})).unwrap();
+        assert!(!other.is_virtual());
+        assert!(m.set(Component, BOM_QUANTITY, json!("2 * span + 50 mm")).unwrap());
+        assert_eq!(m.bom_quantity(), Some("2 * span + 50 mm"));
+        assert!(m.set(Component, BOM_QUANTITY, json!(2.5)).is_err(), "an expression is text");
+        assert!(m.set(Component, BOM_QUANTITY, json!("")).unwrap());
+        assert_eq!(m.bom_quantity(), None);
+        assert!(m.others().next().is_none(), "SolidCraft reads both");
+        assert!(!keys(Design).any(|k| k.name == VIRTUAL || k.name == BOM_QUANTITY), "the Design Properties dialog lists neither");
     }
 
     #[test]
@@ -410,7 +553,9 @@ mod tests {
     #[test]
     fn each_key_is_one_row_in_the_order_the_dialog_shows() {
         let names: Vec<&str> = KEYS.iter().map(|k| k.name).collect();
-        assert_eq!(names, [PROJECT, PART_NUMBER, REVISION, AUTHOR, ORGANIZATION, DESCRIPTION, LICENSE]);
+        assert_eq!(names, [PROJECT, PART_NUMBER, REVISION, AUTHOR, ORGANIZATION, DESCRIPTION, MATERIAL, FINISH, LICENSE]);
+        // The material and finish follow the description (what the part is, then what it is made of
+        // and finished with); the licence stays last, as the dialog's closing legal line.
         for (i, k) in KEYS.iter().enumerate() {
             assert!(!names[..i].contains(&k.name), "`{}` has two rows", k.name);
             assert!(!k.name.is_empty() && !is_namespaced(k.name), "`{}` is unprefixed", k.name);
@@ -421,8 +566,12 @@ mod tests {
             assert!(!is_well_known(name), "{name:?}");
         }
         // Every key SolidCraft took on the design and on a component before the table still is.
-        assert_eq!(key_list(Design), "project, part_number, revision, author, organization, description, license");
-        assert_eq!(key_list(Component), format!("{}, {BOM_TYPE}", key_list(Design)), "a component also takes its bill of materials type");
+        assert_eq!(key_list(Design), "project, part_number, revision, author, organization, description, material, finish, license");
+        assert_eq!(
+            key_list(Component),
+            format!("{}, {BOM_TYPE}, {BOM_QUANTITY}, {VIRTUAL}", key_list(Design)),
+            "a component also takes its bill of materials type, quantity and virtual flag (material and finish are keys of both)"
+        );
     }
 
     #[test]
@@ -448,13 +597,14 @@ mod tests {
         assert_eq!(
             refusal(Design, "colour"),
             "`colour` is not a design property: SolidCraft's are project, part_number, revision, author, organization, \
-             description, license; another tool's data goes under a reverse-DNS key such as `com.example.tool`",
+             description, material, finish, license; another tool's data goes under a reverse-DNS key such as `com.example.tool`",
             "the design's wording is as it was"
         );
         assert_eq!(
             refusal(Component, "colour"),
             "`colour` is not a part property: SolidCraft's are project, part_number, revision, author, organization, \
-             description, license, bom_type; another tool's data goes under a reverse-DNS key such as `com.example.tool`"
+             description, material, finish, license, bom_type, bom_quantity, virtual; another tool's data goes under a reverse-DNS key \
+             such as `com.example.tool`"
         );
         for owner in [Design, Component] {
             let word = owner.names().0;

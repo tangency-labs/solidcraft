@@ -296,6 +296,31 @@ fn points_classify_exactly_against_the_body() {
     assert_eq!(hollow.classify_point(Vec3::X * 40.0).unwrap(), OnBoundary, "the cavity's wall");
 }
 
+/// A point just inside a cylinder's wall is inside it wherever the cylinder's seam lies (#16748). A
+/// ray from it along +x crosses the wall at a grazing angle near the cylinder's silhouette; where
+/// the seam put the patch boundaries so that one patch held both of the line's roots, the ray
+/// missed the wall it leaves by and the point read as outside (a 0.1 round of a primitive
+/// cylinder's rim was refused as too large). Points 0.03 mm inside a radius 10 wall, every half
+/// degree round it, for the seams a primitive (0.6131 rad) and others have.
+#[test]
+fn points_just_inside_a_cylinder_wall_are_inside_at_any_seam() {
+    use crate::{PointClass::Inside, build::extrude};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    for seam in [0.0_f64, 10.0, 20.0, 35.13, 45.0, 60.0, 90.0, 130.0] {
+        let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, seam.to_radians()), holes: vec![] };
+        let body = extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
+        let points: Vec<Vec3> = (0..720)
+            .map(|i| {
+                let a = (f64::from(i) * 0.5).to_radians();
+                Vec3::new(9.97 * a.cos(), 9.97 * a.sin(), 10.0)
+            })
+            .collect();
+        let outside: Vec<f64> =
+            body.classify_points(&points).unwrap().into_iter().enumerate().filter(|(_, c)| *c != Inside).map(|(i, _)| i as f64 * 0.5).collect();
+        assert!(outside.is_empty(), "seam {seam} deg: points at these angles read as not inside: {outside:?}");
+    }
+}
+
 /// A mesh body's triangles are its shape: on them within the record's tolerance, else inside or
 /// outside by the rays' crossings.
 #[test]
@@ -307,4 +332,64 @@ fn points_classify_against_a_mesh_body() {
     assert_eq!(m.classify_point(Vec3::new(5.0, 5.0, 5.0)).unwrap(), Outside);
     assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
     assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
+}
+
+#[test]
+fn point_lies_on_face_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
+    let body = cube(10.0);
+    let found = (0..body.record().faces.len()).filter_map(|f| body.point_lies_on_face(f, Vec3::new(10.0, 3.0, -4.0), 1e-6).ok().flatten()).count();
+    assert_eq!(found, 1);
+    assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
+}
+
+#[test]
+fn face_normal_at_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`measure.rs`); this is the wrapper. On the
+    // cube's x = +10 face the normal points out of the material, along +X.
+    let body = cube(10.0);
+    let on = Vec3::new(10.0, 3.0, -4.0);
+    let normals: Vec<Vec3> = (0..body.record().faces.len()).filter_map(|f| body.face_normal_at(f, on).unwrap()).collect();
+    assert_eq!(normals.len(), 1, "{normals:?}");
+    assert!(normals[0].dist(Vec3::X) < 1e-12, "{normals:?}");
+    // Off every face, an index past the faces and a point that is not a number: no normal.
+    assert!((0..body.record().faces.len()).all(|f| body.face_normal_at(f, Vec3::new(11.0, 3.0, -4.0)).unwrap().is_none()));
+    assert_eq!(body.face_normal_at(99, on).unwrap(), None);
+    assert_eq!(body.face_normal_at(0, Vec3::new(f64::NAN, 0.0, 0.0)).unwrap(), None);
+}
+
+/// A ball of radius 5 less everything above z = 3: its sphere faces end at the circle of radius 4
+/// there. The contour seen along (0.8, -0.6, 0), the circle of radius 5 in the plane of x = (0.6, 0.8,
+/// 0) and z, meets that rim where 5 sin t = 3: at asin 0.6 and pi less it, away from the rim's
+/// vertex. A whole ball's faces have no rim, and a mesh body has no exact form.
+#[test]
+fn outline_cuts_answer_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
+    use std::f64::consts::{PI, TAU};
+    let above = box_solid(Vec3::new(-10.0, -10.0, 3.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let cut = boolean(&sphere(Vec3::ZERO, 5.0).unwrap(), &above, BoolOp::Cut).unwrap().unwrap();
+    let on_sphere = |b: &Body| -> Vec<usize> {
+        (0..b.record().faces.len()).filter(|f| matches!(crate::face_surface(b, *f), Some(crate::FaceSurface::Sphere { .. }))).collect()
+    };
+    let (x, y) = (Vec3::new(0.6, 0.8, 0.0), Vec3::Z);
+    let contour = Curve::Circle { frame: brep::Frame { origin: Vec3::ZERO.into(), x_axis: x.into(), y_axis: y.into() }, radius: 5.0 };
+    let normal = x.cross(y);
+    let mut cuts = cut.outline_cuts(&on_sphere(&cut), &contour, [0.0, TAU], Vec3::ZERO, normal).unwrap();
+    cuts.sort_by(f64::total_cmp);
+    let low = 0.6f64.asin();
+    assert!(cuts.len() == 2 && (cuts[0] - low).abs() < 1e-9 && (cuts[1] - (PI - low)).abs() < 1e-9, "{cuts:?}");
+    let ball = sphere(Vec3::ZERO, 5.0).unwrap();
+    assert_eq!(ball.outline_cuts(&on_sphere(&ball), &contour, [0.0, TAU], Vec3::ZERO, normal).unwrap(), Vec::<f64>::new());
+    let p = [Vec3::ZERO, Vec3::X * 10.0, Vec3::Y * 10.0, Vec3::Z * 10.0];
+    let mesh = crate::mesh_body(&p, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    assert!(mesh.outline_cuts(&[0], &contour, [0.0, TAU], Vec3::ZERO, normal).is_err());
+}
+
+/// solidcore-ops' calls on a body run with the kernel's fix set: by the time a body has its
+/// solidcore-ops form, the session has been told the fixes the modelling runs with.
+#[test]
+fn a_bodys_solidcore_ops_form_runs_with_the_kernels_fixes() {
+    let body = crate::build::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    assert!(body.ops_body().is_some());
+    assert_eq!(solidcore_ops::session::fixes(), crate::smlib_trace::fixes());
 }

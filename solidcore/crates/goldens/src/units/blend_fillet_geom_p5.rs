@@ -1188,3 +1188,180 @@ impl UnitDiff for Runner {
         default_cases(self, &ctx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rail trims whose golden moved from a success to a refusal when
+    /// `fillet_statuses_pass_on` was removed (WR-661; the near-knot snap of WR-664 leaves
+    /// them refused by the same `set_min_max`). Each end point of the rail drops back
+    /// onto the rail before its start point, so the trim interval `[param1, param2]` has
+    /// `param1 > param2` and is not an interval. `Extent1d::set_min_max` refuses it.
+    /// Upstream ignored that status and trimmed the rail to its previous interval, but set
+    /// the vertex uses at the reversed parameters.
+    #[test]
+    fn wr661_moved_rail_trims_end_before_they_start() {
+        const MOVED: [&str; 13] = [
+            "gen0001", "gen0023", "gen0073", "gen0092", "gen0105", "gen0113", "gen0124",
+            "gen0142", "gen0154", "gen0178", "gen0196", "gen0268", "gen0269",
+        ];
+        for name in MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let Query::TrimRails { g } = &i.query else {
+                panic!("{name}: not a rail trim");
+            };
+            let mut rm = RustModel::build(&i.model).expect("model");
+            let solvers: Vec<FilletSolver> = i
+                .solvers
+                .iter()
+                .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
+                .collect();
+            for gi in 0..i.model.geoms.len() {
+                if let Ok(si) = u32::try_from(geom_solver(&i, gi)) {
+                    let gid = rm.geom(gi).expect("geometry");
+                    rm.fb.geom_mut(gid).expect("geometry").solver = Some(FilletSolverId(si));
+                }
+            }
+            let k = Kernel::default();
+            let target = rm.target.clone_standing_for_self().expect("target");
+            let gid = rm.geom(*g).expect("geometry");
+            let e = rm
+                .fb
+                .trim_rail_curves(&k, gid, &solvers, &target)
+                .expect_err("the rail trim is refused");
+            assert!(
+                matches!(
+                    e,
+                    SolidError::InvalidInput {
+                        operation: "geom::extent1d::Extent1d::set_min_max",
+                        ..
+                    }
+                ),
+                "{name}: {e:?}"
+            );
+            // The refused interval is [param1, param2]: each end is the rail parameter
+            // stored on its processed vertex use, else the rail's natural end. The
+            // reversal must be real, not a snap: the rail's points at the two ends are
+            // further apart than the solver's approximation tolerance, below which
+            // `TrimRailCurves` treats two trim points as one (`pnt0.distance(pnt1) >
+            // app_tol`).
+            let approx = i
+                .solvers
+                .get(usize::try_from(geom_solver(&i, *g)).expect("a solver"))
+                .expect("the solver")
+                .approx;
+            let reversed: Vec<(f64, f64)> = (0..2)
+                .filter_map(|ii| {
+                    let fb = &rm.fb;
+                    let rail = fb.geom(gid).expect("geometry").rail(ii).expect("rail");
+                    let curve = edge::curve(fb.brep(), rail).expect("curve").expect("rail curve");
+                    let natural = curve.natural_interval();
+                    let prim = eu1::primary_edgeuse(fb.brep(), rail)
+                        .expect("edge use")
+                        .expect("primary");
+                    let mate = eu1::mate(fb.brep(), prim).expect("mate").expect("mate");
+                    let end = |eu, fallback: f64| {
+                        let vu = fb.brep().edgeuse(eu).expect("edge use").vertexuse;
+                        let vu = vu.expect("vertex use");
+                        let v = fb.brep().vertexuse(vu).expect("vertex use").vertex;
+                        let v = v.expect("vertex");
+                        if fb.fillet_vertex(v).expect("vertex").is_processed() {
+                            fb.fillet_vertexuse(vu).expect("vertex use").uv_point().x
+                        } else {
+                            fallback
+                        }
+                    };
+                    let param1 = end(prim, natural.min());
+                    let param2 = end(mate, natural.max());
+                    (param1 > param2).then(|| {
+                        let p1 = curve.evaluate_point(&k, param1).expect("point");
+                        let p2 = curve.evaluate_point(&k, param2).expect("point");
+                        (param1 - param2, p1.distance(p2))
+                    })
+                })
+                .collect();
+            println!("{name}: reversed by (parameter, distance) {reversed:?}, approx {approx:e}");
+            assert!(
+                reversed.iter().any(|&(_, distance)| distance > approx),
+                "{name}: no rail trim reversed beyond the approximation tolerance"
+            );
+        }
+    }
+
+    /// The rail trims the near-knot snap (WR-664) refused with 1006 before it trimmed
+    /// anything: it looked up the solver's first edge use (the fork reads the zone
+    /// tolerance as `SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`) and refused when
+    /// there was none, although the B-rep it needs is the `target` it is given. These
+    /// cases build their solvers bare (`FilletSolver::new`, no edge uses), as a solver is
+    /// before it is set up on an edge. Each now trims both rails.
+    #[test]
+    fn wr664_rail_trims_of_a_solver_without_edge_uses_build() {
+        let cases = Runner
+            .cases(&CaseContext {
+                root: crate::case::repo_root(),
+                seeds: 16,
+            })
+            .expect("cases");
+        assert_eq!(WR664_TRIMS.len(), 73);
+        for &name in WR664_TRIMS {
+            let case = cases
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            let i: Inputs = case.parse().expect("inputs");
+            let Query::TrimRails { g } = &i.query else {
+                panic!("{name}: not a rail trim");
+            };
+            let mut rm = RustModel::build(&i.model).expect("model");
+            let solvers: Vec<FilletSolver> = i
+                .solvers
+                .iter()
+                .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
+                .collect();
+            for gi in 0..i.model.geoms.len() {
+                if let Ok(si) = u32::try_from(geom_solver(&i, gi)) {
+                    let gid = rm.geom(gi).expect("geometry");
+                    rm.fb.geom_mut(gid).expect("geometry").solver = Some(FilletSolverId(si));
+                }
+            }
+            let si = usize::try_from(geom_solver(&i, *g)).expect("a solver");
+            let solver = solvers.get(si).expect("the solver");
+            assert_eq!(
+                solver.edgeuse(0).expect("index 0"),
+                None,
+                "{name}: the solver has an edge use"
+            );
+            let k = Kernel::default();
+            let target = rm.target.clone_standing_for_self().expect("target");
+            let gid = rm.geom(*g).expect("geometry");
+            rm.fb
+                .trim_rail_curves(&k, gid, &solvers, &target)
+                .unwrap_or_else(|e| panic!("{name}: the rail trim is refused: {e:?}"));
+            let fb = &rm.fb;
+            for ii in 0..2 {
+                let rail = fb.geom(gid).expect("geometry").rail(ii).expect("rail");
+                let curve = edge::curve(fb.brep(), rail).expect("curve").expect("rail curve");
+                let ivl = curve.natural_interval();
+                assert!(ivl.min() < ivl.max(), "{name}: rail {ii} trimmed to {ivl:?}");
+            }
+        }
+    }
+
+    /// The rail trims of [`wr664_rail_trims_of_a_solver_without_edge_uses_build`]: the 73
+    /// rows of this unit's golden that build (status 0) and that the edge-use lookup
+    /// refused.
+    const WR664_TRIMS: &[&str] = &[
+        "gen0003", "gen0005", "gen0010", "gen0012", "gen0014", "gen0018", "gen0022", "gen0026",
+        "gen0028", "gen0034", "gen0036", "gen0042", "gen0045", "gen0049", "gen0050", "gen0056",
+        "gen0057", "gen0061", "gen0068", "gen0075", "gen0077", "gen0078", "gen0079", "gen0082",
+        "gen0085", "gen0086", "gen0088", "gen0089", "gen0090", "gen0095", "gen0097", "gen0101",
+        "gen0102", "gen0106", "gen0108", "gen0112", "gen0125", "gen0126", "gen0132", "gen0134",
+        "gen0136", "gen0143", "gen0150", "gen0159", "gen0167", "gen0172", "gen0173", "gen0180",
+        "gen0189", "gen0195", "gen0222", "gen0226", "gen0227", "gen0228", "gen0229", "gen0230",
+        "gen0234", "gen0241", "gen0242", "gen0245", "gen0247", "gen0248", "gen0255", "gen0257",
+        "gen0258", "gen0260", "gen0270", "gen0272", "gen0274", "gen0277", "gen0293", "gen0297",
+        "gen0299",
+    ];
+}

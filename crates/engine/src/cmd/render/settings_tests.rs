@@ -19,7 +19,7 @@ fn complete_shot_patch_accepts_all_known_fields_and_refuses_unknowns_without_mut
     let mut complete = json!(RenderSetup::default());
     complete["width"] = json!(16);
     complete["height"] = json!(12);
-    complete["camera"] = json!(solidcraft_render::Camera { distance: 80.0, fov: 0.6, ..Default::default() });
+    complete["camera"] = json!(solidcraft_viewport::Camera { distance: 80.0, fov: 0.6, ..Default::default() });
     complete["job"] = json!({"method":"cpu_raytrace","options":{"path":{"max_depth":4},
         "progressive":{"samples_per_pixel":4,"seed":17},"lens":{"aperture_radius_mm":0.02,"focus_distance_mm":80.0},
         "output":{"linear_exr":true}}});
@@ -56,7 +56,7 @@ fn complete_shot_patch_accepts_all_known_fields_and_refuses_unknowns_without_mut
         assert_eq!(history, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
         assert_eq!(s.camera, camera);
     }
-    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+    assert_eq!(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap(), *s.doc);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc, before);
     s.execute("edit.redo", &json!({})).unwrap();
@@ -263,9 +263,9 @@ fn render_lights_small_area_pose_and_resize_preserve_aspect_and_emitting_side() 
     assert!((resized_u.len() - 20.0).abs() < 1e-10);
     assert!((resized_v.len() - 40.0).abs() < 1e-10);
     assert!(
-        solidcraft_render::surface::unit_direction(u.cross(v))
+        solidcraft_viewport::surface::unit_direction(u.cross(v))
             .unwrap()
-            .dot(solidcraft_render::surface::unit_direction(resized_u.cross(resized_v)).unwrap())
+            .dot(solidcraft_viewport::surface::unit_direction(resized_u.cross(resized_v)).unwrap())
             > 0.999999
     );
 }
@@ -299,7 +299,7 @@ fn render_lights_edit_commands_publish_one_undo_and_preserve_other_settings() {
     assert_eq!(list["lights"].as_array().unwrap().len(), 1);
     assert_eq!(list["lights"][0]["kind"], "spot");
     assert_eq!(list["lights"][0]["intensity"], 4.0);
-    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+    assert_eq!(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap(), *s.doc);
 }
 
 #[test]
@@ -653,7 +653,6 @@ fn embedded_hdr_capture_is_offline_atomic_deduplicated_and_undoable_after_source
         s.doc.render.resources.required(&id).unwrap().bytes().as_ptr()
     ));
     assert!(!s.doc.to_json().contains(path.to_str().unwrap()));
-    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
     let container = solidcraft_io::write_design_container(&s.doc).unwrap();
     assert_eq!(solidcraft_io::read_design(&container).unwrap(), *s.doc);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
@@ -752,7 +751,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     assert!(Arc::ptr_eq(&saved, &s.doc));
     assert_eq!(s.revision, revision);
     assert_eq!(s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap()["setup"], json!(setup));
-    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(*s.doc, reopened);
     save(&mut s, json!({"width":800}));
     assert_eq!(s.doc.render.setups["Studio"].job, setup.job);
@@ -784,7 +783,7 @@ fn invalid_saved_jobs_never_partially_replace_a_setup() {
     save(&mut s, json!({"job":{"method":"cpu_raytrace","options":{"primary_samples":4}},"exposure_ev":2}));
     for patch in [
         json!({"width":800,"job":{"method":"cpu_raytrace","options":{"primary_samples":3}}}),
-        json!({"job":{"method":"gpu_path","options":{"samples":4097}}}),
+        json!({"job":{"method":"gpu_path","options":{"samples":65537}}}),
         json!({"job":{"method":"cpu_raytrace","options":{"emissions":[]}}}),
         json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-opened.hdr"}}}}),
         json!({"job":{"method":"raster"}}),
@@ -822,7 +821,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(s.revision, revision);
     assert_eq!(s.undo.len(), undo + 1);
-    let restored = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let restored = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(restored.render, s.doc.render);
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(!s.is_dirty());
@@ -864,7 +863,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
 #[test]
 fn invalid_settings_and_limit_are_atomic() {
     let mut s = Session::default();
-    let mut camera_with_typo = serde_json::to_value(solidcraft_render::Camera::default()).unwrap();
+    let mut camera_with_typo = serde_json::to_value(solidcraft_viewport::Camera::default()).unwrap();
     camera_with_typo["fov_degrees"] = json!(45);
     for patch in [
         json!({"width":0}),
@@ -953,7 +952,7 @@ fn render_lights_shape_falloff_and_world_vectors_lower_to_existing_fields_with_u
         assert_eq!(s.doc, changed);
         // GPU stores half-edges, CPU full sides. Both inspect as the same full vectors.
         s.execute("render.lights.set", &json!({"name":"Studio","id":"area:0","set":{"edge_u_mm":[0,60,0],"edge_v_mm":[40,0,0]}})).unwrap();
-        let roundtrip = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let roundtrip = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(roundtrip, *s.doc);
         s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional"}})).unwrap();
         s.execute("render.lights.set", &json!({"name":"Studio","id":"directional:0","set":{"direction":[-0.4,-0.6,0.7]}})).unwrap();
@@ -1097,7 +1096,7 @@ fn gpu_hard_directional_commands_materialize_defaults_and_keep_sun_distinct() {
     assert_eq!(s.doc, before, "one Undo restores the complete original8-directional setup");
     s.execute("render.lights.remove", &json!({"name":"Studio","id":"directional:7"})).unwrap();
     assert_eq!(crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap().len(), 7);
-    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+    assert_eq!(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap(), *s.doc);
 }
 
 #[test]
@@ -1216,7 +1215,7 @@ fn gpu_point_spot_commands_keep_cones_ranges_undo_visibility_identity_and_portab
         assert!(Arc::ptr_eq(&before, &s.doc));
         assert_eq!(s.undo.len(), undo);
     }
-    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened, *s.doc);
     assert_eq!(
         crate::render_lights::inspect(&reopened.render.setups["Studio"]).unwrap(),

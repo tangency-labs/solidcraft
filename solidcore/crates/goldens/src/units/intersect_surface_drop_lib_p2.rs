@@ -433,7 +433,9 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => 1001.0,
     }
 }
@@ -517,7 +519,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let mut p = pt_in(pt)?;
             let mut off = DropOffset::new(*offset, *singularities);
             let r = p.set_properties(k, &s, &mut off, *singularities, *tol, &ext(*domain), *adjust);
-            match st(r)? {
+            match st(r.map(crate::output::point_outcome_status))? {
                 Ok(c) => o.push(code(c)),
                 Err(c) => o.push(c),
             }
@@ -575,7 +577,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 *end_t,
                 &mut end,
             );
-            match st(r)? {
+            match st(r.map(crate::output::point_outcome_status))? {
                 Ok(c) => o.push(code(c)),
                 Err(c) => o.push(c),
             }

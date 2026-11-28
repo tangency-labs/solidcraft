@@ -5,7 +5,7 @@ use solidcraft_geom::prelude::*;
 pub mod subsurface;
 use subsurface::Subsurface;
 
-use crate::surface::{SurfaceError, unit_direction};
+use solidcraft_viewport::surface::{SurfaceError, unit_direction};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transmission {

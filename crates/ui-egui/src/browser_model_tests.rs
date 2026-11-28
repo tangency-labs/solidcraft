@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_engine::Sel;
 
+use crate::scenario::Harness;
 use crate::test_support::{click, component_box as fixture};
 
 #[test]
@@ -22,40 +23,132 @@ fn navigating_and_selecting_reuse_placements_but_rows_read_live_view_state() {
     assert!(Arc::ptr_eq(&after, &super::model_placement(&mut h.app, &[occurrence]).unwrap()));
 }
 
+/// The component rows' defect tips are worded in the interface language: changing it alone
+/// words them again.
+#[test]
+fn a_language_change_words_the_cached_defect_tips_again() {
+    let (h, _, _) = fixture();
+    let mut cache = super::cache::Cache::default();
+    let sentinel = crate::ui_kit::StatusTip { head: "stale".into(), error: None, warning: None, tail: String::new() };
+    {
+        let _en = solidcraft_ui_text::scope("en");
+        cache.prepare(&h.app);
+        cache.defects.insert(u64::MAX, sentinel);
+        cache.prepare(&h.app);
+        assert!(cache.defects.contains_key(&u64::MAX), "nothing changed: the cache is kept");
+    }
+    let _ja = solidcraft_ui_text::scope("ja");
+    cache.prepare(&h.app);
+    assert!(!cache.defects.contains_key(&u64::MAX), "a new language words the tips again");
+}
+
 #[test]
 fn pending_and_reverted_moves_replace_cached_transforms() {
     let (mut h, _, occurrence) = fixture();
     let first = super::model_placement(&mut h.app, &[occurrence]).unwrap();
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0],"capture":false})).unwrap();
     let moved = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&first, &moved));
     assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcore_record::Vec3::ZERO).x - 20.0).abs() < 1e-9);
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("component.revert_position", json!({"occurrences":[occurrence]})).unwrap();
     let reverted = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&moved, &reverted));
     assert_eq!(first.world, reverted.world);
+    rows_find_what_the_session_finds(&mut h);
+}
+
+/// #14850: what the Browser's model gives the feature rows is what the session itself gives:
+/// each feature's place, mark and bodies (in each placement, and in every one), each component's
+/// History rows, and each folded folder's worst mark and its message.
+fn rows_find_what_the_session_finds(h: &mut crate::scenario::Harness) {
+    use std::collections::BTreeSet;
+    super::prepare_model(&mut h.app);
+    let app = &mut h.app;
+    let doc = app.session.doc.clone();
+    let mut placements: Vec<Option<(u64, Vec<u64>)>> = vec![Some((0, Vec::new())), None];
+    placements.extend(doc.placements().into_iter().map(|(component, path, _)| Some((component, path))));
+    for feature in &doc.features {
+        let id = feature.id;
+        let model = app.tree.model.as_ref().unwrap();
+        assert_eq!(model.position(&app.session, id), doc.feature_index(id), "{}", feature.name);
+        assert_eq!(model.status(app, id), crate::timeline::feature_status(app, id), "{}", feature.name);
+        for placement in &placements {
+            let placement = placement.as_ref().map(|(component, path)| (*component, path.as_slice()));
+            let made = app.session.feature_bodies(&[id], placement);
+            assert_eq!(app.tree.model.as_mut().unwrap().feature_bodies(id, placement), made.as_slice(), "{} in {placement:?}", feature.name);
+        }
+    }
+    let components: BTreeSet<u64> = doc.features.iter().map(|f| f.component).chain([0]).collect();
+    for component in components {
+        let model = app.tree.model.as_ref().unwrap();
+        let listed: Vec<usize> = doc.features.iter().enumerate().filter(|(_, f)| f.component == component).map(|(i, _)| i).collect();
+        assert_eq!(model.history_features(&app.session, component), listed.as_slice(), "component {component}");
+        for history in [false, true] {
+            let ids: Vec<u64> = doc
+                .features
+                .iter()
+                .filter(|f| f.component == component && (history || !matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })))
+                .map(|f| f.id)
+                .collect();
+            let worst = model.folder_status(app, component, history);
+            let mark = (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_tip(app, id)));
+            assert_eq!(mark, crate::timeline::worst_status(app, &ids), "component {component}, history {history}");
+        }
+    }
 }
 
 #[test]
 fn feature_indices_follow_component_edits_and_undo() {
-    let (mut h, component, _) = fixture();
+    let (mut h, component, occurrence) = fixture();
     super::prepare_model(&mut h.app);
     assert!(super::model_feature_indices(&h.app, 0, true).is_empty());
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("sketch.create", json!({"plane":"XY", "name":"Root sketch"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert_eq!(super::entries(&h.app, 0, "sketches")[0].label, "Root sketch");
     assert!(super::entries(&h.app, component, "sketches").is_empty());
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("component.activate", json!({"component":component})).unwrap();
     h.app.run("sketch.create", json!({"plane":"YZ", "name":"Part sketch"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert_eq!(super::entries(&h.app, component, "sketches")[0].label, "Part sketch");
     assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("edit.undo", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, component, "sketches").is_empty());
     assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    rows_find_what_the_session_finds(&mut h);
+
+    // #14850: a box made in the design and one more in the part, placed twice, then rolled back,
+    // suppressed, and with results changed in place.
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let plate = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component":component})).unwrap();
+    h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[20,0,0],"body_name":"Lug"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[50,0,0]})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.roll_to", json!({})).unwrap();
+    h.app.run("timeline.suppress", json!({"feature":plate,"suppressed":true})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.suppress", json!({"feature":plate,"suppressed":false})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    // In place, with the same model, which found the results already: an error and a warning
+    // set, and two results swapped, so their places are no longer where the model found them.
+    let results = &mut h.app.session.model.results;
+    assert!(results.len() > 2, "the last result, which holds the model's state, stays where it is");
+    results.iter_mut().find(|r| r.id == plate).unwrap().error = Some("the blend is larger than the neighbouring faces".into());
+    results[0].warning = Some("edge 3 no longer exists; using the edge at the picked point".into());
+    results.swap(0, 1);
+    rows_find_what_the_session_finds(&mut h);
+    assert!(h.app.tree.model.as_ref().unwrap().matches(&h.app.session), "the same model read the results changed in place");
 }
 
 #[test]
@@ -179,7 +272,7 @@ fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed()
     // The call's frames took the hover from the pointer, which is elsewhere.
     h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
     let lit = super::Lit::of(&mut h.app);
-    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body; the picked face marks its feature");
+    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body, which also holds the picked face, once");
 }
 
 /// #8768: while the Browser's rows start closed, a new design's Bodies and Sketches folders list
@@ -255,8 +348,9 @@ fn hovering_a_collapsed_nested_placement_walks_its_subtree_once() {
     assert_eq!(h.app.viewport.hover_bodies.len(), 7);
 }
 
-/// An open curve turned round is a surface body and the Bodies folder shows it as one; a closed
-/// profile turned all the way round, and a box, are solids.
+/// An open curve turned round is a surface body and the Bodies folder shows it as one, and so is
+/// a closed profile turned all the way round (#21969: a surface operation's result is a surface,
+/// closed or not); a box is a solid.
 #[test]
 fn bodies_folder_tells_surfaces_from_solids() {
     let mut h = crate::scenario::Harness::new();
@@ -273,7 +367,7 @@ fn bodies_folder_tells_surfaces_from_solids() {
     super::prepare_model(&mut h.app);
     let icons: Vec<(String, &str)> = super::entries(&h.app, 0, "bodies").into_iter().map(|e| (e.key, e.icon)).collect();
     assert_eq!(icons.len(), 3, "{icons:?}");
-    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "body")]);
+    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "surface")]);
     assert_eq!(icons[2].1, "body", "the box is a solid");
 }
 
@@ -304,6 +398,16 @@ fn construction_rows_include_points_and_axes() {
     }
     h.app.session.visibility.hidden_origin.push("Point1".into());
     assert!(!super::entries(&h.app, 0, "construction")[0].visible);
+    // The cached rows outlive a visibility change (Show/Hide Reference Geometry, #18131): their
+    // eyes read the session, as a plane's does, not what the row held when it was built.
+    h.app.session.visibility.hidden_origin.push("Axis1".into());
+    for row in &rows {
+        assert!(!row.is_visible(&h.app), "{} still shows an open eye", row.label);
+    }
+    h.app.session.visibility.hidden_origin.clear();
+    for row in &rows {
+        assert!(row.is_visible(&h.app), "{} still shows a closed eye", row.label);
+    }
     h.app.run("selection.delete", json!({"items": rows.iter().map(|r| r.sel.clone().unwrap()).collect::<Vec<_>>()})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, 0, "construction").is_empty());
@@ -351,11 +455,14 @@ fn body_names(app: &crate::SolveApp) -> Vec<String> {
 }
 
 /// The bodies the open Move/Copy would move, a picked component's bodies included.
+/// The bodies Move/Copy moves: those picked and those of the components picked (which move by
+/// their placement), as its preview draws them moved.
 fn move_bodies(app: &crate::SolveApp) -> Vec<String> {
     let Some(d) = app.dialog.as_ref() else { return Vec::new() };
-    crate::dialogs_move::params(app, d)
+    crate::dialogs::preview_commands(app, d)
         .ok()
-        .and_then(|p| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
+        .and_then(|cmds| cmds.into_iter().find(|(id, _)| id == "solid.move"))
+        .and_then(|(_, p)| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
         .unwrap_or_default()
 }
 
@@ -432,7 +539,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     h.frames(2);
     click(&mut h, &format!("row:occurrence:{occurrence}"));
     assert_eq!(move_bodies(&h.app), owned, "the component's bodies are the Move/Copy selection");
-    assert!(h.app.tree.occurrence_move.is_none(), "the open body dialog stays; this click does not switch to component Move");
+    assert!(crate::dialogs_move::moving(&h.app).is_some(), "the open dialog stays and moves the component by its placement");
 
     h.app.dialog = None;
     h.app.run("select.clear", json!({})).unwrap();
@@ -473,8 +580,7 @@ fn browser_move_copy_starts_from_the_selected_body_or_component() {
     let (mut placed, _, occurrence) = fixture();
     placed.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
     crate::keymap::press(&mut placed.app, "M", false);
-    assert!(placed.app.dialog.is_none(), "one selected component still moves as a component");
-    assert!(placed.app.tree.occurrence_move.is_some());
+    assert_eq!(crate::dialogs_move::moving(&placed.app), Some(vec![occurrence]), "one selected component moves by its placement");
 }
 
 /// Shift-click adds every body between the two rows.
@@ -670,4 +776,332 @@ fn find_in_browser_opens_placements_that_start_closed() {
         h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
         "the body's row is drawn"
     );
+}
+
+/// #11547: a selected face lit its body's row only while the pointer was over the model. With the
+/// pointer off the model, the body's row keeps the faint bar of a row that holds something lit,
+/// without the selection colour: the body itself is not selected.
+#[test]
+fn a_body_keeps_a_faint_bar_while_one_of_its_faces_is_selected() {
+    let (mut h, component, occurrence) = fixture();
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let face = solidcraft_engine::doc::appearance::face_index_at(state.body(&body).unwrap(), point).unwrap();
+    let row = |app: &mut crate::SolveApp| {
+        let lit = super::Lit::of(app);
+        lit.row(app, &super::entries(app, component, "bodies")[0])
+    };
+    // The row of the placement the body is in.
+    let placement = |app: &mut crate::SolveApp| {
+        let lit = super::Lit::of(app);
+        lit.placement(&app.session.doc, &[occurrence], component)
+    };
+    h.app.run("select.set", json!({"items":[Sel::Face{body:body.clone(),index:face,point}]})).unwrap();
+    h.app.viewport.hover = None;
+    assert_eq!(row(&mut h.app), (false, super::Mark::Branch), "a face of the body selected, the pointer off the model");
+    assert_eq!(placement(&mut h.app), super::Mark::Branch, "the placement holding the body keeps its faint bar too");
+    h.app.run("select.set", json!({"items":[Sel::Body{name:body}]})).unwrap();
+    assert_eq!(row(&mut h.app), (true, super::Mark::Here), "the body itself selected");
+    h.app.run("select.clear", json!({})).unwrap();
+    assert_eq!(row(&mut h.app), (false, super::Mark::None), "nothing selected");
+    assert_eq!(placement(&mut h.app), super::Mark::None, "and its placement is clear");
+}
+
+/// #19153: hovering a body, feature, construction item, or origin plane highlights its
+/// ancestor folders (and placement/component) with the faint branch bar on the left.
+#[test]
+fn browser_hovering_item_highlights_ancestor_branch() {
+    let mut h = Harness::new();
+    let box_res = h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Cube"})).unwrap();
+    let feature_id = box_res["feature"].as_u64().unwrap();
+    let plane_res = h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "OffsetPlane"})).unwrap();
+    let plane_id = plane_res["feature"].as_u64().unwrap();
+    let axis_res = h.app.run("construct.axis.two_points", json!({"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [0, 0, 20]}, "name": "ZAxis"})).unwrap();
+    let axis_id = axis_res["feature"].as_u64().unwrap();
+    let point_res = h.app.run("construct.point.vertex", json!({"point": {"vertex": [20, 20, 20]}, "name": "CornerPoint"})).unwrap();
+    let point_id = point_res["feature"].as_u64().unwrap();
+
+    // 1. Hovering a body via app.viewport.hover_bodies:
+    h.app.viewport.hover_bodies = vec!["Cube".into()];
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_bodies is populated");
+    let bodies = super::entries(&h.app, 0, "bodies");
+    assert_eq!(lit.branch(&h.app, &bodies), super::Mark::Branch, "Bodies folder gets Mark::Branch when body is hovered");
+    assert_eq!(lit.thing(&super::Thing::Body("Cube".into())), (false, true), "single body is lit as hovered");
+
+    // Hovering multiple bodies (e.g. hovering a component row in the Browser) does not treat
+    // the first body as specifically hovered, avoiding false lighting of the first body row:
+    h.app.viewport.hover_bodies = vec!["Cube".into(), "Cube2".into()];
+    let lit_multi = super::Lit::of(&mut h.app);
+    assert_eq!(lit_multi.thing(&super::Thing::Body("Cube".into())), (false, false), "first body row is not lit when multiple bodies are hovered");
+
+    h.app.viewport.hover_bodies.clear();
+
+    // 2. Hovering an origin plane via app.viewport.hover_plane:
+    h.app.viewport.hover_plane = Some("XY".into());
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_plane is populated");
+    assert_eq!(lit.thing(&super::Thing::Plane("XY".into())), (false, true), "XY plane is hovered");
+    h.app.viewport.hover_plane = None;
+
+    // 3. Hovering a non-sketch feature (e.g. solid.box) via app.viewport.hover_feature:
+    h.app.viewport.hover_feature = Some(feature_id);
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_feature is populated");
+    assert_eq!(lit.thing(&super::Thing::Feature(feature_id)), (false, true), "solid feature is hovered as Thing::Feature");
+    assert!(lit.components.contains(&0), "root component is in lit.components");
+    h.app.viewport.hover_feature = None;
+
+    // 4. Hovering a construction plane/axis/point via app.viewport.hover_feature:
+    for (id, thing) in [
+        (plane_id, super::Thing::Plane("OffsetPlane".into())),
+        (axis_id, super::Thing::Axis("ZAxis".into())),
+        (point_id, super::Thing::Point("CornerPoint".into())),
+    ] {
+        h.app.viewport.hover_feature = Some(id);
+        let lit = super::Lit::of(&mut h.app);
+        assert!(lit.any(), "lit.any() is true for construction feature {id}");
+        assert_eq!(lit.thing(&thing), (false, true), "construction thing is hovered for feature {id}");
+        let construction = super::entries(&h.app, 0, "construction");
+        assert_eq!(lit.branch(&h.app, &construction), super::Mark::Branch, "Construction folder gets Mark::Branch for {id}");
+        h.app.viewport.hover_feature = None;
+    }
+}
+
+/// A design small enough to name in a frame names its placements in that frame, and names them
+/// again after an edit: what is drawn is never a stale placement.
+#[test]
+fn a_small_designs_placements_are_named_in_the_frame_that_asks() {
+    let (mut h, _, occurrence) = fixture();
+    crate::browser::prepare_body_paths(&mut h.app);
+    assert!(h.app.tree.model.as_ref().unwrap().body_paths_ready(), "a small design names them in the frame");
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    assert_eq!(crate::browser::placed_body_path(&h.app, &body), Some(vec![occurrence]));
+    // An edit makes a new model: its placements are named again, never the old ones.
+    let copy = h.app.run("occurrence.copy", json!({"occurrence": occurrence, "translate": [50, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let copied = super::model_placement(&mut h.app, &[copy]).unwrap().bodies[0].world.clone();
+    assert!(!h.app.tree.model.as_ref().unwrap().body_paths_ready(), "the new model has not named its placements yet");
+    assert_eq!(crate::browser::placed_body_path(&h.app, &copied), None, "the old model's names are not answered for the new one");
+    crate::browser::prepare_body_paths(&mut h.app);
+    assert_eq!(crate::browser::placed_body_path(&h.app, &copied), Some(vec![copy]), "the new copy's path");
+    assert_eq!(crate::browser::placed_body_path(&h.app, &body), Some(vec![occurrence]), "the first copy's path is unchanged");
+}
+
+/// A large assembly names its placements beside the window: the frame that asks answers nothing
+/// and does not name them, so a hover never waits for the walk — naming every placement in a
+/// frame froze the window for 14 s on a 100-printer assembly. The Browser's answer is
+/// there, and the same, once the worker lands.
+#[test]
+fn a_large_assemblys_placements_are_named_beside_the_window() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Wheel"})).unwrap();
+    h.app.run("component.from_bodies", json!({"bodies": ["Wheel"]})).unwrap();
+    h.app
+        .run(
+            "solid.pattern.rectangular",
+            json!({"components": ["Wheel"], "dir1": [1, 0, 0], "count1": 55, "spacing1": 20, "dir2": [0, 1, 0], "count2": 55, "spacing2": 20}),
+        )
+        .unwrap();
+    let world = h.app.session.world_state().unwrap();
+    let bodies: Vec<String> = world.bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(bodies.len() > crate::browser::model::BODY_PATHS_AT_ONCE, "{} bodies", bodies.len());
+    // One copy keeps the component's bare name; every other is named by its placement.
+    let placed = bodies.iter().find(|name| name.as_str() != "Wheel").cloned().expect("a repeated copy, named by its placement");
+    drop(world);
+    crate::browser::prepare_body_paths(&mut h.app);
+    assert!(!h.app.tree.model.as_ref().unwrap().body_paths_ready(), "the frame names nothing: the walk runs beside it");
+    assert!(crate::browser::placed_body_path(&h.app, &placed).is_none(), "nothing to mark yet");
+    // It lands a frame or two later.
+    let mut ready = false;
+    for _ in 0..2000 {
+        h.frame();
+        if h.app.tree.model.as_ref().unwrap().body_paths_ready() {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(ready, "the walk landed beside the window");
+    let path = crate::browser::placed_body_path(&h.app, &placed).expect("the placed body's path");
+    let placement = h.app.session.occurrence_placement(&path).unwrap();
+    assert!(placement.bodies.iter().any(|b| b.world == placed), "{placed} is named at {path:?}");
+}
+
+/// Building the Browser's body-by-component index uses `Document::model_body_components` (one
+/// pass over features and bodies) and groups every body into its exact owning component.
+#[test]
+fn browser_model_groups_multi_component_bodies_identically() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "RootBox"})).unwrap();
+    h.app.run("component.create", json!({"name": "Alpha", "grounded": false})).unwrap();
+    let alpha = h.app.session.active_component;
+    for k in 0..4 {
+        h.app.run("solid.cylinder", json!({"radius": 2, "height": 6, "base": [k * 10, 0, 0], "body_name": format!("A{k}")})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("component.create", json!({"name": "Beta", "grounded": false})).unwrap();
+    let beta = h.app.session.active_component;
+    for k in 0..3 {
+        h.app.run("solid.cylinder", json!({"radius": 2, "height": 6, "base": [k * 10, 20, 0], "body_name": format!("B{k}")})).unwrap();
+    }
+    let model = super::model::Model::new(&h.app.session);
+    let state = h.app.session.model.state();
+    for (i, body) in state.bodies.iter().enumerate() {
+        let owner = h.app.session.doc.model_body_component(body);
+        assert!(model.bodies.get(&owner).is_some_and(|list| list.contains(&i)), "body {} missing from component {owner}", body.name);
+    }
+    assert_eq!(model.bodies.get(&0).map(Vec::len), Some(1));
+    assert_eq!(model.bodies.get(&alpha).map(Vec::len), Some(4));
+    assert_eq!(model.bodies.get(&beta).map(Vec::len), Some(3));
+}
+
+#[test]
+fn clicking_a_nested_occurrence_in_the_viewport_reveals_its_row_without_opening_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let sub_a = h.app.run("component.create", json!({"name": "SubA"})).unwrap()["occurrence"].as_u64().unwrap();
+    let part_a = h.app.run("component.create", json!({"name": "PartA"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "PlateA"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let sub_b = h.app.run("component.create", json!({"name": "SubB"})).unwrap()["occurrence"].as_u64().unwrap();
+    let part_b = h.app.run("component.create", json!({"name": "PartB"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "PlateB"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let path_a = vec![sub_a, part_a];
+    let path_b = vec![sub_b, part_b];
+    let key_sub_a = super::occurrence_key(&[sub_a]);
+    let key_part_a = super::occurrence_key(&path_a);
+    let key_sub_b = super::occurrence_key(&[sub_b]);
+    let key_part_b = super::occurrence_key(&path_b);
+    let body_a = h.app.session.occurrence_bodies(&path_a, false).unwrap()[0].clone();
+    h.frames(2);
+    assert!(!super::is_open(&h.app, &key_sub_a, true) && !super::is_open(&h.app, &key_sub_b, true));
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_a.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path_a));
+    assert!(h.app.tree.reveal.is_none());
+    assert!(super::is_open(&h.app, &key_sub_a, true), "ancestor placement opens");
+    assert!(!super::is_open(&h.app, &key_part_a, true), "clicked placement itself stays closed");
+    assert!(!h.app.tree.expanded.contains(&format!("{key_part_a}/bodies")), "target Bodies folder is not expanded");
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none(), "occurrence reveal acknowledged once presented");
+    assert!(super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_a && !*open), "clicked nested placement row is drawn closed");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body_a}")),
+        "body inside the clicked placement stays hidden"
+    );
+    let sub_a_comp = h.app.session.doc.occurrences.iter().find(|o| o.id == sub_a).unwrap().component;
+    let lit = super::Lit::of(&mut h.app);
+    assert_eq!(lit.placement(&h.app.session.doc, &[sub_a], sub_a_comp), super::Mark::Branch);
+
+    // Selecting another nested component closes the previously auto-opened ancestor cleanly.
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_b.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path_b));
+    assert!(!super::is_open(&h.app, &key_sub_a, true), "previous auto-opened ancestor closes again");
+    assert!(!h.app.tree.collapsed.contains(&key_sub_a), "auto-closing does not mark an untouched ancestor as user-collapsed");
+    assert!(super::is_open(&h.app, &key_sub_b, true), "new ancestor opens");
+    assert!(!super::is_open(&h.app, &key_part_b, true), "new target stays closed");
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_b && !*open));
+    assert!(!super::drawn_occurrences().iter().any(|(path, ..)| path == &path_a));
+
+    // An ancestor opened by hand stays open across later viewport component picks.
+    click(&mut h, &format!("fold:occurrence:{sub_a}"));
+    assert!(super::is_open(&h.app, &key_sub_a, true));
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_b }), false, false);
+    assert!(super::is_open(&h.app, &key_sub_a, true), "hand-opened ancestor stays open");
+}
+
+#[test]
+fn clicking_an_off_screen_occurrence_scrolls_it_into_view() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let first = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let mut last = first;
+    for i in 1..=80 {
+        last = h.app.run("occurrence.copy", json!({"occurrence": first, "translate": [20.0 * f64::from(i), 0, 0]})).unwrap()["occurrence"]
+            .as_u64()
+            .unwrap();
+    }
+    h.frames(2);
+    let target = vec![last];
+    assert!(!super::drawn_occurrences().iter().any(|(path, ..)| path == &target), "target placement starts below the scroll clip");
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: target.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&target));
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&target), true), "target placement stays closed");
+
+    let arrived = (0..240).any(|_| {
+        h.frames(1);
+        super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &target && !*open) && h.app.tree.reveal_occurrence.is_none()
+    });
+    assert!(arrived, "the off-screen placement row was never scrolled into view and acknowledged");
+}
+
+#[test]
+fn reveal_pick_follows_shared_panel_open_state_over_show_browser_flag() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let outer = h.app.run("component.create", json!({"name": "Outer"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let path = vec![outer, inner];
+    let outer_key = super::occurrence_key(&[outer]);
+    h.frames(2);
+    assert!(super::panel_open(&h.app));
+
+    // Shared panel host still reports the Browser open even if the legacy window flag differs.
+    h.app.ui.show_browser = false;
+    assert!(super::panel_open(&h.app));
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path));
+    assert!(super::is_open(&h.app, &outer_key, true));
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&path), true));
+
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+
+    // Closing the shared panel prevents reveal_pick even if show_browser is still true.
+    super::close_shared_panel(&mut h.app, "browser");
+    assert!(!super::panel_open(&h.app));
+    h.app.tree.close_row(&outer_key);
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path }), false, false);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(!super::is_open(&h.app, &outer_key, true));
+}
+
+#[test]
+fn clicking_an_occurrence_leaves_the_browser_alone_while_rows_start_closed() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let outer = h.app.run("component.create", json!({"name": "Outer"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let path = vec![outer, inner];
+    let outer_key = super::occurrence_key(&[outer]);
+    let body = h.app.session.occurrence_bodies(&path, false).unwrap()[0].clone();
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    let (collapsed, expanded) = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone());
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path.clone() }), false, false);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(!super::is_open(&h.app, &outer_key, true));
+    assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded));
+    assert!(super::Lit::of(&mut h.app).paths.is_empty());
+
+    // Explicit Find in Browser still opens the path to the body and acknowledges it.
+    super::reveal_body(&mut h.app, &body);
+    h.frames(2);
+    assert!(h.app.tree.reveal.is_none());
+    assert!(super::is_open(&h.app, &outer_key, true));
+    assert!(super::is_open(&h.app, &super::occurrence_key(&path), true));
 }

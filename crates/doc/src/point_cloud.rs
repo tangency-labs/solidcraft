@@ -1,7 +1,8 @@
 //! Point clouds: scanned points (a PLY or XYZ file) kept in the design as a reference to model
 //! from (#5151). They are not bodies: nothing is built from them, they are drawn as points.
-//! The points travel inside the design file (a binary part of the container, base64 in plain
-//! JSON), so it reopens without the original file. They are single precision, relative to the
+//! The points travel inside the design file, as binary parts of the container, so it reopens
+//! without the original file; the design holds them as numbers, never text, and a plain JSON
+//! design can't hold them ([`crate::Document::binary_data`]). They are single precision, relative to the
 //! cloud's own `origin` (double precision), so a scan far from the design's origin keeps its
 //! detail.
 
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solidcore_record::Vec3;
 
-use crate::canvas::{base64_decode, base64_encode};
+use crate::canvas::base64_decode;
 pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Indices, Keep, MAX_CELLS, MAX_COLUMNS, MAX_NAMES, Names, On};
 use crate::{DocError, IDENTITY, Mat, Result};
 
@@ -53,6 +54,9 @@ pub struct PointCloud {
     /// The file's length unit (one of [`UNITS`]): the points were scaled from it to millimetres.
     #[serde(default = "mm")]
     pub units: String,
+    /// The file's up axis: the points were turned from it to stand on the design's Z (#8609).
+    #[serde(default, skip_serializing_if = "Up::is_z")]
+    pub up: Up,
     /// Where the cloud sits in the design: a rigid move of its points.
     #[serde(default = "identity", skip_serializing_if = "is_identity")]
     pub transform: Mat,
@@ -98,6 +102,95 @@ pub enum Source<'a> {
     Corners(&'a [f32]),
     /// A column on the element itself.
     Element(&'a [f32]),
+}
+
+/// The axis a point cloud file has up. Many scanners and phone scanning apps write Y up, so
+/// such a scan, read as it is, lies on its back in a Z-up design (#8609).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Up {
+    /// The file's Z is up, as the design's is: the points are as the file has them.
+    #[default]
+    Z,
+    /// The file's Y is up: the points are turned a quarter turn about X, Y to Z.
+    Y,
+}
+
+impl Up {
+    fn is_z(&self) -> bool {
+        *self == Up::Z
+    }
+    /// From its name (`z` or `y`).
+    pub fn parse(s: &str) -> Option<Up> {
+        match s {
+            "z" => Some(Up::Z),
+            "y" => Some(Up::Y),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Up::Z => "z",
+            Up::Y => "y",
+        }
+    }
+    /// A point of a file with this axis up, in a frame with Z up.
+    pub fn stand(self, [x, y, z]: [f64; 3]) -> [f64; 3] {
+        match self {
+            Up::Z => [x, y, z],
+            Up::Y => [x, -z, y],
+        }
+    }
+    /// The inverse of [`Up::stand`]: a point with Z up, back as the file has it.
+    pub fn lay(self, [x, y, z]: [f64; 3]) -> [f64; 3] {
+        match self {
+            Up::Z => [x, y, z],
+            Up::Y => [x, z, -y],
+        }
+    }
+}
+
+/// Pre-resolved filters for point-level visibility checks (`PointCloud::point_filter`).
+#[derive(Clone, Debug)]
+pub struct PointFilter<'a> {
+    entries: Vec<(Source<'a>, &'a Keep)>,
+}
+
+impl PointFilter<'_> {
+    /// Whether this cloud has no point-level filters active.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Whether point `index` at design-space position `world` passes every active point filter.
+    pub fn keeps(&self, index: usize, world: Vec3) -> bool {
+        for (source, keep) in &self.entries {
+            let val = match *source {
+                Source::Coordinate(0) => world.x,
+                Source::Coordinate(1) => world.y,
+                Source::Coordinate(2) => world.z,
+                Source::Coordinate(_) => continue,
+                Source::Corners(v) | Source::Element(v) => match v.get(index) {
+                    Some(x) => f64::from(*x),
+                    None => return false,
+                },
+            };
+            if !val.is_finite() {
+                return false;
+            }
+            let ok = match keep {
+                Keep::Range { range: [lo, hi] } => (*lo..=*hi).contains(&val),
+                Keep::Values { values } => {
+                    let rounded = val.round();
+                    (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&rounded) && values.contains(&(rounded as i32))
+                }
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// How a cloud's points are coloured.
@@ -203,6 +296,20 @@ impl PointCloud {
     pub fn len(&self) -> usize {
         self.points.len()
     }
+    /// Turn the points (and their origin) from the file's axis as it was read with `self.up`
+    /// to `up`, in the cloud's own frame. The turns are quarter turns, so the coordinates are
+    /// only swapped and negated, never rounded. The placement (`transform`) is left alone.
+    pub fn set_up(&mut self, up: Up) {
+        if up == self.up {
+            return;
+        }
+        let turn = |p: [f64; 3]| up.stand(self.up.lay(p));
+        let o = turn([self.origin.x, self.origin.y, self.origin.z]);
+        let points: Vec<f32> = self.points.iter().flat_map(|p| turn(p.map(f64::from)).map(|v| v as f32)).collect();
+        self.origin = Vec3::new(o[0], o[1], o[2]);
+        self.points = Points::new(points.into());
+        self.up = up;
+    }
     pub fn is_empty(&self) -> bool {
         self.points.len() == 0
     }
@@ -211,6 +318,25 @@ impl PointCloud {
         let p = self.points.get(i)?;
         let local = self.origin + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
         Some(crate::apply_point(&self.transform, local))
+    }
+    /// Transform a world-space ray `(o, d)` into the raw `points` frame (before `origin` and
+    /// `transform`). Because `transform` is rigid, distances along and perpendicular to the ray
+    /// are preserved exactly.
+    pub fn local_ray(&self, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+        let dir = d.normalized()?;
+        if crate::is_identity(&self.transform) {
+            return Some((o - self.origin, dir));
+        }
+        let inv = crate::mat_inverse(&self.transform)?;
+        let lo = crate::apply_point(&inv, o) - self.origin;
+        let ld = (crate::apply_point(&inv, o + dir) - crate::apply_point(&inv, o)).normalized()?;
+        Some((lo, ld))
+    }
+    /// Pre-resolved filter test for points of this cloud: matches the GPU shader and histogram
+    /// filter semantics on `On::Point` properties and design coordinates (`x`, `y`, `z`).
+    pub fn point_filter(&self) -> PointFilter<'_> {
+        let entries = self.filters.iter().filter_map(|f| self.source(&f.property, On::Point).map(|source| (source, &f.keep))).collect();
+        PointFilter { entries }
     }
     /// The corners of the box around the points, in the cloud's placement (mm), or `None` for
     /// an empty cloud.
@@ -468,12 +594,16 @@ impl PartialEq for Points {
     }
 }
 
+/// Never the points themselves: a container writes them to a part of their own and its record keeps
+/// this empty text, which older releases read as "in the part".
 impl Serialize for Points {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.to_bytes()))
+        s.serialize_str("")
     }
 }
 
+/// The empty text a container's record keeps, or an older plain JSON design's base64 points,
+/// decoded once as it opens.
 impl<'de> Deserialize<'de> for Points {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
@@ -511,12 +641,14 @@ impl PartialEq for Colors {
     }
 }
 
+/// Never the colours themselves, as [`Points`].
 impl Serialize for Colors {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.0))
+        s.serialize_str("")
     }
 }
 
+/// As [`Points`]: empty, or an older plain JSON design's base64 colours.
 impl<'de> Deserialize<'de> for Colors {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
@@ -554,6 +686,7 @@ mod tests {
             colors: Colors(colors.into()),
             source_points: 2,
             units: "m".into(),
+            up: Up::Z,
             transform: IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -568,11 +701,16 @@ mod tests {
         }
     }
 
+    /// The points are never written as text (a container keeps them as a part); an older plain JSON
+    /// design's base64 points and colours still read, once, and copies share them.
     #[test]
-    fn points_round_trip_through_json_and_stay_shared() {
+    fn older_base64_points_read_none_are_written_as_text_and_copies_share_them() {
         let c = cloud(vec![0.0, 1.0, 2.0, -3.5, 4.25, 1e6], vec![255, 0, 10, 1, 2, 3]);
-        let json = serde_json::to_string(&c).unwrap();
-        let back: PointCloud = serde_json::from_str(&json).unwrap();
+        let mut json = serde_json::to_value(&c).unwrap();
+        assert_eq!((json["points"].clone(), json["colors"].clone()), (serde_json::json!(""), serde_json::json!("")), "never as text");
+        json["points"] = crate::canvas::base64_encode(&c.points.to_bytes()).into();
+        json["colors"] = crate::canvas::base64_encode(&c.colors.0).into();
+        let back: PointCloud = serde_json::from_value(json).unwrap();
         assert_eq!(back, c);
         assert_eq!(back.points.get(1), Some([-3.5, 4.25, 1e6]));
         assert_eq!(back.colors.get(0), Some([255, 0, 10]));
@@ -606,7 +744,8 @@ mod tests {
     fn damaged_clouds_are_refused() {
         // Not whole points, not finite, not base64.
         for points in ["AAAA", "AADAfwAAwH8AAMB/", "!!!!"] {
-            let json = serde_json::to_string(&cloud(vec![0.0; 3], Vec::new())).unwrap().replace("\"AAAAAAAAAAAAAAAA\"", &format!("\"{points}\""));
+            let json =
+                serde_json::to_string(&cloud(vec![0.0; 3], Vec::new())).unwrap().replace("\"points\":\"\"", &format!("\"points\":\"{points}\""));
             assert!(serde_json::from_str::<PointCloud>(&json).is_err(), "{points}");
         }
         assert!(cloud(vec![0.0; 6], vec![1, 2, 3]).check().is_err(), "one colour for two points");
@@ -654,7 +793,10 @@ mod tests {
         c.transform[3][2] = 100.0;
         assert_eq!(c.shade(c.color_range())(0), height_ramp(1.0));
         assert_eq!((height_ramp(0.0), height_ramp(1.0), height_ramp(f64::NAN)), ([40, 70, 200], [230, 70, 50], [40, 70, 200]));
-        let back: PointCloud = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        // The settings read back; the points themselves are a container's part, never text.
+        let mut back: PointCloud = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert!(back.points.is_empty());
+        (back.points, back.colors) = (c.points.clone(), c.colors.clone());
         assert_eq!(back, c);
     }
 }

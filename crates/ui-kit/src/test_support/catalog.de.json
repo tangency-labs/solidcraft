@@ -1,0 +1,9 @@
+{
+  "ui.save": "Speichern",
+  "ui.cancel": "Abbrechen",
+  "ui.don_t_save": "Nicht speichern",
+  "ui.table.gallery.configurations": "Konfigurationen",
+  "ui.table.gallery.parameters": "Parameter",
+  "prefs.sketch.state_icons": "Statussymbole",
+  "prefs.sketch_state_icons": "Skizzensymbole in der Farbe ihres Zustands"
+}

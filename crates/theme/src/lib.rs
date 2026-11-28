@@ -40,37 +40,18 @@ thread_local! {
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
     static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The Preferences accent over the theme's own ([`set_accent`]), per thread; `None`: the theme's.
+    static ACCENT: Cell<Option<Color32>> = const { Cell::new(None) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
-    /// The 3D view's background colour when Preferences give it one (#7688), per thread like the
+    /// The 3D view's background when Preferences give it one (#7688, #9230), per thread like the
     /// rest. `None`: the theme's gradient.
-    static VIEWPORT_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
+    static VIEWPORT_BACKGROUND: Cell<Option<ViewBackground>> = const { Cell::new(None) };
     /// The last published frame, guarded by every palette input so another app/context cannot
     /// reuse it after changing the thread's theme. Resolution/fade state lives in that context.
     static PUBLISHED: Cell<Option<PublishedTab>> = const { Cell::new(None) };
 }
-
-/// Exact registry names, including contextual/specialty tabs and legacy Render sub-tabs that
-/// still share the Render accent. Unknown names must never silently become Model on import.
-pub const TAB_NAMES: &[&str] = &[
-    "MODEL",
-    "SKETCH",
-    "SURFACE",
-    "MESH",
-    "FORM",
-    "SHEET METAL",
-    "WELDMENTS",
-    "ASSEMBLE",
-    "INSERT",
-    "INSPECT",
-    "MANAGE",
-    "VIEW",
-    "RENDER",
-    "RENDER APPEARANCE",
-    "RENDER SCENE",
-    "RENDER CAMERA",
-];
 
 /// Every input of the thread's theme state: a palette resolved under one is stale under another.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,8 +60,9 @@ pub struct Environment {
     pub vision: ColorVision,
     pub custom_generation: u64,
     pub logo: bool,
+    pub accent: Option<Color32>,
     pub viewport: Option<bool>,
-    pub background: Option<[u8; 3]>,
+    pub background: Option<ViewBackground>,
 }
 
 impl Environment {
@@ -91,6 +73,7 @@ impl Environment {
             vision: vision(),
             custom_generation: CUSTOM_GENERATION.get(),
             logo: LOGO_ACCENT.get(),
+            accent: ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
         }
@@ -98,6 +81,7 @@ impl Environment {
 
     /// A window palette with this state's logo accent and colour vision mode on top.
     pub fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = self.accent.map_or(tokens, |a| tokens.with_accent(a, self.dark));
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
         tokens.with_vision(self.dark, self.vision)
     }
@@ -420,6 +404,82 @@ pub fn set_logo_accent(on: bool) -> bool {
     LOGO_ACCENT.with(|c| c.replace(on) != on)
 }
 
+/// Use `accent` (opaque) over the active theme's accent, or the theme's (`None`); returns whether that changed anything.
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    ACCENT.with(|c| c.replace(accent) != accent)
+}
+
+/// The accent [`set_accent`] last set on this thread.
+pub fn accent() -> Option<Color32> {
+    ACCENT.get()
+}
+
+/// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
+pub fn parse_accent(s: &str) -> Option<Color32> {
+    let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
+    let ([r, g, b], _) = solidcraft_color::hex::parse_digits(hex)?;
+    Some(Color32::from_rgb(r, g, b))
+}
+
+/// The File view's unset colours follow the theme's panel, border, accent and text, not its base's (#4868).
+pub fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+    let fallback = t.text;
+    let best = |inks: &[Color32], fills: &[Color32]| {
+        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
+        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
+    };
+    if !set("file_background") {
+        t.file_background = t.panel;
+    }
+    if !set("file_surface") {
+        t.file_surface = t.dialog_bg;
+    }
+    if !set("file_border") {
+        t.file_border = t.border;
+    }
+    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
+    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
+    if !rail_set {
+        // Deepened toward the theme's darkest colour as the built-in palettes do (Dark's rail ~0.55, Light's ~0.85).
+        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
+        t.file_rail = t.accent.lerp_to_gamma(toward, k);
+    }
+    if !hover_set {
+        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
+    }
+    if !set("file_rail_ink") {
+        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
+    }
+    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
+    let away = best(&inks, &[t.file_rail_ink]);
+    for _ in 0..10 {
+        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
+        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
+            break;
+        }
+        if !rail_set {
+            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
+        }
+        if !hover_set {
+            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
+        }
+    }
+    if !set("file_primary") {
+        t.file_primary = t.accent_soft;
+    }
+    if !set("file_primary_border") {
+        t.file_primary_border = t.accent;
+    }
+    if !set("file_primary_ink") {
+        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
+    }
+    if !set("file_dim") {
+        // Dim where dim text still reads on the page and the cards, else the plain text colour.
+        let on = [t.file_surface, t.file_background];
+        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
+    }
+}
+
 /// The theme file palette [`set_custom`] last set on this thread.
 pub fn custom() -> Option<Custom> {
     CUSTOM.get()
@@ -468,15 +528,110 @@ pub struct TabAccent {
     pub soft: Color32,
 }
 
-/// Palette ramp for icons on a surface explicitly accented by its active tab.
-pub fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
-    match tab {
-        "SKETCH" => Some("sketch"),
-        "SURFACE" => Some("surface"),
-        "MESH" => Some("mesh"),
-        "FORM" => Some("form"),
-        _ => None,
+/// One of the theme's accent ramps: a fill, a small-text ink and a selected-row tint in [`Tokens`],
+/// named after its token slots. The host decides which ramp each of its tabs uses ([`TabTable`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AccentRamp {
+    /// The main accent: `accent`, `selected_ink`, `accent_soft`.
+    #[default]
+    Main,
+    /// `sketch_accent`, `sketch_ink`, `sketch_soft`.
+    Sketch,
+    /// `surface_fill`, `surface_ink`, `surface_soft`.
+    Surface,
+    /// `mesh_fill`, `mesh_ink`, `mesh_soft`.
+    Mesh,
+    /// `form_fill`, `form_tab_ink`, `form_soft`.
+    Form,
+    /// `sheet_fill`, `sheet_ink`, `sheet_soft`.
+    Sheet,
+    /// `render_fill`, `render_ink`, `render_soft`.
+    Render,
+}
+
+impl AccentRamp {
+    pub const ALL: [Self; 7] = [Self::Main, Self::Sketch, Self::Surface, Self::Mesh, Self::Form, Self::Sheet, Self::Render];
+
+    /// The ramp's fill, ink and tint in `t`, before [`TabAccent::for_ramp`] protects the ink's contrast.
+    fn slots(self, t: &Tokens) -> (Color32, Color32, Color32) {
+        match self {
+            Self::Main => (t.accent, t.selected_ink, t.accent_soft),
+            Self::Sketch => (t.sketch_accent, t.sketch_ink, t.sketch_soft),
+            Self::Surface => (t.surface_fill, t.surface_ink, t.surface_soft),
+            Self::Mesh => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
+            Self::Form => (t.form_fill, t.form_tab_ink, t.form_soft),
+            Self::Sheet => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
+            Self::Render => (t.render_fill, t.render_ink, t.render_soft),
+        }
     }
+}
+
+/// How the host accents one of its tabs: the tab's name, its ramp, and the icon palette accent
+/// (a ramp name of the host's icon set) of icons on a surface the tab accents; `None` keeps each
+/// icon's own colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TabStyle {
+    pub name: &'static str,
+    pub ramp: AccentRamp,
+    pub icon_accent: Option<&'static str>,
+}
+
+/// A host's tabs and how each is accented. The host owns the table (usually a `const`) and
+/// resolves its tabs' accents through it; a name it does not list takes [`AccentRamp::Main`]
+/// and no icon accent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TabTable(&'static [TabStyle]);
+
+impl TabTable {
+    pub const fn new(tabs: &'static [TabStyle]) -> Self {
+        Self(tabs)
+    }
+
+    /// Every tab, in the host's order.
+    pub fn tabs(&self) -> &'static [TabStyle] {
+        self.0
+    }
+
+    /// Every tab's exact name, in the host's order.
+    pub fn names(&self) -> impl ExactSizeIterator<Item = &'static str> + use<> {
+        self.0.iter().map(|tab| tab.name)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&'static TabStyle> {
+        self.0.iter().find(|tab| tab.name == name)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    pub fn ramp(&self, name: &str) -> AccentRamp {
+        self.get(name).map_or(AccentRamp::Main, |tab| tab.ramp)
+    }
+
+    pub fn icon_accent(&self, name: &str) -> Option<&'static str> {
+        self.get(name).and_then(|tab| tab.icon_accent)
+    }
+
+    /// The selection colours of tab `name` in `t`.
+    pub fn accent(&self, t: &Tokens, name: &str) -> TabAccent {
+        TabAccent::for_ramp(t, self.ramp(name))
+    }
+}
+
+/// The host's tab table, installed once per process ([`install_tabs`]).
+static TABS: std::sync::OnceLock<TabTable> = std::sync::OnceLock::new();
+
+/// Install the host's tab table, once per process, before the first frame and before any theme
+/// file is read: theme files key their per-tab tables by these names. Installing the same table
+/// again does nothing; a different one is ignored. Returns whether `table` is the installed one.
+pub fn install_tabs(table: TabTable) -> bool {
+    *TABS.get_or_init(|| table) == table
+}
+
+/// The installed tab table, or an empty one before [`install_tabs`].
+pub fn installed_tabs() -> TabTable {
+    TABS.get().copied().unwrap_or(TabTable::new(&[]))
 }
 
 /// WCAG contrast of two opaque sRGB colours.
@@ -509,6 +664,46 @@ pub fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
     authored.text_dim = known.file_dim;
     authored.form_dim = known.file_dim;
     authored
+}
+
+/// Keep a theme's panel colours and lift only the canonical panel inks that miss
+/// 4.5:1 on any of the given opaque `fills`. A failing ink moves toward the
+/// theme's own primary text first, so it keeps the theme's hue, and toward
+/// white or black (trying both) only when the primary text is not readable either. Inks
+/// that already pass, and translucent inks, stay as authored; a pair that
+/// still fails is left for [`panel_fallback_tokens`].
+pub fn panel_readable_inks(mut tokens: Tokens, fills: &[Color32]) -> Tokens {
+    let fills: Vec<Color32> = fills.iter().map(|fill| fill.to_opaque()).collect();
+    let Some(first) = fills.first().copied() else {
+        return tokens;
+    };
+    let passes = |ink: Color32| fills.iter().all(|fill| contrast_ratio(ink, *fill) >= 4.5);
+    // The nearer pole first; fills of different lightness may need the other one.
+    let (pole, other) = if panel_luminance(first) < 0.18 { (Color32::WHITE, Color32::BLACK) } else { (Color32::BLACK, Color32::WHITE) };
+    let primary = if tokens.text.a() == 255 && passes(tokens.text) { tokens.text } else { pole };
+    let lift = |ink: Color32| -> Color32 {
+        if ink.a() != 255 || passes(ink) {
+            return ink;
+        }
+        // Walk toward the primary ink, then toward each pole, in small steps,
+        // and keep the first colour that reads on every fill.
+        for target in [primary, pole, other] {
+            for step in 1..=64_u16 {
+                let mix = |a: u8, b: u8| ((u16::from(a) * (64 - step) + u16::from(b) * step + 32) / 64) as u8;
+                let candidate = Color32::from_rgb(mix(ink.r(), target.r()), mix(ink.g(), target.g()), mix(ink.b(), target.b()));
+                if passes(candidate) {
+                    return candidate;
+                }
+            }
+        }
+        ink
+    };
+    tokens.text = lift(tokens.text);
+    tokens.text_dim = lift(tokens.text_dim);
+    tokens.form_ink = lift(tokens.form_ink);
+    tokens.form_dim = lift(tokens.form_dim);
+    tokens.dialog_label = lift(tokens.dialog_label);
+    tokens
 }
 
 /// Raise a captured panel fill to the first quantized alpha that protects all
@@ -610,17 +805,9 @@ fn readable_fill(fill: Color32, inks: &[Color32], scale: f32) -> Color32 {
 }
 
 impl TabAccent {
-    pub fn for_tab(t: &Tokens, tab: &str) -> Self {
-        let (color, ink, soft) = match tab {
-            "SKETCH" => (t.sketch_accent, t.sketch_ink, t.sketch_soft),
-            "SURFACE" => (t.surface_fill, t.surface_ink, t.surface_soft),
-            "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
-            "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
-            "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
-            "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
-            // Model and shared utility tabs retain their existing selection exactly.
-            _ => (t.accent, t.selected_ink, t.accent_soft),
-        };
+    /// The selection colours of `ramp` in `t`, with an ink that holds small-text contrast on the tint.
+    pub fn for_ramp(t: &Tokens, ramp: AccentRamp) -> Self {
+        let (color, ink, soft) = ramp.slots(t);
         let ink = if contrast_ratio(ink, soft) >= 4.5 {
             ink
         } else if contrast_ratio(color, soft) >= 4.5 {
@@ -649,20 +836,22 @@ impl TabAccent {
     }
 
     pub fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|d| d.get_temp::<Self>(egui::Id::unique("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
+        ctx.data(|d| d.get_temp::<Self>(egui::Id::unique("sc_tab_accent"))).unwrap_or_else(|| Self::for_ramp(&Tokens::get(), AccentRamp::Main))
     }
 
     pub fn current_icon_accent(ctx: &egui::Context) -> Option<&'static str> {
         ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::unique("sc_tab_icon_accent"))).flatten()
     }
 
-    /// Store this frame's accent of `tab` in `ctx` ([`TabAccent::current`]). `sketch_open` is whether a sketch is being
-    /// edited, `tool_active` whether a tool or dialog is open; both only steer focus painting.
-    pub fn set_current(self, tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::Context) {
+    /// Store this frame's accent in `ctx` ([`TabAccent::current`]) with the icon accent of the
+    /// surface it accents ([`TabAccent::current_icon_accent`]). `focus` is the ramp a focused
+    /// numeric editor takes instead of this accent (the host's open editing mode, if it has one),
+    /// `tool_active` whether a tool or dialog is open; both only steer focus painting.
+    pub fn set_current(self, icon_accent: Option<&'static str>, focus: Option<AccentRamp>, tool_active: bool, ctx: &egui::Context) {
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::unique("sc_tab_accent"), self);
-            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(tab));
-            d.insert_temp(egui::Id::unique("sc_sketch_open"), sketch_open);
+            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent);
+            d.insert_temp(egui::Id::unique("sc_focus_ramp"), focus);
             d.insert_temp(egui::Id::unique("sc_tool_accent"), tool_active);
         });
     }
@@ -671,10 +860,28 @@ impl TabAccent {
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
         let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let sketch = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_sketch_open"))).unwrap_or(false);
-        let color = if sketch { t.sketch_accent } else { Self::current(ui.ctx()).color };
+        let color = Self::number_accent_color(ui);
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
+        }
+    }
+
+    /// The numeric field focus ink, for controls that own their entire border.
+    pub fn number_focus_color(ui: &egui::Ui) -> Color32 {
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
+        if !active {
+            return ui.visuals().selection.stroke.color;
+        }
+        let color = Self::number_accent_color(ui);
+        if color == Tokens::get().accent { ui.visuals().selection.stroke.color } else { color }
+    }
+
+    fn number_accent_color(ui: &egui::Ui) -> Color32 {
+        let t = Tokens::get();
+        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
+        match focus {
+            Some(ramp) => Self::for_ramp(&t, ramp).color,
+            None => Self::current(ui.ctx()).color,
         }
     }
 }
@@ -689,8 +896,25 @@ pub fn viewport_dark() -> bool {
     VIEWPORT_DARK.get().unwrap_or_else(is_dark)
 }
 
-/// The 3D view's own background colour, or `None` for the theme's gradient (#7688).
-pub fn viewport_background() -> Option<[u8; 3]> {
+/// The 3D view's background of the user's own (Preferences › Interface › Background): top to
+/// bottom, with an optional colour halfway. Top and bottom alike are one colour (#7688), different
+/// ones a gradient (#9230).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewBackground {
+    pub top: [u8; 3],
+    pub middle: Option<[u8; 3]>,
+    pub bottom: [u8; 3],
+}
+
+impl ViewBackground {
+    /// One colour over the whole view.
+    pub fn flat(colour: [u8; 3]) -> Self {
+        Self { top: colour, middle: None, bottom: colour }
+    }
+}
+
+/// The 3D view's own background, or `None` for the theme's gradient (#7688, #9230).
+pub fn viewport_background() -> Option<ViewBackground> {
     VIEWPORT_BACKGROUND.get()
 }
 
@@ -703,6 +927,38 @@ pub fn set_published(published: Option<PublishedTab>) {
 /// this cached policy; it must retain its existing scene backplate when the option is absent/off.
 pub fn tab_surfaces_enabled() -> bool {
     PUBLISHED.get().is_some_and(|p| p.environment == Environment::current() && p.tab_surfaces)
+}
+
+/// A kind of line on a drawing sheet that has its own screen colour (#18989): its place in
+/// [`Tokens::paper_lines`] and [`Tokens::paper_dark_lines`]. The visible edges are the sheet's ink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaperLine {
+    /// Hidden lines.
+    Hidden,
+    /// Centre lines and centre marks.
+    Centre,
+    /// Dimension lines, extension lines and arrows.
+    Dimension,
+    /// Dimension text.
+    DimensionText,
+    /// Note text and leaders.
+    Note,
+}
+
+impl PaperLine {
+    /// Every kind, in the order of the sets.
+    pub const ALL: [PaperLine; 5] = [PaperLine::Hidden, PaperLine::Centre, PaperLine::Dimension, PaperLine::DimensionText, PaperLine::Note];
+
+    /// Its place in a set ([`Tokens::paper_lines`]).
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether it is text, which needs more contrast with its paper than a line (WCAG 1.4.3 and
+    /// 1.4.11).
+    pub const fn is_text(self) -> bool {
+        matches!(self, PaperLine::DimensionText | PaperLine::Note)
+    }
 }
 
 /// Colour vision modes (#778): a second set of values for the colours that carry a meaning, for
@@ -796,6 +1052,8 @@ pub struct IconColors {
 /// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// User-assigned document labels: red, orange, green, blue, purple.
+    pub library_highlights: [Color32; 5],
     /// Navigation chrome from the approved Navbar boards.
     pub nav_hover: Color32,
     pub nav_press: Color32,
@@ -987,6 +1245,9 @@ pub struct Tokens {
     /// Hovered edge: dark core with a light halo.
     pub hover_edge: Color32,
     pub hover_edge_halo: Color32,
+    /// A hovered edge in Fillet and Chamfer, whose edge input also takes faces (Preferences ›
+    /// Graphics): a colour none of the model's edges have, so the edge a click takes stands out.
+    pub hover_edge_lit: Color32,
     /// How much lighter a hovered face is (grey levels).
     pub hover_face_lift: u8,
     /// Selected profile fill and outline.
@@ -1003,7 +1264,7 @@ pub struct Tokens {
     pub origin_plane_hover: Color32,
     pub origin_point: Color32,
     /// The X, Y and Z colours, one set for every axis drawn (#976): the origin axes, the view
-    /// triad, the navigation cube's triad, the Move gizmo, a 3D sketch point's triad, joint
+    /// triad, the navigator's triad, the Move gizmo, a 3D sketch point's triad, joint
     /// origins, measured distances along the axes and the headless picture's origin axes.
     pub axis_x: Color32,
     pub axis_y: Color32,
@@ -1015,6 +1276,9 @@ pub struct Tokens {
     // ---- bodies and live previews ----
     pub body: Color32,
     pub body_edge: Color32,
+    /// Isoparm lines drawn on a surface: lighter than its edges, so they read as the surface's
+    /// flow, not its boundary.
+    pub isoparm: Color32,
     /// Command manipulators (direction arrows, handles).
     pub manipulator: Color32,
     /// Allowed assembly motion, separate from the selected face's blue.
@@ -1029,16 +1293,18 @@ pub struct Tokens {
     pub preview_sketch: Color32,
     /// Removed material in a feature preview (translucent).
     pub preview_cut: Color32,
-    /// Navigation cube faces, outline and labels.
-    pub cube_face: Color32,
-    pub cube_border: Color32,
-    pub cube_text: Color32,
-    /// Light blue hover fill, readable on the pale cube in either theme.
-    pub cube_hover: Color32,
+    /// Navigator faces, outline and labels.
+    pub navigator_face: Color32,
+    pub navigator_border: Color32,
+    pub navigator_text: Color32,
+    /// Light blue hover fill, readable on the pale navigator in either theme.
+    pub navigator_hover: Color32,
     // ---- viewport ----
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
     pub viewport_bottom: Color32,
+    /// A colour halfway down the viewport's gradient, the user's own (#9230). Themes have none.
+    pub viewport_middle: Option<Color32>,
     pub grid: Color32,
     pub grid_major: Color32,
     /// A whole selected body.
@@ -1107,11 +1373,11 @@ pub struct Tokens {
     pub figure_highlight: Color32,
     /// Neutral shadow cast by a model in a Preferences figure, independent of theme polarity.
     pub figure_shadow: Color32,
-    /// Top face of the Preferences figure cube.
+    /// Top face of the Preferences figure box.
     pub figure_face_top: Color32,
-    /// Left face of the Preferences figure cube.
+    /// Left face of the Preferences figure box.
     pub figure_face_left: Color32,
-    /// Right face of the Preferences figure cube.
+    /// Right face of the Preferences figure box.
     pub figure_face_right: Color32,
     /// Paper, panels and pads drawn inside Preferences figures.
     pub figure_card: Color32,
@@ -1168,6 +1434,24 @@ pub struct Tokens {
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
+    /// Screen paper and ink for the four drawing sheet appearances.
+    pub paper_white: Color32,
+    pub paper_ink: Color32,
+    pub paper_blueprint: Color32,
+    pub paper_blueprint_ink: Color32,
+    pub paper_prussian_blue: Color32,
+    pub paper_prussian_blue_ink: Color32,
+    pub paper_dark: Color32,
+    pub paper_dark_ink: Color32,
+    /// Colours for each kind of line on a drawing sheet, beside its ink (which draws the visible
+    /// edges), in [`PaperLine`] order (#18989): on a white sheet (also the print colours) and on a
+    /// dark one. A blueprint or Prussian blue sheet keeps its one white ink, as a real blueprint
+    /// does. Each colour stays apart from the others and from the ink for normal vision and for
+    /// every colour vision mode, so no mode changes them, and reads on its paper (WCAG: 3:1 for a
+    /// line, 4.5:1 for text). The line types still carry the meaning: a colour is extra help (D26
+    /// of #13159).
+    pub paper_lines: [Color32; 5],
+    pub paper_dark_lines: [Color32; 5],
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1186,6 +1470,12 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// Neutral light over glass, shared by table cards in built-in and custom themes.
+    /// Keep this translucent so the window beneath the card remains visible.
+    pub fn table_fill(&self) -> Color32 {
+        Color32::from_white_alpha(if is_dark() { 14 } else { 153 })
+    }
+
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
     pub fn outset_radius(radius: f32, outset: f32) -> f32 {
         if radius > 0.0 { radius + outset } else { 0.0 }
@@ -1231,7 +1521,7 @@ impl Tokens {
 
     fn base_in(mode: ColorVision) -> Tokens {
         let window = Tokens::themed(is_dark(), mode);
-        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        let tokens = Tokens::viewport_own(mode).map_or(window, |view| window.with_viewport(view));
         tokens.with_background(viewport_background())
     }
 
@@ -1242,7 +1532,7 @@ impl Tokens {
         if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
             return published.view;
         }
-        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+        Tokens::viewport_own(vision()).unwrap_or_else(|| Tokens::themed(is_dark(), vision())).with_background(viewport_background())
     }
 
     pub fn protect_tab_panel(&mut self) {
@@ -1307,7 +1597,7 @@ impl Tokens {
             &mut self.nav_field,
             &mut self.nav_viewport,
             &mut self.glyph_bg,
-            &mut self.cube_face,
+            &mut self.navigator_face,
             &mut self.viewport_top,
             &mut self.viewport_bottom,
             &mut self.grid,
@@ -1318,7 +1608,7 @@ impl Tokens {
             &mut self.control_border,
             &mut self.app_bar_separator,
             &mut self.nav_tip_key_border,
-            &mut self.cube_border,
+            &mut self.navigator_border,
             &mut self.file_background,
             &mut self.file_surface,
             &mut self.file_border,
@@ -1341,20 +1631,25 @@ impl Tokens {
         if let Some(inset) = &mut self.borders.primary_inset {
             adjust(&mut inset.stroke.color);
         }
+        if let Some(middle) = &mut self.viewport_middle {
+            adjust(middle);
+        }
     }
 
-    /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
-    pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
-        if let Some([r, g, b]) = colour {
+    /// These tokens with the 3D view's background the user's own: one flat colour (#7688) or a
+    /// gradient, with or without a colour halfway (#9230). As they are for `None`.
+    pub fn with_background(mut self, background: Option<ViewBackground>) -> Tokens {
+        if let Some(ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = background {
             self.viewport_top = Color32::from_rgb(r, g, b);
-            self.viewport_bottom = self.viewport_top;
+            self.viewport_middle = middle.map(|[r, g, b]| Color32::from_rgb(r, g, b));
+            self.viewport_bottom = Color32::from_rgb(r2, g2, b2);
         }
         self
     }
 
     /// These tokens with the colours drawn in the 3D view taken from `view`: the background and
     /// grid, bodies, selection and hover, the origin and construction geometry, previews, sketches
-    /// and their dimensions and glyphs, the navigation cube and triads, box selection and the
+    /// and their dimensions and glyphs, the navigator and triads, box selection and the
     /// analysis colours. The window keeps its own: panels, dialogs, menus, and the chips and cards
     /// over the view (`overlay` with its text, icons and borders).
     pub fn with_viewport(self, view: Tokens) -> Tokens {
@@ -1364,6 +1659,7 @@ impl Tokens {
             sel_edge_rim: view.sel_edge_rim,
             hover_edge: view.hover_edge,
             hover_edge_halo: view.hover_edge_halo,
+            hover_edge_lit: view.hover_edge_lit,
             hover_face_lift: view.hover_face_lift,
             sel_profile: view.sel_profile,
             sel_profile_edge: view.sel_profile_edge,
@@ -1381,6 +1677,7 @@ impl Tokens {
             construction_geom: view.construction_geom,
             body: view.body,
             body_edge: view.body_edge,
+            isoparm: view.isoparm,
             manipulator: view.manipulator,
             joint_manipulator: view.joint_manipulator,
             joint_axis: view.joint_axis,
@@ -1388,11 +1685,12 @@ impl Tokens {
             preview_new: view.preview_new,
             preview_sketch: view.preview_sketch,
             preview_cut: view.preview_cut,
-            cube_face: view.cube_face,
-            cube_border: view.cube_border,
-            cube_text: view.cube_text,
-            cube_hover: view.cube_hover,
+            navigator_face: view.navigator_face,
+            navigator_border: view.navigator_border,
+            navigator_text: view.navigator_text,
+            navigator_hover: view.navigator_hover,
             viewport_top: view.viewport_top,
+            viewport_middle: view.viewport_middle,
             viewport_bottom: view.viewport_bottom,
             grid: view.grid,
             grid_major: view.grid_major,
@@ -1429,13 +1727,54 @@ impl Tokens {
         }
     }
 
+    /// The colours of the 3D view's own Light or Dark when Preferences give it one ([`set_viewport_dark`], #4146):
+    /// the built-in Light or Dark theme's whatever theme the window uses, so Dark on a dark theme file still shows
+    /// the built-in Dark view. `None`: the view is drawn with the window's own tokens.
+    pub fn viewport_own(mode: ColorVision) -> Option<Tokens> {
+        VIEWPORT_DARK.get().map(|dark| {
+            let t = if dark { Tokens::dark() } else { Tokens::light() };
+            let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+            t.with_vision(dark, mode)
+        })
+    }
+
     /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for
     /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
         let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = ACCENT.get().map_or(t, |a| t.with_accent(a, dark));
         let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
         t.with_vision(dark, mode)
+    }
+
+    /// These tokens with `accent` in place of the theme's; the tabs' own accents (Sketch, Surface, …) stay the theme's.
+    pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
+        let mut t = self;
+        let accent = accent.to_opaque();
+        // The panel behind a translucent theme's tint is the theme's own colour, unmultiplied.
+        let panel = t.panel.to_opaque();
+        t.accent = accent;
+        t.accent_soft = panel.lerp_to_gamma(accent, if dark { 0.3 } else { 0.18 });
+        t.selected_bg = t.accent_soft;
+        // Ink on the soft tint: the accent lifted (dark) or deepened (light) until it reads.
+        let (toward, mut k) = if dark { (Color32::WHITE, 0.35) } else { (Color32::BLACK, 0.35) };
+        t.selected_ink = accent.lerp_to_gamma(toward, k);
+        while contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 && k < 1.0 {
+            k += 0.1;
+            t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
+        }
+        t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
+        t.chip = accent;
+        t.form_primary = accent;
+        t.form_primary_fill = accent;
+        t.sel_face = accent;
+        t.sel_edge = accent;
+        // The File view's rail and primary action follow the new accent, as they follow a theme's.
+        file_view_from_theme(&mut t, dark, |k| {
+            !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")
+        });
+        t
     }
 
     /// These tokens with the logo's three faces in shades of the accent: lighter, the accent
@@ -1465,15 +1804,15 @@ impl Tokens {
         t
     }
 
-    /// Fade idle cube colours into the viewport while retaining opaque facets.
-    pub fn navigation_cube(self, active: bool) -> Tokens {
+    /// Fade idle navigator colours into the viewport while retaining opaque facets.
+    pub fn navigator(self, active: bool) -> Tokens {
         if active {
             return self;
         }
         let mut t = self;
-        t.cube_face = t.cube_face.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_border = t.cube_border.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_text = t.cube_text.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_face = t.navigator_face.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_border = t.navigator_border.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_text = t.navigator_text.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_x = t.axis_x.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_y = t.axis_y.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_z = t.axis_z.lerp_to_gamma(t.viewport_top, 0.55);
@@ -1491,9 +1830,9 @@ pub fn set_viewport_dark(dark: Option<bool>) {
     VIEWPORT_DARK.set(dark);
 }
 
-/// Give the 3D view a background colour of its own (#7688), or `None` for the theme's gradient.
-pub fn set_viewport_background(colour: Option<[u8; 3]>) {
-    VIEWPORT_BACKGROUND.set(colour);
+/// Give the 3D view a background of its own (#7688, #9230), or `None` for the theme's gradient.
+pub fn set_viewport_background(background: Option<ViewBackground>) {
+    VIEWPORT_BACKGROUND.set(background);
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
@@ -1560,6 +1899,64 @@ pub fn panel_motion_ease(progress: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A surface's isoparms show on its faces less than its edges do, and stay visible against the
+    /// view's background (seen at the sheet's silhouette), on both bases.
+    #[test]
+    fn isoparms_are_lighter_than_edges_and_visible_on_the_background() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            let (iso, edge) = (contrast_ratio(t.isoparm, t.body), contrast_ratio(t.body_edge, t.body));
+            assert!(iso >= 1.5 && iso < edge, "isoparm {iso:.2} against edge {edge:.2} on the body");
+            for background in [t.viewport_top, t.viewport_bottom] {
+                let ratio = contrast_ratio(t.isoparm, background);
+                assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
+            }
+        }
+    }
+
+    /// Each kind of line on a drawing sheet (#18989) reads on its paper in both bases and every
+    /// colour vision mode (WCAG: 3:1 for a line, 4.5:1 for text), as the sheet's ink does, and no
+    /// mode changes them: they are measured apart for every eye in `colour_vision_tests`.
+    #[test]
+    fn each_kind_of_sheet_line_reads_on_its_paper() {
+        for dark in [false, true] {
+            for mode in ColorVision::ALL {
+                let t = Tokens::themed(dark, mode);
+                let sheets = [("white", t.paper_white, t.paper_ink, t.paper_lines), ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines)];
+                for (sheet, paper, ink, lines) in sheets {
+                    assert!(contrast_ratio(ink, paper) >= 4.5, "{sheet}: the ink");
+                    for kind in PaperLine::ALL {
+                        let colour = lines[kind.index()];
+                        let (ratio, least) = (contrast_ratio(colour, paper), if kind.is_text() { 4.5 } else { 3.0 });
+                        assert!(colour.a() == 255 && ratio >= least, "{sheet}, dark {dark}, {mode:?}: {kind:?} {ratio:.2} < {least}");
+                    }
+                }
+                let base = if dark { Tokens::dark() } else { Tokens::light() };
+                assert_eq!([t.paper_lines, t.paper_dark_lines], [base.paper_lines, base.paper_dark_lines], "{mode:?} leaves them as they are");
+            }
+        }
+        assert_eq!(PaperLine::ALL.map(PaperLine::index), [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn panel_readable_inks_try_the_other_pole_when_the_nearer_one_cannot_pass_every_fill() {
+        let mut tokens = Tokens::dark();
+        let grey = Color32::from_gray(128);
+        tokens.text = grey;
+        tokens.text_dim = grey;
+        tokens.form_ink = grey;
+        tokens.form_dim = grey;
+        tokens.dialog_label = grey;
+        let fills = [Color32::from_gray(117), Color32::from_gray(120)];
+        let lifted = panel_readable_inks(tokens, &fills);
+        for ink in [lifted.text, lifted.text_dim, lifted.form_ink, lifted.form_dim, lifted.dialog_label] {
+            for fill in fills {
+                assert!(contrast_ratio(ink, fill) >= 4.5, "{ink:?} on {fill:?}");
+            }
+        }
+        let passing = panel_readable_inks(Tokens::dark(), &[Tokens::dark().panel]);
+        assert_eq!(passing.text, Tokens::dark().text, "a readable ink stays as authored");
+    }
 
     #[test]
     fn panel_motion_is_bounded_and_reduced_or_invalid_inputs_finish_immediately() {
@@ -1719,56 +2116,89 @@ mod tests {
                 let t = super::Tokens::themed(dark, vision);
                 // Explicit palette tints and text replace the old gamma lerps. They can be
                 // overridden independently by theme files and hold small-text contrast.
-                for (tab, color, ink, soft) in [
-                    ("SKETCH", t.sketch_accent, t.sketch_ink, t.sketch_soft),
-                    ("SURFACE", t.surface_fill, t.surface_ink, t.surface_soft),
-                    ("MESH", t.mesh_fill, t.mesh_ink, t.mesh_soft),
-                    ("FORM", t.form_fill, t.form_tab_ink, t.form_soft),
-                    ("SHEET METAL", t.sheet_fill, t.sheet_ink, t.sheet_soft),
-                    ("RENDER", t.render_fill, t.render_ink, t.render_soft),
+                for (ramp, color, ink, soft) in [
+                    (super::AccentRamp::Sketch, t.sketch_accent, t.sketch_ink, t.sketch_soft),
+                    (super::AccentRamp::Surface, t.surface_fill, t.surface_ink, t.surface_soft),
+                    (super::AccentRamp::Mesh, t.mesh_fill, t.mesh_ink, t.mesh_soft),
+                    (super::AccentRamp::Form, t.form_fill, t.form_tab_ink, t.form_soft),
+                    (super::AccentRamp::Sheet, t.sheet_fill, t.sheet_ink, t.sheet_soft),
+                    (super::AccentRamp::Render, t.render_fill, t.render_ink, t.render_soft),
                 ] {
-                    let accent = super::TabAccent::for_tab(&t, tab);
+                    let accent = super::TabAccent::for_ramp(&t, ramp);
                     assert_eq!(accent, super::TabAccent { color, ink, soft });
                     assert_ne!(accent.soft, color);
                     assert_ne!(accent.soft, t.panel);
                 }
-                for tab in ["MODEL", "SOLID", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW", "unknown"] {
-                    assert_eq!(super::TabAccent::for_tab(&t, tab), super::TabAccent { color: t.accent, ink: t.selected_ink, soft: t.accent_soft });
-                }
+                assert_eq!(
+                    super::TabAccent::for_ramp(&t, super::AccentRamp::Main),
+                    super::TabAccent { color: t.accent, ink: t.selected_ink, soft: t.accent_soft }
+                );
             }
         }
     }
 
     #[test]
+    fn a_tab_table_resolves_listed_tabs_by_their_ramp_and_others_by_the_main_one() {
+        use super::{AccentRamp, TabAccent, TabStyle, TabTable};
+        const TABLE: TabTable = TabTable::new(&[
+            TabStyle { name: "Tab A", ramp: AccentRamp::Main, icon_accent: None },
+            TabStyle { name: "Tab B", ramp: AccentRamp::Surface, icon_accent: Some("ramp_b") },
+            TabStyle { name: "Tab C", ramp: AccentRamp::Render, icon_accent: None },
+        ]);
+        let t = super::Tokens::light();
+        assert_eq!(TABLE.names().collect::<Vec<_>>(), ["Tab A", "Tab B", "Tab C"]);
+        assert_eq!(TABLE.accent(&t, "Tab B"), TabAccent::for_ramp(&t, AccentRamp::Surface));
+        assert_eq!(TABLE.accent(&t, "Tab C"), TabAccent::for_ramp(&t, AccentRamp::Render));
+        assert_eq!(TABLE.icon_accent("Tab B"), Some("ramp_b"));
+        for unlisted in ["Tab A", "tab b", "", "unknown"] {
+            assert_eq!(TABLE.accent(&t, unlisted), TabAccent::for_ramp(&t, AccentRamp::Main), "{unlisted}");
+            assert_eq!(TABLE.icon_accent(unlisted), None);
+        }
+        assert!(TABLE.contains("Tab A") && !TABLE.contains("tab b"));
+    }
+
+    #[test]
+    fn the_first_installed_tab_table_stays_installed() {
+        use super::{AccentRamp, TabStyle, TabTable};
+        const FIRST: TabTable = TabTable::new(&[TabStyle { name: "Tab A", ramp: AccentRamp::Sketch, icon_accent: None }]);
+        const SECOND: TabTable = TabTable::new(&[TabStyle { name: "Tab B", ramp: AccentRamp::Mesh, icon_accent: None }]);
+        assert!(super::install_tabs(FIRST));
+        assert!(super::install_tabs(FIRST));
+        assert!(!super::install_tabs(SECOND));
+        assert_eq!(super::installed_tabs(), FIRST);
+    }
+
+    #[test]
     fn tab_accents_match_approved_palette() {
         let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
-        for (tab, light, dark) in [
-            ("SKETCH", [0x057f45, 0x057f45, 0xedf7f1], [0x128d45, 0x46be78, 0x1f3b2b]),
-            ("SURFACE", [0xa45000, 0xa45000, 0xfbebd8], [0xb26a14, 0xe0914a, 0x45331e]),
-            ("MESH", [0xe0b200, 0x8a6d00, 0xfff8dc], [0xc6a800, 0xd4b726, 0x41391a]),
-            ("FORM", [0x7349cd, 0x7349cd, 0xeee8fa], [0x8a6fcc, 0xb39bee, 0x372f4f]),
-            ("SHEET METAL", [0x1e6f96, 0x1e6f96, 0xe1f0f7], [0x2a7fa8, 0x4fb3d9, 0x1f3a47]),
-            ("RENDER", [0xa8326e, 0xa8326e, 0xf8e6ef], [0xc8588f, 0xe074ae, 0x402336]),
+        use super::AccentRamp::{Form, Mesh, Render, Sheet, Sketch, Surface};
+        for (ramp, light, dark) in [
+            (Sketch, [0x057f45, 0x057f45, 0xedf7f1], [0x128d45, 0x46be78, 0x1f3b2b]),
+            (Surface, [0xa45000, 0xa45000, 0xfbebd8], [0xb26a14, 0xe0914a, 0x45331e]),
+            (Mesh, [0xe0b200, 0x8a6d00, 0xfff8dc], [0xc6a800, 0xd4b726, 0x41391a]),
+            (Form, [0x7349cd, 0x7349cd, 0xeee8fa], [0x8a6fcc, 0xb39bee, 0x372f4f]),
+            (Sheet, [0x1e6f96, 0x1e6f96, 0xe1f0f7], [0x2a7fa8, 0x4fb3d9, 0x1f3a47]),
+            (Render, [0xa8326e, 0xa8326e, 0xf8e6ef], [0xc8588f, 0xe074ae, 0x402336]),
         ] {
             for (t, values) in [(super::Tokens::light(), light), (super::Tokens::dark(), dark)] {
                 let [color, ink, soft] = values.map(rgb);
-                assert_eq!(super::TabAccent::for_tab(&t, tab), super::TabAccent { color, ink, soft }, "{tab}");
+                assert_eq!(super::TabAccent::for_ramp(&t, ramp), super::TabAccent { color, ink, soft }, "{ramp:?}");
             }
-            let accent = super::TabAccent::for_tab(&super::Tokens::light(), tab);
-            assert_eq!(accent.ink != accent.color, tab == "MESH", "only light Mesh separates ink from fill");
+            let accent = super::TabAccent::for_ramp(&super::Tokens::light(), ramp);
+            assert_eq!(accent.ink != accent.color, ramp == Mesh, "only light Mesh separates ink from fill");
         }
         // These existing Model values intentionally take precedence over the board's proposal.
         for (t, values) in [(super::Tokens::light(), [0x2678da, 0x1a507f, 0xd6e6fa]), (super::Tokens::dark(), [0x3a88ee, 0x9cc7f5, 0x2a466e])] {
             let [color, ink, soft] = values.map(rgb);
-            assert_eq!(super::TabAccent::for_tab(&t, "MODEL"), super::TabAccent { color, ink, soft });
+            assert_eq!(super::TabAccent::for_ramp(&t, super::AccentRamp::Main), super::TabAccent { color, ink, soft });
         }
     }
 
     #[test]
     fn tab_accents_hold_wcag_small_text_contrast_in_both_themes() {
         for (dark, t) in [(false, super::Tokens::light()), (true, super::Tokens::dark())] {
-            for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
-                let accent = super::TabAccent::for_tab(&t, tab);
+            for tab in super::AccentRamp::ALL {
+                let accent = super::TabAccent::for_ramp(&t, tab);
                 let card = if dark { t.panel } else { egui::Color32::WHITE };
                 for (name, ink, ground) in [
                     ("ink on card", accent.ink, card),
@@ -1777,12 +2207,28 @@ mod tests {
                     ("text on fill", accent.on_fill(&t), accent.color),
                 ] {
                     let ratio = super::contrast_ratio(ink, ground);
-                    assert!(ratio >= 4.5, "{tab} dark={dark}: {name} is {ratio:.4}:1 ({ink:?} on {ground:?})");
+                    assert!(ratio >= 4.5, "{tab:?} dark={dark}: {name} is {ratio:.4}:1 ({ink:?} on {ground:?})");
                 }
                 let white_ok = super::contrast_ratio(t.on_accent, accent.color) >= 4.5;
                 assert_eq!(accent.on_fill(&t), if white_ok { t.on_accent } else { t.tab_on_fill_dark });
             }
         }
+    }
+
+    /// The Preferences accent reads `#rrggbb` and nothing else, as the colour field's hex box does (#22089).
+    /// A `+` before five hex digits was read as a colour (`#+fffff` as `#0fffff`). The other inputs were
+    /// refused already and stay refused: a short one, a `-`, a space, and non-ASCII digits that are six
+    /// bytes long.
+    #[test]
+    fn an_accent_with_a_sign_or_a_non_hex_digit_after_the_hash_is_refused() {
+        let taken: Vec<_> =
+            ["#+fffff", "#+FFFFF", "#+0000f", "#+ffff", "#-fffff", "# fffff", "#ffff\u{e9}", "#\u{660}\u{660}\u{660}", "#\u{ff10}\u{ff10}"]
+                .into_iter()
+                .filter_map(|s| super::parse_accent(s).map(|c| (s, c)))
+                .collect();
+        assert!(taken.is_empty(), "taken as an accent: {taken:?}");
+        assert_eq!(super::parse_accent("#3B82F6"), Some(egui::Color32::from_rgb(0x3b, 0x82, 0xf6)));
+        assert_eq!(super::parse_accent(""), None);
     }
 
     #[test]
@@ -1827,7 +2273,7 @@ mod tests {
                 // The two sides differ, so the checks below tell them apart.
                 assert_ne!((w.viewport_top, w.panel), (v.viewport_top, v.panel));
                 // The view's: background and grid, bodies, selection and hover, sketches with their
-                // dimensions and glyphs, the origin, the cube and triads, box selection, analysis.
+                // dimensions and glyphs, the origin, the navigator and triads, box selection, analysis.
                 assert_eq!((t.viewport_top, t.viewport_bottom, t.grid, t.grid_major), (v.viewport_top, v.viewport_bottom, v.grid, v.grid_major));
                 assert_eq!(
                     (t.body, t.body_edge, t.body_selected, t.sel_face, t.sel_edge, t.hover_edge),
@@ -1838,8 +2284,8 @@ mod tests {
                     (v.sketch, v.sketch_fixed, v.dimension, v.glyph_bg, v.glyph_text, v.profile_fill)
                 );
                 assert_eq!(
-                    (t.origin_plane, t.axis_x, t.cube_face, t.cube_text, t.axis_y, t.axis_z),
-                    (v.origin_plane, v.axis_x, v.cube_face, v.cube_text, v.axis_y, v.axis_z)
+                    (t.origin_plane, t.axis_x, t.navigator_face, t.navigator_text, t.axis_y, t.axis_z),
+                    (v.origin_plane, v.axis_x, v.navigator_face, v.navigator_text, v.axis_y, v.axis_z)
                 );
                 assert_eq!(
                     (t.box_window, t.section_cap, t.preview_add, t.sketch_construction, t.continuity),
@@ -1886,6 +2332,6 @@ mod tests {
             assert_eq!(Tokens::get(), host);
         }
         assert_eq!(Tokens::get(), Tokens::dark());
-        assert_eq!(TabAccent::current(&egui::Context::default()), TabAccent::for_tab(&Tokens::dark(), "MODEL"));
+        assert_eq!(TabAccent::current(&egui::Context::default()), TabAccent::for_ramp(&Tokens::dark(), super::AccentRamp::Main));
     }
 }

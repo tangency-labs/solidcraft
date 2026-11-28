@@ -323,13 +323,25 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => -1.0,
     }
 }
 
 /// Builds the cone (the `surface.cone_p1` constructions).
+/// The cone a `surface.cone_p2` case's `inputs` builds (before its op), for replay tests.
+///
+/// # Errors
+///
+/// A [`HarnessError`] when `inputs` is not a case of this unit.
+pub fn case_cone(k: &Kernel, inputs: &Value) -> Result<solidcore::Result<Cone>, HarnessError> {
+    let i: Inputs = serde_json::from_value(inputs.clone()).map_err(|e| harness(e.to_string()))?;
+    Ok(rust_cone(k, &i.cone))
+}
+
 fn rust_cone(k: &Kernel, c: &ConeIn) -> solidcore::Result<Cone> {
     let (o, x, y) = (v3(c.origin), v3(c.x), v3(c.y));
     let a2p = Axis2Placement::new(o, x, y);
@@ -1310,39 +1322,54 @@ mod tests {
         }
     }
 
-    /// The #713 fixtures keep pinned behavior by default and exercise the
-    /// existing opt-in independently of the unpatched C++ oracle.
+    /// The #713 fixtures (WR-385): a cylinder rebuilt from near-equal radii keeps a
+    /// zero semi-angle; a taper is refused before the analytic state changes.
     #[test]
-    fn issue713_fixtures_exercise_both_behaviors() {
+    fn issue713_fixtures_keep_cylinders() {
         let fixtures: Value = serde_json::from_str(include_str!(
             "../../../../fixtures/surface.cone_p2/issue713.json"
         ))
         .unwrap();
         let cases = fixtures["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 24);
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.cylinder_rebuild_mean_radius = enabled;
-            for case in cases {
-                let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
-                let name = case["name"].as_str().unwrap();
-                let mut cone = rust_cone(&k, &i.cone).unwrap();
-                let before = cone.clone();
-                let mut record = Vec::new();
-                rust_op(&k, &mut cone, &i.op, &mut record).unwrap();
-                assert!(cone.is_cylinder_class(), "{name}");
-                if enabled && name.contains("taper_") {
-                    assert_eq!(record.first(), Some(&SM_ERR), "{name}");
-                    assert_eq!(cone.base_radius(), before.base_radius());
-                    assert_eq!(cone.semi_angle_deg(), before.semi_angle_deg());
-                } else {
-                    assert_eq!(record.first(), Some(&SUCCESS), "{enabled} {name}");
-                    if enabled {
-                        assert_eq!(cone.semi_angle_deg(), 0.0, "{name}");
-                    } else if !name.contains("unchanged_") {
-                        assert_ne!(cone.semi_angle_deg(), 0.0, "{name}");
-                    }
-                }
+        let k = Kernel::default();
+        for case in cases {
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let name = case["name"].as_str().unwrap();
+            // The edit's radius change against the rebuild's limit
+            // SM_EFF_ZERO_SQRT (1 + r) = 1e-5 for r 9: a taper's scale 1 ± 2.2222e-6 makes
+            // it 1.99999999998e-5, just under twice the limit (asserted >= 1.99x); the
+            // "rounded" fixtures' 1 ± 5.5556e-7 make it 5.0000000004e-6, just over half
+            // (asserted <= 0.51x); the others are far below.
+            let ModeIn::CylBounded { radius, .. } = &i.cone.mode else {
+                panic!("{name}: not a bounded cylinder");
+            };
+            let OpIn::Rebuild {
+                edit: EditIn::ScaleLastXy { f },
+            } = &i.op
+            else {
+                panic!("{name}: not a scale_last_xy rebuild");
+            };
+            let (radius, f) = (*radius, *f);
+            let gap = (radius * f - radius).abs();
+            let limit = solidcore::math::EFF_ZERO_SQRT * (1.0 + radius);
+            if name.contains("taper_") {
+                assert!(gap >= 1.99 * limit, "{name}: {gap} vs {limit}");
+            } else {
+                assert!(gap <= 0.51 * limit, "{name}: {gap} vs {limit}");
+            }
+            let mut cone = rust_cone(&k, &i.cone).unwrap();
+            let before = cone.clone();
+            let mut record = Vec::new();
+            rust_op(&k, &mut cone, &i.op, &mut record).unwrap();
+            assert!(cone.is_cylinder_class(), "{name}");
+            if name.contains("taper_") {
+                assert_eq!(record.first(), Some(&SM_ERR), "{name}");
+                assert_eq!(cone.base_radius(), before.base_radius());
+                assert_eq!(cone.semi_angle_deg(), before.semi_angle_deg());
+            } else {
+                assert_eq!(record.first(), Some(&SUCCESS), "{name}");
+                assert_eq!(cone.semi_angle_deg(), 0.0, "{name}");
             }
         }
     }

@@ -22,7 +22,9 @@
 //!
 //! A chamfer between planes (#2486) is the same: the chord between the feet of a line spine
 //! is the plane through them ([`ExactClass::Chord`]), kept as a `Plane` with the chamfer's
-//! sizes beside it, its section the chord (order 0).
+//! sizes beside it, its section the chord (order 0). The order-0 section may bulge: an arc
+//! between the feet at a sagitta (#15129, a weld bead), the circular cylinder through the
+//! feet's lines, kept with the sagitta beside the sizes; the chord is the arc of sagitta 0.
 //!
 //! Not upstream. Deviations: none (no upstream counterpart). No recursion: the supports
 //! are kept as surfaces without definitions of their own (a support that is an exact
@@ -30,7 +32,7 @@
 //! are walked one level.
 
 use crate::blend::fillet_exact::{
-    chord_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
+    arc_section_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
 };
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -39,11 +41,111 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::surface::implicit::{check_exact_net, net_miss, ClassSurface, ExactNetCheck, LeaderMap};
+use crate::surface::implicit::{
+    check_exact_net, lies_on, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit, LeaderMap,
+};
+use crate::surface::procedural_blend::bead::BeadDefinition;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::surface::Surface;
 
 const OP_TRANSFORM: &str = "surface::procedural_blend::exact::ExactRound::transform";
+const OP_CIRCLE: &str = "surface::procedural_blend::exact::ExactRound::supports_distance";
+
+/// The torus a round of the circle class is: a surface of revolution's, about its
+/// placement's axis, of the circle its generating arc is on (the centre of a rational quadratic
+/// arc from its first span's control points: the midpoint of the chord pushed away from the
+/// middle point by `a^2 / h`, `a` the half chord, `h` the middle point's distance from the
+/// chord's midpoint); or a torus label's own. `None` for any other surface.
+///
+/// # Errors
+///
+/// Those of reading the arc's control polygon.
+fn own_torus(net: &Surface) -> Result<Option<Implicit>> {
+    use crate::curve::curve::{Curve, CurveKind};
+    use crate::surface::surface::SurfaceKind;
+    match net.kind() {
+        SurfaceKind::Torus(_) => Ok(AnalyticSupport::of(net)
+            .as_ref()
+            .map(AnalyticSupport::implicit)),
+        SurfaceKind::SurfOfRevolution(rev) => {
+            let Some(CurveKind::BSpline(arc)) = rev.gen_curve().map(Curve::kind) else {
+                return Ok(None);
+            };
+            let (points, _) = arc.control_polygon()?;
+            let [p0, p1, p2, ..] = points.as_slice() else {
+                return Ok(None);
+            };
+            let mid = (*p0 + *p2) * 0.5;
+            let (a, h) = ((*p0 - mid).length(), (mid - *p1).length());
+            if h.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                return Ok(None);
+            }
+            let centre = mid + (mid - *p1) * (a * a / (h * h));
+            let position = rev.position();
+            let (o, axis) = (
+                position.origin(),
+                position.x_axis().cross(position.y_axis()),
+            );
+            let along = (centre - o).dot(axis);
+            let across = (centre - o) - axis * along;
+            Ok(Some(Implicit::Torus {
+                centre: o + axis * along,
+                axis,
+                major: across.length(),
+                minor: (*p0 - centre).length(),
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Not upstream (#10876): the torus `net` is when it is a round of the circle class kept as
+/// its definition ([`ExactClass::Circle`], whose net is re-certified on that torus by an
+/// identity), as its centre, unit axis, and major and minor radii; `None` for any other
+/// surface.
+///
+/// # Errors
+///
+/// Those of reading the arc's control polygon.
+pub fn circle_round_torus(net: &Surface) -> Result<Option<(Point3, Vec3, f64, f64)>> {
+    let circle = matches!(
+        net.procedural_blend(),
+        Some(crate::surface::procedural_blend::BlendRef::Exact { round, .. })
+            if round.class() == ExactClass::Circle
+    );
+    if !circle {
+        return Ok(None);
+    }
+    Ok(match own_torus(net)? {
+        Some(Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        }) => Some((centre, axis, major, minor)),
+        _ => None,
+    })
+}
+
+/// Not upstream (#10876): the torus a surface of revolution of a circular arc (or a torus) is,
+/// read off its generating arc's control polygon as the circle class's own check reads it,
+/// as its centre, unit axis, and major and minor radii; `None` for any other surface. A
+/// reading, not a certificate: the caller proves what it relies on.
+///
+/// # Errors
+///
+/// Those of reading the arc's control polygon.
+pub fn revolved_circle_torus(net: &Surface) -> Result<Option<(Point3, Vec3, f64, f64)>> {
+    Ok(match own_torus(net)? {
+        Some(Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        }) => Some((centre, axis, major, minor)),
+        _ => None,
+    })
+}
 
 /// The exact class of a round whose net is its definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +211,9 @@ pub struct ExactRound {
     pub(crate) order: u32,
     /// A chamfer's sizes (the chord, #2486).
     pub(crate) chamfer: Option<ChamferDefinition>,
+    /// The order-0 section's sagitta (#15129): the arc's middle off the chord, away from the
+    /// edge for a positive one; 0 for the chord. Always 0 for a round.
+    pub(crate) sagitta: f64,
     /// The leader (the centre line), where the class's construction makes one.
     pub(crate) leader: Option<BSplineCurve>,
     /// What the class was read with beside the supports.
@@ -152,6 +257,7 @@ impl ExactRound {
             radius,
             order: 1,
             chamfer: None,
+            sagitta: 0.0,
             leader: leader.cloned(),
             inputs,
             map: LeaderMap::default(),
@@ -190,6 +296,7 @@ impl ExactRound {
             radius: 0.0,
             order: 0,
             chamfer: Some(chamfer),
+            sagitta: 0.0,
             leader: leader.cloned(),
             inputs,
             map: LeaderMap::default(),
@@ -200,6 +307,36 @@ impl ExactRound {
     #[must_use]
     pub const fn chamfer(&self) -> Option<&ChamferDefinition> {
         self.chamfer.as_ref()
+    }
+
+    /// The order-0 section bulged to an arc of `sagitta` between the feet (#15129, a weld
+    /// bead): the chord's definition with the sagitta beside its sizes. A sagitta of 0 is the
+    /// chord.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a definition that is not the chord, and for a sagitta not finite or
+    /// past its bound at the chamfer's sizes ([`BeadDefinition::new`]).
+    pub fn with_sagitta(mut self, sagitta: f64) -> Result<Self> {
+        if sagitta == 0.0 {
+            self.sagitta = 0.0;
+            return Ok(self);
+        }
+        let (ExactClass::Chord, Some(chamfer)) = (self.class, self.chamfer) else {
+            return Err(SolidError::invalid_input(
+                "surface::procedural_blend::exact::ExactRound::with_sagitta",
+                "only the chord (order 0) bulges to an arc",
+            ));
+        };
+        BeadDefinition::new(chamfer, sagitta)?;
+        self.sagitta = sagitta;
+        Ok(self)
+    }
+
+    /// The order-0 section's sagitta: 0 for the chord and for every round.
+    #[must_use]
+    pub const fn sagitta(&self) -> f64 {
+        self.sagitta
     }
 
     /// The class.
@@ -263,7 +400,8 @@ impl ExactRound {
 
     /// Re-certifies `net` against this definition: the supports classified again are of
     /// this class, and the net lies on the class's surface derived from them
-    /// ([`check_exact_net`]). Returns the distance proved, 0.
+    /// ([`check_exact_net`]). A round of the circle class is certified on its own torus
+    /// instead ([`ExactRound::supports_distance`]). Returns the distance proved, 0.
     ///
     /// # Errors
     ///
@@ -271,6 +409,10 @@ impl ExactRound {
     /// surface from them, a net off it; those of reading the supports' quadrics and the
     /// net's NURBS form.
     pub fn recertify(&self, k: &Kernel, net: &Surface) -> Result<f64> {
+        if self.class == ExactClass::Circle {
+            self.supports_distance(k, net)?;
+            return Ok(0.0);
+        }
         let [a, b] = &self.supports;
         let blend = classify_supports(k, [a, b], &self.inputs)?;
         // the chord (#2486): a line spine between planes, of sizes that give its offsets
@@ -282,7 +424,7 @@ impl ExactRound {
             let chord = blend.spine == BlendSpine::Line && planes && sized;
             (
                 chord.then_some(ExactClass::Chord.name()),
-                chord_implicit(&blend).map(ClassSurface::Implicit),
+                arc_section_implicit(&blend, self.sagitta).map(ClassSurface::Implicit),
             )
         } else {
             (
@@ -302,19 +444,72 @@ impl ExactRound {
         Ok(0.0)
     }
 
-    /// How far `net` strays from the surface of the class its supports give
-    /// ([`net_miss`]); `None` where they give it none.
+    /// A round of the circle class: the torus `net` is ([`own_torus`]: its revolution's
+    /// axis and generating circle, or its torus label), proved to hold its form to rounding
+    /// ([`lies_on`]),
+    /// and how far that torus is from the class's torus derived from the supports
+    /// ([`class_surface`]): returned, refused past the tolerance the class was read within.
+    ///
+    /// The class is read within the body's tolerance. Supports only that close to it (a plane
+    /// 1e-13 off square to a cylinder's axis, read from a record) have no torus touching both
+    /// exactly, so the round the solver builds, tangent to the supports as they are, is on a
+    /// torus of its own. Its definition is that torus, at bound 0, a stated distance from the
+    /// supports' class.
     ///
     /// # Errors
     ///
-    /// Those of reading the supports' quadrics and of the evaluations.
-    pub fn miss(&self, k: &Kernel, net: &Surface) -> Result<Option<f64>> {
+    /// `InvalidInput` for supports of another class or with no torus, a net of no torus, a
+    /// net off its torus, or a torus further from the class's than the tolerance; those of
+    /// reading the supports' quadrics, the net's NURBS form and [`lies_on`].
+    pub fn supports_distance(&self, k: &Kernel, net: &Surface) -> Result<f64> {
+        let refused = |why| SolidError::invalid_input(OP_CIRCLE, why);
         let [a, b] = &self.supports;
         let blend = classify_supports(k, [a, b], &self.inputs)?;
-        match class_surface(&blend, self.leader.as_ref(), &self.map) {
-            Some(surface) => net_miss(k, net, &surface).map(Some),
-            None => Ok(None),
+        if ExactClass::of_spine(blend.spine) != Some(ExactClass::Circle) {
+            return Err(refused(
+                "the supports classified again are not of the class the definition names",
+            ));
         }
+        let Some(ClassSurface::Implicit(Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        })) = class_surface(&blend, self.leader.as_ref(), &self.map)
+        else {
+            return Err(refused("the supports give the class no torus"));
+        };
+        let form = crate::blend::fillet_section::station::as_b_spline(k, net)?
+            .ok_or_else(|| refused("the net has no NURBS form to check"))?;
+        let own = own_torus(net)?.ok_or_else(|| refused("the net is no torus"))?;
+        if !lies_on(&form, &own)? {
+            return Err(refused("the net is off its own torus"));
+        }
+        let Implicit::Torus {
+            centre: c,
+            axis: d,
+            major: big_r,
+            minor: r,
+        } = own
+        else {
+            return Err(refused("the net's own surface is no torus"));
+        };
+        // every point of the net's torus moves to the class's torus by at most: the turn of
+        // its axis (an angle, over the torus's reach from its centre), the move of its
+        // centre, and the change of its radii
+        let turn = d.cross(axis).length().atan2(d.dot(axis).abs());
+        let distance =
+            turn * (big_r + r) + (c - centre).length() + (big_r - major).abs() + (r - minor).abs();
+        let within = matches!(
+            distance.partial_cmp(&self.inputs.tol),
+            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+        );
+        if !within {
+            return Err(refused(
+                "the net's torus is further from the class's than the tolerance",
+            ));
+        }
+        Ok(distance)
     }
 
     /// Moves the definition with its net (`Transform`): the supports, the leader and the
@@ -357,6 +552,7 @@ impl ExactRound {
         self.inputs.tol *= factor;
         self.radius *= factor;
         self.chamfer = self.chamfer.map(|c| c.scaled(factor));
+        self.sagitta *= factor;
         Ok(())
     }
 }

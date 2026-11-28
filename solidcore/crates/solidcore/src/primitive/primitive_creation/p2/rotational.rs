@@ -14,7 +14,8 @@
 
 use super::PrimitiveCreationAccess;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::primitive::PrimitiveFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::math::{EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
@@ -22,6 +23,22 @@ use crate::primitive::primitive_creation::{p1::PrimitiveCreation, p3::RepeatedSw
 use crate::topology::BrepId;
 
 const OP: &str = "primitive::primitive_creation::p2::rotational";
+
+/// A side of the cone's profile no longer than the scaled zero `minimum`
+/// ([`PrimitiveFailure::ConeSideTooShort`]): the caller's height and radii.
+#[track_caller]
+fn side_too_short(length: f64, minimum: f64) -> SolidError {
+    SolidError::primitive(OP, PrimitiveFailure::ConeSideTooShort { length, minimum })
+}
+
+/// The revolved profile's frame, from the caller's frame and start angle, could not be
+/// set ([`PrimitiveFailure::ProfileFrameDegenerate`]); the frame's error is the cause.
+#[track_caller]
+fn frame_degenerate(cause: SolidError) -> SolidError {
+    Failure::new(OP, PrimitiveFailure::ProfileFrameDegenerate)
+        .caused_by(cause)
+        .into_error()
+}
 
 /// Upstream's full-turn test: `|angle - 360| < 360 * SM_EFF_ZERO`.
 fn full_rotation(rotation_deg: f64) -> bool {
@@ -62,14 +79,26 @@ impl PrimitiveCreation {
         self.init_entity_maps();
 
         if height < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive(
+                OP,
+                PrimitiveFailure::HeightTooSmall {
+                    height,
+                    minimum: EFF_ZERO,
+                },
+            ));
         }
 
         // Check for special cases: a full 360 degree sweep is analytic, a zero
         // sweep fails
         let rotation = end_deg - start_deg;
         if rotation.abs() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive(
+                OP,
+                PrimitiveFailure::SweepAngleTooSmall {
+                    angle: rotation,
+                    minimum: EFF_ZERO,
+                },
+            ));
         }
         let full = full_rotation(rotation);
         if full {
@@ -80,7 +109,7 @@ impl PrimitiveCreation {
 
         // Construct partial cone
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
         a.set_editing(brep, true)?;
 
@@ -99,26 +128,28 @@ impl PrimitiveCreation {
         let mut curves = Vec::new();
         let tol = EFF_ZERO * (1.0 + end.max_dimension() + start.max_dimension());
 
-        if end.distance(start) > tol {
+        let side = end.distance(start);
+        if side > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
                 3, start, end,
             )?)));
         } else {
             // Zero length side of a cone is not legal
-            return Err(SolidError::sm_err(OP));
+            return Err(side_too_short(side, tol));
         }
         if origin.distance(start) > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
                 3, origin, start,
             )?)));
         }
-        if origin.distance(top_base) > tol {
+        let axis_side = origin.distance(top_base);
+        if axis_side > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
                 3, origin, top_base,
             )?)));
         } else {
             // Zero length side of a cone is not legal
-            return Err(SolidError::sm_err(OP));
+            return Err(side_too_short(axis_side, tol));
         }
         if end.distance(top_base) > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
@@ -126,8 +157,16 @@ impl PrimitiveCreation {
             )?)));
         }
         if curves.len() < 3 {
-            // Some problem here with not enough curves
-            return Err(SolidError::sm_err(OP));
+            // the side and the axis are there: both radii are within the tolerance, so no
+            // side leaves the axis
+            return Err(SolidError::primitive(
+                OP,
+                PrimitiveFailure::ConeHasNoRadius {
+                    base: origin.distance(start),
+                    top: end.distance(top_base),
+                    minimum: tol,
+                },
+            ));
         }
 
         self.create_partial_rotational_sweep(
@@ -170,7 +209,7 @@ impl PrimitiveCreation {
 
         // Construct partial sphere
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
         a.set_editing(brep, true)?;
 
@@ -188,12 +227,9 @@ impl PrimitiveCreation {
 
         // We need a frame for the circle: its X is -Axis, its Z is the Y of RefFrame1
         let mut ref_frame3 = Axis2Placement::IDENTITY;
-        if ref_frame3
+        ref_frame3
             .set_canonical(origin, -axis, y_rf1.cross(axis))
-            .is_err()
-        {
-            return Err(SolidError::sm_err(OP));
-        }
+            .map_err(frame_degenerate)?;
 
         // The circle generator can cope all angles.
         let circle = BSplineCurve::create_circle_segment(
@@ -250,7 +286,7 @@ impl PrimitiveCreation {
 
         // Construct partial torus
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
         a.set_editing(brep, true)?;
 
@@ -266,12 +302,9 @@ impl PrimitiveCreation {
 
         // We need a frame for the full circle: its x is the -axis, its Z is YRF1
         let mut ref_frame3 = Axis2Placement::IDENTITY;
-        if ref_frame3
+        ref_frame3
             .set_canonical(center, -axis, (-y_rf1).cross(axis))
-            .is_err()
-        {
-            return Err(SolidError::sm_err(OP));
-        }
+            .map_err(frame_degenerate)?;
 
         // if minor radius = major radius, adjust start and end angle -180 to 180
         let (circle_start, circle_end) = if minor == major {

@@ -1,0 +1,601 @@
+//! The icon renderer over a host's [`IconSet`]: SVG masters drawn at the pixel size they are shown.
+//!
+//! The kit ships no artwork. A host compiles its masters, colour roles, accents and aliases into an
+//! [`IconData`] and wraps it in a `static` [`IconSet`]; [`super::install`] makes it the set the
+//! painters draw from.
+//!
+//! The masters are a small, linted SVG subset: absolute `M L C Q A Z` paths, circles, groups with a
+//! clip or opacity, masks and clip paths. They are parsed once per set and rasterised with tiny-skia
+//! into a texture per (icon, accent, theme, pixel size). A master never carries a colour of its own:
+//! it names a colour role by the role's source hex, which resolves to the theme's hex, or to the
+//! accent's hex for the `active-*` roles. The `gap` role instead erases preceding artwork to
+//! transparency; it never paints a background. The set owns the defaults; theme files may override
+//! display roles and semantic ramps ([`set_theme_palette`]).
+//!
+//! Nothing here panics on bad artwork: a master that does not parse is logged and drawn as the
+//! placeholder.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use solidcraft_icon_svg::{Item, Node, Paint};
+use tiny_skia as sk;
+
+/// The master drawn for every icon the set has no master for. A set without one draws nothing there.
+pub const PLACEHOLDER: &str = "placeholder";
+
+/// The most colour roles a set may have that a theme file can override ([`Palette::roles`]).
+pub const MAX_ROLES: usize = 32;
+
+/// The most accents a set may have that a theme file can override ([`Palette::accents`], after the base ramp).
+pub const MAX_ACCENTS: usize = 15;
+
+/// Opt-in icon discovery on the UI thread. Disabled rendering only checks a thread-local flag.
+pub mod audit {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+
+    /// One requested semantic id and the artwork actually selected by the renderer.
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+    pub struct Requested {
+        pub name: String,
+        pub master: String,
+        pub placeholder: bool,
+    }
+
+    thread_local! {
+        static ACTIVE: Cell<bool> = const { Cell::new(false) };
+        static REQUESTS: RefCell<BTreeMap<String, Requested>> = const { RefCell::new(BTreeMap::new()) };
+    }
+
+    /// Enable collection and reset the accumulated names.
+    pub fn start() {
+        REQUESTS.with(|requests| requests.borrow_mut().clear());
+        ACTIVE.set(true);
+    }
+
+    /// Drain sorted, unique requests; collection stays enabled until `stop`.
+    pub fn take() -> Vec<Requested> {
+        REQUESTS.with(|requests| std::mem::take(&mut *requests.borrow_mut()).into_values().collect())
+    }
+
+    /// Disable collection, releasing any requests that were not taken.
+    pub fn stop() {
+        ACTIVE.set(false);
+        REQUESTS.with(|requests| requests.borrow_mut().clear());
+    }
+
+    pub(super) fn record(name: &str, resolved: super::Resolved) {
+        if ACTIVE.get() {
+            REQUESTS.with(|requests| {
+                requests.borrow_mut().entry(name.to_owned()).or_insert_with(|| Requested {
+                    name: name.to_owned(),
+                    master: resolved.master.to_owned(),
+                    placeholder: resolved.placeholder,
+                });
+            });
+        }
+    }
+}
+
+/// A parsed master of one [`IconSet`].
+pub struct Doc {
+    set: &'static IconSet,
+    items: Vec<Item>,
+    masks: Vec<Vec<Node>>,
+    clips: Vec<Vec<Node>>,
+}
+
+impl std::fmt::Debug for Doc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Doc").field("items", &self.items).field("masks", &self.masks).field("clips", &self.clips).finish_non_exhaustive()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The icon set
+
+/// A host's icon artwork as compiled data. Every colour is `[r, g, b]`; indices refer to
+/// `role_names` (roles) and `accent_names` (accents).
+#[derive(Clone, Copy)]
+pub struct IconData {
+    /// The colour roles, by name. The renderer knows `ink`, `line` (SVG `currentColor`), `guide`,
+    /// `gap` (an eraser), `passive-1..3` and `active-1..3`; other roles are drawn as they are.
+    pub role_names: &'static [&'static str],
+    /// Each role's stable SVG identifier (`#rrggbb`, lower case), in `role_names` order.
+    pub role_source_hex: &'static [&'static str],
+    /// Each role's colour on a light (`[0]`) and a dark (`[1]`) theme, in `role_names` order.
+    pub palette: [&'static [[u8; 3]]; 2],
+    /// The accent ramps, by name.
+    pub accent_names: &'static [&'static str],
+    /// Per accent: (role, light, dark) for each role it recolours.
+    pub accents: &'static [&'static [(usize, [u8; 3], [u8; 3])]],
+    /// Colour-vision variants: (`"red-green"` or `"blue-yellow"`, accent, role, light, dark).
+    pub accent_variants: &'static [(&'static str, usize, usize, [u8; 3], [u8; 3])],
+    /// The masters: (id, family, SVG source). The family `small` holds the variants drawn at
+    /// 24 pixels or less; every other family is a full-size master. A [`PLACEHOLDER`] master is
+    /// drawn for unknown names.
+    pub masters: &'static [(&'static str, &'static str, &'static str)],
+    /// Other names for masters: (alias, master, accent or `""`).
+    pub aliases: &'static [(&'static str, &'static str, &'static str)],
+    /// The accent an icon id is drawn in by default: (id, accent).
+    pub icon_accents: &'static [(&'static str, &'static str)],
+    /// The accent whose ramp tints destructive actions ([`super::paint_danger`]).
+    pub danger_accent: &'static str,
+}
+
+impl IconData {
+    /// No artwork: every icon draws nothing.
+    pub const EMPTY: IconData = IconData {
+        role_names: &[],
+        role_source_hex: &[],
+        palette: [&[], &[]],
+        accent_names: &[],
+        accents: &[],
+        accent_variants: &[],
+        masters: &[],
+        aliases: &[],
+        icon_accents: &[],
+        danger_accent: "",
+    };
+}
+
+/// A host's own masters over another host's [`IconData`] ([`IconSet::extended`]): drawn in that
+/// data's colour roles and accents. For a name both have, the extension's master, alias or
+/// default accent is the one drawn.
+#[derive(Clone, Copy)]
+pub struct IconExtension {
+    /// The host's masters, as [`IconData::masters`].
+    pub masters: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's aliases, as [`IconData::aliases`]; they may name the data's masters too.
+    pub aliases: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's default accents, as [`IconData::icon_accents`], by the data's accent names.
+    pub icon_accents: &'static [(&'static str, &'static str)],
+}
+
+impl IconExtension {
+    /// No masters of the host's own.
+    pub const NONE: IconExtension = IconExtension { masters: &[], aliases: &[], icon_accents: &[] };
+}
+
+/// A host's icons: its [`IconData`], any [`IconExtension`] over it, and the masters parsed from
+/// them on first use. Keep it in a `static`.
+pub struct IconSet {
+    data: IconData,
+    extension: IconExtension,
+    table: OnceLock<Table>,
+    /// Each icon id's master and accent once resolved: every icon drawn at every frame looked
+    /// its id up along the alias and accent lists.
+    resolved: OnceLock<std::sync::Mutex<HashMap<String, Resolved>>>,
+    /// Masters added while the app runs ([`IconSet::add`]): artwork a plugin package ships.
+    added: OnceLock<std::sync::Mutex<HashMap<&'static str, &'static Doc>>>,
+}
+
+/// The largest SVG source [`IconSet::add`] takes.
+pub const MAX_ADDED_BYTES: usize = 64 * 1024;
+
+/// The most masters [`IconSet::add`] keeps: each is kept for the life of the process.
+pub const MAX_ADDED: usize = 1024;
+
+/// The parsed masters: full size, and the small-slot variants.
+struct Table {
+    big: HashMap<&'static str, Doc>,
+    small: HashMap<&'static str, Doc>,
+}
+
+/// A resolved icon: the master to draw and the accent it is drawn in.
+#[derive(Clone, Copy, Debug)]
+pub struct Resolved {
+    pub master: &'static str,
+    pub accent: Option<usize>,
+    pub placeholder: bool,
+}
+
+impl IconSet {
+    /// The set over `data`. Its masters are parsed the first time one is drawn.
+    pub const fn new(data: IconData) -> Self {
+        Self::extended(data, IconExtension::NONE)
+    }
+
+    /// The set over `data` with a host's own masters, aliases and default accents, which take
+    /// precedence for a name both have. `data` is not copied: it is the same static tables.
+    pub const fn extended(data: IconData, extension: IconExtension) -> Self {
+        Self { data, extension, table: OnceLock::new(), resolved: OnceLock::new(), added: OnceLock::new() }
+    }
+
+    /// The set's data (without its extension).
+    pub fn data(&self) -> &IconData {
+        &self.data
+    }
+
+    /// The host's masters over [`IconSet::data`]; [`IconExtension::NONE`] for a plain set.
+    pub fn extension(&self) -> &IconExtension {
+        &self.extension
+    }
+
+    fn role(&self, name: &str) -> Option<usize> {
+        self.data.role_names.iter().position(|role| *role == name)
+    }
+
+    fn table(&'static self) -> &'static Table {
+        self.table.get_or_init(|| {
+            let (mut big, mut small) = (HashMap::new(), HashMap::new());
+            // The extension's masters come first, so they win a name both have.
+            for (id, fam, src) in self.extension.masters.iter().chain(self.data.masters) {
+                match self.parse(src) {
+                    Ok(doc) => {
+                        let map = if *fam == "small" { &mut small } else { &mut big };
+                        // Model masters precede flat glyphs: keep the reviewed command artwork.
+                        map.entry(*id).or_insert(doc);
+                    }
+                    Err(e) => log::warn!("icon {fam}/{id}: {e}"),
+                }
+            }
+            Table { big, small }
+        })
+    }
+
+    /// Parse one master in this set's colour roles.
+    pub fn parse(&'static self, src: &str) -> Result<Doc, String> {
+        let solidcraft_icon_svg::Doc { items, masks, clips } = solidcraft_icon_svg::parse(src, self.data.role_names, self.data.role_source_hex)?;
+        Ok(Doc { set: self, items, masks, clips })
+    }
+
+    /// Add a master while the app runs, named `name`, from SVG source in this set's subset and
+    /// colour roles (the same check the built-in masters pass: no other elements, no colours of
+    /// its own, no references outside the file). It draws like any master, in the theme's roles.
+    /// A name the set already has is refused, so added artwork never replaces the app's. Adding
+    /// the same name again keeps the first. The source is at most [`MAX_ADDED_BYTES`], and at
+    /// most [`MAX_ADDED`] masters are added.
+    pub fn add(&'static self, name: &str, src: &str) -> Result<(), String> {
+        if src.len() > MAX_ADDED_BYTES {
+            return Err(format!("larger than {} KiB", MAX_ADDED_BYTES / 1024));
+        }
+        let added = self.added.get_or_init(Default::default);
+        if added.lock().map_err(|_| "unavailable")?.contains_key(name) {
+            return Ok(());
+        }
+        if name.is_empty() || name == PLACEHOLDER || !self.resolve_master(name).placeholder {
+            return Err(format!("the name {name} is taken"));
+        }
+        let doc = self.parse(src)?;
+        let mut added = added.lock().map_err(|_| "unavailable")?;
+        if added.len() >= MAX_ADDED {
+            return Err("too many added icons".into());
+        }
+        if !added.contains_key(name) {
+            added.insert(Box::leak(name.to_owned().into_boxed_str()), Box::leak(Box::new(doc)));
+        }
+        drop(added);
+        // A name drawn before it was added resolved to the placeholder.
+        if let Some(cache) = self.resolved.get()
+            && let Ok(mut cache) = cache.lock()
+        {
+            cache.remove(name);
+        }
+        Ok(())
+    }
+
+    /// An added master ([`IconSet::add`]) by name, with the name as kept.
+    fn added(&self, name: &str) -> Option<(&'static str, &'static Doc)> {
+        let added = self.added.get()?.lock().ok()?;
+        added.get_key_value(name).map(|(k, v)| (*k, *v))
+    }
+
+    /// The index of the accent `name`, or `None` for the empty name (the base ramp) or an unknown one.
+    pub fn accent_index(&self, name: &str) -> Option<usize> {
+        if name.is_empty() { None } else { self.data.accent_names.iter().position(|a| *a == name) }
+    }
+
+    /// A semantic default belongs to the requested id, never to the caller's current workspace.
+    fn default_accent(&self, name: &str) -> Option<usize> {
+        let find = |accents: &'static [(&'static str, &'static str)]| accents.iter().find(|(id, _)| *id == name);
+        find(self.extension.icon_accents).or_else(|| find(self.data.icon_accents)).and_then(|(_, accent)| self.accent_index(accent))
+    }
+
+    /// The master and accent for an icon id: an alias (with its accent), a master of that name,
+    /// or the placeholder.
+    pub fn resolve(&'static self, name: &str) -> Resolved {
+        let cache = self.resolved.get_or_init(Default::default);
+        let known = cache.lock().ok().and_then(|c| c.get(name).copied());
+        let resolved = known.unwrap_or_else(|| {
+            let resolved = self.resolve_master(name);
+            if let Ok(mut c) = cache.lock() {
+                c.insert(name.to_owned(), resolved);
+            }
+            resolved
+        });
+        audit::record(name, resolved);
+        resolved
+    }
+
+    fn resolve_master(&'static self, name: &str) -> Resolved {
+        if let Some((master, _)) = self.added(name) {
+            return Resolved { master, accent: None, placeholder: false };
+        }
+        let big = &self.table().big;
+        let placeholder = Resolved { master: PLACEHOLDER, accent: None, placeholder: true };
+        let find = |aliases: &'static [(&'static str, &'static str, &'static str)]| aliases.iter().find(|(a, _, _)| *a == name);
+        // The extension's names first: its alias, then its master, then the data's alias.
+        let extends = self.extension.masters.iter().any(|(id, fam, _)| *id == name && *fam != "small");
+        let alias = find(self.extension.aliases).or_else(|| if extends { None } else { find(self.data.aliases) });
+        if let Some((_, master, accent)) = alias {
+            return match big.get_key_value(master) {
+                Some((k, _)) => Resolved { master: k, accent: self.accent_index(accent).or_else(|| self.default_accent(name)), placeholder: false },
+                None => placeholder,
+            };
+        }
+        match big.get_key_value(name) {
+            Some((k, _)) if name != PLACEHOLDER => Resolved { master: k, accent: self.default_accent(name), placeholder: false },
+            _ => placeholder,
+        }
+    }
+
+    /// The master to draw at `px` pixels: the small-slot variant where one exists, the
+    /// placeholder for an unknown master, `None` when the set has neither.
+    pub fn doc_for(&'static self, master: &str, px: u32) -> Option<&'static Doc> {
+        if let Some((_, doc)) = self.added(master) {
+            return Some(doc);
+        }
+        let Table { big, small } = self.table();
+        if let Some(doc) = small.get(master).filter(|_| px <= 24) {
+            return Some(doc);
+        }
+        big.get(master).or_else(|| big.get(PLACEHOLDER))
+    }
+
+    /// Whether the set has a full-size master `id` that parsed.
+    pub fn has_master(&'static self, id: &str) -> bool {
+        self.table().big.contains_key(id)
+    }
+
+    /// Every full-size master id (not the small variants), sorted, for tests and tooling.
+    pub fn master_ids(&'static self) -> Vec<&'static str> {
+        let mut v: Vec<_> = self.table().big.keys().copied().collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// The colour of role `role` (an index into `role_names`) in `look`.
+    pub fn role_rgb(&self, look: Look, role: usize) -> [u8; 3] {
+        let theme = usize::from(look.dark);
+        let vision = match look.vision {
+            solidcraft_theme::ColorVision::Off => "",
+            solidcraft_theme::ColorVision::Protan | solidcraft_theme::ColorVision::Deutan => "red-green",
+            solidcraft_theme::ColorVision::Tritan => "blue-yellow",
+        };
+        if let Some((_, _, _, l, d)) = self.data.accent_variants.iter().find(|(v, a, r, _, _)| *v == vision && Some(*a) == look.accent && *r == role)
+        {
+            return if look.dark { *d } else { *l };
+        }
+        if let Some(rgb) = look.palette.and_then(|p| p.rgb(self, role, look.accent)) {
+            return rgb;
+        }
+        let base = || self.data.palette.get(theme).and_then(|p| p.get(role)).copied().unwrap_or([255, 0, 255]);
+        if self.data.role_names.get(role) == Some(&"guide") {
+            return base();
+        }
+        if let Some((_, l, d)) = look.accent.and_then(|a| self.data.accents.get(a)).and_then(|items| items.iter().find(|(r, _, _)| *r == role)) {
+            return if look.dark { *d } else { *l };
+        }
+        base()
+    }
+
+    /// The colour of the role named `name` in `look`; `gap` is transparent.
+    pub fn role_colour(&self, name: &str, look: Look) -> egui::Color32 {
+        if name == "gap" {
+            return egui::Color32::TRANSPARENT;
+        }
+        let [r, g, b] = self.role(name).map(|role| self.role_rgb(look, role)).unwrap_or([255, 0, 255]);
+        egui::Color32::from_rgb(r, g, b)
+    }
+
+    /// The primary semantic stroke of icon `name` (its `active-3` role), also used by toolbar
+    /// affordances. The set owns its value.
+    pub fn primary(&'static self, name: &str, dark: bool, vision: solidcraft_theme::ColorVision) -> egui::Color32 {
+        let look = Look::themed(dark, self.resolve(name).accent, vision);
+        self.role_colour("active-3", look)
+    }
+
+    fn resolve_paint(&self, look: Look, p: Paint) -> Option<[u8; 3]> {
+        match p {
+            Paint::None | Paint::Knockout => None,
+            Paint::Fixed(c) => Some(c),
+            Paint::Role(r) => Some(self.role_rgb(look, r)),
+            Paint::Line => self.role("line").map(|r| self.role_rgb(look, r)),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rendering
+
+/// Theme-file overrides for stable SVG roles and semantic active-face ramps, indexed like the
+/// installed set's roles and (after the base ramp at 0) accents.
+/// Fixed-size storage keeps `Look` copyable and bounds imported palette size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Palette {
+    pub roles: [Option<[u8; 3]>; MAX_ROLES],
+    pub accents: [Option<[[u8; 3]; 3]>; MAX_ACCENTS + 1],
+}
+
+thread_local! {
+    /// The applied theme file's icon palette and whether its base is dark, per UI thread like the theme's tokens.
+    /// `None`: the set's built-in artwork colours.
+    static THEME_PALETTE: std::cell::Cell<Option<(bool, Palette)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Draw with a theme file's icon palette on its base (`Some((dark, palette))`), or with the built-in colours (`None`).
+/// Returns whether that changed anything.
+pub fn set_theme_palette(palette: Option<(bool, Palette)>) -> bool {
+    THEME_PALETTE.replace(palette) != palette
+}
+
+/// The icon palette state as [`set_theme_palette`] last set it, for restoring it.
+pub fn theme_palette_state() -> Option<(bool, Palette)> {
+    THEME_PALETTE.get()
+}
+
+/// The applied theme file's icon palette for a dark or light drawing, or `None` when the theme is not for that base.
+pub fn theme_palette(dark: bool) -> Option<Palette> {
+    THEME_PALETTE.get().filter(|(base, _)| *base == dark).map(|(_, palette)| palette)
+}
+
+impl Palette {
+    fn rgb(self, set: &IconSet, role: usize, accent: Option<usize>) -> Option<[u8; 3]> {
+        let name = set.data.role_names.get(role)?;
+        let face = match *name {
+            "active-1" => Some(0),
+            "active-2" => Some(1),
+            "active-3" => Some(2),
+            _ => None,
+        };
+        if let Some(face) = face {
+            let ramp = self.accents.get(accent.map_or(0, |a| a.saturating_add(1))).copied().flatten();
+            if let Some(rgb) = ramp.and_then(|r| r.get(face).copied()) {
+                return Some(rgb);
+            }
+            // A base ramp never overwrites a semantic accent that the theme omitted.
+            if accent.is_some() {
+                return None;
+            }
+        }
+        self.roles.get(role).copied().flatten()
+    }
+}
+
+/// The colours of one drawing: the theme and an accent (index into the set's accents, or `None`
+/// for the base palette).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Look {
+    pub dark: bool,
+    pub accent: Option<usize>,
+    pub vision: solidcraft_theme::ColorVision,
+    pub palette: Option<Palette>,
+}
+
+impl Look {
+    pub fn themed(dark: bool, accent: Option<usize>, vision: solidcraft_theme::ColorVision) -> Self {
+        Self { dark, accent, vision, palette: theme_palette(dark) }
+    }
+}
+
+/// Explicit whole-glyph tinting maps shaded passive faces to the selected active ramp.
+/// Keep ink, guides, literal mask colours and knockouts in their original roles.
+#[derive(Clone, Copy)]
+struct PaintLook {
+    set: &'static IconSet,
+    look: Look,
+    tint_passive: bool,
+}
+
+impl PaintLook {
+    fn resolve(self, paint: Paint) -> Option<[u8; 3]> {
+        if self.tint_passive
+            && let Paint::Role(role) = paint
+        {
+            let active = match self.set.data.role_names.get(role).copied() {
+                Some("passive-1") => Some("active-1"),
+                Some("passive-2") => Some("active-2"),
+                Some("passive-3") => Some("active-3"),
+                _ => None,
+            };
+            if let Some(role) = active.and_then(|name| self.set.role(name)) {
+                return Some(self.set.role_rgb(self.look, role));
+            }
+        }
+        self.set.resolve_paint(self.look, paint)
+    }
+}
+
+fn paint_of(c: [u8; 3], alpha: f32) -> sk::Paint<'static> {
+    let mut p = sk::Paint::default();
+    p.set_color_rgba8(c[0], c[1], c[2], (alpha.clamp(0.0, 1.0) * 255.0).round() as u8);
+    p.anti_alias = true;
+    p
+}
+
+fn shape_paint(paint: Paint, look: PaintLook, alpha: f32) -> Option<sk::Paint<'static>> {
+    if paint == Paint::Knockout {
+        let mut paint = paint_of([0, 0, 0], alpha);
+        paint.blend_mode = sk::BlendMode::DestinationOut;
+        Some(paint)
+    } else {
+        look.resolve(paint).map(|colour| paint_of(colour, alpha))
+    }
+}
+
+fn draw_node(pm: &mut sk::Pixmap, n: &Node, look: PaintLook, tf: sk::Transform, doc: &Doc, clip: Option<&sk::Mask>, opacity: f32) {
+    let own;
+    let mask = if let Some(m) = n.mask {
+        own = doc.masks.get(m).and_then(|nodes| {
+            let mut sub = sk::Pixmap::new(pm.width(), pm.height())?;
+            for node in nodes {
+                draw_node(&mut sub, node, look, tf, doc, None, 1.0);
+            }
+            let mut own = sk::Mask::from_pixmap(sub.as_ref(), sk::MaskType::Luminance);
+            if let Some(parent) = clip {
+                for (value, parent) in own.data_mut().iter_mut().zip(parent.data()) {
+                    *value = ((u16::from(*value) * u16::from(*parent) + 127) / 255) as u8;
+                }
+            }
+            Some(own)
+        });
+        own.as_ref()
+    } else {
+        clip
+    };
+    let alpha = n.opacity * opacity;
+    if let Some(paint) = shape_paint(n.fill, look, alpha) {
+        pm.fill_path(&n.path, &paint, n.rule, tf, mask);
+    }
+    if let Some(paint) = shape_paint(n.stroke, look, alpha) {
+        let stroke = sk::Stroke {
+            width: n.width,
+            line_cap: sk::LineCap::Round,
+            line_join: sk::LineJoin::Round,
+            dash: if n.dash.is_empty() { None } else { sk::StrokeDash::new(n.dash.clone(), 0.0) },
+            ..sk::Stroke::default()
+        };
+        pm.stroke_path(&n.path, &paint, &stroke, tf, mask);
+    }
+}
+
+fn draw_items(pm: &mut sk::Pixmap, items: &[Item], look: PaintLook, tf: sk::Transform, doc: &Doc, clip: Option<&sk::Mask>, opacity: f32) {
+    for item in items {
+        match item {
+            Item::Node(n) => draw_node(pm, n, look, tf, doc, clip, opacity),
+            Item::Group { clip: c, opacity: o, items } => {
+                let mask = c.and_then(|c| doc.clips.get(c)).and_then(|nodes| {
+                    let mut m = sk::Mask::new(pm.width(), pm.height())?;
+                    for n in nodes {
+                        m.fill_path(&n.path, n.rule, true, tf);
+                    }
+                    Some(m)
+                });
+                draw_items(pm, items, look, tf, doc, mask.as_ref().or(clip), opacity * o);
+            }
+        }
+    }
+}
+
+/// Rasterise `doc` into a square `px` × `px` premultiplied RGBA image.
+pub fn render(doc: &Doc, look: Look, px: u32) -> Option<sk::Pixmap> {
+    render_with_look(doc, PaintLook { set: doc.set, look, tint_passive: false }, px)
+}
+
+/// Tint passive faces through the active ramp while retaining shading and all geometry.
+pub fn render_tinted(doc: &Doc, look: Look, px: u32) -> Option<sk::Pixmap> {
+    render_with_look(doc, PaintLook { set: doc.set, look, tint_passive: true }, px)
+}
+
+fn render_with_look(doc: &Doc, look: PaintLook, px: u32) -> Option<sk::Pixmap> {
+    let mut pm = sk::Pixmap::new(px, px)?;
+    let s = px as f32 / 64.0;
+    draw_items(&mut pm, &doc.items, look, sk::Transform::from_scale(s, s), doc, None, 1.0);
+    Some(pm)
+}
+
+#[cfg(test)]
+#[path = "svg_tests.rs"]
+mod tests;

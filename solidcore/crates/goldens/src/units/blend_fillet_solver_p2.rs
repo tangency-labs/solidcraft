@@ -43,8 +43,7 @@ use solidcore::blend::fillet_geom::p1::{
     FilletGeomId, FilletGeomType, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_solver::p1::{
-    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator,
-    OffsetSurfaceSlot,
+    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator, OffsetSurfaceSlot,
 };
 use solidcore::blend::fillet_solver::p2::SolverErrorObject;
 use solidcore::curve::curve::Curve;
@@ -269,8 +268,7 @@ fn check_sizes(i: &Inputs) -> Result<(), HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -1.0,
+        e => crate::output::blend_status(e).map_or(-1.0, f64::from),
     }
 }
 
@@ -1004,7 +1002,11 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             )?;
             let empty = Brep::new();
             let index = usize::try_from(*index).map_err(|_| harness("index"))?;
-            match fs.base.fillet_corner(&empty, index, &solidcore::blend::fillet_geom::p3::NoCorners) {
+            match fs.base.fillet_corner(
+                &empty,
+                index,
+                &solidcore::blend::fillet_geom::p3::NoCorners,
+            ) {
                 Ok(c) => {
                     o.push(b(c.is_none()));
                     o.push(fs.jacobian_size().unwrap_or(0) as f64);

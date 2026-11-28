@@ -6,7 +6,7 @@
 //! `*pbProven` is its field. `std::partial_sort` of the violated rows is a full sort of the
 //! pairs `(slack, row)`, a total order on distinct rows, so the rows taken are the same.
 
-use super::{el, el_mut, sm_err, smax, smin};
+use super::{el, el_mut, past_table, smax, smin};
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use core::cell::Cell;
@@ -40,6 +40,14 @@ pub(super) enum QpOutcome {
 /// A row-major element `m[i n + j]`, `SM_ERR` past its end.
 fn at(m: &[f64], i: usize) -> Result<f64> {
     el(m, i)
+}
+
+/// Row `i` of the row-major `C` with `n` columns: the scans read it as one slice, the
+/// same coefficients in the same order as indexing each.
+fn row_of(cm: &[f64], i: usize, n: usize) -> Result<&[f64]> {
+    let start = i.checked_mul(n).ok_or_else(past_table)?;
+    let end = start.checked_add(n).ok_or_else(past_table)?;
+    cm.get(start..end).ok_or_else(past_table)
 }
 
 /// The dual method's state (`sm_SbDualQP`'s locals): `J` (`J' G J = I`, turned as
@@ -134,9 +142,10 @@ fn dual_run(
     let mut z = vec![0.0; n];
     let mut r = vec![0.0; n];
     let slack = |y: &[f64], i: usize| -> Result<f64> {
+        let ci = row_of(cm, i, n)?;
         let mut s = -at(b, i)?;
-        for (k, &yk) in y.iter().enumerate() {
-            s += at(cm, i * n + k)? * yk;
+        for (&c, &yk) in ci.iter().zip(y) {
+            s += c * yk;
         }
         Ok(s)
     };
@@ -250,7 +259,7 @@ fn dual_run(
             up += t;
             if t2 != f64::INFINITY && t == t2 {
                 // p joins: d[q + 1 ..] rotated into d[q], J's columns alike
-                let mut j = n.checked_sub(1).ok_or_else(sm_err)?;
+                let mut j = n.checked_sub(1).ok_or_else(past_table)?;
                 while j > q {
                     let (mut dj1, mut dj) = (at(&d, j - 1)?, at(&d, j)?);
                     let (cs, sn) = givens(&mut dj1, &mut dj);
@@ -276,7 +285,7 @@ fn dual_run(
             // drop leaves: its column out of R, R made triangular again by rotations of its
             // rows (J's columns alike)
             if drop >= active.len() {
-                return Err(sm_err());
+                return Err(past_table());
             }
             active.remove(drop);
             u.remove(drop);
@@ -332,11 +341,12 @@ pub(super) fn dual_qp(
 /// `(n + 1) eps (sum_k |C_ik y_k| + |b_i|)`, the bound of its dot product's rounding. Negative
 /// only where the row is violated by more than its rounding can account for.
 fn violation(cm: &[f64], b: &[f64], y: &[f64], i: usize, n: usize) -> Result<f64> {
+    let ci = row_of(cm, i, n)?;
     let bi = at(b, i)?;
     let mut s = -bi;
     let mut size = bi.abs();
-    for (k, &yk) in y.iter().enumerate() {
-        let t = at(cm, i * n + k)? * yk;
+    for (&c, &yk) in ci.iter().zip(y) {
+        let t = c * yk;
         s += t;
         size += t.abs();
     }
@@ -375,14 +385,14 @@ pub(super) trait QpRows {
         let mut out = Vec::new();
         let mut row = Vec::new();
         for slot in 0..self.slot_count() {
-            if *taken.get(slot).ok_or_else(sm_err)? {
+            if *taken.get(slot).ok_or_else(past_table)? {
                 continue;
             }
             let Some(b) = self.row(slot, &mut row)? else {
                 continue;
             };
             if row.len() != y.len() {
-                return Err(sm_err());
+                return Err(past_table());
             }
             let mut slack = -b;
             let mut size = b.abs();
@@ -420,9 +430,9 @@ impl QpRows for DenseRows<'_> {
 
     fn row(&self, slot: usize, scratch: &mut Vec<f64>) -> Result<Option<f64>> {
         self.builds.set(self.builds.get().saturating_add(1));
-        let start = slot.checked_mul(self.n).ok_or_else(sm_err)?;
-        let end = start.checked_add(self.n).ok_or_else(sm_err)?;
-        let row = self.c.get(start..end).ok_or_else(sm_err)?;
+        let start = slot.checked_mul(self.n).ok_or_else(past_table)?;
+        let end = start.checked_add(self.n).ok_or_else(past_table)?;
+        let row = self.c.get(start..end).ok_or_else(past_table)?;
         scratch.clear();
         scratch.extend_from_slice(row);
         Ok(Some(at(self.b, slot)?))
@@ -542,9 +552,9 @@ fn dual_qp_source_inner(
         for &(_, i) in violated.iter().take(take) {
             *el_mut(&mut taken, i)? = true;
             set.push(i);
-            let b = rows.row(i, &mut row)?.ok_or_else(sm_err)?;
+            let b = rows.row(i, &mut row)?.ok_or_else(past_table)?;
             if row.len() != n {
-                return Err(sm_err());
+                return Err(past_table());
             }
             sc.extend_from_slice(&row);
             sb.push(b);

@@ -15,13 +15,18 @@
 # nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
 # on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
 # Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
-# that changes what they exercise. The wasm compile check runs in the merge queue for a group that
-# touches the crates below the apps, the web app or the manifests. Dependency advisories run nightly
+# that changes what they exercise. The wasm check and browser smoke (up to 45 minutes) run nightly and in
+# the merge queue for a group that touches app dependencies, the web app, assets or the browser
+# tests, not on pull requests, so pull request CI stays fast. Dependency advisories run nightly
 # and on any pull request or merge group that changes Cargo.lock or a Cargo.toml. Only main saves the build caches; pull requests restore them.
-# sccache is on a Blacksmith sticky disk that only main commits.
+# sccache is on a Blacksmith sticky disk that only main commits. So is each build job's target/
+# (WARM_TARGET below): every push to main builds them, a push the queue already tested without
+# running the tests (`warm`), and every other run starts from main's latest build and recompiles
+# only the crates whose files differ from it (scripts/ci/warm_target.py), and their dependents.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
-# Otherwise it runs everything.
+# Otherwise it runs everything; it also does when it changes a cache key (the toolchain, Cargo.lock,
+# the cache settings here), so that main saves the caches the next runs restore.
 # Heavy checks wait for review: a pull request without the `approved-for-ci` label runs only
 # Select checks, the format and repository checks and a quick compile. Adding the label (after
 # review) runs everything above, and every later push to the PR does too, except a push that only
@@ -37,18 +42,26 @@
 # solidcore/, on a pull request (once approved), merge group or push to main that changes
 # solidcore/** (main saves their caches), with SolidCore's cargo-deny (licences, bans, sources,
 # advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
+# The kernel rig (kernel-rig.yml, called as a reusable workflow) runs on approved pull requests and
+# merge groups, for the rig areas the diff reaches, and `ci` requires it.
+# On a pull request every job that builds or tests merges the PR onto today's main right after the
+# checkout (.github/actions/merge-main), not GitHub's refs/pull/N/merge, which can be hours old.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
 # per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
-# the Windows app startup smoke stays on windows-latest, which has a desktop session that presents frames.
+# the Windows app is built there too, and only its startup smoke runs on windows-latest, which has a desktop session that presents frames.
 # Pull requests, forks included, the merge queue, pushes to main and the nightly run all use them:
 # the runners are ephemeral, fork runs get no secrets, and main saves the build caches that every
 # other run restores read-only. Nightly and by hand, Build tests also makes an archive the matrix
 # jobs run; Blacksmith's image matches ubuntu-24.04, so the archive and the recorded goldens behave the
 # same.
+# A fork runs the full suite on GitHub's standard runners: set the repository variables
+# CI_RUNNER=ubuntu-24.04 and CI_RUNNER_WINDOWS=windows-latest on the fork, then Run workflow on the
+# branch (Actions, CI). Every Blacksmith label below reads `vars.CI_RUNNER || '<label>'`, and the
+# Blacksmith sticky-disk caches are skipped when CI_RUNNER is set. Unset, nothing changes here.
 name: CI
 
 on:
@@ -64,7 +77,12 @@ on:
   merge_group:
   push:
     # develop: the SMLib kernel's trunk until it merges into main (its PRs land there).
-    branches: [main, develop]
+    # batch/**: Tickets' merge batches (docs/repo-management.md in tangency-labs/tickets). A batch
+    # branch is main (or the batch below it) plus one merge per pull request; its run is the merge
+    # queue's run: every job below treats a push to batch/** as a merge group. It has to be a push
+    # run, not Run workflow: GitHub counts only a push run's `ci` toward main's required check when
+    # the batch's tip is pushed to main.
+    branches: [main, develop, "batch/**"]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -91,11 +109,21 @@ concurrency:
   # A `labeled` event for any label but approved-for-ci does no work and must not cancel (or queue
   # behind) the PR's real run, so it gets a group of its own; approved-for-ci replaces the
   # unlabelled run with the full one.
-  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
+  # The build jobs keep their target/ on a Blacksmith sticky disk, one per job:
+  # <repository>-target-<job>-<this>. Main writes them (a warm build after every push, see
+  # `warm`); every other run mounts a clone of main's latest and never writes back.
+  # scripts/ci/warm_target.py marks the files that differ from the tree the disk was built from,
+  # so Cargo rebuilds only those crates and their dependents. Change this to start every disk afresh.
+  WARM_TARGET: target-v1
+  # sccache's server stops after 10 idle minutes by default, so the statistics printed after
+  # the tests (often longer than that) came from a new, empty server.
+  SCCACHE_IDLE_TIMEOUT: "0"
 
 jobs:
   dependency-advisories:
@@ -106,11 +134,12 @@ jobs:
     name: Dependency advisories
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.deps == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 60 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
       - name: Install advisory scanner
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Check locked dependencies
@@ -126,7 +155,7 @@ jobs:
     # Not on a draft: every other check needs this one, so they skip too. Not on a label other than
     # approved-for-ci either (the same skip, for the same reason).
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
       contents: read
       # To ask whether the merge queue already tested a commit pushed to main, and which labels the
@@ -143,15 +172,38 @@ jobs:
       quick: ${{ steps.paths.outputs.quick }}
       packages: ${{ steps.paths.outputs.packages }}
       oracle: ${{ steps.paths.outputs.oracle }}
+      # The Python client's tests: approved pull requests and merge groups that touch the client, its
+      # generator, its packaging or the command schemas. They run in Native Linux tests, against the
+      # CLI that job builds on its warm disk; when the native checks don't run (a change to python/
+      # alone), in Reference tests.
+      python: ${{ steps.paths.outputs.python }}
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
       deps: ${{ steps.paths.outputs.deps }}
-      # A merge group reaches the wasm build: Compile WebAssembly.
+      # Relevant merge groups (and batch/** pushes), or the nightly: wasm build and browser smoke.
       wasm: ${{ steps.paths.outputs.wasm }}
       # solidcore/** changed (approved pull requests, merge groups, pushes to main): SolidCore checks.
       solidcore: ${{ steps.paths.outputs.solidcore }}
       # The passing run a merge of main carries forward (its URL), when this push is only that.
       carried: ${{ steps.paths.outputs.carried }}
+      # A batch branch's base (where it leaves main), for the jobs that read a merge group's base.
+      batch_base: ${{ steps.paths.outputs.batch_base }}
+      # A push to main whose commit the merge queue (or a Tickets batch) already tested and passed:
+      # Format and repository checks are skipped too, as the build jobs already are.
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
+      # A push to main whose checks the queue already ran (or that changed no code): the build
+      # jobs with a target/ disk still build, without testing, so the disks main writes follow
+      # main and a pull request recompiles only what it changed.
+      warm: ${{ steps.paths.outputs.warm }}
+      # The build-variant checks (Shared crates build on their own, Build without usage statistics):
+      # every run with `native` but a pull request, which runs them only when it touches what they
+      # guard; the batch runs them before every merge.
+      shared: ${{ steps.paths.outputs.shared }}
+      no_usage_stats: ${{ steps.paths.outputs.no_usage_stats }}
+      # The key a passing SolidCore result is kept under (its tree and the CI that tested it), and
+      # the run whose result for that exact key this run reuses instead of testing again.
+      solidcore_key: ${{ steps.paths.outputs.solidcore_key }}
+      solidcore_reused: ${{ steps.paths.outputs.solidcore_reused }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -159,19 +211,21 @@ jobs:
       - id: paths
         name: Detect code and CI changes
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          # A push to a batch branch (Tickets' merge batches) runs as a merge group.
+          EVENT_NAME: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) && 'merge_group' || github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           RENDER_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'render-tests') }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'approved-for-ci') }}
+          REPO_ID: ${{ github.repository_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           native=false
@@ -180,8 +234,13 @@ jobs:
           deps=false
           wasm=false
           solidcore=false
+          python=false
           full=true
           packages=
+          queue_tested=false
+          warm=false
+          solidcore_key=
+          solidcore_reused=
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
           # something or the whole workspace. Documentation, packaging, other workflows and the bots'
           # scripts select nothing. Pull requests and pushes to main share it.
@@ -193,12 +252,15 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
-          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui, winit (its Windows event loop builds only there),
+          # the title bar's hit test (the window chrome and the app bar's title-bar module, which
+          # the app's Windows-only window procedure answers from), their scripts, the control
+          # server (its refusals, #10967), or a lockfile change that moves the graphics stack
+          # (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -225,13 +287,14 @@ jobs:
           # crates below the apps, the web app, the vendored crates, the manifests and lockfile, the
           # toolchain and cargo config, and this workflow. #8227 put a native-only call in
           # crates/ui-egui and the merge queue passed it, because nothing built for wasm there.
+          # The plugin guide and its example crates count too: the wasm job builds the examples.
           deps_wasm_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|assets/*|xtask/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
               esac
             done < "$1"
           }
@@ -240,11 +303,40 @@ jobs:
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
+          # Whether the NUL-separated paths in $1 reach the Python client (python): the package and
+          # its tests, its generator and wheel builder, its packaging, the MCP server it mirrors, and
+          # the command schemas its bindings are generated from. Pull requests and merge groups
+          # share it; no other pull request runs the client's tests (the release job runs them too).
+          python_paths() {
+            if grep -qzE '^(python/|xtask/src/python\.rs$|packaging/python/|crates/mcp/|crates/engine/src/schema/)' "$1"; then python=true; fi
+          }
+          # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
+          # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
+          # and this workflow installs the toolchain and names the caches. Of ci.yml only the lines
+          # that set those count: the toolchain, rust-cache and sccache actions, the sticky disks,
+          # cache keys and the CARGO_, RUST and SCCACHE_ environment. solidcore/ has its own toolchain
+          # file and lockfile, which only the SolidCore checks read; solidcore_paths runs those.
+          cache_key_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                rust-toolchain|rust-toolchain.toml|Cargo.lock) cache_key="${cache_key:+$cache_key, }$path" ;;
+              esac
+            done < "$1"
+            if grep -qxzF '.github/workflows/ci.yml' "$1" \
+              && git diff -U0 "$2" "$3" -- .github/workflows/ci.yml \
+                | grep -E '^[+-] .*(dtolnay/rust-toolchain@|Swatinem/rust-cache@|useblacksmith/stickydisk@|mozilla-actions/sccache-action@|[[:space:]](key|save-if|workspaces|prefix-key|shared-key|cache-[a-z-]+|toolchain|components|targets|CARGO_[A-Z_]+|RUST[A-Z_]*|SCCACHE_[A-Z_]+):)' > /dev/null; then
+              cache_key="${cache_key:+$cache_key, }the cache settings in ci.yml"
+            fi
+          }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
-          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
-          # the paths say.
+          # holding one, runs them whatever the paths say. The group's pull requests are its
+          # first-parent commits: "Merge pull request #N from ..." merge commits, or "<title> (#N)"
+          # (squash commits, or merge commits titled from the pull request), or "Merge #N: <title>"
+          # (Tickets' merge batches). A pull request's own
+          # commits are off the first-parent line, so an issue number in one of them is not read.
           group_has_render_label() {
-            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+            for pr in $(git log --first-parent --format=%s "$1" \
+              | sed -nE 's/^Merge pull request #([0-9]+) .*/\1/p; s/^Merge #([0-9]+): .*/\1/p; s/.*\(#([0-9]+)\)$/\1/p'); do
               if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
                 return 0
               fi
@@ -255,23 +347,43 @@ jobs:
             # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
             # tested: main saves their caches, which every pull request restores. A push that
             # can't be compared (new branch, force push) runs them.
+            # Likewise the build jobs for a push to main that changes a cache key (cache_key_paths),
+            # or can't be compared: only main saves their caches, so skipping them left every run cold
+            # until the nightly saved one.
+            cache_key=
             if [ "$GITHUB_REF_NAME" = main ]; then
               if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
                 solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+                cache_key_paths "$RUNNER_TEMP/ci-solidcore-paths" "$BEFORE_SHA" "$PUSH_SHA"
               else
                 solidcore=true
+                cache_key="a push that can't be compared"
               fi
               echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
             fi
-            # The queue lands the very commit its merge_group run tested. If that run passed,
-            # testing the push again proves nothing new; otherwise (a merge that skipped the
-            # queue, or the API cannot answer) test everything.
+            # The queue lands the very commit its merge_group run tested (Tickets' batches: the very
+            # commit their batch/** push run tested). If that run passed, testing the push again
+            # proves nothing new; otherwise (a merge that skipped the queue, or the API cannot
+            # answer) test everything.
             # The API through curl and grep, which every runner image has.
-            tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
-              | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
-            if [ "${tested:-0}" -gt 0 ]; then
-              echo "The merge queue already tested $PUSH_SHA: repository checks only."
+            if [ -z "$cache_key" ]; then
+              tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
+                | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
+              if [ "${tested:-0}" -eq 0 ]; then
+                tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&head_sha=$PUSH_SHA&status=success&per_page=100" \
+                  | grep -c '"head_branch": *"batch/' || echo 0)
+              fi
+            fi
+            if [ -n "$cache_key" ]; then
+              echo "$BEFORE_SHA..$PUSH_SHA changes a cache key ($cache_key): running the build jobs to save their caches."
+              full=true
+              packages=
+              native=true
+            elif [ "${tested:-0}" -gt 0 ]; then
+              echo "The merge queue already tested $PUSH_SHA: no checks repeated."
+              queue_tested=true
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
                 | grep -o '"head_sha": *"[0-9a-f]*"' | head -n 1 | grep -o '[0-9a-f]\{40\}') \
@@ -289,8 +401,19 @@ jobs:
               packages=
               native=true
             fi
+            # Main writes the build jobs' target/ disks after every push. When the checks don't run
+            # here (the queue tested this commit, or nothing a build reads changed), the build jobs
+            # still build, without testing (`warm`): otherwise the disks went stale as soon as every
+            # merge came from a tested batch, and every pull request rebuilt the workspace.
+            if [ "$GITHUB_REF_NAME" = main ] && [ "$native" != true ]; then warm=true; fi
           elif [ "$EVENT_NAME" = merge_group ]; then
             native=true
+            # A batch branch has no merge_group payload: its base is where it leaves main, so the
+            # diff is every pull request in it (and in any batch below it that has not landed yet).
+            if [ -z "$GROUP_BASE_SHA" ]; then
+              GROUP_BASE_SHA=$(git merge-base origin/main "$GROUP_HEAD_SHA") || GROUP_BASE_SHA=
+              batch_base=$GROUP_BASE_SHA
+            fi
             # Windows (about 16 runner-minutes) only for a group that changes what it exercises;
             # the nightly runs it whatever changed. A group that can't be compared runs it.
             if git diff --no-renames --name-only -z "$GROUP_BASE_SHA...$GROUP_HEAD_SHA" > "$RUNNER_TEMP/ci-paths"; then
@@ -298,6 +421,7 @@ jobs:
               gpu_paths "$RUNNER_TEMP/ci-paths"
               deps_wasm_paths "$RUNNER_TEMP/ci-paths"
               solidcore_paths "$RUNNER_TEMP/ci-paths"
+              python_paths "$RUNNER_TEMP/ci-paths"
               if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
                 gpu_paths=true
               fi
@@ -314,16 +438,22 @@ jobs:
             native=true
             windows=true
             gpu_paths=true
+            # Run workflow (a fork's full run too) checks SolidCore as the merge queue does.
+            if [ "$EVENT_NAME" = workflow_dispatch ]; then solidcore=true; fi
+            # PRs cannot save the wasm cache. Warm it nightly instead of rebuilding after every merge.
+            if [ "$EVENT_NAME" = schedule ]; then wasm=true; fi
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
-            # the wasm compile waits for the merge queue.
+            # the wasm build and browser smoke wait for the merge queue (and the nightly), so pull
+            # request CI stays fast.
             deps_wasm_paths "$RUNNER_TEMP/ci-paths"
             wasm=false
             solidcore_paths "$RUNNER_TEMP/ci-paths"
+            python_paths "$RUNNER_TEMP/ci-paths"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -349,19 +479,76 @@ jobs:
             native=false
             oracle=false
             solidcore=false
+            python=false
           fi
-          # A push that only merges main into the change (Merge branch 'main', Update branch) when
-          # the change itself already passed: nothing new to test here, and main tests the merged
-          # result after it lands. Over three days, 872 of 1,241 such merges brought in nothing that
+          # A change that already passed (scripts/ci/main_merge.py): the same commit again (a label
+          # added again, approved-for-ci after a pass, a reopen), a "Re-run all jobs" after a pass, a
+          # commit with the same tree, or a push that only merges main into the change (Merge branch
+          # 'main', Update branch). Nothing new to test here, and the batch tests the merged
+          # result before it lands. Over 11 hours on 2026-11-26, 827 pull request runs covered 524
+          # heads: one full run per head is the goal. Over three days, 872 of 1,241 such merges brought in nothing that
           # touched the pull request's files, and each restarted the whole run.
           carried=
           if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
             carried=$(python3 -I scripts/ci/main_merge.py --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$REPO" \
-              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" | sed -n 's/^carried=//p')
+              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" | sed -n 's/^carried=//p')
             if [ -n "$carried" ]; then
-              echo "Only a merge of main into a change that passed in $carried: repository checks only."
+              echo "This change already passed in $carried: repository checks only."
               native=false
               solidcore=false
+              python=false
+            fi
+          fi
+          # The build-variant checks guard the manifests and the feature-gated code. On a pull request
+          # they run only for a change that reaches them; merge groups, batches, main and the nightly
+          # always run them with the native checks, so nothing lands without them. Shared crates:
+          # a manifest or the lockfile (a shared crate's dependencies) or the check itself. Without
+          # usage statistics: a manifest, the lockfile, or a diff that mentions the feature.
+          shared=$native
+          no_usage_stats=$native
+          if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
+            shared=$deps
+            no_usage_stats=$deps
+            if grep -qxzE 'xtask/src/(shared|layers)\.rs' "$RUNNER_TEMP/ci-paths"; then shared=true; fi
+            if git diff "$BASE_SHA...$HEAD_SHA" | grep -qE '^[+-].*usage[-_]stats'; then no_usage_stats=true; fi
+            echo "shared=$shared no_usage_stats=$no_usage_stats (pull request: only when it touches what they guard)"
+          fi
+          # SolidCore's tests and checks read nothing outside solidcore/ (its own lockfile, toolchain
+          # file and test data are inside it) but the steps that run them: this workflow and the
+          # repository's actions. A passing result is kept under the solidcore/ tree that was tested
+          # and those two (an artifact, see SolidCore checks (tests)); a merge group or batch whose
+          # tree and CI are exactly the same reuses it (a batch rebuilt without a failing pull
+          # request, or stacked on one, usually is). Only runs that test a fixed commit keep one
+          # (merge groups, batches, main): a pull request's jobs each merge today's main
+          # (merge-main), so its jobs may not all test the same tree. Pull requests always run their
+          # shards (the queue reads them), pushes to main too (they save the caches), and so do the
+          # nightly and Run workflow.
+          if [ "$solidcore" = true ]; then
+            case "$EVENT_NAME" in
+              merge_group|push)
+                tree=$(git rev-parse "$GROUP_HEAD_SHA:solidcore" 2>/dev/null) || tree=
+                ci_tree=$(git rev-parse "$GROUP_HEAD_SHA:.github/workflows/ci.yml" 2>/dev/null) || ci_tree=
+                actions_tree=$(git rev-parse "$GROUP_HEAD_SHA:.github/actions" 2>/dev/null) || actions_tree= ;;
+              *) tree= ;;
+            esac
+            if [ -n "$tree" ] && [ -n "$ci_tree" ] && [ -n "$actions_tree" ]; then
+              solidcore_key="solidcore-pass-$tree-${ci_tree:0:12}-${actions_tree:0:12}"
+            fi
+            if [ -n "$solidcore_key" ] && [ "$EVENT_NAME" = merge_group ]; then
+              # Only results this repository's own fixed-commit runs kept: a fork's run could name
+              # an artifact anything.
+              solidcore_reused=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/artifacts?name=$solidcore_key&per_page=20" \
+                | jq -r --argjson repo "$REPO_ID" '[.artifacts[] | select(.expired | not)
+                    | select(.workflow_run.head_repository_id == $repo and .workflow_run.repository_id == $repo)
+                    | select(.workflow_run.head_branch == "main" or (.workflow_run.head_branch // "" | startswith("batch/")) or (.workflow_run.head_branch // "" | startswith("gh-readonly-queue/")))
+                    | .workflow_run.id][0] // empty' 2>/dev/null) || solidcore_reused=
+              if [ -n "$solidcore_reused" ]; then
+                echo "SolidCore $tree passed with this CI in run $solidcore_reused: not tested again."
+                solidcore_reused="https://github.com/$REPO/actions/runs/$solidcore_reused"
+                solidcore=false
+              fi
             fi
           fi
           # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
@@ -370,7 +557,8 @@ jobs:
           # - in the merge queue, when the group's diff touches render code or one of its pull
           #   requests carries render-tests;
           # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
-          # - not on a push to main: the queue tested that commit, or the nightly will.
+          # - not on a push to main: the queue tested that commit, or the nightly will; except a push
+          #   to main that changes a cache key (cache_key), so that main saves the GPU job's caches too.
           gpu=false
           if [ "$native" = true ]; then
             case "$EVENT_NAME" in
@@ -379,7 +567,7 @@ jobs:
                 gpu=$gpu_paths
                 if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
               merge_group) gpu=$gpu_paths ;;
-              push) gpu=false ;;
+              push) if [ -n "$cache_key" ]; then gpu=true; fi ;;
               *) gpu=true ;;
             esac
           fi
@@ -388,11 +576,19 @@ jobs:
             echo "gpu=$gpu"
             echo "windows=$windows"
             echo "oracle=$oracle"
+            echo "python=$python"
             echo "doctests=$doctests"
             echo "deps=$deps"
             echo "wasm=$wasm"
             echo "solidcore=$solidcore"
             echo "carried=$carried"
+            echo "batch_base=${batch_base:-}"
+            echo "queue_tested=$queue_tested"
+            echo "warm=$warm"
+            echo "shared=$shared"
+            echo "no_usage_stats=$no_usage_stats"
+            echo "solidcore_key=$solidcore_key"
+            echo "solidcore_reused=$solidcore_reused"
             echo "full=$full"
             echo "quick=$quick"
             echo "packages=$packages"
@@ -400,12 +596,19 @@ jobs:
 
   checks:
     name: Format and repository checks
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    # Not on a push to main the merge queue (or a batch) already tested and passed: nothing changed.
+    needs: changes
+    if: needs.changes.outputs.queue_tested != 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
       # Main saves the cache; every other run restores it, read-only.
@@ -430,12 +633,19 @@ jobs:
       - name: Sorted lists
         run: cargo xtask lists
       # New UI text must reach every complete catalog; report it here, before review (#8542).
+      # Catalog coverage only: the command labels need the app's command table, which this job
+      # never builds (a release build of the CLI took 9-15 minutes). The `tests` job checks them
+      # against the CLI it builds anyway.
       - name: Translations in the complete catalogs
-        run: cargo xtask i18n --check
+        run: cargo xtask i18n --check --no-registry
       - name: Model decisions use exact geometry, not meshes
         run: |
           cargo xtask mesh-decisions
           cargo test -p xtask mesh_decisions --locked
+      - name: Apps compute no geometry
+        run: |
+          cargo xtask app-geometry
+          cargo test -p xtask app_geometry --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
@@ -443,58 +653,150 @@ jobs:
       - name: Design format pending changes
         run: bash scripts/test-format-pending.sh
       - name: Web app offline use and updates (headless Chrome)
-        run: cargo xtask web-offline-test
+        # Not blocking while #14591 is open: the check "the open v3 page was given another build's
+        # file after the update" fails in about one queue batch in a few, with no PR to blame. A
+        # failure is reported as a warning (and still printed in this step's log), not as a failure.
+        run: |
+          cargo xtask web-offline-test || echo "::warning title=Web app offline test failed (non-blocking, #14591)::cargo xtask web-offline-test failed; see this step's log. Tracked in #14591."
       - name: Affected-package selection self-test
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
         run: python3 -I scripts/ci/test_main_merge.py
-      - name: Claim, triage and kernel-paused bot tests
-        run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/kernel-paused/*.test.js scripts/pr-checks/*.test.js
+      # Static acceptance recipes are checked on every non-draft CI run; tests/fixtures
+      # are introduced by separate Drawing PRs, so run each validator when present.
+      - name: Drawing acceptance fixture contracts
+        run: |
+          if test -f tests/fixtures/w23a-drawing-updates/validate.py; then
+            python3 -I tests/fixtures/w23a-drawing-updates/validate.py
+          fi
+          if test -f tests/fixtures/w23-assembly-sheet/validate.py; then
+            python3 -I tests/fixtures/w23-assembly-sheet/validate.py
+          fi
+      - name: Claim, triage and PR-check bot tests
+        run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/pr-checks/*.test.js
 
   # Fast feedback for a pull request that has not been approved for the full CI yet.
   quick-compile:
     name: Quick compile
     needs: changes
-    if: needs.changes.outputs.quick == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    # `warm` too: main keeps its target/ disk current for the pull requests that run it.
+    if: needs.changes.outputs.quick == 'true' || needs.changes.outputs.warm == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-quick-compile
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: quick-compile
+          cache-targets: "false"
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
 
   clippy:
     name: Native Linux Clippy
     needs: changes
-    if: needs.changes.outputs.native == 'true'
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 30
+    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy
-      # Main saves the cache; every other run restores it, read-only.
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-clippy
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        id: target
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-clippy
+          cache-targets: "false"
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Clippy
+        # The whole workspace, pull requests too: on a warm target/ disk only what changed (the
+        # affected packages, scripts/ci/affected.py) is linted again, and `-p` for a few packages
+        # resolved other features than main's build, so it compiled their dependencies again. On a
+        # cold disk (no warm build to start from) a pull request lints only its packages, as before.
         env:
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          WARM_DISK: ${{ steps.target.outputs.warm }}
         run: |
-          # Pull requests lint the affected packages (scripts/ci/affected.py); everything else, all.
           scope=(--workspace)
-          if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
+          if [ "$FULL" != true ] && [ "$WARM_DISK" != true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done
+          fi
           cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
+
+  shared-crates:
+    name: Shared crates build on their own
+    needs: changes
+    # The shared crates must build on their own, without the rest of the workspace: that is
+    # what makes them movable to their own repository (#12935). The check builds them in a
+    # scratch workspace, so it compiles the kernel and the UI stack again: it is a build, not
+    # a static check, and it belongs in the heavy lane.
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.warm == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-shared
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: native-shared
+          cache-targets: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Shared crates build on their own
+        run: cargo xtask shared
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
 
   build-tests:
     name: Build tests
@@ -502,9 +804,9 @@ jobs:
     # hand. Pull requests, the merge queue and main build and run their tests in the `tests` job.
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     # Fork builds start from main's cache, read-only; give them room to finish and upload.
-    timeout-minutes: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45 }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45) }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -514,12 +816,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-archive
@@ -564,19 +867,29 @@ jobs:
   tests:
     name: Native Linux tests
     needs: changes
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' }}
+    # `warm`: a push to main whose checks don't run here builds the tests without running them,
+    # to write the target/ disk (see WARM_TARGET).
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true') }}
     # Builds the tests and runs them in one job on a big runner: there is no archive to upload
     # and download (3 GB on a full run), and the job starts beside the repository checks, not
     # after them. nextest hands tests to its threads as they free up, the slowest first (priority
     # in .config/nextest.toml), so they start at once and no core idles at the end.
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 60
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-32vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       # Pictures (snapshots, screenshots, ui.render, the viewport's offscreen tests) are drawn on
       # the GPU. The runner has none: Mesa's lavapipe (software Vulkan) draws them, and a test that
       # would skip for want of an adapter fails instead.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -584,27 +897,46 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-tests
           path: /home/runner/.cache/sccache
           commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
-      # Main saves the cache; every other run restores it, read-only.
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-tests
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        id: target
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-tests
+          cache-targets: "false"
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
         id: sccache
@@ -619,11 +951,17 @@ jobs:
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest
+      - name: Build the tests for the target/ disk (a push to main the queue already tested)
+        if: needs.changes.outputs.warm == 'true'
+        run: cargo nextest run --workspace --cargo-profile ci --locked --no-run
       - name: Run tests
+        if: needs.changes.outputs.warm != 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
+          WARM_DISK: ${{ steps.target.outputs.warm }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -640,25 +978,81 @@ jobs:
           fi
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
-          # Pull requests test the affected packages (scripts/ci/affected.py).
+          # Pull requests test the affected packages (scripts/ci/affected.py). They build the whole
+          # workspace and select the packages' tests with a filter: `-p` for a few packages resolves
+          # features for those alone, so most crates got other metadata than main's build and were
+          # compiled again (about 190 dependencies and all 85 workspace crates). On the target/
+          # disk the whole workspace costs only what changed, which is what those packages are.
+          # Without a warm disk (a new key, or one Blacksmith evicted) the whole workspace is a cold
+          # build, so a pull request then builds only its packages, as before.
           scope=(--workspace)
-          if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
+          picked=
+          if [ "$FULL" != true ] && [ "$WARM_DISK" = true ]; then
+            for p in $PACKAGES; do picked="${picked:+$picked | }package(=$p)"; done
+            base="($base) & ($picked)"
+          elif [ "$FULL" != true ]; then
+            scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done
+          fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          excluded='package(=solidcraft-gpu) & test(/^path::/)'
+          # Preserve render-only shard activation. When those shards do not run, native tests
+          # still cover the UI renderer; its gpu-path group keeps pipeline creation serial.
+          if [ "$GPU_SHARDS" = true ]; then
+            excluded="($excluded) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))"
+          fi
           # A failed test does not fail the step by itself: the tests known to fail today
           # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+            --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
+      # Every command label needs an English catalog entry (#8542). The label table is the CLI's
+      # command registry, so this reads it from the CLI the test build made: the tests build the
+      # whole workspace, and the CLI's integration tests (CARGO_BIN_EXE) build its binary.
+      # Building it on its own (`cargo build -p solidcraft-cli`) resolved other features and
+      # compiled most of the workspace a second time (about 6.5 minutes).
+      # On a cold disk a pull request tested only its packages (above): then, as before, the check
+      # is skipped when no package that feeds the command table changed, and the CLI is built when
+      # its tests did not build it.
+      - name: Command labels in the translation catalogs
+        if: needs.changes.outputs.warm != 'true'
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
+          WARM_DISK: ${{ steps.target.outputs.warm }}
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          if [ "$FULL" != true ] && [ "$WARM_DISK" != true ]; then
+            case " $PACKAGES " in
+              *" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
+              *) echo "No package that feeds the command table changed."; exit 0 ;;
+            esac
+            case " $PACKAGES " in
+              *" solidcraft-cli "*) ;;
+              *) cargo build -p solidcraft-cli --profile ci --locked ;;
+            esac
+          fi
+          cargo xtask i18n --check --cli "$cli"
+      # The Python client's bindings and tests (Select checks' `python`), against the CLI the test
+      # build made: about 15 seconds. Built here only when the build above did not make it.
+      - name: Python client tests
+        if: needs.changes.outputs.warm != 'true' && needs.changes.outputs.python == 'true'
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          [ -x "$cli" ] || cargo build -p solidcraft-cli --profile ci --locked
+          scripts/ci/python-client.sh "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
       - name: Upload test timings
-        if: always()
+        if: always() && needs.changes.outputs.warm != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit
@@ -676,8 +1070,8 @@ jobs:
     # budget (665 s, against 204 s for the same test in another run) and a shard took 35 minutes.
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.gpu == 'true' }}
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -686,6 +1080,14 @@ jobs:
       # As in Native Linux tests: lavapipe draws, and a test without an adapter fails.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
@@ -694,19 +1096,21 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       # The shards build the same thing, so only the first one commits it (and saves the cache).
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-gpu
@@ -718,11 +1122,23 @@ jobs:
       # shaders change. Same sticky disk rules as the compiler cache.
       - name: Mount lavapipe's shader cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-mesa-gpu
           path: /home/runner/.cache/mesa-gpu
           commit: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && 'on-change' || 'false' }}
+      # On GitHub's runners (a fork with CI_RUNNER set) there is no sticky disk: keep Mesa's cache in
+      # GitHub's cache instead, keyed by the shaders, so only a fork's first run after a shader
+      # change compiles the pipeline cold.
+      - name: Restore lavapipe's shader cache (GitHub's runners)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: vars.CI_RUNNER != ''
+        continue-on-error: true
+        with:
+          path: /home/runner/.cache/mesa-gpu
+          key: mesa-gpu-${{ runner.os }}-${{ hashFiles('crates/gpu/src/**/*.wgsl') }}
+          restore-keys: mesa-gpu-${{ runner.os }}-
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -744,6 +1160,8 @@ jobs:
       - name: Run one shard of the GPU path tests
         env:
           SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
@@ -751,9 +1169,17 @@ jobs:
           # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
+          # A UI-only change needs its progressive renderer, not the unrelated GPU crate tests.
+          scope=(-p solidcraft-gpu -p solidcraft-ui-egui)
+          if [ "$FULL" != true ]; then
+            scope=()
+            for p in $PACKAGES; do
+              case "$p" in solidcraft-gpu|solidcraft-ui-egui) scope+=(-p "$p") ;; esac
+            done
+          fi
           status=0
-          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          cargo nextest run "${scope[@]}" --lib --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E '(package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))' --partition "count:$SHARD/4" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
@@ -775,8 +1201,8 @@ jobs:
     name: Action matrix (${{ matrix.shard }}/16)
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 55
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 165 || 55 }}
     strategy:
       fail-fast: false
       matrix:
@@ -791,7 +1217,7 @@ jobs:
           name: nextest-archive
       - name: Run one shard of the matrix
         # A step limit below the job's, so the outcomes so far are still uploaded.
-        timeout-minutes: 45
+        timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
         env:
           SHARDS: 16
           SHARD: ${{ matrix.shard }}
@@ -817,8 +1243,8 @@ jobs:
     name: Action matrix determinism
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -839,8 +1265,8 @@ jobs:
     name: Property tests (many cases)
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 60
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -863,8 +1289,8 @@ jobs:
     name: Doc tests
     needs: changes
     if: needs.changes.outputs.doctests == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -872,14 +1298,16 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-doc
@@ -926,9 +1354,12 @@ jobs:
   oracle:
     name: Reference tests
     needs: changes
-    if: needs.changes.outputs.oracle == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 60
+    # Also the Python client's tests (Select checks' `python`) when the native checks don't run
+    # (a change to python/ alone): they need the CLI this job builds, so they reuse its build and
+    # caches. With the native checks, Native Linux tests runs them against its own build instead.
+    if: needs.changes.outputs.oracle == 'true' || (needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true')
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -936,14 +1367,16 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-oracle
@@ -967,9 +1400,13 @@ jobs:
       - name: Build the command line
         run: cargo build -p solidcraft-cli --profile ci --locked
       - name: Replay tests/oracle and compare with expected.json
+        if: needs.changes.outputs.oracle == 'true'
         run: cargo xtask oracle --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+      - name: Python client tests
+        if: needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true'
+        run: scripts/ci/python-client.sh "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
       - name: Upload the report
-        if: always()
+        if: always() && needs.changes.outputs.oracle == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: oracle-report
@@ -984,17 +1421,21 @@ jobs:
     name: Windows D3D12 FXC shaders
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: blacksmith-8vcpu-windows-2025
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     env:
       WGPU_BACKEND: dx12
       WGPU_DX12_COMPILER: fxc
       # WARP is a software (Cpu) adapter.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-fxc
@@ -1008,25 +1449,52 @@ jobs:
   # The Windows app starts D3D12 first and only the backend it uses (a Vulkan driver crashed the
   # app at startup on Intel). Start the real app on the runner (its D3D12 adapter is WARP) with
   # several saved settings and safe mode, and check each draws a frame and quits cleanly.
+  # Split in two (2026-11-12): compiling the app and its startup tests took ~30 of this job's 33
+  # minutes on a 4-vCPU GitHub-hosted runner and held the merge queue's front batch. The build and
+  # the startup unit tests (no window) run on a Blacksmith Windows runner; only the smoke itself,
+  # which needs a desktop that presents frames, stays GitHub-hosted, on the built app.
+  windows-build:
+    name: Windows app build
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: windows-build
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Backend order and probing on Windows
+        run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
+      # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
+      - name: Control channel refusals on Windows
+        run: cargo test -p solidcraft-control --profile ci --locked -- server::tests::a_connection_past_the_limit_reads_why
+      - name: Build the app
+        run: cargo build -p solidcraft --profile ci --locked
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app
+          path: target/ci/solidcraft.exe
+          retention-days: 1
+
   windows-startup:
     name: Windows app startup
-    needs: changes
+    needs: [changes, windows-build]
     if: needs.changes.outputs.windows == 'true'
     # GitHub-hosted: the startup smoke needs an interactive desktop that presents frames; on
     # Blacksmith's Windows runners the window never presents ("no frame was presented").
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/merge-main
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          key: windows-startup
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Backend order and probing on Windows
-        run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
-      - name: Build the app
-        run: cargo build -p solidcraft --profile ci --locked
+          name: windows-app
+          path: target/ci
       - name: Start the app under different settings
         shell: pwsh
         run: tools/windows-startup-smoke.ps1 -Exe target/ci/solidcraft.exe
@@ -1035,14 +1503,84 @@ jobs:
         run: tools/windows-resize-smoke.ps1 -Exe target/ci/solidcraft.exe
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
+  # The kernel rig (kernel-rig.yml) on pull requests and merge groups, so `ci` fails when it does
+  # (#19208 merged with its rig failing while the rig was a check of its own that nothing
+  # required). Its plan picks the areas the diff reaches; a change that reaches none runs only the
+  # plan and the summary. Like the other heavy checks it waits for approved-for-ci on a pull
+  # request and is not repeated for a push that only merges main into a change that passed.
+  # Pushes to main and develop, the release gate and a run by hand run kernel-rig.yml directly.
+  kernel-rig:
+    name: Kernel rig
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'merge_group' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') &&
+      needs.changes.outputs.carried == '')) }}
+    uses: ./.github/workflows/kernel-rig.yml
+    with:
+      # A batch branch: grade the areas its diff from main reaches, as for a merge group.
+      batch_base: ${{ needs.changes.outputs.batch_base }}
+    permissions:
+      contents: read
+
+  # A build without the `usage-stats` feature (distribution packagers, universities; see
+  # docs/privacy.md) compiles usage statistics out: the app and the web app build, and the app's
+  # binary holds no trace of the endpoint.
+  no-usage-stats:
+    name: Build without usage statistics
+    needs: changes
+    if: needs.changes.outputs.no_usage_stats == 'true' || needs.changes.outputs.warm == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-no-usage-stats
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: no-usage-stats
+          cache-targets: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Build the app and the web app without the feature
+        run: |
+          cargo build -p solidcraft --no-default-features --profile ci --locked
+          cargo check -p solidcraft-web --target wasm32-unknown-unknown --no-default-features --locked
+      - name: The binary has no usage statistics endpoint
+        run: |
+          endpoint=$(sed -n 's/^pub const ENDPOINT: &str = "\(.*\)";$/\1/p' crates/ui-egui/src/usage_stats.rs)
+          test -n "$endpoint" || { echo "::error::ENDPOINT not found in crates/ui-egui/src/usage_stats.rs"; exit 1; }
+          path=${endpoint#https://*/}
+          if grep -a -c -F -e "$endpoint" -e "/$path" target/ci/solidcraft; then
+            echo "::error::the build without usage-stats still holds the endpoint ($endpoint)"; exit 1
+          fi
+          echo "no trace of $endpoint"
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
+
   ci:
     # On a run another label starts (every other job skipped), this job reports the result of the
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore]
+    needs: [changes, checks, quick-compile, clippy, shared-crates, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig, no-usage-stats]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
       contents: read
       # To read the commit's other runs of this workflow.
@@ -1056,20 +1594,44 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # The other runs of ci.yml for this commit. While one is still going, wait for it (at
-          # most 90 minutes); then pass only when the newest one that ran its checks passed.
+          # The other runs of ci.yml for this commit. While one that runs checks is still going,
+          # wait for it (at most 90 minutes); then pass only when the newest one that ran its
+          # checks passed. A run another label started is not waited for: its only job is ci,
+          # which waits as this one does, so two labels added close together had their runs wait
+          # for each other until the deadline. Such a run has every job but ci skipped; a run
+          # whose jobs are not listed yet, or cannot be read, is waited for.
           deadline=$((SECONDS + 5400))
           while :; do
             runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=100" \
               --jq "[.workflow_runs[] | select(.id != $RUN_ID)]")
-            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            pending=0
+            for id in $(jq -r '.[] | select(.status != "completed") | .id' <<<"$runs"); do
+              checks=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+                --jq 'if (.jobs | length) == 0 then 1
+                      else [.jobs[] | select(.name != "ci" and .conclusion != "skipped")] | length end') || checks=1
+              if [ "${checks:-1}" -gt 0 ]; then pending=$((pending + 1)); fi
+            done
             if [ "$pending" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30
           done
-          # Runs with every job skipped (labels, before this job reported) are not a result.
-          latest=$(jq -r '[.[] | select(.status == "completed" and .conclusion != "skipped")]
-            | sort_by(.created_at) | last | "\(.conclusion) \(.html_url)"' <<<"$runs")
+          # The result is the newest run that ran checks, by when its latest attempt finished
+          # (updated_at), so a rerun that passed replaces its first attempt's failure. Only runs that
+          # passed or failed count (cancelled ones don't: a run replaced by a newer push or label, or a
+          # fork run that waited for approval and was cancelled), and label runs like this one don't
+          # either: their only job is ci, which repeats an older result, so counting them let one
+          # copied failure outlive the rerun that fixed it.
+          latest=""
+          for id in $(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
+              | sort_by(.updated_at) | reverse | .[].id' <<<"$runs"); do
+            ran=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+              --jq '[.jobs[] | select(.name != "ci" and .conclusion != "skipped" and .conclusion != null)] | length')
+            if [ "${ran:-0}" -gt 0 ]; then
+              latest=$(jq -r --argjson id "$id" '.[] | select(.id == $id) | "\(.conclusion) \(.html_url)"' <<<"$runs")
+              break
+            fi
+          done
+          [ -n "$latest" ] || latest="none (no run of this commit ran its checks)"
           echo "The commit's latest run: $latest"
           echo "A label started this run: \`ci\` repeats the commit's latest result ($latest)." >> "$GITHUB_STEP_SUMMARY"
           test "${latest%% *}" = success
@@ -1078,13 +1640,20 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
+          QUEUE_TESTED: ${{ needs.changes.outputs.queue_tested }}
           NATIVE: ${{ needs.changes.outputs.native }}
           QUICK: ${{ needs.changes.outputs.quick }}
           QUICK_COMPILE: ${{ needs.quick-compile.result }}
           WINDOWS: ${{ needs.changes.outputs.windows }}
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
+          PYTHON_RUN: ${{ needs.changes.outputs.python }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
+          # The build-variant checks: with the native flag, except on a pull request that does not
+          # touch what they guard (Select checks' `shared` and `no_usage_stats`).
+          SHARED_RUN: ${{ needs.changes.outputs.shared }}
+          SHARED: ${{ needs.shared-crates.result }}
+          NO_USAGE_STATS_RUN: ${{ needs.changes.outputs.no_usage_stats }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1093,6 +1662,7 @@ jobs:
           DOCS: ${{ needs.doc-tests.result }}
           ORACLE: ${{ needs.oracle.result }}
           WINDOWS_FXC: ${{ needs.windows-fxc.result }}
+          WINDOWS_BUILD: ${{ needs.windows-build.result }}
           WINDOWS_STARTUP: ${{ needs.windows-startup.result }}
           DEPS_RUN: ${{ needs.changes.outputs.deps }}
           ADVISORIES: ${{ needs.dependency-advisories.result }}
@@ -1100,9 +1670,22 @@ jobs:
           WASM: ${{ needs.wasm.result }}
           SOLIDCORE_RUN: ${{ needs.changes.outputs.solidcore }}
           SOLIDCORE: ${{ needs.solidcore.result }}
+          SOLIDCORE_TESTS: ${{ needs.solidcore-tests.result }}
+          SOLIDCORE_STANDALONE: ${{ needs.solidcore-standalone.result }}
+          # The same condition as the kernel-rig job's `if` (after Select checks passed, which is
+          # tested first).
+          RIG_RUN: >-
+            ${{ github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) ||
+            (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
+          RIG: ${{ needs.kernel-rig.result }}
+          NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
           test "$CHANGES" = success
-          test "$CHECKS" = success
+          if [ "$QUEUE_TESTED" = true ]; then
+            test "$CHECKS" = skipped
+          else
+            test "$CHECKS" = success
+          fi
           # An unapproved pull request: the heavy jobs are skipped on purpose.
           if [ "$QUICK" = true ]; then
             test "$QUICK_COMPILE" = success
@@ -1115,6 +1698,12 @@ jobs:
             fi
             test "$TESTS" = success
           fi
+          if [ "$SHARED_RUN" = true ]; then
+            test "$SHARED" = success
+          fi
+          if [ "$NO_USAGE_STATS_RUN" = true ]; then
+            test "$NO_USAGE_STATS" = success
+          fi
           # The same output decides whether the GPU path tests run (their job's `if`).
           if [ "$GPU_RUN" = true ]; then
             test "$GPU" = success
@@ -1122,11 +1711,13 @@ jobs:
           if [ "$DOCTESTS" = true ]; then
             test "$DOCS" = success
           fi
-          if [ "$ORACLE_RUN" = true ]; then
+          # The Python client's tests run in Reference tests only without the native checks.
+          if [ "$ORACLE_RUN" = true ] || { [ "$PYTHON_RUN" = true ] && [ "$NATIVE" != true ]; }; then
             test "$ORACLE" = success
           fi
           if [ "$WINDOWS" = true ]; then
             test "$WINDOWS_FXC" = success
+            test "$WINDOWS_BUILD" = success
             test "$WINDOWS_STARTUP" = success
           fi
           # Cargo.lock or a Cargo.toml changed on a pull request or in a merge group.
@@ -1140,7 +1731,20 @@ jobs:
           # solidcore/** changed on an approved pull request, in a merge group or on main.
           if [ "$SOLIDCORE_RUN" = true ]; then
             test "$SOLIDCORE" = success
+            test "$SOLIDCORE_TESTS" = success
+            test "$SOLIDCORE_STANDALONE" = success
           fi
+          # The kernel rig: its own summary passes when the plan selected no area.
+          if [ "$RIG_RUN" = true ]; then
+            test "$RIG" = success
+          fi
+      - name: Note a reused SolidCore result
+        if: needs.changes.outputs.solidcore_reused != ''
+        env:
+          REUSED: ${{ needs.changes.outputs.solidcore_reused }}
+          KEY: ${{ needs.changes.outputs.solidcore_key }}
+        run: |
+          echo "SolidCore: reused the passing result for ${KEY#solidcore-pass-} from $REUSED; its build, tests and checks were not repeated." >> "$GITHUB_STEP_SUMMARY"
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1149,17 +1753,22 @@ jobs:
           echo "This push only merges main into a change that already passed; the heavy checks were not repeated. Passing run: $CARRIED" >> "$GITHUB_STEP_SUMMARY"
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
-  # cargo check, no tests). In the merge queue for a group that reaches the wasm build (Select
-  # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
+  # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
+  # (`cargo xtask plugin-examples`), then run the built web client in headless Chrome. In the
+  # merge queue for a group that reaches the wasm build (Select checks' `wasm`), where `ci`
+  # requires it, and nightly; never on pull requests; by hand with cross_compile. Pages keeps the
+  # full API and offline browser tests.
   wasm:
-    name: Compile WebAssembly
+    name: Compile WebAssembly and test browser startup
     needs: changes
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.cross_compile) || needs.changes.outputs.wasm == 'true') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    # Full code generation needs more time than the former check-only job, especially cold.
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1167,6 +1776,24 @@ jobs:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
+      - run: cargo xtask plugin-examples
+      - name: Install trunk
+        env:
+          TRUNK_VERSION: v0.21.14
+          TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          archive="$RUNNER_TEMP/trunk.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$TRUNK_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the browser app
+        working-directory: apps/solidcraft-web
+        # No release LTO or wasm-opt: this gate checks runtime behavior, not package size.
+        run: trunk build --cargo-profile ci --public-url ./
+      - name: Test browser startup, frames and opening a design
+        run: cargo xtask web-api-test --smoke --site dist/web
 
   # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
   # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from
@@ -1175,34 +1802,61 @@ jobs:
   # solidcore/** (Select checks' `solidcore`), where `ci` requires it; skipped otherwise. Its build,
   # kernel-rig and goldens jobs are one entry here, so the rig and goldens binaries are built once
   # without an artifact between jobs.
+  # solidcore/ exported alone (as the mirror to tangency-labs/solidcore carries it) must still check: the
+  # `layers` rule reads the manifests, this builds them without the rest of the repository around.
+  solidcore-standalone:
+    name: SolidCore builds on its own
+    needs: changes
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - name: Export solidcore/ alone
+        run: |
+          mkdir -p "$RUNNER_TEMP/sc"
+          git archive HEAD solidcore | tar -x -C "$RUNNER_TEMP/sc"
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        working-directory: ${{ runner.temp }}/sc/solidcore
+        run: rustup show active-toolchain || rustup toolchain install
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "${{ runner.temp }}/sc/solidcore -> bin"
+          key: solidcore-standalone
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Check the exported tree
+        working-directory: ${{ runner.temp }}/sc/solidcore
+        run: cargo check --workspace --all-targets --locked
+
   solidcore:
     name: SolidCore checks (${{ matrix.check }})
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - check: fmt and clippy
             key: lint
-            runner: blacksmith-8vcpu-ubuntu-2404
-          - check: tests
-            key: tests
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
           - check: kernel rig and goldens
             key: rig
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
           - check: wasm
             key: wasm
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
           - check: deny
             key: deny
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
           - check: publish dry run
             key: publish
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     defaults:
       run:
         working-directory: solidcore
@@ -1210,9 +1864,10 @@ jobs:
       CARGO_INCREMENTAL: 0
       # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
-      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || needs.changes.outputs.batch_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Main saves the cache; every other run restores it, read-only.
@@ -1224,7 +1879,7 @@ jobs:
       # .github/actions/upstream, run from solidcore/ (a composite action's steps would run from the
       # repository root): usd-brep at the pin in scripts/upstream-pin.env, for upstream/TestFiles.
       - name: Upstream sources (TestFiles)
-        if: matrix.check == 'tests' || matrix.check == 'kernel rig and goldens'
+        if: matrix.check == 'kernel rig and goldens'
         run: |
           while IFS='=' read -r k v; do
             case "$k" in
@@ -1281,36 +1936,6 @@ jobs:
             python3 -I scripts/ci/check_panic_sites.py
           fi
 
-      # test: every test once in the goldens profile, then the doctests, then the solids report
-      # (exits 1 while any primitive fails, so only a crash or a missing JSON fails).
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
-        if: matrix.check == 'tests'
-        with:
-          tool: cargo-nextest@0.9.150
-      - name: Workspace tests (goldens profile)
-        if: matrix.check == 'tests'
-        run: cargo nextest run --workspace --cargo-profile goldens --no-fail-fast
-      - name: Doctests (goldens profile)
-        if: matrix.check == 'tests'
-        run: cargo test --workspace --profile goldens --doc
-      - name: Solids report (primitives example)
-        if: matrix.check == 'tests'
-        run: |
-          set +e
-          cargo run --profile goldens -p solidcore --example primitives -- --json reports/solids/solids.json
-          rc=$?
-          set -e
-          [ "$rc" -le 1 ] && test -s reports/solids/solids.json
-      # main's solids report, for SolidCore's site (solidcore-pages.yml, scripts/fetch-solids.sh).
-      - name: Upload solids report
-        if: matrix.check == 'tests' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: solids-report
-          path: solidcore/reports/solids/solids.json
-          if-no-files-found: error
-          retention-days: 90
-
       # build, kernel-rig and goldens: the rig's test binary and the goldens binary (goldens
       # profile), the rig run from its crate's directory, then every unit against its golden.
       - name: Build the rig and goldens binaries (goldens profile)
@@ -1330,6 +1955,9 @@ jobs:
         if: matrix.check == 'kernel rig and goldens'
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/solidcore/reports/kernel-rig/table.md
+          # each case in a process of its own, one per vCPU of the 16-vCPU, 64 GB runner, with a
+          # CPU-time hang limit (#14277)
+          KERNEL_CASES_JOBS: "16"
         run: |
           mkdir -p reports/kernel-rig
           cd crates/solidcore-ops
@@ -1370,11 +1998,205 @@ jobs:
         if: matrix.check == 'publish dry run'
         run: cargo publish -p solidcore --locked --dry-run
 
+  # SolidCore's tests, split so a merge group does not wait 35 minutes on one job: one build (a
+  # nextest archive of the workspace's tests, goldens profile), six shards that each run a sixth of
+  # the tests from it, and the doctests and the solids report (neither fits in an archive) in a job
+  # of their own. Every test the single job ran still runs once: `--partition count:i/6` cuts the
+  # archive's test list into six disjoint parts, and each shard prints its count in its summary.
+  # `SolidCore checks (tests)` below is the one result the rest of the workflow reads.
+  solidcore-tests-build:
+    name: SolidCore tests (build)
+    needs: changes
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
+    defaults:
+      run:
+        working-directory: solidcore
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      # Main saves the cache; every other run restores it, read-only.
+      # target/ from main's last build (see WARM_TARGET); only main commits it.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-solidcore-tests
+          path: ${{ github.workspace }}/solidcore/bin
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        working-directory: .
+        run: python3 -I scripts/ci/warm_target.py prepare --target solidcore/bin ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: solidcore/bin (its target-dir) is on the disk above.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "solidcore -> bin"
+          key: solidcore-tests
+          cache-targets: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest@0.9.150
+      - name: Compile the workspace's tests into an archive (goldens profile)
+        run: cargo nextest archive --workspace --cargo-profile goldens --archive-file tests.tar.zst
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcore-nextest-archive
+          path: solidcore/tests.tar.zst
+          retention-days: 1
+          compression-level: 0
+      - name: Seal the build directory
+        if: success() && github.ref == 'refs/heads/main'
+        working-directory: .
+        run: python3 -I scripts/ci/warm_target.py seal --target solidcore/bin
+
+  solidcore-tests-shard:
+    name: SolidCore tests (${{ matrix.shard }}/6)
+    needs: [changes, solidcore-tests-build]
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    defaults:
+      run:
+        working-directory: solidcore
+    env:
+      CARGO_INCREMENTAL: 0
+      # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
+      SOLIDCORE_REQUIRE_UPSTREAM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest@0.9.150
+      - name: Upstream sources (TestFiles)
+        run: |
+          while IFS='=' read -r k v; do
+            case "$k" in
+              UPSTREAM_REPO|UPSTREAM_VERSION|UPSTREAM_COMMIT) export "$k=$v" ;;
+            esac
+          done < scripts/upstream-pin.env
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: solidcore-nextest-archive
+          path: solidcore
+      - name: One sixth of the workspace tests (goldens profile)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
+            --partition "count:$SHARD/6" --no-fail-fast
+
+  solidcore-tests-extras:
+    name: SolidCore tests (doctests and solids report)
+    needs: changes
+    if: needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
+    defaults:
+      run:
+        working-directory: solidcore
+    env:
+      CARGO_INCREMENTAL: 0
+      SOLIDCORE_REQUIRE_UPSTREAM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "solidcore -> bin"
+          key: solidcore-tests-extras
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Upstream sources (TestFiles)
+        run: |
+          while IFS='=' read -r k v; do
+            case "$k" in
+              UPSTREAM_REPO|UPSTREAM_VERSION|UPSTREAM_COMMIT) export "$k=$v" ;;
+            esac
+          done < scripts/upstream-pin.env
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      - name: Doctests (goldens profile)
+        run: cargo test --workspace --profile goldens --doc
+      # The solids report exits 1 while any primitive fails, so only a crash or a missing JSON fails.
+      - name: Solids report (primitives example)
+        run: |
+          set +e
+          cargo run --profile goldens -p solidcore --example primitives -- --json reports/solids/solids.json
+          rc=$?
+          set -e
+          [ "$rc" -le 1 ] && test -s reports/solids/solids.json
+      # main's solids report, for SolidCore's site (solidcore-pages.yml, scripts/fetch-solids.sh).
+      - name: Upload solids report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solids-report
+          path: solidcore/reports/solids/solids.json
+          if-no-files-found: error
+          retention-days: 90
+
+  solidcore-tests:
+    name: SolidCore checks (tests)
+    needs: [changes, solidcore-tests-build, solidcore-tests-shard, solidcore-tests-extras, solidcore, solidcore-standalone]
+    if: always() && needs.changes.outputs.solidcore == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    timeout-minutes: 5
+    steps:
+      - env:
+          BUILD: ${{ needs.solidcore-tests-build.result }}
+          SHARDS: ${{ needs.solidcore-tests-shard.result }}
+          EXTRAS: ${{ needs.solidcore-tests-extras.result }}
+        run: |
+          echo "build=$BUILD shards=$SHARDS extras=$EXTRAS"
+          test "$BUILD" = success && test "$SHARDS" = success && test "$EXTRAS" = success
+      # Every SolidCore job passed on a fixed commit (a merge group, a batch, main): keep the result
+      # under its key, for a later run with exactly the same solidcore/ tree and CI (Select checks).
+      - name: Keep the passing result
+        id: keep
+        if: >-
+          needs.changes.outputs.solidcore_key != '' && needs.solidcore.result == 'success' &&
+          needs.solidcore-standalone.result == 'success' && github.repository == 'tangency-labs/solidcraft' &&
+          (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/batch/'))))
+        env:
+          KEY: ${{ needs.changes.outputs.solidcore_key }}
+        run: echo "$KEY ${{ github.sha }}" > "$RUNNER_TEMP/solidcore-pass.txt"
+      - if: steps.keep.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ needs.changes.outputs.solidcore_key }}
+          path: ${{ runner.temp }}/solidcore-pass.txt
+          retention-days: 7
+
   riscv64-gates:
     name: Compile RISC-V (manual)
     if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check out craft-fonts
@@ -1383,7 +2205,7 @@ jobs:
           repository: storytold/craft-fonts
           ref: ${{ env.CRAFT_FONTS_REF }}
           path: craft-fonts
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1426,8 +2248,8 @@ jobs:
     name: Nightly alert
     needs: [dependency-advisories, changes, checks, ci, build-tests, action-matrix, action-matrix-determinism, property-tests]
     if: always() && github.event_name == 'schedule'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 15 || 5 }}
     permissions:
       issues: write
     steps:

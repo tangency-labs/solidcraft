@@ -25,9 +25,10 @@
 //! boundary report with a non-null list is guarded in C++: its global label lookup
 //! omits `CurveBoundedSurface` and would index past the one-entry default table.
 //! Defined basis-failure reports retain that default label and are compared.
-//! The inherited base check at levels 0..2 reads unwritten continuity outputs
-//! (generic `GetKnots` fails); the native guard probes initialized outputs and
-//! rejects that undefined path. Most new draws use `LEVEL_GIVEN`, which skips it.
+//! The inherited base check at levels 0..2 cannot compute the continuities (generic
+//! `GetKnots` fails), where upstream reads their unwritten outputs; as the fork, that
+//! fails surface test 4, and with a non-null list its report then reaches the label
+//! guard above. Most new draws use `LEVEL_GIVEN`, which skips it.
 
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
@@ -337,7 +338,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let ok = match surface.assert_valid(&k, want_reports.then_some(&mut reports), level, ObjectKey(1)) {
         Ok(ok) => ok,
         Err(e) => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            // a status answer is recorded by its operation and status, as `Upstream` printed
+            // it, so a B-spline failure's own wording does not move the row
+            let text = match solidcore::error::nurbs::upstream_status(&e) {
+                Some(code) => format!("{}: upstream status {code}", e.operation()),
+                None => e.to_string(),
+            };
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(text)));
         }
     };
     let mut v = vec![f64::from(u8::from(ok)), reports.len() as f64];

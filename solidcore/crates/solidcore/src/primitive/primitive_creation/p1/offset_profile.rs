@@ -19,6 +19,7 @@ use super::primitives::{new_brep, planar_faces};
 use super::{Boolean2d, PrimitiveCreation};
 use crate::curve::composite_curve::{CompositeCurve, OffsetCornerType, OffsetParams};
 use crate::curve::curve::Curve;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -26,6 +27,10 @@ use crate::nurbs::knots::Side;
 use crate::topology::Brep;
 
 const OP: &str = "primitive::primitive_creation::p1::offset_profile";
+
+/// Why a face the profile's planar faces were just built as has no surface.
+const NEW_FACE_SURFACE: &str = "a face `planar_faces` just built has no surface, though it builds \
+                                every face on the plane of its curves";
 
 /// `OffsetProfile`: the faces bounded by the closed loops of the coplanar `curves`
 /// (`CreatePlanarFacesWith3DCurves` with `approx_tol_3d`), their loops offset by
@@ -101,7 +106,7 @@ fn offset_profile_in(
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::primitive_broken_link(OP, NEW_FACE_SURFACE))?
             .evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?;
         // build a CompositeCurve for every loop
         let composites = crate::topology::face::p3::create_composites(k, brep, face)?;
@@ -173,5 +178,5 @@ fn difference(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Brep> {
         (&mut a_marks, &mut b_marks),
         &mut state.env(None),
     )?;
-    result.ok_or_else(|| SolidError::null_pointer(OP))
+    result.ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::PlanarDifferenceEmpty))
 }

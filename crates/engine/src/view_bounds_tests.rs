@@ -16,7 +16,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 
 /// What the viewport draws: visible bodies' meshes and the sketches it shows, from the scene.
 fn drawn(s: &Session) -> Aabb3 {
-    let cam = solidcraft_render::Camera { distance: 1e5, ..Default::default() };
+    let cam = solidcraft_viewport::Camera { distance: 1e5, ..Default::default() };
     let scene = crate::view::scene(s, &cam).unwrap();
     let mut b = Aabb3::EMPTY;
     for m in &scene.meshes {

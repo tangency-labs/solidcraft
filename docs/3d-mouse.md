@@ -10,16 +10,26 @@ versions. Two preferences opt into holding the model:
   makes the cap and navigation bridge zoom toward the surface in the middle of the view and stop
   there. Drag-zoom holds the model point where the drag began. The wheel and pinch keep their
   separate **Zoom to the cursor** preference; neither setting changes the other.
-- Preferences › Navigation › 3D mouse › **Orbit** defaults to **Classic**. Choose **Traced**
+- Preferences › Input › 3D mouse › **Orbit** defaults to **Classic**. Choose **Traced**
   (`space_mouse_model_pivot: true`) to turn around the model point in the middle of the view when
   the turn begins. A faint ball marks that point until the cap is back at rest. Over empty space,
   the pivot is the middle of the bodies in view. The navigation bridge uses the same preference,
   but picks the point each frame because device apps do not report rest.
 
+Preferences › Input › 3D mouse › **Motion model** says what the cap moves. **Object** (the
+default, as in earlier versions) moves the model the way you push, tilt or twist the cap. **Target
+camera** (`space_mouse_motion: "target_camera"`) moves the camera that way instead, around the
+point the view turns about, so the model moves the other way along every axis. Each axis's
+**Invert** still reverses that axis in either model. The navigation bridge is not affected: a
+device app sends view motion, not cap motion.
+
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
-adjust the view with the navigation cube, the cap can rotate it too. Turn on **Turn sketches with
+adjust the view with the view navigator, the cap can rotate it too. Turn on **Turn sketches with
 the 3D mouse** (`space_mouse_sketch_orbit: true`) to let the cap rotate a sketch seen square on as
-well, as the mouse can. The Navigation
+well, as the mouse can. Turn on **Keep the horizon level with the 3D mouse**
+(`space_mouse_horizon_lock: true`) and the view never rolls: Tilt turns it up and down, Roll and
+Spin turn it about the world's up axis, and a view that is already rolled is eased level. With
+**Free orbit** on as well, the tilt goes on over the poles and the horizon stays level. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
 invert switch and a speed for the 3D mouse. The cap's zoom direction comes from its own invert
 switch; **Reverse zoom direction** under Wheel and trackpad reverses the wheel only (#8993). The web app reads
@@ -43,6 +53,25 @@ Bluetooth ones (where `idVendor` isn't set, so the HID id is matched instead):
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="256f", TAG+="uaccess"
 SUBSYSTEM=="hidraw", KERNELS=="0005:256F:*", TAG+="uaccess"
 ```
+
+When [`smed`](https://github.com/thomschlie/smed), the SpaceMouse Enterprise driver daemon, runs (its socket
+`$XDG_RUNTIME_DIR/smed/api.sock`), Automatic reads the 3D mouse through it before anything else;
+**Driver** under Advanced can pick it, spacenavd or the device itself. A smed that does not answer
+within a second is left as one that refused, and asked again later. smed reports every
+key by 3Dconnexion's id, beyond the 32 a HID bitmask holds (the Enterprise's Tab and Space are 175
+and 176), and tells a short press from one held past the device's long-press threshold. The Buttons
+section then shows two jobs in each key's row, under **Press** and **Held**; a key whose held job
+is **As a short press** does its short job when held, and one that holds Shift, Ctrl or Alt has no
+held job, since the modifier stays held for as long as the key is down. On the devices we have
+measured (SpaceMouse Pro and SpaceMouse Enterprise) each row is named by the key printed on it
+(**T**, its held job **T, held**); others show **Button N**. The SpaceMouse Enterprise starts with
+the jobs printed on its keys, and T, R and F held give the bottom, left and back views; read
+without smed, its keys start with no job, as before. The first time a device is read through smed,
+it takes over the calibration and button jobs saved for it read directly (smed passes its axes on
+unchanged and numbers its keys the same way), where it has none of its own; long jobs start from
+the defaults, and the direct settings stay for when it is read directly again. smed keeps the
+rotation lock: its Lock key or **Rotation lock** in the Buttons section switches it, the key's LED
+shows it, and the view then only pans and zooms.
 
 Older SpaceNavigators use Logitech's vendor id `046d`, so add a rule with their product id (see
 `lsusb`) instead of matching every Logitech device. A homemade device needs a rule with its own
@@ -73,7 +102,7 @@ Some homemade input devices come with a program of their own that reads the devi
 knobs, rings and buttons into navigation (profiles, sensitivity, button actions). Such a program can
 move SolidCraft's view directly instead of emulating mouse drags, so the mouse pointer stays the
 user's and both can be used at once. Turn on **Navigate with a device app on this computer** in
-Preferences › Navigation › 3D mouse (off by default) and set the port the program listens on
+Preferences › Input › 3D mouse (off by default) and set the port the program listens on
 (8765 unless the program says otherwise). The desktop app then connects to `127.0.0.1:<port>`,
 retries every second while nothing answers, and shows **Connected** with the program's name once it
 is. Only the window with focus moves, and not on the start page or while a file dialog is open.

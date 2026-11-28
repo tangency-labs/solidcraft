@@ -1,5 +1,6 @@
 //! Built-in authored resources and explicit runtime projections. The source catalogs
 //! retain their original authoring status; unsupported concepts never become fake presets.
+use solidcraft_geom::MeshGeom;
 use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},
@@ -224,7 +225,8 @@ struct Listed {
 pub(super) fn targets(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.targets";
     let input: LibraryTargetsParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    if input.query.len() > 256
+    // A query may be a whole body name, which is up to `MAX_BODY_NAME_BYTES`.
+    if input.query.len() > solidcraft_render::job::MAX_BODY_NAME_BYTES
         || input.query.chars().any(char::is_control)
         || input.limit == 0
         || input.limit > 128

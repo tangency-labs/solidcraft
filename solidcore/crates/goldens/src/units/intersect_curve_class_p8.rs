@@ -28,7 +28,6 @@ use solidcore::surface::b_spline_volume::BSplineVolume;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::{Volume, VolumeKind};
-use solidcore::SolidError;
 
 /// Runner for curve classification part 8.
 pub struct Runner;
@@ -238,7 +237,9 @@ fn rust(input: Input) -> Result<Output, HarnessError> {
     }
     let status = match result {
         Ok(()) => 0,
-        Err(SolidError::Upstream { code, .. }) => code,
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            solidcore::error::upstream_status(&e).unwrap_or(-1)
+        }
         _ => 1001,
     };
     let mut o = vec![f64::from(status), cc.size() as f64];

@@ -20,6 +20,10 @@ class Repo:
         self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "t")
         self.git("config", "commit.gpgsign", "false")
+        # No background gc or maintenance: a detached `git gc --auto` writing into .git while
+        # tearDown deletes the directory fails the test ("Directory not empty: '.git'").
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True, check=True).stdout.strip()
@@ -142,6 +146,48 @@ class MergeOfMain(unittest.TestCase):
         head = self.r.git("rev-parse", "HEAD")
         self.assertIsNone(main_merge.merge_of_main(base, head))
 
+
+
+class Reuse(unittest.TestCase):
+    """The same commit, the same tree or this run's previous attempt that passed is carried."""
+
+    def setUp(self):
+        self.calls = []
+        self.real_get = main_merge.get
+
+    def tearDown(self):
+        main_merge.get = self.real_get
+
+    def fake(self, answers):
+        def get(url, token):
+            self.calls.append(url)
+            for key, value in answers.items():
+                if key in url:
+                    return value
+            return {}
+        main_merge.get = get
+
+    def test_previous_attempt_that_passed_with_shards(self):
+        self.fake({"attempts/1/jobs": {"jobs": [{"name": "Native Linux tests", "conclusion": "success"}]},
+                   "attempts/1": {"conclusion": "success", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "u1")
+
+    def test_previous_attempt_that_failed_or_first_attempt(self):
+        self.fake({"attempts/1": {"conclusion": "failure", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "")
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 1, "t"), "")
+
+    def test_previous_attempt_without_shards_is_not_carried(self):
+        self.fake({"attempts/1/jobs": {"jobs": [{"name": "ci", "conclusion": "success"}]},
+                   "attempts/1": {"conclusion": "success", "html_url": "u1"}})
+        self.assertEqual(main_merge.previous_attempt("o/r", "9", 2, "t"), "")
+
+    def test_same_commit_needs_this_pull_request_and_shards(self):
+        run = {"id": 5, "pull_requests": [{"number": 7}], "html_url": "u5"}
+        self.fake({"/jobs": {"jobs": [{"name": "Native Linux tests", "conclusion": "success"}]},
+                   "runs?head_sha=abc": {"workflow_runs": [run]}})
+        self.assertEqual(main_merge.passing_run("o/r", "abc", "t", 7, "o/r", "b"), "u5")
+        self.assertEqual(main_merge.passing_run("o/r", "abc", "t", 8, "o/r", "b"), "")
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,11 +63,17 @@ If a printer can't do gradients, use the one-colour files, or fill every face wi
 
 ## Name and logo
 
-The SolidCraft code and these files are licensed MIT OR Apache-2.0 (see the [README](../../README.md#licence)),
-so you may copy and change them. The name SolidCraft and this logo identify the SolidCraft
+The SolidCraft code is licensed MIT OR Apache-2.0 (see the [README](../../README.md#licence)); these
+files are not (see Licence below). The name SolidCraft and this logo identify the SolidCraft
 project. Use them to refer to the project, for example in an article, a talk, or a sticker for a
 meetup. If you publish a fork or a modified build, give it its own name and logo so people
 don't mistake it for SolidCraft.
 
 The wordmark is set in IBM Plex Sans Bold (SIL Open Font License 1.1, the interface font in
-`assets/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.
+`crates/look/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.
+
+## Licence
+
+The SolidCraft name, logo and brand kit are under the SolidCraft Brand Licence
+([LICENSE-BRAND](../../LICENSE-BRAND)). Using them for anything other than SolidCraft needs the
+maintainers' written permission first.

@@ -54,7 +54,7 @@ mod native {
         document: Weak<solidcraft_engine::doc::Document>,
         model: Weak<solidcraft_engine::doc::ModelState>,
         revision: u64,
-        camera: (solidcraft_engine::render::UpAxis, [u64; 8]),
+        camera: (solidcraft_viewport::UpAxis, [u64; 8]),
         moves: BTreeMap<u64, solidcraft_engine::doc::Mat>,
         exploded: BTreeMap<u64, solidcraft_engine::doc::Mat>,
         visibility: Value,
@@ -62,7 +62,7 @@ mod native {
         visual: Value,
         lights: solidcraft_engine::schema::render_lights::Visibility,
     }
-    fn camera(app: &SolveApp) -> (solidcraft_engine::render::UpAxis, [u64; 8]) {
+    fn camera(app: &SolveApp) -> (solidcraft_viewport::UpAxis, [u64; 8]) {
         let c = app.cam;
         (c.up, [c.target.x, c.target.y, c.target.z, c.yaw, c.pitch, c.roll, c.distance, c.fov].map(f64::to_bits))
     }
@@ -337,8 +337,13 @@ mod native {
                     let successful = result.is_ok();
                     #[cfg(test)]
                     if disconnect_retirement && successful {
-                        // Inject an actual disconnected return/ack channel after
-                        // handing the owned proof to the ordinary UI receiver.
+                        // Inject an actual disconnected return/ack channel, then
+                        // hand the owned proof to the ordinary UI receiver. Close
+                        // both first: if the window could still return the proof
+                        // into an open channel, this thread would drop it from the
+                        // channel buffer on exit and release its credit (#15077).
+                        drop(retired);
+                        drop(ack);
                         if let Err(returned) = ready_tx.send(result) {
                             drop(returned);
                         }

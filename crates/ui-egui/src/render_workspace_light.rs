@@ -544,7 +544,7 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
                 let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
+                let n = solidcraft_viewport::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),
@@ -768,7 +768,7 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let enabled = count < cap;
                 let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
                 crate::scenario::publish_target(&format!("render:lighting:add:{kind}"), response.rect);
-                if response.on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
+                if response.backing_on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
                     dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
                     ui.close();
                 }
@@ -1262,7 +1262,7 @@ fn vector_field(
     let mut changed = false;
     for ((index, component), axis) in value.iter_mut().enumerate().zip(["X", "Y", "Z"]) {
         ui_kit::row(ui, &format!("{label} {axis}"), |ui| {
-            let response = ui_kit::number_field(ui, component, range.clone(), 0.1, suffix);
+            let response = ui_kit::compact_number_field(ui, component, range.clone(), 0.1, suffix);
             crate::scenario::publish_target(&format!("render:light:{key}:{index}"), response.rect);
             changed |= accepted(&response);
         });

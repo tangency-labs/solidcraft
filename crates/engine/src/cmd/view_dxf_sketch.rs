@@ -7,19 +7,12 @@ use solidcore_record::{Plane, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::Sketch;
 
-use super::progress::Stage;
 use crate::Session;
+use crate::mesh_lines::{Part, Refused, Stage};
 use crate::view::{sketch_curve_visible, sketch_shown};
 
 /// Sampled sketch points kept for one export, at most.
 const MAX_POINTS: usize = 4_000_000;
-
-/// One connected run of a sketch curve in world coordinates.
-pub(super) struct Part {
-    pub points: Vec<Vec3>,
-    /// Drawn over the bodies (the sketch being edited) rather than hidden behind them.
-    pub on_top: bool,
-}
 
 fn profile_curve(sk: &Sketch, i: usize) -> bool {
     sketch_curve_visible(sk, i) && sk.curves.get(i).is_some_and(|c| !c.construction && !c.centerline && (c.link.is_none() || sk.is_text_curve(i)))
@@ -51,22 +44,22 @@ fn curve_parts(sk: &Sketch, i: usize, plane: &Plane, tolerance: f64) -> Vec<Vec<
 }
 
 /// The shown sketches' profile curves, sampled at the export's chord `tolerance`.
-pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, &'static str> {
-    let world = s.world_state().map_err(|_| "the model cannot be placed")?;
+pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, Refused> {
+    let world = s.world_state().map_err(|_| Refused::Invalid("the model cannot be placed"))?;
     let shown: Vec<_> = world.sketches.iter().filter(|ss| sketch_shown(s, ss.feature)).collect();
     let progress = Stage::new("dxf_projection", shown.len());
     let mut result = Vec::new();
     let mut total = 0usize;
-    let mut add = |points: Vec<Vec3>, on_top: bool, result: &mut Vec<Part>| -> Result<(), &'static str> {
+    let mut add = |points: Vec<Vec3>, on_top: bool, result: &mut Vec<Part>| -> Result<(), Refused> {
         if points.len() < 2 {
             return Ok(());
         }
         if points.iter().any(|p| !p.is_finite()) {
-            return Err("sketch contains invalid coordinates");
+            return Err(Refused::Invalid("a sketch contains invalid coordinates"));
         }
         total = total.saturating_add(points.len());
         if total > MAX_POINTS {
-            return Err("view exceeds export memory budget; hide sketches or increase tolerance");
+            return Err(Refused::SketchPoints(MAX_POINTS));
         }
         result.push(Part { points, on_top });
         Ok(())

@@ -168,10 +168,9 @@
 //!   call `GetType()` on null objects there (plan/upstream-issues.md UB-98).
 //! - **Manager destructor** leaves the objects it does not list in the store (upstream
 //!   allocates them from the context).
-//! - `RemoveCoincidentNoEdgeProtoVertex` keeps upstream's `return SM_SUCCESS` (read as
-//!   `TRUE`) when the point solve finds nothing (plan/upstream-issues.md WR-73); the
-//!   opt-in `Kernel::fixes.proto_vertex_miss_is_false` returns `FALSE` there
-//!   (tangency-labs/solidcore#848).
+//! - `RemoveCoincidentNoEdgeProtoVertex` returns `FALSE` when the point solve finds
+//!   nothing, where upstream returns `SM_SUCCESS`, read as `TRUE` (plan/upstream-issues.md
+//!   WR-73, tangency-labs/solidcore#848).
 //! - `Dump`, `Draw` and the `SM_DEBUG_CODE` blocks are not ported.
 //! - **Recursion.** None.
 
@@ -185,8 +184,9 @@ pub use assembly::{Assembly, AssemblyInstance};
 pub use copy_brep_map::CopyBrepMap;
 pub use owning_topology::{destroy_topology, OwningRecords, OwningTopology};
 pub use proto::{
-    EdgeDefId, EdgeDefinition, ProtoEdge, ProtoEdgeId, ProtoFace, ProtoFaceId, ProtoGeometry,
-    ProtoTopology, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId, VertexDefinition,
+    DeclaredContact, EdgeDefId, EdgeDefinition, ProtoEdge, ProtoEdgeId, ProtoFace, ProtoFaceId,
+    ProtoGeometry, ProtoTopology, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId,
+    VertexDefinition,
 };
 
 #[cfg(test)]
@@ -506,47 +506,39 @@ mod tests {
         Curve::from(crate::curve::offset_curve::OffsetCurve::empty())
     }
 
-    fn kernel_pass_on(pass_on: bool) -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
-        k
-    }
-
     /// fork bcc6f01 (`sm_WhichPVToCombine`, `if (pOrigPE->Evaluate(..) != SM_SUCCESS)
     /// return NULL`): the split point cannot be evaluated. Upstream compares the unset
     /// point with the end proto vertices (here one at the unset position, which then
     /// matches); the fork answers no proto vertex.
     #[test]
     fn which_pv_to_combine_without_a_split_point_is_none() {
-        for pass_on in [false, true] {
-            let k = kernel_pass_on(pass_on);
-            let geo = Geo(vec![unevaluable()]);
-            let mut m = manager();
-            let ivl = Extent1d::from_min_max(0.0, 1.0);
-            let v0 = m.new_proto_vertex(Vec3::UNDEF, 1e-5).unwrap();
-            let v1 = m
-                .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
-                .unwrap();
-            let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
-            let ed = m
-                .insert_edge_definition(EdgeDefinition::new(
-                    Some(C0),
-                    ivl,
-                    R0,
-                    L0,
-                    1e-5,
-                    None,
-                    None,
-                    Some(pe),
-                ))
-                .unwrap();
-            m.proto_edge_mut(pe)
-                .unwrap()
-                .edge_definitions_mut()
-                .push(ed);
-            let pv = m.which_pv_to_combine(&k, &geo, pe, 0.5, None).unwrap();
-            assert_eq!(pv, if pass_on { None } else { Some(v0) });
-        }
+        let k = Kernel::default();
+        let geo = Geo(vec![unevaluable()]);
+        let mut m = manager();
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let v0 = m.new_proto_vertex(Vec3::UNDEF, 1e-5).unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let ed = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                R0,
+                L0,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.proto_edge_mut(pe)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed);
+        let pv = m.which_pv_to_combine(&k, &geo, pe, 0.5, None).unwrap();
+        assert_eq!(pv, None);
     }
 
     /// fork bcc6f01 (`sm_IsInterior`, `sm_AreSameCurve`: "no value, no evidence"): the
@@ -556,17 +548,195 @@ mod tests {
     /// within tolerance and `sm_AreSameCurve` answers `true`.
     #[test]
     fn unevaluable_curve_is_not_interior_or_same() {
-        for pass_on in [false, true] {
-            let k = kernel_pass_on(pass_on);
-            let geo = Geo(vec![unevaluable(), line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
-            let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let k = Kernel::default();
+        let geo = Geo(vec![unevaluable(), line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let c1 = H(1, ClassObjectKind::Curve);
+        assert!(!proto::is_interior(&k, &geo, Some(C0), &ivl, 0.5, 1e-5).unwrap());
+        // upstream drops the unset point onto the line and takes the curves for the
+        // same; the port answers no, as the fork does
+        let same = proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-5).unwrap();
+        assert!(!same);
+    }
+
+    /// [`Geo`] whose edge 22 bounds face 21, so that (face 20, face 21) and (face 20,
+    /// edge 22) are connected source pairs for the edge combine.
+    struct GeoEdgeOnFace(Geo);
+
+    impl ClassGeometry<H> for GeoEdgeOnFace {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            self.0.curve(o)
+        }
+        fn surface(&self, _o: H) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _o: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+    }
+
+    impl ProtoTopology<H> for GeoEdgeOnFace {
+        fn vertex_use_faces(&self, vertex: H) -> crate::Result<Vec<Option<H>>> {
+            self.0.vertex_use_faces(vertex)
+        }
+        fn edge_use_faces(&self, _edge: H) -> crate::Result<Vec<Option<H>>> {
+            Ok(vec![Some(H(21, ClassObjectKind::Face))])
+        }
+        fn edge_start_vertex(&self, edge: H) -> crate::Result<Option<H>> {
+            self.0.edge_start_vertex(edge)
+        }
+        fn edge_other_vertex(&self, edge: H, vertex: Option<H>) -> crate::Result<Option<H>> {
+            self.0.edge_other_vertex(edge, vertex)
+        }
+        fn vertex_point(&self, vertex: H) -> crate::Result<Point3> {
+            self.0.vertex_point(vertex)
+        }
+        fn edge_brep(&self, edge: H) -> crate::Result<Option<ObjectKey>> {
+            self.0.edge_brep(edge)
+        }
+        fn edge_faces(&self, edge: H) -> crate::Result<Vec<H>> {
+            self.0.edge_faces(edge)
+        }
+    }
+
+    /// Whether the two line definitions `l1` and `l2` (of one proto edge from (0,0,0) to
+    /// (2,0,0), each with tolerance 1e-5, on the face pair (20, 21) and (20, edge 22)) can
+    /// combine at `factor` times their summed tolerances.
+    fn combine_lines(k: &Kernel, l1: Curve, l2: Curve, factor: f64) -> u64 {
+        let geo = GeoEdgeOnFace(Geo(vec![l1, l2]));
+        let mut m = manager();
+        let ivl = geo.0 .0[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(v0);
+        m.add_proto_vertex(v1);
+        let pe = m.new_proto_edge(k, Some(v0), Some(v1), ivl).unwrap();
+        m.add_proto_edge(pe);
+        let fa = H(20, ClassObjectKind::Face);
+        let fb = H(21, ClassObjectKind::Face);
+        let eb = H(22, ClassObjectKind::Edge);
+        let c1 = H(1, ClassObjectKind::Curve);
+        let ed1 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                fa,
+                fb,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        let ed2 = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(c1),
+                ivl,
+                fa,
+                eb,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.can_combine_edge_definitions_within(k, &geo, ed1, ed2, factor)
+            .unwrap()
+    }
+
+    /// #15718: at the exact radius (factor 1) two line definitions of one proto edge
+    /// combine only when each lies within the summed tolerances of the other over its
+    /// whole piece. Here they cross at the first one's midpoint at an angle: the midpoint
+    /// drop upstream decides from is 0, but their ends are 3e-5 apart against summed
+    /// tolerances of 2e-5, so they are two curves and are not combined. The companion pair,
+    /// 4e-6 apart at the ends, is one piece and still combines (the first, on the
+    /// higher-dimensional face pair, is the one deleted).
+    #[test]
+    fn crossing_line_definitions_combine_only_within_tolerance_end_to_end() {
+        let k = Kernel::default();
+        for (a, want) in [(1.5e-5, 0), (2e-6, 1)] {
+            let geo = GeoEdgeOnFace(Geo(vec![
+                line([0.0, a, 0.0], [2.0, -a, 0.0]),
+                line([0.0, -a, 0.0], [2.0, a, 0.0]),
+            ]));
+            let mut m = manager();
+            let ivl = geo.0 .0[0].natural_interval();
+            let v0 = m
+                .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let v1 = m
+                .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            m.add_proto_vertex(v0);
+            m.add_proto_vertex(v1);
+            let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+            m.add_proto_edge(pe);
+            let fa = H(20, ClassObjectKind::Face);
+            let fb = H(21, ClassObjectKind::Face);
+            let eb = H(22, ClassObjectKind::Edge);
             let c1 = H(1, ClassObjectKind::Curve);
-            assert!(!proto::is_interior(&k, &geo, Some(C0), &ivl, 0.5, 1e-5).unwrap());
-            // upstream drops the unset point onto the line and takes the curves for the
-            // same; the fork answers no
-            let same =
-                proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-5).unwrap();
-            assert_eq!(same, !pass_on);
+            let ed1 = m
+                .insert_edge_definition(EdgeDefinition::new(
+                    Some(C0),
+                    ivl,
+                    fa,
+                    fb,
+                    1e-5,
+                    None,
+                    None,
+                    Some(pe),
+                ))
+                .unwrap();
+            let ed2 = m
+                .insert_edge_definition(EdgeDefinition::new(
+                    Some(c1),
+                    ivl,
+                    fa,
+                    eb,
+                    1e-5,
+                    None,
+                    None,
+                    Some(pe),
+                ))
+                .unwrap();
+            let got = m
+                .can_combine_edge_definitions_within(&k, &geo, ed1, ed2, 1.0)
+                .unwrap();
+            assert_eq!(got, want, "ends {:e} apart", 2.0 * a);
+            // upstream's factor-5 path still decides from the midpoint, as before
+            let five = m
+                .can_combine_edge_definitions_within(&k, &geo, ed1, ed2, 5.0)
+                .unwrap();
+            assert_eq!(five, 1, "ends {:e} apart, factor 5", 2.0 * a);
+        }
+    }
+
+    /// #15718: two collinear line definitions shifted along their line combine at the
+    /// exact radius only when each piece lies within the summed tolerances (2e-5) of the
+    /// other piece, not merely of its line: shifted by 3e-5 they are two pieces and are
+    /// kept (the line distance is 0 at every end, and the first piece's end at x = 0 is
+    /// 3e-5 from the second piece); shifted by 4e-6 they are one and combine. Upstream's
+    /// factor-5 midpoint path combines both, as before.
+    #[test]
+    fn collinear_line_definitions_shifted_along_the_line_combine_only_within_tolerance() {
+        let k = Kernel::default();
+        for (shift, want) in [(3e-5, 0), (4e-6, 1)] {
+            let l1 = line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
+            let l2 = line([shift, 0.0, 0.0], [2.0 + shift, 0.0, 0.0]);
+            let got = combine_lines(&k, l1.clone(), l2.clone(), 1.0);
+            assert_eq!(got, want, "shifted by {shift:e}");
+            assert_eq!(
+                combine_lines(&k, l1, l2, 5.0),
+                1,
+                "shifted by {shift:e}, factor 5"
+            );
         }
     }
 
@@ -688,24 +858,101 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v2)
             .unwrap());
         assert!(m.proto_vertices().is_empty());
-        // off the curve: no solution, and upstream's SM_SUCCESS reads as TRUE
+        // off the curve: no solution, so not removed (WR-73: upstream's SM_SUCCESS read as
+        // TRUE is not kept)
         let v3 = m
             .new_proto_vertex(Point3::new(1.0, 5.0, 0.0), 1e-5)
             .unwrap();
         m.add_proto_vertex(v3);
-        assert!(m
+        assert!(!m
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
+        // each of the two ran its point solve
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 2);
     }
 
-    /// tangency-labs/solidcore#848 (WR-73): with the opt-in, a proto vertex the proto
+    /// A proto vertex that has proto edges is never
+    /// removed and a miss is `false` too, so its point solve is not run: on the curve or off
+    /// it, the answer is `false` and no solve is counted. An edge-less proto vertex is solved
+    /// as before, and so is every proto vertex under a fired cancel token, where the solve is
+    /// what may report the cancel.
+    #[test]
+    fn a_proto_vertex_with_proto_edges_is_not_solved() {
+        let mut k = Kernel::default();
+        let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
+        let mut m = manager();
+        let ivl = geo.0[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let ed = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                R0,
+                L0,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.proto_edge_mut(pe)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed);
+        // two proto vertices that each end a proto edge of their own, one on `pe`'s curve
+        // and one off it
+        let other = m.new_proto_edge(&k, None, None, ivl).unwrap();
+        let mut edged = Vec::new();
+        for y in [0.0, 5.0] {
+            let v = m.new_proto_vertex(Point3::new(1.0, y, 0.0), 1e-5).unwrap();
+            m.add_proto_vertex(v);
+            m.proto_vertex_mut(v).unwrap().add_proto_edge(other);
+            edged.push(v);
+        }
+        k.work_counters.reset();
+        for &v in &edged {
+            assert!(!m
+                .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v)
+                .unwrap());
+        }
+        assert_eq!(m.proto_vertices(), &edged[..]);
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 0);
+        // an edge-less one on the curve is solved and removed
+        let free = m
+            .new_proto_vertex(Point3::new(0.5, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(free);
+        assert!(m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, free)
+            .unwrap());
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 1);
+        // under a fired token the solve runs as it did before (a line's solve does not ask
+        // the token, so the answer is still `false`; a curve whose solve builds its cache
+        // reports the cancel from there)
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.set_cancel_token(token);
+        for &v in &edged {
+            assert!(!m
+                .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v)
+                .unwrap());
+        }
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 3);
+    }
+
+    /// tangency-labs/solidcore#848 (WR-73): a proto vertex the proto
     /// edge does not reach is reported as not removed, so the caller goes on testing it
     /// against the remaining proto edges.
     #[test]
     fn issue_848_no_hit_is_false() {
-        let mut k = Kernel::default();
-        k.fixes.proto_vertex_miss_is_false = true;
+        let k = Kernel::default();
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -750,11 +997,6 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, on)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[off]);
-        // the default keeps upstream's TRUE
-        k.fixes.proto_vertex_miss_is_false = false;
-        assert!(m
-            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
-            .unwrap());
     }
 
     #[test]

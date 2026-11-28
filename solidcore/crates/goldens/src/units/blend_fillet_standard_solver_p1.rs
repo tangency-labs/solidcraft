@@ -35,12 +35,13 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
 use solidcore::blend::fillet_solver::p1::{FilletSurfaceGenerator, OffsetSurfaceSlot};
 use solidcore::blend::fillet_standard_solver::p1::{
-    constant_radius_from_edgeuse, constant_radius_is_kind_of, BlendCurveCrossSectionFsg,
+    constant_radius_from_edgeuse, constant_radius_is_kind_of,
     BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs,
     CurveBasedFs, FilletLaw, FilletLawKind, FilletSolver, InitialSurface, LinearCrossSectionFsg,
-    RailSurface, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
+    SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
     CONSTANT_RADIUS_FS_TYPE_STRING,
 };
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -408,7 +409,9 @@ pub(crate) fn put_default_geom(
         match s.surface.evaluate_point(k, uv) {
             Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) => v.extend([f64::from(code), 0.0, 0.0, 0.0]),
+            Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+                v.extend([f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            }
             Err(e) => return Err(e),
         }
     }
@@ -494,7 +497,9 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -558,7 +563,7 @@ fn fail(e: &SolidError) -> Result<f64, Box<Output>> {
 }
 
 fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     let (res, curves) = match i {
         Inputs::Circ {
@@ -588,58 +593,9 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
             };
             (res, [c, r1, r2])
         }
-        Inputs::Blend {
-            cont,
-            scale,
-            tol,
-            g1,
-            center,
-            rail1,
-            rail2,
-            sides,
-        } => {
-            let fsg = BlendCurveCrossSectionFsg {
-                continuity: *cont as u32,
-                blend_scale: *scale,
-                at_thirds: false,
-            };
-            let mut c = bcurve_of(center)?;
-            let mut r1 = bcurve_of(rail1)?;
-            let mut r2 = bcurve_of(rail2)?;
-            let built = match sides {
-                Some(s) => Some((
-                    surface_of(&s.s1)?,
-                    bcurve_of(&s.uv1)?,
-                    surface_of(&s.s2)?,
-                    bcurve_of(&s.uv2)?,
-                )),
-                None => None,
-            };
-            let (side1, side2) = match &built {
-                Some((s1, uv1, s2, uv2)) => (
-                    RailSurface {
-                        surface: Some(s1),
-                        uv_curve: Some(uv1),
-                    },
-                    RailSurface {
-                        surface: Some(s2),
-                        uv_curve: Some(uv2),
-                    },
-                ),
-                None => (
-                    RailSurface {
-                        surface: None,
-                        uv_curve: None,
-                    },
-                    RailSurface {
-                        surface: None,
-                        uv_curve: None,
-                    },
-                ),
-            };
-            let res = fsg
-                .create_surface_from_curves(&k, &mut c, &mut r1, &mut r2, *tol, *g1, side1, side2);
-            (res, [c, r1, r2])
+        Inputs::Blend { .. } => {
+            // the blend-curve generator is retired (WR-685): `cases` drops these
+            return Err(harness("the blend-curve generator is retired (WR-685)"));
         }
         _ => return Err(harness("not a generator op")),
     };
@@ -761,7 +717,8 @@ fn vr_of(k: &Kernel, s: &VrIn) -> Result<VariableRadiusFs, HarnessError> {
         .set_fillet_surface_generator(Some(match s.fsg {
             1 => FilletSurfaceGenerator::Linear,
             2 => FilletSurfaceGenerator::circular_default(),
-            _ => FilletSurfaceGenerator::blend_curve_default(),
+            // a blend curve is the G^n section (the old generator is retired, WR-685)
+            _ => FilletSurfaceGenerator::GnSection(GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT)),
         }));
     curve_based.original = Some(center);
     let law = match &s.law {
@@ -824,9 +781,18 @@ fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
     })
 }
 
-#[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    rust_record_seen(i, &mut |_, _| {})
+}
+
+/// [`rust_record`], showing `seen` each offset surface of a Jacobian case's solver (with
+/// the extension it holds) once the call has returned, where its record is written.
+#[allow(clippy::too_many_lines)]
+fn rust_record_seen(
+    i: &Inputs,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Rec, HarnessError> {
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::Circ { .. } | Inputs::Blend { .. } => return rust_generator(i),
@@ -1019,6 +985,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
             }
             o.extend(slot_offsets(&fs.solver.surfaces));
+            fs.solver.surfaces.iter().flatten().for_each(|slot| seen(&k, &slot.surface));
         }
         Inputs::CdSetup {
             solver,
@@ -1095,6 +1062,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
             }
             o.extend(offsets(&fs.solver.surfaces));
+            fs.solver.surfaces.iter().flatten().for_each(|slot| seen(&k, &slot.surface));
         }
         Inputs::CdInit {
             solver,
@@ -1309,7 +1277,7 @@ fn rust_edgeuse_body(
     fu: f64,
     fv: f64,
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -1346,9 +1314,9 @@ fn rust_edgeuse_body(
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(e) => {
-                        let st = match e {
-                            SolidError::Upstream { code, .. } => f64::from(code),
-                            _ => return Err(e),
+                        let st = match solidcore::error::nurbs::upstream_status(&e) {
+                            Some(code) => f64::from(code),
+                            None => return Err(e),
                         };
                         v.extend([st, 0.0, 0.0, 0.0]);
                     }
@@ -1362,12 +1330,71 @@ fn rust_edgeuse_body(
             }
             put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
         }
-        Err(SolidError::Upstream { code, .. }) => v.push(f64::from(code)),
+        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => v.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))),
         Err(e) => return Err(e),
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
     Ok(v)
+}
+
+/// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
+/// after it, what the case's row reports (`None` where the op refuses before its body or
+/// its body reports `null_deref`, as the row does, so only states the row has are seen). For
+/// the rebuilt-trim certificate (`topology_edgeuse_p2::trim_bounds`).
+#[cfg(test)]
+pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let Inputs::CrEu {
+        brep,
+        eu,
+        tol,
+        ang,
+        tan,
+        r,
+        r2,
+        fu,
+        fv,
+    } = case.parse::<Inputs>()?
+    else {
+        return Ok(None);
+    };
+    let Ok(mut s) = eu_setup(&brep, eu)? else {
+        return Ok(None);
+    };
+    // the op's own order: its refusals before the body, then the body's own status
+    if edgeuse_refusal(&s)?.is_some() {
+        return Ok(None);
+    }
+    if body {
+        let out = rust_edgeuse_body(&mut s.brep, s.eu, tol, ang, tan, r, r2, fu, fv)
+            .map_err(|e| he(&e))?;
+        if out.first() == Some(&-2.0) {
+            return Ok(None);
+        }
+    }
+    Ok(Some((s.brep, s.eu)))
+}
+
+/// The refusal the edge-use op reports before its body: inexact geometry at the selected
+/// edge use, or at its radial's face and edge.
+fn edgeuse_refusal(s: &Setup) -> Result<Option<Output>, HarnessError> {
+    if let Some(o) = inexact_geometry(s) {
+        return Ok(Some(o));
+    }
+    // the radial's face and edge too
+    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
+        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
+            let probe = Setup {
+                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
+                eu: radial,
+                types: s.types.clone(),
+            };
+            if let Some(o) = inexact_geometry(&probe) {
+                return Ok(Some(o));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
@@ -1389,21 +1416,8 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    if let Some(o) = inexact_geometry(&s) {
+    if let Some(o) = edgeuse_refusal(&s)? {
         return Ok(o);
-    }
-    // the radial's face and edge too
-    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
-        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
-            let probe = Setup {
-                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
-                eu: radial,
-                types: s.types.clone(),
-            };
-            if let Some(o) = inexact_geometry(&probe) {
-                return Ok(o);
-            }
-        }
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *r, *r2, *fu, *fv) {
         Ok(body) => Ok(eu_output(&body)),
@@ -2168,7 +2182,11 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        // The blend-curve generator is retired (WR-685, #2273): its cases are still drawn,
+        // so the generated cases after them stay as they were, and dropped here.
+        cases.retain(|c| !matches!(c.parse::<Inputs>(), Ok(Inputs::Blend { .. })));
+        Ok(cases)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -2188,6 +2206,10 @@ mod tests {
         for seed in 0..400u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);
             let i = gen_case(&mut rng);
+            // (the retired blend-curve generator's cases are dropped, WR-685)
+            if matches!(i, Inputs::Blend { .. }) {
+                continue;
+            }
             let op = i.label();
             let out = rust(&i).expect("harness");
             let kind = if let Some(d) = &out.deferred {
@@ -2220,7 +2242,6 @@ mod tests {
                 .unwrap_or(0)
         };
         assert!(ok("Circ") > 40, "too few successful Circ cases");
-        assert!(ok("Blend") > 20, "too few successful Blend cases");
         assert!(ok("CrEu") > 10, "too few successful CrEu cases");
     }
 
@@ -2272,5 +2293,224 @@ mod tests {
             kinds: vec![],
         };
         assert!(rust(&base).is_err());
+    }
+}
+
+/// WR-458, WR-633 and WR-650 (#18921): the 172 rows the offset surface's extension from
+/// its base moves. A Jacobian taken outside a mate's domain is taken on the mate's offset's
+/// extension; each row's own case is run as its record is (`rust_record_seen`), and every
+/// extension its solver's offsets then hold is certified ([`crate::g1r_cert::ExtensionWatch`]:
+/// bit for bit the extension a fresh evaluation from the base's NURB builds, each step
+/// certified G1). Every row's solver holds at least one extension: the moved values are
+/// taken on certified extensions from the base (PROVEN, up to the rounding the
+/// certificate's header bounds).
+#[cfg(test)]
+mod wr458_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 172] = [
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(True, False)_3_1",
+    ];
+
+    #[test]
+    fn each_moved_row_runs_on_certified_extensions_from_its_base() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i = c.parse::<Inputs>().unwrap();
+            let (mut growths, mut err) = (0, None);
+            let mut look = |k: &Kernel, s: &OffsetSurface| {
+                let mut w = ExtensionWatch::default();
+                match w.observe(k, &s.surface) {
+                    Ok(()) => growths += w.growths,
+                    Err(e) => {
+                        err.get_or_insert(e);
+                    }
+                }
+            };
+            let _rec = rust_record_seen(&i, &mut look).unwrap_or_else(|e| panic!("{}: {e:?}", c.name));
+            if let Some(e) = err {
+                panic!("{}: {e}", c.name);
+            }
+            eprintln!("{}: {growths} extensions", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }

@@ -21,7 +21,7 @@
 //! | `assert_test_vertex1`        | `sm_AssertTestVertex1`                    |
 //!
 //! Deviations: one function per upstream callee, so each package replaces exactly one
-//! body. Until a callee is ported its seam returns [`SolidError::Unported`]; a
+//! body. Until a callee is ported its seam returns [`crate::SolidError::Unported`]; a
 //! difftest case reaching it is deferred, never passed. Upstream evaluates the level-2
 //! seams (Face 32/33/38, Edge 13) only at `SM_LEVEL_2`; `sm_AssertTestVertex1` runs at
 //! every level (only its report is level 2).
@@ -30,7 +30,7 @@
 //! replace a body with the call into the ported function.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::Result;
 use crate::geom::assert_array::{AssertArray, ObjectKey};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -113,9 +113,17 @@ pub(super) fn surface_assert_valid(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(
-            "topology::brep::validation::assert_valid",
-        ))?
+        .ok_or_else(|| {
+            crate::error::Failure::new(
+                "topology::brep::validation::assert_valid",
+                crate::error::topology::TopologyFailure::Defect {
+                    why: "the face has no surface, though the assert calls this only for a face \
+                          with one",
+                },
+            )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
+        })?
         .clone_for_evaluation()?;
     let mut services = BrepFaceServices::new(&mut *b);
     surface.assert_valid_with_face_context(
@@ -159,14 +167,85 @@ pub(super) fn assert_test_edge13(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Res
 }
 
 /// `sm_AssertTestVertex1(this, &dMaxGap3d, &pMaxGapFace)`: `(passed, max_gap_3d)`, the
-/// vertex within the cross-section tolerance of its faces and on their corner
-/// (`IsWithinXSectTol3dOfFaces`, `IsOnFaceCorner`). Called at every level; its report
-/// (Vertex test 1) is level 2.
+/// vertex within its local tolerance of its faces. The
+/// body's intersection tolerance remains the floor. Strict corner queries keep
+/// their own semantics; this is the tolerant body's validity check. Called at
+/// every level; its report (Vertex test 1) is level 2.
 pub(super) fn assert_test_vertex1(
     k: &mut Kernel,
     b: &mut Brep,
     v: VertexId,
 ) -> Result<(bool, f64)> {
-    let (passed, max_gap_3d, _) = crate::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
-    Ok((passed, max_gap_3d))
+    use crate::topology::vertex::corner;
+
+    let (_, face_gap, _) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, false)?;
+    let tolerance = vertex1_tolerance(k, b, v)?;
+    // CalcCornerFromFaces is a placement query, not a distance to the tolerant
+    // boundary. Its approximate intersection can slide along a shared curve;
+    // even an exact ideal corner ignores the incident faces' tolerance bands.
+    // As on main, Test 1 reports the measured vertex/face gap. Strict corner
+    // queries used by placement and repair keep their independent semantics.
+    Ok((face_gap <= tolerance, face_gap))
+}
+
+/// The gap Vertex Test 1 allows: the vertex's own tolerance, with the body's intersection
+/// tolerance as the floor. A tolerance past `GROWTH_PAST_RATIO` times the large/small size
+/// limit (Test #82's refusal) excuses no gap, so such a vertex is held to the floor alone, as on
+/// main; the check itself may have grown it there (an edge tolerance cascading to its vertices).
+pub(super) fn vertex1_tolerance(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
+    use crate::topology::vertex::corner;
+
+    let floor = corner::xsect_tol_3d_of_brep(k, b);
+    let local = b.vertex(v)?.tolerance;
+    let refused = crate::topology::brep::validation::pointers::GROWTH_PAST_RATIO
+        * crate::geom::tol::LARGE_SMALL_SIZE_RATIO
+        * b.tolerance();
+    Ok(if local > refused {
+        floor
+    } else {
+        floor.max(local)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Vec3;
+    use crate::primitive::api_primitives::create_box;
+    use crate::topology::{vertex, vertexuse};
+
+    #[test]
+    fn vertex_face_gap_is_not_the_ideal_corner_displacement() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let v = b
+            .vertex_list()
+            .iter()
+            .copied()
+            .find(|&v| b.vertex(v).unwrap().point == Vec3::ZERO)
+            .unwrap();
+        // Prepare trim caches before changing the recorded vertex point.
+        vertex::corner::is_on_face_corner(&k, &mut b, v).unwrap();
+        let offset = 1.3e-5;
+        let radius = 2.1e-5;
+        b.vertex_mut(v).unwrap().point = Vec3::new(offset, offset, offset);
+        b.vertex_mut(v).unwrap().tolerance = radius;
+        for vu in vertex::vertexuses(&b, v).unwrap() {
+            vertexuse::init_vertex_face_gap(&mut b, vu).unwrap();
+        }
+        let (_, corner) = vertex::corner::is_on_face_corner(&k, &mut b, v).unwrap();
+        assert!(corner.found_point);
+        assert!(corner.best_point.distance(b.vertex(v).unwrap().point) > radius);
+        // The ideal intersection is outside the ball, but (1e-5, 1e-5, 1e-5)
+        // is inside it and inside all three face bands. Report actual face gaps;
+        // the independent whole-body tolerance checks retain their own bounds.
+        let band = b.tolerance();
+        let witness = Vec3::new(band, band, band);
+        assert!(witness.distance(b.vertex(v).unwrap().point) < radius);
+        assert!(corner.best_point.distance(Vec3::ZERO) < 1e-12);
+        let (passed, gap) = assert_test_vertex1(&mut k, &mut b, v).unwrap();
+        assert!(passed, "face gap {gap}");
+        assert!((gap - offset).abs() < 1e-12, "face gap {gap}");
+        assert_eq!(b.vertex(v).unwrap().tolerance, radius);
+    }
 }

@@ -51,15 +51,16 @@
 //!   [`BoundsCheck`], `(bool, SurfParamType)` from the boundary test, the new grid
 //!   point of the stride check. Upstream's in/out best indices of
 //!   `FindPolygonTriangleGuess` (kept when no net point qualifies) are passed in.
-//!   The constructor keeps the unused `cpdOptTargetDistance` and
-//!   `eSolutionRequested` (`NotUsed` upstream).
+//!   The constructor keeps the target distance (`cpdOptTargetDistance`, `NotUsed`
+//!   upstream, "cbi: do this"): the global solve bounds a minimum by it as the tree
+//!   solve does (#20438; a maximise goes to the tree solve). `eSolutionRequested` stays unused (`NotUsed`
+//!   upstream): the solve finds one candidate (#20438).
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status the outputs
 //!   keep their previous values (initially undefined, [`Vec3::UNDEF`]), and an
 //!   `SmSurfaceEval` accessor reads the values it holds; [`SolidError::Unported`]
 //!   still propagates. A failing `CalculateBoundingBox` of the directed-maximise
-//!   constructor leaves the box in its initial (inside-out) state by default, as
-//!   upstream; [`UpstreamFixes::surface_point_solver_propagates_bbox_failure`](crate::kernel::UpstreamFixes::surface_point_solver_propagates_bbox_failure)
-//!   (WR-72, #2169) opts into returning that bounding-box error.
+//!   constructor returns its error (WR-72, #2169), where upstream leaves the box in its
+//!   initial (inside-out) state and solves against a point `1.4 * SM_BIG_DOUBLE` away.
 //! - **Unported callees.** The base
 //!   `SmSurface::CreateIsoParametricCurve` (`surface.surface_p5`, the iso curve of a
 //!   curve-bounded or STEP surface) return [`SolidError::Unported`].
@@ -68,10 +69,15 @@
 //!   output first, so the guess is always `0`. The port passes `0` explicitly.
 //! - **Control points.** An index past the control net (upstream reads past the
 //!   array) returns [`SolidError::InvalidInput`].
+//! - **Cell seeds.** [`SurfPtGlobalSolver::with_seed_net`] lets a trimmed blend's
+//!   tight-box search read its cell's control net for guesses (#18809). The
+//!   original surface still answers the objective, local solves and solution seam
+//!   and closure tests.
 //! - Debug-only drawing and `SM_ASSERT`s are compiled out of the release build and
 //!   omitted. `Dump` has no counterpart.
 
 use crate::curve::curve::Curve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
@@ -88,6 +94,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::math::CPoint;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_CPTS: &str = "surface::surface_point_solve::p1::control_point";
@@ -125,6 +132,8 @@ pub struct SurfacePointSolver<'s> {
     tight_tol: f64,
     /// `m_dLooseTol`.
     loose_tol: f64,
+    /// `cpdOptTargetDistance` (`NotUsed` upstream; bounds the answer, #20438).
+    target_distance: Option<f64>,
 }
 
 impl<'s> SurfacePointSolver<'s> {
@@ -138,11 +147,8 @@ impl<'s> SurfacePointSolver<'s> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the bounding box (directed operation only). With
-    /// [`UpstreamFixes::surface_point_solver_propagates_bbox_failure`](crate::kernel::UpstreamFixes::surface_point_solver_propagates_bbox_failure)
-    /// enabled, any [`Surface::calculate_bounding_box`] failure for
-    /// [`SolverOperation::Signed3dDirectedMaximize`] is returned (WR-72, #2169); by
-    /// default its non-`Unported` failures are ignored, as upstream.
+    /// Any [`Surface::calculate_bounding_box`] failure for
+    /// [`SolverOperation::Signed3dDirectedMaximize`] (WR-72, #2169; upstream ignores it).
     pub fn new(
         k: &Kernel,
         surface: &'s Surface,
@@ -150,7 +156,7 @@ impl<'s> SurfacePointSolver<'s> {
         solver_op: SolverOperation,
         test_point: Point3,
         distance_tolerance: f64,
-        _opt_target_distance: Option<f64>,
+        opt_target_distance: Option<f64>,
         _solution_requested: SolutionRequested,
     ) -> Result<Self> {
         // We need an SmBSplineSurface for some operations.
@@ -166,6 +172,7 @@ impl<'s> SurfacePointSolver<'s> {
             // Tight tolerance: tight, but it should be achievable.
             tight_tol: EFF_ZERO * (1.0 + test_point.max_dimension()),
             loose_tol: distance_tolerance,
+            target_distance: opt_target_distance,
         };
 
         if solver_op == SolverOperation::Signed3dDirectedMaximize {
@@ -173,21 +180,13 @@ impl<'s> SurfacePointSolver<'s> {
             // minimise along its negation.
             solver.dir_vec = (-test_point).unitize_or_z();
 
-            // A point to define a plane: a corner of the expanded bounding box.
-            // By default a failing box is left in its initial, inside-out state, as
-            // upstream; WR-72 (#2169) opts into propagating the bounding-box error.
-            let mut bbox =
-                match surface.calculate_bounding_box(k, &solver.domain, [true, false, false], true)
-                {
-                    Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e)
-                        if e.is_unported_or_cancelled()
-                            || k.fixes.surface_point_solver_propagates_bbox_failure =>
-                    {
-                        return Err(e);
-                    }
-                    Err(_) => Extent3d::new(),
-                };
+            // A point to define a plane: a corner of the expanded bounding box. A failing
+            // box is an error (WR-72, #2169): upstream leaves it inside-out and solves
+            // against a point 1.4 * SM_BIG_DOUBLE away.
+            let mut bbox = surface
+                .calculate_bounding_box(k, &solver.domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_else(Extent3d::new);
             bbox.expand_relative(0.2);
 
             let d = solver.dir_vec;
@@ -244,6 +243,12 @@ impl<'s> SurfacePointSolver<'s> {
     #[must_use]
     pub const fn loose_tol(&self) -> f64 {
         self.loose_tol
+    }
+
+    /// The target distance the answer is bounded by (`cpdOptTargetDistance`).
+    #[must_use]
+    pub const fn target_distance(&self) -> Option<f64> {
+        self.target_distance
     }
 
     /// The direction of the directed operation, zero otherwise (`m_sDirVec`).
@@ -477,6 +482,9 @@ pub struct SurfPtGlobalSolver<'s> {
     closed_in_u: Option<bool>,
     /// `m_bClosedInV` (`None` = `UNSURE`).
     closed_in_v: Option<bool>,
+    /// Not upstream (#20438): the last [`Self::solve`] dropped its answer, a minimum
+    /// beyond the target distance.
+    dropped_beyond_target: bool,
 }
 
 /// The result of [`SurfPtGlobalSolver::find_polygon_triangle_guess`].
@@ -499,6 +507,16 @@ pub struct PolygonTriangleGuess {
 }
 
 impl<'s> SurfPtGlobalSolver<'s> {
+    /// Use `net` only for control-polygon guesses in this solve. Its parameters must
+    /// be the surface's parameters over the solve domain. The objective, derivatives,
+    /// local solves and solution seam and closure tests still use the original
+    /// surface (#18809).
+    #[must_use]
+    pub(crate) fn with_seed_net(mut self, net: &'s BSplineSurface) -> Self {
+        self.base.b_spline = Some(net);
+        self
+    }
+
     /// A global solver (`SmSurfPtGlobalSolver(...)`); the closure is computed on
     /// first use.
     ///
@@ -528,7 +546,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
             )?,
             closed_in_u: None,
             closed_in_v: None,
+            dropped_beyond_target: false,
         })
+    }
+
+    /// Whether the last [`Self::solve`] dropped its answer because it was a minimum
+    /// farther than the target distance by more than the tolerance (#20438). The
+    /// solve's one candidate need not be the nearest point (#20483), so a caller that
+    /// must honour the target asks the tree solve instead
+    /// ([`Surface::global_point_solve_1`]).
+    #[must_use]
+    pub const fn dropped_beyond_target(&self) -> bool {
+        self.dropped_beyond_target
+    }
+
+    /// Records whether the solve dropped a minimum beyond the target distance.
+    pub(super) fn set_dropped_beyond_target(&mut self, dropped: bool) {
+        self.dropped_beyond_target = dropped;
     }
 
     /// Whether the surface is closed over the domain in `which_dir` (`SM_SP_U` or
@@ -629,7 +663,10 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::sm_err(OP_TRI));
+            return Err(SolidError::surface(
+                OP_TRI,
+                SurfaceFailure::SolverSurfaceNotBSpline,
+            ));
         };
 
         let (best_idx_u, best_idx_v) = best_idx;
@@ -637,7 +674,7 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let mut best_idx_v = best_idx_v;
         let (num_u, num_v, cpts) = bspl
             .control_points()
-            .map_err(|_| SolidError::sm_err(OP_TRI))?;
+            .map_err(|e| chained(OP_TRI, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
         let mut best_dist = BIG_DOUBLE;
         let mut this_local_u = -1.0;
@@ -768,17 +805,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // This requires an SmBSplineSurface.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::sm_err(OP_LEG));
+            return Err(SolidError::surface(
+                OP_LEG,
+                SurfaceFailure::SolverSurfaceNotBSpline,
+            ));
         };
 
         // Also, this won't help in this case:
         if b.solver_op == SolverOperation::Signed3dDirectedMaximize {
-            return Err(SolidError::sm_err(OP_LEG));
+            return Err(SolidError::surface(
+                OP_LEG,
+                SurfaceFailure::UnsupportedSolverOperation,
+            ));
         }
 
         let (num_u, num_v, cpts) = bspl
             .control_points()
-            .map_err(|_| SolidError::sm_err(OP_LEG))?;
+            .map_err(|e| chained(OP_LEG, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
 
         let best_pt = control_point(&cpts, num_v, best_idx_u, best_idx_v, rational)?;
@@ -2033,7 +2076,6 @@ mod tests {
     use super::*;
     use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
     use crate::geom::solution_array::OperandObject;
-    use crate::kernel::UpstreamFixes;
     use crate::nurbs::math::NOW;
     use crate::surface::curve_bounded_surface::CurveBoundedSurface;
     use crate::surface::plane::Plane;
@@ -2144,6 +2186,20 @@ mod tests {
         let uv = g.refine_guess_polygon_leg(0, 0).unwrap();
         assert!((uv.x - 0.25).abs() < 1e-12 && (uv.y - 0.5).abs() < 1e-12);
         assert!(g.refine_guess_polygon_leg(5, 0).is_err());
+
+        // A different seed net may change a guess's distance, but never the
+        // objective's surface: the target remains 2 above z = 0, not z = 1.
+        let seed = BSplineSurface::create_bilinear_surface(
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(0.0, 1.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let g = g.with_seed_net(&seed);
+        let guess = g.find_polygon_triangle_guess((1, 1)).unwrap();
+        assert!((guess.best_dist - 1.0).abs() < 1e-12);
+        assert!((g.calc_func_val(&k, Point2::new(0.25, 0.75)).unwrap() - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2417,90 +2473,8 @@ mod tests {
     }
 
     #[test]
-    fn wr72_default_ignores_failed_bbox_and_places_test_point_near_big_double() {
-        let default_kernel = Kernel::default();
-        assert!(
-            !default_kernel
-                .fixes
-                .surface_point_solver_propagates_bbox_failure
-        );
-
-        let cb_plane = Surface::from(
-            CurveBoundedSurface::new(wr72_tilted_plane(), Vec::new(), Vec::new(), true).unwrap(),
-        );
-        let bbox_err = cb_plane
-            .calculate_bounding_box(&default_kernel, &unit_dom(), [true, false, false], true)
-            .unwrap_err();
-        assert_eq!(bbox_err.sm_status(), Some(SM_ERR_NULL_POINTER));
-
-        let raw_dir = Point3::new(-1.0, 2.0, -3.0);
-        let solver = SurfacePointSolver::new(
-            &default_kernel,
-            &cb_plane,
-            &unit_dom(),
-            SolverOperation::Signed3dDirectedMaximize,
-            raw_dir,
-            1e-6,
-            None,
-            SolutionRequested::Single,
-        )
-        .unwrap();
-        assert_eq!(solver.dir_vec(), (-raw_dir).unitize_or_z());
-        // Inside-out Extent3d::new() ([+BIG_DOUBLE, -BIG_DOUBLE]^3) expanded by 0.2 has
-        // min ~= +1.4 * BIG_DOUBLE and max ~= -1.4 * BIG_DOUBLE.
-        let mut expected_bbox = Extent3d::new();
-        expected_bbox.expand_relative(0.2);
-        assert_eq!(
-            solver.test_point(),
-            Point3::new(
-                expected_bbox.min().x,
-                expected_bbox.max().y,
-                expected_bbox.min().z,
-            )
-        );
-        assert!(solver.test_point().x.abs() > 1.0e19);
-        assert!(solver.test_point().y.abs() > 1.0e19);
-        assert!(solver.test_point().z.abs() > 1.0e19);
-
-        // End-to-end on a curve-bounded bilinear surface S(u, v) = (u, v, 0.5 * u * v),
-        // whose true +z maximum over [0, 1]^2 is (1, 1): default C++ parity ignores the
-        // failed bounding box and solves against z = -1.4 * BIG_DOUBLE instead.
-        let cb_bspline = Surface::from(
-            CurveBoundedSurface::new(bilinear(0.5), Vec::new(), Vec::new(), true).unwrap(),
-        );
-        let sols = cb_bspline
-            .global_point_solve::<OperandObject>(
-                &default_kernel,
-                None,
-                &unit_dom(),
-                SolverOperation::Signed3dDirectedMaximize,
-                Point3::new(0.0, 0.0, 1.0),
-                1e-6,
-                None,
-                SolutionRequested::Single,
-            )
-            .unwrap();
-        assert_eq!(sols.len(), 1);
-        let sol = sols.get(0).unwrap();
-        assert!(sol.start.solution_value > 1.0e19);
-        assert!(sol.start.param(0).unwrap() < 0.1 && sol.start.param(1).unwrap() < 0.1);
-    }
-
-    #[test]
-    fn wr72_opt_in_propagates_bbox_failure_in_constructors_and_flag_lookup() {
-        let mut fixed_kernel = Kernel::default();
-        assert!(UpstreamFixes::NAMES.contains(&"surface_point_solver_propagates_bbox_failure"));
-        let flag = fixed_kernel
-            .fixes
-            .flag_mut("surface_point_solver_propagates_bbox_failure")
-            .unwrap();
-        assert!(!*flag);
-        *flag = true;
-        assert!(
-            fixed_kernel
-                .fixes
-                .surface_point_solver_propagates_bbox_failure
-        );
+    fn wr72_propagates_bbox_failure_in_constructors() {
+        let fixed_kernel = Kernel::default();
 
         let cb_plane = Surface::from(
             CurveBoundedSurface::new(wr72_tilted_plane(), Vec::new(), Vec::new(), true).unwrap(),
@@ -2549,17 +2523,6 @@ mod tests {
 
         // An uninitialised B-spline surface fails CalculateBoundingBox with SM_ERR.
         let empty_bspline = Surface::from(BSplineSurface::new());
-        assert!(SurfacePointSolver::new(
-            &Kernel::default(),
-            &empty_bspline,
-            &unit_dom(),
-            SolverOperation::Signed3dDirectedMaximize,
-            up_z,
-            1e-6,
-            None,
-            SolutionRequested::Single,
-        )
-        .is_ok());
         let empty_err = SurfacePointSolver::new(
             &fixed_kernel,
             &empty_bspline,
@@ -2575,11 +2538,8 @@ mod tests {
     }
 
     #[test]
-    fn wr72_opt_in_propagates_bbox_failure_in_end_to_end_solves() {
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel
-            .fixes
-            .surface_point_solver_propagates_bbox_failure = true;
+    fn wr72_propagates_bbox_failure_in_end_to_end_solves() {
+        let fixed_kernel = Kernel::default();
 
         let cb_plane = Surface::from(
             CurveBoundedSurface::new(wr72_tilted_plane(), Vec::new(), Vec::new(), true).unwrap(),
@@ -2640,13 +2600,8 @@ mod tests {
     }
 
     #[test]
-    fn wr72_non_directed_ops_unchanged_when_bbox_fails() {
-        let default_kernel = Kernel::default();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel
-            .fixes
-            .surface_point_solver_propagates_bbox_failure = true;
-
+    fn wr72_non_directed_ops_ignore_a_failed_bbox() {
+        let k = Kernel::default();
         let cb_bspline = Surface::from(
             CurveBoundedSurface::new(bilinear(0.5), Vec::new(), Vec::new(), true).unwrap(),
         );
@@ -2657,8 +2612,8 @@ mod tests {
             SolverOperation::Intersect,
             SolverOperation::Maximize,
         ] {
-            let solver_default = SurfacePointSolver::new(
-                &default_kernel,
+            let solver = SurfacePointSolver::new(
+                &k,
                 &cb_bspline,
                 &unit_dom(),
                 op,
@@ -2668,25 +2623,13 @@ mod tests {
                 SolutionRequested::Single,
             )
             .unwrap();
-            let solver_fixed = SurfacePointSolver::new(
-                &fixed_kernel,
-                &cb_bspline,
-                &unit_dom(),
-                op,
-                query_pt,
-                1e-6,
-                None,
-                SolutionRequested::Single,
-            )
-            .unwrap();
-            assert_eq!(solver_default.test_point(), query_pt);
-            assert_eq!(solver_fixed.test_point(), query_pt);
-            assert_eq!(solver_default.dir_vec(), solver_fixed.dir_vec());
+            assert_eq!(solver.test_point(), query_pt);
+            assert_eq!(solver.dir_vec(), Vec3::ZERO);
         }
 
-        let drop_default = cb_bspline
+        let drop = cb_bspline
             .local_point_solve_1::<()>(
-                &default_kernel,
+                &k,
                 &unit_dom(),
                 SolverOperation::Minimize,
                 query_pt,
@@ -2694,32 +2637,16 @@ mod tests {
                 None,
             )
             .unwrap();
-        let drop_fixed = cb_bspline
-            .local_point_solve_1::<()>(
-                &fixed_kernel,
-                &unit_dom(),
-                SolverOperation::Minimize,
-                query_pt,
-                Point2::new(0.5, 0.5),
-                None,
-            )
-            .unwrap();
-        assert_eq!(drop_default.found, drop_fixed.found);
-        assert_eq!(drop_default.solution.start, drop_fixed.solution.start);
+        assert!(drop.found);
     }
 
     #[test]
-    fn wr72_valid_surfaces_directed_maximize_unchanged() {
-        let default_kernel = Kernel::default();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel
-            .fixes
-            .surface_point_solver_propagates_bbox_failure = true;
-
+    fn wr72_valid_surfaces_directed_maximize() {
+        let k = Kernel::default();
         let up_z = Point3::new(0.0, 0.0, 1.0);
         for valid_surface in [bilinear(0.5), wr72_tilted_plane()] {
-            let solver_default = SurfacePointSolver::new(
-                &default_kernel,
+            let solver = SurfacePointSolver::new(
+                &k,
                 &valid_surface,
                 &unit_dom(),
                 SolverOperation::Signed3dDirectedMaximize,
@@ -2729,23 +2656,11 @@ mod tests {
                 SolutionRequested::Single,
             )
             .unwrap();
-            let solver_fixed = SurfacePointSolver::new(
-                &fixed_kernel,
-                &valid_surface,
-                &unit_dom(),
-                SolverOperation::Signed3dDirectedMaximize,
-                up_z,
-                1e-6,
-                None,
-                SolutionRequested::Single,
-            )
-            .unwrap();
-            assert_eq!(solver_default.test_point(), solver_fixed.test_point());
-            assert!(solver_fixed.test_point().z.abs() < 10.0);
+            assert!(solver.test_point().z.abs() < 10.0);
 
-            let global_default = valid_surface
+            let global = valid_surface
                 .global_point_solve::<OperandObject>(
-                    &default_kernel,
+                    &k,
                     None,
                     &unit_dom(),
                     SolverOperation::Signed3dDirectedMaximize,
@@ -2755,25 +2670,10 @@ mod tests {
                     SolutionRequested::Single,
                 )
                 .unwrap();
-            let global_fixed = valid_surface
-                .global_point_solve::<OperandObject>(
-                    &fixed_kernel,
-                    None,
-                    &unit_dom(),
-                    SolverOperation::Signed3dDirectedMaximize,
-                    up_z,
-                    1e-6,
-                    None,
-                    SolutionRequested::Single,
-                )
-                .unwrap();
-            assert_eq!(global_default.len(), 1);
-            assert_eq!(global_fixed.len(), 1);
-            let sol_default = global_default.get(0).unwrap();
-            let sol_fixed = global_fixed.get(0).unwrap();
-            assert_eq!(sol_default.start, sol_fixed.start);
-            assert!((sol_fixed.start.param(0).unwrap() - 1.0).abs() < 1e-9);
-            assert!((sol_fixed.start.param(1).unwrap() - 1.0).abs() < 1e-9);
+            assert_eq!(global.len(), 1);
+            let sol = global.get(0).unwrap();
+            assert!((sol.start.param(0).unwrap() - 1.0).abs() < 1e-9);
+            assert!((sol.start.param(1).unwrap() - 1.0).abs() < 1e-9);
         }
     }
 }

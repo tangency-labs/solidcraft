@@ -4,4 +4,5 @@
 
 # The vendored SolidCore kernel, owned as in SolidCore's own CODEOWNERS
 # (solidcore/.github/CODEOWNERS, which GitHub reads only at a repository's root).
-/solidcore/ @jyviko @bherbruck
+# The team (jyviko and bherbruck) assigns one of them per pull request, so either one approves.
+/solidcore/ @tangency-labs/solidcore-owners

@@ -19,6 +19,10 @@ const PRIMITIVES: [(&str, &[(&str, &str)]); 5] = [
     ("solid.coil", &[("diameter", "40"), ("revolutions", "4"), ("pitch", "8"), ("section_size", "3")]),
 ];
 
+/// #12418: the radius a new Solid Fillet opens at, per design unit: the 2 mm the tool ships
+/// with, shown in the design's units.
+const FILLET_RADII: &[(&str, &str)] = &[("mm", "2 mm"), ("cm", "0.2 cm"), ("m", "0.002 m"), ("in", "0.07874 in"), ("ft", "0.006562 ft")];
+
 /// A design in `units`, with nothing in it.
 fn design(units: &str) -> Harness {
     let mut h = Harness::new();
@@ -60,6 +64,16 @@ fn type_into(h: &mut Harness, key: &str, text: &str) {
 }
 
 fn ok(h: &mut Harness) {
+    // The preview computes off the window thread and the window's height changes while it says
+    // so: wait for it, as a person does, so the click lands where OK now is.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(2);
     h.step(&json!({"click": {"handle": "dialog:OK"}})).unwrap();
     h.frames(2);
     assert!(h.app.dialog.is_none(), "OK closes the dialog: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -188,21 +202,23 @@ fn editing_a_primitive_after_the_design_goes_to_inches_keeps_its_millimetres() {
     h.frames(2);
     let before = volume(&mut h.app.session);
     let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
-    let want: [&[(&str, &str)]; 4] = [
-        &[("length", "40 mm"), ("width", "w"), ("height", "20 mm")],
-        &[("radius", "(10 mm) / 2"), ("height", "12 mm")],
-        &[("radius", "4 mm")],
-        &[("major", "10 mm"), ("minor", "2 mm")],
+    // What OK keeps: the cylinder's diameter is kept as the radius `(10 mm) / 2`, and Edit shows
+    // the diameter it was typed as (#6609).
+    let want: [(&[(&str, &str)], &[&str]); 4] = [
+        (&[("length", "40 mm"), ("width", "w"), ("height", "20 mm")], &["40 mm", "w", "20 mm"]),
+        (&[("diameter", "10 mm"), ("height", "12 mm")], &["(10 mm) / 2", "12 mm"]),
+        (&[("radius", "4 mm")], &["4 mm"]),
+        (&[("major", "10 mm"), ("minor", "2 mm")], &["10 mm", "2 mm"]),
     ];
     assert_eq!(ids.len(), want.len());
-    for (id, want) in ids.into_iter().zip(want) {
+    for (id, (want, kept)) in ids.into_iter().zip(want) {
         h.app.edit_feature(id);
         h.frames(3);
         let shown = fields(&h);
         assert_eq!(shown, want.iter().map(|(k, v)| (*k, (*v).to_string())).collect::<Vec<_>>());
         assert_shown(&h, &shown);
         ok(&mut h);
-        assert_eq!(stored(&h, id), want.iter().map(|(_, v)| (*v).to_string()).collect::<Vec<_>>());
+        assert_eq!(stored(&h, id), kept);
         let after = volume(&mut h.app.session);
         assert!((after - before).abs() < 1e-6 * before, "the part is unchanged: {after} mm³, was {before} mm³");
     }
@@ -238,17 +254,165 @@ fn editing_in_a_millimetre_design_keeps_the_sizes_as_they_are_kept() {
     assert_size(&mut h.app.session, [40.0, 30.0, 20.0]);
 }
 
+/// Click one choice of the dialog's Size row (Diameter | Radius), as a person does.
+fn size_choice(h: &mut Harness, choice: &str) {
+    h.step(&json!({"click": {"handle": format!("dialog:Size:{choice}")}})).unwrap();
+    h.frames(2);
+}
+
+#[test]
+fn editing_a_cylinder_or_sphere_made_from_a_diameter_shows_that_diameter() {
+    // #6609: a diameter given to Cylinder or Sphere is kept as the radius `(D) / 2`. Edit Feature
+    // shows the diameter, as the window that made it asked, on Diameter; OK without a change keeps
+    // the feature and the part. Small, typical and large sizes.
+    for d in ["0.2", "20", "5000"] {
+        let mut h = design("mm");
+        h.app.run("solid.box", json!({"length": 80, "width": 50, "height": 10})).unwrap();
+        h.app.run("solid.cylinder", json!({"diameter": d, "height": 20, "base": [40, 25, 10], "operation": "join", "name": "Pin"})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter": d, "center": [0, 0, 6000], "operation": "new", "name": "Ball"})).unwrap();
+        let before = volume(&mut h.app.session);
+        let ids: Vec<u64> = h.app.session.doc.features.iter().skip(1).map(|f| f.id).collect();
+        let want: [&[(&str, String)]; 2] = [&[("diameter", format!("{d} mm")), ("height", "20".into())], &[("diameter", format!("{d} mm"))]];
+        for (id, want) in ids.into_iter().zip(want) {
+            let kept = stored(&h, id);
+            assert_eq!(kept[0], format!("({d} mm) / 2"));
+            h.app.edit_feature(id);
+            h.frames(3);
+            assert_eq!(fields(&h), want, "{d}");
+            assert_shown(&h, want);
+            ok(&mut h);
+            assert_eq!(stored(&h, id), kept, "an unchanged edit keeps the radius as it was");
+        }
+        let after = volume(&mut h.app.session);
+        assert!((after - before).abs() <= 1e-9 * before, "{d}: the part is unchanged: {after} mm³, was {before} mm³");
+    }
+}
+
+#[test]
+fn a_saved_design_that_keeps_a_radius_opens_and_edits_it_as_made() {
+    // A Cylinder made from a radius (a script's `radius`) opens on Radius. A Sphere's diameter
+    // saved before #779 as `(20) / 2` opens as the diameter 20 in the design's units, as an
+    // expression's bare number reads: 20 in once the design is in inches. OK keeps both sizes,
+    // and a new diameter typed into the Cylinder after switching it to Diameter makes it.
+    let mut h = design("mm");
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "name": "Pin"})).unwrap();
+    h.app.run("solid.sphere", json!({"diameter": 20, "center": [50, 0, 0], "operation": "new", "name": "Ball"})).unwrap();
+    let saved = h.app.session.doc.to_json().replace("(20 mm) / 2", "(20) / 2");
+    assert!(saved.contains("\"(20) / 2\""), "the design keeps the older text");
+    h.app.session = Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
+    h.app.session.refresh();
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    h.frames(2);
+    let before = volume(&mut h.app.session);
+    let pi = std::f64::consts::PI;
+    let ball_volume = 4.0 / 3.0 * pi * 254.0_f64.powi(3);
+    assert!((before - (pi * 25.0 * 10.0 + ball_volume)).abs() < 1e-3 * before, "{before}");
+    let [pin, ball] = [0, 1].map(|i| h.app.session.doc.features[i].id);
+    for (id, want, kept) in
+        [(pin, vec![("radius", "5 mm"), ("height", "10 mm")], ["5 mm", "10 mm"].as_slice()), (ball, vec![("diameter", "20 in")], &["(20 in) / 2"])]
+    {
+        let want: Vec<_> = want.into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        h.app.edit_feature(id);
+        h.frames(3);
+        assert_eq!(fields(&h), want);
+        assert_shown(&h, &want);
+        ok(&mut h);
+        assert_eq!(stored(&h, id), kept);
+    }
+    let after = volume(&mut h.app.session);
+    assert!((after - before).abs() <= 1e-9 * before, "the part is unchanged: {after} mm³, was {before} mm³");
+    h.app.edit_feature(pin);
+    h.frames(3);
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h), [("diameter", "10 mm".to_string()), ("height", "10 mm".to_string())]);
+    type_into(&mut h, "diameter", "30 mm");
+    h.frames(2);
+    ok(&mut h);
+    assert_eq!(stored(&h, pin)[0], "(30 mm) / 2");
+    let after = volume(&mut h.app.session);
+    assert!(((after - before) - pi * (225.0 - 25.0) * 10.0).abs() < 1e-6 * before, "the cylinder is 30 mm across: {after}, was {before}");
+}
+
+#[test]
+fn the_size_switches_between_diameter_and_radius_and_ok_sends_the_one_shown() {
+    // #6609: a new Cylinder asks for a diameter; Radius turns the size into the radius of the same
+    // part and OK sends `radius`. Back on Diameter the size is the diameter again, and an
+    // expression is wrapped rather than worked out.
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name": "w", "expression": "12 mm"})).unwrap();
+    h.app.start("solid.cylinder");
+    h.frames(3);
+    assert_eq!(fields(&h), [("diameter", "20 mm".to_string()), ("height", "20 mm".to_string())]);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h)[0], ("radius", "10 mm".to_string()));
+    assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["radius"], "10 mm");
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "20 mm".to_string()));
+    type_into(&mut h, "diameter", "w");
+    h.frames(2);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h)[0], ("radius", "(w) / 2".to_string()));
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "w".to_string()));
+    size_choice(&mut h, "Radius");
+    type_into(&mut h, "radius", "7");
+    h.frames(2);
+    ok(&mut h);
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    assert_eq!(stored(&h, id)[0], "7");
+    let v = volume(&mut h.app.session);
+    assert!((v - std::f64::consts::PI * 49.0 * 20.0).abs() < 1e-3 * v, "radius 7, height 20: {v}");
+    // Edit opens a radius on Radius; Diameter doubles it and keeps the part.
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_eq!(fields(&h)[0], ("radius", "7".to_string()));
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "14".to_string()));
+    ok(&mut h);
+    assert_eq!(stored(&h, id)[0], "(14 mm) / 2");
+    assert!((volume(&mut h.app.session) - v).abs() < 1e-9 * v);
+    // The Sphere window has the same choice.
+    h.app.start("solid.sphere");
+    h.frames(3);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h), [("radius", "10 mm".to_string())]);
+}
+
+#[test]
+fn a_size_switched_between_diameter_and_radius_keeps_its_unit_and_its_text() {
+    use crate::length_input::{diameter_of, scaled};
+    assert_eq!(diameter_of("(20 mm) / 2"), Some("20 mm"));
+    assert_eq!(diameter_of("(w + (2 mm)) / 2"), Some("w + (2 mm)"));
+    for other in ["10 mm", "(a) / (b) / 2", "(a) + (b) / 2", "() / 2", "w / 2"] {
+        assert_eq!(diameter_of(other), None, "{other}");
+    }
+    for (diameter, radius) in
+        [("0.2 mm", "0.1 mm"), ("20 mm", "10 mm"), ("5000 mm", "2500 mm"), ("1 in", "0.5 in"), ("3", "1.5"), ("1e3 mm", "500 mm")]
+    {
+        assert_eq!(scaled(diameter, false), radius);
+    }
+    assert_eq!(scaled("7 mm", true), "14 mm");
+    assert_eq!(scaled("1,5 mm", true), "3 mm");
+    assert_eq!(scaled("w", false), "(w) / 2");
+    assert_eq!(scaled("(w) / 2", true), "w");
+    assert_eq!(scaled("r + 1 mm", true), "2 * (r + 1 mm)");
+    assert_eq!(scaled("2 * (r + 1 mm)", false), "r + 1 mm");
+    assert_eq!(scaled("", true), "");
+}
+
 #[test]
 fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     // #3862: Edit Feature on a coil opens the Coil dialog with every setting it was made with,
     // not the command line; OK changes what was edited and keeps the rest.
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{CoilSection, FeatureKind};
+    use solidcraft_engine::geom::prelude::*;
     let mut h = design("mm");
     h.app
         .run(
             "solid.coil",
             json!({"diameter": 40, "revolutions": 4, "pitch": 8, "section_size": 3, "section_position": "outside",
-                   "clockwise": true, "start_angle": "30 deg", "base": [5, 0, 0], "operation": "new"}),
+                   "clockwise": true, "reversed": true, "start_angle": "30 deg", "base": [5, 0, 0], "axis": [1, 2, 3], "operation": "new"}),
         )
         .unwrap();
     let id = h.app.session.doc.features.first().map(|f| f.id).unwrap();
@@ -268,7 +432,12 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     ok(&mut h);
     assert_eq!(h.app.session.doc.features.len(), 1, "OK redefines the coil instead of adding one");
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Coil { base, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+        Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+            assert!(*reversed);
+            assert!(
+                solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9),
+                "{axis:?}"
+            );
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));
@@ -278,27 +447,215 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     }
 }
 
+#[test]
+fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
+    let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[6,1]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("parameters.add", json!({"name":"axis_x","expression":"30 mm"})).unwrap();
+    let made = h
+        .app
+        .run("solid.coil", json!({"axis":{"origin":["axis_x",0,0],"dir":[0,0,1]},"diameter":20,"section_size":1,"revolutions":1,"pitch":8}))
+        .unwrap();
+    let id = made["feature"].as_u64().unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: sketch }, solidcraft_engine::Sel::Axis { name: "Y".into() }];
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs.iter().all(|input| input.items.is_empty()));
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { axis_ref: Some(solidcraft_engine::doc::AxisRef::Line { origin, .. }), .. } => {
+            assert_eq!(origin[0].to_string(), "axis_x");
+        }
+        other => panic!("expected explicit coil axis: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_preserves_its_axis_reference_and_reverse_option() {
+    let mut h = design("mm");
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[30,0,0]},"b":{"point":[30,0,10]},"name":"Spin"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"offset","expression":"40 mm"})).unwrap();
+    let reply = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":"Spin","base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true
+            }),
+        )
+        .unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: "Spin".into() }]);
+    assert_eq!(d.extra["reversed"], true);
+    assert_eq!(d.extra["axis"], "Spin");
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { base, axis_ref, reversed, .. } => {
+            assert_eq!(base[0].as_str(), "offset");
+            assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.as_ref() == "Spin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name":"offset","expression":"15 mm"})).unwrap();
+    let world = json!({"type":"world","axis":"Z"});
+    let feature = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":world,"base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8
+            }),
+        )
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    h.app.edit_feature(feature);
+    let mut d = h.app.dialog.take().unwrap();
+    let command = |d: &crate::dialogs::Dialog| crate::dialogs::apply_commands(&h.app, d).unwrap()[0].1["params"].clone();
+    assert_eq!(command(&d)["axis"], world);
+    assert_eq!(command(&d)["base"], json!(["offset", 0.0, 0.0]));
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Y".into() });
+    assert_eq!(command(&d)["axis"], json!({"type":"world","axis":"Y"}));
+    assert_eq!(command(&d)["base"], json!([0.0, 0.0, 0.0]));
+}
+
+#[test]
+fn editing_a_coil_keeps_a_saved_sketch_coordinate_axis() {
+    use solidcraft_engine::doc::{AxisRef, FeatureKind};
+
+    for (axis, world) in [("x", "Y"), ("y", "Z")] {
+        let mut h = design("mm");
+        let sketch = h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,2],"p1":[12,4]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let id = h.app.run("solid.coil", json!({"sketch":sketch,"axis":world,"revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+        match &mut h.app.session.doc_mut().feature_mut(id).unwrap().kind {
+            FeatureKind::Coil { axis_ref, .. } => *axis_ref = Some(AxisRef::SketchAxis { axis: axis.into() }),
+            other => panic!("expected a coil: {other:?}"),
+        }
+        h.app.session.refresh();
+
+        h.app.edit_feature(id);
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: axis.into() }]);
+        let commands = apply_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["params"]["axis"], json!({"type":"sketch_axis","axis":axis}));
+        type_into(&mut h, "pitch", "10");
+        ok(&mut h);
+        assert!(matches!(
+            &h.app.session.doc.feature(id).unwrap().kind,
+            FeatureKind::Coil { axis_ref: Some(AxisRef::SketchAxis { axis: stored }), pitch, .. }
+            if stored == axis && pitch.as_str() == "10"
+        ));
+    }
+}
+
+#[test]
+fn editing_a_coil_keeps_its_sketch_axis_when_the_profile_owner_changes() {
+    use solidcraft_engine::Sel;
+
+    let mut h = design("mm");
+    let mut add_sketch = |axis_x| {
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.line", json!({"points":[[axis_x,0],[axis_x,10]],"construction":true})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,-1],"p1":[22,1]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketch
+    };
+    let original = add_sketch(0);
+    let replacement = add_sketch(5);
+    let id = h.app.run("solid.coil", json!({"sketch":original,"axis":"l1","revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let params = |d: &crate::dialogs::Dialog| -> serde_json::Value { apply_commands(&h.app, d).unwrap()[0].1["params"].clone() };
+    assert_eq!(params(&d)["axis"], json!({"curve":"l1"}));
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { sketch: Some(original), id: "l1".into() }]);
+
+    d.active = 0;
+    d.pick(&h.app.session, Sel::Profile { sketch: replacement, index: 0 });
+    assert_eq!(params(&d)["sketch"], replacement);
+    assert_eq!(params(&d)["axis"], json!({"sketch":original,"curve":"l1"}));
+
+    d.active = 1;
+    d.pick(&h.app.session, Sel::SketchCurve { sketch: Some(replacement), id: "l1".into() });
+    assert_eq!(params(&d)["axis"], "l1");
+}
+
+#[test]
+fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
+    let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[30,0],[30,10]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let saved_axis = json!({"sketch":sketch,"curve":"l1"});
+    let id = h.app.run("solid.coil", json!({"axis":saved_axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::SketchCurve { id: "l1".into(), sketch: Some(sketch) }]);
+
+    h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Axis:filled"), Some(0.0));
+    assert!(h.widget(&saved_axis.to_string()).is_none());
+    let mut d = h.app.dialog.take().expect("Edit Coil opens with a broken axis");
+    assert!(d.inputs[1].items.is_empty());
+    assert_eq!(d.extra["axis"], saved_axis);
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], saved_axis);
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Z".into() });
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], json!({"type":"world","axis":"Z"}));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    ok(&mut h);
+    assert!(matches!(
+        &h.app.session.doc.feature(id).unwrap().kind,
+        solidcraft_engine::doc::FeatureKind::Coil {
+            axis_ref: Some(solidcraft_engine::doc::AxisRef::World { axis }), ..
+        } if axis == "Z"
+    ));
+}
+
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
-        ("solid.extrude", &["10", "10", "", "", "2", "1"]),
-        ("solid.fillet", &["2", "2"]),
+        ("solid.extrude", &["10", "10", "", "", "", "2", "1"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
-        ("solid.emboss", &["1"]),
+        ("solid.emboss", &["1", "", ""]),
         ("solid.offset_face", &["2"]),
-        ("solid.pattern.rectangular", &["20", "20"]),
-        ("solid.pattern.path", &["20"]),
+        ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
+        ("solid.pattern.path", &["20", ""]),
         ("solid.pipe", &["5", ""]),
         ("solid.bounding_solid", &["2"]),
         ("solid.move", &["0", "0", "0"]),
         ("construct.plane.offset", &["0"]),
         ("inspect.section", &["0"]),
-        ("surface.extrude", &["10"]),
+        ("surface.extrude", &["10", ""]),
         ("surface.offset", &["2"]),
         ("surface.ruled", &["10"]),
         ("surface.thicken", &["2"]),
@@ -330,7 +687,114 @@ fn operation_length_defaults_follow_every_design_unit() {
             let expected: Vec<_> = numbers.iter().map(|n| if n.is_empty() { String::new() } else { format!("{n} {units}") }).collect();
             assert_eq!(values, expected, "{command} in {units}");
         }
+        // The Solid Fillet's radius is the size the tool ships with (2 mm), shown in the
+        // design's units: a radius is bound by the faces beside its edges, and the number 2
+        // read in an inch design (50.8 mm) never fits the part (#12418).
+        let radius = FILLET_RADII.iter().find_map(|entry| (entry.0 == units).then_some(entry.1)).expect("a design unit");
+        let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+        let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+        assert_eq!(values, vec![radius.to_string(), radius.to_string()], "solid.fillet in {units}");
     }
+}
+
+/// #12418: a new Solid Fillet opens at the radius the tool ships with, in the design's units.
+#[test]
+fn operation_length_defaults_keep_the_fillet_radius_at_the_shipped_size() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["0.07874 in".to_string(), "0.07874 in".to_string()], "a new Solid Fillet in an inch design");
+}
+
+/// #12418: only the Solid Fillet's radius changes. Every other operation keeps the number the
+/// design's unit reads, and the preference brings the old Fillet default back.
+#[test]
+fn operation_length_defaults_keep_every_other_operation_on_the_design_unit() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").unwrap_or_else(|| panic!("no dialog for solid.extrude"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values[0], "10 in", "a new Extrude in an inch design");
+
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.chamfer").unwrap_or_else(|| panic!("no dialog for solid.chamfer"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values[0], "1 in", "a new Chamfer in an inch design");
+
+    // The preference keeps the old default: the number 2 read in the design's units.
+    let mut h = design("in");
+    h.app.preferences.fillet_legacy_radius = true;
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["2 in".to_string(), "2 in".to_string()], "the preference keeps the old Fillet default");
+}
+
+/// A new Extrude's distance (`extrude_start`): 10 in the design's unit by default, as before; the
+/// last new extrude's distance or a typed length when asked for; and 10 again where that value
+/// isn't a usable length. The remembered distance is kept with the preferences.
+#[test]
+fn new_extrude_starts_at_ten_unless_the_preference_asks_for_the_last_or_a_typed_distance() {
+    let opened = |h: &Harness| match crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").map(|d| d.kind) {
+        Some(Kind::Extrude { distance, .. }) => distance,
+        _ => panic!("no dialog for solid.extrude"),
+    };
+    let mut h = design("in");
+    assert_eq!(h.app.preferences.extrude_start, crate::prefs::ExtrudeStart::Fixed);
+    assert_eq!(opened(&h), "10 in", "the default is unchanged");
+    // Fixed ignores whatever was applied or typed.
+    h.call("ui.prefs", json!({"extrude_custom_distance": "25 mm", "extrude_last_distance": "7 mm"}));
+    assert_eq!(opened(&h), "10 in");
+    h.call("ui.prefs", json!({"extrude_start": "custom"}));
+    assert_eq!(opened(&h), "25 mm");
+    h.call("ui.prefs", json!({"extrude_custom_distance": "nonsense"}));
+    assert_eq!(opened(&h), "10 in", "a custom value that isn't a length gives the fixed 10");
+    h.call("ui.prefs", json!({"extrude_start": "last_used", "extrude_last_distance": ""}));
+    assert_eq!(opened(&h), "10 in", "no extrude applied yet");
+    h.call("ui.prefs", json!({"extrude_last_distance": "7 mm"}));
+    assert_eq!(opened(&h), "7 mm");
+    let mut other = design("in");
+    other.app.load_prefs(&h.app.prefs());
+    assert_eq!(opened(&other), "7 mm", "kept with the preferences");
+    assert_eq!(
+        serde_json::from_value::<crate::prefs::Prefs>(json!({"extrude_start": "later"})).unwrap().extrude_start,
+        crate::prefs::ExtrudeStart::Fixed
+    );
+    assert!(crate::prefs::set(&mut h.app, &json!({"extrude_start": "later"})).is_err(), "asked for by name, an unknown choice is refused");
+}
+
+/// "Last used" remembers the distance of a new extrude applied from its dialog, not an edited
+/// one's, nor a Through All extent.
+#[test]
+fn last_used_extrude_distance_comes_from_new_extrudes_applied_in_the_dialog() {
+    let mut h = design("mm");
+    h.call("ui.prefs", json!({"extrude_start": "last_used"}));
+    h.app.run("sketch.create", json!({"plane":"XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    if let Kind::Extrude { distance, .. } = &mut d.kind {
+        *distance = "12.5 mm".into();
+    }
+    h.frames(3);
+    ok(&mut h);
+    assert!((volume(&mut h.app.session) - 40.0 * 30.0 * 12.5).abs() < 1e-6);
+    assert_eq!(h.app.preferences.extrude_last_distance, "12.5 mm");
+    let d = crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").unwrap();
+    assert!(matches!(&d.kind, Kind::Extrude { distance, .. } if distance == "12.5 mm"), "the next new Extrude starts there");
+    let mut edited = d.clone();
+    if let Kind::Extrude { distance, .. } = &mut edited.kind {
+        *distance = "3 mm".into();
+    }
+    edited.editing = Some((1, None));
+    assert_eq!(crate::dialogs::remembered_extrude_distance(&h.app, &edited), None, "an edited extrude doesn't count");
+    let mut through = d.clone();
+    if let Kind::Extrude { distance, all, .. } = &mut through.kind {
+        *distance = "3 mm".into();
+        *all = true;
+    }
+    assert_eq!(crate::dialogs::remembered_extrude_distance(&h.app, &through), None, "Through All has no distance");
 }
 
 #[test]
@@ -562,6 +1026,28 @@ fn editing_a_box_or_cylinder_shows_its_placement_and_keeps_it() {
     assert_shown(&h, &[("X", "60".into()), ("Y", "0".into()), ("Z", "0".into())]);
     ok(&mut h);
     assert_eq!(stored(&h, cylinder_id), base);
+}
+
+/// A box placed by its centre opens for editing with Center chosen and its centre in the fields,
+/// and a new length grows it on both sides (#14487).
+#[test]
+fn editing_a_box_placed_by_its_centre_keeps_it_centred() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 10, "center": [50, 0, 0]})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_shown(&h, &[("X", "50".into()), ("Y", "0".into()), ("Z", "0".into())]);
+    type_into(&mut h, "length", "30");
+    h.frames(2);
+    let sent = sent(&h);
+    let p = sent.get("params").unwrap_or(&sent);
+    assert!(p.get("center").is_some() && p.get("corner").is_none(), "{sent}");
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    assert_near(made[0].0, [35.0, -5.0, -5.0]);
+    assert_near(made[0].1, [65.0, 5.0, 5.0]);
 }
 
 #[test]
@@ -818,4 +1304,219 @@ fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_e
     h.frames(3);
     assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
     assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+}
+
+#[test]
+fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
+    // #11230: the Point input wakes snap points (a hole's centre, an edge's middle, a face's
+    // centre), and a snapped point fills the placement fields.
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(crate::snap_wake::wanted(&h.app), "{cmd}");
+        let point = solidcore_record::Vec3::new(5.0, 7.5, 0.0);
+        let hit = crate::viewport::Hit::Vertex { body: String::new(), point };
+        let sel = h.app.dialog.as_ref().and_then(|d| d.active_input()).and_then(|i| i.accepts(&hit, None, |_, _| false));
+        let Some(sel) = sel else { panic!("{cmd}: the snap point is not taken") };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel);
+        h.frames(2);
+        let want: Vec<(&str, String)> = [("X", "5 mm"), ("Y", "7.5 mm"), ("Z", "0 mm")].iter().map(|(k, v)| (*k, v.to_string())).collect();
+        assert_shown(&h, &want);
+        // Off in Preferences, nothing wakes.
+        h.app.preferences.snap_points = false;
+        assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
+    }
+}
+
+/// Whether the open dialog's Body Name row can be typed in (#20776): it is always there for a
+/// feature that can make a body, greyed out unless the operation is New Body.
+fn shows_body_name(h: &Harness) -> bool {
+    let label = solidcraft_ui_text::tr("ui.body_name");
+    h.output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+}
+
+/// The `body_name` the open dialog's OK sends, if any.
+fn sent_body_name(h: &Harness) -> Option<String> {
+    // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+    let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+    let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+    params.get("body_name").and_then(Value::as_str).map(str::to_string)
+}
+
+#[test]
+fn the_body_name_row_shows_for_new_body_only_and_a_typed_name_names_the_body() {
+    for (cmd, _) in PRIMITIVES {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(shows_body_name(&h), "{cmd}: New Body shows Body Name");
+        assert_eq!(sent_body_name(&h), None, "{cmd}: empty sends no body_name");
+        for operation in [1, 2] {
+            if let Some(Kind::Primitive { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+                *op = operation;
+            }
+            h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Ignored"));
+            h.frames(2);
+            assert!(!shows_body_name(&h), "{cmd}: operation {operation} greys Body Name out");
+            assert_eq!(sent_body_name(&h), None, "{cmd}: operation {operation} sends no body_name");
+        }
+        if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 0;
+        }
+        h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("  Lid "));
+        h.frames(2);
+        assert!(shows_body_name(&h), "{cmd}: back to New Body shows it again");
+        assert_eq!(sent_body_name(&h).as_deref(), Some("Lid"), "{cmd}: a typed name is sent");
+    }
+    let mut h = design("mm");
+    h.app.start("solid.box");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Lid"));
+    h.frames(2);
+    ok(&mut h);
+    assert!(h.app.session.world_state().unwrap().body("Lid").is_some(), "the box's body is named Lid");
+}
+
+#[test]
+fn editing_a_primitive_shows_the_name_its_body_was_given() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Frame"})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(shows_body_name(&h));
+    assert_eq!(sent_body_name(&h).as_deref(), Some("Frame"));
+}
+
+/// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
+/// or height and revolutions; the command gets exactly the chosen pair. A height is the centre
+/// line's or, chosen beside it, the coil's end to end (#20736).
+#[test]
+fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.into_iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p).unwrap()
+    };
+    let shows = |h: &Harness, label: &str| {
+        let label = solidcraft_ui_text::tr(label);
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+    };
+    // Untouched: today's pair.
+    let keys = |p: &serde_json::Value| {
+        let mut keys: Vec<_> = p.as_object().unwrap().keys().filter(|k| matches!(k.as_str(), "height" | "pitch" | "revolutions")).cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.coil_path_height"));
+    // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "pitch"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
+    assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
+    // Back to the default pair: no height is sent.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    ok(&mut h);
+    let by_height = volume(&mut h.app.session);
+    // 20 high at pitch 8 is 2.5 turns.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 2.5, "pitch": 8, "section_size": 3, "operation": "new"})).unwrap();
+    let expected = volume(&mut reference.app.session);
+    assert!((by_height - expected).abs() <= expected * 1e-6, "{by_height} vs {expected}");
+    // Height and revolutions.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "revolutions"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
+    ok(&mut h);
+    // 20 high in 4 turns is a pitch of 5.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
+    let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
+    assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+    // #20736: the height measured end to end. The choice is sent only when it is Overall, and the
+    // coil then reaches 20 from end to end: its centre line is 17, a 3 mm section short.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    assert!(sent(&h).get("height_measure").is_none(), "the centre line is the default");
+    choose(&mut h, "ui.coil_height_measure", "ui.coil_overall");
+    assert_eq!(sent(&h)["height_measure"], "overall");
+    assert!(shows(&h, "ui.coil_overall_height") && !shows(&h, "ui.coil_path_height"));
+    ok(&mut h);
+    let m = h.app.run("inspect.measure", json!({})).unwrap();
+    let span = m["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(f64::NAN) - m["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((span - 20.0).abs() < 0.02, "{span}");
+}
+
+/// Combine's offset and rounding radius are lengths in the design's unit, as every other
+/// length field: in an inch design they are converted when the dialog applies (a bare 0.1 is
+/// 0.1 in, not 0.1 mm). Left empty, the radius stays empty, so the command leaves it out.
+#[test]
+fn combine_offset_and_radius_follow_the_design_unit() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.combine").unwrap_or_else(|| panic!("no dialog for solid.combine"));
+    if let crate::dialogs::Kind::Combine { operation, offset, radius, round_edges, .. } = &mut d.kind {
+        *operation = 2;
+        *offset = "0.1".into();
+        *round_edges = true;
+        *radius = String::new();
+    }
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["0.1".to_string()], "the offset only, the empty radius left out");
+    let mm = crate::length_input::eval(&h.app.session.doc, &values[0], solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "0.1 in an inch design: {mm} mm");
+    if let crate::dialogs::Kind::Combine { radius, .. } = &mut d.kind {
+        *radius = "0.05".into();
+    }
+    assert_eq!(crate::length_input::fields(&h.app.session.doc, &mut d.kind).len(), 2, "a typed radius is converted too");
+}
+
+/// Only a plain zero stands for no offset: an expression that is zero now, such as a
+/// parameter, is kept so the cut follows it when it changes.
+#[test]
+fn combine_offset_of_a_parameter_at_zero_is_kept() {
+    for zero in ["0", "0 mm", "0.0in", "(0) in", " 0 "] {
+        assert!(crate::dialogs::literal_zero(zero), "{zero}");
+    }
+    for kept in ["gap", "gap * 0", "0.1 mm", "", "1 - 1"] {
+        assert!(!crate::dialogs::literal_zero(kept), "{kept}");
+    }
+}
+
+#[test]
+fn coil_start_angle_steps_by_ten_degrees() {
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    let extra = |h: &Harness| h.app.dialog.as_ref().unwrap().extra["start_angle"].clone();
+    h.step(&json!({"click":{"handle":"dialog:Start angle up"}})).unwrap();
+    assert_eq!(extra(&h), json!("10 deg"));
+    h.step(&json!({"click":{"handle":"dialog:Start angle down"}})).unwrap();
+    assert_eq!(extra(&h), json!("0 deg"));
 }

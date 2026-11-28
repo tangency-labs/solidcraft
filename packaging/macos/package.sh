@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Build and package SolidCraft for macOS:
 #
-#   $DIST/solidcraft-<version>-macos-<arch>.dmg        SolidCraft.app (with solidcraft-cli inside) on a
+#   $DIST/solidcraft-<version>-macos-<arch>.dmg        SolidCraft.app (with solidcraft-cli and the
+#                                                      Quick Look extensions inside) on a
 #                                                      drag-to-Applications DMG with a drawn window
 #                                                      (assets/platforms/macos/dmg)
-#   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI (and its solvecraft-cli
-#                                                      compatibility alias) with the licence files
+#   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI with the licence files
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build] [--sign]
 #        packaging/macos/package.sh --build-only <rust-target>
@@ -28,10 +28,12 @@ set -euo pipefail
 # The same reverse-DNS id as the Linux APP_ID.
 MACOS_BUNDLE_ID=io.tangencylabs.solidcraft
 
-# sign_code <path> [identifier] [entitlements]: Developer ID with the hardened runtime and a secure
-# timestamp, or the ad-hoc signature (Apple silicon refuses unsigned code) without an identity.
+# sign_code <path> [identifier] [entitlements] [always]: Developer ID with the hardened runtime and
+# a secure timestamp, or the ad-hoc signature (Apple silicon refuses unsigned code) without an
+# identity. The entitlements go on Developer ID signatures only, or on every signature with
+# `always` (the Quick Look extensions' sandbox, which macOS requires before it loads them).
 sign_code() {
-  local path="$1" identifier="${2:-}" entitlements="${3:-}"
+  local path="$1" identifier="${2:-}" entitlements="${3:-}" always="${4:-}"
   local args=(--force)
   if [ -n "$SIGN_IDENTITY" ]; then
     args+=(--sign "$SIGN_IDENTITY" --options runtime --timestamp)
@@ -39,7 +41,9 @@ sign_code() {
     args+=(--sign - --timestamp=none)
   fi
   if [ -n "$identifier" ]; then args+=(--identifier "$identifier"); fi
-  if [ -n "$entitlements" ] && [ -n "$SIGN_IDENTITY" ]; then args+=(--entitlements "$entitlements"); fi
+  if [ -n "$entitlements" ] && { [ -n "$SIGN_IDENTITY" ] || [ "$always" = always ]; }; then
+    args+=(--entitlements "$entitlements")
+  fi
   codesign "${args[@]}" "$path"
 }
 
@@ -72,6 +76,19 @@ staple() {
     sleep "${STAPLE_RETRY_SLEEP:-20}"
   done
   echo "could not staple $1" >&2
+  return 1
+}
+
+# validate <path>: stapler validate looks the ticket up at Apple and can lose the connection
+# ("The network connection was lost", error 68), so try it a few times as staple does.
+validate() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    if xcrun stapler validate "$1"; then return 0; fi
+    echo "stapler validate failed (attempt $i), retrying" >&2
+    sleep "${STAPLE_RETRY_SLEEP:-20}"
+  done
+  echo "could not validate the staple of $1" >&2
   return 1
 }
 
@@ -132,7 +149,7 @@ if [ -n "$BUILD_ONLY" ]; then
     *) echo "unknown --build-only target $BUILD_ONLY" >&2; exit 2 ;;
   esac
   echo "==> SolidCraft $VERSION for macOS ($BUILD_ONLY, build only)"
-  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli --target "$BUILD_ONLY")
+  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli -p solidcraft-quicklook --target "$BUILD_ONLY")
   exit 0
 fi
 
@@ -140,12 +157,14 @@ echo "==> SolidCraft $VERSION for macOS ($ARCH)"
 if [ "$SKIP_BUILD" = 0 ]; then
   args=()
   for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
-  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli "${args[@]}")
+  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli -p solidcraft-quicklook "${args[@]}")
 fi
 
 rm -rf "$WORK"
 mkdir -p "$WORK/bin"
-for bin in solidcraft solidcraft-cli solvecraft-cli; do
+# The Quick Look extensions (apps/solidcraft-quicklook): Finder icons and Space previews of designs.
+EXTENSIONS=(thumbnail preview)
+for bin in solidcraft solidcraft-cli solidcraft-thumbnail-extension solidcraft-preview-extension; do
   inputs=()
   for t in "${TARGETS[@]}"; do inputs+=("$CARGO_TARGET_DIR/$t/release/$bin"); done
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
@@ -168,10 +187,25 @@ copy_docs "$APP/Contents/Resources/Licenses"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" "$ROOT/assets/platforms/macos/Info.plist.in" >"$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
+# The Quick Look extensions: macOS registers them from Contents/PlugIns when the app is installed.
+# Each is a bundle of its own (CFBundlePackageType XPC!) with a sandboxed signature.
+for ext in "${EXTENSIONS[@]}"; do
+  name="$(tr '[:lower:]' '[:upper:]' <<<"${ext:0:1}")${ext:1}"
+  appex="$APP/Contents/PlugIns/SolidCraft$name.appex"
+  mkdir -p "$appex/Contents/MacOS"
+  cp "$WORK/bin/solidcraft-$ext-extension" "$appex/Contents/MacOS/solidcraft-$ext-extension"
+  sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
+    "$ROOT/assets/platforms/macos/${name}Extension.Info.plist.in" >"$appex/Contents/Info.plist"
+  plutil -lint "$appex/Contents/Info.plist"
+done
 # Signature over the whole bundle. Nested code is signed first: the bundle signature refuses an
 # unsigned helper in Contents/MacOS. The entitlements go on the bundle (they apply to the main
-# executable): the 3D mouse driver is loaded by the app, not by the CLI.
-sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
+# executable): the 3D mouse driver is loaded by the app, not by the CLI. The extensions get their
+# sandbox entitlements even when ad-hoc signed.
+sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli" "$SCRIPT_DIR/cli-entitlements.plist"
+for appex in "$APP"/Contents/PlugIns/*.appex; do
+  sign_code "$appex" "" "$SCRIPT_DIR/quicklook-entitlements.plist" always
+done
 sign_code "$APP" "" "$SCRIPT_DIR/entitlements.plist"
 codesign --verify --strict --deep --verbose=2 "$APP"
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -183,13 +217,18 @@ if [ -n "$SIGN_IDENTITY" ]; then
   grep -q 'com.apple.security.cs.disable-library-validation' <<<"$info"
 fi
 test -x "$APP/Contents/MacOS/solidcraft-cli" || { echo "solidcraft-cli is missing from $APP" >&2; exit 1; }
+for appex in "$APP"/Contents/PlugIns/SolidCraft{Thumbnail,Preview}.appex; do
+  # macOS loads an extension only when it is sandboxed.
+  info="$(codesign --display --entitlements - --xml "$appex" 2>/dev/null)"
+  grep -q 'com.apple.security.app-sandbox' <<<"$info" || { echo "$appex is not sandboxed" >&2; exit 1; }
+done
 if [ "$NOTARIZE" = 1 ]; then
   # Staple the app itself, so a copy dragged out of the DMG opens offline too.
   echo "==> notarizing $APP"
   ditto -c -k --keepParent "$APP" "$WORK/SolidCraft-app.zip"
   notarize "$WORK/SolidCraft-app.zip"
   staple "$APP"
-  xcrun stapler validate "$APP"
+  validate "$APP"
 fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
@@ -242,7 +281,7 @@ if [ "$NOTARIZE" = 1 ]; then
   echo "==> notarizing $DMG"
   notarize "$DMG"
   staple "$DMG"
-  xcrun stapler validate "$DMG"
+  validate "$DMG"
   # Gatekeeper's verdict on the DMG and on the app as a user gets it.
   spctl -a -t open --context context:primary-signature -vv "$DMG"
   MNT="$(mktemp -d)"
@@ -256,10 +295,7 @@ echo "==> building $CLI_ZIP"
 CLI_DIR="$WORK/solidcraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/solidcraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
-# Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
-cp "$WORK/bin/solvecraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias"
+sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli" "$SCRIPT_DIR/cli-entitlements.plist"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"

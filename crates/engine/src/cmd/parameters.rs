@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
-use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, keep_point_order, keep_sides_at_zero, solve_with};
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
@@ -41,8 +41,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CHANGE_CONTRACT)
         .output(output_schema_for::<ParamChanged>)
         .params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
-         a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
+        "name, expression (number or text), unit?: a unit expressions know (mm, in, deg, kg, mm³, m²…; every one is listed in \
+         docs/book/src/guide/parameters.md), \"\" or text (new parameters default to their value's kind's unit, a length the design's units; a text \
+         parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
          or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
          parameters, checked together and rebuilt once, all or nothing) → changed?: {name: value} (with changes), recomputed: features rebuilt, \
@@ -53,6 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.list", "List Parameters", crate::checked!("parameters.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ParamListResult>)
@@ -119,7 +121,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&EVALUATE_CONTRACT)
         .output(output_schema_for::<ExprEvaluated>)
-        .params("expression, kind?: length|angle|unitless (or unit?: mm|in|deg…; text: the text a text parameter would hold, as `text`) → ok, value (mm/rad), display_value, references, error"),
+        .params(
+            "expression, kind?: length|angle|mass|volume|area|unitless (or unit?: mm|in|deg|kg…; text: the text a text \
+             parameter would hold, as `text`) → ok, value (mm/rad/g/mm³/mm²), kind, display_value (in the unit, else the \
+             kind's: deg, kg…), references, error",
+        ),
     CommandSpec::new("parameters.complete", "Complete Expression", crate::checked!("parameters.complete", complete))
         .icon("params")
         .noundo()
@@ -155,6 +161,116 @@ fn is_text(s: &Session, name: &str, unit: Option<&str>) -> bool {
     s.doc.text_param(name).is_some() || unit.is_some_and(solidcraft_doc::text_params::is_text_unit)
 }
 
+fn pending_move_users(s: &Session, name: &str) -> Vec<solidcraft_doc::ParamUser> {
+    let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+    let mut by_occ: std::collections::BTreeMap<u64, std::collections::BTreeSet<&'static str>> = std::collections::BTreeMap::new();
+    for r in &s.pending_move_records {
+        let inputs = by_occ.entry(r.occurrence).or_default();
+        for (label, e) in ["translate x", "translate y", "translate z"].into_iter().zip(&r.step.translate) {
+            if uses(e) {
+                inputs.insert(label);
+            }
+        }
+        if let Some(origin) = &r.step.origin {
+            for (label, e) in ["origin x", "origin y", "origin z"].into_iter().zip(origin) {
+                if uses(e) {
+                    inputs.insert(label);
+                }
+            }
+        }
+        if let Some(angle) = &r.step.angle
+            && uses(angle)
+        {
+            inputs.insert("angle");
+        }
+    }
+    by_occ
+        .into_iter()
+        .flat_map(|(id, inputs)| {
+            let occ_name = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+            inputs.into_iter().map(move |input| solidcraft_doc::ParamUser::Occurrence {
+                occurrence: id,
+                name: occ_name.clone(),
+                input: input.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn pending_joint_base_users(s: &Session, name: &str) -> Vec<solidcraft_doc::ParamUser> {
+    let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+    let mut out = Vec::new();
+    for (&jid, (_, exprs)) in &s.pending_joint_bases {
+        let joint = s.doc.assembly.joints.iter().find(|j| j.id == jid);
+        let jname = joint.map(|j| j.name.clone()).unwrap_or_else(|| jid.to_string());
+        let dofs = joint.map(|j| j.kind.dofs()).unwrap_or(&[]);
+        for (i, e) in exprs.iter().enumerate() {
+            if let Some(e) = e.as_deref()
+                && joint.is_none_or(|j| j.exprs.value(i) != Some(e))
+                && uses(e)
+            {
+                let dof = dofs.get(i).copied().unwrap_or("value");
+                out.push(solidcraft_doc::ParamUser::Joint { joint: jid, name: jname.clone(), input: format!("{dof} (before capture)") });
+            }
+        }
+    }
+    out
+}
+
+fn check_pending_move_delete(s: &Session, name: &str, cmd: &str) -> Result<()> {
+    let mut users = pending_move_users(s, name);
+    users.extend(pending_joint_base_users(s, name));
+    if !users.is_empty() {
+        let list: Vec<String> = users.iter().map(solidcraft_doc::ParamUser::describe).collect();
+        return Err(bad(cmd, format!("`{name}` is used by {}", list.join(", "))));
+    }
+    Ok(())
+}
+
+fn rename_pending_joint_bases(s: &mut Session, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for (_, exprs) in s.pending_joint_bases.values_mut() {
+        for slot in exprs.iter_mut().flatten() {
+            let updated = expr::rename_reference(slot, old, new);
+            if updated != *slot {
+                *slot = updated;
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+fn rename_pending_move_records(s: &mut Session, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for r in &mut s.pending_move_records {
+        for e in &mut r.step.translate {
+            let updated = expr::rename_reference(e, old, new);
+            if updated != *e {
+                *e = updated.into();
+                n += 1;
+            }
+        }
+        if let Some(origin) = &mut r.step.origin {
+            for e in origin {
+                let updated = expr::rename_reference(e, old, new);
+                if updated != *e {
+                    *e = updated.into();
+                    n += 1;
+                }
+            }
+        }
+        if let Some(angle) = &mut r.step.angle {
+            let updated = expr::rename_reference(angle, old, new);
+            if updated != *angle {
+                *angle = updated.into();
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.change";
     let solved = s.solved_sketches();
@@ -162,6 +278,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         return change_many(s, changes, &solved);
     }
     if let Some(n) = str_(p, "delete") {
+        check_pending_move_delete(s, n.trim(), cmd)?;
         s.doc_mut().remove_param(n.trim())?;
         s.settle_value_edit(&solved)?;
         return reply(cmd, ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new() });
@@ -170,7 +287,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let mut renamed: Option<ParamRename> = None;
     let mut changed_through: Option<String> = None;
     if let Some(new) = str_(p, "new_name") {
-        let n = s.doc_mut().rename_param(&name, new)?;
+        let mut n = s.doc_mut().rename_param(&name, new)?;
+        n += rename_pending_move_records(s, &name, new.trim());
+        n += rename_pending_joint_bases(s, &name, new.trim());
         renamed = Some(ParamRename { from: name, to: new.trim().to_string(), references_updated: n });
         name = new.trim().to_string();
     }
@@ -204,7 +323,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
             if known(s, &new) {
                 return Err(bad(cmd, format!("there is already a parameter `{new}`: type `{new}` to use it, or change it in Parameters")));
             }
-            let n = s.doc_mut().rename_param(&name, &new)?;
+            let mut n = s.doc_mut().rename_param(&name, &new)?;
+            n += rename_pending_move_records(s, &name, &new);
+            n += rename_pending_joint_bases(s, &name, &new);
             renamed = Some(ParamRename { from: name, to: new.clone(), references_updated: n });
             name = new;
         }
@@ -227,6 +348,11 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().set_favorite(&name, f)?;
     }
     let switched = switch_by_rules(s, &before);
+    if let Some(expr) = e.as_deref()
+        && let Some(flipped) = normalize_negative_dimension(s, &name, expr)
+    {
+        e = Some(flipped);
+    }
     if e.is_some() {
         keep_dimension_start(s, &name);
     }
@@ -248,36 +374,136 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
 }
 
-/// The point a length dimension keeps when its value changes: the first it measures from (a
-/// line's start). None for other dimensions.
-fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
-    match kind {
-        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
-        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
-            CurveKind::Line { a, .. } => Some(a),
-            _ => None,
-        },
-        _ => None,
+/// A negative value on a sided distance dimension flips the free side to the opposite side of its
+/// reference and stores the positive magnitude (or `-(expr)` for parametric expressions), matching
+/// `sketch.dimension`.
+fn normalize_negative_dimension(s: &mut Session, name: &str, expr_text: &str) -> Option<String> {
+    let (vals, _) = s.doc.param_values();
+    let w = vals.get(name)?.to_kind(expr::Kind::Length).ok()?;
+    if w >= 0.0 {
+        return None;
     }
-}
-
-/// A length dimension driven by `name` keeps its first point where it is when the value
-/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
-/// sketch is solved here with that point held, before the design evaluates from its stored
-/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
-/// before.
-fn keep_dimension_start(s: &mut Session, name: &str) {
-    let targets: Vec<(u64, usize)> = s
+    let targets: Vec<(u64, Vec<ConstraintKind>)> = s
         .doc
         .features
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::Sketch { sketch, .. } => sketch
-                .constraints
-                .iter()
-                .find(|c| !c.driven && c.param.as_deref() == Some(name))
-                .and_then(|c| dimension_start(sketch, &c.kind))
-                .map(|p| (f.id, p)),
+            FeatureKind::Sketch { sketch, .. } => {
+                let matched: Vec<ConstraintKind> = sketch
+                    .constraints
+                    .iter()
+                    .filter(|c| !c.driven && c.param.as_deref() == Some(name) && !c.kind.is_angle())
+                    .map(|c| c.kind.clone())
+                    .collect();
+                (!matched.is_empty()).then_some((f.id, matched))
+            }
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    let mut updated = Vec::with_capacity(targets.len());
+    for (id, kinds) in targets {
+        let Ok(stored) = sketch_store::read(&s.doc, id) else { return None };
+        let mut sk = stored.clone();
+        let mut has_offset = false;
+        for kind in &kinds {
+            if !sk.flip_for_negative_dimension(kind, -w) {
+                return None;
+            }
+            if matches!(kind, ConstraintKind::OffsetDistance { .. }) {
+                has_offset = true;
+            }
+        }
+        if has_offset {
+            let _ = sk.refresh_offsets();
+        }
+        updated.push((id, sk));
+    }
+    for (id, sk) in updated {
+        if sketch_store::write(s.doc_mut(), id, sk).is_err() {
+            return None;
+        }
+    }
+    let flipped_expr = if expr::references(expr_text).is_empty() { s.doc.design_length(-w).1 } else { format!("-({expr_text})") };
+    if s.doc_mut().change_param(name, &flipped_expr, None, None).is_ok() { Some(flipped_expr) } else { None }
+}
+
+/// Points a driving dimension keeps when its own parameter changes. A length keeps the first
+/// point it measures from (a line's start, #6070). A point-to-line distance is a construction
+/// offset measured from the reference line, so that line stays and the offset point moves.
+fn dimension_held_points(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
+    match kind {
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => vec![*p],
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, .. }) => vec![*a],
+            _ => Vec::new(),
+        },
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        _ => Vec::new(),
+    }
+}
+
+fn reference_line_ends(sk: &Sketch, line: usize) -> Vec<usize> {
+    match sk.curves.get(line).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => vec![*a, *b],
+        _ => Vec::new(),
+    }
+}
+
+/// Held points for a construction offset whose expression mentions `name`, not for an ordinary
+/// dimension that happens to reference it. A parallel offset holds the reference line. A
+/// horizontal or vertical offset is a distance from the sketch origin, and holds that origin.
+fn construction_offset_hold(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
+    match kind {
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } if sk.point_index("origin") == Some(*p) => vec![*p],
+        _ => Vec::new(),
+    }
+}
+
+/// The points to hold while `name` changes. The first dimension whose parameter is `name` wins,
+/// as it did before, including when that dimension holds nothing. An earlier dimension that only
+/// mentions `name` in its expression is skipped when it holds no points, so it cannot hide that
+/// direct dimension. A construction offset is the expression match that does hold its reference.
+fn held_for_parameter(sketch: &Sketch, doc: &solidcraft_doc::Document, name: &str) -> Option<Vec<usize>> {
+    let mut offset = None;
+    for c in sketch.constraints.iter().filter(|c| !c.driven) {
+        let Some(param) = c.param.as_deref() else { continue };
+        if param == name {
+            let points = dimension_held_points(sketch, &c.kind);
+            return (!points.is_empty()).then_some(points);
+        }
+        let mentions = doc.param(param).is_some_and(|p| expr::references(&p.expr).iter().any(|r| r == name));
+        if !mentions {
+            continue;
+        }
+        let points = construction_offset_hold(sketch, &c.kind);
+        if points.is_empty() || offset.is_some() {
+            continue;
+        }
+        offset = Some(points);
+    }
+    offset
+}
+
+/// A length dimension driven by `name` keeps its first point where it is when the value
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). A
+/// construction offset whose expression mentions `name` keeps its reference instead. An ordinary
+/// dimension that merely references `name` (a length of `width * 2`) is left to the normal
+/// solve, so both ends can still move. The sketch is solved here with those points held, before
+/// the design evaluates from its stored positions. Where holding them can't solve (a symmetry
+/// moves both ends), evaluation solves as before. A sketch that already has offset curves pins
+/// that dimension's first point and runs the full solve, so a tangent cap does not jump to
+/// another branch (#4823).
+fn keep_dimension_start(s: &mut Session, name: &str) {
+    let targets: Vec<(u64, Vec<usize>)> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => held_for_parameter(sketch, &s.doc, name).map(|points| (f.id, points)),
             _ => None,
         })
         .collect();
@@ -285,19 +511,20 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         return;
     }
     let vals = s.doc.evaluation_values();
-    for (id, start) in targets {
+    for (id, points) in targets {
         let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
         let mut trial = stored.clone();
         if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let hold = Hold { points: vec![start], radii: Vec::new() };
-        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() && trial.freeform_chain_offsets.is_empty() {
+            let hold = Hold { points, radii: Vec::new() };
             solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
         } else {
             // A solve against stale offset points can stretch an attached cap into a different
             // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(&start) = points.first() else { continue };
             let Some(p) = trial.points.get_mut(start) else { continue };
             p.fixed = true;
             s.doc
@@ -308,10 +535,15 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         if stored.points.len() == trial.points.len() {
-            // Only the points move: the stored dimensions keep their own values.
+            // Only the points move: the stored dimensions keep their own values, and the order of
+            // the points of one this edit drives to zero, which keeps their sides (#15766).
+            keep_sides_at_zero(&mut trial, &reference);
             let mut kept = stored.clone();
             for (p, q) in kept.points.iter_mut().zip(&trial.points) {
                 p.pos = q.pos;
+            }
+            for (c, t) in kept.constraints.iter_mut().zip(&trial.constraints) {
+                keep_point_order(&mut c.kind, &t.kind);
             }
             let _ = sketch_store::write(s.doc_mut(), id, kept);
         }
@@ -338,7 +570,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);
-    for (name, _) in &list {
+    for (name, expr) in &list {
+        normalize_negative_dimension(s, name, expr);
         keep_dimension_start(s, name);
     }
     s.settle_value_edit(solved)?;
@@ -423,7 +656,9 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.rename";
     let name = param_name(cmd, p)?.to_string();
     let new = str_(p, "new_name").ok_or_else(|| bad(cmd, "`new_name` is required"))?;
-    let references_updated = s.doc_mut().rename_param(&name, new)?;
+    let mut references_updated = s.doc_mut().rename_param(&name, new)?;
+    references_updated += rename_pending_move_records(s, &name, new.trim());
+    references_updated += rename_pending_joint_bases(s, &name, new.trim());
     reply(cmd, ParamRenamed { from: name, to: new.trim().to_string(), references_updated, param_warnings: Vec::new() })
 }
 
@@ -431,6 +666,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.delete";
     let name = param_name(cmd, p)?.to_string();
     let solved = s.solved_sketches();
+    check_pending_move_delete(s, &name, cmd)?;
     s.doc_mut().remove_param(&name)?;
     s.settle_value_edit(&solved)?;
     reply(cmd, ParamDeleted { deleted: name, param_warnings: Vec::new() })
@@ -471,7 +707,9 @@ fn users(s: &mut Session, p: &Value) -> Result<Value> {
     if !known(s, name) {
         return Err(bad(cmd, format!("no parameter `{name}`")));
     }
-    let users = s.doc.param_users(name);
+    let mut users = s.doc.param_users(name);
+    users.extend(pending_move_users(s, name));
+    users.extend(pending_joint_base_users(s, name));
     let users = users.into_iter().map(ParameterUser::from).collect();
     let drives = s
         .doc
@@ -548,16 +786,16 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         let body = ExprEvaluatedBody::Text { ok: true, kind: "text".into(), text: solidcraft_doc::text_params::unquote(&e), references: Vec::new() };
         return reply(cmd, ExprEvaluated { body, param_warnings: Vec::new() });
     }
-    if let Some(u) = unit
-        && expr::unit_info(u).is_none()
-    {
-        return Err(bad(cmd, format!("unknown unit `{u}`")));
+    if let Some(why) = unit.and_then(expr::unit_problem) {
+        return Err(bad(cmd, why));
     }
+    // A kind by the name `Kind` has for itself (`length`, `mass`…), or `number` for a unit-less one.
     let kind = match (str_(p, "kind"), unit) {
-        (Some("length"), _) => Some(Kind::Length),
-        (Some("angle"), _) => Some(Kind::Angle),
-        (Some("unitless" | "number"), _) => Some(Kind::Unitless),
-        (Some(other), _) => return Err(bad(cmd, format!("unknown kind `{other}` (length, angle or unitless)"))),
+        (Some("number"), _) => Some(Kind::Unitless),
+        (Some(name), _) => Some(serde_json::from_value::<Kind>(json!(name)).map_err(|_| {
+            let names: Vec<String> = Kind::ALL.iter().filter_map(|k| json!(k).as_str().map(str::to_string)).collect();
+            bad(cmd, format!("unknown kind `{name}` ({} or number)", names.join(", ")))
+        })?),
         (None, Some(u)) => Some(Kind::from_unit(u)),
         (None, None) => None,
     };
@@ -575,16 +813,8 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     let defines = expr::definition(&e).map(|(n, _)| n);
     let body = match r {
         Ok((v, k)) => {
-            let value = match k {
-                Kind::Length => expr::Value::length(v),
-                Kind::Angle => expr::Value::angle(v),
-                Kind::Unitless => expr::Value::num(v),
-            };
-            let shown = match (unit, k) {
-                (Some(u), _) => expr::value_in_unit(value, u),
-                (None, Kind::Angle) => v.to_degrees(),
-                (None, _) => v,
-            };
+            // Shown in the unit asked for, else in its kind's (degrees, kilograms…).
+            let shown = expr::value_in_unit(expr::Value::of_kind(k, v), unit.unwrap_or(k.default_unit()));
             ExprEvaluatedBody::Value {
                 ok: true,
                 value: expr::round_reported(v),

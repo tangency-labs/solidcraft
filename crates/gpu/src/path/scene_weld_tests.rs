@@ -4,7 +4,8 @@ use std::sync::Arc;
 use super::{MediumWeld, Triangle, flatten, medium_preparation_bytes};
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
-use solidcraft_render::{ProductMesh, ProductScene, job::CancelToken, surface::OpaqueSurface, transmission::Transmission};
+use solidcraft_render::{ProductMesh, ProductScene, job::CancelToken, transmission::Transmission};
+use solidcraft_viewport::surface::OpaqueSurface;
 
 fn seam_tetra(offset: Vec3) -> ProductScene {
     // Original outward tetrahedron. Only one face has a duplicated CAD seam

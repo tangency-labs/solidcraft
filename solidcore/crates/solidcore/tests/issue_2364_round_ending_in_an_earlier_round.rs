@@ -21,6 +21,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -42,16 +44,10 @@ const BACK_TOP: Point3 = Point3::new(30.0, 0.0, 10.0);
 /// A point on the upright at the knife-edge tip.
 const TIP: Point3 = Point3::new(W + 21.0, 0.0, 5.0);
 
-/// SolidCraft's rig set: every fix but the five it leaves off.
+/// SolidCraft's rig set: every fix.
 fn kernel() -> Kernel {
-    let mut f = UpstreamFixes::all();
-    f.cone_unbounded_parameterized_as_nurb = false;
-    f.ellipse_open_arc_keeps_end_angle = false;
-    f.fillet_overflow_crease_along_edge = false;
-    f.fillet_refuse_rounds_breaking_through = false;
-    f.shell_one_construction = false;
     Kernel {
-        fixes: f,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     }
 }
@@ -98,8 +94,15 @@ fn measured(k: &mut Kernel, b: &mut Brep) -> (usize, f64) {
     )
 }
 
-/// `first` rounded r 2, then the tip's upright r 2, against both rounded together.
-fn rounds_in_turn_match_both_together(first: Point3, together_volume: f64, in_turn_volume: f64) {
+/// `first` rounded r 2, then the tip's upright r 2, against both rounded together. `was`
+/// is the pair's values before `brep_volume` closed tolerant edges' gaps (#16735), when they
+/// moved: each move is checked to be within the old integrator's leak bound.
+fn rounds_in_turn_match_both_together(
+    first: Point3,
+    together_volume: f64,
+    in_turn_volume: f64,
+    was: Option<(f64, f64)>,
+) {
     let mut k = kernel();
     let mut b = arc_wall_plate(&mut k);
     round(&mut k, &mut b, &[first, TIP], 2.0);
@@ -107,8 +110,11 @@ fn rounds_in_turn_match_both_together(first: Point3, together_volume: f64, in_tu
     assert_eq!(faces, 8);
     assert!(
         (together - together_volume).abs() <= 1e-9 * together_volume,
-        "{together:.12}"
+        "{together:.17}"
     );
+    if let Some((was, _)) = was {
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, together, 1e-8);
+    }
 
     let mut k = kernel();
     let mut b = arc_wall_plate(&mut k);
@@ -118,8 +124,11 @@ fn rounds_in_turn_match_both_together(first: Point3, together_volume: f64, in_tu
     assert_eq!(faces, 8);
     assert!(
         (in_turn - in_turn_volume).abs() <= 1e-9 * in_turn_volume,
-        "{in_turn:.12}"
+        "{in_turn:.17}"
     );
+    if let Some((_, was)) = was {
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, in_turn, 1e-8);
+    }
     // two constructions of one body: the corner of both rounds, and the global merge's cut
     let rel = (in_turn - together).abs() / together;
     eprintln!("in turn {in_turn:.12}, together {together:.12}, rel {rel:.2e}");
@@ -130,14 +139,20 @@ fn rounds_in_turn_match_both_together(first: Point3, together_volume: f64, in_tu
 }
 
 /// The arc's top edge first: 9452.927851913 in turn against 9452.927826170 together
-/// (2.7e-9 relative).
+/// (2.7e-9 relative) until `brep_volume` closed tolerant edges' gaps (#16735); now
+/// 9452.927854312 in turn against 9452.927854286 together (2.8e-12, MEASURED).
 #[test]
 fn the_tip_rounded_after_the_arc_top_matches_both_together() {
-    rounds_in_turn_match_both_together(ARC_TOP, 9452.927826170264, 9452.927851913100);
+    rounds_in_turn_match_both_together(
+        ARC_TOP,
+        9452.927854285643,
+        9452.927854311902,
+        Some((9452.927826170264, 9452.927851913100)),
+    );
 }
 
 /// The back top edge first: 9428.557343079310 in turn against 9428.557343079308 together.
 #[test]
 fn the_tip_rounded_after_the_back_top_matches_both_together() {
-    rounds_in_turn_match_both_together(BACK_TOP, 9428.557343079308, 9428.557343079310);
+    rounds_in_turn_match_both_together(BACK_TOP, 9428.557343079308, 9428.557343079310, None);
 }

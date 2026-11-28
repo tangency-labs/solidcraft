@@ -175,6 +175,27 @@ fn a_box_placed_by_its_centre_reads_its_sizes_in_the_design_units() {
     keeps_shape_through(&mut s, &["in", "mm"]);
 }
 
+/// A box placed by its centre grows on both sides when its size changes later, also after a save and
+/// reopen; a box placed by its corner keeps growing from that corner (#14487).
+#[test]
+fn a_box_placed_by_its_centre_stays_centred_when_its_size_changes() {
+    let near = |a: [f64; 6], b: [f64; 6]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "center": [0, 0, 0], "name": "Box", "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "corner": [50, 0, 0], "name": "Corner", "body_name": "B"}));
+    assert!(near(shape(&mut s, "A").bbox, [-10.0, -5.0, -5.0, 10.0, 5.0, 5.0]), "{:?}", shape(&mut s, "A"));
+    run(&mut s, "timeline.edit", json!({"feature": "Box", "set": {"length": "30"}}));
+    let a = shape(&mut s, "A");
+    assert!(near(a.bbox, [-15.0, -5.0, -5.0, 15.0, 5.0, 5.0]), "{a:?}");
+    assert!(rel(a.volume, 3000.0) < 1e-9, "{a:?}");
+    run(&mut s, "timeline.edit", json!({"feature": "Corner", "set": {"length": "30"}}));
+    assert!(near(shape(&mut s, "B").bbox, [50.0, 0.0, 0.0, 80.0, 10.0, 10.0]), "{:?}", shape(&mut s, "B"));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "timeline.edit", json!({"feature": "Box", "set": {"width": "20", "height": "4"}}));
+    assert!(near(shape(&mut reopened, "A").bbox, [-15.0, -10.0, -2.0, 15.0, 10.0, 2.0]), "{:?}", shape(&mut reopened, "A"));
+    keeps_shape_through(&mut reopened, &["in", "mm"]);
+}
+
 #[test]
 fn press_pull_keeps_its_distance_when_the_units_change() {
     // A face pushed in: the cut's depth is the distance's size.
@@ -224,7 +245,8 @@ fn bare_numbers_beside_a_unitless_expression_stay_bare() {
     assert_eq!(inputs(&s, 0)[2], "(16) / (2 * 4)", "the revolutions");
     assert!(s.model.result(s.doc.features[0].id).is_some_and(|r| r.error.is_none()));
     run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "center": ["2 * 5", 0, 0], "body_name": "B"}));
-    assert_eq!(s.doc.features[1].kind.point_expr().map(|p| p[0].to_string()), Some("(2 * 5) - (20) / 2".to_string()));
+    // The centre is kept as typed; the box stays centred on it (#14487).
+    assert_eq!(s.doc.features[1].kind.point_expr().map(|p| p[0].to_string()), Some("2 * 5".to_string()));
     let b = shape(&mut s, "B");
     assert!(b.bbox[0].abs() < 1e-6 && (b.bbox[3] - 20.0).abs() < 1e-6, "{b:?}");
 }

@@ -28,7 +28,13 @@ pub mod prepared;
 mod progressive;
 pub mod punctual;
 pub mod reflection;
-pub use bvh::{BuildLimits, BuildProgress, Bvh, BvhBuilder, MAX_DEPTH, MAX_MEMORY_BYTES, MAX_TRIANGLES};
+pub use bvh::BuildLimits;
+pub use bvh::BuildProgress;
+pub use bvh::Bvh;
+pub use bvh::BvhBuilder;
+pub use bvh::MAX_DEPTH;
+pub use bvh::MAX_MEMORY_BYTES;
+pub use bvh::MAX_TRIANGLES;
 
 /// Finite coordinate admission, not a CAD accuracy guarantee.
 pub const MAX_COORDINATE_MM: f64 = 1e12;
@@ -76,6 +82,8 @@ fn check_cancel(cancel: &CancelToken) -> Result<()> {
 pub struct WorkBudget {
     limit: u64,
     used: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    shared: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl WorkBudget {
@@ -83,7 +91,12 @@ impl WorkBudget {
         if limit == 0 || limit > crate::job::MAX_CPU_WORK {
             return Err(TraceError::InvalidInput("work limit outside 1..=MAX_WORK"));
         }
-        Ok(Self { limit, used: 0 })
+        Ok(Self {
+            limit,
+            used: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            shared: None,
+        })
     }
     pub fn used(&self) -> u64 {
         self.used
@@ -91,13 +104,37 @@ impl WorkBudget {
     pub fn remaining(&self) -> u64 {
         self.limit - self.used
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parallel_reset(&mut self, limit: u64, ledger: &std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        self.limit = limit;
+        self.used = 0;
+        self.shared = Some(ledger.clone());
+    }
     fn tick(&mut self, cancel: &CancelToken) -> Result<()> {
         self.charge(1, cancel)
     }
 
     fn charge(&mut self, units: u64, cancel: &CancelToken) -> Result<()> {
         check_cancel(cancel)?;
-        self.used = self.used.checked_add(units).filter(|used| *used <= self.limit).ok_or(TraceError::WorkLimit)?;
+        let used = self.used.checked_add(units).filter(|used| *used <= self.limit).ok_or(TraceError::WorkLimit)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(shared) = &self.shared {
+            use std::sync::atomic::Ordering;
+            // Reserve from one image-owned ledger without depending on the
+            // newer atomic update naming; Rust 1.95 and wasm stay supported.
+            let mut remaining = shared.load(Ordering::Relaxed);
+            loop {
+                let next = remaining.checked_sub(units).ok_or(TraceError::WorkLimit)?;
+                match shared.compare_exchange_weak(remaining, next, Ordering::Relaxed, Ordering::Relaxed) {
+                    Ok(_) => break,
+                    Err(current) => {
+                        check_cancel(cancel)?;
+                        remaining = current;
+                    }
+                }
+            }
+        }
+        self.used = used;
         Ok(())
     }
 }

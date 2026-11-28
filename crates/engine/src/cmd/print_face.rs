@@ -1,4 +1,5 @@
-//! Laying bodies on their print face for a slicer (#8429). The bodies being sent are copied (the
+//! Laying bodies on their print face for a slicer (#8429), or for an STL or 3MF export with
+//! `lay_on_print_faces`. The bodies being sent are copied (the
 //! state the export writes is already a copy), and each copy whose body has a print face is
 //! turned so the face points down, its centre of mass moved onto the world origin in X and Y,
 //! and the face moved onto Z = 0: one rigid transform, applied once. The design and its timeline
@@ -11,18 +12,56 @@ use solidcraft_doc::{ModelState, PrintFace};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
-use crate::params::{bad, str_};
-use crate::schema::print_face::PrintFaceResult;
+use crate::params::{bad, str_, string_list};
+use crate::schema::print_face::{BodyPrintFace, PrintFaceResult, PrintFaceStatus, PrintFacesResult};
 use crate::{EngineError, Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("body.print_face", "Print Face", crate::checked!("body.print_face", print_face))
-    .icon("print_face")
-    .key("Ctrl+B")
-    .contract(&PRINT_FACE_CONTRACT)
-    .output(crate::schema::output_schema_for::<PrintFaceResult>)
-    .params("body: its name; point?: [x, y, z] on a flat face of it, in mm (omit to clear) → {body, face?}: marks the face a slicer export (file.send_to_slicer, file.save_mesh with slicer, file.open_in_easyprint) lays the body on: turned so the face points down at Z = 0, the centre of mass over the origin. One per body, replacing the last; flat faces of solid bodies only. A print face that is gone or no longer flat is reported in the export's warnings, and the body exported as it lies")];
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("body.print_face", "Print Face", crate::checked!("body.print_face", print_face))
+        .icon("print_face")
+        .key("Ctrl+B")
+        .contract(&PRINT_FACE_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintFaceResult>)
+        .params("body: its name; point?: [x, y, z] on a flat face of it, in mm (omit to clear) → {body, face?}: marks the face a slicer export (file.send_to_slicer, file.save_mesh with slicer, file.open_in_easyprint), or an STL or 3MF export with lay_on_print_faces (file.export, file.export_stl, file.export_3mf, file.save_mesh), lays the body on: turned so the face points down at Z = 0, the centre of mass over the origin. One per body, replacing the last; flat faces of solid bodies only. A print face that is gone or no longer flat is reported in the export's warnings, and the body exported as it lies"),
+    CommandSpec::new("body.print_faces", "Check Print Faces", crate::checked!("body.print_faces", print_faces))
+        .icon("print_face")
+        .noundo()
+        .read_only()
+        .contract(&PRINT_FACES_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintFacesResult>)
+        .params("bodies?: name | [names] (default every body) → {bodies: [{body, status: set | none | lost, face?, problem?}], all_set}: whether each body has a print face (body.print_face) that an export would lay it on; lost: one was marked but the face is gone or no longer flat (problem says why). all_set is true when at least one body was checked and every one is set. Read-only"),
+];
 
 const PRINT_FACE_CONTRACT: crate::schema::TypedContract<crate::schema::print_face::PrintFaceParams> = crate::schema::TypedContract::new();
+const PRINT_FACES_CONTRACT: crate::schema::TypedContract<crate::schema::print_face::PrintFacesParams> = crate::schema::TypedContract::new();
+
+/// Say whether each body has a print face, and whether an export can still find it. Changes
+/// nothing.
+fn print_faces(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.print_faces";
+    let names = string_list(cmd, p, "bodies")?;
+    let world = s.world_state()?;
+    let bodies: Vec<&solidcraft_doc::ModelBody> = if names.is_empty() {
+        world.bodies.iter().collect()
+    } else {
+        names.iter().map(|n| world.body(n).ok_or_else(|| bad(cmd, format!("no body `{n}`")))).collect::<Result<_>>()?
+    };
+    let checked: Vec<BodyPrintFace> = bodies
+        .into_iter()
+        .map(|b| {
+            let face = s.doc.print_faces.get(b.definition_name()).map(|t| t.name.clone());
+            let (status, problem) = match s.doc.print_face(&world, b) {
+                None => (PrintFaceStatus::None, None),
+                Some(Ok(_)) => (PrintFaceStatus::Set, None),
+                Some(Err(e)) => (PrintFaceStatus::Lost, Some(e.to_string())),
+            };
+            BodyPrintFace { body: b.name.clone(), status, face, problem }
+        })
+        .collect();
+    let all_set = !checked.is_empty() && checked.iter().all(|b| b.status == PrintFaceStatus::Set);
+    let reply = PrintFacesResult { bodies: checked, all_set, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
 
 /// Mark or clear a body's print face.
 fn print_face(s: &mut Session, p: &Value) -> Result<Value> {
@@ -283,6 +322,80 @@ mod tests {
     }
 
     #[test]
+    fn print_faces_says_which_bodies_have_one_and_changes_nothing() {
+        let mut s = block();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "body_name": "Spacer"}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(r["all_set"], false, "{r}");
+        assert_eq!(r["bodies"], json!([{"body": "Block", "status": "none"}, {"body": "Spacer", "status": "none"}]), "{r}");
+
+        let marked = run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        let undo_after_mark = s.undo.len();
+        let r = run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(r["bodies"][0]["status"], "set", "{r}");
+        assert_eq!(r["bodies"][0]["face"], marked["face"], "{r}");
+        assert_eq!(r["bodies"][1]["status"], "none", "{r}");
+        assert_eq!(r["all_set"], false, "{r}");
+
+        // Only the bodies asked for, in the order asked for.
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Block"]}));
+        assert_eq!(r["all_set"], true, "{r}");
+        assert_eq!(r["bodies"].as_array().map(Vec::len), Some(1), "{r}");
+        run(&mut s, "body.print_face", json!({"body": "Spacer", "point": [42.5, 2.5, 0]}));
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Spacer", "Block"]}));
+        assert_eq!(r["bodies"][0]["body"], "Spacer", "{r}");
+        assert_eq!(r["all_set"], true, "{r}");
+
+        // Checking is not an undo step and changes no print face.
+        assert!(undo < undo_after_mark);
+        let before = s.doc.print_faces.clone();
+        let steps = s.undo.len();
+        run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(s.undo.len(), steps);
+        assert_eq!(s.doc.print_faces, before);
+    }
+
+    #[test]
+    fn print_faces_reports_a_face_that_was_cut_away_as_lost() {
+        let mut s = block();
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [-5, -5, 3], "operation": "cut"}));
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Block"]}));
+        let b = &r["bodies"][0];
+        assert_eq!(b["status"], "lost", "{r}");
+        assert!(b["face"].is_string() && b["problem"].as_str().is_some_and(|p| !p.is_empty()), "{r}");
+        assert_eq!(r["all_set"], false, "{r}");
+    }
+
+    #[test]
+    fn print_faces_refuses_an_unknown_body_or_a_bad_list_and_is_false_with_no_bodies() {
+        let mut s = block();
+        let e = s.execute("body.print_faces", &json!({"bodies": ["Bracket"]})).unwrap_err().to_string();
+        assert!(e.contains("Bracket"), "{e}");
+        let e = s.execute("body.print_faces", &json!({"bodies": 3})).unwrap_err().to_string();
+        assert!(e.contains("bodies"), "{e}");
+        let e = s.execute("body.print_faces", &json!({"bodies": [1]})).unwrap_err().to_string();
+        assert!(e.contains("bodies"), "{e}");
+        let r = run(&mut Session::default(), "body.print_faces", json!({}));
+        assert_eq!(r, json!({"bodies": [], "all_set": false}));
+    }
+
+    #[test]
+    fn print_faces_takes_one_name_as_a_list_of_one_with_strict_checks_too() {
+        // A plain name is the repository's shorthand for a list of one (`params::string_list`);
+        // the contract accepts it as well, so strict parameter checks don't refuse it.
+        for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+            let mut s = block();
+            s.param_check = check;
+            let r = run(&mut s, "body.print_faces", json!({"bodies": "Block"}));
+            assert_eq!(r["bodies"], json!([{"body": "Block", "status": "none"}]), "{check:?}: {r}");
+            let e = s.execute("body.print_faces", &json!({"bodies": 3})).unwrap_err().to_string();
+            assert!(e.contains("bodies"), "{check:?}: {e}");
+        }
+    }
+
+    #[test]
     fn a_print_face_is_saved_with_the_design_and_an_older_design_has_none() {
         let mut s = block();
         run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
@@ -294,6 +407,193 @@ mod tests {
         older.as_object_mut().expect("object").remove("print_faces");
         let opened: solidcraft_doc::Document = serde_json::from_value(older).expect("open");
         assert!(opened.print_faces.is_empty());
+    }
+
+    /// A file in a fresh folder of the system's temporary folder, for `case`.
+    fn temp_file(case: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("solidcraft-print-faces-{case}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporary folder");
+        dir.join("block.solidcraft").to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn without_keep_print_faces_a_save_leaves_them_out_and_the_session_keeps_them() {
+        let mut s = block();
+        s.keep_print_faces = false;
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        let path = temp_file("save");
+        run(&mut s, "file.save", json!({"path": path}));
+        // The design on screen still has it, and is not left with unsaved changes.
+        assert!(s.doc.print_faces.contains_key("Block"));
+        assert!(!s.is_dirty());
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert!(opened.doc.print_faces.is_empty(), "the file has no print face");
+        assert_eq!(opened.doc.features.len(), s.doc.features.len());
+        assert_eq!(opened.doc.params, s.doc.params);
+        // With keep_print_faces on (the engine's default), the file keeps it, as before.
+        s.keep_print_faces = true;
+        run(&mut s, "file.save", json!({"path": path}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert_eq!(opened.doc.print_faces, s.doc.print_faces);
+    }
+
+    #[test]
+    fn a_design_saved_with_print_faces_opens_without_them_unless_they_are_kept() {
+        let mut s = block();
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Brass"}));
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        // Saved as an older version saved it: with the print face in the file.
+        let path = temp_file("older");
+        run(&mut s, "file.save", json!({"path": path}));
+        let mut opened = Session { keep_print_faces: false, ..Session::default() };
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert!(opened.doc.print_faces.is_empty(), "the stored print face is dropped as the design opens");
+        assert!(!opened.is_dirty(), "dropping it is not an unsaved change");
+        assert!(opened.undo.is_empty(), "nor a step to undo");
+        // Everything else the file holds is there.
+        assert_eq!(opened.doc.features.len(), s.doc.features.len());
+        assert_eq!(opened.doc.params, s.doc.params);
+        assert_eq!(opened.doc.materials, s.doc.materials);
+        assert_eq!(opened.model.state().bodies.len(), 1);
+        // The setting is the user's: it survives the open.
+        assert!(!opened.keep_print_faces);
+        // Kept, the design opens with its print face.
+        let mut kept = Session::default();
+        run(&mut kept, "doc.open", json!({"path": path}));
+        assert_eq!(kept.doc.print_faces, s.doc.print_faces);
+    }
+
+    /// `name` in a fresh folder of the system's temporary folder, for `case`.
+    fn temp_path(case: &str, name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("solidcraft-lay-on-print-faces-{case}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporary folder");
+        dir.join(name).to_string_lossy().into_owned()
+    }
+
+    /// The box around every triangle of the STL file at `path`, in mm.
+    fn stl_box(path: &str) -> ([f64; 3], [f64; 3]) {
+        let triangles = solidcraft_io::read_stl(&std::fs::read(path).expect("the STL file")).expect("an STL file");
+        assert!(!triangles.is_empty(), "{path} has no triangles");
+        let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for p in triangles.iter().flatten() {
+            for k in 0..3 {
+                min[k] = min[k].min(f64::from(p[k]));
+                max[k] = max[k].max(f64::from(p[k]));
+            }
+        }
+        (min, max)
+    }
+
+    /// Near enough for a coordinate an STL file holds as an f32.
+    fn near_f32(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn an_stl_export_lays_the_body_on_its_print_face_only_when_asked() {
+        // The 10 x 5 end at X = 20 is the print face, so laid the 20 mm length stands up at Z = 0,
+        // centred on the origin in X and Y.
+        let mut s = block();
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [20, 5, 2.5]}));
+        let undo = s.undo.len();
+        let laid_box = |(min, max): ([f64; 3], [f64; 3])| {
+            near_f32(min[2], 0.)
+                && near_f32(max[2], 20.)
+                && near_f32(min[0] + max[0], 0.)
+                && near_f32(min[1] + max[1], 0.)
+                && near_f32((max[0] - min[0]) * (max[1] - min[1]), 50.)
+        };
+        for (id, name, extra) in [
+            ("file.export_stl", "a.stl", json!({})),
+            ("file.export", "b.stl", json!({})),
+            ("file.export", "c.stl", json!({"format": "stla"})),
+            ("file.save_mesh", "d.stl", json!({})),
+            ("file.save_mesh", "e.stl", json!({"format": "stl", "ascii": true})),
+        ] {
+            let path = temp_path("stl", name);
+            let mut p = json!({"path": path, "lay_on_print_faces": true});
+            p.as_object_mut().expect("object").extend(extra.as_object().expect("object").clone());
+            let reply = run(&mut s, id, p);
+            assert_eq!(reply["print_faces"], json!(["Block"]), "{id}: {reply}");
+            assert!(reply.get("warnings").is_none(), "{id}: {reply}");
+            let bbox = stl_box(&path);
+            assert!(laid_box(bbox), "{id} {name}: {bbox:?}");
+            // Without the key, or with it false, the body is written as it lies in the design.
+            for lay in [json!(null), json!(false)] {
+                let path = temp_path("stl-as-it-lies", name);
+                let mut p = json!({"path": path, "lay_on_print_faces": lay});
+                p.as_object_mut().expect("object").extend(extra.as_object().expect("object").clone());
+                let reply = run(&mut s, id, p);
+                assert!(reply.get("print_faces").is_none(), "{id}: {reply}");
+                let (min, max) = stl_box(&path);
+                assert!(near_f32(min[0], 0.) && near_f32(max[0], 20.) && near_f32(min[2], 0.) && near_f32(max[2], 5.), "{id}: {min:?} {max:?}");
+            }
+        }
+        // The design itself has not moved, and nothing was added to undo.
+        assert_eq!(s.undo.len(), undo);
+        let m = solidcraft_kernel::measure_mass(&s.model.state().bodies[0].body).expect("measure");
+        assert!(near(m.bbox.min.x, 0.) && near(m.bbox.max.x, 20.) && near(m.bbox.max.z, 5.), "{:?}", m.bbox);
+    }
+
+    #[test]
+    fn a_3mf_export_reports_the_bodies_it_laid_on_their_print_face() {
+        let mut s = block();
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [20, 5, 2.5]}));
+        for (id, name) in [("file.export_3mf", "a.3mf"), ("file.export", "b.3mf"), ("file.save_mesh", "c.3mf")] {
+            let path = temp_path("3mf", name);
+            let reply = run(&mut s, id, json!({"path": path, "lay_on_print_faces": true}));
+            assert_eq!(reply["print_faces"], json!(["Block"]), "{id}: {reply}");
+            assert!(std::fs::metadata(&path).is_ok_and(|m| m.len() > 0), "{id}: {path}");
+        }
+    }
+
+    #[test]
+    fn an_export_with_lay_on_print_faces_writes_a_body_without_one_as_it_lies() {
+        // A second body with no print face lies where it is; a print face cut away is reported.
+        let mut s = block();
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [50, 0, 0], "body_name": "Cube", "operation": "new"}));
+        let path = temp_path("none", "cube.stl");
+        let reply = run(&mut s, "file.export_stl", json!({"path": path, "bodies": ["Cube"], "lay_on_print_faces": true}));
+        assert!(reply.get("print_faces").is_none() && reply.get("warnings").is_none(), "{reply}");
+        let (min, max) = stl_box(&path);
+        assert!(near_f32(min[0], 50.) && near_f32(max[0], 54.) && near_f32(max[2], 4.), "{min:?} {max:?}");
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [-5, -5, 3], "operation": "cut"}));
+        let path = temp_path("cut", "block.stl");
+        let reply = run(&mut s, "file.export_stl", json!({"path": path, "bodies": ["Block"], "lay_on_print_faces": true}));
+        assert!(reply.get("print_faces").is_none(), "{reply}");
+        assert!(reply["warnings"].as_array().is_some_and(|w| w.len() == 1 && w[0].as_str().is_some_and(|w| w.contains("Block"))), "{reply}");
+        let (min, max) = stl_box(&path);
+        assert!(near_f32(min[0], 0.) && near_f32(max[0], 20.) && near_f32(max[2], 3.), "{min:?} {max:?}");
+    }
+
+    #[test]
+    fn lay_on_print_faces_is_refused_for_a_format_that_is_not_printed_or_a_value_that_is_not_true_or_false() {
+        let mut s = block();
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [20, 5, 2.5]}));
+        for (id, name, lay) in [
+            ("file.export", "a.step", json!(true)),
+            ("file.export", "a.obj", json!(true)),
+            ("file.export", "a.glb", json!(true)),
+            ("file.export", "a.json", json!(true)),
+            ("file.export", "b.stl", json!("yes")),
+            ("file.export_stl", "c.stl", json!(1)),
+            ("file.export_3mf", "d.3mf", json!([true])),
+            ("file.save_mesh", "e.stl", json!({})),
+        ] {
+            let path = temp_path("refused", name);
+            let e = s.execute(id, &json!({"path": path, "lay_on_print_faces": lay})).expect_err(id).to_string();
+            assert!(e.contains("lay_on_print_faces"), "{id} {name}: {e}");
+            assert!(std::fs::metadata(&path).is_err(), "{id} {name}: a refused export writes nothing");
+        }
+        // False is accepted for any format: the file is written as the design has it.
+        let path = temp_path("false", "a.step");
+        run(&mut s, "file.export", json!({"path": path, "lay_on_print_faces": false}));
+        assert!(std::fs::metadata(&path).is_ok());
     }
 
     #[test]

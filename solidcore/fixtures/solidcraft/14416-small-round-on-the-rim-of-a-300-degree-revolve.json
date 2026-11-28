@@ -1,0 +1,601 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/14416",
+ "test": "none: a regression between SolidCraft 0.30.1 (truck) and 0.40.0-rc.3 (solidcore); the report's script",
+ "summary": "SolidCraft 0.40 refuses a small round on the outer rim arc of a partial revolve that turns about 280 to 320 degrees with 'not supported yet: the fillet is larger than the faces beside its edges allow', while a larger radius on the same edge builds; 0.30.1 builds them all (#14416). The report's script: the rectangle [2, 10] x [0, 8] on XY revolved about the y axis, and a round or chamfer on the outer top arc (radius 10, y = 8). Here the profile is revolved with the runner's revolve step about the y axis through the origin, and the edge is picked at (-10, 8, 0), 180 degrees round the axis, which lies on the arc whichever way the revolve turns and is no vertex; the inner arc's control at (-2, 8, 0). Replayed with solidcraft-cli built on GitHub's runners (fork SychPL/solidcraft branch fork-ci-14416, run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse the 0.4 round at 280, 300 and 320 degrees, the 1 mm round and the 0.4 chamfer at 300, and build the 0.4 round at 270 and 330, the 2 mm round at 300 and the inner arc's 0.4 round at 300, each within 7e-8 of the expected volume; v0.30.1 builds all nine. On solidcore every refused case is an ERROR, 'blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0', with no fixes and with all of SolidCraft's (kernel_cases/fixes.json, a fork probe gives the same verdicts), so the cases carry no fixes; the others pass within 8e-8. Expected volumes are closed form, by Pappus: the rectangle (area 64, centroid 6 from the axis) gives 64 * 6 * t; a round of radius r takes the spandrel (1 - pi/4) r^2, whose centroid lies c r = (10 - 3 pi)/(12 - 3 pi) r in from the edge on both legs, at R - c r from the axis on the outer arc (R = 10, the material inside it) and R + c r on the inner one (R = 2); a chamfer of legs d takes d^2/2 with its centroid d/3 in. The report's own figures agree: 2008.84 at 300 degrees, 1807.95 at 270 and 1967.68 for the 2 mm round. Tolerance per case: 1e-8 of the volume (the integrator's accuracy) plus 1e-5 times the round's or chamfer's area (a face anywhere within the body's 1e-5 tolerance of exact), rounded up: 0.0001 to 0.002 mm^3; below what a radius 0.1% off changes (0.0036 mm^3 for the 0.4 round at 300 degrees, 0.086 for the 2 mm one).",
+ "cases": [
+  {
+   "name": "round_0_4_at_300_degrees",
+   "note": "The report's case: a 0.4 round on the outer top arc of a 300 degree revolve. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 300.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2008.837517385,
+     "tol": 0.0004,
+     "formula": "64*6*rad(300) - rad(300)*(1 - pi/4)*0.4^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_4_at_270_degrees",
+   "note": "The report's ok.json: the same at 270 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 build it, 1807.953766; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 270.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1807.953765646,
+     "tol": 0.0004,
+     "formula": "64*6*rad(270) - rad(270)*(1 - pi/4)*0.4^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_4_at_280_degrees",
+   "note": "The report's angle series, 280 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 0.3428 mm'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 280.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1874.915016226,
+     "tol": 0.0004,
+     "formula": "64*6*rad(280) - rad(280)*(1 - pi/4)*0.4^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_4_at_320_degrees",
+   "note": "The report's angle series, 320 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 320.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2142.760018544,
+     "tol": 0.0004,
+     "formula": "64*6*rad(320) - rad(320)*(1 - pi/4)*0.4^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_4_at_330_degrees",
+   "note": "The report's angle series, 330 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 build it, 2209.721269; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 330.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2209.721269123,
+     "tol": 0.0004,
+     "formula": "64*6*rad(330) - rad(330)*(1 - pi/4)*0.4^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_1_at_300_degrees",
+   "note": "The report's radius series at 300 degrees, radius 1. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 300.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1999.633760372,
+     "tol": 0.0009,
+     "formula": "64*6*rad(300) - rad(300)*(1 - pi/4)*1^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0009 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_2_at_300_degrees",
+   "note": "The report's radius series at 300 degrees, radius 2. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 build it, 1967.681099; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 300.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1967.681098446,
+     "tol": 0.002,
+     "formula": "64*6*rad(300) - rad(300)*(1 - pi/4)*2^2*(R - c*r), R = 10, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.002 mm^3"
+    }
+   }
+  },
+  {
+   "name": "chamfer_0_4_at_300_degrees",
+   "note": "The report's chamfer: 0.4 on the same edge at 300 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the chamfer is larger than the faces beside its edges allow'); v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 300.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -10.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "distance": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2006.486358629,
+     "tol": 0.0004,
+     "formula": "64*6*rad(300) - rad(300)*0.5*0.4^2*(10 - 0.4/3) (Pappus: the rectangle less the chamfer's triangle); tol 0.0004 mm^3"
+    }
+   }
+  },
+  {
+   "name": "inner_round_0_4_at_300_degrees",
+   "note": "Control from the report: the 0.4 round on the inner top arc (radius 2) at 300 degrees, picked at (-2, 8, 0). solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 build it, 2010.243666; v0.30.1 builds it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         8.0
+        ],
+        [
+         2.0,
+         8.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 300.0
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "block",
+     "edges": [
+      [
+       -2.0,
+       8.0,
+       0.0
+      ]
+     ],
+     "radius": 0.4
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 2010.243666239,
+     "tol": 0.0001,
+     "formula": "64*6*rad(300) - rad(300)*(1 - pi/4)*0.4^2*(R + c*r), R = 2, c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the round's spandrel); tol 0.0001 mm^3"
+    }
+   }
+  }
+ ]
+}

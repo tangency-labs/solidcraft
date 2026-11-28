@@ -1,39 +1,54 @@
 //! Sheet metal dialogs: Flange (base from profiles, edge flanges from picked edges, contour from
-//! open sketch lines; the picks decide which), Hem, Unfold and Refold, Convert to Sheet Metal,
+//! open sketch lines; the picks decide which), Tab (profiles on a face of a sheet join it), Hem, Unfold and Refold, Convert to Sheet Metal,
 //! Sheet Metal Rules (the rule manager) and Create Flat Pattern (a flat view of the part with
 //! its bend lines, the bend table and DXF export).
 
 use crate::dialogs::put;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{choice_row, expr_row, hint_row};
+use crate::ui_kit::{IconSegment, choice_row, expr_row, hint_row, row, segmented_icons};
 use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use serde_json::{Map, Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::doc::hardware_catalog::{HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_engine::doc::sheet::SheetRule;
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::{CornerJoinKind, FeatureKind, FoldSide, ModelState, ProfileSel, SheetEdgeName};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::io::{DxfExportProfile, DxfLinetype, DxfRole, DxfRoleStyle};
 
 use crate::SolveApp;
-use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
+use crate::dialogs::{Dialog, HOLE_FACES, Kind, edge_sel, face_sel, form_row, profile_indices};
 use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
 use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
 
+/// The kinds of press-in hardware the dialog offers, in the table's order, and their labels.
+const HARDWARE_KINDS: [HardwareKind; 4] = [HardwareKind::Nut, HardwareKind::FlushNut, HardwareKind::Stud, HardwareKind::Standoff];
+const HARDWARE_LABELS: [&str; 4] = ["ui.hardware_kind_nut", "ui.hardware_kind_flush_nut", "ui.hardware_kind_stud", "ui.hardware_kind_standoff"];
+/// What the Hardware dialog passes on to the command's own keys, and the keys it keeps to itself.
+const HARDWARE_OWN_KEYS: [&str; 5] = ["single_point", "flip", "position_exprs", "all_points", "diameter_for"];
+
+const CORNER_KINDS: [CornerJoinKind; 3] = [CornerJoinKind::Butt, CornerJoinKind::PartialOverlap, CornerJoinKind::FullOverlap];
+
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
 /// The flange types' messages, by the type's index (Base, Edge, Contour).
 const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
+const CONTOUR_ORIENTATIONS: [&str; 3] = ["ui.center", "sheet.flange.side_1", "sheet.flange.side_2"];
+const CONTOUR_ORIENTATION_VALUES: [&str; 3] = ["center", "side1", "side2"];
+const CONTOUR_DIRECTIONS: [&str; 2] = ["ui.one_side", "ui.symmetric"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
-/// Rule fields the manager edits (parameter name, label).
-pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
+/// Rule fields the manager edits (parameter name, label). The 90° value comes last, so the others
+/// keep their places; it is drawn in place of the K Factor row when the rule unfolds by bend
+/// deduction or allowance.
+pub(crate) const RULE_FIELDS: [(&str, &str); 9] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -42,19 +57,312 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("corner_relief", "Corner Relief"),
     ("hem_gap", "Hem Gap"),
     ("gap", "Flange Gap"),
+    ("unfold_value", "Bend Deduction at 90°"),
 ];
+/// Where the manager's rule gets its K-factor (the rule's `unfold_method`) and their labels.
+pub(crate) const UNFOLD_METHODS: [&str; 3] = ["k_factor", "deduction", "allowance"];
+const UNFOLD_METHOD_LABELS: [&str; 3] = ["K Factor", "Bend Deduction", "Bend Allowance"];
+/// The 90° value's label, by the unfold method (none for the K-factor).
+const UNFOLD_VALUE_LABELS: [&str; 3] = ["", "Bend Deduction at 90°", "Bend Allowance at 90°"];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
+/// The bend relief shapes the manager offers (the rule's `bend_relief_shape`) and their labels.
+pub(crate) const BEND_RELIEF_SHAPES: [&str; 3] = ["rectangular", "obround", "tear"];
+const BEND_RELIEF_SHAPE_LABELS: [&str; 3] = ["Rectangular", "Obround", "Tear"];
 /// How the manager's rule reads bend angles in the DXF bend notes (the rule's `angle_display`)
 /// and their labels.
 pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
 const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
+/// The manager's unfold choice for a rule's `unfold_method` (the K-factor for an unknown one).
+pub(crate) fn unfold_index(method: &str) -> usize {
+    let method = solidcraft_engine::doc::sheet::UnfoldMethod::parse(method).unwrap_or_default();
+    UNFOLD_METHODS.iter().position(|m| *m == method.name()).unwrap_or(0)
+}
+/// Switching the manager's Unfold choice keeps the part as it is, whichever way it goes, so the
+/// user starts from the equivalent and types their chart's value over it, with no error before
+/// they have typed:
+/// - K Factor to Bend Deduction or Bend Allowance: the 90° field gets the value the K Factor field
+///   gives now. A value left there by an earlier choice is replaced unless it already says that
+///   K-factor for the new choice (so a typed `3.2 mm` comes back as typed).
+/// - Deduction to allowance, or back: the value is converted.
+/// - A chart choice to K Factor: the K Factor field gets the K-factor the 90° value works out to.
+///
+/// `main` holds the rule's fields in `RULE_FIELDS` order (thickness, K Factor, bend radius, …) and
+/// `extra` the 90° value. `Thickness` in the bend radius is the rule's thickness, as the rule
+/// itself reads it. A field that does not evaluate leaves everything as typed.
+pub(crate) fn switch_unfold(doc: &solidcraft_engine::doc::Document, main: &mut [String], extra: &mut [String], from: usize, to: usize) {
+    use solidcraft_engine::doc::{expr::Kind as Ek, sheet::UnfoldMethod};
+    /// Two K-factors that give the same flat pattern to well under a nanometre.
+    const SAME_K: f64 = 1e-9;
+    let method = |i: usize| UNFOLD_METHODS.get(i).and_then(|m| UnfoldMethod::parse(m));
+    let length = |text: &str| crate::length_input::eval(doc, text, Ek::Length).ok().filter(|v| v.is_finite());
+    let (Some(from), Some(to), Some(field)) = (method(from), method(to), extra.first_mut()) else { return };
+    let Some(thickness) = main.first().and_then(|t| length(t)) else { return };
+    let Some(radius) = crate::sheet_rule_library::radius_mm(main, doc, thickness).filter(|r| r.is_finite()) else { return };
+    let typed_k = main.get(1).and_then(|t| doc.eval(t, Ek::Unitless).ok()).filter(|k| k.is_finite());
+    let chart_k = |chart: UnfoldMethod, field: &str| length(field).and_then(|v| chart.k_factor(v, thickness, radius)).filter(|k| k.is_finite());
+    match (from, to) {
+        (UnfoldMethod::KFactor, chart) => {
+            let Some(k) = typed_k else { return };
+            let says_k = chart_k(chart, field).is_some_and(|have| (have - k).abs() < SAME_K);
+            if !says_k && let Some(value) = chart.value(k, thickness, radius).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
+        (chart, UnfoldMethod::KFactor) => {
+            // A value outside 0 to 1 is the rule's own error to report: the K Factor field stays.
+            let Some(k) = chart_k(chart, field).filter(|k| (0.0..=1.0).contains(k)) else { return };
+            if typed_k.is_none_or(|have| (have - k).abs() >= SAME_K)
+                && let Some(k_field) = main.get_mut(1)
+            {
+                let text = format!("{k:.12}");
+                let text = text.trim_end_matches('0').trim_end_matches('.');
+                *k_field = if text.is_empty() { "0".into() } else { text.into() };
+            }
+        }
+        (chart, other) => {
+            if let Some(value) = chart_k(chart, field).and_then(|k| other.value(k, thickness, radius)).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
+    }
+}
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
 /// Which way a further bend turns, against the bend before it.
 const BEND_WAY_LABELS: [&str; 2] = ["Same way", "Other way"];
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
+/// The bend relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
+/// the shapes of `BEND_RELIEF_SHAPES` in order.
+const FLANGE_BEND_RELIEF_LABELS: [&str; 4] = ["Rule", "Rectangular", "Obround", "Tear"];
+
+/// The DXF profile chosen in the Flat Pattern panel: the file, and what reading it gave (the
+/// reader's message when the file cannot be used). Export DXF passes the file to
+/// `sheet.export_dxf` as its `profile`, and the command reads it again.
+#[derive(Clone, Debug)]
+pub struct DxfProfileChoice {
+    pub path: String,
+    pub read: Result<DxfExportProfile, String>,
+}
+
+impl DxfProfileChoice {
+    pub(crate) fn open(path: String) -> Self {
+        let read = solidcraft_engine::io::vfs::read(&path, solidcraft_engine::io::MAX_DXF_PROFILE_BYTES)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| DxfExportProfile::read(&bytes).map_err(|e| e.to_string()));
+        Self { path, read }
+    }
+
+    /// The profile's own name, or its file's name when it has none or cannot be read.
+    fn shown(&self) -> &str {
+        match &self.read {
+            Ok(profile) if !profile.name().is_empty() => profile.name(),
+            _ => self.path.rsplit(['/', '\\']).next().unwrap_or(&self.path),
+        }
+    }
+}
+
+/// The message of each role of a DXF profile.
+fn dxf_role_label(role: DxfRole) -> &'static str {
+    match role {
+        DxfRole::Outline => "sheet.dxf_profile.role.outline",
+        DxfRole::Cut => "sheet.dxf_profile.role.cut",
+        DxfRole::CutText => "sheet.dxf_profile.role.cut_text",
+        DxfRole::Etch => "sheet.dxf_profile.role.etch",
+        DxfRole::BendUp => "sheet.dxf_profile.role.bend_up",
+        DxfRole::BendDown => "sheet.dxf_profile.role.bend_down",
+        DxfRole::BendNotes => "sheet.dxf_profile.role.bend_notes",
+        DxfRole::Pockets => "sheet.dxf_profile.role.pockets",
+        DxfRole::Perforation => "sheet.dxf_profile.role.perforation",
+        DxfRole::Roll => "sheet.dxf_profile.role.roll",
+        DxfRole::FormUp => "sheet.dxf_profile.role.form_up",
+        DxfRole::FormDown => "sheet.dxf_profile.role.form_down",
+    }
+}
+
+/// The roles `profile` writes otherwise than the standard layers do, each with how it is written
+/// (`None`: left out of the file).
+pub(crate) fn dxf_profile_changes(profile: &DxfExportProfile) -> Vec<(DxfRole, Option<&DxfRoleStyle>)> {
+    let standard = DxfExportProfile::neutral();
+    DxfRole::ALL
+        .iter()
+        .copied()
+        .filter_map(|role| {
+            let style = profile.role(role)?;
+            (standard.role(role) != Some(style)).then_some((role, style.on.then_some(style)))
+        })
+        .collect()
+}
+
+/// The Flat Pattern panel's DXF profile rows: the chosen profile, the buttons that choose a file
+/// or go back to the standard layers, and why a profile cannot be used. What a profile changes
+/// is listed by `dxf_profile_change_rows`, below the export buttons.
+/// True when the profile was dropped here: what the last export said no longer applies.
+fn dxf_profile_rows(app: &mut SolveApp, ui: &mut egui::Ui, profile: &mut Option<DxfProfileChoice>) -> bool {
+    let mut dropped = false;
+    use solidcraft_ui_text::tr;
+    let t = Tokens::get();
+    form_row(ui, tr("sheet.dxf_profile.label"), |ui| match profile.as_ref() {
+        Some(choice) => {
+            ui.add(egui::Label::new(choice.shown()).truncate()).backing_on_hover_text(choice.path.as_str());
+        }
+        None => {
+            ui.label(tr("sheet.dxf_profile.none"));
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        let choose = crate::ui_kit::button(ui, tr("sheet.dxf_profile.choose"), crate::ui_kit::Button::Normal)
+            .backing_on_hover_text(tr("sheet.dxf_profile.hint"));
+        if choose.clicked() {
+            app.pick_file(tr("sheet.dxf_profile.label"), &["json"], |app, path| {
+                if let Some(path) = path {
+                    choose_dxf_profile(app, path);
+                }
+            });
+        }
+        if profile.is_some() && crate::ui_kit::button(ui, tr("sheet.dxf_profile.clear"), crate::ui_kit::Button::Normal).clicked() {
+            *profile = None;
+            dropped = true;
+        }
+    });
+    if let Some(DxfProfileChoice { read: Err(e), .. }) = profile.as_ref() {
+        ui.vertical(|ui| {
+            let text = solidcraft_ui_text::format("sheet.dxf_profile.error", &[("error", e.as_str())]);
+            ui.add(egui::Label::new(RichText::new(text).color(t.error)).wrap());
+        });
+    }
+    dropped
+}
+
+/// What the chosen profile changes, one row for each role it writes otherwise than the standard
+/// layers do. A foldable section drawn below the export buttons: however long the list, it never
+/// pushes Export DXF… out of reach.
+fn dxf_profile_change_rows(ui: &mut egui::Ui, profile: Option<&DxfProfileChoice>) {
+    use solidcraft_ui_text::tr;
+    let Some(DxfProfileChoice { read: Ok(read), .. }) = profile else { return };
+    let t = Tokens::get();
+    let changes = dxf_profile_changes(read);
+    if changes.is_empty() {
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(RichText::new(tr("sheet.dxf_profile.same")).color(t.text_dim)).wrap());
+        });
+        return;
+    }
+    crate::ui_kit::section_count(ui, "dxf_profile_changes", tr("sheet.dxf_profile.changes"), true, Some(changes.len()), |ui| {
+        for (role, style) in changes {
+            let text = match style {
+                Some(style) => {
+                    let linetype = tr(match style.linetype {
+                        DxfLinetype::Continuous => "sheet.dxf_profile.linetype.continuous",
+                        DxfLinetype::Dashed => "sheet.dxf_profile.linetype.dashed",
+                        DxfLinetype::Hidden => "sheet.dxf_profile.linetype.hidden",
+                    });
+                    solidcraft_ui_text::format(
+                        "sheet.dxf_profile.style",
+                        &[("layer", style.layer.as_str()), ("color", &style.color.to_string()), ("linetype", linetype)],
+                    )
+                }
+                None => tr("sheet.dxf_profile.off").to_string(),
+            };
+            // The value wraps: a long layer name is never cut short.
+            crate::ui_kit::value_row(ui, tr(dxf_role_label(role)), &text);
+        }
+    });
+}
+
+/// The chosen profile's file for an export, read again first: the file may have been edited since
+/// it was chosen, and the panel shows what is exported. `None`: no profile, the standard layers.
+/// An error is the message for a profile that cannot be used: nothing is exported with the
+/// standard layers for a cutter that expects its own.
+fn dxf_profile_checked(profile: &mut Option<DxfProfileChoice>) -> Result<Option<&str>, String> {
+    if let Some(choice) = profile.as_mut() {
+        *choice = DxfProfileChoice::open(std::mem::take(&mut choice.path));
+    }
+    match profile.as_ref() {
+        Some(DxfProfileChoice { read: Err(_), .. }) => Err(solidcraft_ui_text::tr("sheet.dxf_profile.fix_first").to_string()),
+        choice => Ok(choice.map(|c| c.path.as_str())),
+    }
+}
+
+/// The file picked for the Flat Pattern panel's DXF profile: read now, so the panel shows what
+/// it changes or why it cannot be used before anything is exported.
+pub(crate) fn choose_dxf_profile(app: &mut SolveApp, path: String) {
+    if let Some(d) = app.dialog.as_mut()
+        && let Kind::Sheet(Sm::FlatPattern { profile, status, .. }) = &mut d.kind
+    {
+        *profile = Some(DxfProfileChoice::open(path));
+        // What the last export said was about the profile before this one.
+        *status = None;
+    }
+}
+
+/// Choices for one export. They are never saved in Preferences or in the design.
+#[derive(Clone, Copy, Debug)]
+pub struct DxfExportOptions {
+    units: usize,
+    bend_lines: bool,
+    markings: bool,
+    /// Set from the flat-pattern panel's Hardware notes option (#17752); off elsewhere.
+    hardware_notes: bool,
+}
+
+impl Default for DxfExportOptions {
+    fn default() -> Self {
+        Self { units: 0, bend_lines: true, markings: true, hardware_notes: false }
+    }
+}
+
+/// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
+/// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
+#[derive(Clone, Debug, Default)]
+pub struct SegmentRow {
+    pub from: String,
+    pub to: String,
+    pub angle: String,
+    pub height: String,
+    /// The stretch's own side where it has one: `Some(true)` turns its bend the other way than the
+    /// sheet's top face (as the feature's `flip` does), `Some(false)` turns it toward that face,
+    /// and `None` follows the feature's `flip`. An explicit `false` under a flipped feature stays
+    /// explicit, as the design wrote it.
+    pub flip: Option<bool>,
+    /// Whether its `from` and `to` are the dialog's own equal stretches rather than the design's:
+    /// adding another stretch redistributes these, and a restored list never does.
+    pub equal: bool,
+}
+
+/// An edge flange's corner controls, identified by source rims rather than viewport picks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlangeCorner {
+    /// Covering and covered source rims, in that order.
+    pub sources: [SheetEdgeName; 2],
+    /// The selected entry in `CORNER_KINDS`.
+    pub kind: usize,
+    /// Partial overlap's authored distance.
+    pub overlap: String,
+    /// Authored clearance, empty to follow the rule.
+    pub gap: String,
+}
+
+/// Corner choices from an evaluated flange preview. An edit uses its actual feature ID;
+/// a new flange uses appended bends whose source panel existed before the command.
+pub(crate) fn flange_corner_sources(before: &ModelState, after: &ModelState, editing: Option<u64>) -> Vec<[SheetEdgeName; 2]> {
+    let mut corners = Vec::new();
+    for sheet in &after.surface_sheets {
+        let Some(previous) = before.surface_sheets.iter().find(|previous| previous.body == sheet.body) else { continue };
+        let Some(body) = after.body(&sheet.body) else { continue };
+        let belongs = |source: &SheetEdgeName| {
+            let Ok(index) = sheet.bend_joint_for_edge_name(source, body) else { return false };
+            let Some(maker) = sheet.bend_feature(index) else { return false };
+            match editing {
+                Some(feature) => maker == feature,
+                None => !(0..previous.sheet.joints.len()).any(|joint| previous.bend_feature(joint) == Some(maker)),
+            }
+        };
+        corners.extend(sheet.corner_join_sources(body).into_iter().filter(|sources| sources.iter().any(belongs)));
+    }
+    corners
+}
 
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
@@ -72,18 +380,35 @@ crate::dialog_descriptor::dialog_descriptors! {
             gap: String = String::new() => gap.as_deref().map(str::to_string).unwrap_or_default(),
             flip: bool = false => *flip,
         } => json!({"length": length, "flip": flip});
-        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Stationary Side", PLANAR_FACES, false)],
-            FeatureKind::SheetFold { angle, radius, position, flip, .. }) {
+        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Fixed Face", PLANAR_FACES, false)],
+            FeatureKind::SheetFold { angle, radius, position, flip, stays, .. }) {
             angle: String = "90 deg".into() => angle.to_string(),
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
             position: usize = 0 => FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
             flip: bool = false => *flip,
+            // The side that stays: 0 decided as the fold is made, 1 left of the line as drawn
+            // (seen from the sheet's surface), 2 right of it.
+            stays: usize = 0 => match stays {
+                Some(FoldSide::Left) => 1,
+                Some(FoldSide::Right) => 2,
+                None => 0,
+            },
         } => json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
         Path("sheet.path_flange", "PATH FLANGE", [("Edge", EDGES, false), ("Path", CURVES, true)],
             FeatureKind::SheetPath { radius, .. }) {
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({});
+        Tab("sheet.tab", "ui.sheet_tab_title", [("Profile", PROFILES, true)],
+            FeatureKind::SheetTab { .. }) {
+        } => json!({});
         ; custom {
+            CornerJoin {
+                flipped: bool,
+                kind: usize,
+                overlap: String,
+                gap: String,
+                saved: Option<[SheetEdgeName; 2]>,
+            },
             /// Base, edge or contour flange (`ty` follows the picks: profiles, edges, sketch lines).
             Flange {
                 ty: usize,
@@ -93,8 +418,13 @@ crate::dialog_descriptor::dialog_descriptors! {
                 position: usize,
                 /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
                 height_from: usize,
+                /// Contour flange: which side of the sheet thickness the contour follows.
+                orientation: usize,
+                /// Contour flange: split its width equally across the sketch plane.
+                symmetric: bool,
                 flip: bool,
                 distance: String,
+                /// Contour flange: the width on the other side of the sketch plane.
                 reverse: bool,
                 rule: usize,
                 /// Edge flanges: the edges with an angle and/or a height of their own (the picked point,
@@ -104,15 +434,47 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// 0 is the rule's) and its size (empty: the rule's).
                 relief: usize,
                 relief_size: String,
+                /// Edge flanges: the bend relief shape of their own (index into
+                /// `FLANGE_BEND_RELIEF_LABELS`; 0 is the rule's).
+                bend_relief: usize,
                 /// Edge flanges: further bends (angle, height, turns the other way), each a flange on
                 /// the far edge of the one before it (the command's `then`).
                 then: Vec<(String, String, bool)>,
+                /// Edge flanges: the picked edges' segments (the command's per-edge `segments`),
+                /// by the point of the edge each belongs to: one stretch of that edge each, with
+                /// its own fractions, angle, height and side; an edge with none is the whole edge.
+                segments: Vec<(Vec3, Vec<SegmentRow>)>,
+                /// Edge flanges: corner choices saved by the two source rims.
+                corners: Vec<FlangeCorner>,
+                /// Last discovered pairs for these picks, retained while a value is refused.
+                corner_pairs: Vec<[SheetEdgeName; 2]>,
+                corner_picks: Vec<Sel>,
+                corner_query: Option<Box<(u64, Vec<(String, Value)>)>>,
             },
             Unfold {
                 refold: bool,
             },
+            /// Convert (#6748): no face is fixed; the sheet is every face of the body but the
+            /// skipped ones, or the faces picked and every face a bend joins to them, each a panel
+            /// however thin the body, and the sharp edges are cut open but the bends. The faces
+            /// picked to engrave are a pocket of the panel round them.
             Convert {
                 rule: usize,
+                /// The side of the faces the material lies on (index into `MATERIAL_SIDES`).
+                side: usize,
+                /// The body last looked at, and its own thickness where it is a solid that is
+                /// sheet metal already (a shell's, a plate's), for the hint to Recognize it.
+                thin: Option<(String, Option<f64>)>,
+            },
+            /// Recognize (#6748): a body that is sheet metal already becomes the rule's sheet;
+            /// with a new rule's name, a rule made from the body first.
+            Recognize {
+                rule: usize,
+                /// The name of a new rule made from the body (empty: the rule chosen).
+                new_rule: String,
+                /// The body last measured with the Surface Face and Skip Faces picks it was read
+                /// with, and what was read of it or why it is no sheet.
+                measured: Option<((String, Option<Vec3>, Vec<Vec3>), Result<String, String>)>,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -121,16 +483,40 @@ crate::dialog_descriptor::dialog_descriptors! {
                 values: Vec<String>,
                 /// The corner relief shape (index into `RELIEF_SHAPES`).
                 relief: usize,
+                /// The bend relief shape (index into `BEND_RELIEF_SHAPES`).
+                bend_relief: usize,
                 /// How bend angles read (index into `ANGLE_DISPLAYS`).
                 angles: usize,
+                /// Where the K-factor comes from (index into `UNFOLD_METHODS`).
+                unfold: usize,
                 active: bool,
                 loaded: Option<usize>,
+                /// The material the rule is for (a label; #18304).
+                material: String,
+            },
+            /// Press-in hardware (#17752): the kind (index into `HARDWARE_KINDS`), its thread (a size
+            /// the table has for the kind) and, for a stud or a standoff, its length. The picks are
+            /// where it goes: a place on a face or sketch points.
+            Hardware {
+                kind: usize,
+                thread: String,
+                length: String,
             },
             /// The flat pattern of the picked (or last) sheet body.
             FlatPattern {
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>)>,
                 status: Option<String>,
+                export: Option<DxfExportOptions>,
+                /// Export DXF also writes a note beside each press-in hardware hole (#17752). Off:
+                /// the file has the sheet and its mounting holes only.
+                hardware_notes: bool,
+                /// The DXF profile Export DXF writes with (`None`: the standard layers).
+                profile: Option<DxfProfileChoice>,
+            },
+            ExportDxf {
+                body: String,
+                options: DxfExportOptions,
             },
         }
     }
@@ -140,17 +526,21 @@ impl Sm {
     pub fn title(&self) -> &'static str {
         match self {
             Sm::Flange { .. } => "FLANGE",
+            Sm::CornerJoin { .. } => "cmd.sheet.corner_join",
             Sm::Unfold { refold: false } => "UNFOLD",
             Sm::Unfold { refold: true } => "REFOLD",
             Sm::Convert { .. } => "CONVERT TO SHEET METAL",
+            Sm::Recognize { .. } => "RECOGNIZE SHEET METAL",
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
+            Sm::ExportDxf { .. } => "cmd.sheet_export_dxf",
+            Sm::Hardware { .. } => "ui.hardware_title",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
 
     pub fn previews(&self) -> bool {
-        !matches!(self, Sm::FlatPattern { .. })
+        !matches!(self, Sm::FlatPattern { .. } | Sm::ExportDxf { .. })
     }
 
     /// The value on the canvas (the flange's follows its picks).
@@ -176,6 +566,8 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         radius: String::new(),
         position: 0,
         height_from: 0,
+        orientation: 1,
+        symmetric: false,
         flip: false,
         distance: crate::dialogs::length_default(&app.session, "20"),
         reverse: false,
@@ -183,7 +575,13 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         own: Vec::new(),
         relief: 0,
         relief_size: String::new(),
+        bend_relief: 0,
         then: Vec::new(),
+        segments: Vec::new(),
+        corners: Vec::new(),
+        corner_pairs: Vec::new(),
+        corner_picks: Vec::new(),
+        corner_query: None,
     }
 }
 
@@ -191,18 +589,39 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (sm, inputs) = match id {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
+        "sheet.corner_join" => (Sm::CornerJoin { kind: 0, overlap: String::new(), gap: String::new(), saved: None, flipped: false }, corner_inputs()),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "sheet.convert" => {
-            (Sm::Convert { rule: 0 }, vec![SelInput::new("Fixed Face", PLANAR_FACES, false), SelInput::new("Bend Edges", EDGES, true)])
-        }
+        "sheet.convert" => (Sm::Convert { rule: 0, side: 0, thin: None }, convert_inputs()),
+        "sheet.recognize" => (Sm::Recognize { rule: 0, new_rule: String::new(), measured: None }, recognize_inputs()),
         "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
-            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, active: true, loaded: None }, vec![])
+            (
+                Sm::Rules {
+                    pick,
+                    name: String::new(),
+                    values: Vec::new(),
+                    relief: 0,
+                    bend_relief: 0,
+                    angles: 0,
+                    unfold: 0,
+                    active: true,
+                    loaded: None,
+                    material: String::new(),
+                },
+                vec![],
+            )
         }
-        "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.hardware" => (
+            Sm::Hardware { kind: 0, thread: "M3".into(), length: crate::dialogs::length_default(&app.session, "10") },
+            vec![SelInput::new("ui.hardware_place", HOLE_FACES, true)],
+        ),
+        "sheet.flat_pattern" => (
+            Sm::FlatPattern { data: None, key: None, status: None, export: None, hardware_notes: false, profile: None },
+            vec![SelInput::new("Body (last if none)", BODIES, false)],
+        ),
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -231,6 +650,16 @@ fn rule_combo(app: &SolveApp, ui: &mut egui::Ui, id: &str, rule: &mut usize) {
     choice_row(ui, "Rule", id, rule, &refs);
 }
 
+/// The Flange window's rule box with a note under it, wrapped in the control column, that says where the rule's values are
+/// changed: the window itself has no thickness or K-factor (#17421).
+fn flange_rule_combo(app: &SolveApp, ui: &mut egui::Ui, rule: &mut usize) {
+    rule_combo(app, ui, "sm_rule", rule);
+    let hint = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    crate::ui_kit::below_row_control(ui, "Rule", ui.available_width(), |ui| {
+        crate::ui_kit::text(ui, hint, crate::ui_kit::Text::Note("sheet_flange_rule_values"))
+    });
+}
+
 /// The flange type the picks make: edges an edge flange, sketch lines a contour, else base.
 fn flange_type(inputs: &[SelInput]) -> usize {
     let items = inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]);
@@ -243,12 +672,323 @@ fn flange_type(inputs: &[SelInput]) -> usize {
     }
 }
 
+/// Converting, the sides of the faces the material can lie on, and their labels.
+const MATERIAL_SIDES: [(&str, &str); 2] = [("inside", "Inside"), ("outside", "Outside")];
+
+/// Recognize's inputs (#6748): the body that is sheet metal already, a face whose side is the
+/// sheet's surface (none: its largest face's), the faces left out, and the bend edges.
+pub(crate) fn recognize_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Surface Face", FACES, false),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Bend Edges", EDGES, true),
+    ]
+}
+
+/// The body a dialog's picks are on: the body picked, or the one its faces or edges are on.
+fn picked_body(inputs: &[SelInput]) -> Option<String> {
+    inputs.iter().flat_map(|i| &i.items).find_map(|x| match x {
+        Sel::Body { name } | Sel::Edge { body: name, .. } | Sel::Face { body: name, .. } => Some(name.clone()),
+        _ => None,
+    })
+}
+
+/// Body `name`'s own thickness where it is a solid that is sheet metal already (a shell's, a
+/// plate's), as Recognize reads it; none for a surface body, or a solid of no one thickness.
+fn own_thickness(app: &SolveApp, name: &str) -> Option<f64> {
+    let state = app.session.model.state();
+    let mb = state.body(name).filter(|b| !b.is_surface())?;
+    solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).ok().map(|m| m.thickness)
+}
+
+/// What Recognize reads of body `name` (#6748), as its dialog says it: its thickness and its
+/// modelled bends' radii, or why it is no sheet. Read as the command reads it, from the side of
+/// the Surface Face picked at `face` less the Skip Faces picked at `skip`; the picks are where the
+/// body is shown, so the body is read there too (as placed, a rigid move of the model's).
+fn measure_text(app: &SolveApp, name: &str, face: Option<Vec3>, skip: &[Vec3]) -> Result<String, String> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let mb = state.body(name).ok_or_else(|| format!("no body `{name}`"))?;
+    let m = solidcraft_engine::doc::measure_sheet_body(mb, face, skip, &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
+    let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
+    let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
+    Ok(solidcraft_ui_text::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+}
+
+/// Convert's inputs (#6748): the body (a solid or a surface body), the bend edges, the faces left
+/// out, the faces that make the sheet (none: every face but those left out), and the walls and
+/// floors of recesses kept as engravings (none: a recess's faces are panels too).
+pub(crate) fn convert_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Bend Edges", EDGES, true),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Faces", FACES, true),
+        SelInput::new("Engrave Faces", FACES, true),
+    ]
+}
+
+fn corner_inputs() -> Vec<SelInput> {
+    vec![SelInput::new("ui.surface_corner_covering", PLANAR_FACES, false), SelInput::new("ui.surface_corner_covered", PLANAR_FACES, false)]
+}
+
+pub(crate) fn swap_corner(saved: &mut Option<[SheetEdgeName; 2]>, inputs: &mut [SelInput]) {
+    if let Some([covering, covered]) = saved {
+        std::mem::swap(covering, covered);
+    } else if let [covering, covered] = inputs {
+        std::mem::swap(&mut covering.items, &mut covered.items);
+    }
+}
+
+fn corner_sheet_thickness(app: &SolveApp, inputs: &[SelInput], join: bool, saved_body: Option<&str>) -> Option<f64> {
+    let selected = inputs.iter().flat_map(|input| &input.items).find_map(|item| match item {
+        Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body),
+        _ => None,
+    });
+    let world = (join && selected.is_some()).then(|| crate::open_meshing::session_world(&app.session));
+    let body_name = if let Some(world) = &world {
+        let body = world.bodies.iter().find(|body| Some(&body.name) == selected)?;
+        Some(body.source_name.as_deref().unwrap_or(&body.name))
+    } else if join {
+        Some(saved_body?)
+    } else {
+        selected.map(|body| body.as_str())
+    };
+    let state = app.session.model.state();
+    let mut sheets = state.surface_sheets.iter().filter(|sheet| body_name.is_none_or(|body| sheet.body == body));
+    let sheet = sheets.next()?;
+    if sheets.next().is_some() {
+        return None;
+    }
+    Some(sheet.sheet.thickness).filter(|thickness| thickness.is_finite() && *thickness > 0.0)
+}
+
+pub(crate) fn corner_kind(kind: usize, overlap: &str) -> CornerJoinKind {
+    match CORNER_KINDS.get(kind) {
+        Some(CornerJoinKind::PartialOverlap) if overlap.trim().is_empty() => CornerJoinKind::FullOverlap,
+        Some(kind) => *kind,
+        None => CornerJoinKind::Butt,
+    }
+}
+
+pub(crate) fn corner_overlap_error(doc: &solidcraft_engine::doc::Document, kind: usize, overlap: &str, thickness: Option<f64>) -> Option<String> {
+    if corner_kind(kind, overlap) != CornerJoinKind::PartialOverlap {
+        return None;
+    }
+    match crate::length_input::eval(doc, overlap, ValueKind::Length) {
+        Ok(amount) if amount.is_finite() && amount > 0.0 && thickness.is_none_or(|limit| amount <= limit) => None,
+        Ok(_) => Some(match thickness {
+            Some(limit) => solidcraft_ui_text::tr("ui.surface_corner_overlap_limit").replace("{thickness}", &crate::length_input::shown(doc, limit)),
+            None => solidcraft_ui_text::tr("ui.surface_corner_overlap_positive").to_owned(),
+        }),
+        Err(error) => Some(error.to_string()),
+    }
+}
+
+fn corner_icon(overlap: bool, flipped: bool) -> &'static str {
+    match (overlap, flipped) {
+        (false, _) => "sheet_corner_butt",
+        (true, false) => "sheet_corner_overlap",
+        (true, true) => "sheet_corner_overlap_flipped",
+    }
+}
+
+fn corner_rows(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    kind: &mut usize,
+    overlap: &mut String,
+    gap: &mut String,
+    thickness: Option<f64>,
+    swap: (bool, bool),
+) -> (bool, bool) {
+    let (can_swap, flipped) = swap;
+    let mut selected = usize::from(*kind != 0);
+    let swapped = row(ui, "ui.surface_corner_type", |ui| {
+        let butt = solidcraft_ui_text::tr("ui.surface_corner_butt");
+        let overlap = solidcraft_ui_text::tr("ui.surface_corner_overlap");
+        let layout = if solidcraft_ui_text::bidi::has_rtl(app.tr("ui.surface_corner_type")) {
+            egui::Layout::right_to_left(egui::Align::Center)
+        } else {
+            egui::Layout::left_to_right(egui::Align::Center)
+        };
+        ui.with_layout(layout, |ui| {
+            let side = crate::ui_kit::row_height().min(ui.available_width().max(0.0) / 3.0);
+            let (rect, _) = ui.allocate_exact_size(vec2(side, crate::ui_kit::row_height()), egui::Sense::hover());
+            let swapped = if can_swap && selected != 0 {
+                solidcraft_ui_registry::publish_target("dialog:corner_swap", rect);
+                crate::ui_kit::bare_icon_button_at(ui, rect, "swap", app.tr("ui.surface_corner_swap")).clicked()
+            } else {
+                false
+            };
+            let options = [
+                IconSegment { key: butt, icon: corner_icon(false, false), tip: butt.to_owned() },
+                IconSegment { key: overlap, icon: corner_icon(true, flipped ^ swapped), tip: overlap.to_owned() },
+            ];
+            ui.push_id("sm_corner_type", |ui| segmented_icons(ui, &mut selected, &options, &[]));
+            swapped
+        })
+        .inner
+    });
+    *kind = selected;
+    let mut enter = hint_row(ui, "ui.surface_corner_gap", gap, solidcraft_ui_text::tr_label("from the rule"));
+    if selected != 0 {
+        let error = corner_overlap_error(&app.session.doc, *kind, overlap, thickness);
+        enter |= crate::ui_kit::checked_expr_row(ui, "ui.surface_corner_overlap", overlap, app.tr("ui.surface_corner_overlap_hint"), error.is_some());
+        if let Some(error) = error {
+            crate::ui_kit::status_line(ui, &error, crate::ui_kit::StatusTone::Warning);
+        }
+    }
+    (enter, swapped)
+}
+
+fn same_corner(first: &[SheetEdgeName; 2], second: &[SheetEdgeName; 2]) -> bool {
+    first == second || first.first() == second.get(1) && first.get(1) == second.first()
+}
+
+pub(crate) fn discover_flange_corners(app: &SolveApp, dialog: &mut Dialog) {
+    let Kind::Sheet(Sm::Flange { corners, .. }) = &mut dialog.kind else { return };
+    let saved = std::mem::take(corners);
+    let commands = (flange_type(&dialog.inputs) == 1).then(|| crate::dialogs::preview_commands(app, dialog));
+    let Kind::Sheet(Sm::Flange { corners, corner_pairs, corner_picks, corner_query, .. }) = &mut dialog.kind else { return };
+    *corners = saved;
+    let picks = dialog.inputs.first().map(|input| input.items.as_slice()).unwrap_or_default();
+    let changed_picks = !corner_picks.is_empty() && picks != corner_picks;
+    if picks != corner_picks {
+        *corner_picks = picks.to_vec();
+        corner_pairs.clear();
+        *corner_query = None;
+    }
+    let Some(Ok(commands)) = commands else {
+        if changed_picks {
+            corners.clear();
+        }
+        return;
+    };
+    let query = (app.session.revision, commands);
+    if corner_query.as_deref() == Some(&query) {
+        return;
+    }
+    if let Ok(preview) = app.session.preview(&query.1) {
+        *corner_pairs = flange_corner_sources(&preview.before, &preview.after, dialog.editing.map(|(id, _)| id));
+        corners.retain(|corner| corner_pairs.iter().any(|pair| same_corner(pair, &corner.sources)));
+    } else if changed_picks {
+        corners.clear();
+    }
+    *corner_query = Some(Box::new(query));
+}
+
+fn flange_corner_rows(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    corners: &mut Vec<FlangeCorner>,
+    discovered: &[[SheetEdgeName; 2]],
+    thickness: Option<f64>,
+) -> bool {
+    let mut pairs = discovered.to_vec();
+    for corner in corners.iter() {
+        if !pairs.iter().any(|pair| same_corner(pair, &corner.sources)) {
+            pairs.push(corner.sources.clone());
+        }
+    }
+    if pairs.is_empty() {
+        return false;
+    }
+    let mut enter = false;
+    let default_open = pairs.len() <= 4;
+    crate::ui_kit::section(ui, "flange_corners", "ui.surface_corners", true, |ui| {
+        for (index, sources) in pairs.into_iter().enumerate() {
+            let saved = corners.iter().position(|corner| same_corner(&corner.sources, &sources));
+            let mut corner = saved.and_then(|index| corners.get(index)).cloned().unwrap_or_else(|| FlangeCorner {
+                sources: sources.clone(),
+                kind: 0,
+                overlap: String::new(),
+                gap: String::new(),
+            });
+            let flipped = corner.sources != sources;
+            let mut hovered = false;
+            ui.push_id(("sm_flange_corner", index), |ui| {
+                ui.add_enabled_ui(saved.is_some() || corners.len() < 2000, |ui| {
+                    let title = format!("{} {}", app.tr("ui.surface_corner"), index + 1);
+                    if let Some((accepted, swapped)) = crate::ui_kit::card_section_with_hover(
+                        ui,
+                        "card",
+                        &title,
+                        default_open,
+                        Some(corner_icon(corner.kind != 0, flipped)),
+                        |pointer| hovered = pointer,
+                        |ui| corner_rows(app, ui, &mut corner.kind, &mut corner.overlap, &mut corner.gap, thickness, (true, flipped)),
+                    ) {
+                        enter |= accepted;
+                        if swapped {
+                            corner.sources.swap(0, 1);
+                        }
+                    }
+                });
+            });
+            if hovered {
+                app.preview.hovered_corner = app.preview.flange_faces.iter().position(|preview| same_corner(&preview.sources, &corner.sources));
+            }
+            if let Some(saved) = saved.and_then(|index| corners.get_mut(index)) {
+                *saved = corner;
+            } else if (corner.kind != 0 || !corner.gap.trim().is_empty()) && corners.len() < 2000 {
+                corners.push(corner);
+            }
+        }
+    });
+    enter
+}
+
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [SelInput]) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>, extra: &Map<String, Value>) -> bool {
     let t = Tokens::get();
     let mut enter = false;
+    let join = matches!(k, Sm::CornerJoin { .. });
+    let saved_body = matches!(k, Sm::CornerJoin { saved: Some(_), .. }).then(|| extra.get("body").and_then(Value::as_str)).flatten();
+    let thickness = corner_sheet_thickness(app, inputs, join, saved_body);
+    app.preview.hovered_corner = None;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
+        Sm::CornerJoin { kind, overlap, gap, saved, flipped } => {
+            if let Some(names) = saved.as_ref() {
+                for (label, source) in ["ui.surface_corner_covering", "ui.surface_corner_covered"].into_iter().zip(names) {
+                    form_row(ui, label, |ui| {
+                        let name = source.to_string();
+                        ui.add(egui::Label::new(&name).truncate()).backing_on_hover_text(name);
+                    });
+                }
+            }
+            let can_swap =
+                saved.is_some() || matches!(inputs.as_slice(), [covering, covered] if !covering.items.is_empty() && !covered.items.is_empty());
+            let (accepted, swapped) = corner_rows(app, ui, kind, overlap, gap, thickness, (can_swap, *flipped));
+            enter |= accepted;
+            if swapped {
+                swap_corner(saved, inputs);
+                *flipped = !*flipped;
+            }
+        }
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            bend_relief,
+            then,
+            segments,
+            corners,
+            corner_pairs,
+            ..
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
@@ -286,8 +1026,62 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     if let Some(n) = drop {
                         then.remove(n);
                     }
+                    // The picked edges, each split into its own stretches: `from`…`to` as fractions
+                    // of what the sheet still has of that edge, with each stretch's own angle,
+                    // height and side (the command's per-edge `segments`).
+                    form_row(ui, "Segments", |_ui| {});
+                    for (n, p) in edge_point_list(inputs).iter().enumerate() {
+                        let slot = segments_slot(segments, *p);
+                        let Some((_, list)) = segments.get_mut(slot) else { continue };
+                        // Every picked edge carries the same row labels, and a row's scrub (label
+                        // drag) id is its scope id plus the label: each edge's block needs a scope
+                        // of its own, or dragging one edge's `Segment 1 height` moves every edge's.
+                        ui.scope_builder(egui::UiBuilder::new().id_salt(("sm_edge_segments", n)), |ui| {
+                            form_row(ui, &format!("Edge {}", n + 1), |ui| {
+                                let add = crate::ui_kit::button(ui, "Split Edge", crate::ui_kit::Button::Normal).backing_on_hover_text(
+                                    solidcraft_ui_text::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
+                                );
+                                if add.clicked() && list.len() < 64 {
+                                    add_segment(list);
+                                }
+                            });
+                            let mut drop = None;
+                            for (m, row) in list.iter_mut().enumerate() {
+                                let part = m + 1;
+                                form_row(ui, &format!("Segment {part}"), |ui| {
+                                    if crate::ui_kit::bin_button(ui, solidcraft_ui_text::tr_label("Remove this segment")).clicked() {
+                                        drop = Some(m);
+                                    }
+                                    ui.label(format!("{} … {}", row.from.trim(), row.to.trim()));
+                                });
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} from"), &mut row.from, "0");
+                                enter |= e;
+                                row.equal &= !changed;
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} to"), &mut row.to, "1");
+                                enter |= e;
+                                row.equal &= !changed;
+                                enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
+                                enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
+                                // The stretch's own side: the feature's, or the other one. A side the
+                                // design spelled out (even the feature's) stays as it was until this
+                                // choice is moved off the one it shows.
+                                let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
+                                choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                if way == 1 {
+                                    row.flip = Some(!*flip);
+                                } else if row.flip == Some(!*flip) {
+                                    row.flip = None;
+                                }
+                            }
+                            if let Some(m) = drop {
+                                remove_segment(list, m);
+                            }
+                        });
+                    }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                        // The relief beside the bends' ends: the rule's unless set here.
+                        choice_row(ui, "Bend Relief Shape", "sm_flange_bend_relief", bend_relief, &FLANGE_BEND_RELIEF_LABELS);
                         // The relief at the corners these flanges make: the rule's unless set here.
                         choice_row(ui, "Corner Relief Shape", "sm_flange_relief", relief, &FLANGE_RELIEF_LABELS);
                         enter |= hint_row(ui, "Corner Relief", relief_size, solidcraft_ui_text::tr_label("from the rule"));
@@ -325,16 +1119,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             }
                         }
                     });
+                    enter |= flange_corner_rows(app, ui, corners, corner_pairs, thickness);
                 }
                 2 => {
                     enter |= expr_row(ui, "Distance", distance);
 
-                    rule_combo(app, ui, "sm_rule", rule);
+                    flange_rule_combo(app, ui, rule);
                 }
-                _ => rule_combo(app, ui, "sm_rule", rule),
+                _ => flange_rule_combo(app, ui, rule),
             }
             if *ty == 2 {
-                crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
+                crate::ui_kit::section(ui, "sheet_contour_options", "Options", true, |ui| {
+                    choice_row(ui, "ui.orientation", "sm_contour_orientation", orientation, &CONTOUR_ORIENTATIONS);
+                    let mut direction = usize::from(*symmetric);
+                    choice_row(ui, "ui.direction", "sm_contour_direction", &mut direction, &CONTOUR_DIRECTIONS);
+                    *symmetric = direction == 1;
+                    enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                    crate::ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Other side", reverse)], 2);
+                });
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
@@ -353,11 +1155,27 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             enter |= hint_row(ui, "ui.sheet_gap", gap, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
-        Sm::Fold { angle, radius, position, flip } => {
+        Sm::Fold { angle, radius, position, flip, stays } => {
             choice_row(ui, "Bend Line Position", "sm_fold_pos", position, &FOLD_POSITION_LABELS);
             enter |= expr_row(ui, "Angle", angle);
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
+            // Which side of the line as drawn stays, seen from the sheet's surface. A new fold
+            // decides it as it is made (the side of the face picked, else the side more of the
+            // sheet joins) and keeps it; an edit shows the fold's own side, and swaps it. A face
+            // picked decides it again.
+            let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
+            form_row(ui, "Stationary Side", |ui| {
+                ui.label(solidcraft_ui_text::tr_label(match *stays {
+                    _ if picked => "Fixed Face",
+                    1 => "Left",
+                    2 => "Right",
+                    _ => "Automatic",
+                }));
+                if !picked && *stays > 0 && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
+                    *stays = 3 - *stays;
+                }
+            });
         }
         Sm::Path { radius } => {
             path_chain(app, inputs);
@@ -374,9 +1192,78 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
+        Sm::Hardware { kind, thread, length } => {
+            choice_row(ui, "Type", "sm_hardware_kind", kind, &HARDWARE_LABELS);
+            let which = HARDWARE_KINDS.get(*kind).copied().unwrap_or(HardwareKind::Nut);
+            // The sizes the table has for the kind: a thread it lacks falls back to the first.
+            let sizes = hardware_sizes_of(which);
+            let names: Vec<&str> = sizes.iter().map(|size| size.thread).collect();
+            let mut at = names.iter().position(|name| *name == thread.as_str()).unwrap_or(0);
+            choice_row(ui, "ui.hardware_thread", "sm_hardware_thread", &mut at, &names);
+            if let Some(name) = names.get(at).filter(|name| **name != thread.as_str()) {
+                *thread = (*name).to_string();
+            }
+            if which.has_length() {
+                enter |= expr_row(ui, "Length", length);
+            }
+            if let Some(size) = sizes.get(at) {
+                let (hole, sheet, edge) = (size.hole.to_string(), size.min_sheet.to_string(), size.edge.to_string());
+                let limits =
+                    solidcraft_ui_text::format("ui.hardware_limits", &[("hole", hole.as_str()), ("sheet", sheet.as_str()), ("edge", edge.as_str())]);
+                crate::ui_kit::status_line(ui, &limits, crate::ui_kit::StatusTone::Dim);
+            }
+            // What the sheet cannot hold is said as it is previewed: a sheet too thin is refused (the
+            // preview's error, shown with the dialog's), a centre too near an edge or a bend warns.
+            if let Some(warning) = app.preview.warning.as_deref() {
+                crate::ui_kit::status_line(ui, warning, crate::ui_kit::StatusTone::Warning);
+            }
+        }
+        Sm::Tab {} => {
+            // No thickness to set: the tab takes the sheet's own.
+            form_row(ui, "Thickness", |ui| {
+                ui.label(solidcraft_ui_text::tr_label("from the rule"));
+            });
+        }
         Sm::Unfold { .. } => {}
-        Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
-        Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
+        Sm::Convert { rule, side, thin } => {
+            rule_combo(app, ui, "sm_conv_rule", rule);
+            let labels = MATERIAL_SIDES.map(|(_, label)| label);
+            choice_row(ui, "Material", "sm_conv_side", side, &labels);
+            // A solid that is sheet metal already: Recognize keeps its own sides. Never shown
+            // for a surface body, which is surfaces only.
+            if let Some(name) = picked_body(inputs)
+                && thin.as_ref().is_none_or(|(b, _)| *b != name)
+            {
+                let own = own_thickness(app, &name);
+                *thin = Some((name, own));
+            }
+            if let Some((_, Some(t))) = thin.as_ref() {
+                let hint = solidcraft_ui_text::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
+            }
+        }
+        Sm::Recognize { rule, new_rule, measured } => {
+            // Read again when the body, the Surface Face or the Skip Faces change.
+            let key = picked_body(inputs).map(|name| (name, items(inputs, 1).face_points().first().copied(), items(inputs, 2).face_points()));
+            if let Some(key) = key
+                && measured.as_ref().is_none_or(|(k, _)| *k != key)
+            {
+                let read = measure_text(app, &key.0, key.1, &key.2);
+                *measured = Some((key, read));
+            }
+            match measured.as_ref() {
+                Some((_, Ok(text))) => {
+                    crate::ui_kit::status_line(ui, text, crate::ui_kit::StatusTone::Dim);
+                }
+                Some((_, Err(why))) => {
+                    crate::ui_kit::status_line(ui, why, crate::ui_kit::StatusTone::Warning);
+                }
+                None => {}
+            }
+            rule_combo(app, ui, "sm_rec_rule", rule);
+            enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
+        }
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, unfold, active, loaded, material } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -393,18 +1280,47 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         crate::length_input::stored(&app.session.doc, &base.corner_relief),
                         crate::length_input::stored(&app.session.doc, &base.hem_gap),
                         crate::length_input::stored(&app.session.doc, &base.gap),
+                        if base.unfold_value.trim().is_empty() {
+                            String::new()
+                        } else {
+                            crate::length_input::stored(&app.session.doc, &base.unfold_value)
+                        },
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
+                    *bend_relief = BEND_RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.bend_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
+                    *unfold = unfold_index(&base.unfold_method);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
+                    material.clone_from(&base.material);
                 },
                 fields: {
-                    for ((key, label), v) in RULE_FIELDS.iter().zip(values.iter_mut()) {
+                    crate::ui_kit::text_row(ui, "Material", material, "Material");
+                    // The 90° value (the last field) takes the K Factor row's place when the rule
+                    // unfolds by bend deduction or allowance.
+                    let split = values.len().min(RULE_FIELDS.len() - 1);
+                    let (main, extra) = values.split_at_mut(split);
+                    let mut switched_from = None;
+                    for ((key, label), v) in RULE_FIELDS.iter().zip(main.iter_mut()) {
+                        if *key == "relief_width" {
+                            // The bend relief's shape goes with its size, the two rows below.
+                            choice_row(ui, "Bend Relief Shape", "sm_bend_relief_shape", bend_relief, &BEND_RELIEF_SHAPE_LABELS);
+                        }
                         if *key == "corner_relief" {
                             // The shape goes with its size, the row below.
                             choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
                         }
+                        if *key == "k_factor" {
+                            switched_from = Some(*unfold);
+                            choice_row(ui, "Unfold", "sm_unfold_method", unfold, &UNFOLD_METHOD_LABELS);
+                            if let (Some(value_label), Some(value)) = (UNFOLD_VALUE_LABELS.get(*unfold).filter(|l| !l.is_empty()), extra.first_mut()) {
+                                enter |= expr_row(ui, value_label, value);
+                                continue;
+                            }
+                        }
                         enter |= expr_row(ui, label, v);
+                    }
+                    if let Some(before) = switched_from.filter(|before| before != unfold) {
+                        switch_unfold(&app.session.doc, main, extra, before, *unfold);
                     }
                     choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);
                 }
@@ -423,10 +1339,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::FlatPattern { data, key, status } => {
+        Sm::ExportDxf { options, .. } => dxf_options_rows(ui, options),
+        Sm::FlatPattern { data, key, status, export, hardware_notes, profile } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
+                *export = None;
                 let mut p = json!({});
                 if let Some(b) = &body {
                     p["body"] = json!(b);
@@ -466,14 +1384,65 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             );
                         });
                     }
-                    ui.vertical(|ui| {
-                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
+                    // Rolls (#6748), each as a bend has its row: how far it turns, its inside
+                    // radius (a cone's runs along it), and how wide it lies in the flat.
+                    let rolls = v["roll_table"].as_array().cloned().unwrap_or_default();
+                    if !rolls.is_empty() {
+                        form_row(ui, "Rolls", |ui| {
+                            ui.label(format!("{}", rolls.len()));
+                        });
+                    }
+                    for r in rolls.iter().take(50) {
+                        form_row(ui, &format!("  Roll {}", r["roll"].as_u64().unwrap_or(0)), |ui| {
+                            let radius = r["radius"].as_f64().map(|x| format!("  R{}", crate::prefs::show_mm(app, x, 1))).unwrap_or_default();
+                            ui.label(format!(
+                                "{:.1}°{radius}  {} x {}",
+                                r["angle_deg"].as_f64().unwrap_or(0.0),
+                                crate::prefs::show_mm(app, r["width"].as_f64().unwrap_or(0.0), 1),
+                                crate::prefs::show_mm(app, r["length"].as_f64().unwrap_or(0.0), 1)
+                            ));
+                        });
+                    }
+                    // Only a sheet with press-in hardware has notes to ask for.
+                    if v["hardware"].as_array().is_some_and(|h| !h.is_empty()) {
+                        crate::ui_kit::options(ui, "sheet_flat_options", &mut [("ui.hardware_notes", &mut *hardware_notes)]);
+                    }
+                    if dxf_profile_rows(app, ui, profile) {
+                        *status = None;
+                    }
+                    if let Some(options) = export {
+                        dxf_options_rows(ui, options);
+                        let (save, cancel) = ui
+                            .horizontal_wrapped(|ui| {
+                                let save = export_button(ui, "dialog:sheet_dxf:save");
+                                let cancel = crate::ui_kit::button(ui, app.tr("ui.cancel"), crate::ui_kit::Button::Normal);
+                                crate::scenario::publish_target("dialog:sheet_dxf:cancel", cancel.rect);
+                                (save, cancel.clicked())
+                            })
+                            .inner;
+                        if save {
+                            *status = Some(match dxf_profile_checked(profile) {
+                                Err(refusal) => refusal,
+                                Ok(file) => export_flat_with_profile(
+                                    app,
+                                    v["body"].as_str().unwrap_or(""),
+                                    Some(DxfExportOptions { hardware_notes: *hardware_notes, ..*options }),
+                                    file,
+                                ),
+                            });
                         }
-                    });
+                        if save || cancel {
+                            *export = None;
+                        }
+                    } else if export_button(ui, "dialog:sheet_dxf:options") {
+                        match dxf_profile_checked(profile) {
+                            Err(refusal) => *status = Some(refusal),
+                            Ok(_) => *export = Some(DxfExportOptions::default()),
+                        }
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "csv"));
+                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), None));
                         }
                     });
                     if let Some(s) = status {
@@ -481,6 +1450,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             ui.add(egui::Label::new(RichText::new(s.as_str()).color(t.text_dim)).wrap());
                         });
                     }
+                    dxf_profile_change_rows(ui, profile.as_ref());
                 }
                 Some(Err(e)) => {
                     ui.vertical(|ui| {
@@ -494,16 +1464,47 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     enter
 }
 
-/// The ribbon exports use the same save picker as the flat-pattern panel. Keep the
+fn export_button(ui: &mut egui::Ui, handle: &str) -> bool {
+    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal);
+    crate::scenario::publish_target(handle, response.rect);
+    response.clicked()
+}
+
+fn dxf_options_rows(ui: &mut egui::Ui, options: &mut DxfExportOptions) {
+    use solidcraft_ui_text::tr;
+    let units = [tr("unit.mm.short"), tr("unit.inch.short")];
+    let response = choice_row(ui, tr("ui.units"), "sheet_dxf_units", &mut options.units, &units);
+    crate::scenario::publish_target("dialog:sheet_dxf:units", response.rect);
+    for (label, handle, value) in [
+        ("sheet.dxf.bend_lines", "dialog:sheet_dxf:bend_lines", &mut options.bend_lines),
+        ("sheet.dxf.markings", "dialog:sheet_dxf:markings", &mut options.markings),
+    ] {
+        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr(label), value);
+        crate::scenario::publish_target(handle, response.rect);
+    }
+}
+
+/// The ribbon exports use the same options and save picker as the flat-pattern panel. Keep the
 /// commands' default target (the last sheet body) and leave programmatic calls headless.
 pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
-    let extension = match id {
-        "sheet.export_dxf" => "dxf",
-        "sheet.export_bend_table" => "csv",
+    let dxf = match id {
+        "sheet.export_dxf" => true,
+        "sheet.export_bend_table" => false,
         _ => return false,
     };
-    if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
-        export_flat(app, &body, extension);
+    let state = app.session.model.state();
+    let last = state.surface_sheets.last().map(|sheet| sheet.body.clone());
+    drop(state);
+    if let Some(body) = last {
+        if dxf {
+            if app.dialog.is_some() {
+                crate::dialogs::cancel(app);
+            }
+            app.view_windows.start_tool_panel(app.docs.current_tab());
+            app.dialog = Some(Dialog::new(Kind::Sheet(Sm::ExportDxf { body, options: DxfExportOptions::default() }), vec![]));
+        } else {
+            export_flat(app, &body, None);
+        }
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker;
         // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
@@ -514,16 +1515,41 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
-fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
+/// `dxf`: the DXF's choices (with `hardware_notes`, a note beside each press-in hardware hole);
+/// none: the bend table.
+pub(crate) fn export_flat(app: &mut SolveApp, body: &str, dxf: Option<DxfExportOptions>) -> String {
+    export_flat_with_profile(app, body, dxf, None)
+}
+
+/// As `export_flat`. `profile` is the DXF profile file the Flat Pattern panel chose
+/// (`sheet.export_dxf`'s `profile`); the bend table has none.
+fn export_flat_with_profile(app: &mut SolveApp, body: &str, dxf: Option<DxfExportOptions>, profile: Option<&str>) -> String {
+    let profile = profile.filter(|_| dxf.is_some()).map(str::to_string);
+    let (extension, command) = if dxf.is_some() { ("dxf", "sheet.export_dxf") } else { ("csv", "sheet.export_bend_table") };
     let name = format!("{}-{body}.{extension}", app.session.doc.name);
     let body = body.to_string();
-    let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
-            match app.run(command, json!({"body": body, "path": path})) {
+            let mut params = json!({"body": body, "path": path});
+            if let Some(options) = dxf {
+                params["units"] = json!(if options.units == 1 { "inches" } else { "mm" });
+                params["bend_lines"] = json!(options.bend_lines);
+                params["markings"] = json!(options.markings);
+                if options.hardware_notes {
+                    params["hardware_notes"] = json!(true);
+                }
+            }
+            if let Some(profile) = &profile {
+                params["profile"] = json!(profile);
+            }
+            if let Some(profile) = &profile {
+                params["profile"] = json!(profile);
+            }
+            match app.run(command, params) {
                 Ok(_) => {
-                    app.set_status(format!("Exported {path}"), false);
-                    format!("Saved {path}")
+                    let shown = crate::display_user_path(&path);
+                    app.set_status(format!("Exported {shown}"), false);
+                    format!("Saved {shown}")
                 }
                 Err(e) => e,
             }
@@ -618,35 +1644,301 @@ fn own_slot(own: &mut Vec<(Vec3, String, String)>, p: Vec3) -> usize {
     })
 }
 
-/// The edges for `sheet.flange`: a plain point, or `{point, angle?, height?}` for an edge with
-/// an angle and/or a height of its own.
-fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Value> {
-    edge_point_list(inputs)
-        .into_iter()
-        .map(|p| {
-            let (a, h) = own.iter().find(|o| o.0.dist(p) < 1e-9).map(|o| (o.1.trim(), o.2.trim())).unwrap_or(("", ""));
-            if a.is_empty() && h.is_empty() {
-                return pt(p);
-            }
-            let mut e = json!({"point": pt(p)});
-            for (k, v) in [("angle", a), ("height", h)] {
-                if !v.is_empty() {
-                    e[k] = json!(v);
+/// The edges for `sheet.flange`, each with the stretches the dialog holds for that edge (the
+/// command's per-edge `segments`); an edge with none is the whole edge, as before.
+fn flange_edges_segmented(inputs: &[SelInput], own: &[(Vec3, String, String)], segments: &[(Vec3, Vec<SegmentRow>)]) -> Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for (n, p) in edge_point_list(inputs).into_iter().enumerate() {
+        let (a, h) = own.iter().find(|o| o.0.dist(p) < 1e-9).map(|o| (o.1.trim(), o.2.trim())).unwrap_or(("", ""));
+        let list = segments.iter().find(|s| s.0.dist(p) < 1e-9).map(|s| s.1.as_slice()).unwrap_or(&[]);
+        // An edge with nothing of its own is the plain point it always was.
+        if a.is_empty() && h.is_empty() && list.is_empty() {
+            out.push(pt(p));
+            continue;
+        }
+        let mut edge = json!({"point": pt(p)});
+        if !a.is_empty() {
+            edge["angle"] = json!(a);
+        }
+        if !h.is_empty() {
+            edge["height"] = json!(h);
+        }
+        if !list.is_empty() {
+            let mut segs = Vec::with_capacity(list.len());
+            for (m, row) in list.iter().enumerate() {
+                let fraction = |k: &str, text: &str| -> Result<f64, String> {
+                    let x =
+                        text.trim().parse::<f64>().map_err(|_| format!("edge {} segment {}: {k} must be a fraction of the edge", n + 1, m + 1))?;
+                    if !(0.0..=1.0).contains(&x) {
+                        return Err(format!("edge {} segment {}: {k} must be a fraction from 0 to 1", n + 1, m + 1));
+                    }
+                    Ok(x)
+                };
+                let mut seg = json!({"from": fraction("from", &row.from)?, "to": fraction("to", &row.to)?});
+                if !row.angle.trim().is_empty() {
+                    seg["angle"] = json!(row.angle.trim());
                 }
+                if !row.height.trim().is_empty() {
+                    seg["height"] = json!(row.height.trim());
+                }
+                if let Some(f) = row.flip {
+                    seg["flip"] = json!(f);
+                }
+                segs.push(seg);
             }
-            e
-        })
-        .collect()
+            edge["segments"] = json!(segs);
+        }
+        out.push(edge);
+    }
+    Ok(out)
+}
+
+/// Where the segments of the edge picked at `p` are kept (an empty entry on first use).
+fn segments_slot(segments: &mut Vec<(Vec3, Vec<SegmentRow>)>, p: Vec3) -> usize {
+    segments.iter().position(|s| s.0.dist(p) < 1e-9).unwrap_or_else(|| {
+        segments.push((p, Vec::new()));
+        segments.len() - 1
+    })
+}
+
+/// Add one stretch to an edge's list: while the list is the dialog's own equal stretches they stay
+/// equal, and a list the design gave keeps its fractions with the new stretch splitting the last
+/// one where it ends.
+fn add_segment(list: &mut Vec<SegmentRow>) {
+    list.push(SegmentRow { equal: true, ..Default::default() });
+    if list.iter().all(|r| r.equal) {
+        let n = list.len();
+        for (i, r) in list.iter_mut().enumerate() {
+            r.from = format!("{}", i as f64 / n as f64);
+            r.to = format!("{}", (i + 1) as f64 / n as f64);
+        }
+        return;
+    }
+    let i = list.len() - 1;
+    let (Some(from), Some(to)) = (list[i - 1].from.trim().parse::<f64>().ok(), list[i - 1].to.trim().parse::<f64>().ok()) else {
+        return;
+    };
+    let mid = from + (to - from) / 2.0;
+    list[i - 1].to = format!("{mid}");
+    list[i].from = format!("{mid}");
+    list[i].to = format!("{to}");
+    list[i].equal = false;
+}
+
+/// Take one stretch out of an edge's list and keep the list a partition of the edge: the gap the
+/// removed stretch leaves is bridged from the stretches beside it, never from the removed row,
+/// whose fields may be mid-edit and empty. The stretch before the removed one reaches to where the
+/// stretch after it starts (or to the edge's end when none follows), the list's first stretch
+/// starts at the edge's start and its last ends at the edge's end, and removing the only stretch
+/// leaves the whole edge. A boundary the user did not touch never moves: a neighbour whose value
+/// doesn't parse is the only reason to fall back to equal stretches. Deleting never leaves a list
+/// the command refuses unless another row's own value was already mid-edit.
+fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
+    if m >= list.len() {
+        return;
+    }
+    if list.len() == 1 {
+        list.clear();
+        return;
+    }
+    let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite() && (0.0..=1.0).contains(x));
+    list.remove(m);
+    for row in list.iter_mut() {
+        row.equal = false;
+    }
+    // Where the gap the removed stretch leaves now ends: the stretch after it starts there, and
+    // with none after it, the edge does.
+    let target = match list.get(m) {
+        Some(next) => fraction(&next.from),
+        None => Some(1.0),
+    };
+    // The stretch before the removed one takes the gap. The removed row's `from`/`to` are not read.
+    let bridged = match (target, m.checked_sub(1)) {
+        // The removed stretch was the first: pinning the new first stretch's start covers it.
+        (_, None) => true,
+        (Some(to), Some(i)) => match list.get_mut(i) {
+            Some(prev) => {
+                let ok = fraction(&prev.from).is_some_and(|from| to > from);
+                if ok {
+                    prev.to = format!("{to}");
+                }
+                ok
+            }
+            None => false,
+        },
+        (None, Some(_)) => false,
+    };
+    if !bridged {
+        let n = list.len();
+        for (i, row) in list.iter_mut().enumerate() {
+            row.from = format!("{}", i as f64 / n as f64);
+            row.to = format!("{}", (i + 1) as f64 / n as f64);
+        }
+    }
+    // The stretches cover the whole edge, ends included.
+    if let Some(first) = list.first_mut() {
+        first.from = "0".into();
+    }
+    if let Some(last) = list.last_mut() {
+        last.to = "1".into();
+    }
+}
+
+fn corner_sources(app: &SolveApp, inputs: &[SelInput]) -> Result<(String, SheetEdgeName, SheetEdgeName), String> {
+    let Some(Sel::Face { body: covering_body, point: covering, .. }) = items(inputs, 0).first() else {
+        return Err(app.tr("ui.surface_corner_pick_covering").to_owned());
+    };
+    let Some(Sel::Face { body: covered_body, point: covered, .. }) = items(inputs, 1).first() else {
+        return Err(app.tr("ui.surface_corner_pick_covered").to_owned());
+    };
+    if covering_body != covered_body {
+        return Err(app.tr("ui.surface_corner_same_body").to_owned());
+    }
+    let world = crate::open_meshing::session_world(&app.session);
+    let body = world.bodies.iter().find(|body| &body.name == covering_body).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let source = body.source_name.as_deref().unwrap_or(&body.name);
+    let state = app.session.model.state();
+    let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == source).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let built = state.body(source).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let [covering_joint, covered_joint] = sheet.corner_joints_at(&body.body, [*covering, *covered], 1e-6).map_err(|error| error.to_string())?;
+    let covering = sheet.bend_source_edge(covering_joint, built).map_err(|error| error.to_string())?;
+    let covered = sheet.bend_source_edge(covered_joint, built).map_err(|error| error.to_string())?;
+    Ok((source.to_string(), covering, covered))
 }
 
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
+/// Whether a refusal of `sheet.hardware` says what to change in the dialog (a sheet too thin for the
+/// hardware, a size or a hole diameter the table lacks, a missing length, a place that is no sheet),
+/// rather than a failure of the design or the kernel.
+pub(crate) fn hardware_refusal(error: &str) -> bool {
+    [
+        "is made for a sheet of at least",
+        "the table has no ",
+        "takes a hole of ",
+        "needs its `length`",
+        "needs its length",
+        "has no `length`",
+        "`length` must be more than 0",
+        "is not in a sheet metal part",
+    ]
+    .iter()
+    .any(|known| error.contains(known))
+}
+
+/// What the Hardware dialog runs: one `sheet.hardware` per sketch whose points are picked, and one
+/// per place picked on a face (a place on a sketch point follows the point, as a Single hole's
+/// does). The picks decide which; nothing is run until one is made.
+fn hardware_commands(
+    app: &SolveApp,
+    kind: usize,
+    thread: &str,
+    length: &str,
+    inputs: &[SelInput],
+    extra: &Map<String, Value>,
+) -> Result<Vec<(String, Value)>, String> {
+    let which = HARDWARE_KINDS.get(kind).copied().unwrap_or(HardwareKind::Nut);
+    let mut base = json!({"kind": which.name(), "thread": thread});
+    if which.has_length() {
+        if length.trim().is_empty() {
+            return Err(format!("a {} needs its length", which.name()));
+        }
+        base["length"] = json!(length);
+    }
+    let size_now = format!("{}:{thread}", which.name());
+    for (key, value) in extra {
+        let own = HARDWARE_OWN_KEYS.contains(&key.as_str());
+        let stale = key == "diameter" && extra.get("diameter_for").and_then(Value::as_str) != Some(size_now.as_str());
+        if !own && !stale {
+            base[key] = value.clone();
+        }
+    }
+    let flip = extra.get("flip").and_then(Value::as_bool).unwrap_or(false);
+    let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
+    let mut places: Vec<Value> = Vec::new();
+    for x in items(inputs, 0) {
+        match x {
+            Sel::SketchPoint { id } => {
+                let Some((sketch, point)) = id.split_once(':').and_then(|(sk, point)| Some((sk.parse::<u64>().ok()?, point))) else { continue };
+                match by_sketch.iter_mut().find(|(sk, _)| *sk == sketch) {
+                    Some((_, ids)) => ids.push(point.to_string()),
+                    None => by_sketch.push((sketch, vec![point.to_string()])),
+                }
+            }
+            Sel::Face { point, .. } => places.push(match crate::dialogs::single_point_at(app, extra, *point) {
+                Some((sketch, id)) => json!({"sketch": sketch, "points": [id], "single": true}),
+                None => json!({"position": pt(*point)}),
+            }),
+            _ => {}
+        }
+    }
+    let sketches = by_sketch.into_iter().map(|(sketch, ids)| {
+        let mut place = json!({"sketch": sketch, "points": ids});
+        if flip {
+            place["flip"] = json!(true);
+        }
+        place
+    });
+    let places: Vec<Value> = sketches.chain(places).collect();
+    if places.is_empty() {
+        return Err("select where the hardware goes: a place on a face, or sketch points".into());
+    }
+    Ok(places
+        .into_iter()
+        .map(|place| {
+            let mut p = base.clone();
+            if let (Some(p), Some(place)) = (p.as_object_mut(), place.as_object()) {
+                p.extend(place.clone());
+            }
+            ("sheet.hardware".to_string(), p)
+        })
+        .collect())
+}
+
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, .. } => {
+        Sm::CornerJoin { kind, overlap, gap, saved, .. } => {
+            let (body, covering, covered) = if let Some([covering, covered]) = saved {
+                (extra.get("body").and_then(Value::as_str).map(str::to_string), covering.clone(), covered.clone())
+            } else {
+                let (body, covering, covered) = corner_sources(app, inputs)?;
+                (Some(body), covering, covered)
+            };
+            let kind = corner_kind(*kind, overlap);
+            let mut p = json!({"covering": covering, "covered": covered, "kind": kind});
+            if let Some(body) = body {
+                p["body"] = json!(body);
+            }
+            if kind == CornerJoinKind::PartialOverlap {
+                put(&mut p, &[("overlap", overlap)]);
+            }
+            put(&mut p, &[("gap", gap)]);
+            ("sheet.corner_join", p)
+        }
+        Sm::Flange {
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            bend_relief,
+            then,
+            segments,
+            corners,
+            ..
+        } => {
             let mut p = match flange_type(inputs) {
                 1 => {
-                    let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
+                    let mut p = json!({"type": "edge", "edges": flange_edges_segmented(inputs, own, segments)?, "height": height, "angle": angle,
                         "position": POSITIONS.get(*position).copied().unwrap_or("inside")});
                     put(&mut p, &[("radius", radius)]);
                     if let Some(from) = HEIGHT_FROM.get(*height_from).filter(|_| *height_from > 0) {
@@ -656,7 +1948,37 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    if let Some(shape) = bend_relief.checked_sub(1).and_then(|i| BEND_RELIEF_SHAPES.get(i)) {
+                        p["bend_relief_shape"] = json!(shape);
+                    }
+                    if !corners.is_empty() {
+                        p["corners"] = json!(
+                            corners
+                                .iter()
+                                .map(|corner| {
+                                    let kind = corner_kind(corner.kind, &corner.overlap);
+                                    let [covering, covered] = &corner.sources;
+                                    let mut params = json!({"covering": covering, "covered": covered, "kind": kind});
+                                    if kind == CornerJoinKind::PartialOverlap {
+                                        put(&mut params, &[("overlap", &corner.overlap)]);
+                                    }
+                                    put(&mut params, &[("gap", &corner.gap)]);
+                                    params
+                                })
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    // A split edge takes no `then` in v1: a chain needs one far edge to stand on,
+                    // and the refusal names the edge whose segments took it away.
                     if !then.is_empty() {
+                        let split =
+                            edge_point_list(inputs).iter().position(|p| segments.iter().any(|(q, list)| q.dist(*p) < 1e-9 && !list.is_empty()));
+                        if let Some(n) = split {
+                            return Err(format!(
+                                "edge {} is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature",
+                                n + 1
+                            ));
+                        }
                         let mut bends = Vec::with_capacity(then.len());
                         for (n, (a, h, other)) in then.iter().enumerate() {
                             if h.trim().is_empty() {
@@ -681,7 +2003,17 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         .named_sketch()
                         .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
                         .ok_or("pick lines of one sketch")?;
-                    json!({"type": "contour", "sketch": sketch, "curves": ids, "distance": distance, "reverse": reverse})
+                    let mut p = json!({
+                        "type": "contour",
+                        "sketch": sketch,
+                        "curves": ids,
+                        "distance": distance,
+                        "orientation": CONTOUR_ORIENTATION_VALUES.get(*orientation).copied().unwrap_or("side1"),
+                        "symmetric": symmetric,
+                        "reverse": reverse,
+                    });
+                    put(&mut p, &[("radius", radius)]);
+                    p
                 }
                 _ => {
                     let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
@@ -705,7 +2037,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("gap", gap)]);
             ("sheet.hem", p)
         }
-        Sm::Fold { radius, .. } => {
+        Sm::Fold { radius, stays, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
@@ -723,6 +2055,13 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("radius", radius)]);
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
+            } else {
+                // No face picked: the fold's own side, where it has one.
+                match *stays {
+                    1 => p["stays"] = json!("left"),
+                    2 => p["stays"] = json!("right"),
+                    _ => {}
+                }
             }
             ("sheet.fold", p)
         }
@@ -737,6 +2076,18 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let mut p = json!({"edge": edge, "sketch": sketch, "curves": curves});
             put(&mut p, &[("radius", radius)]);
             ("sheet.path_flange", p)
+        }
+        Sm::Tab {} => {
+            let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
+            match ps.first().map(|x| x.0) {
+                Some(sketch) => {
+                    let idx: Vec<usize> = ps.iter().filter(|x| x.0 == sketch).map(|x| x.1).collect();
+                    ("sheet.tab", json!({"sketch": sketch, "profiles": idx}))
+                }
+                // An edited tab of all its sketch's profiles keeps them (in `extra`).
+                None if extra.contains_key("sketch") => ("sheet.tab", json!({})),
+                None => return Err("select the tab's profile: a closed sketch on a flat face of the sheet".into()),
+            }
         }
         Sm::Perforate { margin, .. } => {
             let mut p = json!({});
@@ -755,30 +2106,94 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
-        Sm::Convert { rule } => {
-            let Some(Sel::Face { body, point, .. }) = items(inputs, 0).first() else {
-                return Err("select the fixed face first (a plate's large face)".into());
+        Sm::Recognize { rule, new_rule, .. } => {
+            let Some(body) = picked_body(inputs) else {
+                return Err("select the body to recognize first".into());
             };
-            let mut p = json!({"body": body, "face": pt(*point)});
-            // The sharp edges of a solid or shelled body that become bends (a plate has none).
+            let mut p = json!({"body": body});
+            if let Some(face) = items(inputs, 1).face_points().first() {
+                p["face"] = pt(*face);
+            }
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            let bends: Vec<Value> = items(inputs, 3).edge_points().into_iter().map(pt).collect();
+            if !bends.is_empty() {
+                p["bends"] = json!(bends);
+            }
+            match new_rule.trim() {
+                "" => {
+                    if let Some(r) = rule_value(app, *rule) {
+                        p["rule"] = json!(r);
+                    }
+                }
+                name => p["new_rule"] = json!(name),
+            }
+            ("sheet.recognize", p)
+        }
+        Sm::Convert { rule, side, .. } => {
+            // No face is fixed: the body picked, or the one its bend edges or faces are on.
+            let picks = items(inputs, 0).iter().chain(items(inputs, 1)).chain(items(inputs, 2)).chain(items(inputs, 3)).chain(items(inputs, 4));
+            let Some(body) = picks
+                .filter_map(|x| match x {
+                    Sel::Body { name: body } | Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.clone()),
+                    _ => None,
+                })
+                .next()
+            else {
+                return Err("select the body to convert first".into());
+            };
+            let mut p = json!({"body": body});
+            // Every sharp edge is cut open but these.
             let bends: Vec<Value> = items(inputs, 1).edge_points().into_iter().map(pt).collect();
             if !bends.is_empty() {
                 p["bends"] = json!(bends);
+            }
+            // The faces picked make the sheet, with every face a bend joins to them; with none,
+            // every face but the skipped ones does (the command refuses both).
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            let faces: Vec<Value> = items(inputs, 3).face_points().into_iter().map(pt).collect();
+            if let Some((face, more)) = faces.split_first() {
+                p["face"] = face.clone();
+                if !more.is_empty() {
+                    p["faces"] = json!(more);
+                }
+            }
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            // A recess is an engraving only where its faces are picked for it.
+            let engrave: Vec<Value> = items(inputs, 4).face_points().into_iter().map(pt).collect();
+            if !engrave.is_empty() {
+                p["engrave"] = json!(engrave);
+            }
+            if let Some((key, _)) = MATERIAL_SIDES.get(*side).filter(|_| *side > 0) {
+                p["direction"] = json!(key);
             }
             if let Some(r) = rule_value(app, *rule) {
                 p["rule"] = json!(r);
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, angles, active, .. } => {
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, unfold, active, material, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
+            // Sent when there is one, or to clear the one the rule has or a new rule would take from
+            // the active rule (#18304).
+            let inherited = rules.get(*pick).map_or_else(|| app.session.doc.sheet_rule(None).material, |r| r.material.clone());
+            if !material.trim().is_empty() || !inherited.is_empty() {
+                p["material"] = json!(material.trim());
+            }
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
+            p["bend_relief_shape"] = json!(BEND_RELIEF_SHAPES.get(*bend_relief).copied().unwrap_or("rectangular"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
+            p["unfold_method"] = json!(UNFOLD_METHODS.get(*unfold).copied().unwrap_or("k_factor"));
             ("sheet.manage_rules", p)
         }
-        Sm::FlatPattern { .. } => return Ok(Vec::new()),
+        Sm::FlatPattern { .. } | Sm::ExportDxf { .. } => return Ok(Vec::new()),
+        Sm::Hardware { kind, thread, length } => return hardware_commands(app, *kind, thread, length, inputs, extra),
     };
     k.fill_simple_params(&mut p);
     if let Value::Object(m) = &mut p {
@@ -796,6 +2211,19 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let rule_index = |r: &Option<String>| r.as_ref().and_then(|n| rule_list(app).iter().position(|x| &x.name == n)).map_or(0, |i| i + 1);
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
+        FeatureKind::SheetCornerJoin { body, corner } => {
+            if let Some(body) = body {
+                extra.insert("body".into(), json!(body));
+            }
+            let form = Sm::CornerJoin {
+                flipped: false,
+                kind: CORNER_KINDS.iter().position(|kind| *kind == corner.kind).unwrap_or(0),
+                overlap: corner.overlap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                gap: corner.gap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                saved: Some([corner.covering.clone(), corner.covered.clone()]),
+            };
+            return Some((Kind::Sheet(form), Vec::new(), extra));
+        }
         FeatureKind::SheetBase { sketch, profiles, rule, flip } => {
             let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             let mut f = new_flange(app, 0);
@@ -805,31 +2233,69 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse, .. } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse, .. } => {
             let mut f = new_flange(app, 2);
-            if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, .. } = &mut f {
+            if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, radius: rad, orientation: o, symmetric: sym, .. } = &mut f {
                 *fl = *flip;
+                *rv = *reverse;
                 *r = rule_index(rule);
                 *d = distance.to_string();
-                *rv = *reverse;
+                *rad = radius.as_ref().map(ToString::to_string).unwrap_or_default();
+                *o =
+                    orientation.as_deref().and_then(|value| CONTOUR_ORIENTATION_VALUES.iter().position(|candidate| *candidate == value)).unwrap_or(1);
+                *sym = *symmetric;
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            height_from,
+            bend_relief_shape,
+            corners,
+            ..
+        } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
+            // The edges' segments, by the point of the edge each belongs to: the fractions the
+            // design has (a split edge keeps them; the equal stretches are the dialog's own), each
+            // stretch's own angle, height and side, and an explicit side kept explicit.
+            let mut segments: Vec<(Vec3, Vec<SegmentRow>)> = Vec::new();
             // The edges, and the angle and height some have of their own (kept by the point the
             // edge's selection carries).
             let (mut picked, mut own) = (Vec::new(), Vec::new());
             for e in edges {
                 let Some(sel) = edge_sel(s, e.point.0) else { continue };
-                if let (Sel::Edge { point, .. }, true) = (&sel, e.angle.is_some() || e.height.is_some()) {
+                let Sel::Edge { point, .. } = &sel else { continue };
+                if e.angle.is_some() || e.height.is_some() {
                     own.push((
                         *point,
                         e.angle.as_deref().map(str::to_string).unwrap_or_default(),
                         e.height.as_deref().map(str::to_string).unwrap_or_default(),
                     ));
+                }
+                if !e.segments.is_empty() {
+                    let rows = e
+                        .segments
+                        .iter()
+                        .map(|x| SegmentRow {
+                            from: format!("{}", x.from),
+                            to: format!("{}", x.to),
+                            angle: x.angle.as_deref().map(str::to_string).unwrap_or_default(),
+                            height: x.height.as_deref().map(str::to_string).unwrap_or_default(),
+                            flip: x.flip,
+                            equal: false,
+                        })
+                        .collect();
+                    segments.push((*point, rows));
                 }
                 picked.push(sel);
             }
@@ -843,6 +2309,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
+                orientation: 1,
+                symmetric: false,
                 flip: *flip,
                 distance: crate::dialogs::length_default(&app.session, "20"),
                 reverse: false,
@@ -853,7 +2321,24 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .and_then(|name| RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
                     .map_or(0, |i| i + 1),
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
+                bend_relief: bend_relief_shape
+                    .as_deref()
+                    .and_then(|name| BEND_RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
+                    .map_or(0, |i| i + 1),
                 then: Vec::new(),
+                segments,
+                corners: corners
+                    .iter()
+                    .map(|corner| FlangeCorner {
+                        sources: [corner.covering.clone(), corner.covered.clone()],
+                        kind: CORNER_KINDS.iter().position(|kind| *kind == corner.kind).unwrap_or(0),
+                        overlap: corner.overlap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                        gap: corner.gap.as_ref().map(ToString::to_string).unwrap_or_default(),
+                    })
+                    .collect(),
+                corner_pairs: Vec::new(),
+                corner_picks: Vec::new(),
+                corner_query: None,
             };
             (f, picked)
         }
@@ -863,7 +2348,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Sm::simple_restore(kind)?, edges.iter().filter_map(|p| edge_sel(s, p.0)).collect())
         }
-        FeatureKind::SheetFold { sketch, curve, a, b, fixed, body, .. } => {
+        FeatureKind::SheetFold { sketch, curve, a, b, fixed, stays, body, .. } => {
             if let Some(bd) = body {
                 extra.insert("body".into(), json!(bd));
             }
@@ -883,7 +2368,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
                 }
             }
-            if let Some(i) = ins.get_mut(1) {
+            // The face picked as the fold was made decided the side that stays, which the fold
+            // keeps (the Stationary Side row): an edit picks it no more, so the side is never
+            // decided again from where that face lies now.
+            if let Some(i) = ins.get_mut(1)
+                && stays.is_none()
+            {
                 i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
             }
             return Some((Kind::Sheet(k), ins, extra));
@@ -902,19 +2392,123 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
+        FeatureKind::Hole { hardware: Some(h), position, direction, diameter, points, .. } => {
+            let which = HARDWARE_KINDS.iter().position(|k| *k == h.kind).unwrap_or(0);
+            let length = h.length.as_ref().map_or_else(|| crate::dialogs::length_default(s, "10"), |e| e.to_string());
+            let k = Sm::Hardware { kind: which, thread: h.thread.clone(), length };
+            // A hole that is not the table's size keeps its own.
+            // It is that size's alone (`diameter_for`): the window has no diameter field, so a kind or
+            // thread chosen afterwards takes the table's again.
+            if hardware_size(h.kind, &h.thread).is_none_or(|size| diameter.as_str() != format!("{} mm", size.hole)) {
+                extra.insert("diameter".into(), json!(diameter.to_string()));
+                extra.insert("diameter_for".into(), json!(format!("{}:{}", h.kind.name(), h.thread)));
+            }
+            let (_, mut ins) = start(app, "sheet.hardware")?;
+            match points {
+                Some(sp) if sp.single => {
+                    // A Single hole at a sketch point: picked on its face where the point is now.
+                    let id = sp.ids.first().cloned().unwrap_or_default();
+                    let at = st
+                        .sketch(sp.sketch.0)
+                        .and_then(|ss| ss.sketch.points.iter().find(|p| p.id == id).map(|p| ss.plane.to_world(p.pos)))
+                        .unwrap_or(position.0);
+                    if let Some(i) = ins.first_mut() {
+                        i.multi = false;
+                        i.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
+                    }
+                    extra.insert("direction".into(), crate::dialogs::pt_expr(direction));
+                    extra.insert("single_point".into(), json!({"point": pt(at), "sketch": sp.sketch.0, "id": id}));
+                }
+                Some(sp) => {
+                    // Points gone from the sketch are left out, so OK drops them.
+                    let kept = |id: &&String| st.sketch(sp.sketch.0).is_none_or(|ss| ss.sketch.points.iter().any(|p| &p.id == *id));
+                    if let Some(i) = ins.first_mut() {
+                        i.items = sp.ids.iter().filter(kept).map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
+                    }
+                    if sp.flip {
+                        extra.insert("flip".into(), json!(true));
+                    }
+                }
+                None => {
+                    if let Some(i) = ins.first_mut() {
+                        i.multi = false;
+                        i.items = vec![face_sel(s, position.0).unwrap_or(Sel::Face { body: String::new(), index: 0, point: position.0 })];
+                    }
+                    extra.insert("direction".into(), crate::dialogs::pt_expr(direction));
+                }
+            }
+            return Some((Kind::Sheet(k), ins, extra));
+        }
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            if let Some(b) = body {
+                extra.insert("body".into(), json!(b));
+            }
+            let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            let (_, mut ins) = start(app, "sheet.tab")?;
+            if let Some(i) = ins.first_mut() {
+                i.items = ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+            }
+            // Profiles stay a profile selection (`All` keeps them all).
+            if matches!(profiles, ProfileSel::All) && ins.first().is_some_and(|i| i.items.is_empty()) {
+                extra.insert("sketch".into(), json!(sketch.0));
+                extra.insert("profiles".into(), json!("all"));
+            }
+            return Some((Kind::Sheet(Sm::simple_restore(kind)?), ins, extra));
+        }
         FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetUnfold { body, refold, .. } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
-        FeatureKind::SheetConvert { face, rule, bends, .. } => {
-            let (_, mut ins) = start(app, "sheet.convert")?;
+        FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {
+            let mut ins = convert_inputs();
             if let Some(i) = ins.first_mut() {
-                i.items = face_sel(s, face.0).into_iter().collect();
+                i.items = vec![Sel::Body { name: body.to_string() }];
             }
             if let Some(i) = ins.get_mut(1) {
                 i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule) }), ins, extra));
+            if let Some(i) = ins.get_mut(3) {
+                i.items = std::iter::once(face).chain(faces).filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(4) {
+                i.items = engrave.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
+        }
+        FeatureKind::SheetRecognize { body, face, skip, bends, rule } => {
+            let mut ins = recognize_inputs();
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = face.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(3) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            let k = Sm::Recognize { rule: rule_index(rule), new_rule: String::new(), measured: None };
+            return Some((Kind::Sheet(k), ins, extra));
+        }
+        FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, engrave, direction } => {
+            let mut ins = convert_inputs();
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(4) {
+                i.items = engrave.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
         }
         _ => return None,
     };
@@ -1015,8 +2609,8 @@ fn bend_colors() -> (Color32, Color32) {
     (t.bend_up, t.bend_down)
 }
 
-/// The flat pattern view: outline, cut-outs, perforations and bend lines (up and down in
-/// their colours), fitted over the viewport. True when the dialog is a flat pattern.
+/// The flat pattern view: outline, cut-outs, perforations, bend lines (up and down in their
+/// colours) and rolls' lines, fitted over the viewport. True when the dialog is a flat pattern.
 pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dialog) -> bool {
     let Kind::Sheet(Sm::FlatPattern { data, .. }) = &d.kind else { return false };
     let t = Tokens::get();
@@ -1078,6 +2672,13 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             painter.add(egui::Shape::closed_line(pts, Stroke::new(1.4, t.text)));
         }
     }
+    // A cut of no width (a tear bend relief, or where a split edge's stretches part) is cut
+    // along beside the outline: drawn as the outline is.
+    for slit in v["slits"].as_array().into_iter().flatten() {
+        if let (Some(a), Some(b)) = (read(&slit[0]), read(&slit[1])) {
+            painter.line_segment([to(a), to(b)], Stroke::new(1.8, t.text));
+        }
+    }
     if let Some(body) = v["body"].as_str() {
         app.flat_view.cache_perforations(&app.session, body);
         let clip = rect.intersect(painter.clip_rect());
@@ -1129,6 +2730,14 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         let col = if b["direction"] == "up" { up_col } else { down_col };
         painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, col), 8.0, 5.0));
     }
+    // A roll's lines (#6748): where it starts and ends along its rulings, dotted, and halfway
+    // between, dashed.
+    let rolls: Vec<&serde_json::Value> = v["roll_lines"].as_array().into_iter().flatten().collect();
+    for l in &rolls {
+        let (Some(a), Some(e)) = (read(&l["start"]), read(&l["end"])) else { continue };
+        let (dash, gap) = if l["line"] == "middle" { (8.0, 5.0) } else { (2.0, 3.0) };
+        painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, t.text), dash, gap));
+    }
     // Legend.
     let mut y = rect.top() + 14.0;
     painter.text(
@@ -1145,6 +2754,22 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             pos2(rect.left() + 44.0, y),
             Align2::LEFT_TOP,
             label,
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+            t.text_dim,
+        );
+    }
+    if !rolls.is_empty() {
+        y += 20.0;
+        painter.extend(egui::Shape::dashed_line(
+            &[pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)],
+            Stroke::new(1.6, t.text),
+            2.0,
+            3.0,
+        ));
+        painter.text(
+            pos2(rect.left() + 44.0, y),
+            Align2::LEFT_TOP,
+            "Roll start and end (middle dashed)",
             FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
         );
@@ -1172,7 +2797,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
 /// y up, millimetres), so the shared navigation moves it like any other camera. The Design
 /// camera is left alone while this has the viewport.
 pub struct FlatView {
-    pub cam: solidcraft_engine::render::Camera,
+    pub cam: solidcraft_viewport::Camera,
     /// The camera frames the pattern; cleared by Fit and Home, and whenever the dialog is closed.
     pub fitted: bool,
     /// Flat centres stay out of the command JSON and are reused while navigating.
@@ -1182,10 +2807,10 @@ pub struct FlatView {
 
 impl Default for FlatView {
     fn default() -> Self {
-        let mut cam = solidcraft_engine::render::Camera::default();
-        cam.set_view(solidcraft_engine::render::StandardView::Top);
+        let mut cam = solidcraft_viewport::Camera::default();
+        cam.set_view(solidcraft_viewport::StandardView::Top);
         cam.fov = 0.0;
-        cam.up = solidcraft_engine::render::UpAxis::Z;
+        cam.up = solidcraft_viewport::UpAxis::Z;
         FlatView { cam, fitted: false, perforation_key: None, perforations: Vec::new() }
     }
 }
@@ -1199,19 +2824,12 @@ impl FlatView {
         }
         self.perforation_key = Some((state_key, body.to_owned()));
         self.perforations.clear();
-        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
-        for field in &sheet.perforations {
-            if self.perforations.len() >= MAX_HOLES {
-                break;
-            }
-            if !field.diameter.is_finite() || field.diameter <= 0.0 {
-                continue;
-            }
-            let Ok(centres) = sheet.perforation_holes(field) else { continue };
+        let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) else { return };
+        for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
             let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-            self.perforations.extend(centres.into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
         }
     }
 

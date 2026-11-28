@@ -128,7 +128,9 @@ fn v3(p: &P3) -> Vec3 {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -267,7 +269,7 @@ fn param_method(code: u32) -> Option<ParamMethod> {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // the one curve of an offset or continuity case, else the case's record
     let one = |c: &Crv| -> Result<Result<Curve, Box<Output>>, HarnessError> {
         let mut v = Vec::new();

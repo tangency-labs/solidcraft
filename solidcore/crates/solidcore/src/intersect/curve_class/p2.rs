@@ -84,7 +84,8 @@
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p3::PointSolveOptions;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{Solution, SolutionType};
@@ -203,6 +204,9 @@ impl<O: ClassObject> CurveClassification<O> {
         geometry: &impl ClassGeometry<O>,
         other: &Self,
     ) -> Result<()> {
+        self.native_material_face = None;
+        self.native_foreign_support = None;
+        let mut copied_curve = true;
         // when needed - free old curve
         if self.is_curve_owned && self.curve.is_some() {
             self.curve = None;
@@ -218,7 +222,8 @@ impl<O: ClassObject> CurveClassification<O> {
                     OP_CC,
                     "owned classification curve is not a curve",
                 ))?;
-                if ignored(curve.copy(k))?.is_some() {
+                copied_curve = ignored(curve.copy(k))?.is_some();
+                if copied_curve {
                     self.curve = Some(c);
                 }
             }
@@ -234,6 +239,12 @@ impl<O: ClassObject> CurveClassification<O> {
         self.doing_cross_hatch = other.doing_cross_hatch;
         self.doing_fillets = other.doing_fillets;
         self.ok_to_set_tolerance = other.ok_to_set_tolerance;
+        self.source_reach = other.source_reach;
+        self.seam_hint = other.seam_hint;
+        if copied_curve && self.curve == other.curve {
+            self.native_material_face = other.native_material_face;
+            self.native_foreign_support = other.native_foreign_support;
+        }
         self.tgt_loops_only = other.tgt_loops_only;
         self.tgt_loops.clear();
         self.tgt_loops.extend_from_slice(&other.tgt_loops);
@@ -416,6 +427,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // set the modified curve bit
         self.is_curve_current = options.is_curve_current;
+        if !options.is_curve_current {
+            self.native_foreign_support = None;
+        }
 
         let zone_tol_3d = options.zone_tol_3d;
 
@@ -428,6 +442,8 @@ impl<O: ClassObject> CurveClassification<O> {
             // set new values
             self.is_curve_owned = options.is_curve_owned;
             self.curve = options.curve;
+            self.native_material_face = None;
+            self.native_foreign_support = None;
             self.src_zone_tol_3d = if zone_tol_3d > 0.0 {
                 zone_tol_3d
             } else {
@@ -503,7 +519,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // check state - lIntervalIndex within bounds
         let size = self.size();
         if index >= size {
-            return Err(SolidError::sm_err(OP_CONNECT));
+            return Err(index_past_end(OP_CONNECT, index, size));
         }
         let mut end_to_squeeze = end_to_squeeze;
 
@@ -601,7 +617,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input
         if index >= self.size() {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(index_past_end(OP_EDIT, index, self.size()));
         }
 
         // Get allowed displacement range for the new Param value
@@ -614,7 +630,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MinParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(outside_range(OP_EDIT, new_param, &allowed));
         }
 
         // modify the target interval boundary position
@@ -670,7 +686,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // check input
         let size = self.size();
         if index >= size {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(index_past_end(OP_EDIT, index, size));
         }
 
         // Get allowed displacement range for the new Param value
@@ -683,7 +699,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MaxParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(outside_range(OP_EDIT, new_param, &allowed));
         }
 
         // modify the target interval boundary position
@@ -837,8 +853,8 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // Curve is 3d branch - Use drop point
         let Some(face) = self.face else {
-            // check state - the surface must be given
-            return Err(SolidError::sm_err(OP_UV));
+            // check state - the surface must be given (the caller's classification, rule 9)
+            return Err(SolidError::intersect(OP_UV, IntersectFailure::NoClassFace));
         };
         let surface = match geometry.topology_entity(face) {
             Some((b, EntityRef::Face(f))) => face_p2::surface(b, f)?,
@@ -855,7 +871,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 ))
             }
         };
-        let surface = surface.ok_or(SolidError::sm_err(OP_UV))?;
+        let surface = surface.ok_or_else(|| {
+            Failure::new(OP_UV, IntersectFailure::FaceWithoutSurface)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
 
         // (EvaluatePoint's status is ignored upstream: an undefined point on failure)
         let point = ignored(curve.evaluate_point(k, param))?.unwrap_or(Vec3::UNDEF);
@@ -1442,6 +1462,27 @@ fn tail_curve_curve<O: ClassObject, S: Copy>(
     }
     // (else upstream only warns: refined curve/edge intersection failed)
     Ok(true)
+}
+
+/// An interval index the caller gave that is not below the classification's `size` (rule 9;
+/// upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn index_past_end(op: &'static str, index: usize, size: usize) -> SolidError {
+    SolidError::intersect(op, IntersectFailure::IntervalIndexPastEnd { index, size })
+}
+
+/// A new interval end the caller gave outside the range its neighbours `allowed` (rule 9;
+/// upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn outside_range(op: &'static str, param: f64, allowed: &Extent1d) -> SolidError {
+    SolidError::intersect(
+        op,
+        IntersectFailure::ParameterOutsideRange {
+            param,
+            min: allowed.min(),
+            max: allowed.max(),
+        },
+    )
 }
 
 /// The mutable-adapter dispatch gap of the large-gap part: an adapter that cannot lend
@@ -2238,9 +2279,14 @@ mod tests {
         let k = Kernel::default();
         let g = line();
         let mut c = cc(&k, &[0.0, 0.25, 0.5, 1.0]);
-        assert!(c
+        let e = c
             .connect_intervals(3, IntervalPosition::Start, true)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::IntervalIndexPastEnd { index: 3, size: 3 })
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR));
         c.connect_intervals(1, IntervalPosition::End, true).unwrap();
         assert_eq!(c.size(), 2);
         assert_eq!(c.at(1).unwrap().min(), 0.25);
@@ -2249,7 +2295,16 @@ mod tests {
         assert_eq!(c.interval().min(), 0.25);
 
         let mut c = cc(&k, &[0.0, 0.25, 0.5, 1.0]);
-        assert!(c.edit_interval_min(&k, &g, 1, 0.6, true).is_err());
+        let e = c.edit_interval_min(&k, &g, 1, 0.6, true).unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::ParameterOutsideRange {
+                param: 0.6,
+                min: 0.0,
+                max: 0.5,
+            })
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR));
         c.edit_interval_min(&k, &g, 1, 0.1, true).unwrap();
         assert_eq!(c.at(0).unwrap().max(), 0.1);
         c.edit_interval_max(&k, &g, 1, 1.0, true).unwrap();

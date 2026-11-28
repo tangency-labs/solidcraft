@@ -1,0 +1,643 @@
+{
+ "id": "96-frame-tower",
+ "name": "T-slot tower of butted frame members",
+ "description": "The acceptance tower of #4003 in 45 x 45 bar: 600 x 600 footprint, 1500 high; 4 uprights at the corners, three rings of 4 rails butted between the uprights, flush with the outside, and 2 cross members in the middle ring butted between its rails along X. Every line runs through its section's centre, 22.5 in from the outside.",
+ "exercises": [
+  "frame_member",
+  "frame_trim",
+  "butt_joint"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm).",
+  "members": "frame_member lays one bar per sketch line, its section centred on the line and square to it; bodies are named after body_name, numbered on (Rail, Rail (2), ...) in sketch and line order.",
+  "trims": "frame_trim butts each listed member's end against the side of the target member it meets (the nearer end, no gap)."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Uprights front",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     22.5,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       22.5,
+       1500
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       577.5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1500
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Uprights front members",
+   "sketch": "Uprights front",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Upright"
+  },
+  {
+   "op": "sketch",
+   "name": "Uprights back",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     577.5,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       22.5,
+       1500
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       577.5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1500
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Uprights back members",
+   "sketch": "Uprights back",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Upright"
+  },
+  {
+   "op": "sketch",
+   "name": "Rails front",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     22.5,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       22.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       722.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       722.5
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       1477.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1477.5
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Rails front members",
+   "sketch": "Rails front",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Rail"
+  },
+  {
+   "op": "sketch",
+   "name": "Rails back",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     577.5,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       22.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       722.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       722.5
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       1477.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1477.5
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Rails back members",
+   "sketch": "Rails back",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Rail"
+  },
+  {
+   "op": "sketch",
+   "name": "Rails left",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     22.5,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     1,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       22.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       722.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       722.5
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       1477.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1477.5
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Rails left members",
+   "sketch": "Rails left",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Rail"
+  },
+  {
+   "op": "sketch",
+   "name": "Rails right",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     577.5,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     1,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       22.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       722.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       722.5
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       22.5,
+       1477.5
+      ]
+     },
+     "end": {
+      "at": [
+       577.5,
+       1477.5
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Rails right members",
+   "sketch": "Rails right",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Rail"
+  },
+  {
+   "op": "sketch",
+   "name": "Cross",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     0,
+     722.5
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       200,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       200,
+       577.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       400,
+       22.5
+      ]
+     },
+     "end": {
+      "at": [
+       400,
+       577.5
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Cross members",
+   "sketch": "Cross",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Cross"
+  },
+  {
+   "op": "frame_trim",
+   "name": "Rails between uprights",
+   "members": [
+    "Rail",
+    "Rail (2)",
+    "Rail (3)",
+    "Rail (4)",
+    "Rail (5)",
+    "Rail (6)",
+    "Rail (7)",
+    "Rail (8)",
+    "Rail (9)",
+    "Rail (10)",
+    "Rail (11)",
+    "Rail (12)"
+   ],
+   "to": [
+    "Upright",
+    "Upright (2)",
+    "Upright (3)",
+    "Upright (4)"
+   ]
+  },
+  {
+   "op": "frame_trim",
+   "name": "Cross members between rails",
+   "members": [
+    "Cross",
+    "Cross (2)"
+   ],
+   "to": [
+    "Rail (2)",
+    "Rail (5)"
+   ]
+  }
+ ]
+}

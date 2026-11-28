@@ -1,6 +1,7 @@
 //! Application-owned command execution shared by UI, control and headless MCP.
 //! No Session, document, geometry, dialogs or camera are reachable here.
 mod catalogue;
+pub use catalogue::{bytes_from_plain, plain_bytes, snapshot_from_value, snapshot_value};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -66,6 +67,21 @@ pub struct WorkspaceDescriptor {
     pub id: WorkspaceId,
     pub title_key: String,
     pub default_preset: String,
+}
+
+/// A stored layout that `CatalogueState::hydrate_lenient` could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SkippedEntry {
+    Builtin(String, RawRecord),
+    User(String, RawRecord),
+    Remembered(WorkspaceId, RawRecord),
+}
+
+/// A stored layout exactly as read: its bytes and its recovery bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRecord {
+    pub bytes: Vec<u8>,
+    pub rejected: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,7 +152,7 @@ impl CatalogueState {
         }
         let mut metadata = 0_usize;
         for (id, item) in &self.workspaces {
-            valid_id(&id.0)?;
+            valid_workspace_id(&id.0)?;
             valid_id(&item.title_key)?;
             if item.id != *id || !self.builtins.contains_key(&item.default_preset) {
                 return Err(error(Rule::MissingTarget, "workspace requires a registered immutable default"));
@@ -156,7 +172,7 @@ impl CatalogueState {
             bytes = bytes.saturating_add(stored.bytes.len() + stored.rejected.as_ref().map_or(0, |r| r.len()));
         }
         for (id, stored) in &self.remembered {
-            valid_id(&id.0)?;
+            valid_workspace_id(&id.0)?;
             metadata = metadata.saturating_add(id.0.len());
             bytes = bytes.saturating_add(stored.bytes.len() + stored.rejected.as_ref().map_or(0, |r| r.len()));
         }
@@ -229,7 +245,7 @@ impl InMemoryCatalogue {
         Ok(())
     }
     pub fn register_workspace(&mut self, mut descriptor: WorkspaceDescriptor) -> PanelResult<()> {
-        valid_id(&descriptor.id.0)?;
+        valid_workspace_id(&descriptor.id.0)?;
         valid_id(&descriptor.title_key)?;
         if self.state.workspaces.contains_key(&descriptor.id) {
             return Err(error(Rule::DuplicateId, "workspace already registered"));
@@ -286,6 +302,7 @@ pub fn is_command(id: &str) -> bool {
 }
 pub const IDS: &[&str] = &[
     "layout.apply",
+    "layout.delete",
     "layout.get",
     "layout.reset",
     "layout.save",
@@ -333,6 +350,7 @@ pub enum PanelCommand {
     ResetPair(wire::ResetPair),
     Save(wire::Save),
     Apply(wire::Apply),
+    Delete(wire::Delete),
     Reset(wire::Revision),
     Workspace(wire::WorkspaceSelect),
 }
@@ -395,6 +413,7 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
             PanelCommand::Save(read(params)?)
         }
         "layout.apply" => PanelCommand::Apply(read(params)?),
+        "layout.delete" => PanelCommand::Delete(read(params)?),
         "layout.reset" => PanelCommand::Reset(read(params)?),
         "layout.workspace.select" => PanelCommand::Workspace(read(params)?),
         _ => return Err(error(Rule::MissingTarget, "not an application layout command")),
@@ -410,7 +429,7 @@ fn validate_selector(target: &Option<wire::Target>, id: &Option<String>) -> Pane
             wire::Target::Instance(id) => valid_id(&id.0),
             wire::Target::Section(id) => valid_id(&id.0),
             wire::Target::Column(id) => valid_id(&id.0),
-            wire::Target::Workspace(id) => valid_id(&id.0),
+            wire::Target::Workspace(id) => valid_workspace_id(&id.0),
             wire::Target::NativeHost(id) => valid_id(&id.0),
         },
         (None, Some(id)) => valid_id(id),
@@ -487,7 +506,10 @@ fn validate_command(command: &PanelCommand) -> PanelResult<()> {
         PanelCommand::Apply(p) => {
             preset_name(&p.name)?;
         }
-        PanelCommand::Workspace(p) => valid_id(&p.workspace.0)?,
+        PanelCommand::Delete(p) => {
+            preset_name(&p.name)?;
+        }
+        PanelCommand::Workspace(p) => valid_workspace_id(&p.workspace.0)?,
         _ => {}
     }
     Ok(())
@@ -658,7 +680,13 @@ fn current_envelope(catalogue: &CatalogueState, state: &LayoutReply, registry: &
 /// v1 writes merely to inspect identities; callers union current live IDs too.
 pub fn current_envelope_snapshot(catalogue: &dyn LayoutCatalogue, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
     match catalogue.state().remembered(&state.layout.workspace) {
-        Some(stored) => stored.project_envelope(registry, &state.layout.workspace),
+        Some(stored) => {
+            let mut envelope = stored.project_envelope(registry, &state.layout.workspace)?;
+            if holds_live_quarantine(&envelope, &state.layout, registry) {
+                restore_quarantine(&mut envelope, registry)?;
+            }
+            Ok(envelope)
+        }
         None => Ok(LayoutEnvelope::new(state.layout.clone())),
     }
 }
@@ -712,7 +740,7 @@ fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry:
         }
     }
     next.section_order = order;
-    super::persistence::merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
+    merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
     let layout = next.layout.clone();
     with_live_layout(&next, layout, registry)
 }
@@ -871,6 +899,20 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             let action = LayoutAction::Inspect;
             let state = stage_current(context, &state, &action, &current, recovery, next)?;
             value(wire::SaveReply { name, overwritten, state })
+        }
+        PanelCommand::Delete(p) => {
+            revision(p.expected_revision, &state)?;
+            let name = match next.find_preset_name(&preset_name(&p.name)?) {
+                Some((PresetKind::BuiltIn, _)) => return Err(error(Rule::Capability, "built-in presets are immutable")),
+                Some((PresetKind::User, name)) => name.to_string(),
+                None => return Err(error(Rule::MissingTarget, "layout preset not registered")),
+            };
+            // Only the library changes: the panels stay where they are, even when
+            // they match the deleted layout.
+            next.users.remove(&name);
+            let action = LayoutAction::Inspect;
+            let state = stage_current(context, &state, &action, &current, recovery, next)?;
+            value(wire::DeleteReply { name, state })
         }
         PanelCommand::Apply(p) => {
             revision(p.expected_revision, &state)?;
@@ -1064,7 +1106,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
         let empty = json!({});
         match parse_command(id, step.get("params").unwrap_or(&empty))? {
-            PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) => {}
+            PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) | PanelCommand::Delete(_) => {}
             PanelCommand::HeaderAction(_) => header_action = true,
             PanelCommand::Contextual { .. } => contextual = true,
             PanelCommand::Apply(_) | PanelCommand::Reset(_) => replacement = true,
@@ -1150,7 +1192,7 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
         match id {
             "panel.list" => result = value(wire::ListReply { state: committed.clone(), kinds: context.registry.specs().cloned().collect() })?,
             "layout.get" => result = value(wire::GetReply { state: committed.clone(), workspaces: context.catalogue.state().summaries() })?,
-            "layout.save" | "layout.workspace.select" => result["state"] = value(committed.clone())?,
+            "layout.save" | "layout.delete" | "layout.workspace.select" => result["state"] = value(committed.clone())?,
             _ => result = value(committed.clone())?,
         }
         results.push(result);

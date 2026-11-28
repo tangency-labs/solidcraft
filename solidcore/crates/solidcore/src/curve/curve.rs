@@ -7,6 +7,7 @@
 //! lives in its own submodule and adds methods to [`Curve`] (or generic functions
 //! over [`CurveEvaluate`]).
 
+mod bspline_part;
 pub mod p1;
 pub mod p2;
 pub mod p3;
@@ -16,6 +17,11 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
+mod projected_pair;
+mod projected_pair_all;
+mod projected_pair_ellipse;
+mod projected_pair_monotone;
+mod turning;
 
 pub use p2::{
     knots_ignoring_status, Curve, CurveEvaluate, CurveKind, CurvePropertyType, KnotsWithStatus,

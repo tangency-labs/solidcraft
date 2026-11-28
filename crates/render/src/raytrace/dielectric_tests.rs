@@ -43,8 +43,8 @@ fn environment() -> Option<crate::job::RaytraceEnvironmentOptions> {
     Some(crate::job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 })
 }
 pub(in crate::raytrace) fn request(options: RaytraceOptions) -> ImageRequest {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     ImageRequest {
         studio_weights: None,
         environment: None,
@@ -233,7 +233,7 @@ fn runtime_dielectric_inputs_are_bounded_and_default_off() {
     material.thickness_mm = 1.0;
     let options = RaytraceOptions { dielectrics: vec![material], ..Default::default() };
     assert!(options.validate().is_err());
-    let oversized = serde_json::json!({"dielectrics": vec![input(DielectricBoundary::ThinSheet);9]});
+    let oversized = serde_json::json!({"dielectrics": vec![input(DielectricBoundary::ThinSheet); job::MAX_OPTICAL_TARGETS + 1]});
     assert!(serde_json::from_value::<RaytraceOptions>(oversized).is_err());
     assert!(serde_json::from_value::<RaytraceOptions>(serde_json::json!({"dielectrics":[{"body_index":0,"body_name":"x".repeat(1025),"boundary":"closed_box","ior":1.5,"absorption_per_mm":[0,0,0],"thickness_mm":0}]})).is_err());
 }
@@ -365,7 +365,7 @@ fn actual_oblique_png_selects_the_snell_shifted_colour_target() {
             }),
             color: [255; 3],
             opacity: 1.0,
-            surface: Some(crate::surface::OpaqueSurface::new(color, 0.0, 1.0, 1.0).unwrap()),
+            surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(color, 0.0, 1.0, 1.0).unwrap()),
             faces: Vec::new(),
         }
     }
@@ -1181,5 +1181,58 @@ fn general_path_sheet_preparation_is_prepaid_charged_and_cancellable_without_a_p
         cancel.cancel();
         assert_eq!(task.step(&captured, &options, &mut work, &cancel).unwrap_err().code, job::ErrorCode::Cancelled);
         assert!(!task.ready());
+    }
+}
+
+fn opus_concave_boundary() -> Mesh {
+    let polygon = [(0.0, 0.0), (3.0, 0.0), (3.0, 1.0), (1.0, 1.0), (1.0, 3.0), (0.0, 3.0)];
+    let mut mesh = Mesh::default();
+    for z in [0.0, 1.0] {
+        for (x, y) in polygon {
+            mesh.positions.push(Vec3::new(x, y, z));
+            mesh.normals.push(Vec3::Z);
+        }
+    }
+    for [a, b, c] in [[0, 1, 2], [0, 2, 3], [0, 3, 5], [3, 4, 5]] {
+        mesh.triangles.extend([[a, c, b], [a + 6, b + 6, c + 6]]);
+    }
+    for i in 0..6 {
+        let j = (i + 1) % 6;
+        mesh.triangles.extend([[i, j, j + 6], [i, j + 6, i + 6]]);
+    }
+    mesh.tri_face.resize(mesh.triangles.len(), 0);
+    mesh
+}
+
+#[test]
+fn general_glass_nonconvex_overlapping_bounds_distinguish_air_and_true_containment() {
+    for contained in [false, true] {
+        let mut outer = box_body(1.0);
+        outer.mesh = Arc::new(opus_concave_boundary());
+        let mut inner = box_body(1.0);
+        inner.name = "notch or arm".into();
+        for p in &mut Arc::make_mut(&mut inner.mesh).positions {
+            p.x = (p.x + 10.0) * 0.03 + if contained { 0.2 } else { 1.5 };
+            p.y = (p.y + 10.0) * 0.03 + if contained { 0.2 } else { 1.5 };
+            p.z = p.z * 0.6 + 0.2;
+        }
+        let mut source = scene(outer);
+        source.meshes.push(inner);
+        let mut options = general_options();
+        options.dielectrics.push(DielectricOptions { body_index: 1, body_name: "notch or arm".into(), ..options.dielectrics[0].clone() });
+        for reverse in [false, true] {
+            if reverse {
+                source.meshes.reverse();
+                for input in &mut options.dielectrics {
+                    input.body_index = 1 - input.body_index;
+                }
+                options.dielectrics.reverse();
+            }
+            let certificate = general_certificate(&source, &options).unwrap();
+            let child = usize::from(!reverse);
+            let parent = usize::from(reverse);
+            assert_eq!(certificate.region(child).unwrap().parent, contained.then_some(parent));
+            assert_eq!(certificate.region(parent).unwrap().parent, None);
+        }
     }
 }

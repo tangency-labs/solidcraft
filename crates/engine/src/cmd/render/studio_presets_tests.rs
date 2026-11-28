@@ -43,7 +43,7 @@ fn native_studios_resolve_without_mutation_and_apply_one_complete_undo() {
         assert!(!saved.stage.is_empty());
         assert_eq!(s.doc.features.len(), 1);
         assert!(s.doc.materials.is_empty());
-        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render.setups["Shot"], *saved);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc.to_json(), before);
@@ -176,7 +176,7 @@ fn physical_backgrounds_preserve_geometry_lights_camera_and_one_undo() {
         super::super::staging::apply(&mut scene, after, "test").unwrap();
         assert!(Arc::ptr_eq(&first, &scene.meshes[0].mesh));
         assert_eq!(scene.meshes.len(), 1 + after.stage.iter().count());
-        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(&reopened.render.setups["Shot"], after);
         let snapshot = s.doc.to_json();
         assert!(s.execute("render.stage.backdrop", &json!({"name":"Shot","kind":kind,"expected_revision":s.revision,"set":{"stage":[]}})).is_err());
@@ -195,7 +195,7 @@ fn finishing_and_linear_master_saved_intent_survive_reopen_without_host_and_reje
         "backdrop":{"mode":"radial","first_srgb":[230,220,200],"second_srgb":[25,35,45],"center":[0.4,0.3],"radius":0.8}}});
     s.execute("render.settings.set", &json!({"name":"Shot","set":{"job":job}})).unwrap();
     let after = s.doc.to_json();
-    let reopened = solidcraft_doc::Document::from_json(&after).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened.render, s.doc.render);
     for patch in [
         json!({"job":{"method":"gpu_path","transparent_background":true,"options":job["options"]}}),
@@ -288,7 +288,7 @@ fn cpu_native_studios_preserve_full_job_and_exact_hdr_rig_authority_for_all_twen
         let id = entry["id"].as_str().unwrap();
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":20,"width":15,"height":10,"body_name":"Subject"})).unwrap();
-        let camera = solidcraft_render::Camera { fov: 0.5, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { fov: 0.5, ..Default::default() };
         let options = CpuJob {
             budget: CpuBudget::Studio,
             progressive: Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 947 }),
@@ -377,7 +377,7 @@ fn cpu_native_studios_preserve_full_job_and_exact_hdr_rig_authority_for_all_twen
         assert_eq!(s.doc.features, before.features);
         assert_eq!(s.doc.materials, before.materials);
         let saved_json = s.doc.to_json();
-        let reopened = solidcraft_doc::Document::from_json(&saved_json).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render.setups["Shot"], *saved);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc, before);
@@ -395,7 +395,7 @@ fn cpu_native_studio_cold_capture_matches_typed_source_every_prefix_and_raw_mast
     for id in ["NATIVE-STUDIO-001", "NATIVE-STUDIO-004", "RIG-020"] {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":20,"width":15,"height":10,"body_name":"Subject"})).unwrap();
-        let camera = solidcraft_render::Camera { target: solidcore_record::Vec3::new(10.0, 7.5, 5.0), distance: 35.0, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { target: solidcore_record::Vec3::new(10.0, 7.5, 5.0), distance: 35.0, ..Default::default() };
         s.execute("render.settings.set",&json!({"name":"Shot","set":{"width":8,"height":8,"camera":camera,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":47},"area_samples":1,"seed":731,"output":{"linear_exr":true}}}}})).unwrap();
         s.execute("render.library.environment.apply", &json!({"id":"HDR-001","name":"Shot","samples":1})).unwrap();
         if id == "RIG-020" {

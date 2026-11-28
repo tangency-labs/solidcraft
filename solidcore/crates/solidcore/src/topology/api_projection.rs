@@ -14,13 +14,20 @@
 //! | `plane_projection` (private)       | `SmCurve::CreatePlaneProjection` (virtual dispatch: the `SmBSplineCurve` override, `SM_ERR` otherwise) |
 //! | `crv_on_surf_plane_projection` (private) | `SmCrvOnSurf::CreatePlaneProjection`        |
 //!
+//! [`project_brep_onto_plane`] draws what is visible, not the body's outline: it projects the
+//! visible curves of hidden-curve removal ([`crate::blend::hcr`]), so an edge between two faces
+//! that both face the viewer is drawn (a smooth one is not), and any part another face hides is
+//! left out, an outline edge included. The outline of a whole body for a sketch's projection is
+//! [`crate::eval::outline`]: every stretch of an edge between a face that faces the viewer and
+//! one that does not, hidden or not.
+//!
 //! Deviations:
 //! - **Context.** `SmApiGetOrCreateContext()` is the caller's [`Kernel`].
 //! - **Null pointers.** A null B-rep, curve or surface is `None`. Where upstream
 //!   dereferences a null B-rep (`SmApiCreateSilhouetteCurves` with a usable normal) the
 //!   port returns [`SolidError::InvalidInput`].
 //! - **Statuses.** The `SM_ERR_INVALID_INPUT` and `SM_ERR` the wrappers return themselves
-//!   are [`SolidError::Upstream`] with that code.
+//!   are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with that code.
 //! - **Overflowing normal (UB-169).** A normal whose squared length overflows unitizes
 //!   to a zero vector. `SmApiProjectBrepOntoPlane` then ignores the failed
 //!   `MakeUnitOrthoVectors` and places its plane with the uninitialised outputs; the port
@@ -52,7 +59,8 @@
 use crate::blend::hcr::{Hcr, HcrOptions};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::assert_array::labels::{EDGEUSE_TYPE, EDGE_TYPE};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -74,28 +82,19 @@ use crate::EntityRef;
 const OP: &str = "topology::api_projection";
 const OP_PROJ: &str = "topology::api_projection::plane_projection";
 
-/// An `SmApiStatus` the wrapper returns itself.
-const fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
-}
-
 /// `sNormal.Unitize() != SM_SUCCESS` returns `SM_ERR_INVALID_INPUT`.
 fn unit_normal(normal: Vec3) -> Result<Vec3> {
-    normal.unitize().map_err(|_| status(SM_ERR_INVALID_INPUT))
+    normal.unitize().map_err(|e| {
+        Failure::new(OP, TopologyFailure::ZeroLengthVector)
+            .caused_by(e)
+            .into_error()
+    })
 }
 
-/// `pBrep->CalculateBoundingBox(BBox)` with its status ignored (the box then stays
-/// empty), and the length of its diagonal.
+/// `pBrep->CalculateBoundingBox(BBox)`, and the length of its diagonal. Upstream
+/// ignores the status (the box then stays empty); it is passed on here (WR-658).
 fn box_and_length(k: &Kernel, brep: &Brep) -> Result<(Extent3d, f64)> {
-    let bbox = ignored(crate::error::passed_on(
-        qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default()),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or_else(Extent3d::new);
+    let bbox = qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default())?;
     let diagonal = bbox.size();
     let length = diagonal.length();
     Ok((bbox, length))
@@ -165,7 +164,7 @@ pub fn project_brep_onto_plane(
     out: &mut Vec<Option<Curve>>,
 ) -> Result<()> {
     let Some(brep) = brep else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology(OP, TopologyFailure::NoBrepGiven));
     };
 
     let plane_normal = unit_normal(plane_normal)?;
@@ -178,10 +177,7 @@ pub fn project_brep_onto_plane(
 
     let mut plane = Axis2Placement::default();
     // (status ignored upstream; fork 4803d6d passes it on: `SER`)
-    let set = plane.set_canonical(plane_origin, y, z);
-    if k.fixes.brep_edit_statuses_pass_on {
-        set?;
-    }
+    plane.set_canonical(plane_origin, y, z)?;
 
     let invert_plane = plane.invert();
 
@@ -234,8 +230,8 @@ pub fn create_silhouette_curves(
 
     let plane_normal = unit_normal(plane_normal)?;
 
-    let brep = brep
-        .ok_or_else(|| SolidError::invalid_input(OP, "SmApiCreateSilhouetteCurves: null B-rep"))?;
+    let brep =
+        brep.ok_or_else(|| SolidError::invalid_input(OP, "silhouette curves: null B-rep"))?;
     let (_, length) = box_and_length(k, brep)?;
 
     let approx_tol = length * 1.0e-4;
@@ -283,8 +279,11 @@ pub fn project_curve_onto_brep(
     projection_vector: Vec3,
     out: &mut Vec<Option<Curve>>,
 ) -> Result<()> {
-    let (Some(brep), Some(curve)) = (brep, curve) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+    let Some(brep) = brep else {
+        return Err(SolidError::topology(OP, TopologyFailure::NoBrepGiven));
+    };
+    let Some(curve) = curve else {
+        return Err(SolidError::topology(OP, TopologyFailure::NoCurveGiven));
     };
 
     // The kernel resets its output array. Keep caller-owned curves out of it.
@@ -305,7 +304,7 @@ pub fn project_curve_onto_brep(
 
     // check result
     if projected.is_empty() {
-        return Err(status(SM_ERR));
+        return Err(SolidError::topology(OP, TopologyFailure::NoProjectedCurves));
     }
 
     let start_size = out.len();
@@ -343,8 +342,13 @@ pub fn project_curve_onto_surface(
     surface: Option<&Surface>,
     outputs: SurfaceProjection<'_>,
 ) -> Result<()> {
-    let (Some(curve), Some(surface)) = (curve, surface) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+    let Some(curve) = curve else {
+        return Err(SolidError::topology(OP, TopologyFailure::NoCurveGiven));
+    };
+    let Some(surface) = surface else {
+        return Err(Failure::new(OP, TopologyFailure::NoSurfaceGiven)
+            .with_status(SM_ERR_INVALID_INPUT)
+            .into_error());
     };
 
     let interval = curve.natural_interval();
@@ -397,7 +401,7 @@ pub fn project_curve_onto_surface(
 /// makes with the curve's owner, on a copy when it has none yet), the `SmCrvOnSurf` override for a curve on a
 /// surface (and an `SmTangentField`, which inherits it); `SM_ERR` otherwise (the
 /// `SmCurve` base).
-fn plane_projection(
+pub(crate) fn plane_projection(
     k: &Kernel,
     curve: &Curve,
     plane_point: Point3,
@@ -480,7 +484,10 @@ fn plane_projection(
         | CurveKind::Offset(_)
         | CurveKind::Conic(_)
         | CurveKind::CrvInVolume(_)
-        | CurveKind::Composite(_) => Err(SolidError::sm_err(OP_PROJ)),
+        | CurveKind::Composite(_) => Err(SolidError::topology(
+            OP_PROJ,
+            TopologyFailure::NoPlaneProjection,
+        )),
     }
 }
 
@@ -534,7 +541,10 @@ fn crv_on_surf_plane_projection(
             | CurveKind::Parabola(_)
             | CurveKind::Hyperbola(_)
     ) {
-        return Err(SolidError::null_pointer(OP_PROJ));
+        return Err(SolidError::topology(
+            OP_PROJ,
+            TopologyFailure::CurveNotBSpline { entity: None },
+        ));
     }
 
     // Lift this curve to a BSplineCurve
@@ -554,11 +564,12 @@ fn crv_on_surf_plane_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
 
     fn code(r: &Result<()>) -> Option<i32> {
         match r {
-            Err(SolidError::Upstream { code, .. }) => Some(*code),
-            _ => None,
+            Err(e) => e.upstream_status(),
+            Ok(()) => None,
         }
     }
 
@@ -580,6 +591,40 @@ mod tests {
         assert_eq!(code(&r), Some(SM_ERR_INVALID_INPUT));
         let r = project_curve_onto_surface(&k, None, None, SurfaceProjection::default());
         assert_eq!(code(&r), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(out.len(), 1);
+    }
+
+    /// Each missing or unusable argument gives its own cause, with upstream's status.
+    #[test]
+    fn each_missing_argument_names_its_cause() {
+        use crate::error::topology::TopologyFailure as T;
+        let cause = |r: &Result<()>| {
+            r.as_ref()
+                .err()
+                .and_then(SolidError::topology_failure)
+                .copied()
+        };
+        let mut k = Kernel::default();
+        let mut out = vec![None];
+        let r = project_brep_onto_plane(&mut k, None, Vec3::ZERO, Vec3::Z, &mut out);
+        assert_eq!(cause(&r), Some(T::NoBrepGiven));
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let r = project_brep_onto_plane(&mut k, Some(&b), Vec3::ZERO, Vec3::ZERO, &mut out);
+        assert_eq!(cause(&r), Some(T::ZeroLengthVector));
+        assert!(r.as_ref().err().and_then(SolidError::cause).is_some());
+        let r = project_curve_onto_brep(&k, None, None, Vec3::Z, &mut out);
+        assert_eq!(cause(&r), Some(T::NoBrepGiven));
+        let r = project_curve_onto_brep(&k, Some(&mut b), None, Vec3::Z, &mut out);
+        assert_eq!(code(&r), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(cause(&r), Some(T::NoCurveGiven));
+        let r = project_curve_onto_surface(&k, None, None, SurfaceProjection::default());
+        assert_eq!(cause(&r), Some(T::NoCurveGiven));
+        let line =
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0)).unwrap();
+        let r = project_curve_onto_surface(&k, Some(&line), None, SurfaceProjection::default());
+        assert_eq!(code(&r), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(cause(&r), Some(T::NoSurfaceGiven));
         assert_eq!(out.len(), 1);
     }
 

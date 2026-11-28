@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Chain dimension</title>
+  <path d="M9 18L9 47M31 18L31 47M55 18L55 47" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9 29L55 29M15 24L9 29L15 34M25 24L31 29L25 34M37 24L31 29L37 34M49 24L55 29L49 34" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

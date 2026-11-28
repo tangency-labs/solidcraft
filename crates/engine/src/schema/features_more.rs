@@ -1,5 +1,5 @@
-//! Contracts for four commands in `cmd/features_more.rs` (#12655): Rib, Web, Remove and Boundary
-//! Fill. Each adds a feature and returns `add_feature`'s reply, a
+//! Contracts for five commands in `cmd/features_more.rs` (#12655, #2829): Rib, Web, Remove,
+//! Boundary Fill and Replace Face. Each adds a feature and returns `add_feature`'s reply, a
 //! [`super::features::FeatureResult`].
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
@@ -13,12 +13,16 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, IdOrName, LengthExpr, OperationParam, Point3, RibDirectionParam, TouchingParam, feature_common, present};
+use super::types::{
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilHeightMeasureParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint,
+    EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    RibDirectionParam, SketchRef, StringList, TouchingParam, feature_common, present,
+};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most curves a rib or web follows, and the most cells Boundary Fill fills, as
@@ -27,18 +31,20 @@ const MAX_CURVES: usize = 1000;
 const MAX_CELLS: usize = 1000;
 /// The most tool bodies Boundary Fill takes.
 const MAX_TOOLS: usize = 64;
+/// The most faces Replace Face moves.
+const MAX_FACES: usize = 1000;
 
 /// A list of names read as `params::string_list` reads it (through [`NameList`], with its
 /// messages), then held to `range` items with the handler's whole `message` for any other count.
 /// `string_list` reads `null` as no names, so `null` gets that message too.
-fn names_in<'de, D: Deserializer<'de>>(d: D, range: std::ops::RangeInclusive<usize>, message: &str) -> Result<Option<NameList>, D::Error> {
+pub(super) fn names_in<'de, D: Deserializer<'de>>(d: D, range: std::ops::RangeInclusive<usize>, message: &str) -> Result<Option<NameList>, D::Error> {
     let v = Value::deserialize(d)?;
     let names = if v.is_null() { NameList::default() } else { NameList::deserialize(v).map_err(D::Error::custom)? };
     if range.contains(&names.0.len()) { Ok(Some(names)) } else { Err(D::Error::custom(whole(message))) }
 }
 
 /// A list of 1 to `max` names: one name as text, or a list.
-fn names_schema(description: &str, max: usize) -> Schema {
+pub(super) fn names_schema(description: &str, max: usize) -> Schema {
     json_schema!({
         "description": description,
         "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": max}]
@@ -84,9 +90,74 @@ pub struct RibParams {
     pub flip: Option<bool>,
     #[serde(default)]
     pub direction: Option<RibDirectionParam>,
+    /// True: the curves' open ends run on in their own direction until they meet the part, so
+    /// the wall reaches the face beyond them. Default: false.
+    #[serde(default)]
+    pub extend: Option<bool>,
     /// What the join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Replace Face's `faces`, read as the handler reads them, with its messages.
+#[derive(Debug)]
+pub struct ReplaceFaces(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for ReplaceFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let items = v.as_array().ok_or_else(|| D::Error::custom(whole("`faces` must list points [x, y, z] or face names")))?;
+        if items.is_empty() || items.len() > MAX_FACES {
+            return Err(D::Error::custom(whole("`faces` must list 1…1000 points")));
+        }
+        for item in items {
+            crate::cmd::face_ref_form(item).map_err(|why| D::Error::custom(whole(why)))?;
+        }
+        Ok(ReplaceFaces(items.clone()))
+    }
+}
+
+impl JsonSchema for ReplaceFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ReplaceFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let face = generator.subschema_for::<FaceRef>();
+        json_schema!({
+            "description": "The planar faces to move: 1 to 1000.",
+            "type": "array",
+            "items": face,
+            "minItems": 1,
+            "maxItems": MAX_FACES
+        })
+    }
+}
+
+fn faces_and_target(schema: &mut Schema) {
+    require(schema, "faces");
+    schema.insert("anyOf".into(), json!([{"required": ["target"]}, {"required": ["target_face"]}]));
+}
+
+/// Move planar faces onto a plane, or onto the plane of a parallel planar face. `target_face` is
+/// read before `target`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_and_target)]
+pub struct ReplaceFaceParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default)]
+    pub faces: Option<ReplaceFaces>,
+    /// The plane to move the faces onto.
+    #[serde(default)]
+    pub target: Option<PlaneParam>,
+    /// A point on a planar face, whose plane the faces move onto.
+    #[serde(default)]
+    pub target_face: Option<Point3>,
+    /// The body the faces are on. Default: found from the faces.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -123,6 +194,19 @@ const CELLS_MESSAGE: &str = "`cells` must list 1…1000 points [x, y, z], one in
 /// Boundary Fill's `tools`: 1 to 64 body names.
 fn fill_tools<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
     names_in(d, 1..=MAX_TOOLS, TOOLS_MESSAGE)
+}
+
+/// Boundary Fill's `planes`: up to 64 plane names (the handler checks that each is one).
+fn fill_planes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    names_in(d, 0..=MAX_TOOLS, "`planes` must list at most 64 plane names")
+}
+
+fn fill_planes_schema(_: &mut SchemaGenerator) -> Schema {
+    // Unlike the tools, no planes at all is allowed: the handler reads `[]` as none.
+    json_schema!({
+        "description": "Planes that also bound the cells, by name: an origin plane (XY, XZ, YZ) or a construction plane. A plane cuts space like an infinite plane, so it can close an open end of a tool body; a cell lies on the side of each plane its point is on. Up to 64 with the tools.",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 0, "maxItems": MAX_TOOLS}]
+    })
 }
 
 fn fill_tools_schema(_: &mut SchemaGenerator) -> Schema {
@@ -180,6 +264,9 @@ pub struct BoundaryFillParams {
     #[serde(default, deserialize_with = "fill_tools")]
     #[schemars(schema_with = "fill_tools_schema")]
     pub tools: Option<NameList>,
+    #[serde(default, deserialize_with = "fill_planes")]
+    #[schemars(schema_with = "fill_planes_schema")]
+    pub planes: Option<NameList>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FillCells")]
     pub cells: Option<FillCells>,
@@ -192,6 +279,151 @@ pub struct BoundaryFillParams {
     /// What a join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Add a coil: a section swept along a helix. Give two of `revolutions` (or `turns`), `height` and
+/// `pitch`. The section is either made from `diameter` and `section_size`, or taken from `sketch`.
+/// One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CoilParams {
+    /// The helix's diameter, greater than zero. Required without `sketch`; refused with it.
+    #[serde(default)]
+    pub diameter: Option<LengthExpr>,
+    /// The number of turns, greater than zero; it may be fractional.
+    #[serde(default)]
+    pub revolutions: Option<NumberExpr>,
+    /// The number of turns, when `revolutions` is not given.
+    #[serde(default)]
+    pub turns: Option<NumberExpr>,
+    /// The height of the helix along `axis`. Not used when `revolutions` (or `turns`) and `pitch`
+    /// are both given.
+    #[serde(default)]
+    pub height: Option<LengthExpr>,
+    /// What `height` measures: the helix's centre line (the default) or the coil overall, end to
+    /// end, where the section reaches past the centre line at both ends. With `overall`, the
+    /// command works out the centre-line height that gives it. Needs `height`, refused with
+    /// `sketch`; with square ends it needs `pitch` too.
+    #[serde(default)]
+    pub height_measure: Option<CoilHeightMeasureParam>,
+    /// The distance along `axis` between one turn and the next.
+    #[serde(default)]
+    pub pitch: Option<LengthExpr>,
+    /// The section's diameter when circular, or its side when square, greater than zero. The
+    /// section must stay clear of the coil's axis. Required without `sketch`; refused with it.
+    #[serde(default)]
+    pub section_size: Option<LengthExpr>,
+    /// Refused with `sketch`.
+    #[serde(default)]
+    pub section: Option<CoilSectionParam>,
+    /// Refused with `sketch`.
+    #[serde(default)]
+    pub section_position: Option<CoilSectionPositionParam>,
+    /// A point on the helix's axis, where it starts. Default: the origin.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub base: Option<PointExpr3>,
+    /// The direction the helix climbs: X, Y, Z or `[x, y, z]`, each a number or an expression
+    /// with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the coil follows as the parameters
+    /// change (a parameter added as a plain number is a length: divide it by its unit,
+    /// `"n / 1 mm"`); or an axis reference in the same forms as Revolve. Default: Z.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CoilAxis")]
+    pub axis: Option<CoilAxis>,
+    /// Climb in the opposite direction along the axis, independently of `clockwise`. Default: false.
+    #[serde(default, deserialize_with = "super::features::reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
+    #[serde(default)]
+    pub start_angle: Option<AngleExpr>,
+    /// Turn clockwise about the selected axis without changing axial propagation. Default: false.
+    #[serde(default)]
+    pub clockwise: Option<bool>,
+    /// Where the wire ends: in a plane through the axis (axial, the default) or square to the
+    /// wire. Refused with `sketch`.
+    #[serde(default)]
+    pub end_cut: Option<CoilEndCutParam>,
+    /// A sketch whose profile is the section. Its plane is the section plane, so its placement
+    /// sets the radius and the start phase.
+    #[serde(default)]
+    pub sketch: Option<SketchRef>,
+    /// Which profile of `sketch` to sweep: exactly one closed profile without holes must result.
+    /// Default: all of them. Needs `sketch`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// How the coil combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on. Default: every body in the active component.
+    /// Ignored when `participants` lists bodies.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Raise a sketch's profiles from a face of the part, or sink them into it. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EmbossParams {
+    /// The sketch, by id or name. Default: the active sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which profiles of the sketch to use. Default: all of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// How far the profiles are raised or sunk.
+    pub depth: LengthExpr,
+    #[serde(default)]
+    pub mode: Option<EmbossModeParam>,
+    /// The bodies to emboss, by name. With `face`, only these are searched for it.
+    #[serde(default)]
+    pub targets: Option<NameList>,
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. A point on
+    /// a ring of faces tangent to each other (a side of flats and rounds) stands for the ring: when the profiles lie
+    /// on another face of it, that face is taken. Default: inferred when exactly one supported tangent cylinder
+    /// matches the selected profiles.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "EmbossFacePoint")]
+    pub face: Option<EmbossFacePoint>,
+    /// A shift of the profiles along the sketch's x before they are laid on the face. The sketch
+    /// is not changed. Default: none.
+    #[serde(default)]
+    pub offset_x: Option<LengthExpr>,
+    /// A shift of the profiles along the sketch's y. Default: none.
+    #[serde(default)]
+    pub offset_y: Option<LengthExpr>,
+    /// A turn of the profiles, counter-clockwise in the sketch, about the middle of their bounds.
+    /// The offsets are not turned with them. Default: none.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Raise a planar face of a body into a dome along its outward normal. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DomeParams {
+    /// The face: a point [x, y, z] on it, or a face name from `model.faces`.
+    pub face: FaceRef,
+    /// How far the dome rises from the face, along its outward normal.
+    pub height: LengthExpr,
+    /// The dome's meridian. Default: elliptical.
+    #[serde(default)]
+    pub shape: Option<DomeShapeParam>,
+    /// Cut the dome into the body instead. Not supported yet: refused. Default: false.
+    #[serde(default)]
+    pub reverse: Option<bool>,
+    /// The body the face is on. Default: found from the face.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

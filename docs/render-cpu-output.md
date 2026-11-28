@@ -34,8 +34,9 @@ transparent-background flag. Opaque remains the default; explicit true exports
 straight-alpha geometric coverage. Unknown or GPU transport fields inside output
 are refused.
 
-Missing/null output and identity presentation keep the original f64 PNG exactly.
-EXR-only retention also preserves that display path. Nonidentity presentation
+With native resolution and denoising disabled, missing/null output and identity
+presentation keep the original f64 PNG exactly. EXR-only retention also preserves
+that display path. Nonidentity presentation
 converts one complete pass to FLOAT32, premultiplied by primary coverage, before
 shared Display/Bloom/Photographic stages. Fixed CPU captures raw radiance before
 its existing per-pixel display write; progressive CPU converts the complete f64
@@ -48,11 +49,12 @@ scene-linear sRGB/D65 and coverage-premultiplied; A is primary coverage. The CPU
 producer has its own exact native software metadata profile. Regrading accepts
 only the exact retained native CPU/GPU profiles; it does not import arbitrary EXR.
 
-The shared output envelope remains 8192 pixels per side and 16,777,216 pixels in
+The shared final output envelope is 8192 pixels per side and 33,554,432 pixels in
 total. A larger CPU profile does not raise that separate envelope. Active output
 is validated before HDR IO or scene capture, and offline saved setups validate it
-as well. Original CPU images without these output stages retain their existing
-profile bounds.
+as well. X2 reconstructs the internal trace grid to these selected final dimensions;
+see [quality controls](render-quality-controls.md) for internal-grid admission.
+Native CPU images without these output stages retain their existing profile bounds.
 
 Admission adds one 16-byte-per-pixel conversion, bounded bloom scratch (24 bytes
 per pixel), optional photographic scratch (8 bytes per pixel plus 16 KiB), final

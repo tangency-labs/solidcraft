@@ -47,16 +47,12 @@
 //!   allocation-only `SmContext` arguments are omitted. Evaluation and continuity
 //!   queries retain the caller's Kernel through the concrete surface dispatch;
 //!   `CalculateContinuities`' unused angle tolerance is omitted.
-//! - **`CreateUVIsoLine`** keeps upstream's branches by default: a constant-`u` curve
-//!   gets a line at `x = iso` along `(0, 1, 0)` over the *u* interval of the domain,
-//!   from the domain's minimum v; the second branch repeats the `SM_SP_U` test, so
-//!   every other parameter type is `SM_ERR_INVALID_INPUT`
-//!   ([`SolidError::InvalidInput`]). With
-//!   [`Kernel::fixes.iso_curve_uv_line_both_params`](crate::kernel::UpstreamFixes::iso_curve_uv_line_both_params) (opt-in, default off) the
-//!   kernel-threaded entry point builds both directions over the varying coordinate's
+//! - **`CreateUVIsoLine`** builds both directions over the varying coordinate's
 //!   interval from a zero varying origin: `UV(t) = (iso, t, 0)` for constant `u`,
-//!   `UV(t) = (t, iso, 0)` for constant `v` (WR-30). The kernel-free
-//!   [`IsoCurve::create_uv_iso_line`] always keeps the pinned body.
+//!   `UV(t) = (t, iso, 0)` for constant `v` (WR-30). Upstream gives a constant-`u` curve
+//!   a line at `x = iso` along `(0, 1, 0)` over the *u* interval of the domain, from the
+//!   domain's minimum v, and its second branch repeats the `SM_SP_U` test, so every other
+//!   parameter type is `SM_ERR_INVALID_INPUT`.
 //! - **`ReadFromDB`** always builds a new curve (the "fill the curve passed in" branch
 //!   and its `IsKindOf` check have no counterpart; the type and dimension arguments are
 //!   unused upstream and dropped). It reads the iso data and the surface type, then
@@ -258,58 +254,44 @@ impl IsoCurve {
     /// The UV line of the `C_uv(s)` part of `S(C_uv(s))` (`CreateUVIsoLine`), a 2D
     /// `SmLine`, over the surface's domain as far as it is built
     /// ([`Surface::natural_uv_domain_if_built`]: an iso curve of a lazy analytic uses
-    /// [`IsoCurve::create_uv_iso_line_with_nurb`]). Always the pinned v1.0.1 body,
-    /// whatever the kernel flag: only constant `u`, over the u interval and from the
-    /// domain-minimum origin.
+    /// [`IsoCurve::create_uv_iso_line_with_nurb`]).
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] unless the curve is constant `u` (upstream tests
-    /// `SM_SP_U` twice).
+    /// [`SolidError::InvalidInput`] for a parameter type other than `u` and `v`.
     pub fn create_uv_iso_line(&self) -> Result<Curve> {
-        self.uv_iso_line(self.surface.natural_uv_domain_if_built(), false)
+        self.uv_iso_line(self.surface.natural_uv_domain_if_built())
     }
 
     /// [`IsoCurve::create_uv_iso_line`] over the surface's natural domain as upstream
     /// reads it (`GetNaturalUVDomain`, which makes a lazy analytic's missing NURB).
-    /// With [`Kernel::fixes.iso_curve_uv_line_both_params`](crate::kernel::UpstreamFixes::iso_curve_uv_line_both_params) both directions are built
-    /// over the varying coordinate's interval from a zero varying origin; without it
-    /// the pinned body is used.
     ///
     /// # Errors
     ///
     /// Those of [`IsoCurve::create_uv_iso_line`]; [`SolidError::Unported`] from making
     /// the NURB.
     pub fn create_uv_iso_line_with_nurb(&self, k: &Kernel) -> Result<Curve> {
-        self.uv_iso_line(
-            self.surface.natural_uv_domain_with_nurb(k)?,
-            k.fixes.iso_curve_uv_line_both_params,
-        )
+        self.uv_iso_line(self.surface.natural_uv_domain_with_nurb(k)?)
     }
 
-    /// The body of `CreateUVIsoLine` over the surface's natural `domain`. With
-    /// `both_params` (the opt-in WR-30 fix) both directions are built; without it the
-    /// body is pinned v1.0.1's: the `SM_SP_U` test is repeated, so only constant `u`
-    /// succeeds, over the u interval and from the domain-minimum origin.
-    fn uv_iso_line(&self, domain: Extent2d, both_params: bool) -> Result<Curve> {
-        // locals
-        let mut line_point = Point3::new(domain.min().x, domain.min().y, 0.0);
-        let (line_ivl, line_unit_vec) = if self.surf_param == SurfParamType::U {
-            if both_params {
-                // UV(t) = (iso, t, 0): the varying coordinate starts at zero. The
-                // line is P + s*V, so the domain minimum must not be added twice.
-                line_point = Point3::new(self.iso_parameter, 0.0, 0.0);
-                (domain.v_interval(), Vec3::new(0.0, 1.0, 0.0))
-            } else {
-                line_point.x = self.iso_parameter;
-                (domain.u_interval(), Vec3::new(0.0, 1.0, 0.0))
-            }
-        } else if both_params && self.surf_param == SurfParamType::V {
+    /// The body of `CreateUVIsoLine` over the surface's natural `domain` (WR-30).
+    fn uv_iso_line(&self, domain: Extent2d) -> Result<Curve> {
+        let (line_point, line_ivl, line_unit_vec) = if self.surf_param == SurfParamType::U {
+            // UV(t) = (iso, t, 0): the varying coordinate starts at zero. The line is
+            // P + s*V, so the domain minimum must not be added twice.
+            (
+                Point3::new(self.iso_parameter, 0.0, 0.0),
+                domain.v_interval(),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+        } else if self.surf_param == SurfParamType::V {
             // UV(t) = (t, iso, 0), likewise from a zero varying origin.
-            line_point = Point3::new(0.0, self.iso_parameter, 0.0);
-            (domain.u_interval(), Vec3::new(1.0, 0.0, 0.0))
+            (
+                Point3::new(0.0, self.iso_parameter, 0.0),
+                domain.u_interval(),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
         } else {
-            // the `else if` branch repeats the SM_SP_U test and is never taken
             return Err(SolidError::InvalidInput {
                 operation: OP_UV_ISO_LINE,
                 reason: "Bad value for m_eSurfParam",
@@ -616,18 +598,12 @@ mod tests {
         BSplineSurface::from_nurb(s, false)
     }
 
-    fn kernel_with_uv_iso_line_fix() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.iso_curve_uv_line_both_params = true;
-        k
-    }
-
     fn assert_point(actual: Point3, expected: Point3) {
         let d = actual.distance(expected);
         assert!(d < 1e-12, "point {actual:?} != {expected:?} (distance {d})");
     }
 
-    /// Checks an opt-in UV line against its independent UV map (`uv_of`), its lift
+    /// Checks a UV line against its independent UV map (`uv_of`), its lift
     /// through the iso curve's own surface accessor and the same iso curve evaluated
     /// at the same parameter, and an independent bilinear formula (`lift_of`).
     fn assert_uv_line(
@@ -692,10 +668,6 @@ mod tests {
     fn evaluation_and_errors() {
         let k = &Kernel::default();
         let a = IsoCurve::new(patch(), SurfParamType::V, 1.0, false, true);
-        assert!(matches!(
-            a.create_uv_iso_line(),
-            Err(SolidError::InvalidInput { .. })
-        ));
         // constant v = 1 on the patch: x = u / 2, y = (v + 1) / 4
         let p = a.evaluate_point(k, 0.5).expect("point");
         assert!((p.y - 0.5).abs() < 1e-12);
@@ -706,55 +678,8 @@ mod tests {
     }
 
     #[test]
-    fn uv_iso_line_default_is_pinned() {
+    fn uv_iso_line_uses_each_varying_interval_and_origin() {
         let k = &Kernel::default();
-        let fixed = &kernel_with_uv_iso_line_fix();
-        let iso = 1.0;
-
-        // Constant u: pinned v1.0.1 uses the u interval and the domain-minimum
-        // origin (the line is P + s*V, so that minimum is added to every point).
-        let u = IsoCurve::new(patch(), SurfParamType::U, iso, false, true);
-        let line = u.create_uv_iso_line_with_nurb(k).expect("default U line");
-        assert_eq!(line.dim(), 2);
-        assert_eq!(line.natural_interval(), Extent1d::from_min_max(0.0, 2.0));
-        assert_point(
-            line.evaluate_point(k, 0.0).expect("start"),
-            Point3::new(iso, -1.0, 0.0),
-        );
-        assert_point(
-            line.evaluate_point(k, 2.0).expect("end"),
-            Point3::new(iso, 1.0, 0.0),
-        );
-
-        // The kernel-free entry point stays pinned even with the flag on.
-        let kernel_free = u.create_uv_iso_line().expect("kernel-free U line");
-        assert_eq!(kernel_free.natural_interval(), line.natural_interval());
-        assert_point(
-            kernel_free.evaluate_point(fixed, 0.0).expect("start"),
-            Point3::new(iso, -1.0, 0.0),
-        );
-        assert_point(
-            kernel_free.evaluate_point(fixed, 2.0).expect("end"),
-            Point3::new(iso, 1.0, 0.0),
-        );
-
-        // Constant v is exactly the pinned refusal by default; the kernel-free
-        // entry point keeps it even while a kernel with the flag on exists.
-        let v = IsoCurve::new(patch(), SurfParamType::V, iso, false, true);
-        for line in [v.create_uv_iso_line(), v.create_uv_iso_line_with_nurb(k)] {
-            match line {
-                Err(SolidError::InvalidInput { operation, reason }) => {
-                    assert_eq!(operation, OP_UV_ISO_LINE);
-                    assert_eq!(reason, "Bad value for m_eSurfParam");
-                }
-                _ => panic!("expected InvalidInput"),
-            }
-        }
-    }
-
-    #[test]
-    fn uv_iso_line_opt_in_uses_each_varying_interval_and_origin() {
-        let k = &kernel_with_uv_iso_line_fix();
         let iso = 1.0;
 
         // Constant u: UV(t) = (iso, t, 0) over the v interval.
@@ -784,27 +709,11 @@ mod tests {
     }
 
     #[test]
-    fn uv_iso_line_opt_in_equal_domain_control() {
-        let k = &kernel_with_uv_iso_line_fix();
-        let off = &Kernel::default();
+    fn uv_iso_line_equal_domain_control() {
+        let k = &Kernel::default();
         let iso = 1.0;
-
-        // With zero minima and equal intervals the opt-in U line is the pinned one
-        // bit for bit, so this ordinary case cannot hide an origin shift.
         let u = IsoCurve::new(equal_domain_patch(), SurfParamType::U, iso, false, true);
-        let on = u.create_uv_iso_line_with_nurb(k).expect("U line with fix");
-        let old = u.create_uv_iso_line().expect("pinned U line");
-        assert_eq!(on.natural_interval(), old.natural_interval());
-        for t in [0.0, 0.5, 2.0] {
-            let opt_in = on.evaluate_point(k, t).expect("opt-in point");
-            let pinned = old.evaluate_point(off, t).expect("pinned point");
-            assert_eq!(opt_in, pinned);
-            let lifted = u
-                .surface()
-                .evaluate_point(off, Point2::new(pinned.x, pinned.y))
-                .expect("pinned lift");
-            assert_point(lifted, u.evaluate_point(off, t).expect("pinned iso point"));
-        }
+        let on = u.create_uv_iso_line_with_nurb(k).expect("U line");
         assert_uv_line(
             &on,
             k,
@@ -814,14 +723,8 @@ mod tests {
             // x = u/2, y = v/2, z = u (v + 2)/4.
             |t| Point3::new(iso / 2.0, t / 2.0, iso * (t + 2.0) / 4.0),
         );
-
-        // Constant v succeeds only with the flag.
         let v = IsoCurve::new(equal_domain_patch(), SurfParamType::V, iso, false, true);
-        assert!(matches!(
-            v.create_uv_iso_line_with_nurb(off),
-            Err(SolidError::InvalidInput { .. })
-        ));
-        let line = v.create_uv_iso_line_with_nurb(k).expect("V line with fix");
+        let line = v.create_uv_iso_line_with_nurb(k).expect("V line");
         assert_uv_line(
             &line,
             k,
@@ -834,7 +737,7 @@ mod tests {
 
     #[test]
     fn uv_iso_line_opt_in_translated_domain_origin() {
-        let k = &kernel_with_uv_iso_line_fix();
+        let k = &Kernel::default();
         let (u_min, v_min) = (1.0, 2.0);
         let (iso_u, iso_v) = (1.5, 3.0);
         let patch = || patch_with_domain(u_min, v_min);

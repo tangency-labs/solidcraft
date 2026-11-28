@@ -77,13 +77,18 @@ const HEAD_BASE: f32 = ARM_FROM + DASH + GAP;
 /// (the dialog's drag arrow) can keep clear of it.
 pub(super) const MARKER_CLEAR: f32 = HEAD_BASE + HEAD_LEN + 6.0;
 
-/// The move marker: a dot with four arms to the screen cardinals. At rest each arm is two dashes,
-/// a place that can be grabbed and nothing more. Pointed at, the outer dash becomes an arrowhead,
-/// its far end narrowing to a point and its near end widening while it grows a little: the
-/// feature moves straight in any direction along the face. While it drags, the inner dash runs
-/// on into the head as a solid shaft. The dotted-to-solid switch is the one step that cannot
-/// tween, so it flips halfway into the drag.
-pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &Tokens) {
+/// The four screen cardinals: the arms of a marker whose feature moves anywhere on its face.
+pub(super) const CARDINALS: [Vec2; 4] = [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)];
+
+/// The move marker: a dot with an arm for each way the feature can go, the four screen cardinals
+/// when it moves anywhere on its face, two along a line when a reference edge holds it to one,
+/// none when its references hold it still. At rest each arm is two dashes, a place that can be
+/// grabbed and nothing more. Pointed at, the outer dash becomes an arrowhead, its far end
+/// narrowing to a point and its near end widening while it grows a little: the feature moves
+/// straight that way along the face. While it drags, the inner dash runs on into the head as a
+/// solid shaft. The dotted-to-solid switch is the one step that cannot tween, so it flips halfway
+/// into the drag. `arms` are unit screen directions.
+pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, arms: &[Vec2], _t: &Tokens) {
     let solid = s.active > 0.5;
     let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
     // The outer dash on its way to being the head.
@@ -92,7 +97,7 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &T
     let far = LINE / 2.0 * (1.0 - s.hot);
     let mut lines: Vec<Vec<Pos2>> = Vec::new();
     let mut heads: Vec<Vec<Pos2>> = Vec::new();
-    for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
+    for d in arms.iter().copied() {
         // The inner dash, or the shaft up to the head's base.
         lines.push(vec![c + d * ARM_FROM, c + d * if solid { HEAD_BASE } else { ARM_FROM + DASH }]);
         let n: Vec2 = vec2(-d.y, d.x);
@@ -119,6 +124,42 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &T
     }
     painter.circle_filled(c, DOT_R + CASE / 2.0, case);
     painter.circle_filled(c, DOT_R, core);
+}
+
+/// An offset arrow's shaft width and how much larger than the marker's arrowheads its head is: it
+/// is the one handle of its move, so it reads at a glance.
+const ARROW_LINE: f32 = 3.0;
+const ARROW_HEAD: f32 = 1.4;
+
+/// An offset arrow: a straight shaft from `from` ending in an arrowhead at `to` (the move it
+/// makes), white on its casing like every handle, with its label (`A`, or `A 5.0 mm`) past the
+/// tip on the panel's backing, as the turn ring's readout. `hot` eases 0 (resting) to 1 (pointer
+/// over or dragging): the head grows a little.
+pub(super) fn offset_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, hot: f32, label: &str, t: &Tokens) {
+    let d = to - from;
+    let len = d.length();
+    if !(len.is_finite() && len > 1.0) {
+        return;
+    }
+    let dir = d / len;
+    let n = vec2(-dir.y, dir.x);
+    let grow = ARROW_HEAD * (0.85 + 0.3 * hot);
+    let (head_len, half) = ((HEAD_LEN * grow).min(len), HEAD_HALF * grow);
+    let base = to - dir * head_len;
+    let head = vec![base + n * half, to, base - n * half];
+    let (core, case) = (core(hot > 0.5), casing());
+    painter.add(egui::Shape::line_segment([from, base], Stroke::new(ARROW_LINE + CASE, case)));
+    painter.add(egui::Shape::convex_polygon(grown(&head, CASE / 2.0), case, Stroke::NONE));
+    painter.add(egui::Shape::line_segment([from, base], Stroke::new(ARROW_LINE, core)));
+    painter.add(egui::Shape::convex_polygon(head, core, Stroke::NONE));
+    let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_body), t.text);
+    let pad = vec2(4.0, 1.0);
+    let size = galley.size() + 2.0 * pad;
+    // Past the tip by half the label's reach along the arrow, so any direction keeps it clear.
+    let centre = to + dir * (0.5 * (size.x * dir.x.abs() + size.y * dir.y.abs()) + 4.0);
+    let rect = egui::Rect::from_center_size(centre, size);
+    painter.rect(rect, 3.0, t.panel.gamma_multiply(0.92), Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+    painter.galley(rect.min + pad, galley, t.text);
 }
 
 /// A convex polygon with every edge moved outwards by `d` (mitred corners).

@@ -28,13 +28,23 @@
 //! | [`Seg2`] | [`kp::Seg2`] | [`seg2`] | [`record_seg2`] |
 //! | [`Loop2`] | [`kp::Loop2`] | [`loop2`] | [`record_loop2`] |
 //! | [`Region2`] (a planar profile) | [`kp::Region2`] | [`region2`] | [`record_region2`] |
+//! | [`BlendDefinition`](solidcore_record::brep::blend::BlendDefinition) (a face's blend) | `FaceDefinition` | [`blend::blend`] | [`blend::record_blend`] |
 //!
-//! [`brep`] converts the record's B-rep to the kernel's body and back.
+//! [`brep`] converts the record's B-rep to the kernel's body and back; [`cell_grid`] the cell
+//! grid's spec and plan; [`develop`] a sheet metal part's surfaces and its flat pattern; [`frame`]
+//! frame-stock pieces, members and gusset supports; [`shaft_spline`] a shaft spline's numbers,
+//! plan and outlines.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
 
+pub mod blend;
 pub mod brep;
+pub mod cell_grid;
+pub mod develop;
+pub mod frame;
+pub mod round_face;
+pub mod shaft_spline;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;
@@ -183,10 +193,10 @@ pub fn curve(c: &Curve) -> Result<k::Curve, Invalid> {
     if !record_curve_fits(c, 0) {
         return Err(Invalid("geometry depth"));
     }
-    Ok(curve_inner(c))
+    curve_inner(c)
 }
-fn curve_inner(c: &Curve) -> k::Curve {
-    match c {
+fn curve_inner(c: &Curve) -> Result<k::Curve, Invalid> {
+    Ok(match c {
         Curve::Line { start, end } => k::Curve::Line {
             start: *start,
             end: *end,
@@ -215,11 +225,11 @@ fn curve_inner(c: &Curve) -> k::Curve {
             leader,
             tolerance,
         } => k::Curve::SurfaceIntersection {
-            surfaces: [Box::new(surface_inner(a)), Box::new(surface_inner(b))],
-            leader: Box::new(curve_inner(leader)),
+            surfaces: [Box::new(surface_inner(a)?), Box::new(surface_inner(b)?)],
+            leader: Box::new(curve_inner(leader)?),
             tolerance: *tolerance,
         },
-    }
+    })
 }
 
 /// A kernel curve as the record's; refuses geometry deeper than [`MAX_DEPTH`].
@@ -266,10 +276,12 @@ pub fn surface(s: &Surface) -> Result<k::Surface, Invalid> {
     if !record_surface_fits(s, 0) {
         return Err(Invalid("geometry depth"));
     }
-    Ok(surface_inner(s))
+    surface_inner(s)
 }
-fn surface_inner(s: &Surface) -> k::Surface {
-    match s {
+/// A blend label has no kernel surface of its own: its geometry is the face's NURBS form, and its
+/// definition crosses with [`blend`].
+fn surface_inner(s: &Surface) -> Result<k::Surface, Invalid> {
+    Ok(match s {
         Surface::Plane {
             origin,
             u_axis,
@@ -345,13 +357,18 @@ fn surface_inner(s: &Surface) -> k::Surface {
             matrix,
             forward,
         } => k::Surface::PlacedRevolution {
-            profile: Box::new(curve_inner(profile)),
+            profile: Box::new(curve_inner(profile)?),
             origin: *origin,
             axis: *axis,
             matrix: *matrix,
             forward: *forward,
         },
-    }
+        Surface::Blend { .. } => {
+            return Err(Invalid(
+                "a blend's label: its geometry is the face's NURBS form",
+            ))
+        }
+    })
 }
 
 /// A kernel surface as the record's; refuses geometry deeper than [`MAX_DEPTH`].
@@ -587,5 +604,19 @@ pub fn record_region2(r: &kp::Region2) -> Region2 {
     Region2 {
         outer: record_loop2(&r.outer),
         holes: r.holes.iter().map(record_loop2).collect(),
+    }
+}
+
+/// The kernel's standing of an imported cubic as the record's.
+#[must_use]
+pub fn record_cubic_standing(
+    s: solidcore::curve::hermite_curve::CubicStanding,
+) -> solidcore_record::curve_query::CubicStanding {
+    use solidcore::curve::hermite_curve::CubicStanding as K;
+    use solidcore_record::curve_query::CubicStanding as R;
+    match s {
+        K::Chord => R::Chord,
+        K::Curve => R::Curve,
+        K::Refused => R::Refused,
     }
 }

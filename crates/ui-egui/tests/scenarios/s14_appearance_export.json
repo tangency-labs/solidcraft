@@ -103,20 +103,11 @@
   }
  },
  {
-  "click": {
-   "world": [
-    15,
-    10,
-    10
-   ]
-  }
- },
- {
   "widget": "Save"
  },
  {
   "expect": {
-   "file": "Body1.stl"
+   "file": "Untitled.stl"
   }
  }
 ]

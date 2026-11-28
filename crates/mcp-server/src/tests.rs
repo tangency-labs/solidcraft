@@ -1,6 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 use serde_json::{Value, json};
 
-use crate::{Effect, Info, PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server, Tools, check_arguments, object, string, text_result, tool};
+use crate::{
+    Cancelled, Contents, Effect, Info, PROTOCOL_VERSION, ProgressReporter, Reference, SUPPORTED_VERSIONS, Server, Tools, cancelled_notification,
+    check_arguments, object, progress_notification, progress_token, string, text_result, tool,
+};
 
 /// One app's tools: `echo` and `level`, nothing behind them (no engine, no design). `log` records
 /// every listing and call in order.
@@ -33,9 +38,13 @@ fn info() -> Info {
 }
 
 fn serve(lines: &[Value]) -> (Server<Echo>, Vec<Value>) {
+    serve_with(Echo::default(), lines)
+}
+
+fn serve_with<T: Tools>(tools: T, lines: &[Value]) -> (Server<T>, Vec<Value>) {
     let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
     let mut output = Vec::new();
-    let mut s = Server::new(info(), Echo::default());
+    let mut s = Server::new(info(), tools);
     s.serve(std::io::Cursor::new(input), &mut output).unwrap();
     let replies = String::from_utf8(output).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     (s, replies)
@@ -114,7 +123,7 @@ fn notification() -> Value {
     json!({"jsonrpc": "2.0", "method": "notifications/progress"})
 }
 
-fn reply(s: &mut Server<Echo>, msg: &Value) -> Option<Value> {
+fn reply<T: Tools>(s: &mut Server<T>, msg: &Value) -> Option<Value> {
     s.handle_line(&msg.to_string()).map(|r| serde_json::from_str(&r).unwrap())
 }
 
@@ -193,7 +202,8 @@ fn null_arguments_are_none_and_enums_are_checked() {
     assert_eq!(args, [&json!({}), &json!({}), &json!({"level": "high"})]);
 }
 
-/// An app that serves no resources, templates or prompts lists none of each.
+/// An app that serves no resources, templates or prompts lists none of each, says it serves only
+/// tools, and has no prompt to fill in or argument to complete.
 #[test]
 fn the_default_lists_are_empty() {
     let mut s = Server::new(info(), Echo::default());
@@ -201,6 +211,150 @@ fn the_default_lists_are_empty() {
     assert_eq!(result(&mut s, "resources/list"), json!({"resources": []}));
     assert_eq!(result(&mut s, "resources/templates/list"), json!({"resourceTemplates": []}));
     assert_eq!(result(&mut s, "prompts/list"), json!({"prompts": []}));
+    assert_eq!(result(&mut s, "initialize")["capabilities"], json!({"tools": {"listChanged": false}}));
+    for method in ["prompts/get", "completion/complete"] {
+        let r = reply(&mut s, &json!({"jsonrpc": "2.0", "id": 2, "method": method, "params": {"name": "describe"}})).unwrap();
+        assert_eq!(r["error"]["code"], -32601, "{method}: {r}");
+    }
+}
+
+/// An app that serves more than tools: a prompt with a required and an optional argument, a
+/// resource template, a Markdown resource and a PNG, and suggestions for any argument. `asked`
+/// records every prompt filled in and every completion asked for.
+#[derive(Default)]
+struct Library {
+    asked: Vec<String>,
+}
+
+impl Tools for Library {
+    fn instructions(&self) -> String {
+        "Library test.".into()
+    }
+    fn list(&mut self) -> Vec<Value> {
+        Vec::new()
+    }
+    fn call(&mut self, name: &str, _: &Value) -> Value {
+        text_result(format!("no tool `{name}`"), true)
+    }
+    fn resources(&self) -> Vec<Value> {
+        vec![
+            json!({"uri": "lib://readme", "name": "Readme", "mimeType": "text/markdown"}),
+            json!({"uri": "lib://logo", "name": "Logo", "mimeType": "image/png"}),
+        ]
+    }
+    fn resource_templates(&self) -> Vec<Value> {
+        vec![json!({"uriTemplate": "lib://parts/{name}", "name": "Part", "mimeType": "text/markdown"})]
+    }
+    fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
+        let markdown = |text: String| Contents::Text { mime_type: "text/markdown".into(), text };
+        Some(Ok(match uri {
+            "lib://readme" => markdown("# Parts\n\nA \"quoted\" line.".into()),
+            "lib://logo" => Contents::Blob { mime_type: "image/png".into(), data: b"foo".to_vec() },
+            "lib://parts/broken" => return Some(Err("the part is being rebuilt".into())),
+            _ => markdown(format!("# {}", uri.strip_prefix("lib://parts/")?)),
+        }))
+    }
+    fn prompts(&self) -> Vec<Value> {
+        vec![json!({"name": "describe", "title": "Describe a part", "arguments": [{"name": "part", "required": true}, {"name": "tone"}]})]
+    }
+    fn get_prompt(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        self.asked.push(format!("{name} {args}"));
+        let text = format!("Describe {} in a {} tone.", args["part"].as_str().unwrap_or_default(), args["tone"].as_str().unwrap_or("plain"));
+        Ok(json!({"messages": [{"role": "user", "content": {"type": "text", "text": text}}]}))
+    }
+    fn complete(&mut self, reference: Reference<'_>, argument: &str, value: &str) -> Vec<String> {
+        self.asked.push(format!("{reference:?} {argument}={value}"));
+        (0..150).map(|i| format!("{value}{i}")).collect()
+    }
+}
+
+/// The shared crate serves an app's prompt, resource template and Markdown and binary resources,
+/// and tells the client at `initialize` that it does (#13336).
+#[test]
+fn an_app_serves_prompts_templates_and_markdown_or_binary_resources() {
+    let request = |id: u64, method: &str, params: Value| json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    let (mut s, replies) = serve_with(
+        Library::default(),
+        &[
+            request(1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION})),
+            request(2, "prompts/list", json!({})),
+            request(3, "prompts/get", json!({"name": "describe", "arguments": {"part": "bracket"}})),
+            request(4, "resources/templates/list", json!({})),
+            request(5, "resources/read", json!({"uri": "lib://readme"})),
+            request(6, "resources/read", json!({"uri": "lib://logo"})),
+            request(7, "resources/read", json!({"uri": "lib://parts/bracket"})),
+            request(8, "resources/read", json!({"uri": "lib://parts/broken"})),
+            request(9, "resources/read", json!({"uri": "lib://nope"})),
+        ],
+    );
+    let result = |i: usize| &replies[i]["result"];
+    assert_eq!(
+        result(0)["capabilities"],
+        json!({"tools": {"listChanged": false}, "resources": {"listChanged": false}, "prompts": {"listChanged": false}, "completions": {}})
+    );
+    assert_eq!(result(1)["prompts"][0]["name"], "describe");
+    assert_eq!(result(2), &json!({"messages": [{"role": "user", "content": {"type": "text", "text": "Describe bracket in a plain tone."}}]}));
+    assert_eq!(result(3), &json!({"resourceTemplates": [{"uriTemplate": "lib://parts/{name}", "name": "Part", "mimeType": "text/markdown"}]}));
+    // The Markdown goes out as it is, not as a JSON string of it.
+    assert_eq!(result(4), &json!({"contents": [{"uri": "lib://readme", "mimeType": "text/markdown", "text": "# Parts\n\nA \"quoted\" line."}]}));
+    assert_eq!(result(5), &json!({"contents": [{"uri": "lib://logo", "mimeType": "image/png", "blob": "Zm9v"}]}));
+    assert_eq!(result(6), &json!({"contents": [{"uri": "lib://parts/bracket", "mimeType": "text/markdown", "text": "# bracket"}]}));
+    assert_eq!(replies[7]["error"], json!({"code": -32603, "message": "the part is being rebuilt"}));
+    assert_eq!(replies[8]["error"]["code"], -32002);
+    assert_eq!(s.tools().asked, [r#"describe {"part":"bracket"}"#]);
+}
+
+/// A prompt is filled in only with the arguments its listing declares, each a string, the
+/// required ones present; anything else is invalid params and the app is never asked.
+#[test]
+fn prompt_arguments_are_checked_before_the_prompt_is_filled_in() {
+    let mut s = Server::new(info(), Library::default());
+    let get =
+        |s: &mut Server<Library>, params: Value| reply(s, &json!({"jsonrpc": "2.0", "id": 1, "method": "prompts/get", "params": params})).unwrap();
+    for (params, message) in [
+        (json!({"arguments": {"part": "a"}}), "missing prompt `name`"),
+        (json!({"name": "summarise"}), "unknown prompt `summarise`"),
+        (json!({"name": "describe"}), "describe: missing required argument `part`"),
+        (json!({"name": "describe", "arguments": ["a"]}), "describe: arguments must be an object"),
+        (json!({"name": "describe", "arguments": {"part": 3}}), "describe: argument `part` must be a string"),
+        (json!({"name": "describe", "arguments": {"part": null}}), "describe: argument `part` must be a string"),
+        (json!({"name": "describe", "arguments": {"part": "a", "size": "big"}}), "describe: unknown argument `size`; its arguments are: part, tone"),
+    ] {
+        assert_eq!(get(&mut s, params.clone())["error"], json!({"code": -32602, "message": message}), "{params}");
+    }
+    assert!(s.tools().asked.is_empty());
+    let filled = get(&mut s, json!({"name": "describe", "arguments": {"part": "hinge", "tone": "dry"}}));
+    assert_eq!(filled["result"]["messages"][0]["content"]["text"], "Describe hinge in a dry tone.");
+}
+
+/// Completion asks the app about a listed prompt or a resource, and sends the first 100
+/// suggestions with how many there are; a bad reference or argument is invalid params.
+#[test]
+fn completion_suggests_up_to_a_hundred_values() {
+    let mut s = Server::new(info(), Library::default());
+    let complete = |s: &mut Server<Library>, params: Value| {
+        reply(s, &json!({"jsonrpc": "2.0", "id": 1, "method": "completion/complete", "params": params})).unwrap()
+    };
+    let r = complete(&mut s, json!({"ref": {"type": "ref/prompt", "name": "describe"}, "argument": {"name": "part", "value": "br"}}));
+    let completion = &r["result"]["completion"];
+    assert_eq!(completion["values"].as_array().map(Vec::len), Some(100), "{r}");
+    assert_eq!((&completion["values"][0], &completion["total"], &completion["hasMore"]), (&json!("br0"), &json!(150), &json!(true)));
+    let r = complete(&mut s, json!({"ref": {"type": "ref/resource", "uri": "lib://parts/{name}"}, "argument": {"name": "name", "value": ""}}));
+    assert_eq!(r["result"]["completion"]["values"][99], "99");
+    assert_eq!(s.tools().asked, [r#"Prompt("describe") part=br"#, r#"Resource("lib://parts/{name}") name="#]);
+    let bad_ref = "`ref` must be a prompt's {type: ref/prompt, name} or a resource's {type: ref/resource, uri}";
+    let bad_argument = "`argument` must have a `name` and a `value`, both strings";
+    for (params, message) in [
+        (json!({"ref": {"type": "ref/prompt", "name": "summarise"}, "argument": {"name": "a", "value": ""}}), "unknown prompt `summarise`"),
+        (json!({"ref": {"type": "ref/tool", "name": "x"}, "argument": {"name": "a", "value": ""}}), bad_ref),
+        (json!({"ref": {"type": "ref/resource"}, "argument": {"name": "a", "value": ""}}), bad_ref),
+        (json!({"argument": {"name": "a", "value": ""}}), bad_ref),
+        (json!({"ref": {"type": "ref/prompt", "name": "describe"}, "argument": {"name": "part"}}), bad_argument),
+        (json!({"ref": {"type": "ref/prompt", "name": "describe"}}), bad_argument),
+    ] {
+        assert_eq!(complete(&mut s, params.clone())["error"], json!({"code": -32602, "message": message}), "{params}");
+    }
+    assert_eq!(s.tools().asked.len(), 2, "a refused completion never reaches the app");
 }
 
 /// `Tools::call` runs right after the listing its arguments were checked against, every time,
@@ -214,4 +368,146 @@ fn every_call_runs_right_after_its_listing() {
     reply(&mut s, &call("echo", json!({})));
     reply(&mut s, &json!([call("level", json!({})), call("echo", json!({"text": "b"}))]));
     assert_eq!(s.tools().log, ["list", "list", "call echo", "list", "list", "call level", "list", "call echo"]);
+}
+
+/// Open schemas forward extra keys, but still check declared properties and required fields.
+#[test]
+fn additional_properties_are_forwarded_only_when_allowed() {
+    let mut schema = object(json!({"theme": {"type": "string"}}), &["theme"]);
+    for additional in [None, Some(false), Some(true)] {
+        if let Some(allow) = additional {
+            schema["additionalProperties"] = json!(allow);
+        } else {
+            schema.as_object_mut().unwrap().remove("additionalProperties");
+        }
+        let defs = vec![tool("prefs", "Preferences", "Set preferences", schema.clone(), Effect::Edits)];
+        assert_eq!(check_arguments(&defs, "prefs", &json!({"theme": "dark", "other": 1})).is_ok(), additional == Some(true));
+        assert!(check_arguments(&defs, "prefs", &json!({"theme": 1})).is_err());
+        assert!(check_arguments(&defs, "prefs", &json!({"other": 1})).is_err());
+    }
+}
+
+/// Standard MCP `notifications/cancelled` parsing accepts string & integer `requestId`s, rejects
+/// requests and malformed payloads, and invokes both `Tools::cancel` and `with_on_cancel` hooks
+/// without emitting a JSON-RPC reply.
+#[test]
+fn cancelled_notification_parses_valid_messages_and_invokes_hooks() {
+    assert_eq!(
+        cancelled_notification(r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":42,"reason":"user aborted"}}"#),
+        Some(Cancelled { request_id: json!(42), reason: Some("user aborted".into()) })
+    );
+    assert_eq!(
+        cancelled_notification(r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"req-7"}}"#),
+        Some(Cancelled { request_id: json!("req-7"), reason: None })
+    );
+    for invalid in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"notifications/cancelled","params":{"requestId":42}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":null}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1.5}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":{"id":1}}}"#,
+        "not json",
+    ] {
+        assert_eq!(cancelled_notification(invalid), None, "{invalid}");
+    }
+
+    #[derive(Default)]
+    struct CancelSpy {
+        seen: Vec<(Value, Option<String>)>,
+    }
+    impl Tools for CancelSpy {
+        fn instructions(&self) -> String {
+            "spy".into()
+        }
+        fn list(&mut self) -> Vec<Value> {
+            Vec::new()
+        }
+        fn call(&mut self, _: &str, _: &Value) -> Value {
+            text_result("ok", false)
+        }
+        fn cancel(&mut self, request_id: &Value, reason: Option<&str>) {
+            self.seen.push((request_id.clone(), reason.map(str::to_owned)));
+        }
+    }
+
+    let hook_seen: Arc<Mutex<Vec<(Value, Option<String>)>>> = Arc::new(Mutex::new(Vec::new()));
+    let hook_log = Arc::clone(&hook_seen);
+    let mut s = Server::new(info(), CancelSpy::default()).with_on_cancel(move |id, reason| {
+        hook_log.lock().unwrap().push((id.clone(), reason.map(str::to_owned)));
+    });
+    assert_eq!(
+        reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 11, "reason": "timeout"}})),
+        None
+    );
+    assert_eq!(reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "abc"}})), None);
+    assert_eq!(reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": null}})), None);
+
+    let expected = vec![(json!(11), Some("timeout".to_string())), (json!("abc"), None)];
+    assert_eq!(s.tools().seen, expected);
+    assert_eq!(*hook_seen.lock().unwrap(), expected);
+}
+
+/// Standard MCP `notifications/progress` serializes string & integer `_meta.progressToken` values,
+/// supports thread-safe emission via `ProgressReporter`, and emits nothing when no valid
+/// `progressToken` is supplied.
+#[test]
+fn progress_notifications_serialize_string_and_integer_tokens_and_omit_when_absent() {
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": "tok-1"}})), Some(json!("tok-1")));
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": 99}})), Some(json!(99)));
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": 1.5}})), None);
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": true}})), None);
+    assert_eq!(progress_token(&json!({})), None);
+
+    assert_eq!(
+        progress_notification(&json!("tok-1"), 1.0, Some(4.0), Some("step 1/4")),
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "tok-1", "progress": 1, "total": 4, "message": "step 1/4"}})
+    );
+    assert_eq!(
+        progress_notification(&json!(7), 0.5, None, Some("")),
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 7, "progress": 0.5}})
+    );
+
+    struct Stepper;
+    impl Tools for Stepper {
+        fn instructions(&self) -> String {
+            "stepper".into()
+        }
+        fn list(&mut self) -> Vec<Value> {
+            vec![tool("work", "Work", "Do two steps.", object(json!({}), &[]), Effect::ReadOnly)]
+        }
+        fn call(&mut self, _: &str, _: &Value) -> Value {
+            text_result("done", false)
+        }
+        fn call_with_progress(&mut self, _: &str, _: &Value, progress: Option<&ProgressReporter>) -> Value {
+            if let Some(p) = progress {
+                p.report(1.0, Some(2.0), Some("step 1/2"));
+                p.report(2.0, Some(2.0), None);
+            }
+            text_result("done", false)
+        }
+    }
+
+    let (_, messages) = serve_with(
+        Stepper,
+        &[
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": "p-str"}}}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": 42}}}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "work", "arguments": {}}}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": true}}}),
+        ],
+    );
+    assert_eq!(
+        messages,
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "p-str", "progress": 1, "total": 2, "message": "step 1/2"}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "p-str", "progress": 2, "total": 2}}),
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 42, "progress": 1, "total": 2, "message": "step 1/2"}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 42, "progress": 2, "total": 2}}),
+            json!({"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "id": 4, "result": {"content": [{"type": "text", "text": "done"}]}}),
+        ]
+    );
 }

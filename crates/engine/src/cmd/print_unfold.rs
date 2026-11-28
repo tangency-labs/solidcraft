@@ -137,7 +137,8 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
     let mut doc = Document::new(&format!("{name} unfolded"));
     doc.units = s.doc.units.clone();
     let mut fresh = Session::new(doc);
-    let kind = FeatureKind::Import { file: format!("{name} ({})", s.doc.name), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind =
+        FeatureKind::Import { file: format!("{name} ({})", s.doc.name), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None };
     let id = fresh.doc_mut().add_feature(kind, None)?;
     if let Some(f) = fresh.doc_mut().feature_mut(id) {
         f.body_names = vec![name.to_string()];
@@ -572,7 +573,13 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
     if let Some(old) = unfold.surface {
         scratch.doc_mut().delete_feature(old)?;
     }
-    let kind = FeatureKind::Import { file: format!("{} printable parts", unfold.body), step: text.into(), components: Vec::new(), skip: Vec::new() };
+    let kind = FeatureKind::Import {
+        file: format!("{} printable parts", unfold.body),
+        step: text.into(),
+        components: Vec::new(),
+        skip: Vec::new(),
+        records: None,
+    };
     let id = scratch.doc_mut().add_feature(kind, None)?;
     if let Some(f) = scratch.doc_mut().feature_mut(id) {
         f.body_names = (1..=parts.len()).map(|i| format!("{} Part {i}", unfold.body)).collect();
@@ -586,7 +593,7 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
     if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
         return Err(bad(cmd, format!("the printable parts weren't made: {error}")));
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     if !s.visibility.hidden_bodies.contains(&unfold.body) {
         s.visibility.hidden_bodies.push(unfold.body.clone());
     }
@@ -609,7 +616,7 @@ fn unmake(s: &mut Session, _: &Value) -> Result<Value> {
         u.parts = None;
     }
     scratch.refresh();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     remake(s, cmd, PrintUnfoldStep::Flat, splits)?;
     reply(s, cmd)
 }
@@ -644,7 +651,8 @@ fn remake(s: &mut Session, cmd: &str, step: PrintUnfoldStep, splits: Vec<Vec3>) 
     if let Some(old) = unfold.surface {
         scratch.doc_mut().delete_feature(old)?;
     }
-    let kind = FeatureKind::Import { file: format!("{} faces", unfold.body), step: text.into(), components: Vec::new(), skip: Vec::new() };
+    let kind =
+        FeatureKind::Import { file: format!("{} faces", unfold.body), step: text.into(), components: Vec::new(), skip: Vec::new(), records: None };
     let id = scratch.doc_mut().add_feature(kind, None)?;
     if let Some(f) = scratch.doc_mut().feature_mut(id) {
         f.body_names = (1..=patches.len()).map(|i| format!("{} Face {i}", unfold.body)).collect();
@@ -658,7 +666,7 @@ fn remake(s: &mut Session, cmd: &str, step: PrintUnfoldStep, splits: Vec<Vec3>) 
     if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
         return Err(bad(cmd, format!("the surface model wasn't made: {error}")));
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     if !s.visibility.hidden_bodies.contains(&unfold.body) {
         s.visibility.hidden_bodies.push(unfold.body.clone());
     }
@@ -877,7 +885,8 @@ fn surface(s: &mut Session, _: &Value) -> Result<Value> {
     let refs: Vec<&solidcraft_kernel::Body> = patches.iter().collect();
     let step = solidcraft_kernel::step_export(&refs, "SolidCraft unfold for printing")?;
     let mut scratch = s.scratch();
-    let kind = FeatureKind::Import { file: format!("{} faces", unfold.body), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind =
+        FeatureKind::Import { file: format!("{} faces", unfold.body), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None };
     let id = scratch.doc_mut().add_feature(kind, None)?;
     let taken: Vec<String> = scratch.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let names: Vec<String> = (1..=patches.len())
@@ -897,7 +906,7 @@ fn surface(s: &mut Session, _: &Value) -> Result<Value> {
     if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
         return Err(bad(cmd, format!("the surface model wasn't made: {error}")));
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     if !s.visibility.hidden_bodies.contains(&unfold.body) {
         s.visibility.hidden_bodies.push(unfold.body.clone());
     }
@@ -920,7 +929,7 @@ fn edit(s: &mut Session, _: &Value) -> Result<Value> {
         u.splits = Vec::new();
     }
     scratch.refresh();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     s.visibility.hidden_bodies.retain(|b| *b != unfold.body);
     reply(s, cmd)
 }

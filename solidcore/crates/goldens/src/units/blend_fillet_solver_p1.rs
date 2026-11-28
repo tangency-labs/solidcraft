@@ -48,6 +48,7 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{JacobianLoad, OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
 use solidcore::blend::fillet_solver::p1::{
     check_edge_curve_domains, compute_uv_vectors, find_next_good_interval, test_analytic_surface,
     test_manifold_tangent_rollover, test_side_edge_convexity, tol_ang_tol_rad, trim_rail,
@@ -419,7 +420,9 @@ fn trim_interval(c: &BrepCase, e: i64, t: [f64; 2]) -> Result<[f64; 2], HarnessE
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1288,9 +1291,10 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 1 => FilletSurfaceGenerator::Linear,
                 2 => FilletSurfaceGenerator::circular_default(),
                 3 => FilletSurfaceGenerator::circular(a != 0.0, bb, c != 0.0, d != 0.0),
-                4 => FilletSurfaceGenerator::blend_curve_default(),
-                // (the shim's `(ULONG)b`)
-                _ => FilletSurfaceGenerator::blend_curve(a, bb as u32),
+                // a blend curve is the G^n section (the old generator is retired, WR-685):
+                // the default order 2, or order `b` (at least 2) at thumbweight `a`
+                4 => FilletSurfaceGenerator::GnSection(GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT)),
+                _ => FilletSurfaceGenerator::GnSection(GnSectionFsg::new((bb as usize).max(2), a)),
             };
             o.push(f64::from(g.fillet_surface_generator_type() as i32));
             match g {
@@ -1302,7 +1306,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 ]),
                 _ => o.extend([0.0; 4]),
             }
-            o.push(g.blend_scale().unwrap_or(0.0));
+            o.push(g.thumbweight().unwrap_or(0.0));
             o.push(g.continuity().map_or(0.0, f64::from));
             if *kind == 0 {
                 let k = Kernel::default();
@@ -2348,5 +2352,58 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &crate::Case) -> Result<Output, HarnessError> {
         let k = &Kernel::default();
         rust(k, &case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod bstuv {
+    #![allow(clippy::unwrap_used, clippy::panic, clippy::print_stderr)]
+    use super::*;
+
+    /// WR-441 (`crate::bstuv_trim_rows`): `trim_rail_mouse_rebuild_edge7`, whose rail's UV
+    /// trim keeps its short end spans. `sm_TrimRail` trims the rail's 3D curve and its UV
+    /// trim to the same interval. The mate holds no trim, so it reads the primary's. After
+    /// the trim, the UV trim is certified on the trimmed rail within the edge's tolerance:
+    /// a rounded-interval Hausdorff bound between `C` and `S(W)`, over the whole interval
+    /// and over each end span.
+    #[test]
+    fn bstuv_trim_rail_keeps_its_rail_on_the_edge() {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::query::curve_surface_gap::trim_image_gap_bound;
+        use solidcore::topology::edgeuse::p1 as eu1;
+        let name = "trim_rail_mouse_rebuild_edge7";
+        let case = crate::case::regression_case(&Runner, name);
+        let i: Inputs = case.parse().unwrap();
+        let Inputs::TrimRail { brep, t, .. } = &i else {
+            panic!("{name}: not a trim_rail case")
+        };
+        let mut c = own_case(brep).unwrap().unwrap();
+        let r = resolve(&i, &c);
+        let e = EdgeId::from_index(eid(r[0]).unwrap());
+        let [t0, t1] = trim_interval(&c, r[0], *t).unwrap();
+        let prim = eu::primary_edgeuse(&c.brep, e).unwrap().unwrap();
+        let k = Kernel::default();
+        trim_rail(&k, &mut c.brep, e, &Extent1d::from_min_max(t0, t1)).unwrap();
+        let (w, owner) = eu1::uv_trim_curve(&c.brep, prim).unwrap();
+        assert_eq!(owner, Some(prim), "the primary holds the trim");
+        let w = w.unwrap();
+        let face = eu1::face(&c.brep, prim).unwrap().unwrap();
+        let s = c.brep.face(face).unwrap().surface.as_ref().unwrap();
+        let rec = c.brep.edge(e).unwrap();
+        let (curve, tol) = (rec.curve.as_ref().unwrap(), rec.tolerance);
+        let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, curve, w, tol);
+        let CurveKind::BSpline(bw) = w.kind() else {
+            panic!("the trim is not a B-spline")
+        };
+        let knots = bw.gw_nurb().unwrap().knots().to_vec();
+        let range = [knots[0], knots[knots.len() - 1]];
+        let full = trim_image_gap_bound(&k, s, curve, w, range, 0.0)
+            .unwrap()
+            .unwrap();
+        eprintln!("BSTUV {name}: {ends:?}, whole trim {full:e} (tolerance {tol:e})");
+        assert_eq!(ends.n, 48, "the row's trim");
+        for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)).chain([full]) {
+            assert!(b <= tol, "the trim is {b:e} off the rail");
+        }
     }
 }

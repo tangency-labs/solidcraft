@@ -1,6 +1,30 @@
-//! The content blocks a tool result is made of (MCP `CallToolResult`).
+//! The content blocks a tool result is made of (MCP `CallToolResult`), and the contents a resource
+//! read sends (MCP `ReadResourceResult`).
 
 use serde_json::{Value, json};
+
+/// What `resources/read` sends for one resource: text of a MIME type, or bytes of a MIME type,
+/// which go out base64-encoded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Contents {
+    Text { mime_type: String, text: String },
+    Blob { mime_type: String, data: Vec<u8> },
+}
+
+impl Contents {
+    /// `value` as JSON text (`application/json`).
+    pub fn json(value: &Value) -> Self {
+        Self::Text { mime_type: "application/json".into(), text: value.to_string() }
+    }
+
+    /// The MCP contents block of resource `uri`.
+    pub(crate) fn block(&self, uri: &str) -> Value {
+        match self {
+            Self::Text { mime_type, text } => json!({"uri": uri, "mimeType": mime_type, "text": text}),
+            Self::Blob { mime_type, data } => json!({"uri": uri, "mimeType": mime_type, "blob": base64(data)}),
+        }
+    }
+}
 
 /// A tool result of one text block, flagged as an error when `is_error` (the model sees the
 /// message; an error is still a result, not a JSON-RPC error).

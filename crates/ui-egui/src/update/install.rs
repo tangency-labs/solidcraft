@@ -10,7 +10,9 @@
 //! What "put in place" means per installation:
 //! - AppImage: the new AppImage is written next to the old one and renamed over it (atomic on
 //!   one file system; the running copy keeps its old inode), then SolidCraft offers a restart.
-//! - Windows installer: the `.msi` is started with `msiexec /i … /passive` as SolidCraft exits.
+//! - Windows installer: the `.msi` uses `msiexec /i … /passive REBOOT=ReallySuppress`
+//!   as SolidCraft exits, preventing an unattended system restart (#18774). A "just for me"
+//!   install adds `ALLUSERS=2 MSIINSTALLPERUSER=1`, so the update stays in the user's own context.
 //! - Windows portable `.zip` / standalone `.exe`: the running `solidcraft.exe` is renamed to
 //!   `solidcraft.exe.old` (Windows allows renaming a running executable), the new one takes its
 //!   name, and SolidCraft offers a restart; the `.old` file is deleted at the next start.
@@ -49,8 +51,8 @@ pub type HttpDownload = Arc<dyn Fn(&str, &Path, &dyn Fn(u64, Option<u64>) -> boo
 pub enum Method {
     /// Replace this AppImage file.
     AppImage(PathBuf),
-    /// Run the downloaded `.msi`.
-    Msi,
+    /// Run the downloaded `.msi`; `per_user` for a "just for me" install.
+    Msi { per_user: bool },
     /// Swap the running executable (at this path) for the portable zip's one.
     PortableZip(PathBuf),
     /// Swap the running executable (at this path) for the downloaded `.exe`.
@@ -63,7 +65,8 @@ pub enum Method {
 pub fn method(kind: &InstallKind, exe: Option<&Path>) -> Option<Method> {
     match kind {
         InstallKind::AppImage(path) => Some(Method::AppImage(path.clone())),
-        InstallKind::WindowsMsi => Some(Method::Msi),
+        InstallKind::WindowsMsi => Some(Method::Msi { per_user: false }),
+        InstallKind::WindowsMsiPerUser => Some(Method::Msi { per_user: true }),
         InstallKind::WindowsPortable => exe.map(|e| Method::PortableZip(e.to_path_buf())),
         InstallKind::WindowsExe => exe.map(|e| Method::Exe(e.to_path_buf())),
         InstallKind::MacApp(_) => Some(Method::Dmg),
@@ -238,7 +241,7 @@ pub fn run(
     let part = match method {
         Method::AppImage(target) => sibling(target, ".update")?,
         Method::Exe(exe) => sibling(exe, ".update")?,
-        Method::Msi | Method::Dmg | Method::PortableZip(_) => {
+        Method::Msi { .. } | Method::Dmg | Method::PortableZip(_) => {
             std::fs::create_dir_all(staging).map_err(|e| format!("{}: {e}", staging.display()))?;
             staging.join(&asset.name)
         }
@@ -276,11 +279,11 @@ pub fn run(
 }
 
 /// Where an AppImage called `path` goes once it holds `version`: if its name is a release name
-/// (`solidcraft-<version>-linux-<arch>.AppImage`, or the old `solvecraft-` one), the new release's name
+/// (`solidcraft-<version>-linux-<arch>.AppImage`), the new release's name
 /// in the same folder; any other name (renamed by the user, or without a version) is kept.
 pub fn release_named(path: &Path, version: &str, arch: &str) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let rest = name.strip_prefix("solidcraft-").or_else(|| name.strip_prefix("solvecraft-"));
+    let rest = name.strip_prefix("solidcraft-");
     if rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.contains("-linux-") && r.ends_with(".appimage")) {
         path.with_file_name(format!("solidcraft-{}-linux-{arch}.AppImage", version.trim_start_matches('v')))
     } else {
@@ -325,7 +328,17 @@ pub fn apply(method: &Method, package: &Path) -> Result<Outcome, String> {
             }
             Ok(Outcome::Restart(exe.clone()))
         }
-        Method::Msi => Ok(Outcome::Installer(PathBuf::from("msiexec"), vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into()])),
+        // /passive is non-interactive. Without REBOOT=ReallySuppress, Windows Installer may
+        // restart the user's computer to replace a still-running solidcraft-cli.exe (#18774).
+        // Windows Installer finds the installed version only in its own context, so a per-user
+        // install is updated per-user; without the two properties the MSI defaults to all users.
+        Method::Msi { per_user } => {
+            let mut args = vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()];
+            if *per_user {
+                args.extend(["ALLUSERS=2".into(), "MSIINSTALLPERUSER=1".into()]);
+            }
+            Ok(Outcome::Installer(PathBuf::from("msiexec"), args))
+        }
         Method::Dmg => Ok(Outcome::Opened(package.to_path_buf())),
     }
 }

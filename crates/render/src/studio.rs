@@ -4,7 +4,7 @@
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use crate::surface::{OpaqueSurface, SurfaceError, unit_direction};
+use solidcraft_viewport::surface::{OpaqueSurface, SurfaceError, unit_direction};
 
 /// Fixed, neutral directional lights in the project's world frame (Z up).
 /// Directions point towards each light and are analytically unit length.

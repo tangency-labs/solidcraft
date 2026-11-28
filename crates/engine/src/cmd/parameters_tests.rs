@@ -145,6 +145,94 @@ fn unit_errors_and_cycles_are_refused() {
     assert!((r["value"].as_f64().unwrap_or(0.0) - 50.8).abs() < 1e-9, "{r}");
 }
 
+/// A product of lengths evaluates as the volume or area it is (#4811), shown in mm³ or mm², and
+/// `kind` can ask for a mass, a volume or an area.
+#[test]
+fn products_of_lengths_evaluate_as_volumes_and_areas() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "10 mm"}));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^3"}));
+    assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("volume"), Some(1000.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a * 2 mm", "kind": "area"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("area"), Some(20.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^2", "kind": "volume"}));
+    assert!(r["error"].as_str().unwrap_or("").contains("expected a volume, got an area"), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "2", "kind": "mass"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("mass"), Some(2000.0)), "a bare mass is kilograms (in grams): {r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "4", "kind": "number"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("unitless"), Some(4.0)), "{r}");
+    let e = err(&mut s, "expr.evaluate", json!({"expression": "1", "kind": "weight"}));
+    assert!(e.contains("(length, angle, unitless, mass, volume, area or number)"), "{e}");
+}
+
+/// Masses, volumes and areas as parameters (#4811): `50 g` is a mass, shown in kilograms; a bare
+/// number in a kilogram parameter is kilograms; a unit's name can't be a parameter's; the units
+/// are offered as a word is typed; and the table exports and imports with its units.
+#[test]
+fn mass_volume_and_area_parameters() {
+    let mut s = Session::default();
+    let r = run(&mut s, "parameters.add", json!({"name": "grease", "expression": "50 g"}));
+    assert_eq!((r["unit"].as_str(), r["value"].as_f64(), r["display_value"].as_f64()), (Some("kg"), Some(50.0), Some(0.05)), "{r}");
+    run(&mut s, "parameters.add", json!({"name": "kit", "expression": "2", "unit": "kg"}));
+    run(&mut s, "parameters.add", json!({"name": "total", "expression": "kit + grease * 4"}));
+    run(&mut s, "parameters.add", json!({"name": "sheet", "expression": "2.5 m²"}));
+    run(&mut s, "parameters.add", json!({"name": "oil", "expression": "500 ml", "unit": "cm³"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    let shown = |n: &str| (row(&l, n)["unit"].as_str().map(str::to_string), row(&l, n)["display_value"].as_f64());
+    assert_eq!(shown("kit"), (Some("kg".into()), Some(2.0)), "{l}");
+    assert_eq!(shown("total"), (Some("kg".into()), Some(2.2)), "{l}");
+    assert_eq!(shown("sheet"), (Some("mm²".into()), Some(2.5e6)), "{l}");
+    // A bare number beside a mass means the same in a preview and in the parameter it makes: kg.
+    let preview = run(&mut s, "expr.evaluate", json!({"expression": "kit + 1"}));
+    let made = run(&mut s, "parameters.add", json!({"name": "more", "expression": "kit + 1"}));
+    assert_eq!((preview["value"].as_f64(), preview["display_value"].as_f64()), (Some(3000.0), Some(3.0)), "{preview}");
+    assert_eq!((made["unit"].as_str(), made["value"].as_f64(), made["display_value"].as_f64()), (Some("kg"), Some(3000.0), Some(3.0)), "{made}");
+    let bare = run(&mut s, "expr.evaluate", json!({"expression": "3", "kind": "mass"}));
+    let typed = run(&mut s, "parameters.add", json!({"name": "three", "expression": "3", "unit": "kg"}));
+    assert_eq!((bare["value"].as_f64(), typed["value"].as_f64()), (Some(3000.0), Some(3000.0)));
+    assert_eq!(shown("oil"), (Some("cm³".into()), Some(500.0)), "{l}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "kit / 2", "unit": "lb"}));
+    assert_eq!(r["display_value"].as_f64(), Some(solidcraft_doc::expr::round_reported(1000.0 / 453.592_37)), "reported to 12 digits: {r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "kit"}));
+    assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("mass"), Some(2.0)), "shown in kg: {r}");
+    // A mass is not a length, either way round.
+    let e = err(&mut s, "parameters.add", json!({"name": "bad", "expression": "kit", "unit": "mm"}));
+    assert!(e.contains("expected a length, got a mass"), "{e}");
+    let e = err(&mut s, "parameters.change", json!({"name": "kit", "expression": "2 mm"}));
+    assert!(e.contains("expected a mass, got a length"), "{e}");
+    // A unit's name can't be a parameter's, new or renamed; an unknown unit names the known ones.
+    for unit in ["g", "kg", "lb", "ml", "cm³", "m²"] {
+        assert!(err(&mut s, "parameters.add", json!({"name": unit, "expression": "1"})).contains("unit name"), "{unit}");
+        assert!(err(&mut s, "parameters.rename", json!({"name": "kit", "new_name": unit})).contains("unit name"), "{unit}");
+    }
+    assert!(err(&mut s, "parameters.add", json!({"name": "x", "expression": "1", "unit": "tonne"})).contains("kg"));
+    // The units are offered as the word is typed, with their kind.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * k"}));
+    let kg = c["suggestions"].as_array().and_then(|a| a.iter().find(|x| x["text"] == "kg")).cloned();
+    assert_eq!(kg.map(|x| (x["kind"].clone(), x["detail"].clone())), Some((json!("unit"), json!("mass"))), "{c}");
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "cm"}));
+    assert!(c["suggestions"].as_array().is_some_and(|a| a.iter().any(|x| x["text"] == "cm³")), "{c}");
+    // Export and import keep the units.
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("grease,kg,50 g,0.05,,false"), "{csv}");
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    assert_eq!(t.doc.param("oil").map(|p| p.unit.as_str()), Some("cm³"));
+    assert_eq!(t.doc.param_values().0.get("total"), s.doc.param_values().0.get("total"));
+}
+
+/// `parameters.change` sends its readers to the guide for the units, so the guide names every
+/// unit expressions know.
+#[test]
+fn the_guide_lists_every_unit() {
+    let guide = include_str!("../../../../docs/book/src/guide/parameters.md");
+    let change = super::COMMANDS.iter().find(|c| c.id == "parameters.change").map_or("", |c| c.params);
+    assert!(change.contains("docs/book/src/guide/parameters.md"), "{change}");
+    for (unit, _, _) in solidcraft_doc::expr::UNITS {
+        assert!(guide.contains(&format!("`{unit}`")), "{unit} is missing from the guide");
+    }
+}
+
 #[test]
 fn rename_updates_every_reference() {
     let mut s = Session::default();
@@ -233,7 +321,7 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     }
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift"}));
     run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
     run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
     run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
@@ -398,6 +486,123 @@ fn csv_and_json_round_trip() {
     run(&mut v, "parameters.import", json!({"path": path.to_string_lossy()}));
     assert_eq!(v.doc.param("len").map(|p| p.expr.as_str()), Some("80 mm"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_import_resolves_forward_references() {
+    let mut session = Session::default();
+    let rows = json!([
+        {"name": "panel_width", "unit": "in", "expression": "opening_width - (panel_thickness * 2)"},
+        {"name": "opening_width", "unit": "in", "expression": "24 in"},
+        {"name": "panel_thickness", "unit": "in", "expression": "3/4 in"},
+        {"name": "panel_angle", "expression": "door_angle + 15 deg"},
+        {"name": "door_angle", "expression": "30 deg"}
+    ]);
+
+    run(&mut session, "parameters.import", json!({"text": rows.to_string()}));
+
+    let (values, errors) = session.doc.param_values();
+    assert!(errors.is_empty(), "{errors:?}");
+    // Inch and angle conversions can round at the last bit on different platforms.
+    for (name, expected) in [("panel_width", 22.5), ("panel_angle", 45.0)] {
+        let actual = session.doc.param_display_value(&values, name).expect("imported parameter has a value");
+        assert!(rel(actual, expected) < 1e-12, "{name}: expected {expected}, got {actual}");
+    }
+}
+
+#[test]
+fn parameter_import_preserves_input_and_existing_table_order() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let rows = json!([
+        {"name": "a", "expression": "b + 1 mm"},
+        {"name": "b", "expression": "2 mm"},
+        {"name": "c", "expression": "3 mm"}
+    ]);
+    let imported = run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(imported["imported"], json!(["a", "b", "c"]));
+    let names: Vec<_> = s.doc.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["existing", "a", "b", "c"]);
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 3.0);
+}
+
+#[test]
+fn parameter_import_keeps_last_duplicate_and_inherited_metadata() {
+    let mut s = Session::default();
+    let rows = json!([
+        {"name": "a", "expression": "b", "unit": "", "comment": "kept"},
+        {"name": "b", "expression": "a", "unit": ""},
+        {"name": "a", "expression": "1", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    let list = run(&mut s, "parameters.list", json!({}));
+    assert_eq!(row(&list, "a")["value"], 1.0);
+    assert_eq!(row(&list, "b")["value"], 1.0);
+    assert_eq!(row(&list, "a")["comment"], "kept");
+    let rows = json!([
+        {"name": "a", "expression": "c", "unit": ""},
+        {"name": "a", "expression": "5", "unit": ""},
+        {"name": "c", "expression": "7", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 5.0);
+}
+
+#[test]
+fn parameter_import_keeps_text_literal_with_explicit_or_inherited_unit() {
+    let mut s = Session::default();
+    let rows = json!([{"name": "label", "unit": "Text", "expression": "label"}]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(s.doc.text_param("label").unwrap().text, "label");
+    // An existing text parameter stays text when unit is omitted.
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nlabel,label\n"}));
+    let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+    let mut fresh = Session::default();
+    run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+    assert_eq!(fresh.doc.text_param("label").unwrap().text, "label");
+    // The second definition inherits the first definition's text unit.
+    let rows = json!([
+        {"name": "other", "unit": "text", "expression": "first"},
+        {"name": "other", "expression": "other"}
+    ]);
+    run(&mut fresh, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(fresh.doc.text_param("other").unwrap().text, "other");
+}
+
+#[test]
+fn parameter_import_rejects_final_cycles_and_oversized_expressions_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let before = s.doc.to_json();
+    for rows in [
+        json!([{"name": "a", "expression": "b"}, {"name": "b", "expression": "a"}]),
+        json!([{"name": "a", "expression": "x".repeat(4097)}]),
+        json!([{"name": "a", "expression": "1", "unit": "invalid"}, {"name": "a", "expression": "2"}]),
+    ] {
+        assert!(s.execute("parameters.import", &json!({"text": rows.to_string()})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+/// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
+/// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
+#[test]
+fn csv_keeps_formulas_as_text_and_imports_them_back() {
+    let mut s = Session::default();
+    let rows = [("d3", "4", "plain"), ("a", "=d3", "+2 for the fit"), ("b", "=5", "'=kept"), ("c", "-5 mm", "@x"), ("e", "6", "one; two")];
+    for (name, expression, comment) in rows {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression, "comment": comment}));
+    }
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    for written in [",'=d3,", ",'+2 for the fit,", ",'=5,", ",''=kept,", ",'-5 mm,-5,'@x,", ",\"one; two\","] {
+        assert!(csv.contains(written), "{written}: {csv}");
+    }
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    for (name, _, comment) in rows {
+        let (before, after) = (s.doc.param(name), t.doc.param(name));
+        assert_eq!(after.map(|p| (p.expr.as_str(), p.comment.as_str())), before.map(|p| (p.expr.as_str(), comment)), "{name}: {csv}");
+    }
 }
 
 #[test]
@@ -744,6 +949,72 @@ fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
+/// Where the circle's centre is in the stored sketch `feature`.
+fn circle_centre(s: &Session, feature: u64) -> solidcore_record::Vec2 {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Circle { .. })) {
+        Some(solidcraft_sketch::CurveKind::Circle { c, .. }) => sk.points[*c].pos,
+        _ => solidcore_record::Vec2::new(f64::NAN, f64::NAN),
+    }
+}
+
+#[test]
+fn a_dimension_driven_to_zero_and_back_keeps_its_side() {
+    // #15766: a pin drawn at (-10, -5), dimensioned from the origin by `x` and `y`. At 0 its
+    // centre is on the axis; a value after that puts it back on the side it was drawn on.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "y", "expression": "5 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pin sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [-10, -5], "radius": 2}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "x"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "y"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": "2 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pin sketch", "distance": "1 mm"}));
+    for (name, value, want) in [
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "5 mm", (-10.0, -5.0)),
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "3 mm", (-10.0, -3.0)),
+        ("x", "0 mm", (0.0, -3.0)),
+        ("x", "4 mm", (-4.0, -3.0)),
+    ] {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
+        let c = circle_centre(&s, feature);
+        assert!((c.x - want.0).abs() < 1e-9 && (c.y - want.1).abs() < 1e-9, "{name} = {value}: centre {c:?}, want {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{name} = {value}");
+    }
+}
+
+/// Where the line's two ends are in the stored sketch `feature`: `(start, end)`.
+fn line_ends(s: &Session, feature: u64) -> (solidcore_record::Vec2, solidcore_record::Vec2) {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Line { .. })) {
+        Some(solidcraft_sketch::CurveKind::Line { a, b }) => (sk.points[*a].pos, sk.points[*b].pos),
+        _ => (solidcore_record::Vec2::new(f64::NAN, f64::NAN), solidcore_record::Vec2::new(f64::NAN, f64::NAN)),
+    }
+}
+
+#[test]
+fn a_dimension_between_two_free_points_driven_to_zero_and_back_keeps_its_sides() {
+    // #15766 with neither end fixed: a line from (20, 5) back to (10, 0), its horizontal length
+    // `w`. Both ends share the change; at 0 they are level, and a value after that puts the end
+    // back on the side it was drawn on instead of mirroring the line.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Free sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[20, 5], [10, 0]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l.start", "l.end"], "type": "horizontal", "value": "w"}));
+    run(&mut s, "sketch.finish", json!({}));
+    for (value, want) in [("6 mm", (18.0, 12.0)), ("0 mm", (15.0, 15.0)), ("10 mm", (20.0, 10.0)), ("0 mm", (15.0, 15.0)), ("4 mm", (17.0, 13.0))] {
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": value}));
+        let (start, end) = line_ends(&s, feature);
+        assert!((start.x - want.0).abs() < 1e-6 && (end.x - want.1).abs() < 1e-6, "w = {value}: start {start:?}, end {end:?}, want x {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "w = {value}");
+    }
+}
+
 #[test]
 fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
     let (mut s, feature, params) = linkage_session();
@@ -976,7 +1247,7 @@ fn any_value_input_can_define_a_parameter() {
     assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.param("gauge").map(|p| p.expr.as_str())), ("gauge", Some("2")));
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift = 15"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift = 15"}));
     match &s.doc.canvases[0].plane {
         solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "lift"),
         other => panic!("{other:?}"),
@@ -1044,6 +1315,34 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     let mut s = Session::default();
     run(&mut s, "document.units", json!({"units": "cm"}));
     close(added(&mut s, json!({"name": "v", "expression": "3"})), "cm", 30.0, 3.0);
+}
+
+/// Areas and volumes follow the design's length unit as lengths do: in an inch design an area
+/// reads in in² and a volume in in³, a bare number in such a parameter is one of those, and a unit
+/// given keeps its own.
+#[test]
+fn areas_and_volumes_take_the_design_unit() {
+    let added = |s: &mut Session, p: Value| {
+        let r = run(s, "parameters.add", p);
+        (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
+    };
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
+    };
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    close(added(&mut s, json!({"name": "face", "expression": "645.16 mm²"})), "in²", 645.16, 1.0);
+    close(added(&mut s, json!({"name": "pocket", "expression": "1 in * 2 in * 3 in"})), "in³", 6.0 * 16_387.064, 6.0);
+    close(added(&mut s, json!({"name": "more", "expression": "face + 1"})), "in²", 2.0 * 645.16, 2.0);
+    close(added(&mut s, json!({"name": "metric", "expression": "1 cm²", "unit": "cm²"})), "cm²", 100.0, 1.0);
+    close(added(&mut s, json!({"name": "deck", "expression": "1 ft²"})), "in²", 92_903.04, 144.0);
+    close(added(&mut s, json!({"name": "tank", "expression": "1 ft³"})), "in³", 28_316_846.592, 1728.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "ft"}));
+    close(added(&mut s, json!({"name": "deck", "expression": "2 ft * 3 ft"})), "ft²", 6.0 * 92_903.04, 6.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "m"}));
+    close(added(&mut s, json!({"name": "sheet", "expression": "2.5 m²"})), "m²", 2.5e6, 2.5);
 }
 
 /// Hostile parameters.add input in an inch design is refused with a reason and adds nothing.
@@ -1208,6 +1507,42 @@ fn a_definition_of_the_parameter_a_value_names_changes_it() {
 /// The error of the feature named `name` in the last evaluation.
 fn feature_error(s: &Session, name: &str) -> Option<String> {
     s.model.results.iter().find(|r| r.name == name).and_then(|r| r.error.clone())
+}
+
+/// A horizontal distance from the origin to a point that is 0 (the point on the y axis) can be
+/// changed to a positive value through its parameter, and back: the point moves along x and the
+/// circle centred on it with it, instead of the sketch failing as a conflict.
+#[test]
+fn a_horizontal_distance_from_the_origin_changed_from_zero_moves_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Offset", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 5], [30, 5]], "ids": ["floor"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "floor", "mode": "horizontal"}));
+    for (entities, kind, value) in [
+        (json!(["origin", "floor.start"]), "vertical", json!(5)),
+        (json!(["origin", "floor.start"]), "horizontal", json!(30)),
+        (json!(["floor.start", "floor.end"]), "horizontal", json!(60)),
+    ] {
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "type": kind, "value": value}));
+    }
+    run(&mut s, "sketch.point", json!({"point": [3, 20], "id": "hole", "construction": true, "connect": false}));
+    run(&mut s, "sketch.circle.center", json!({"center": "hole", "diameter": 8}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["floor.start", "hole"], "type": "vertical", "value": 15}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "hole"], "type": "horizontal", "value": "Offset"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let disc = std::f64::consts::PI * 16.0 * 5.0;
+    for (value, x) in [("0.5 mm", 0.5), ("0 mm", 0.0), ("0.5 mm", 0.5), ("-0 mm", 0.0)] {
+        let r = run(&mut s, "parameters.change", json!({"name": "Offset", "expression": value}));
+        assert_eq!(r["errors"], json!([]), "{value}: {r}");
+        assert!(rel(volume(&mut s), disc) < 1e-3, "{value}");
+        // The disc is centred on the point, so its box's middle in x is where the point went.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let b = &m["bodies"][0]["bbox"];
+        let middle = (b["min"][0].as_f64().unwrap_or(f64::NAN) + b["max"][0].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((middle - x).abs() < 1e-3, "{value}: the point is at x = {middle}, want {x}: {m}");
+    }
 }
 
 /// A sketch dimension set negative fails its sketch; the features built from it fail naming that

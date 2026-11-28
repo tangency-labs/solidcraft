@@ -6,12 +6,13 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use egui::{Pos2, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::Session;
-use solidcraft_engine::doc::Mat;
 use solidcraft_engine::doc::joints::JointKind;
+use solidcraft_engine::doc::{Document, Mat, ModelState};
+use solidcraft_engine::{AutomaticExplode, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, form_row};
@@ -66,7 +67,7 @@ pub enum Mo {
     Explode {
         name: String,
         scale: f64,
-        shown: Option<(u64, u64)>,
+        preview: Option<Box<ExplodePreview>>,
         saved: Option<BTreeMap<u64, Mat>>,
         error: Option<String>,
     },
@@ -75,6 +76,14 @@ pub enum Mo {
         error: Option<String>,
         rule_editor: Box<configuration_rules_ui::Editor>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct ExplodePreview {
+    doc: Arc<Document>,
+    model: Arc<ModelState>,
+    layout: Option<AutomaticExplode>,
+    attempted_scale: Option<u64>,
 }
 
 impl Mo {
@@ -133,7 +142,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 SelInput::new("Against", BODIES, true),
             ],
         ),
-        "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, shown: None, saved: None, error: None }, vec![]),
+        "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, preview: None, saved: None, error: None }, vec![]),
         "config.table" | "config.configure" => (Mo::Configurations { new_row: String::new(), error: None, rule_editor: Default::default() }, vec![]),
         _ => return None,
     };
@@ -381,9 +390,11 @@ pub fn closed(app: &mut SolveApp, d: &mut Dialog, applied: bool) {
     }
 }
 
-/// The occurrence placements of `after` that differ from `before` (as pending moves).
-fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
-    let mut out = before.pending_moves.clone();
+/// The occurrence placements of `after` that differ from `before`, as pending moves over `base`:
+/// the moves shown before the dialog showed a pose of its own. Not over the pose it showed last:
+/// a part this pose puts back where the design has it would stay where that pose left it (#13511).
+fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
+    let mut out = base.clone();
     for o in &after.doc.occurrences {
         let was = before.doc.occurrences.iter().find(|b| b.id == o.id).map(|b| b.transform);
         if was != Some(o.transform) {
@@ -393,12 +404,12 @@ fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy.
-fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64, Mat>, String> {
+/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
     sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(&app.session, &sc))
+    Ok(moved(base, &app.session, &sc))
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -415,15 +426,16 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
         }
         let mut sc = app.session.scratch();
         // Cut as the viewport is (a copy leaves the section out).
-        sc.section = app.session.section;
+        sc.section = app.session.section.clone();
         let made = sc.execute("motion.study", &params).and_then(|r| {
             sc.execute(
                 "motion.export_animation",
-                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes}),
+                // At the rate the dialog plays it, so the GIF lasts as long as playing does.
+                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "fps": STEPS_PER_S}),
             )
         });
         match made {
-            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), false),
+            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&path))]), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
@@ -441,6 +453,43 @@ fn explode_pose(app: &SolveApp, scale: f64) -> Result<BTreeMap<u64, Mat>, String
     sc.execute("explode.create", &json!({"name": "__preview", "scale": scale})).map_err(|e| e.to_string())?;
     sc.execute("explode.show", &json!({ "view": "__preview" })).map_err(|e| e.to_string())?;
     Ok(sc.pending_moves.clone())
+}
+
+fn preview_explode(
+    app: &mut SolveApp,
+    scale: f64,
+    preview: &mut Option<Box<ExplodePreview>>,
+    saved: &mut Option<BTreeMap<u64, Mat>>,
+    error: &mut Option<String>,
+) {
+    let s = &app.session;
+    let model = s.model.state();
+    if preview.as_ref().is_none_or(|p| !Arc::ptr_eq(&p.doc, &s.doc) || !Arc::ptr_eq(&p.model, &model)) {
+        *preview = Some(Box::new(ExplodePreview { doc: s.doc.clone(), model, layout: None, attempted_scale: None }));
+    }
+    let Some(preview) = preview.as_mut() else { return };
+    let key = (scale * 1000.0).round() as u64;
+    if preview.attempted_scale == Some(key) {
+        return;
+    }
+    let moves = if s.command_check().is_some() {
+        // A host can check the parameters of both commands, including each requested scale.
+        explode_pose(app, scale)
+    } else {
+        match &preview.layout {
+            Some(layout) => layout.placements(scale),
+            None => s.prepare_automatic_explode().and_then(|layout| preview.layout.insert(layout).placements(scale)),
+        }
+        .map_err(|e| e.to_string())
+    };
+    match moves {
+        Ok(moves) => {
+            display(app, saved, moves);
+            *error = None;
+        }
+        Err(e) => *error = Some(e),
+    }
+    preview.attempted_scale = Some(key);
 }
 
 // ---- rows ----
@@ -464,28 +513,29 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 }
             });
             for s in list.get("sets").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(id) = s.get("id").and_then(Value::as_u64) else { continue };
                 let n = s.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let off = s.get("suppressed").and_then(Value::as_bool).unwrap_or(false);
-                crate::ui_kit::section(ui, format!("contact:{n}"), &n, true, |ui| {
+                crate::ui_kit::section(ui, format!("contact:{id}"), &n, true, |ui| {
                     ui.horizontal(|ui| {
                         let count = s.get("occurrences").and_then(Value::as_array).map_or(0, Vec::len);
                         ui.label(
                             RichText::new(solidcraft_ui_text::format("contact.components_count", &[("count", &count.to_string())])).color(t.text_dim),
                         );
-                        if crate::ui_kit::button(
+                        let suppress = crate::ui_kit::button(
                             ui,
                             solidcraft_ui_text::tr_label(if off { "Unsuppress" } else { "Suppress" }),
                             crate::ui_kit::Button::Small,
-                        )
-                        .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "suppressed": !off}));
+                        );
+                        crate::scenario::publish_target(&format!("contact:{id}:suppress"), suppress.rect);
+                        if suppress.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "suppressed": !off}));
                         }
-                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
-                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"))
-                            .clicked()
-                        {
-                            let _ = app.run("contact.edit", json!({"set": n, "delete": true}));
+                        let delete = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"));
+                        crate::scenario::publish_target(&format!("contact:{id}:delete"), delete.rect);
+                        if delete.clicked() {
+                            let _ = app.run("contact.edit", json!({"set": id, "delete": true}));
                         }
                     });
                 });
@@ -521,21 +571,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             }
         }
         Mo::MotionStudy { .. } => enter = motion_study_rows(app, ui, k, inputs, t),
-        Mo::Explode { name, scale, shown, saved, error } => {
+        Mo::Explode { name, scale, preview, saved, error } => {
             text_row(ui, "Name", name, "");
             form_row(ui, "Explode", |ui| {
                 crate::ui_kit::slider(ui, scale, 0.0..=2.0, Default::default());
             });
-            let key = ((*scale * 1000.0).round() as u64, 0);
-            if *shown != Some(key) {
-                match explode_pose(app, *scale) {
-                    Ok(m) => {
-                        display(app, saved, m);
-                        *error = None;
-                    }
-                    Err(e) => *error = Some(e),
-                }
-                *shown = Some(key);
+            let revision = app.session.revision;
+            preview_explode(app, *scale, preview, saved, error);
+            if revision != app.session.revision {
+                ui.ctx().request_repaint();
             }
             if let Some(e) = error {
                 ui.vertical(|ui| {
@@ -740,7 +784,9 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         h.finish()
     };
     if *shown != Some((u64::from(now), key)) {
-        match params.and_then(|p| study_pose(app, &p, now)) {
+        // The moves from before the dialog showed anything (it keeps them in `saved`).
+        let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
+        match params.and_then(|p| study_pose(app, &p, now, base)) {
             Ok(m) => {
                 display(app, saved, m);
                 *error = None;
@@ -821,6 +867,33 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
 mod tests {
     use super::*;
 
+    #[test]
+    fn contact_set_rows_edit_the_selected_id_when_names_repeat() {
+        let mut h = crate::scenario::Harness::new();
+        for name in ["A", "B"] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({"name": name})).unwrap();
+        }
+        for _ in 0..2 {
+            h.app.run("contact.create", json!({"name": "Shared", "occurrences": ["A", "B"]})).unwrap();
+        }
+        let before = h.app.session.doc.assembly.contact_sets.clone();
+        let second = before[1].id;
+        h.app.start("contact.create");
+        h.frames(3);
+        for suppressed in [true, false] {
+            h.step(&json!({"click": {"handle": format!("contact:{second}:suppress")}})).unwrap();
+            let sets = &h.app.session.doc.assembly.contact_sets;
+            assert_eq!(sets.len(), 2);
+            assert_eq!(sets[0], before[0], "the first same-name set stays unchanged");
+            let mut expected = before[1].clone();
+            expected.suppressed = suppressed;
+            assert_eq!(sets[1], expected, "the clicked second row changes");
+        }
+        h.step(&json!({"click": {"handle": format!("contact:{second}:delete")}})).unwrap();
+        assert_eq!(h.app.session.doc.assembly.contact_sets, vec![before[0].clone()]);
+    }
+
     /// Playback runs on, starts over at the end when looping, else stops on the last step.
     #[test]
     fn playback_advances_loops_and_stops() {
@@ -879,6 +952,55 @@ mod tests {
         assert_eq!(seen.len(), 11, "every step 0..=10 is shown: {seen:?}");
     }
 
+    /// How many parts the dialog shows away from where the design has them.
+    fn displaced(h: &crate::scenario::Harness) -> usize {
+        let off = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9);
+        let doc = &h.app.session.doc;
+        h.app
+            .session
+            .pending_moves
+            .iter()
+            .filter(|(id, m)| doc.occurrences.iter().find(|o| o.id == **id).is_some_and(|o| off(&o.transform, m)))
+            .count()
+    }
+
+    /// Show step `to` of a 10-step study that turns the hinge from 90° back to 0°.
+    fn show_step(h: &mut crate::scenario::Harness, to: f64) {
+        if let Some(Kind::Motion(Mo::MotionStudy { steps, tracks, step, playing, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *steps = "10".into();
+            *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "90 deg".into()), (10, "0 deg".into())] }];
+            (*step, *playing) = (to, false);
+        }
+        h.frames(3);
+    }
+
+    /// A step that puts a part back where the design has it shows the part there, after Go to
+    /// Start and after the step before it: the pose is shown over the moves from before the
+    /// dialog, not over the pose it showed last (#13511).
+    #[test]
+    fn a_step_that_puts_a_part_back_shows_it_there() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        // The design has the hinge at 0°, where the study's last step puts it.
+        h.app.run("joint.drive", json!({"joint": "Hinge", "value": 0})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        show_step(&mut h, 0.0);
+        assert_ne!(displaced(&h), 0, "step 0 turns the hinge to 90°");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "Go to End puts it back where the design has it");
+        show_step(&mut h, 9.0);
+        assert_ne!(displaced(&h), 0, "the step before turns it again");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "and the last step puts it back again");
+    }
+
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.
     #[test]
     fn shown_poses_are_put_back() {
@@ -908,13 +1030,71 @@ mod tests {
                     analysis: Box::default(),
                 }
             } else {
-                Mo::Explode { name: "E".into(), scale: 1.0, shown: None, saved, error: None }
+                Mo::Explode { name: "E".into(), scale: 1.0, preview: None, saved, error: None }
             };
             let mut d = Dialog::new(Kind::Motion(mo), vec![]);
             closed(&mut app, &mut d, applied);
             assert_eq!(app.session.pending_moves == shown, kept, "{kind} {applied}");
             app.session.pending_moves = before.clone();
         }
+    }
+
+    fn add_explode_parts(app: &mut SolveApp) -> [u64; 2] {
+        [("Left", 0), ("Right", 30)].map(|(name, x)| {
+            let added = app.run("component.create", json!({"name": name})).unwrap();
+            app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+            app.run("component.activate", json!({"component": "root"})).unwrap();
+            added["occurrence"].as_u64().unwrap()
+        })
+    }
+
+    #[test]
+    fn exploded_view_slider_reuses_the_prepared_layout() {
+        let mut h = crate::scenario::Harness::new();
+        let [left, right] = add_explode_parts(&mut h.app);
+        let view = h.app.run("explode.create", json!({"moves": [{"occurrence": "Right", "translate": [0, 20, 0]}]})).unwrap();
+        h.app.start("explode.create");
+        assert!(h.app.dialog.is_some());
+        // A programmatic view change before the dialog draws its first preview.
+        h.app.session.execute("explode.show", &json!({"view": view["view"]})).unwrap();
+        let pending = h.app.session.pending_moves.clone();
+        let prepared = |app: &SolveApp| {
+            let Kind::Motion(Mo::Explode { preview: Some(preview), .. }) = &app.dialog.as_ref().unwrap().kind else {
+                panic!("the prepared explode preview");
+            };
+            std::ptr::from_ref(preview.as_ref())
+        };
+        h.frame();
+        let initial = prepared(&h.app);
+        let Kind::Motion(Mo::Explode { scale, .. }) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("the explode dialog") };
+        *scale = 0.5;
+        h.frame();
+        assert_eq!(prepared(&h.app), initial);
+        // The centres are 30 mm apart, so each half-scale move has length 7.5 mm.
+        for (id, dx) in [(left, -7.5), (right, 7.5)] {
+            let transform = h.app.session.pending_moves[&id];
+            assert_eq!([transform[3][0], transform[3][1]], [dx, 0.0]);
+        }
+        crate::dialogs::cancel(&mut h.app);
+        assert_eq!(h.app.session.pending_moves, pending);
+    }
+
+    #[test]
+    fn exploded_view_slider_checks_both_commands_and_retries_when_the_scale_changes() {
+        let mut h = crate::scenario::Harness::new();
+        let app = &mut h.app;
+        add_explode_parts(app);
+        app.session.set_command_check(Some(Arc::new(|id, _, _| if id == "explode.show" { Err("temporary refusal".into()) } else { Ok(()) })));
+        let (mut preview, mut saved, mut error) = (None, None, None);
+        preview_explode(app, 1.0, &mut preview, &mut saved, &mut error);
+        assert_eq!(error.as_deref(), Some("temporary refusal"));
+
+        app.session.set_command_check(None);
+        preview_explode(app, 1.0, &mut preview, &mut saved, &mut error);
+        assert!(error.is_some() && app.session.pending_moves.is_empty());
+        preview_explode(app, 0.5, &mut preview, &mut saved, &mut error);
+        assert!(error.is_none());
+        assert_eq!(app.session.pending_moves.len(), 2);
     }
 
     #[test]
@@ -933,27 +1113,17 @@ mod tests {
         assert_eq!(cell_value("param:width", "90 mm"), json!("90 mm"));
     }
 
-    fn click_rule_button(h: &mut crate::scenario::Harness, name: &str) {
-        // The table header also contains this name. Its TextRun may be emitted
-        // after the popup, so select the actual choice rather than matching text.
-        let bounds = h
-            .output
-            .accesskit_update
-            .as_ref()
-            .unwrap()
-            .nodes
-            .iter()
-            .rev()
-            .find_map(|(_, n)| {
-                (n.role() == egui::accesskit::Role::Button && !n.is_disabled() && n.label() == Some(name)).then(|| n.bounds()).flatten()
-            })
-            .expect("rule button");
-        h.step(&json!({"click": [(bounds.x0 + bounds.x1) / 2.0, (bounds.y0 + bounds.y1) / 2.0]})).unwrap();
+    fn select_rule_parameter(h: &mut crate::scenario::Harness, name: &str) {
+        h.step(&json!({"click":{"handle":format!("dialog:Parameter:{name}")}})).unwrap();
+        assert!(h.widget("Choose…").is_none(), "parameter choice should close and update the dropdown");
     }
 
-    fn select_rule_parameter(h: &mut crate::scenario::Harness, name: &str) {
-        click_rule_button(h, name);
-        assert!(h.widget("Choose…").is_none(), "parameter choice should close and update the dropdown");
+    fn assert_preview_parameter(h: &crate::scenario::Harness, name: &str, value: &str) {
+        let cell = crate::scenario::handle_at(&format!("config:preview:param:{name}")).unwrap();
+        assert!(
+            h.widgets(value).iter().any(|at| egui::pos2(at[0] as f32, at[1] as f32).distance(cell) < 1.0),
+            "preview of {name} should show {value}"
+        );
     }
 
     // Kit rows publish identities independently of translated text. Long forms scroll through
@@ -1000,6 +1170,7 @@ mod tests {
                 Some("Preview Row") => Some("config:preview_row"),
                 Some("Apply") => Some("config:activate:Default"),
                 Some("Drive parameter") => Some("dialog:Then"),
+                Some("Choose…") => Some("config:choice:effect_parameter"),
                 Some("Preview: Default") => Some("dialog:section:Preview: Default"),
                 _ => step
                     .get("click")
@@ -1044,14 +1215,42 @@ mod tests {
             {"widget":"Preview Row"},{"widget":"Preview: Default"}
         ])).unwrap();
         reveal_config_handle(&mut h, "config:preview:param:length");
-        assert!(h.widget("length = 20 mm").is_some());
+        assert_preview_parameter(&h, "length", "20 mm");
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, "40 mm");
         click_config_handle(&mut h, "config:rule:last:up");
         click_config_handle(&mut h, "config:preview_row");
         assert_eq!(h.app.session.doc.configs.rules[0].id, "last");
         reveal_config_handle(&mut h, "config:preview:param:length");
-        assert!(h.widget("length = 10").is_some());
+        assert_preview_parameter(&h, "length", "10");
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, "40 mm");
+    }
+
+    #[test]
+    fn configuration_rule_tables_keep_actions_and_preview_bands_at_small_widths() {
+        for width in [1280, 720] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", json!({"width":width,"height":720}));
+            h.run(&json!([
+                {"call":"engine.execute","params":{"command":"parameters.change","params":{"name":"length","expression":"40 mm"}}},
+                {"call":"engine.execute","params":{"command":"config.configure","params":{"params":["length"]}}},
+                {"call":"engine.execute","params":{"command":"config.rule","params":{"rule":{"id":"drive","name":"Drive length","condition":{"type":"always"},"effect":{"type":"drive_parameter","parameter":"length","expression":"20 mm"}}}}},
+                {"start":"config.table"}
+            ])).unwrap();
+            click_config_handle(&mut h, "config:rule:drive:enabled");
+            assert!(!h.app.session.doc.configs.rules[0].enabled);
+            click_config_handle(&mut h, "config:rule:drive:enabled");
+            assert!(h.app.session.doc.configs.rules[0].enabled);
+            let before = h.app.session.doc.clone();
+            configuration_steps(&mut h, &json!([{"widget":"Preview Row"},{"widget":"Preview: Default"}])).unwrap();
+            reveal_config_handle(&mut h, "config:preview:param:length");
+            assert_preview_parameter(&h, "length", "20 mm");
+            assert!(h.widget("Matched").is_some());
+            click_config_handle(&mut h, "dialog:table:configuration_preview:group:parameters");
+            assert!(crate::scenario::handle_at("config:preview:param:length").is_none());
+            click_config_handle(&mut h, "dialog:table:configuration_preview:group:parameters");
+            assert!(crate::scenario::handle_at("config:preview:param:length").is_some());
+            assert_eq!(h.app.session.doc, before, "preview and its section bands leave the design unchanged");
+        }
     }
 
     #[test]
@@ -1129,7 +1328,7 @@ mod tests {
             }
             h.run(&json!([
                 {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10,"body_name":"Block"}}},
-                {"start":"config.table"}, {"widget":"Add Column"}
+                {"start":"config.table"}, {"widget":"Add column"}
             ]))
             .unwrap();
             if component {
@@ -1164,7 +1363,7 @@ mod tests {
             {"call":"engine.execute","params":{"command":"sketch.circle.center","params":{"center":[0,0],"radius":9.999,"id":"inner"}}},
             {"call":"engine.execute","params":{"command":"sketch.finish","params":{}}},
             {"call":"engine.execute","params":{"command":"solid.extrude","params":{"distance":10,"profiles":[{"point":[9.9995,0]}],"body_name":"Ring"}}},
-            {"start":"config.table"},{"widget":"Add Column"},{"widget":"Face Appearance"},{"widget":"Faces on Ring"}
+            {"start":"config.table"},{"widget":"Add column"},{"widget":"Face Appearance"},{"widget":"Faces on Ring"}
         ]))
         .unwrap();
         assert!(h.widget("side:outer").is_some());
@@ -1232,7 +1431,7 @@ mod tests {
                 ]))
                 .unwrap();
             harness.frames(4);
-            for label in ["Configuration", "Active", "Apply", "Add configuration", "Add Column"] {
+            for label in ["Configuration", "Active", "Apply", "Add configuration", "Add column"] {
                 assert_single_line(&harness, label);
             }
             crate::scenario::check(&mut harness, &json!({"windows_fit":{"max_width":Tokens::get().form_card_width * 3.0}})).unwrap();
@@ -1263,14 +1462,15 @@ mod tests {
     }
 
     /// Export Animation saves the study the dialog shows (its keys need not be saved) as a GIF,
-    /// also when the name is typed without `.gif`, and the design keeps no study.
+    /// also when the name is typed without `.gif`, and the design keeps no study. The GIF plays
+    /// at the dialog's rate: its 5 frames (steps 0 to 4) last 5/24 s, in hundredths.
     #[test]
     fn export_animation_saves_the_dialogs_study_as_a_gif() {
         // Drawn as the CLI draws (the headless device), as scenario shots are.
         #[cfg(not(target_arch = "wasm32"))]
         if solidcraft_engine::capture::installed().is_none() {
             solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                 Ok(solidcraft_engine::capture::Picture { rgba, renderer })
             }));
         }
@@ -1301,6 +1501,19 @@ mod tests {
         let gif = std::fs::read(h.dir.join("swing.gif")).unwrap();
         assert!(gif.starts_with(b"GIF89a"), "{:?}", h.app.status);
         assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+        // Each frame's delay, from its graphic control block (after the 256-colour table).
+        let (mut at, mut delays) = (13 + 768, Vec::new());
+        while gif[at] != 0x3B {
+            if gif[at] == 0x21 && gif[at + 1] == 0xF9 {
+                delays.push(u16::from_le_bytes([gif[at + 4], gif[at + 5]]));
+            }
+            at += if gif[at] == 0x2C { 11 } else { 2 };
+            while gif[at] != 0 {
+                at += usize::from(gif[at]) + 1;
+            }
+            at += 1;
+        }
+        assert_eq!(delays, [4, 4, 5, 4, 4], "24 frames a second");
         assert!(h.app.session.doc.assembly.studies.is_empty(), "exporting saves no study");
     }
 

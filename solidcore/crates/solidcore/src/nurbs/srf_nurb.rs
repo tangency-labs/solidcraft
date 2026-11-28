@@ -32,7 +32,7 @@
 //! | [`cone_elliptic_ends`], [`EllipticCone`]     | `N_ConeEllipticEnds`                  |
 //!
 //! Deviations:
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart. A
 //!   routine that fails returns only the error, even where upstream has already
@@ -83,7 +83,7 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::a_object::reverse_knots;
 use crate::kernel::UpstreamFixes;
 use crate::math::Vec3;
@@ -667,8 +667,8 @@ impl Surface {
     /// `R[usp-p+i][vsp-q+j]`, for `k <= udr`, `l <= vdr` (`l <= udr - k` when `upper`
     /// and `udr == vdr`). Parameters outside the domain evaluate the end spans.
     ///
-    /// Errors with [`NlibCode::MaxDerivative`] when `udr` or `vdr` exceeds
-    /// `NL_MAXDER`, with [`NlibCode::Convergence`] when the rational denominator is
+    /// Errors with [`NurbsFailure::DerivativeOrder`] when `udr` or `vdr` exceeds
+    /// `NL_MAXDER`, with [`NurbsFailure::NotConverged`] when the rational denominator is
     /// not invertible, and with the errors of
     /// [`KnotVector::find_span`].
     pub fn basis_derivs(
@@ -686,12 +686,18 @@ impl Surface {
 
         // Check order of derivatives.
         if udr > MAX_DERIVATIVE || vdr > MAX_DERIVATIVE {
-            return Err(SolidError::nlib(OP, NlibCode::MaxDerivative));
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::DerivativeOrder {
+                    given: udr.max(vdr),
+                    max: MAX_DERIVATIVE,
+                },
+            ));
         }
         if pu > MAX_DEGREE || qu > MAX_DEGREE {
             return Err(invalid(
                 OP,
-                "degree above NL_MAXDEG (upstream scratch array size)",
+                "degree above the largest degree the NURBS routines handle",
             ));
         }
         if pu < TINY_NP && qu < TINY_NP {
@@ -777,7 +783,7 @@ impl Surface {
         // Compute derivatives of rational basis.
         let d00 = at(&d, 0, 0)?;
         if float_op_is_bad(1.0, d00, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Convergence));
+            return Err(SolidError::nurbs(OP, NurbsFailure::NotConverged));
         }
         let inv_w00 = 1.0 / d00;
 
@@ -1221,7 +1227,7 @@ impl Surface {
             }
             let [[d00, d01], [d10, d11]] = d;
             if float_op_is_bad(1.0, d00, FloatOp::Division) {
-                return Err(SolidError::nlib(bd_op, NlibCode::Convergence));
+                return Err(SolidError::nurbs(bd_op, NurbsFailure::NotConverged));
             }
             let inv_w00 = 1.0 / d00;
             let t11 = pascal_entry(1, 1).ok_or_else(|| oob(bd_op))?;
@@ -1342,7 +1348,7 @@ impl Surface {
     /// [`Surface::eval_pt_deriv_normal_pole`] is used instead.
     ///
     /// Errors with the errors of [`Surface::derivs`] and with
-    /// [`NlibCode::Geometry`] when a vector cannot be normalised.
+    /// [`NurbsFailure::Geometry`] when a vector cannot be normalised.
     pub fn eval_pt_deriv_normal_fast(
         &self,
         u: f64,
@@ -1411,7 +1417,7 @@ impl Surface {
     /// direction's knots reversed by
     /// [`reverse_knots`] (`NI_ReverseKnots`).
     ///
-    /// Errors with [`NlibCode::Call`] for [`Direction::UV`] (nothing changes).
+    /// Errors with [`NurbsFailure::CallFailed`] for [`Direction::UV`] (nothing changes).
     pub fn reverse(&mut self, dir: Direction) -> Result<()> {
         const OP: &str = "nurbs::srf_nurb::Surface::reverse";
         let (nu, mu, ru, su) = self.array_sizes();
@@ -1439,7 +1445,7 @@ impl Surface {
                 let vp = self.v_knots().to_vec();
                 reverse_knots(&vp, su, self.v_knots_mut())?;
             }
-            Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+            Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
         }
         Ok(())
     }
@@ -1459,7 +1465,7 @@ impl Surface {
     /// [`reverse_knots`] (`NI_ReverseKnots`), the
     /// other's copied.
     ///
-    /// Errors with [`NlibCode::Call`] for [`Direction::UV`].
+    /// Errors with [`NurbsFailure::CallFailed`] for [`Direction::UV`].
     pub fn reversed(&self, dir: Direction) -> Result<Surface> {
         const OP: &str = "nurbs::srf_nurb::Surface::reversed";
         let idx = self.indices();
@@ -1503,7 +1509,7 @@ impl Surface {
                 }
                 reverse_knots(vp, idx.s, &mut vq)?;
             }
-            Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+            Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
         }
         Surface::new(net, idx.p, idx.q, uq, vq)
     }
@@ -1535,7 +1541,7 @@ impl Surface {
     /// `tols[0]` and first partial derivative angles within `tols[1]`. `dflg` picks
     /// the directions checked. Returns the closed direction(s), `None` for none.
     ///
-    /// Errors with [`NlibCode::Input`] for `level > 1`, with [`NlibCode::Knot`] when
+    /// Errors with [`NurbsFailure::Input`] for `level > 1`, with [`NurbsFailure::Knots`] when
     /// the knot vector has no next span, with the errors of [`Surface::derivs`], and
     /// with the error of a failed derivative angle when nothing clears it.
     pub fn is_closed_smooth(
@@ -1608,7 +1614,7 @@ impl Surface {
 
         // Check for bad input data.
         if level > 1 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let mut uboo = false;
         let mut vboo = false;
@@ -1708,7 +1714,7 @@ impl Surface {
                     ii += 1;
                 }
                 if ii >= s {
-                    return Err(SolidError::nlib(OP, NlibCode::Knot));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
                 }
             }
         }
@@ -1779,7 +1785,7 @@ impl Surface {
                     ii += 1;
                 }
                 if ii >= r {
-                    return Err(SolidError::nlib(OP, NlibCode::Knot));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
                 }
             }
         }
@@ -1812,7 +1818,7 @@ impl Surface {
     /// derivative (negated at the domain end).
     ///
     /// Errors with the errors of [`Surface::derivs`] and with
-    /// [`NlibCode::Geometry`] when both partials vanish or the normal is too short.
+    /// [`NurbsFailure::Geometry`] when both partials vanish or the normal is too short.
     pub fn eval_pt_normal_at_pole(
         &self,
         u: f64,
@@ -1846,7 +1852,7 @@ impl Surface {
         if mag <= 0.001 * MODEL_TOL || nsv.is_err() {
             sv = Vec3::ZERO;
             if pole == 1 {
-                return Err(SolidError::nlib(OP, NlibCode::Geometry));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Geometry));
             }
             pole = 2;
         } else if let Ok((x, _)) = nsv {
@@ -1874,7 +1880,7 @@ impl Surface {
         };
 
         if n.length() < 0.001 * MODEL_TOL {
-            return Err(SolidError::nlib(OP, NlibCode::Geometry));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Geometry));
         }
         let (n, _) = normalize(n)?;
         Ok(PtDerivNormal { p, su, sv, n })
@@ -2431,7 +2437,7 @@ fn project_hit(lsg: LineSeg, p: Vec3) -> Result<Vec3> {
 ///
 /// # Errors
 ///
-/// The errors of [`cyl_cone`] and [`extract_iso_crv`], [`NlibCode::Geometry`] for a
+/// The errors of [`cyl_cone`] and [`extract_iso_crv`], [`NurbsFailure::Geometry`] for a
 /// zero-length ruling, and [`SolidError::Degenerate`] (upstream's bare error flag)
 /// when an end plane is parallel to a ruling.
 pub fn cone_elliptic_ends(c: &EllipticCone) -> Result<Surface> {
@@ -3410,10 +3416,7 @@ mod tests {
             let upstream = s.is_closed_smooth(1, &tols, Direction::U);
             assert!(matches!(
                 upstream,
-                Err(SolidError::Nlib {
-                    code: NlibCode::Geometry,
-                    ..
-                })
+                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Geometry))
             ));
             let fixed = s.is_closed_smooth_with_fixes(&pole_fix(), 1, &tols, Direction::U);
             assert_eq!(fixed.unwrap(), Some(Direction::U));

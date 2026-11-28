@@ -2,31 +2,33 @@
 //! Model/commands, controller state, presentation and layout have separate owners.
 mod app;
 mod fixtures;
-mod host;
-mod interaction;
-mod layout;
+mod plugin;
 mod preferences;
 mod production;
-mod runtime;
 mod specimen;
-mod surfaces;
-mod workspace;
 
 pub use app::*;
 pub use fixtures::*;
-pub use host::*;
-pub use interaction::*;
-pub use layout::*;
+#[cfg(test)]
+pub(crate) use plugin::instance_for as plugin_instance;
+pub(crate) use plugin::queue_selection;
+pub(crate) use preferences::PanelLayoutSnapshot;
+pub(crate) use preferences::panel_layout_matches;
+pub(crate) use preferences::panel_layout_snapshot;
 pub use preferences::*;
-pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
-pub(crate) use production::{
-    refresh_production, register_content_focus, report_content_composer_height, report_content_extent, shared_content_composer_height,
-    shared_content_measurement,
-};
-pub use runtime::*;
+pub(crate) use production::PanelVisibilitySnapshot;
+pub(crate) use production::apply_placement_command;
+pub(crate) use production::place_assistant;
+pub(crate) use production::refresh_production;
+pub(crate) use production::register_content_focus;
+pub(crate) use production::report_content_composer_height;
+pub(crate) use production::report_content_extent;
+pub(crate) use production::shared_content_composer_height;
+pub(crate) use production::shared_content_measurement;
+#[cfg(test)]
+pub(crate) use production::timeline_tall;
+pub use solidcraft_ui_kit::panel_runtime::*;
 pub use specimen::*;
-pub use surfaces::*;
-pub use workspace::*;
 
 #[cfg(test)]
 mod tests;

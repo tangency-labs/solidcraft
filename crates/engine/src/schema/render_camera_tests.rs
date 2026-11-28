@@ -7,7 +7,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 /// A render camera that isn't the default one, as `render.camera.set` takes it.
 fn camera() -> Value {
-    json!(solidcraft_render::Camera { yaw: 0.2, pitch: 0.3, roll: 0.1, ..Default::default() })
+    json!(solidcraft_viewport::Camera { yaw: 0.2, pitch: 0.3, roll: 0.1, ..Default::default() })
 }
 
 /// `camera()` with `key` set to `value`, or taken out when `value` is `None`.

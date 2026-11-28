@@ -1,14 +1,13 @@
-//! What a face measures on the surface behind it (#9086).
+//! What a face measures on the surface behind it (#9086), and around it (#12048).
 //!
 //! A curved face's area is the area of the surface it lies on: a cylinder's band is
-//! r·θ·h and a whole sphere 4πr². The display mesh's triangles run inside a curve, so
-//! their sum falls short of it.
+//! r·θ·h and a whole sphere 4πr². A face on a sphere, cut or whole, takes the kernel's
+//! exact face area (#22556). The display mesh's triangles run inside a curve, so their
+//! sum falls short of it.
 //!
 //! A flat face's area is the area its exact edges enclose (#12372): its outer loop's area
 //! less its holes'. The display mesh's polygon for a round hole runs inside the circle, so
 //! the mesh's holes are too small and the face reads too big.
-
-use std::f64::consts::PI;
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Loop};
@@ -23,9 +22,15 @@ pub(crate) fn patch_area(body: &Body, mesh: &Mesh, patch: &[usize]) -> Option<f6
     match solidcraft_kernel::face_surface(body, *patch.first()?)? {
         FaceSurface::Plane { normal, point } => flat_patch(body, patch, normal, point),
         FaceSurface::Cylinder { origin, axis, radius } => cylinder_band(body, mesh, patch, origin, axis, radius),
-        FaceSurface::Sphere { radius, .. } => sphere(body, patch, radius),
+        FaceSurface::Sphere { center, radius } => sphere(body, patch, center, radius),
         _ => None,
     }
+}
+
+/// The exact area of one face, from its surface and trim by the kernel
+/// ([`Body::face_area`]), with no display mesh (#22556). `None` where the kernel gives none.
+pub(crate) fn face_area(body: &Body, face: usize) -> Option<f64> {
+    body.face_area(face).ok().flatten().filter(|a| a.is_finite())
 }
 
 /// Two orthonormal directions in a plane and a point on it: the plane's own 2D coordinates.
@@ -172,6 +177,79 @@ fn border_edges(mesh: &Mesh, patch: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+/// The length of the edges around a face.
+pub(crate) struct Perimeter {
+    pub(crate) total: f64,
+    /// The outer loop's length and the summed length of the hole loops, on a flat face with holes.
+    pub(crate) outer_inner: Option<(f64, f64)>,
+}
+
+/// The perimeter of the patch of faces `patch`: the length of its drawn border edges, each as
+/// long as `edge_len` says. A hidden seam is no border. `None` for a face with no border, such as
+/// a whole sphere. Only a flat face tells an outer loop from its holes: the two rims of a
+/// cylinder's side are neither.
+pub(crate) fn patch_perimeter(mesh: &Mesh, patch: &[usize], flat: bool, edge_len: impl Fn(usize) -> f64) -> Option<Perimeter> {
+    let edges: Vec<usize> = border_edges(mesh, patch).into_iter().filter(|&edge| mesh.edge_visible(edge)).collect();
+    let lengths: Vec<f64> = edges.iter().map(|&edge| edge_len(edge)).collect();
+    let total: f64 = lengths.iter().sum();
+    if !(total > 0.0) {
+        return None;
+    }
+    let outer_inner = flat.then(|| outer_loop_length(mesh, &edges, &lengths)).flatten().map(|outer| (outer, total - outer));
+    Some(Perimeter { total, outer_inner })
+}
+
+/// The length of the outer loop of a flat face's border `edges`, when they form several loops.
+/// The outer loop is the one with the widest box: every hole lies inside the outer loop, so a
+/// hole's box fits in the outer loop's box, even when the hole's own length is the greater.
+fn outer_loop_length(mesh: &Mesh, edges: &[usize], lengths: &[f64]) -> Option<f64> {
+    let polylines: Vec<&Vec<Vec3>> = edges.iter().map(|&edge| mesh.edges.get(edge)).collect::<Option<_>>()?;
+    let mut loop_of: Vec<usize> = (0..edges.len()).collect();
+    // Two edges in one loop share an end: the tessellator ends every edge on its B-rep vertices'
+    // own points, so a shared vertex is the same point to the last bit. A tolerance would join a
+    // hole to the outer loop where the two pass closer than it. The ends are sorted along X and
+    // each one meets only the ends with its X, so a face with many edges stays cheap.
+    let mut ends: Vec<(Vec3, usize)> =
+        polylines.iter().enumerate().flat_map(|(i, p)| [p.first(), p.last()].into_iter().flatten().map(move |end| (*end, i))).collect();
+    ends.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
+    for (i, (end, edge)) in ends.iter().enumerate() {
+        for (other, other_edge) in ends.iter().skip(i + 1).take_while(|(other, _)| other.x == end.x) {
+            if *end == *other {
+                let (a, b) = (loop_root(&loop_of, *edge), loop_root(&loop_of, *other_edge));
+                if let Some(slot) = loop_of.get_mut(a) {
+                    *slot = b;
+                }
+            }
+        }
+    }
+    let roots: Vec<usize> = (0..edges.len()).map(|edge| loop_root(&loop_of, edge)).collect();
+    // Each loop's box, in one pass over the border points.
+    let mut boxes: std::collections::BTreeMap<usize, (Vec3, Vec3)> = std::collections::BTreeMap::new();
+    for (polyline, root) in polylines.iter().zip(&roots) {
+        for p in polyline.iter() {
+            let (low, high) = boxes.entry(*root).or_insert((*p, *p));
+            (low.x, low.y, low.z) = (low.x.min(p.x), low.y.min(p.y), low.z.min(p.z));
+            (high.x, high.y, high.z) = (high.x.max(p.x), high.y.max(p.y), high.z.max(p.z));
+        }
+    }
+    if boxes.len() < 2 {
+        return None;
+    }
+    let (outer, _) = boxes.into_iter().map(|(id, (low, high))| (id, low.dist(high))).max_by(|a, b| a.1.total_cmp(&b.1))?;
+    Some(lengths.iter().zip(&roots).filter(|(_, r)| **r == outer).map(|(length, _)| *length).sum())
+}
+
+/// The loop `edge` belongs to, as the edge that stands for that loop.
+fn loop_root(loop_of: &[usize], mut edge: usize) -> usize {
+    while let Some(&next) = loop_of.get(edge) {
+        if next == edge {
+            break;
+        }
+        edge = next;
+    }
+    edge
+}
+
 /// Whether edge `edge` is a straight line parallel to `axis`.
 fn straight_along(body: &Body, edge: usize, axis: UnitVec3) -> bool {
     let Some(e) = body.record().edges.get(edge) else { return false };
@@ -245,30 +323,19 @@ fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: 
     Some(radius * low_turn * height)
 }
 
-/// The area of a sphere: 4πr², when the body is the whole of it.
-fn sphere(body: &Body, patch: &[usize], radius: f64) -> Option<f64> {
+/// The area of a patch of faces on one sphere: the sum of its faces' exact areas, each from
+/// the kernel ([`face_area`]).
+fn sphere(body: &Body, patch: &[usize], center: Vec3, radius: f64) -> Option<f64> {
     if !(radius.is_finite() && radius > 0.0) {
         return None;
     }
-    // The whole patch lies on one sphere.
-    for f in patch {
-        match solidcraft_kernel::face_surface(body, *f)? {
-            FaceSurface::Sphere { radius: r, .. } if (r - radius).abs() <= radius * 1e-6 => {}
+    let mut total = 0.0;
+    for &face in patch {
+        match solidcraft_kernel::face_surface(body, face)? {
+            FaceSurface::Sphere { center: c, radius: r } if (r - radius).abs() <= radius * 1e-6 && c.dist(center) <= radius * 1e-6 => {}
             _ => return None,
         }
+        total += face_area(body, face)?;
     }
-    // The body is the whole sphere: every face of it lies on that sphere and the patch
-    // holds them all. A body with a face of its own (a sphere that was cut) is a piece of
-    // the sphere, whose area this does not work out: the measure of the mesh stands in
-    // for it.
-    for f in 0..body.record().faces.len() {
-        match solidcraft_kernel::face_surface(body, f)? {
-            FaceSurface::Sphere { radius: r, .. } if (r - radius).abs() <= radius * 1e-6 => {}
-            _ => return None,
-        }
-        if !patch.contains(&f) {
-            return None;
-        }
-    }
-    Some(4.0 * PI * radius * radius)
+    (total.is_finite() && total > 0.0).then_some(total)
 }

@@ -31,6 +31,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::math::{
     blend_pt, combine2_pts, combine4_pts, float_op_is_bad, pascal_triangle,
     power_basis_srf_eval_pts, realloc_1d, realloc_2d, solve_quadratic, srf_power_basis_eval_derivs,
@@ -291,7 +292,9 @@ fn rust_err(e: &SolidError) -> Output {
         return d;
     }
     match e {
-        SolidError::Nlib { code, .. } => Output::err(format!("nlib_{}", code.code())),
+        e if nlib_number(e).is_some() => {
+            Output::err(format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+        }
         other => Output::err(format!("rust: {other}")),
     }
 }

@@ -37,12 +37,28 @@ impl Mat {
 }
 
 /// Solve `A x = b` (A square). Returns `None` when singular.
-pub fn solve(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
+pub fn solve(a: Mat, b: Vec<f64>) -> Option<Vec<f64>> {
+    solve_counted(a, b, &mut 0.0)
+}
+
+/// [`solve`], adding to `ops` the multiply-adds it does (rows it skips cost nothing), for
+/// callers that hold a work budget. The same arithmetic, so the same solution.
+pub fn solve_counted(a: Mat, b: Vec<f64>, ops: &mut f64) -> Option<Vec<f64>> {
+    solve_unless(a, b, ops, &|| false)
+}
+
+/// [`solve_counted`] that gives up (`None`) once `stop` answers true: it asks before each pivot
+/// column, so a large system stops part way through its elimination. Until then the same
+/// arithmetic, so the same solution.
+pub fn solve_unless(mut a: Mat, mut b: Vec<f64>, ops: &mut f64, stop: &dyn Fn() -> bool) -> Option<Vec<f64>> {
     let n = a.rows;
     if a.cols != n || b.len() != n || n.checked_mul(n) != Some(a.data.len()) {
         return None;
     }
     for k in 0..n {
+        if stop() {
+            return None;
+        }
         let mut piv = k;
         let mut best = a.get(k, k).abs();
         for r in k + 1..n {
@@ -70,6 +86,7 @@ pub fn solve(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
             if f == 0.0 {
                 continue;
             }
+            *ops += (n - k) as f64;
             for (x, v) in row.iter_mut().zip(pivot) {
                 *x += -f * v;
             }
@@ -89,6 +106,12 @@ pub fn solve(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
 
 /// Reduce to row echelon form in place; returns the pivot column of each pivot row.
 pub fn rref(a: &mut Mat, tol: f64) -> Vec<usize> {
+    rref_counted(a, tol, &mut 0.0, f64::INFINITY).unwrap_or_default()
+}
+
+/// [`rref`], adding its multiply-adds to `ops`; `None` (the matrix part reduced) once `ops`
+/// passes `budget`.
+pub fn rref_counted(a: &mut Mat, tol: f64, ops: &mut f64, budget: f64) -> Option<Vec<usize>> {
     let mut pivots = Vec::new();
     let mut row = 0;
     for col in 0..a.cols {
@@ -121,15 +144,28 @@ pub fn rref(a: &mut Mat, tol: f64) -> Vec<usize> {
             if f == 0.0 {
                 continue;
             }
-            for c in 0..a.cols {
-                let v = a.get(row, c);
-                a.add(r, c, -f * v);
+            *ops += a.cols as f64;
+            if *ops > budget {
+                return None;
+            }
+            // Row by row on slices: the same operations in the same order as element by element.
+            let cols = a.cols;
+            let (lo, hi) = (row.min(r), row.max(r));
+            let (head, tail) = a.data.split_at_mut(hi * cols);
+            let (pivot, target) = if row < r {
+                (head.get(lo * cols..lo * cols + cols)?, tail.get_mut(..cols)?)
+            } else {
+                let (p, t) = (tail.get(..cols)?, head.get_mut(lo * cols..lo * cols + cols)?);
+                (p, t)
+            };
+            for (x, v) in target.iter_mut().zip(pivot) {
+                *x += -f * v;
             }
         }
         pivots.push(col);
         row += 1;
     }
-    pivots
+    Some(pivots)
 }
 
 /// For each column of `j`: is that variable fixed by the constraints (zero in every null-space
@@ -137,6 +173,44 @@ pub fn rref(a: &mut Mat, tol: f64) -> Vec<usize> {
 pub fn determined_vars(j: &Mat, tol: f64) -> (Vec<bool>, usize) {
     let mut a = j.clone();
     let pivots = rref(&mut a, tol);
+    determined_from(&a, pivots, tol)
+}
+
+/// One vector of `j`'s null space that mixes all of it: the sum of the null-space basis vectors
+/// of the free columns (one per free column, the pivot columns following from it), each scaled
+/// to a largest entry of `weight(k)` for the k-th free column in column order, so that no
+/// freedom is drowned by another's larger entries. Also the rank. All zero when `j` has full
+/// column rank.
+pub fn null_mix(j: &Mat, tol: f64, weight: impl Fn(usize) -> f64) -> (Vec<f64>, usize) {
+    let mut a = j.clone();
+    let pivots = rref(&mut a, tol);
+    let mut n = vec![0.0; a.cols];
+    let free = (0..a.cols).filter(|c| !pivots.contains(c));
+    for (k, f) in free.enumerate() {
+        // A pivot row reads x_pivot + a[r][f]·x_f = 0 for this basis vector.
+        let peak = (0..pivots.len()).map(|r| a.get(r, f).abs()).fold(1.0_f64, f64::max);
+        let w = weight(k) / peak;
+        if let Some(x) = n.get_mut(f) {
+            *x += w;
+        }
+        for (r, pc) in pivots.iter().enumerate() {
+            if let Some(x) = n.get_mut(*pc) {
+                *x -= a.get(r, f) * w;
+            }
+        }
+    }
+    (n, pivots.len())
+}
+
+/// The rank of `j`, its row reduction's multiply-adds added to `ops`; `None` once they pass
+/// `budget`.
+pub fn rank_counted(j: &Mat, tol: f64, ops: &mut f64, budget: f64) -> Option<usize> {
+    let mut a = j.clone();
+    rref_counted(&mut a, tol, ops, budget).map(|p| p.len())
+}
+
+/// [`determined_vars`] from the reduced matrix and its pivots.
+fn determined_from(a: &Mat, pivots: Vec<usize>, tol: f64) -> (Vec<bool>, usize) {
     let rank = pivots.len();
     let free: Vec<usize> = (0..a.cols).filter(|c| !pivots.contains(c)).collect();
     let mut det = vec![true; a.cols];

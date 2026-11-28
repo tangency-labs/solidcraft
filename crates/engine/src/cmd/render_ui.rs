@@ -1,16 +1,22 @@
 //! Transient Render view requests and explicit refusals for planned interactions.
 use super::CommandSpec;
+use crate::schema::appearance::{AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult};
+use crate::schema::render_jobs::Job;
 use crate::schema::render_lights::{MuteParams, SoloParams};
 use crate::schema::{
     TypedContract, output_schema_for,
-    render_ui::{BatchParams, BatchResult, CheckReport, CompareDivider, CompareParams, CompareSide, ResultIndex},
+    render_ui::{
+        BatchParams, BatchResult, CheckReport, CloseResultParams, CompareDivider, CompareParams, CompareSide, OutputSize, RESULT_VIEW_FORMS,
+        ResultIndex, ResultViewName, ResultViewParams, ResultViewResult,
+    },
 };
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 const SOLO: crate::schema::TypedContract<SoloParams> = crate::schema::TypedContract::new();
 const MUTE: crate::schema::TypedContract<MuteParams> = crate::schema::TypedContract::new();
+const PAINT: TypedContract<AppearancePaintParams> = TypedContract::new();
+const PICK_UP: TypedContract<AppearancePickUpParams> = TypedContract::new();
 
 fn solo(_: &mut crate::Session, params: &serde_json::Value) -> crate::Result<serde_json::Value> {
     let command = "render.lights.solo";
@@ -37,11 +43,20 @@ fn mute(_: &mut crate::Session, params: &serde_json::Value) -> crate::Result<ser
     serde_json::to_value(input).map_err(|e| crate::params::bad(command, e.to_string()))
 }
 const RESULT_INDEX: TypedContract<ResultIndex> = TypedContract::new();
+const RESULT_VIEW: TypedContract<ResultViewParams> = TypedContract::new();
+const CLOSE_RESULT: TypedContract<CloseResultParams> = TypedContract::new();
+const OUTPUT_SIZE: TypedContract<OutputSize> = TypedContract::new();
 const COMPARE: TypedContract<CompareParams> = TypedContract::new();
 const DIVIDER: TypedContract<CompareDivider> = TypedContract::new();
 const BATCH: TypedContract<BatchParams> = TypedContract::new();
 
 const CHECK_REPORT: TypedContract<CheckReport> = TypedContract::new();
+
+/// `reply` as the command's own JSON: the reply type is what its output schema describes, so the
+/// two cannot drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("render.preflight.copy", "Copy Render Check Report", crate::checked!("render.preflight.copy", copy_check))
@@ -61,27 +76,35 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(results_ready)
         .contract(&RESULT_INDEX).output(output_schema_for::<ResultIndex>)
         .params("index: integer 0..7, oldest first; must be retained. Drops only that transient result, selecting the newest remaining result if necessary; echoes index."),
-    CommandSpec::new("render.output.size", "Set Render Output Size", output_size)
+    CommandSpec::new("render.output.size", "Set Render Output Size", crate::checked!("render.output.size", output_size))
         .icon("settings")
+        .contract(&OUTPUT_SIZE)
+        .output(output_schema_for::<OutputSize>)
         .noundo()
         .doc_only()
-        .params("width, height: 1..16384; custom?: bool. Validated Render output draft request; headless echo only, no design edits or job."),
-    CommandSpec::new("render.result.view", "View Render Image", result_view)
+        .params("width, height: 1..16384; custom?: bool. Validated Render output draft request; headless echo only, no design edits or job. The UI separately limits new selections to 8192 per side, 33554432 output pixels and the selected rendering profile."),
+    CommandSpec::new("render.result.view", "View Render Image", crate::checked!("render.result.view", result_view))
         .icon("render_image")
         .noundo()
         .doc_only()
-        .params("view: model|image|fit|actual. Validated result canvas request; headless echo only, never starts a job."),
-    CommandSpec::new("render.result.close", "Close Render Image", close_result)
+        .contract(&RESULT_VIEW)
+        .output(output_schema_for::<ResultViewResult>)
+        .params("view: model|image|fit|actual|denoise_mask. Guide-mask view requires a selected completed result captured with denoising diagnostics. Validated result canvas request; headless echo only, never starts a job."),
+    CommandSpec::new("render.result.close", "Close Render Image", crate::checked!("render.result.close", close_result))
         .icon("close")
         .key("Escape")
         .noundo()
         .doc_only()
+        .contract(&CLOSE_RESULT)
+        .output(output_schema_for::<ResultViewResult>)
         .params("No parameters. Return to Model Preview; headless echo only, never cancels a job."),
-    CommandSpec::new("appearance.paint", "Paint Appearance", super::inspect::appearance_gestures::paint)
+    CommandSpec::new("appearance.paint", "Paint Appearance", crate::checked!("appearance.paint", super::inspect::appearance_gestures::paint))
         .icon("appearance").key("B").noundo()
+        .contract(&PAINT).output(output_schema_for::<AppearancePaintResult>)
         .params("appearance or color/name/opacity/pbr: appearance.assign look parameters; validates and returns look for ui.start paint. done?: true ends the UI tool. Programmatic calls never open UI."),
-    CommandSpec::new("appearance.pick_up", "Pick Up Appearance", super::inspect::appearance_gestures::pick_up)
+    CommandSpec::new("appearance.pick_up", "Pick Up Appearance", crate::checked!("appearance.pick_up", super::inspect::appearance_gestures::pick_up))
         .icon("select").key("I").noundo()
+        .contract(&PICK_UP).output(output_schema_for::<AppearancePickUpResult>)
         .params("target?: appearance.chain target; returns its resolved look, or requests the UI sampling tool when omitted. Programmatic calls never open UI."),
 
     CommandSpec::new("render.lights.solo","Solo Light",crate::checked!("render.lights.solo",solo))
@@ -249,46 +272,37 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OutputSize {
-    width: u32,
-    height: u32,
-    #[serde(default)]
-    custom: bool,
-}
 fn output_size(_: &mut Session, params: &Value) -> Result<Value> {
     let input: OutputSize = serde_json::from_value(params.clone()).map_err(|e| bad("render.output.size", e.to_string()))?;
     if !(1..=16384).contains(&input.width) || !(1..=16384).contains(&input.height) {
         return Err(bad("render.output.size", "dimensions must be in 1..16384"));
     }
-    let mut reply = json!({"width":input.width,"height":input.height});
-    if input.custom {
-        reply["custom"] = json!(true);
-    }
-    Ok(reply)
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ResultView {
-    view: String,
+    serde_json::to_value(input).map_err(|e| bad("render.output.size", e.to_string()))
 }
 fn result_view(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: ResultView = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.view", e.to_string()))?;
-    if !matches!(input.view.as_str(), "model" | "image" | "fit" | "actual") {
-        return Err(bad("render.result.view", "view must be model, image, fit or actual"));
+    let input: ResultViewParams = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.view", e.to_string()))?;
+    let view = ResultViewName::parse(&input.view).ok_or_else(|| bad("render.result.view", RESULT_VIEW_FORMS))?;
+    if view == ResultViewName::DenoiseMask {
+        s.render_jobs.collect().map_err(crate::render_jobs::job_error)?;
+        let job = s.render_selected_result().ok_or_else(|| bad("render.result.view", "no completed result is selected"))?;
+        let frame = s.render_jobs.frame(job).map_err(crate::render_jobs::job_error)?;
+        if frame.denoise_mask_png().is_none() {
+            return Err(bad("render.result.view", "the selected result has no denoising guide mask"));
+        }
+        s.render_jobs.set_comparison(None);
+        return reply("render.result.view", ResultViewResult { view, job: Some(Job(job)) });
     }
-    if input.view == "model" {
+    if view == ResultViewName::Model {
         s.render_jobs.set_comparison(None);
     }
-    Ok(json!({"view":input.view}))
+    reply("render.result.view", ResultViewResult { view, job: None })
 }
 fn close_result(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
         return Err(bad("render.result.close", "expected no parameters"));
     }
     s.render_jobs.set_comparison(None);
-    Ok(json!({"view":"model"}))
+    reply("render.result.close", ResultViewResult { view: ResultViewName::Model, job: None })
 }
 
 #[cfg(test)]
@@ -297,7 +311,16 @@ fn output_viewer_requests_are_validated_headless_echoes() {
     let mut s = Session::default();
     let document = s.doc.clone();
     let before = (s.revision, s.undo.len(), s.evaluations);
-    for size in [json!({"width":1280,"height":720}), json!({"width":1920,"height":1080})] {
+    // Headless requests keep the established per-side range. They allocate no
+    // image; the UI and actual renderer independently enforce their envelopes.
+    for size in [
+        json!({"width":1280,"height":720}),
+        json!({"width":1920,"height":1080}),
+        json!({"width":7680,"height":4320}),
+        json!({"width":16384,"height":1}),
+        json!({"width":1,"height":16384}),
+        json!({"width":16384,"height":16384}),
+    ] {
         assert_eq!(s.execute("render.output.size", &size).unwrap(), size);
     }
     let custom = json!({"width":1920,"height":1080,"custom":true});
@@ -307,10 +330,18 @@ fn output_viewer_requests_are_validated_headless_echoes() {
         let request = json!({"view":view});
         assert_eq!(s.execute("render.result.view", &request).unwrap(), request);
     }
+    assert!(s.execute("render.result.view", &json!({"view":"denoise_mask"})).is_err());
     assert_eq!(s.execute("render.result.close", &json!({})).unwrap(), json!({"view":"model"}));
-    for request in
-        [json!(null), json!({}), json!({"width":0,"height":1}), json!({"width":u64::MAX,"height":1}), json!({"width":1,"height":1,"extra":true})]
-    {
+    for request in [
+        json!(null),
+        json!({}),
+        json!({"width":0,"height":1}),
+        json!({"width":1,"height":0}),
+        json!({"width":16385,"height":1}),
+        json!({"width":1,"height":16385}),
+        json!({"width":u64::MAX,"height":1}),
+        json!({"width":1,"height":1,"extra":true}),
+    ] {
         assert!(s.execute("render.output.size", &request).is_err());
     }
     for request in [json!(null), json!({"view":"unknown"}), json!({"view":"image","extra":true})] {
@@ -511,7 +542,7 @@ fn batch_fixture(count: usize) -> Session {
     let mut s = Session::default();
     s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
     for index in 0..count {
-        let camera = solidcraft_render::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
         s.execute("render.settings.set", &json!({"name":format!("Shot {index:02}"),"set":{"camera":camera,"width":8+index,"height":8}})).unwrap();
     }
     s
@@ -633,7 +664,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     let original = s.doc.render.setups.get("Shot 01").unwrap().camera;
     s.execute("render.batch", &json!({"request":{"setup":"Shot 00"}})).unwrap();
     let first = s.render_queue_state().job.unwrap();
-    let changed = solidcraft_render::Camera { yaw: 2.0, ..Default::default() };
+    let changed = solidcraft_viewport::Camera { yaw: 2.0, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"Shot 01","set":{"camera":changed}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     let document = s.doc.clone();

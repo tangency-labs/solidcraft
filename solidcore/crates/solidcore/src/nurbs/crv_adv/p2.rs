@@ -28,7 +28,7 @@
 //! | [`G1_ANGLE_TOL`]                             | `g1tol` of `N_CrvEvalUnboundedPtsAndDerivs` |
 //!
 //! Deviations:
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart.
 //! - Routines that write into an output curve that is NULL, an existing curve or the
@@ -74,7 +74,7 @@
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_adv::{compatible_knot_array_mult, increase_knot_mult};
 use crate::nurbs::basis_basic::PTOL;
@@ -443,7 +443,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Input`] for an empty `x`, `x[0] <= U[0]` or `x[r] >= U[m]`, and the
+    /// [`NurbsFailure::Input`] for an empty `x`, `x[0] <= U[0]` or `x[r] >= U[m]`, and the
     /// errors of the knot span search.
     pub fn refine_to_knot_vector(&self, x: &[f64]) -> Result<Vec<CPoint>> {
         const OP: &str = "nurbs::crv_adv::p2::Curve::refine_to_knot_vector";
@@ -461,13 +461,13 @@ impl Curve {
         // Check input parameters.
         let r = sx(x.len(), OP)? - 1;
         if r < 0 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         if get(x, 0, OP)? <= get(uk, 0, OP)? {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         if get(x, r, OP)? >= get(uk, m, OP)? {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         // Find knot spans.
@@ -640,9 +640,9 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Input`] for `d > p` or a rational curve, [`NlibCode::Derivative`]
+    /// [`NurbsFailure::Input`] for `d > p` or a rational curve, [`NurbsFailure::ZeroDerivative`]
     /// when a knot difference `U[i+p+1] - U[i+k]` is zero, and
-    /// [`NlibCode::Numerical`] when the quotient `(p-k+1) / (U[i+p+1] - U[i+k])` would
+    /// [`NurbsFailure::Numerical`] when the quotient `(p-k+1) / (U[i+p+1] - U[i+k])` would
     /// overflow or underflow.
     pub fn non_rat_first_deriv(&self, d: usize) -> Result<Curve> {
         const OP: &str = "nurbs::crv_adv::p2::Curve::non_rat_first_deriv";
@@ -656,10 +656,10 @@ impl Curve {
         let m = sx(self.m(), OP)?;
         let d = sx(d, OP)?;
         if d > p {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         if self.is_rational() {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         // See if memory is needed.
@@ -680,11 +680,11 @@ impl Curve {
             for i in 0..=n - k {
                 let (hi, lo) = (get(uk, i + p + 1, OP)?, get(uk, i + k, OP)?);
                 if hi == lo {
-                    return Err(SolidError::nlib(OP, NlibCode::Derivative));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::ZeroDerivative));
                 }
                 let num = p as f64 - k as f64 + 1.0;
                 if float_op_is_bad(num, hi - lo, FloatOp::Division) {
-                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                 }
                 let alf = num / (hi - lo);
                 let c = CPoint::combine2(alf, get(&tw, i + 1, OP)?, -alf, get(&tw, i, OP)?);
@@ -817,7 +817,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Input`] when `alf del - bet gam < PTOL` or a new knot is not
+    /// [`NurbsFailure::Input`] when `alf del - bet gam < PTOL` or a new knot is not
     /// computable.
     pub fn reparam_rat(&self, alf: f64, bet: f64, gam: f64, del: f64) -> Result<Curve> {
         let mut out = None;
@@ -833,7 +833,7 @@ impl Curve {
 
         // Check coefficients.
         if (alf * del - bet * gam) < PTOL {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         // Get local notation.
@@ -852,7 +852,7 @@ impl Curve {
             let num = alf * ui + bet;
             let den = gam * ui + del;
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             set(uq, i, num / den, OP)?;
         }
@@ -1006,9 +1006,9 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Input`] when the reparametrisation is degenerate or a new knot is
-    /// not computable, [`NlibCode::Weight`] for a weight whose reciprocal is not
-    /// computable, [`NlibCode::Numerical`] when a new weight is not computable, and the
+    /// [`NurbsFailure::Input`] when the reparametrisation is degenerate or a new knot is
+    /// not computable, [`NurbsFailure::Weight`] for a weight whose reciprocal is not
+    /// computable, [`NurbsFailure::Numerical`] when a new weight is not computable, and the
     /// errors of [`Curve::reparam_to_interval`]. The curve is left modified as far as
     /// upstream got.
     pub fn reparam_end_weights(&mut self, wt0: f64, wtn: f64) -> Result<()> {
@@ -1038,7 +1038,7 @@ impl Curve {
         let gam = wn - w0;
         let del = w0;
         if (alf * del - bet * gam) < PTOL {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         let uk = self.knots().to_vec();
@@ -1048,7 +1048,7 @@ impl Curve {
             let c = get(pw, i, OP)?;
             set(&mut w, i, c.w, OP)?;
             if float_op_is_bad(1.0, c.w, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Weight));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
             }
             let fact = 1.0 / c.w;
             set(pw, i, c.scale(fact), OP)?;
@@ -1064,7 +1064,7 @@ impl Curve {
             }
             let wi = get(&w, i, OP)?;
             if float_op_is_bad(wi, fact, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             let wi = wi / fact;
             set(&mut w, i, wi, OP)?;
@@ -1085,7 +1085,7 @@ impl Curve {
             let num = alf * ui + bet;
             let den = gam * ui + del;
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             set(uq, i, num / den, OP)?;
         }

@@ -11,10 +11,10 @@
 //! leaves in, which makes G2 the curvature vector and G3 the way that curvature vector changes
 //! along that direction (its normal part: what a surface-to-surface match can hold).
 //!
-//! What the support surface does along the leave direction is read off from samples on its own
-//! parameter line (the line through the station that leaves in the leave direction at unit
-//! speed) by finite differences: the second derivative of a surface curve with a unit tangent is
-//! its curvature vector, and the third is the arclength derivative of that curvature vector.
+//! The support surface's parameter line leaves each station at unit speed in the leave
+//! direction. Its derivatives give the curvature vector and the arc-length derivative of
+//! curvature. Open spline spans supply these derivatives directly, including at corners.
+//! Other supports and interior knots use the five-point stencils on the support.
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
@@ -83,6 +83,42 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
         return Err(KernelError::Invalid("the picked edges do not run on from one another".into()));
     }
     Ok(chain)
+}
+
+/// The edges of `body` a path, rail or boundary pick of edges `edges` (the record's edge indices,
+/// which are the display's) stands for with its curve chain: the picked edges (each once, in
+/// order), then every edge that continues one of them within `angle` radians at a shared vertex,
+/// and so on, stopping at a branch (`solidcore_ops::tangent::curve_chain_ordered`). Unlike a
+/// blend's chain ([`crate::tangent_chain_edges`]) the faces play no part.
+pub fn curve_chain_of_edges(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("an edge chain")?;
+    let count = body.record().edges.len();
+    if edges.is_empty() || edges.len() > 10_000 || edges.iter().any(|&e| e >= count) {
+        return Err(KernelError::Invalid("pick 1 to 10000 edges of the body".into()));
+    }
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("an edge chain: the body is no SMLib body".into()))?;
+    let (ops, order) = &*form;
+    solidcore_ops::tangent::curve_chain_ordered(ops, order, edges, angle)
+        .map(|chain| chain.members)
+        .map_err(|e| KernelError::Failed(format!("an edge chain: {e}")))
+}
+
+/// The faces of `body` a pick of faces `faces` (the record's face indices, which are the
+/// display's) stands for with its tangent ring: the picked faces (each once, in order), then every
+/// face joined to one of them across a smooth edge (its two faces meeting within `angle` radians
+/// all along it), and so on (`solidcore_ops::tangent::tangent_face_chain_ordered`): a part's side
+/// of flats and rounds tangent to each other, from any one of them.
+pub fn tangent_face_chain_of_faces(body: &Body, faces: &[usize], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("a face chain")?;
+    let count = body.record().faces.len();
+    if faces.is_empty() || faces.len() > 10_000 || faces.iter().any(|&f| f >= count) {
+        return Err(KernelError::Invalid("pick 1 to 10000 faces of the body".into()));
+    }
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("a face chain: the body is no SMLib body".into()))?;
+    let (ops, order) = &*form;
+    solidcore_ops::tangent::tangent_face_chain_ordered(ops, order, faces, angle)
+        .map(|chain| chain.members)
+        .map_err(|e| KernelError::Failed(format!("a face chain: {e}")))
 }
 
 /// Whether a chain of `body`'s edges closes back on itself.
@@ -216,7 +252,7 @@ impl ChainLine {
     /// The arclength of the chain's point nearest `p`, and how far `p` is from the chain: the
     /// nearest point of the fine polyline, then refined on that edge's own curve between the
     /// samples either side (golden-section search).
-    fn nearest_with_distance(&self, p: Vec3) -> (f64, f64) {
+    fn nearest_with_distance(&self, p: Vec3) -> (f64, Option<f64>) {
         let mut best = (f64::INFINITY, 0.0, 0usize, 0.0, 0.0);
         for w in self.samples.windows(2) {
             let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
@@ -228,9 +264,16 @@ impl ChainLine {
             }
         }
         let (chord, s, edge, ta, tb) = best;
-        let on_curve = self.curves.get(edge).and_then(|(c, _)| {
+        if !chord.is_finite() {
+            return (s, None);
+        }
+        let on_curve = self.curves.get(edge).and_then(|(c, [start, end])| {
             let d = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
-            let (mut lo, mut hi) = (ta.min(tb), ta.max(tb));
+            let (mut lo, mut hi) = (ta.min(tb).max(start.min(*end)), ta.max(tb).min(start.max(*end)));
+            if lo > hi {
+                return None;
+            }
+            let ends = d(lo).min(d(hi));
             let g = 0.5 * (5f64.sqrt() - 1.0);
             for _ in 0..80 {
                 let (x, y) = (hi - g * (hi - lo), lo + g * (hi - lo));
@@ -240,9 +283,10 @@ impl ChainLine {
                     lo = x;
                 }
             }
-            Some(d(0.5 * (lo + hi))).filter(|x| x.is_finite())
+            Some(ends.min(d(0.5 * (lo + hi)))).filter(|x| x.is_finite())
         });
-        (s, on_curve.map_or(chord, |d| d.min(chord)))
+        // The chord locates a candidate interval. Only a point on the trimmed curve measures the gap.
+        (s, on_curve)
     }
 
     /// The arclength of the chain's point nearest `p`.
@@ -439,6 +483,15 @@ impl Support {
         }
         let du = (c * w.dot(su) - b * w.dot(sv)) / det;
         let dv = (a * w.dot(sv) - b * w.dot(su)) / det;
+        // At a spline corner the parameter line can run outside the box in both directions.
+        // Derivatives of the boundary span still give the shape at exactly the projected UV.
+        if let SurfaceEval::Eval(spline, _) = surf
+            && let Some(jet) = spline.spline_line_derivatives([u, v], [du, dv])
+        {
+            let [d1, d2, d3] = jet.map(solidcraft_geom::tess::from_kernel);
+            let (_, bend, bend_change) = shape(d1, d2, d3)?;
+            return Ok((Frame { p, leave: w, bend, bend_change }, n));
+        }
         // The samples of the parameter line. A station sits on the support surface's own
         // boundary, so the line usually leaves the face: the shape is then read from the samples
         // of the one side that is still on the surface, which is the surface's own extension past
@@ -713,8 +766,8 @@ pub fn sample_grid(body: &Body, along: usize, across: usize) -> Result<Vec<Vec<V
         .collect()
 }
 
-/// The most any point of a bridge's boundary row is from the chain it was built on — the row at
-/// `v0` for the first boundary, at `v1` for the second: what a stitch would have to close up.
+/// The largest sampled distance from the bridge boundary to the chain it was built on.
+/// The first boundary runs at `v0`, the second at `v1`. Excursions between stations can be missed.
 fn boundary_gap(made: &Body, line: &ChainLine, at_end: bool) -> Result<f64> {
     let (surf, [[u0, u1], [v0, v1]]) = the_face(made)?;
     let v = if at_end { v1 } else { v0 };
@@ -722,7 +775,9 @@ fn boundary_gap(made: &Body, line: &ChainLine, at_end: bool) -> Result<f64> {
     for i in 0..=256 {
         let q =
             surf.point([u0 + (u1 - u0) * i as f64 / 256.0, v]).ok_or_else(|| KernelError::Failed("bridge: the surface has no point there".into()))?;
-        worst = worst.max(line.nearest_with_distance(q).1);
+        let distance =
+            line.nearest_with_distance(q).1.ok_or_else(|| KernelError::Failed("bridge: no curve point for a boundary gap sample".into()))?;
+        worst = worst.max(distance);
     }
     Ok(worst)
 }
@@ -836,7 +891,7 @@ fn pair_with(a: &[(Vec3, usize)], line: &ChainLine, seam: Option<Vec3>) -> Resul
 /// that keeps the blend from twisting; a closed chain does not blend to an open one. `align`
 /// overrides the direction each side leaves in (points in world space); `crown` how full each side
 /// is; `stitch` sews the blend to its two bodies where their boundaries meet. The reply's `gap`, if
-/// any, is how far the blend's own boundary lay from the chains it was built on.
+/// any, is the largest sampled distance from the blend boundaries to the input chains.
 #[allow(clippy::too_many_arguments)]
 pub fn blend_between(
     a: &Body,
@@ -890,8 +945,7 @@ pub fn blend_between(
     if !stitch {
         return Ok((blend, gap));
     }
-    // Sewing up a boundary the blend only approximates: the stitch is given what the boundary
-    // actually strays, so that a real gap between the bodies is still refused.
+    // Use the measured distances at the boundary stations to choose a sewing tolerance.
     let out = crate::surfaces::stitch(&[a, b, &blend], gap * 1.05 + 1e-9)?;
     Ok((out, gap))
 }

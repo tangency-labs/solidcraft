@@ -6,14 +6,18 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to use its name: when the value is
-just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
-cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
-`d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit.
+name (`d1`, `d2`, …). Double-click another dimension to edit it: the current value is applied,
+as **Enter** does (if it is not valid, the box stays open with its error), and the clicked
+dimension opens with its value selected. Single-click another driving dimension to insert its
+name: when the value is just a number (such as `10` or `10 mm`) the name replaces it; otherwise
+it goes in at the cursor, replacing selected text and keeping what you typed, so typing `10 + `
+and clicking `d1` gives `10 + d1`. The name goes in a moment after the click, once it is clear
+the click was not the first of a double-click. Add arithmetic such as `/ 2` to build a dependent
+dimension. Press **Enter** to apply the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
-![The Parameters dialog, numbered 1 to 5](../media/parameters/dialog.png)
+<img class="dark-ui" src="../media/parameters/dialog.png" alt="The Parameters dialog, numbered 1 to 5">
+<img class="light-ui" src="../media/parameters/dialog.light.png" alt="The Parameters dialog, numbered 1 to 5">
 
 **1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
@@ -80,18 +84,43 @@ is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, 
 `2.5 mm`, and `-(width-0,5)/2` is `-(width-0.5)/2` (directly in a function's parentheses the
 comma separates its arguments, so write `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
-numbers). A length where an angle is expected (or the other way round) is an
-error, not a silent conversion. Cycles are reported with their path (`a → b → a`), renaming a
-parameter updates every expression, dimension and feature input that uses it, and a parameter
-in use can't be deleted (the error lists its users).
+numbers). A length where an angle is expected, or a mass where a length is (any value of
+another kind), is an error, not a silent conversion. Cycles are reported with their path
+(`a → b → a`), renaming a parameter updates every expression, dimension and feature input that
+uses it, and a parameter in use can't be deleted (the error lists its users).
+
+Masses, volumes and areas have units too: `50 g`, `0.5 kg`, `1 lb`, `500 ml`, `2 cm³`, `1 m³`,
+`3 mm²`, `1.5 m²` (`cm^3` works as well as `cm³`). A parameter can be a mass, a volume or an
+area, and a density times a volume is a mass: `7.85 g/cm³ * (10 mm)^3` is 7.85 g. A new mass
+parameter shows in kg, and a volume or an area in the cube or square of the design's length unit
+(`in³` and `in²` in an inch design). A bare number in a parameter is in its
+unit (`2` in a g parameter is 2 g), and otherwise in the unit its kind shows in: `kit + 1` beside a
+mass is 1 kg more, and `3` where a mass is expected is 3 kg. `l`, `L`, `t` and `oz` are not units
+(they are common names, or could be a mass or a volume), and neither is `m3` (an M3 screw).
+
+The units are:
+- lengths: `mm`, `cm`, `m`, `km`, `um` (or `µm`), `nm`, `in` (or `inch`, `"`), `ft` (or `'`),
+  `yd` and `mil`;
+- angles: `deg` (or `°`) and `rad`;
+- masses: `g`, `kg` and `lb`;
+- volumes: `ml`, `mm³`, `cm³`, `m³`, `in³` and `ft³`;
+- areas: `mm²`, `cm²`, `m²`, `in²` and `ft²`.
+
+No parameter can be named after a unit. When a design saved before these units opens, a
+parameter or feature input called `g`, `kg`, `lb`, `ml`, `mm³`, `cm³`, `m³`, `in³`, `ft³`, `mm²`, `cm²`, `m²`,
+`in²` or `ft²`
+is renamed (`g` becomes `g_param`), everything that uses it follows, and its comment says why.
+Its value doesn't change.
 
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
 and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
 `parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
 makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
-values use the same units as the operation. Angles, counts and scale factors keep their own
+secondary distances, wall thicknesses, gaps, offsets and radii. One is the exception: a new Solid
+Fillet's radius opens at the 2 mm the tool ships with, shown in the design's units ("0.07874 in" in
+an inch design), because a radius is bound by the faces beside its edges. Canvas handles and live
+sketch values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.
 
@@ -102,6 +131,13 @@ an unchanged field cannot reinterpret it. Computed sizes and tolerances keep the
 precision when written back into editable fields, independently of display precision.
 
 Parameters export to and import from CSV or JSON (`parameters.export`, `parameters.import`).
+In a CSV, a value that a spreadsheet would run as a formula is written with a `'` before it, so the
+spreadsheet shows it as text. That is a value that starts with `=`, `+`, `-` or `@`, their full-width
+forms, a tab or a line break, after any spaces and `'`; a plain number such as `-5` is left as it is.
+The import takes the `'` off again. A spreadsheet that saves the file again as CSV can drop the `'`
+(Excel does), so export again from SolidCraft instead of passing that file on. Earlier versions of
+SolidCraft wrote every value unchanged, so in a CSV from one of them, a value whose first character
+really was a `'` typed before a formula character (`'=x`) now imports without it (`=x`).
 **Configurations** (`config.*`) keep a table of rows, each with its own parameter values and
 suppressed features, physical materials and body appearances, switched with `config.activate`.
 The table's Library picker selects material or appearance values. Choose **Follow material**
@@ -126,3 +162,21 @@ time and what changed from the design as it is now: features that fail (`failed`
 (`joints_flipped`, more than 90°), sketch planes that turned over (`sketches_flipped`) and sketch
 solves that fail or only hold by flipping a triangle's turn or an offset's side (`sketches_failed`).
 `summary` counts the values that show each.
+
+Use **Compare Parameter Variants** when several parameters must change together. Each
+named variant starts from the same open design, so values from one variant never carry
+over to the next. For example, compare a pair of bracket sizes:
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Compact", "set": {"Width": "40 mm", "Thickness": "4 mm"}},
+  {"name": "Wide", "set": {"Width": "60 mm", "Thickness": "6 mm"}}
+]}}
+```
+
+The command accepts up to 12 variants with up to 16 existing parameters each. It returns
+the baseline's volume, mass and body counts, then one result per variant in input order.
+The result reports new feature, joint or sketch regressions using the same checks as
+Parameter Sweep. A refused expression is an error for that variant; later variants still
+run. A variant with a rebuild regression has no metrics. Open bodies do not count toward
+volume or mass. The design and its undo history are unchanged.

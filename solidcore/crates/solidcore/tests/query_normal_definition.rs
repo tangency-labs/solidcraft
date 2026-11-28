@@ -35,14 +35,12 @@ use solidcore::{Brep, Kernel, SolidError};
 /// `TWIST_TAN`: tan 30 degrees.
 const TWIST_TAN: f64 = 0.577_350_269_189_625_76;
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -246,8 +244,11 @@ fn a_definition_off_its_net_s_domain_is_refused() {
 /// foot sits on a face's knot line and its box straddles it, the point is still enclosed (a
 /// check of the feet against one piece refused 67 of the 188 the net then had), and so is
 /// every point between two stations; each enclosure holds the evaluator's point. The net
-/// has 181 inner knots since #2690: the certificate accepts a level by each uv parameter's
-/// own error, so some spans certify without being halved.
+/// had 181 inner knots since #2690 (the certificate accepts a level by each uv parameter's
+/// own error, so some spans certify without being halved), 169 since #13984 (each proved
+/// feet's box is tightened before the Taylor solve, so more spans certify unhalved), 164
+/// since #14405 (the arc's rows over a piece are bounded by Taylor models too), and 113
+/// since #14405's feet (the feet over a piece are bounded by Taylor models too).
 #[test]
 fn every_station_and_every_point_between_is_enclosed() {
     let mut k = solidcraft_kernel();
@@ -281,7 +282,7 @@ fn every_station_and_every_point_between_is_enclosed() {
         .filter(|&x| x > lo && x < hi)
         .collect();
     inner.dedup();
-    assert_eq!(inner.len(), 181);
+    assert_eq!(inner.len(), 113);
     let mut points = Vec::new();
     for w in inner.windows(2) {
         points.push(w[0]);

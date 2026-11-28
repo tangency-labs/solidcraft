@@ -11,8 +11,8 @@ fn invalid(message: &str) -> JobError {
 /// The writer checks exact dimensions and payload before reserving any output.
 pub fn encoded_limit(width: u32, height: u32) -> Result<u64> {
     let (w, h) = (u64::from(width), u64::from(height));
-    if w == 0 || h == 0 || w > 8192 || h > 8192 || w * h > 16_777_216 {
-        return Err(invalid("linear EXR requires 1..8192 sides and at most 16777216 pixels"));
+    if w == 0 || h == 0 || w > 8192 || h > 8192 || w * h > super::MAX_OUTPUT_PIXELS {
+        return Err(invalid("linear EXR requires 1..8192 sides and at most 33554432 pixels"));
     }
     Ok(w * h * 16 + h * 16 + 4096)
 }

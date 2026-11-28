@@ -16,6 +16,7 @@
 
 use core::fmt::{self, Debug};
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassification;
@@ -24,7 +25,6 @@ use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::face::p2::{point_classify_prepared, BrepCacheFace, PointClassifyOptions};
 use crate::surface::surface::p1::get_surface_cache_with_face;
-use crate::surface::surface::CacheTreeState;
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
 use crate::surface::trim_srf_cache::CacheFace;
 use crate::topology::{Brep, FaceId};
@@ -33,6 +33,11 @@ use crate::topology::{Brep, FaceId};
 pub trait FaceQueries<O>: Debug {
     /// Returns the face's 3D zone tolerance.
     fn face_zone_tol_3d(&self, face: O) -> Result<f64>;
+
+    /// Whether the face has loop uses ([`crate::topology::face::p4::has_loopuses`]):
+    /// a trimmed cache's point test classifies only on such a face, and keeps every
+    /// point on a face without loop uses.
+    fn face_has_loopuses(&self, face: O) -> Result<bool>;
 
     /// Classifies a UV point against a face, returning its class and optional object.
     fn face_point_classify(
@@ -171,6 +176,10 @@ impl<O: Copy + PartialEq> CacheFace<O> for MappedCacheFace<'_, O> {
         self.handles(self.inner.upward_loopuses()?)
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        self.inner.has_loopuses()
+    }
+
     fn loopuse_edgeuses(&self, loopuse: O) -> Result<Vec<O>> {
         self.handles(self.inner.loopuse_edgeuses(self.entity(loopuse)?)?)
     }
@@ -300,6 +309,11 @@ impl<O: Copy + PartialEq> FaceQueries<O> for PreparedFaceQueries<'_, O> {
         crate::topology::face::p2::tolerance(self.brep, self.face)
     }
 
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.check_face(face)?;
+        crate::topology::face::p4::has_loopuses(self.brep, self.face)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -347,9 +361,10 @@ pub fn prepare_face_surface_cache<O: Copy + PartialEq>(
 /// [`prepare_face_surface_cache`] without the solve's `GetTree`: the cache as
 /// `smsurf_GetSurfaceCache` hands it to a reader that reads only its state bits
 /// (`GlobalPointSolve`'s fast-drop face test). A cache the factory leaves without
-/// tree (made during a Boolean operation, or reused unbuilt:
-/// [`crate::surface::surface::Surface::cache_tree_state`]) keeps the state bits the `SmTrimSrfCache`
-/// constructor set; a surface whose cache upstream has built is built here as well.
+/// tree (made during a Boolean operation) keeps the state bits the `SmTrimSrfCache`
+/// constructor set. Upstream reuses a cache an earlier call built, with the built
+/// tree's bits; the port keeps no record of that, so such a cache is made again here
+/// and, during a Boolean operation, has the constructor's bits.
 ///
 /// # Errors
 ///
@@ -381,10 +396,8 @@ fn face_surface_cache<O: Copy + PartialEq>(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::FaceHasNoSurface))?
         .clone_for_evaluation()?;
-    // upstream reuses a cache whose tree is built, with the built tree's state bits
-    let get_tree = get_tree || surface.cache_tree_state() == CacheTreeState::Built;
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, handle_of, entity_of)?;
     let mut cache = get_surface_cache_with_face(k, &surface, Some(surface_handle), &mut mapped)?;
     // A Boolean operation can defer the factory's tree build until GetTree.

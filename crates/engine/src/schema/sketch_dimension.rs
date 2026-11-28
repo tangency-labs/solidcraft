@@ -9,7 +9,8 @@
 //!
 //! The handler reads some keys only in some cases, and so does the contract: a driven dimension
 //! (`driven: true`) measures and has no value, so its `value` (apart from a definition, which
-//! the handler refuses by itself), `scale_sketch` and `if_redundant` are not read and not checked.
+//! the handler refuses by itself), `scale_sketch`, `scale_about_origin` and `if_redundant` are not
+//! read and not checked.
 //! `if_redundant` is read only once the dimension turns out to be determined by the sketch.
 //!
 //! The handler reads a few keys more leniently than a type can (a `type` that is not text counts
@@ -33,8 +34,9 @@ use crate::params::json_brief;
 
 /// One or two entities to dimension: a curve or point id (`l1`, `p3`, `l1.start`), `x` or `y` (a
 /// sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}`
-/// or vertex `{vertex: [x, y, z], body?}`, which the handler projects into the sketch first. One
-/// id may be given as text rather than a list.
+/// or vertex `{vertex: [x, y, z], body?}`, which the handler projects into the sketch first, or in
+/// a 3D sketch a planar model face `{face: [x, y, z], body?}`. One id may be given as text rather
+/// than a list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DimensionEntities(pub Vec<Value>);
 
@@ -51,7 +53,9 @@ impl DimensionEntities {
                 if list.len() > MAX_PROJECTED_ENTITIES {
                     return Err(format!("`entities` may list at most {MAX_PROJECTED_ENTITIES} entities"));
                 }
-                if let Some((i, e)) = list.iter().enumerate().find(|(_, e)| !e.is_string() && !model_ref(e)) {
+                // A planar model face, `{face: [x,y,z], body?}`, is a plane for a 3D dimension
+                // (#10616), which the 3D handler reads first.
+                if let Some((i, e)) = list.iter().enumerate().find(|(_, e)| !e.is_string() && !model_ref(e) && e.get("face").is_none()) {
                     return Err(format!("`entities` must list names; the entry {} is {}", i + 1, json_brief(e)));
                 }
                 list.clone()
@@ -78,9 +82,9 @@ impl JsonSchema for DimensionEntities {
                 "required": [key]
             })
         };
-        let one = serde_json::json!({"anyOf": [{"type": "string"}, model("edge"), model("vertex")]});
+        let one = serde_json::json!({"anyOf": [{"type": "string"}, model("edge"), model("vertex"), model("face")]});
         json_schema!({
-            "description": "One or two entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. One id may be given as text instead of a list.",
+            "description": "One or two entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. In a 3D sketch, a 3D point or line and a plane: `xy`, `yz`, `xz`, a construction plane's name, or a planar model face `{face: [x, y, z], body?}`. One id may be given as text instead of a list.",
             "anyOf": [{"type": "string"}, {"type": "array", "items": one, "minItems": 1, "maxItems": 2}]
         })
     }
@@ -138,11 +142,17 @@ pub struct SketchDimensionParams {
     pub driven: Option<bool>,
     /// When this is the sketch's first length dimension and nothing in the sketch fixes a size
     /// (no other driving length dimension, nothing fixed or projected), scale the whole sketch
-    /// about its origin to the value instead of distorting it (the reply's `scaled` is the factor).
+    /// to the value instead of distorting it (the reply's `scaled` is the factor). A free
+    /// drawing uses its own centre. A drawing tied to the origin scales about the origin.
     /// Default: false. Not read for a driven dimension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub scale_sketch: Option<bool>,
+    /// Scale about the sketch origin even when the drawing is free. Default: false. Not read
+    /// for a driven dimension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub scale_about_origin: Option<bool>,
     /// For an ellipse with type auto: `major` or `minor`, the half-axis an earlier placement
     /// chose, kept while `text_at` is near the boundary between them (any case; other text is
     /// ignored).
@@ -212,12 +222,13 @@ impl SketchDimensionParams {
         // The sketch is read after the entities; a model reference among them is left to the
         // handler, which looks the sketch up first (see `DimensionEntities::read`).
         let sketch = typed::<SketchTarget>(o, "sketch")?;
-        let (mut value, mut scale_sketch, mut if_redundant) = (None, None, None);
+        let (mut value, mut scale_sketch, mut scale_about_origin, mut if_redundant) = (None, None, None, None);
         // A driven dimension measures: it has no value to read, nothing to scale and nothing it
         // could be redundant with.
         if driven != Some(true) {
             value = typed::<LengthExpr>(o, "value")?;
             scale_sketch = flag(o, "scale_sketch", None)?;
+            scale_about_origin = flag(o, "scale_about_origin", None)?;
             if_redundant = text(o, "if_redundant")?;
         }
         Ok(SketchDimensionParams {
@@ -229,6 +240,7 @@ impl SketchDimensionParams {
             text_at,
             driven,
             scale_sketch,
+            scale_about_origin,
             previous_axis,
             half_axes,
             if_redundant,
@@ -246,6 +258,9 @@ impl<'de> Deserialize<'de> for SketchDimensionParams {
 /// What `sketch.dimension` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DimensionResult {
+    /// For a 3D sketch's dimension (#10608): its constraint id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
     /// The parameter that holds the dimension's value (`d1`, or the name a `name = expression`
     /// value defined); null for a driven dimension, which has none.
     pub param: Option<String>,
@@ -254,7 +269,9 @@ pub struct DimensionResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub driven: Option<bool>,
     /// What the dimension is: `LinearDimension`, `RadialDimension`, `DiameterDimension`,
-    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`.
+    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`; for a 3D sketch's
+    /// dimension (#10608), `length`, `distance`, `distance_x`, `distance_y`, `distance_z`,
+    /// `angle` or `radius`.
     #[serde(rename = "type")]
     pub kind: String,
     /// The parameter's expression, as the design stores it, in the design's units (a driving

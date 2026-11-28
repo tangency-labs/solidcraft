@@ -99,6 +99,85 @@ fn an_arc_past_a_turn_moves_back_by_whole_turns() {
     near(at(&k, &e.curve, -90.0), [0.0, -1.0, 0.0], 1e-15 * 8.0);
 }
 
+/// The record's parameter comes back from the kernel's: on a circle or ellipse the angle at
+/// which the record evaluates the kernel's point, in the turn of the interval (the kernel's
+/// rational parameter in degrees is not that angle off the quarter turns); unchanged elsewhere.
+#[test]
+fn the_record_parameter_inverts_the_kernel_parameter() {
+    let k = k();
+    let close = |a: f64, b: f64| assert!((a - b).abs() <= 1e-15 * 8.0, "{a} != {b}");
+    // the record's ellipse at its own parameter
+    let on =
+        |o: [f64; 3], [rx, ry]: [f64; 2], r: f64| [o[0] + rx * r.cos(), o[1] + ry * r.sin(), o[2]];
+    for (record, o, radii) in [
+        (
+            Record::Circle {
+                frame: frame([1.0, 2.0, 3.0]),
+                radius: 10.0,
+            },
+            [1.0, 2.0, 3.0],
+            [10.0, 10.0],
+        ),
+        (
+            Record::Ellipse {
+                frame: frame([0.0; 3]),
+                radii: [3.0, 1.0],
+            },
+            [0.0; 3],
+            [3.0, 1.0],
+        ),
+    ] {
+        for interval in [[0.0, TAU], [TAU, TAU + FRAC_PI_2], [-PI, 0.0]] {
+            let e = from_parameters(&k, &record, interval).unwrap();
+            for i in 0..=16 {
+                let t =
+                    e.interval.min() + (e.interval.max() - e.interval.min()) * f64::from(i) / 16.0;
+                let p = at(&k, &e.curve, t);
+                let r = record_parameter(&record, interval, t, p);
+                assert!(
+                    interval[0] - 1e-12 <= r && r <= interval[1] + 1e-12,
+                    "{r} outside {interval:?}"
+                );
+                near(p, on(o, radii, r), 1e-12);
+            }
+        }
+    }
+    // a quarter turn is exact, as is a whole turn's end
+    let circle = Record::Circle {
+        frame: frame([0.0; 3]),
+        radius: 1.0,
+    };
+    let e = from_parameters(&k, &circle, [0.0, TAU]).unwrap();
+    close(
+        record_parameter(&circle, [0.0, TAU], 90.0, at(&k, &e.curve, 90.0)),
+        FRAC_PI_2,
+    );
+    close(
+        record_parameter(&circle, [0.0, TAU], 360.0, at(&k, &e.curve, 360.0)),
+        TAU,
+    );
+    let line = Record::Line {
+        start: [0.0; 3],
+        end: [1.0, 0.0, 0.0],
+    };
+    assert_eq!(
+        record_parameter(&line, [0.0, 1.0], 0.25, p3([0.25, 0.0, 0.0])),
+        0.25
+    );
+}
+
+/// A parameter a solve rounds just past an end (one ulp past 1, as a cone's silhouette end
+/// came back) is on that end; one past it by more than `EFF_ZERO` is outside.
+#[test]
+fn a_parameter_rounded_past_an_end_is_on_it() {
+    let past = 1.0 + f64::EPSILON;
+    assert_eq!(on_interval([0.0, 1.0], past), Some(1.0));
+    assert_eq!(on_interval([0.0, 1.0], -1e-13), Some(0.0));
+    assert_eq!(on_interval([0.0, 1.0], 0.5), Some(0.5));
+    assert_eq!(on_interval([0.0, 1.0], 1.0 + 1e-9), None);
+    assert_eq!(on_interval([0.0, 1.0], f64::NAN), None);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]
@@ -232,10 +311,11 @@ fn a_trim_runs_over_its_edges_kernel_interval() {
     assert_eq!((p.x, p.y), (1.0, 2.0));
 }
 
-/// A kernel line goes to the record by its points at its interval's ends, over [0, 1]: the
-/// same line, its parameter an affine image of the kernel's, and back again unchanged.
+/// A kernel line goes to the record as the kernel holds it, its point and its point plus its
+/// vector, over the STEP parameters of its interval (#3137: as SolidCraft's flat export wrote
+/// it), and back again unchanged.
 #[test]
-fn a_line_goes_back_by_its_two_end_points() {
+fn a_line_goes_back_as_the_kernel_holds_it() {
     let k = k();
     let line = Curve::from(Line::create_canonical(
         Point3::new(1.0, 2.0, 3.0),
@@ -245,11 +325,44 @@ fn a_line_goes_back_by_its_two_end_points() {
     assert_eq!(
         r.curve,
         Record::Line {
-            start: [2.0, 2.0, 3.0],
-            end: [5.0, 2.0, 3.0],
+            start: [1.0, 2.0, 3.0],
+            end: [3.0, 2.0, 3.0],
         }
     );
-    assert_eq!((&r.nurbs, r.interval), (&None, [0.0, 1.0]));
+    assert_eq!((&r.nurbs, r.interval), (&None, [0.5, 2.0]));
+    let back = from_parameters(&k, &r.curve, r.interval).unwrap();
+    assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
+}
+
+/// A line whose STEP parameter runs against its NURBS parameter (`inside_out`: `s = -t`) goes to
+/// the record with its vector reversed and its interval negated, so the interval increases; the
+/// record's point at each end of it is the kernel's at that end, bit for bit, and the round
+/// trip is the identity.
+#[test]
+fn a_reversed_line_goes_back_with_its_vector_turned() {
+    let k = k();
+    let line = Curve::from(Line::infinite(
+        Point3::new(1.0, 2.0, 3.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        3,
+        true,
+    ));
+    let (lo, hi) = (0.5, 2.0);
+    let r = record_of(&k, &line, &Extent1d::from_raw(lo, hi)).unwrap();
+    let Record::Line { start, end } = r.curve else {
+        panic!("not a line: {:?}", r.curve)
+    };
+    assert!(r.interval[0] < r.interval[1], "{:?}", r.interval);
+    let on = |s: f64| {
+        Point3::new(
+            start[0] + s * (end[0] - start[0]),
+            start[1] + s * (end[1] - start[1]),
+            start[2] + s * (end[2] - start[2]),
+        )
+    };
+    // the record's interval runs the kernel's ends in order
+    assert_eq!(on(r.interval[0]), at(&k, &line, lo));
+    assert_eq!(on(r.interval[1]), at(&k, &line, hi));
     let back = from_parameters(&k, &r.curve, r.interval).unwrap();
     assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
 }
@@ -310,7 +423,7 @@ fn a_circle_goes_back_as_its_label_on_its_form() {
     let Record::RationalSpline { knots, homogeneous } = quarter_form([1.0, 2.0, 1e-9], 2.0) else {
         unreachable!()
     };
-    let moved = spline(&knots, &homogeneous, 3, OP).unwrap();
+    let moved = spline(&knots, &homogeneous, 3, true, OP).unwrap();
     let opts = EllipseOptions {
         dim: 3,
         nurb: Some(&moved),
@@ -449,7 +562,7 @@ fn a_form_that_turns_back_between_samples_is_refused() {
     let Record::RationalSpline { knots, homogeneous } = &form else {
         unreachable!()
     };
-    let nurbs = spline(knots, homogeneous, 3, OP).unwrap();
+    let nurbs = spline(knots, homogeneous, 3, true, OP).unwrap();
     let (o, x, y) = axes(&frame([0.0, 0.0, 0.0])).unwrap();
     assert!(curve_on_quadrics(&nurbs, &quadrics(o, x, y, 1.0, 1.0, true)).unwrap());
     let err = conic_on_form(&k, &unit_circle(), &form).unwrap_err();
@@ -473,6 +586,48 @@ fn a_form_past_a_whole_turn_is_refused() {
     assert!((d.max() - d.min() - 240.0).abs() < 1e-9, "{d:?}");
 }
 
+/// An arc that needs five quarters of its frame's grid (it ends 0.02° past the quarter line a
+/// turn on from the quarter it starts in, as an edge of a face that ends within its tolerance of
+/// that line) has its form cut to it ([`crate::eval::form::curve`]), so the form is taken: the
+/// conic over the arc's 330°, from the arc's start to its end. Five whole quarters were refused
+/// as a form past a whole turn, and with them every body that had such an edge.
+#[test]
+fn an_arc_that_needs_five_quarters_of_its_grid_is_taken_on_its_form() {
+    let k = k();
+    let (o, r) = ([1.0, 2.0, 0.0], 2.0);
+    let circle = Record::Circle {
+        frame: frame(o),
+        radius: r,
+    };
+    let point = |t: f64| [o[0] + r * t.cos(), o[1] + r * t.sin(), o[2]];
+    for [t0, t1] in [
+        [30.02_f64.to_radians(), 360.02_f64.to_radians()],
+        [89.98_f64.to_radians(), 419.98_f64.to_radians()],
+        [1.0, 6.5],
+        // A whole turn from inside a quarter.
+        [-2.5, -2.5 + TAU],
+    ] {
+        let (form, [a, b]) = crate::eval::form::curve(&circle, [t0, t1]).unwrap();
+        let c = conic_on_form(&k, &circle, &form).unwrap();
+        let crate::curve::curve::CurveKind::Ellipse(e) = c.kind() else {
+            panic!("not a conic")
+        };
+        let d = e.step_interval();
+        let sweep = (t1 - t0).to_degrees();
+        assert!((d.max() - d.min() - sweep).abs() < 1e-9, "{d:?}");
+        let ivl = e.base().natural_interval();
+        assert_eq!((ivl.min(), ivl.max()), (a, b));
+        near(at(&k, &c, a), point(t0), 1e-14 * 8.0);
+        near(at(&k, &c, b), point(t1), 1e-14 * 8.0);
+        let mid = 0.5 * (t0 + t1);
+        near(
+            at(&k, &c, crate::eval::form::param(mid)),
+            point(mid),
+            1e-14 * 8.0,
+        );
+    }
+}
+
 /// B1: a closed form on strongly uneven knots (three quarters on [0, 0.03], the last on
 /// [0.03, 1]: one sixteenth of the parameter spans 270°) is the whole turn, not refused.
 #[test]
@@ -485,4 +640,122 @@ fn an_unevenly_parameterised_closed_form_is_the_whole_turn() {
     };
     let d = e.step_interval();
     assert_eq!(d.max() - d.min(), 360.0, "{d:?}");
+}
+
+/// Polynomial splines, polylines and UV trims build non-rational curves (`w = NOW`, matching
+/// `BSplineCurve::create_canonical`) whether clamped or unclamped, so `certified_hausdorff`
+/// accepts them; rational splines keep their weights (#20422).
+#[test]
+fn a_polynomial_spline_and_polyline_are_non_rational() {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::crv_deviation::certified_hausdorff;
+
+    let k = k();
+    let assert_poly_3d = |record: Record, interval: [f64; 2]| {
+        let e = from_parameters(&k, &record, interval).unwrap();
+        let CurveKind::BSpline(b) = e.curve.kind() else {
+            panic!("not a B-spline")
+        };
+        let nurb = b.gw_nurb().unwrap();
+        assert!(nurb.cpts().iter().all(|p| p.w == NOW), "{:?}", nurb.cpts());
+        let bound = certified_hausdorff(nurb, interval, nurb, interval).unwrap();
+        assert!(bound <= 1e-12, "self-deviation {bound}");
+    };
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 1.2]],
+        },
+        [0.0, 1.0],
+    );
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 1.0]],
+        },
+        [0.0, 1.0],
+    );
+    assert_poly_3d(
+        Record::Spline {
+            knots: vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0],
+            points: vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 1.0]],
+        },
+        [1.0, 2.0],
+    );
+    assert_poly_3d(
+        Record::Polyline {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0], [1.0, 2.0, 0.0]],
+        },
+        [0.0, 2.0],
+    );
+
+    let poly_trim = uv_trim(
+        &Record2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [2.0, 4.0]],
+        },
+        &Extent1d::from_raw(0.0, 1.0),
+        [1.0, 1.0],
+    )
+    .unwrap();
+    let CurveKind::BSpline(b) = poly_trim.kind() else {
+        panic!("not a B-spline")
+    };
+    assert!(b
+        .gw_nurb()
+        .unwrap()
+        .cpts()
+        .iter()
+        .all(|p| p.w == NOW && p.z == NOZ));
+
+    let w = core::f64::consts::FRAC_1_SQRT_2;
+    let rat_trim = uv_trim(
+        &Record2::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![[1.0, 0.0, 1.0], [w, w, w], [0.0, 1.0, 1.0]],
+        },
+        &Extent1d::from_raw(0.0, 1.0),
+        [1.0, 1.0],
+    )
+    .unwrap();
+    let CurveKind::BSpline(b) = rat_trim.kind() else {
+        panic!("not a B-spline")
+    };
+    assert!(b
+        .gw_nurb()
+        .unwrap()
+        .cpts()
+        .iter()
+        .all(|p| p.w != NOW && p.z == NOZ));
+}
+
+/// #3384: a flat arc about a far centre (chord 40 on radius 4e5, the world origin at the
+/// chord's middle, one rational quadratic piece) is proved on its circle by [`on_conic`]: the
+/// sphere's constant `|o|^2 - r^2` cancels there and counts at the size of `|o|^2` and `r^2`.
+/// The same arc with its middle pole moved out by 1e-11 of the radius (its middle about
+/// 5e-12 of the radius off the circle) is still refused: the bound is rounding, not a tolerance.
+#[test]
+fn a_flat_arc_about_a_far_centre_is_proved_on_its_circle_and_no_further() {
+    let (h, r) = (20.0_f64, 4e5_f64);
+    let cy = -(r * r - h * h).sqrt();
+    let w = (h / r).asin().cos();
+    let arc = |lift: f64| {
+        // the middle pole, where the end tangents meet, r / w above the centre (homogeneous)
+        let top = cy + r / w + lift;
+        spline(
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            &[
+                [h, 0.0, 0.0, 1.0],
+                [0.0, w * top, 0.0, w],
+                [-h, 0.0, 0.0, 1.0],
+            ],
+            3,
+            true,
+            OP,
+        )
+        .unwrap()
+    };
+    let (o, x, y) = axes(&frame([0.0, cy, 0.0])).unwrap();
+    assert!(on_conic(&arc(0.0), o, x, y, r, r, true).unwrap());
+    assert!(!on_conic(&arc(1e-11 * r), o, x, y, r, r, true).unwrap());
 }

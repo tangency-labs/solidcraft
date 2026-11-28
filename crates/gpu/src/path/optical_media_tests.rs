@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::transmission::{Transmission, subsurface::Subsurface};
 
 fn slab_body(name: &str, scale: Vec3, shift: Vec3, ior: f64, absorption: Vec3) -> ProductMesh {
@@ -469,6 +470,171 @@ fn origin_vacuum(o:vec3<f32>,d:vec3<f32>)->bool {
     }
 }
 
+#[test]
+fn gpu_photon_origin_uses_optical_bounds_with_low_parts_and_all_proposal_layouts() {
+    use solidcraft_render::job::CausticOptions;
+    let source = [
+        photons::shader_source().unwrap(),
+        r#"
+@compute @workgroup_size(1) fn photon_origin_reference() {
+    let boundary=photon_origin_boundary(u.eye.xyz,u.right.xyz,u.up.xyz);
+    var media:array<Medium,16>;var count=0u;var valid=boundary.valid;
+    if valid && boundary.hit.triangle!=0xffffffffu {valid=initialize_media(boundary.hit.triangle,u.up.xyz,&media,&count);}
+    let legacy=origin_boundary(u.eye.xyz+u.right.xyz,u.up.xyz);
+    let root=nodes[0];let point=u.eye.xyz+u.right.xyz;
+    accumulation[0]=vec4<f32>(select(0.0,1.0,valid),f32(count),select(0.0,1.0,boundary.hit.triangle!=0xffffffffu),
+        select(0.0,1.0,photon_origin_outside_optics(u.eye.xyz,u.right.xyz)));
+    accumulation[1]=vec4<f32>(select(0.0,1.0,legacy.valid),select(0.0,1.0,all(point>=root.lo) && all(point<=root.hi)),0.0,1.0);
+}
+"#
+        .to_owned(),
+    ]
+    .concat();
+    let parsed = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+        .validate(&parsed)
+        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let pipelines = photons::Pipelines::shared(context).unwrap();
+    let pipeline = checked_creation(&context.device, || {
+        let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("photon physical origin certificate"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&pipelines.layout)],
+            immediate_size: 0,
+        });
+        Ok(context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some("photon_origin_reference"),
+            compilation_options: Default::default(),
+            cache: None,
+        }))
+    })
+    .unwrap();
+    let mut nested_scene = nested();
+    let mut opaque = directional_receiver().meshes.remove(0);
+    for p in &mut Arc::make_mut(&mut opaque.mesh).positions {
+        p.x *= 2.0;
+        p.y *= 2.0;
+        p.z = 30.0;
+    }
+    nested_scene.bounds = nested_scene.bounds.union(&opaque.mesh.bounds());
+    nested_scene.meshes.push(opaque);
+    // OPUS map 0 / seed 81 / photon 465196: these four retained-f32 vertices
+    // preserve both actual lens-rim faces, closed here as a tetrahedron. Their
+    // nearest entry/exit depths tie along the captured ray while its physical
+    // origin is independently outside every optical surface.
+    let mut rim = glass_slab(false).meshes.remove(0);
+    rim.mesh = Arc::new(Mesh {
+        positions: vec![
+            Vec3::new(-228.50514221191406, 20.0, 97.48429107666016),
+            Vec3::new(-228.50514221191406, 29.0, 97.48429107666016),
+            Vec3::new(-228.50514221191406, 29.0, 99.4035415649414),
+            Vec3::new(-230.0750732421875, 28.104591369628906, 97.5528335571289),
+        ],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [2, 1, 3], [1, 0, 3], [0, 2, 3]],
+        tri_face: vec![0, 1, 2, 3],
+        ..Default::default()
+    });
+    let mut opaque = directional_receiver().meshes.remove(0);
+    for p in &mut Arc::make_mut(&mut opaque.mesh).positions {
+        p.x *= 100.0;
+        p.y *= 100.0;
+        p.z = 0.0;
+    }
+    let rim_scene = ProductScene { bounds: rim.mesh.bounds().union(&opaque.mesh.bounds()), meshes: vec![rim, opaque] };
+    for guided_emission in [false, true] {
+        for power_weighted_sources in [false, true] {
+            for (captured, mut scene) in [(false, nested_scene.clone()), (true, rim_scene.clone())] {
+                for body in &mut scene.meshes {
+                    body.transmission = body.transmission.map(|optics| optics.with_shadow_transmission(false));
+                }
+                let mut task = Task::new(
+                    context.clone(),
+                    scene,
+                    request(2),
+                    JobOptions {
+                        nested_media: true,
+                        samples: 1,
+                        caustics: Some(CausticOptions { photons: 1, guided_emission, power_weighted_sources, ..Default::default() }),
+                        ..Default::default()
+                    },
+                    CancelToken::default(),
+                )
+                .unwrap();
+                let epsilon = f64::from(task.epsilon);
+                let cases = if captured {
+                    vec![(
+                        Vec3::new(317.0488586425781, 162.61300659179688, 62.66033935546875),
+                        Vec3::new(1.3214378668635618e-5, 6.820903763582464e-6, 1.460740236325364e-6),
+                        Vec3::new(-0.9693225026130676, -0.23739922046661377, 0.06368253380060196),
+                        true,
+                        0.0,
+                        true,
+                        true,
+                    )]
+                } else {
+                    vec![
+                        (Vec3::new(10.0, 0.0, 20.0), Vec3::ZERO, -Vec3::Z, true, 0.0, true, true),
+                        (Vec3::new(10.0, 10.0, 20.0), Vec3::ZERO, -Vec3::Z, true, 0.0, true, true),
+                        (Vec3::new(0.25, 0.125, 0.0), Vec3::new(0.0, 0.0, 20.0), -Vec3::Z, true, 0.0, true, false),
+                        (Vec3::new(0.25, 0.125, 4.0), Vec3::new(0.0, 0.0, -2.5), -Vec3::Z, true, 1.0, false, false),
+                        (Vec3::new(0.25, 0.125, 0.0), Vec3::ZERO, -Vec3::Z, true, 2.0, false, false),
+                        (Vec3::new(0.25, 0.125, 4.0), Vec3::new(0.0, 0.0, -2.0), -Vec3::Z, false, 0.0, false, true),
+                        (Vec3::new(0.25, 0.125, -4.0), Vec3::new(0.0, 0.0, 2.0), Vec3::Z, false, 0.0, false, true),
+                        (Vec3::new(10.0, 0.0, 2.0), Vec3::ZERO, -Vec3::Z, false, 0.0, false, true),
+                        (Vec3::new(0.25, 0.125, 2.0), Vec3::new(0.0, 0.0, 2.0_f64.powi(-25)), -Vec3::Z, false, 0.0, false, true),
+                        (Vec3::new(0.25, 0.125, 2.0 + epsilon * 0.5), Vec3::ZERO, -Vec3::Z, true, 0.0, true, true),
+                    ]
+                };
+                for (origin, low, direction, valid, count, outside, legacy_refusal) in cases {
+                    let mut params = task.parameters(1).unwrap();
+                    let mut values = Vec::new();
+                    for vector in [origin, low, direction] {
+                        scene::vector(&mut values, vector, 0.0);
+                    }
+                    params[32..80].copy_from_slice(&values);
+                    context.queue.write_buffer(&task.uniform, 0, &params);
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let mut pass = encoder.begin_compute_pass(&Default::default());
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &task.bind, &[]);
+                        pass.dispatch_workgroups(1, 1, 1);
+                    }
+                    context.queue.submit([encoder.finish()]);
+                    task.sample = 1;
+                    let pixels = task.read_linear().unwrap();
+                    let detail = format!(
+                        "captured={captured} guided={guided_emission} weighted={power_weighted_sources} origin={origin:?} low={low:?}: {pixels:?}"
+                    );
+                    assert_eq!(pixels[0][0] != 0.0, valid, "{detail}");
+                    assert_eq!(pixels[0][3] != 0.0, outside, "{detail}");
+                    if valid {
+                        assert_eq!(pixels[0][1], count, "{detail}");
+                    }
+                    if outside {
+                        assert_eq!(pixels[0][2], 0.0, "a proven exterior bypasses the future query: {detail}");
+                    }
+                    if legacy_refusal {
+                        assert_eq!(pixels[1][0], 0.0, "regression must exercise the previous refusal: {detail}");
+                    }
+                    if outside && (captured || origin.z == 20.0) {
+                        assert_eq!(pixels[1][1], 1.0, "the unrelated opaque geometry defeats the whole-scene root shortcut: {detail}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn origin_emitter_fixture() -> ProductScene {
     let mut glass = slab_body("Pupil medium", Vec3::new(0.5, 1.0, 4.0), Vec3::new(-5.0, 0.0, 0.0), 1.0, Vec3::new(2.0_f64.ln(), 4.0_f64.ln(), 0.0));
     // The exact uploaded box is x[-10,0], y[-10,10], z[-2,2].
@@ -635,4 +801,126 @@ fn gpu_boundary_origins_refuse_through_existing_diagnostics_and_non_nested_outsi
     let legacy = render(false);
     assert!(legacy.iter().all(|p| p[0] > 0.0 && p[3] == 1.0));
     assert_eq!(legacy, render(true), "the extra opt-in query consumes no RNG and leaves an already supported outside path byte-identical");
+}
+
+#[test]
+fn opus_128_disjoint_optics_are_independent_of_the_16_layer_medium_stack() {
+    let mut source = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    for index in 0..solidcraft_render::job::MAX_OPTICAL_TARGETS {
+        source.meshes.push(slab_body(&format!("OPUS {index}"), Vec3::new(1.0, 1.0, 0.25), Vec3::new(index as f64 * 30.0, 0.0, 0.0), 1.0, Vec3::ZERO));
+    }
+    source.bounds = source.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    assert!(scene::flatten(&source, Vec3::ZERO, &CancelToken::default()).is_ok());
+    source.meshes.push(slab_body("one target too many", Vec3::new(1.0, 1.0, 0.25), Vec3::new(128.0 * 30.0, 0.0, 0.0), 1.0, Vec3::ZERO));
+    assert!(scene::flatten(&source, Vec3::ZERO, &CancelToken::default()).err().unwrap().message.contains("128"));
+}
+
+#[test]
+fn opus_thirty_gpu_optics_cross_60_interfaces_with_the_new_depth_budget() {
+    let Some(executor) = executor() else { return };
+    let mut source = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    for index in 0..30 {
+        source.meshes.push(slab_body(
+            &format!("OPUS {index}"),
+            Vec3::new(1.0, 1.0, 0.25),
+            Vec3::new(0.0, 0.0, f64::from(index)),
+            1.0,
+            Vec3::new(0.1, 0.2, 0.0),
+        ));
+    }
+    source.bounds = source.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    let mut req = request(1);
+    req.camera.distance = 50.0;
+    req.camera.fov = 0.00000001;
+    let options = JobOptions { samples: 1, max_depth: u32::from(solidcraft_render::job::MAX_PATH_DEPTH), seed: 9, ..Default::default() };
+    let mut task = Task::new(executor.context, source, req, options, CancelToken::default()).unwrap();
+    task.environment = 1.0;
+    task.environment_bottom_only = true;
+    task.studio = 0.0;
+    task.dispatch().unwrap();
+    let actual = task.read_linear().unwrap()[0];
+    for (actual, expected) in actual.into_iter().zip([(-0.75_f64).exp(), (-1.5_f64).exp(), 1.0, 1.0]) {
+        assert!((f64::from(actual) - expected).abs() < 2e-5, "60-interface Beer {actual} vs {expected}");
+    }
+}
+
+fn opus_concave_boundary() -> Mesh {
+    let polygon = [(0.0, 0.0), (3.0, 0.0), (3.0, 1.0), (1.0, 1.0), (1.0, 3.0), (0.0, 3.0)];
+    let mut mesh = Mesh::default();
+    for z in [0.0, 1.0] {
+        for (x, y) in polygon {
+            mesh.positions.push(Vec3::new(x, y, z));
+            mesh.normals.push(Vec3::Z);
+        }
+    }
+    for [a, b, c] in [[0, 1, 2], [0, 2, 3], [0, 3, 5], [3, 4, 5]] {
+        mesh.triangles.extend([[a, c, b], [a + 6, b + 6, c + 6]]);
+    }
+    for i in 0..6 {
+        let j = (i + 1) % 6;
+        mesh.triangles.extend([[i, j, j + 6], [i, j + 6, i + 6]]);
+    }
+    mesh.tri_face.resize(mesh.triangles.len(), 0);
+    mesh
+}
+
+#[test]
+fn nonconvex_optical_surfaces_admit_disjoint_overlapping_bounds_and_certify_true_containment() {
+    let cancel = CancelToken::default();
+    for contained in [false, true] {
+        let mut outer = slab_body("concave parent", Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 1.5, Vec3::ZERO);
+        outer.mesh = Arc::new(opus_concave_boundary());
+        let mut inner = slab_body("notch or arm", Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 1.5, Vec3::ZERO);
+        let bounds = inner.mesh.bounds();
+        let span = bounds.max - bounds.min;
+        for p in &mut Arc::make_mut(&mut inner.mesh).positions {
+            p.x = (p.x - bounds.min.x) / span.x * 0.6 + if contained { 0.2 } else { 1.5 };
+            p.y = (p.y - bounds.min.y) / span.y * 0.6 + if contained { 0.2 } else { 1.5 };
+            p.z = (p.z - bounds.min.z) / span.z * 0.6 + 0.2;
+        }
+        let mut source = ProductScene { bounds: outer.mesh.bounds(), meshes: vec![outer, inner] };
+        for reverse in [false, true] {
+            if reverse {
+                source.meshes.reverse();
+            }
+            assert!(scene::flatten_with_media(&source, Vec3::ZERO, &cancel, true).is_ok(), "contained={contained} reverse={reverse}");
+            assert_eq!(scene::flatten_with_media(&source, Vec3::ZERO, &cancel, false).is_ok(), !contained);
+        }
+    }
+}
+
+#[test]
+fn opus_final_gpu_profile_completes_on_the_same_physical_executor() {
+    let Some(executor) = executor() else { return };
+    let host = ImageHost::with_executor(Arc::new(executor)).unwrap();
+    let options =
+        JobOptions { samples: 2, max_depth: u32::from(solidcraft_render::job::MAX_PATH_DEPTH), linear_exr: true, seed: 81, ..Default::default() };
+    let mut submission = host.prepare_submission(sphere(white()), request(1), options, None, CancelToken::default()).unwrap();
+    submission.select_image_mode(RenderMode::Final).unwrap();
+    let job = host.submit_prepared(solidcraft_render::job::JobId { session: 982, serial: 1, generation: 1 }, 1, submission).unwrap();
+    let status = job.wait_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+    assert_eq!(status.resolved.profile.mode, RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "gpu-path");
+    assert_eq!((status.options.samples, status.options.max_depth), (2, 64));
+    assert!(job.frame().unwrap().unwrap().linear_master_info().is_some());
+}
+
+#[test]
+fn opus_gpu_preparation_rejects_actual_optical_crossings_before_a_job_exists_and_releases_its_lease() {
+    let Some(executor) = executor() else { return };
+    let host = ImageHost::with_executor(Arc::new(executor)).unwrap();
+    let mut source = nested();
+    for point in &mut Arc::make_mut(&mut source.meshes[1].mesh).positions {
+        point.x += 5.0;
+    }
+    let options = JobOptions { nested_media: true, samples: 1, ..Default::default() };
+    let failure = host.prepare_submission(source, request(1), options, None, CancelToken::default()).err().unwrap();
+    assert_eq!(failure.code, ErrorCode::InvalidScene);
+    assert!(failure.message.contains("Outer") && failure.message.contains("Inner"), "{}", failure.message);
+    assert_eq!(host.admitted_bytes(), 0, "failed Check releases all captured work without creating a job");
+    let cancel = CancelToken::default();
+    cancel.cancel();
+    assert_eq!(host.prepare_submission(nested(), request(1), options, None, cancel).err().unwrap().code, ErrorCode::Cancelled);
+    assert_eq!(host.admitted_bytes(), 0);
 }

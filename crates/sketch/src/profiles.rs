@@ -8,6 +8,7 @@
 //! rectangle with a hole, and the disc.
 
 use solidcraft_geom::prelude::*;
+use std::collections::HashSet;
 use std::f64::consts::TAU;
 use std::sync::{Arc, OnceLock};
 
@@ -24,6 +25,35 @@ const MERGE_TOL: f64 = 1e-6;
 /// within it join only when each is the other's unique nearest end, so a third end as near
 /// leaves the gap open.
 pub const ENDPOINT_JOIN_TOL: f64 = MERGE_TOL * 100.0;
+/// How far apart (mm) the ends of a line and an arc, or of two arcs, may be and still join when
+/// each end lies on the other curve. Where a curve meets an arc tangentially, a point held on
+/// both by "point on curve" constraints is only fixed to about `sqrt(2 * radius * residual)`
+/// along the tangent: the solver's 1e-9 mm residual leaves the two ends up to 2.2e-4 mm apart
+/// on a 25 mm arc (#14256). Half of [`ISLAND_MARGIN`], so joined curves share an island.
+const TANGENT_JOIN_TOL: f64 = ISLAND_MARGIN * 0.5;
+/// How near (mm) an end must lie to another curve's line or circle to count as on it for
+/// [`TANGENT_JOIN_TOL`]: well above the solver's residual, well below any visible gap.
+const ON_CARRIER_TOL: f64 = MERGE_TOL * 0.1;
+/// How far apart (radians) the tangents of two curves leaving a corner may be and still count as
+/// one direction, so that their curvature says which turns first. Curves the solver holds
+/// tangent differ by about 1e-7 there.
+const TANGENT_ANGLE_TOL: f64 = 1e-6;
+
+/// Whether two pieces leaving one corner `angle` radians apart, with curvatures `dk` apart and
+/// the shorter `reach` mm long, leave it the same way, so that curvature orders them: their
+/// tangents are within [`TANGENT_ANGLE_TOL`], or the bend crosses them back within
+/// [`TANGENT_JOIN_TOL`] of the corner and within both pieces. An end joined that far along a
+/// tangent tilts an arc's tangent by about that over its radius (7e-6 rad for 1e-4 mm on a
+/// radius of 15).
+fn leave_same_way(angle: f64, dk: f64, reach: f64) -> bool {
+    angle.abs() <= TANGENT_ANGLE_TOL.max(dk.abs() * reach.clamp(0.0, TANGENT_JOIN_TOL) * 0.5)
+}
+
+/// A piece's chord, the length [`leave_same_way`] gives the bend to cross back within.
+fn chord(s: &Seg2) -> f64 {
+    s.start().dist(s.end())
+}
+
 const MAX_EDGES: usize = 50_000;
 
 /// A closed region usable by features, with the ids of the curves bounding it.
@@ -32,6 +62,11 @@ pub struct Profile {
     pub region: Region2,
     /// Curve ids of the outer loop.
     pub outer_curves: Vec<String>,
+    /// For each piece of `outer_curves`, the other curves lying on it: a side drawn on a projected
+    /// edge is named after the earlier curve, and a pick by the drawn curves still finds the
+    /// profile ([`profile_by_curves`], #20503).
+    #[serde(skip)]
+    outer_alternates: Vec<Vec<String>>,
     /// Curve ids of each hole loop.
     pub hole_curves: Vec<Vec<String>>,
     pub area: f64,
@@ -90,6 +125,18 @@ struct Edge {
     curve: usize,
 }
 
+/// A loop bounded in part by a chorded curve's chords, under this area (mm2) and thinner on
+/// average (2 x area / perimeter, mm) than the chords' tolerance, is a sliver of the
+/// chord fit, not a region of the drawing (see the loop tracing in `island_loops`).
+const SLIVER_AREA: f64 = 1e-3;
+const SLIVER_WIDTH: f64 = 1.5e-3;
+/// A lobe of a traced loop (a stretch back to the node it left) thinner on average than this
+/// (2 x area / perimeter, mm) has no width the solid can hold: its two sides lie within the
+/// kernel's intersection tolerance (2e-5 mm), so a face bounded by the loop has two coincident
+/// edges there and the kernel's check refuses it. An imported outline that folds back on itself
+/// for a few micrometres leaves such a lobe (#22630).
+const LOBE_WIDTH: f64 = 2e-5;
+
 /// Do two circles lie within `tol` of each other all the way round?
 fn same_circle(c: Vec2, r: f64, c2: Vec2, r2: f64, tol: f64) -> bool {
     c.dist(c2) + (r - r2).abs() <= tol
@@ -100,8 +147,9 @@ fn same_circle(c: Vec2, r: f64, c2: Vec2, r2: f64, tol: f64) -> bool {
 /// the first, so the earliest curve in sketch order names the shared edge, as when the pieces
 /// lie exactly on each other. Kept both, they would bound a sliver of no area, and the
 /// round-off in their directions would make the turns at their ends disagree, so the regions on
-/// both sides would be lost (#635).
-fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<bool> {
+/// both sides would be lost (#635). Each piece left out is given as the kept piece it lies on, so
+/// the curve it belongs to still bounds the regions beside it (#20503).
+fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<Option<usize>> {
     // Between the same nodes, two pieces of lines run along one path, and so do two pieces of
     // arcs or circles on one circle through the same middle (not the two halves of a circle). A
     // line and an arc never do, nor does a sampled piece of a free-form curve: a chord and its
@@ -120,11 +168,11 @@ fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<bool> {
         .enumerate()
         .map(|(i, e)| {
             let between = kept.entry((e.u.min(e.v), e.u.max(e.v))).or_default();
-            let first = !between.iter().any(|k| edges.get(*k).is_some_and(|f| same_path(f, e)));
-            if first {
+            let twin = between.iter().copied().find(|k| edges.get(*k).is_some_and(|f| same_path(f, e)));
+            if twin.is_none() {
                 between.push(i);
             }
-            first
+            twin
         })
         .collect()
 }
@@ -242,16 +290,23 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
         let plain: Vec<Seg2> = run.iter().filter_map(|x| segs.get(*x).copied()).collect();
         let full = k0.and_then(|(ci, k, fwd)| exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }));
+        // A run over every piece in order is the whole segment only from end to end: one that
+        // starts or stops at a crossing inside its first or last piece (a split piece keeps its
+        // tag) has as many pieces but is a part of it (#17462).
         let whole = match (full, tags.get(run[0]).copied().flatten()) {
-            (Some(_), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
+            (Some(seg), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
                 let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
                 let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
-                order == want
+                let ends = match (plain.first(), plain.last()) {
+                    (Some(a), Some(b)) => a.start().dist(seg.start()) < MERGE_TOL && b.end().dist(seg.end()) < MERGE_TOL,
+                    _ => false,
+                };
+                order == want && ends
             }
             _ => false,
         };
         runs.push(match full {
-            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain },
+            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain, chords: (false, false) },
             Some(seg) => {
                 let (a, b) = (plain.first().map(Seg2::start).unwrap_or_default(), plain.last().map(Seg2::end).unwrap_or_default());
                 let (t0, t1) = (seg.closest_param(a), seg.closest_param(b));
@@ -259,7 +314,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
                 let snap = |t: f64, p: Vec2, at: f64| (t - at).abs() < 1e-6 && seg.point_at(at).dist(p) < 1e-6;
                 let fixed = (snap(t0, a, 0.0), snap(t1, b, 1.0));
                 let (t0, t1) = (if fixed.0 { 0.0 } else { t0 }, if fixed.1 { 1.0 } else { t1 });
-                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain } } else { Run::Plain(plain) }
+                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain, chords: (false, false) } } else { Run::Plain(plain) }
             }
             None => Run::Plain(plain),
         });
@@ -279,7 +334,11 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         }
         let (Some(ra), Some(rb)) = (runs.get(a), runs.get(b)) else { continue };
         let p0 = ra.end();
-        let crossing = refine_crossing(ra, rb, p0);
+        // A crossing at a shallow angle moves far for a small error in either curve (a line
+        // ending on a curve within the join tolerance, or a chord of the polyline): where the
+        // search finds none near the junction, the junction itself is the crossing, moved onto
+        // the exact curve.
+        let crossing = refine_crossing(ra, rb, p0).filter(|(p, ..)| p.dist(p0) < 1e-2).or_else(|| project_junction(ra, rb, p0));
         match crossing {
             Some((p, ta, tb)) if p.dist(p0) < 1e-2 => {
                 if let Some(x) = runs.get_mut(a) {
@@ -289,11 +348,13 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
                     x.set_start(p, tb);
                 }
             }
+            // The chords' crossing isn't the curves': only the piece holding it stays a chord.
             _ => {
-                for k in [a, b] {
-                    if let Some(x) = runs.get_mut(k) {
-                        x.give_up();
-                    }
+                if let Some(x) = runs.get_mut(a) {
+                    x.give_up_end();
+                }
+                if let Some(x) = runs.get_mut(b) {
+                    x.give_up_start();
                 }
             }
         }
@@ -301,17 +362,31 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
     runs.into_iter().flat_map(Run::into_segs).collect()
 }
 
+/// How a cut of a curve merges with the cuts next to it.
+#[derive(Clone, Copy, PartialEq)]
+enum Cut {
+    /// An end lying on the curve, or a crossing: one cut with any other a few tolerances away.
+    Firm,
+    /// A crossing next to an end of one of the two curves that misses the other: it gives way to
+    /// any other cut it is merged with.
+    Weak,
+    /// A crossing next to another curve's end that lies on only one of the two: a point of its
+    /// own, one cut only with a cut within the tolerance of it.
+    Apart,
+}
+
 /// A stretch of a profile loop: plain segments, or (part of) an exact free-form segment.
 enum Run {
     Plain(Vec<Seg2>),
     /// `seg` (in loop direction) between parameters `t0` and `t1`; `fixed` ends are exact;
-    /// `plain` is the polyline fallback.
+    /// `plain` is the polyline fallback; `chords` keep its first or last piece at an end given up.
     Exact {
         seg: Seg2,
         t0: f64,
         t1: f64,
         fixed: (bool, bool),
         plain: Vec<Seg2>,
+        chords: (bool, bool),
     },
 }
 
@@ -356,28 +431,62 @@ impl Run {
             Run::Exact { t0, .. } => *t0 = t,
         }
     }
-    fn give_up(&mut self) {
-        if let Run::Exact { fixed: (false, _) | (_, false), plain, .. } = self {
-            *self = Run::Plain(std::mem::take(plain));
+    /// No exact crossing at the end: the exact curve stops at the last piece's start, a chord after.
+    fn give_up_end(&mut self) {
+        if let Run::Exact { seg, t0, t1, fixed, plain, chords } = self
+            && !fixed.1
+        {
+            let t = match plain.as_slice() {
+                [_, .., last] => seg.closest_param(last.start()),
+                _ => *t0,
+            };
+            if t - *t0 > 1e-9 {
+                (*t1, fixed.1, chords.1) = (t, true, true);
+            } else {
+                *self = Run::Plain(std::mem::take(plain));
+            }
+        }
+    }
+    /// No exact crossing at the start: a chord, then the exact curve from the first piece's end.
+    fn give_up_start(&mut self) {
+        if let Run::Exact { seg, t0, t1, fixed, plain, chords } = self
+            && !fixed.0
+        {
+            let t = match plain.as_slice() {
+                [first, .., _] => seg.closest_param(first.end()),
+                _ => *t1,
+            };
+            if *t1 - t > 1e-9 {
+                (*t0, fixed.0, chords.0) = (t, true, true);
+            } else {
+                *self = Run::Plain(std::mem::take(plain));
+            }
         }
     }
     fn into_segs(self) -> Vec<Seg2> {
         match self {
             Run::Plain(v) => v,
-            Run::Exact { seg, t0, t1, .. } => {
-                if t0 <= 1e-12 && t1 >= 1.0 - 1e-12 {
-                    return vec![seg];
-                }
-                let s = if t1 < 1.0 - 1e-12 { seg.split_at(t1).0 } else { seg };
-                if t0 <= 1e-12 {
-                    return vec![s];
-                }
-                // Conic halves are reparametrised: find t0's point again on the left part.
-                let u = local_param(&s, seg.point_at(t0), if t1 > 1e-12 { t0 / t1 } else { 0.0 });
-                vec![s.split_at(u.clamp(1e-9, 1.0 - 1e-9)).1]
+            Run::Exact { seg, t0, t1, plain, chords, .. } => {
+                let head = plain.first().filter(|_| chords.0).copied();
+                let tail = plain.last().filter(|_| chords.1).copied();
+                head.into_iter().chain([exact_part(seg, t0, t1)]).chain(tail).collect()
             }
         }
     }
+}
+
+/// The part of `seg` between parameters `t0` and `t1`.
+fn exact_part(seg: Seg2, t0: f64, t1: f64) -> Seg2 {
+    if t0 <= 1e-12 && t1 >= 1.0 - 1e-12 {
+        return seg;
+    }
+    let s = if t1 < 1.0 - 1e-12 { seg.split_at(t1).0 } else { seg };
+    if t0 <= 1e-12 {
+        return s;
+    }
+    // Conic halves are reparametrised: find t0's point again on the left part.
+    let u = local_param(&s, seg.point_at(t0), if t1 > 1e-12 { t0 / t1 } else { 0.0 });
+    s.split_at(u.clamp(1e-9, 1.0 - 1e-9)).1
 }
 
 /// The segment with its end moved to `p` (lines; arcs keep their circle).
@@ -410,14 +519,26 @@ fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
             let near = (a.end() + b.start()) * 0.5;
             Some(center + Vec2::from_angle((near - center).angle()) * radius)
         }
-        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => intersections_within(
-            &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
-            &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
-            tol,
-        )
-        .into_iter()
-        .filter(|p| p.dist((a.end() + b.start()) * 0.5) <= tol * 2.0)
-        .min_by(|p, q| p.dist((a.end() + b.start()) * 0.5).total_cmp(&q.dist((a.end() + b.start()) * 0.5))),
+        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
+            let mid = (a.end() + b.start()) * 0.5;
+            // Two arcs whose ends both lie on both circles meet there: keep that point. Where the
+            // circles touch tangentially (an arc leaving another's end along its tangent, as two
+            // corner arcs of one outline do) their intersection moves along the tangent by about
+            // sqrt(2 * radius * gap) for a gap between them, 3e-5 mm for a 1e-9 mm round-off, and
+            // trimming both arcs there moved the outline's corner off the sketch's point.
+            let on_a = center + Vec2::from_angle((mid - center).angle()) * radius;
+            if (on_a.dist(c2) - r2).abs() <= ON_CARRIER_TOL && on_a.dist(mid) <= ON_CARRIER_TOL {
+                return Some(on_a);
+            }
+            intersections_within(
+                &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
+                &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
+                tol,
+            )
+            .into_iter()
+            .filter(|p| p.dist(mid) <= tol * 2.0)
+            .min_by(|p, q| p.dist(mid).total_cmp(&q.dist(mid)))
+        }
         _ => None,
     }
 }
@@ -484,10 +605,63 @@ fn close_line_joints(mut segs: Vec<Seg2>, tol: f64) -> Vec<Seg2> {
     segs
 }
 
-/// Joins line and arc ends that lie close together. Returns false when there were too many ends
-/// close together to look at them all (nothing is joined then).
+/// The line or circle a profile line or arc lies on, from its exact geometry.
+#[derive(Clone, Copy)]
+enum Carrier {
+    Line { a: Vec2, b: Vec2 },
+    Circle { c: Vec2, r: f64 },
+}
+
+impl Carrier {
+    fn of(sk: &Sketch, ci: usize) -> Option<Carrier> {
+        match sk.curves.get(ci)?.kind {
+            CurveKind::Line { a, b } => {
+                let (a, b) = (sk.point(a)?, sk.point(b)?);
+                (a.dist(b) > MERGE_TOL).then_some(Carrier::Line { a, b })
+            }
+            CurveKind::Arc { .. } => match sk.segs(ci).into_iter().next()? {
+                Seg2::Arc { center, radius, .. } if center.is_finite() && radius.is_finite() => Some(Carrier::Circle { c: center, r: radius }),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn distance(&self, p: Vec2) -> f64 {
+        match *self {
+            Carrier::Line { a, b } => {
+                let d = b - a;
+                (d.cross(p - a) / d.len().max(1e-12)).abs()
+            }
+            Carrier::Circle { c, r } => (p.dist(c) - r).abs(),
+        }
+    }
+}
+
+/// Whether the end `p` of a curve lying on `pc` and the end `q` of another curve lying on `qc`
+/// meet where the two curves touch: each end lies on the other's line or circle. Two lines never
+/// meet this way (an end slides freely along a line it lies on, so ends on a common line can be
+/// genuinely apart), nor do two arcs of one circle.
+fn ends_on_each_other(p: Vec2, pc: Carrier, q: Vec2, qc: Carrier) -> bool {
+    let distinct = match (pc, qc) {
+        (Carrier::Line { .. }, Carrier::Line { .. }) => false,
+        (Carrier::Circle { c, r }, Carrier::Circle { c: c2, r: r2 }) => !same_circle(c, r, c2, r2, MERGE_TOL),
+        _ => true,
+    };
+    distinct && qc.distance(p) <= ON_CARRIER_TOL && pc.distance(q) <= ON_CARRIER_TOL
+}
+
+/// Joins line and arc ends that lie close together: within [`ENDPOINT_JOIN_TOL`], or within
+/// [`TANGENT_JOIN_TOL`] where each end lies on the other curve ([`ends_on_each_other`]). Returns
+/// false when there were too many ends close together to look at them all (nothing is joined
+/// then).
 fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mut [usize], max_edges: usize) -> bool {
-    let tol = ENDPOINT_JOIN_TOL;
+    let tol = TANGENT_JOIN_TOL;
+    let mut carriers = std::collections::HashMap::<usize, Option<Carrier>>::new();
+    for &(_, curve_index) in endpoints {
+        carriers.entry(curve_index).or_insert_with(|| Carrier::of(sk, curve_index));
+    }
+    let carrier = |ci: usize| carriers.get(&ci).copied().flatten();
     let cell = |p: Vec2| ((p.x / tol).floor() as i64, (p.y / tol).floor() as i64);
     let mut curve_endpoints = std::collections::HashMap::<usize, Vec<usize>>::new();
     for &(point_index, curve_index) in endpoints {
@@ -500,19 +674,19 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
             Some(((*a).min(*b), (*a).max(*b)))
         })
         .collect();
-    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<(usize, usize)>> = std::collections::HashMap::new();
     let mut joins = std::collections::HashMap::<(usize, usize), f64>::new();
     let mut checks = 0usize;
     let check_limit = max_edges.saturating_mul(16).max(16);
     let mut exceeded_limit = false;
-    'points: for &(point_index, _) in endpoints {
+    'points: for &(point_index, curve_index) in endpoints {
         let Some(point) = sk.point(point_index).filter(|point| point.is_finite()) else { continue };
         let (cx, cy) = cell(point);
         for dx in -1..=1 {
             for dy in -1..=1 {
                 let (Some(x), Some(y)) = (cx.checked_add(dx), cy.checked_add(dy)) else { continue };
                 if let Some(candidates) = grid.get(&(x, y)) {
-                    for &other_index in candidates {
+                    for &(other_index, other_curve) in candidates {
                         if other_index == point_index {
                             continue;
                         }
@@ -521,7 +695,13 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
                             exceeded_limit = true;
                             break 'points;
                         }
-                        if let Some(distance) = sk.point(other_index).map(|other| point.dist(other)).filter(|distance| *distance <= tol) {
+                        let Some(other) = sk.point(other_index) else { continue };
+                        let distance = point.dist(other);
+                        let touching = || match (carrier(curve_index), carrier(other_curve)) {
+                            (Some(pc), Some(qc)) => curve_index != other_curve && ends_on_each_other(point, pc, other, qc),
+                            _ => false,
+                        };
+                        if distance <= ENDPOINT_JOIN_TOL || (distance <= tol && touching()) {
                             let pair = (point_index.min(other_index), point_index.max(other_index));
                             joins.entry(pair).and_modify(|best| *best = best.min(distance)).or_insert(distance);
                         }
@@ -529,7 +709,7 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
                 }
             }
         }
-        grid.entry((cx, cy)).or_default().push(point_index);
+        grid.entry((cx, cy)).or_default().push((point_index, curve_index));
     }
     if !exceeded_limit {
         let mut nearest = std::collections::HashMap::<usize, (f64, Option<usize>)>::new();
@@ -554,6 +734,35 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
             let b_is_unique_nearest = nearest.get(&b).is_some_and(|(_, closest)| *closest == Some(a));
             if a_is_unique_nearest && b_is_unique_nearest {
                 union(groups, a, b);
+            }
+        }
+        // A third end at a corner (a line's end and two caps' arcs leaving it along the line) is
+        // nobody's unique nearest end, and left out it cuts the other two curves a hair from the
+        // corner. When every end it could join is already one corner, it joins that corner; an
+        // end near two separate corners still stays open.
+        let mut candidates = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+        for &(a, b) in joins.keys() {
+            if !connected_endpoints.contains(&(a, b)) {
+                candidates.entry(a).or_default().push(b);
+                candidates.entry(b).or_default().push(a);
+            }
+        }
+        for _ in 0..4 {
+            let mut joined = false;
+            for (&point, others) in &candidates {
+                if others.len() < 2 {
+                    continue;
+                }
+                let root = find(groups, point);
+                let mut roots = others.iter().map(|&o| find(groups, o));
+                let Some(first) = roots.next() else { continue };
+                if first != root && roots.all(|r| r == first) {
+                    union(groups, point, first);
+                    joined = true;
+                }
+            }
+            if !joined {
+                break;
             }
         }
     }
@@ -587,6 +796,30 @@ fn refine_crossing(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
         tb -= da.cross(f) / det;
     }
     None
+}
+
+/// How far from the polyline's junction the exact curve may be moved to meet it: the chords
+/// stray from the curve by up to [`SAMPLE_TOL`].
+const JUNCTION_TOL: f64 = 2.0 * SAMPLE_TOL;
+
+/// The junction of an exact run with a plain one taken as the crossing, when it lies within
+/// [`JUNCTION_TOL`] of the exact curve: the point on the curve nearest `p` and its parameter
+/// (the plain run's end moves there). Only a line end moves: an arc's end can only turn along its
+/// own circle, which would leave the joint open. Two exact runs have no plain end to move.
+fn project_junction(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
+    let (seg, t, within) = match (a, b) {
+        (Run::Exact { seg, t0, t1, .. }, Run::Plain(plain)) if plain.first().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
+            let t = local_param(seg, p, *t1);
+            (seg, t, t > *t0 && t <= 1.0)
+        }
+        (Run::Plain(plain), Run::Exact { seg, t0, t1, .. }) if plain.last().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
+            let t = local_param(seg, p, *t0);
+            (seg, t, t >= 0.0 && t < *t1)
+        }
+        _ => return None,
+    };
+    let q = seg.point_at(t);
+    (within && q.is_finite() && q.dist(p) <= JUNCTION_TOL).then_some((q, t, t))
 }
 
 /// Parameter of the point of `s` nearest `p`, by Newton from `t`.
@@ -683,24 +916,30 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
 /// which the letter's own profile already has as a hole. What "all profiles" means for text:
 /// the letters, not the letters with their counters filled in.
 pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile> {
+    let counters = text_counters(sk, &profiles);
+    profiles.into_iter().zip(counters).filter(|(_, counter)| !*counter).map(|(p, _)| p).collect()
+}
+
+/// For each of `profiles`, whether it is the counter of a letter (see [`without_text_counters`]).
+pub fn text_counters(sk: &Sketch, profiles: &[Profile]) -> Vec<bool> {
     let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
     let text_only: Vec<bool> = profiles
         .iter()
         .map(|p| !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(*ci))))
         .collect();
     if !text_only.iter().any(|t| *t) {
-        return profiles;
+        return vec![false; profiles.len()];
     }
     // Outer polylines and their boxes, once.
     let polys: Vec<Ring<Vec2>> = profiles.iter().map(|p| p.region.outer.polyline(1e-3)).collect();
     let boxes: Vec<solidcraft_geom::Aabb2> = polys.iter().map(|pl| pl.bounds()).collect();
     let areas: Vec<f64> = profiles.iter().map(|p| p.region.outer.signed_area().abs()).collect();
-    let keep: Vec<bool> = (0..profiles.len())
+    (0..profiles.len())
         .map(|i| {
             if !text_only.get(i).copied().unwrap_or(false) {
-                return true;
+                return false;
             }
-            let Some(probe) = profiles.get(i).and_then(|p| p.region.outer.segs.first()).map(Seg2::mid) else { return true };
+            let Some(probe) = profiles.get(i).and_then(|p| p.region.outer.segs.first()).map(Seg2::mid) else { return false };
             let ai = areas.get(i).copied().unwrap_or(0.0);
             let depth = (0..profiles.len())
                 .filter(|&j| {
@@ -711,10 +950,160 @@ pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile
                         && polys.get(j).is_some_and(|pl| pl.contains(probe))
                 })
                 .count();
-            depth % 2 == 0
+            depth % 2 == 1
         })
-        .collect();
-    profiles.into_iter().zip(keep).filter(|(_, k)| *k).map(|(p, _)| p).collect()
+        .collect()
+}
+
+/// Curves above which [`enclosed_gaps`] does not look for drawn loops (it then finds no gap).
+const MAX_GAP_CURVES: usize = 20_000;
+
+/// Which of `profiles` are gaps between drawn loops: regions that closed loops crossing each
+/// other shut off, but that lie inside none of those loops. The middle of four closed strips
+/// laid out as a # is one (#19963). A drawn loop is a circle or another closed curve, or a run of
+/// curves end to end that closes with exactly two curve ends at each corner. A profile is a gap
+/// when every curve of its outer loop belongs to such a loop and none of those loops holds it.
+/// A profile bounded in part by any other curve (a line that crosses the drawing, a branch) is
+/// never a gap, so regions that open curves close off stay as they are.
+pub fn enclosed_gaps(sk: &Sketch, profiles: &[Profile]) -> Vec<bool> {
+    let none = vec![false; profiles.len()];
+    if sk.curves.len() > MAX_GAP_CURVES {
+        return none;
+    }
+    let loops = drawn_loops(sk);
+    if loops.is_empty() {
+        return none;
+    }
+    let mut loop_of: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (l, (curves, _)) in loops.iter().enumerate() {
+        for ci in curves {
+            if let Some(c) = sk.curves.get(*ci) {
+                loop_of.insert(c.id.as_str(), l);
+            }
+        }
+    }
+    profiles
+        .iter()
+        .map(|p| {
+            if p.outer_curves.is_empty() {
+                return false;
+            }
+            let Some(around) = p.outer_curves.iter().map(|id| loop_of.get(id.as_str()).copied()).collect::<Option<HashSet<usize>>>() else {
+                return false;
+            };
+            let probe = p.region.interior_point();
+            around.iter().all(|l| loops.get(*l).is_some_and(|(_, lp)| !lp.contains(probe)))
+        })
+        .collect()
+}
+
+/// The sketch's closed drawn loops, each as its curves and the loop they make: closed curves on
+/// their own, and runs of open curves end to end through corners where exactly two curve ends
+/// meet (ends within [`ENDPOINT_JOIN_TOL`] are one corner).
+fn drawn_loops(sk: &Sketch) -> Vec<(Vec<usize>, Loop2)> {
+    let mut out = Vec::new();
+    // Corners: positions of curve ends, found through a grid of cells ENDPOINT_JOIN_TOL wide.
+    let mut corners: Vec<Vec2> = Vec::new();
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let cell = |p: Vec2| ((p.x / ENDPOINT_JOIN_TOL).floor() as i64, (p.y / ENDPOINT_JOIN_TOL).floor() as i64);
+    let mut corner = |p: Vec2| -> usize {
+        let (cx, cy) = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(found) =
+                    grid.get(&(cx + dx, cy + dy)).and_then(|v| v.iter().find(|i| corners.get(**i).is_some_and(|q| q.dist(p) <= ENDPOINT_JOIN_TOL)))
+                {
+                    return *found;
+                }
+            }
+        }
+        corners.push(p);
+        let i = corners.len() - 1;
+        grid.entry((cx, cy)).or_default().push(i);
+        i
+    };
+    // Open curves by their end corners.
+    let mut open: Vec<(usize, usize, usize)> = Vec::new();
+    for (ci, c) in sk.curves.iter().enumerate() {
+        if c.construction || c.centerline || c.infinite {
+            continue;
+        }
+        match c.kind.ends() {
+            None => {
+                let segs = sk.segs(ci);
+                if !segs.is_empty() {
+                    out.push((vec![ci], Loop2 { segs }));
+                }
+            }
+            Some((a, b)) => {
+                let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { continue };
+                if !pa.is_finite() || !pb.is_finite() {
+                    continue;
+                }
+                let (u, v) = (corner(pa), corner(pb));
+                open.push((ci, u, v));
+            }
+        }
+    }
+    let mut at: Vec<Vec<usize>> = vec![Vec::new(); corners.len()];
+    for (k, (_, u, v)) in open.iter().enumerate() {
+        if let Some(list) = at.get_mut(*u) {
+            list.push(k);
+        }
+        if let Some(list) = at.get_mut(*v) {
+            list.push(k);
+        }
+    }
+    let mut used = vec![false; open.len()];
+    for first in 0..open.len() {
+        if used.get(first).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(&(_, start, _)) = open.get(first) else { continue };
+        // Walk from `first`'s start corner along curves through corners of exactly two ends.
+        let mut run: Vec<(usize, bool)> = Vec::new();
+        let (mut k, mut from) = (first, start);
+        let mut closed = false;
+        for _ in 0..open.len() {
+            let Some(&(_, u, v)) = open.get(k) else { break };
+            if used.get(k).copied().unwrap_or(true) {
+                break;
+            }
+            if let Some(flag) = used.get_mut(k) {
+                *flag = true;
+            }
+            let reversed = from != u;
+            run.push((k, reversed));
+            let far = if reversed { u } else { v };
+            if far == start {
+                closed = true;
+                break;
+            }
+            let Some(ends) = at.get(far).filter(|e| e.len() == 2) else { break };
+            let Some(&next) = ends.iter().find(|e| **e != k) else { break };
+            (k, from) = (next, far);
+        }
+        // A closed run needs its start corner to hold exactly two ends too.
+        if !closed || at.get(start).is_none_or(|e| e.len() != 2) {
+            continue;
+        }
+        let mut curves = Vec::with_capacity(run.len());
+        let mut segs = Vec::new();
+        for (k, reversed) in run {
+            let Some(&(ci, _, _)) = open.get(k) else { continue };
+            curves.push(ci);
+            let piece = sk.segs(ci);
+            if reversed {
+                segs.extend(piece.iter().rev().map(Seg2::reversed));
+            } else {
+                segs.extend(piece);
+            }
+        }
+        if !segs.is_empty() {
+            out.push((curves, Loop2 { segs }));
+        }
+    }
+    out
 }
 
 /// Find all closed profiles of a sketch. Curves are split where other curves end on them or
@@ -754,8 +1143,42 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
     search(sk, max_edges, true, true).profiles
 }
 
+type BezierDefinition = (u8, Vec<(u64, u64)>);
+
+/// Exact single-span control-spline data, independent of direction and point IDs. Other spline
+/// modes can depend on knots, weights or handles; multi-span conversion can round differently
+/// on reversal. Keep those unchanged, and never infer duplicates from sampled chords.
+fn bezier_definition(sk: &Sketch, kind: &CurveKind) -> Option<BezierDefinition> {
+    let CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None, handles } = kind else { return None };
+    if !handles.is_empty() || !(1..=MAX_BEZIER_DEGREE).contains(&usize::from(*degree)) || pts.len() != usize::from(*degree) + 1 {
+        return None;
+    }
+    let bits = |v: f64| if v == 0.0 { 0 } else { v.to_bits() };
+    let mut points: Vec<(u64, u64)> = pts
+        .iter()
+        .map(|i| {
+            let p = sk.point(*i)?;
+            p.is_finite().then(|| (bits(p.x), bits(p.y)))
+        })
+        .collect::<Option<_>>()?;
+    if points.iter().rev().cmp(points.iter()).is_lt() {
+        points.reverse();
+    }
+    Some((*degree, points))
+}
+
 fn search(sk: &Sketch, max_edges: usize, split: bool, cached: bool) -> ProfileSearch {
-    let curves: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| !c.construction && !c.centerline && !c.infinite).map(|(i, _)| i).collect();
+    // Repeated SVG outlines contribute one graph boundary. Keep the first curve's identity,
+    // and retain all source curves in the sketch so editing a duplicate can separate it again.
+    let mut definitions = HashSet::new();
+    let curves: Vec<usize> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.construction && !c.centerline && !c.infinite)
+        .filter(|(_, c)| bezier_definition(sk, &c.kind).is_none_or(|key| definitions.insert(key)))
+        .map(|(i, _)| i)
+        .collect();
     let groups = if split { islands(sk, &curves) } else { vec![curves] };
     let found: Vec<Arc<Island>> = groups
         .iter()
@@ -783,7 +1206,10 @@ struct Island {
 
 struct IslandLoop {
     lp: Loop2,
+    poly: Ring<Vec2>,
     ids: Vec<String>,
+    /// For each piece of `ids`, the other curves lying on it ([`without_overlaps`]).
+    alternates: Vec<Vec<String>>,
     /// Connected component within the island (loops of one component never nest).
     comp: usize,
     complete: Option<Vec<String>>,
@@ -796,15 +1222,76 @@ struct IslandLoop {
 
 impl IslandLoop {
     fn new(lp: Loop2, ids: Vec<String>, comp: usize, complete: Option<Vec<String>>, key: (u8, usize, usize)) -> IslandLoop {
-        let bounds = lp.polyline(1e-3).bounds();
+        let poly = lp.polyline(CONTAINS_TOL);
+        let bounds = poly.bounds();
         let area = lp.signed_area().abs();
-        IslandLoop { lp, ids, comp, complete, key, bounds, area }
+        IslandLoop { lp, poly, ids, alternates: Vec::new(), comp, complete, key, bounds, area }
+    }
+
+    fn with_alternates(mut self, alternates: Vec<Vec<String>>) -> IslandLoop {
+        self.alternates = alternates;
+        self
     }
 
     /// Rough size, for bounding the cache.
     fn weight(&self) -> usize {
-        self.lp.segs.len() + self.ids.len() + 1
+        self.lp.segs.len() + self.poly.len() + self.ids.len() + self.alternates.iter().map(Vec::len).sum::<usize>() + 1
     }
+}
+
+/// Signed distance of `q` from `shape`: to the left of a line, outside a circle.
+fn side_of(shape: &Shape, q: Vec2) -> f64 {
+    match *shape {
+        Shape::Line { a, b } => {
+            let d = b - a;
+            let len = d.len();
+            if len > 0.0 { d.cross(q - a) / len } else { q.dist(a) }
+        }
+        Shape::Round { c, r, .. } => q.dist(c) - r,
+    }
+}
+
+/// The part of the free-form segment `seg` from `from` to `to` (two points on it), in that
+/// direction; `None` when either point lies further than `tol` from the segment or the two are
+/// one point of it.
+fn exact_between(seg: &Seg2, from: Vec2, to: Vec2, tol: f64) -> Option<Seg2> {
+    let (t0, t1) = (seg.closest_param(from), seg.closest_param(to));
+    if seg.point_at(t0).dist(from) > tol || seg.point_at(t1).dist(to) > tol || (t1 - t0).abs() < 1e-12 {
+        return None;
+    }
+    // `part` carries `hi` into the tail, whose parameter a conic's split re-normalises.
+    let part = seg.part(t0.min(t1), t0.max(t1));
+    Some(if t0 <= t1 { part } else { part.reversed() })
+}
+
+/// Samples of the free-form curve between a chord's ends that a crossing check looks at.
+const CHORD_SIDE_SAMPLES: usize = 16;
+
+/// Whether `chord`, a straight piece sampled from the free-form segment `seg`, crosses `other`
+/// only because it is straight: one end of the chord lies on `other` (within `tol`), the other
+/// end lies off it, and the segment itself, between the two ends, never gets more than `tol`
+/// to the far side of `other`. The chord then cuts across a bulge of `other` the curve only
+/// touches (a spline tangent to an arc where both end). Gives the chord's end on `other`: a
+/// crossing there is the touch itself, one further along the chord is sampling.
+fn chord_crossing_from_sampling(chord: &Shape, seg: &Seg2, other: &Shape, tol: f64) -> Option<Vec2> {
+    let Shape::Line { a, b } = *chord else { return None };
+    let (sa, sb) = (side_of(other, a), side_of(other, b));
+    let (on, off, s_off) = match (sa.abs() <= tol, sb.abs() <= tol) {
+        (true, false) => (a, b, sb),
+        (false, true) => (b, a, sa),
+        _ => return None,
+    };
+    if !s_off.is_finite() {
+        return None;
+    }
+    let (t0, t1) = (seg.closest_param(on), seg.closest_param(off));
+    (1..CHORD_SIDE_SAMPLES)
+        .all(|n| {
+            let t = t0 + (t1 - t0) * n as f64 / CHORD_SIDE_SAMPLES as f64;
+            let s = side_of(other, seg.point_at(t));
+            s.is_finite() && s * s_off.signum() >= -tol
+        })
+        .then_some(on)
 }
 
 /// How far apart two curves' pieces must be to search them separately: well past every
@@ -820,9 +1307,33 @@ const ISLAND_PAIR_BUDGET: usize = 4_000_000;
 /// of another group. Every box holds everything the search derives from its curve (the end
 /// points, and the sampled points of free-form segments, which lie in their control polygon).
 fn islands(sk: &Sketch, curves: &[usize]) -> Vec<Vec<usize>> {
+    // A long piece is cut into a few boxes so that it does not cover every curve it spans; a
+    // drawing of thousands of short segments (an imported outline) is one box each, not sixteen.
+    // The pieces are a 64th of the drawing's extent, which is all the sweep needs to tell apart
+    // pieces that do not touch. That extent is the union of one box per piece, and a piece no
+    // longer than a 64th of it keeps that box: the curves whose pieces need cutting are the few
+    // long ones, so no piece is sampled twice for nothing.
+    let mut extent = solidcraft_geom::Aabb2::EMPTY;
+    let mut one: Vec<Vec<solidcraft_geom::Aabb2>> = Vec::with_capacity(curves.len());
+    for &ci in curves {
+        let boxes = piece_boxes(sk, ci, f64::INFINITY);
+        for b in &boxes {
+            if !(b.min.is_finite() && b.max.is_finite()) {
+                return vec![curves.to_vec()];
+            }
+            extent = extent.union(b);
+        }
+        one.push(boxes);
+    }
+    let cell = (extent.max.x - extent.min.x).max(extent.max.y - extent.min.y).max(1e-9) / 64.0;
     let mut boxes: Vec<(usize, solidcraft_geom::Aabb2)> = Vec::new();
     for (k, &ci) in curves.iter().enumerate() {
-        for b in piece_boxes(sk, ci) {
+        let short = one.get(k).is_some_and(|box_list| box_list.iter().all(|b| (b.max.x - b.min.x).max(b.max.y - b.min.y) <= cell));
+        let pieces = match one.get_mut(k) {
+            Some(cached) if short => std::mem::take(cached),
+            _ => piece_boxes(sk, ci, cell),
+        };
+        for b in pieces {
             if !(b.min.is_finite() && b.max.is_finite()) {
                 return vec![curves.to_vec()];
             }
@@ -866,7 +1377,7 @@ fn islands(sk: &Sketch, curves: &[usize]) -> Vec<Vec<usize>> {
 
 /// Boxes covering a profile curve: its end points, and each of its pieces (lines and arcs in a
 /// few parts, so a long diagonal line or a large circle around other curves does not cover them).
-fn piece_boxes(sk: &Sketch, ci: usize) -> Vec<solidcraft_geom::Aabb2> {
+fn piece_boxes(sk: &Sketch, ci: usize, cell: f64) -> Vec<solidcraft_geom::Aabb2> {
     let Some(c) = sk.curves.get(ci) else { return Vec::new() };
     let mut out = Vec::new();
     let point_box = |p: Vec2| solidcraft_geom::Aabb2 { min: p, max: p };
@@ -876,30 +1387,41 @@ fn piece_boxes(sk: &Sketch, ci: usize) -> Vec<solidcraft_geom::Aabb2> {
     match c.kind {
         CurveKind::Line { a, b } => {
             if let (Some(a), Some(b)) = (sk.point(a), sk.point(b)) {
-                seg_boxes(&Seg2::Line { a, b }, &mut out);
+                seg_boxes(&Seg2::Line { a, b }, cell, &mut out);
             }
         }
         CurveKind::Circle { c, r } => {
             if let Some(c) = sk.point(c) {
-                seg_boxes(&Seg2::Arc { center: c, radius: r, start: 0.0, sweep: TAU }, &mut out);
+                seg_boxes(&Seg2::Arc { center: c, radius: r, start: 0.0, sweep: TAU }, cell, &mut out);
             }
         }
         CurveKind::Arc { .. } => {
             for s in sk.segs(ci).iter().take(1) {
-                seg_boxes(s, &mut out);
+                seg_boxes(s, cell, &mut out);
             }
         }
         _ => match sk.exact_segs(ci) {
-            Some(ex) => ex.iter().for_each(|s| seg_boxes(s, &mut out)),
-            None => sk.segs(ci).iter().for_each(|s| seg_boxes(s, &mut out)),
+            Some(ex) => ex.iter().for_each(|s| seg_boxes(s, cell, &mut out)),
+            None => sk.segs(ci).iter().for_each(|s| seg_boxes(s, cell, &mut out)),
         },
     }
     out
 }
 
+/// How many boxes a piece of the given length takes, at most [`MAX_PARTS`]: one when it is no
+/// longer than `cell` (a [`f64::INFINITY`] cell: one for every piece).
+fn parts_for(len: f64, cell: f64) -> usize {
+    if !(len.is_finite() && cell.is_finite() && cell > 0.0) || len <= cell {
+        return 1;
+    }
+    ((len / cell).ceil() as usize).clamp(1, MAX_PARTS)
+}
+
+/// The most boxes one piece of a curve takes, for [`parts_for`].
+const MAX_PARTS: usize = 16;
+
 /// Boxes covering a segment and everything the search samples from it.
-fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
-    const PARTS: usize = 16;
+fn seg_boxes(s: &Seg2, cell: f64, out: &mut Vec<solidcraft_geom::Aabb2>) {
     let hull = |pts: &[Vec2]| {
         pts.iter().fold(solidcraft_geom::Aabb2::EMPTY, |mut b, p| {
             b.add(*p);
@@ -908,15 +1430,18 @@ fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
     };
     match *s {
         Seg2::Line { a, b } => {
-            for k in 0..PARTS {
-                let (t0, t1) = (k as f64 / PARTS as f64, (k + 1) as f64 / PARTS as f64);
+            // Only a line is cut: a curve's length is a numerical integral, and its box is one
+            // hull (below) or an arc's own count, so asking for it here would be wasted.
+            let parts = parts_for(s.length(), cell);
+            for k in 0..parts {
+                let (t0, t1) = (k as f64 / parts as f64, (k + 1) as f64 / parts as f64);
                 out.push(hull(&[a + (b - a) * t0, a + (b - a) * t1]));
             }
         }
         Seg2::Arc { center, radius, start, sweep } => {
-            // Parts of at most TAU / PARTS; each lies within its chord's box grown by its sagitta.
+            // Each part lies within its chord's box grown by its sagitta.
             let r = radius.abs();
-            let n = ((sweep.abs() / (TAU / PARTS as f64)).ceil() as usize).clamp(1, PARTS);
+            let n = parts_for(r * sweep.abs(), cell);
             let step = sweep / n as f64;
             let sag = r * (1.0 - (step.abs() * 0.5).cos()) + r * 1e-12;
             let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * r;
@@ -936,7 +1461,7 @@ fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
 }
 
 /// A fingerprint of everything [`island_loops`] reads for a group of curves: their places in
-/// the sketch, ids, kinds, end points and geometry.
+/// the sketch, ids, kinds, whether they are linked, end points and geometry.
 fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
     use std::hash::{Hash, Hasher};
     let mut h = [std::collections::hash_map::DefaultHasher::new(), std::collections::hash_map::DefaultHasher::new()];
@@ -952,7 +1477,7 @@ fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
             put(&|x| (ci, u8::MAX).hash(x));
             continue;
         };
-        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, std::mem::discriminant(&c.kind)).hash(x));
+        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, c.link.is_some(), std::mem::discriminant(&c.kind)).hash(x));
         if let Some((a, b)) = c.kind.ends() {
             put(&|x| {
                 (a, b).hash(x);
@@ -1174,11 +1699,65 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     incomplete |= !crossings;
     // Split parameters per shape: end points of other curves on it, and crossings.
     let mut ends: Vec<Vec2> = Vec::new();
-    for (_, sh) in &shapes {
+    // For the ends of lines and arcs: the corner each was joined into ([`merge_nearby_endpoints`])
+    // and the point it is, with its curve; and the same for each shape's own curve's two ends.
+    type Corner = Option<(usize, usize, usize)>;
+    let corner_of = |ci: usize| -> [Corner; 2] {
+        sk.curves
+            .get(ci)
+            .filter(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. }))
+            .and_then(|c| c.kind.ends())
+            .map(|(a, b)| [a, b].map(|q| endpoint_groups.get(q).map(|g| (*g, q, ci))))
+            .unwrap_or([None, None])
+    };
+    let mut end_corners: Vec<Corner> = Vec::new();
+    let mut own_corners: Vec<[Corner; 2]> = Vec::new();
+    for (ci, sh) in &shapes {
+        let corners = corner_of(*ci);
+        own_corners.push(corners);
         match *sh {
             Shape::Line { a, b } => ends.extend([a, b]),
             Shape::Round { sweep, .. } if sweep < TAU - 1e-12 => ends.extend([sh.point(0.0), sh.point(sweep)]),
+            Shape::Round { .. } => continue,
+        }
+        end_corners.extend(corners);
+    }
+    let mut carriers = std::collections::HashMap::<usize, Option<Carrier>>::new();
+    // Whether the end (corner, point, curve) `e` was joined with an end of the shape's own curve
+    // where the two curves touch ([`ends_on_each_other`]).
+    let mut touches_own_end = |e: Corner, own: [Corner; 2]| -> bool {
+        let Some((corner, q, cq)) = e else { return false };
+        own.into_iter().flatten().any(|(oc, o, co)| {
+            if oc != corner || co == cq {
+                return false;
+            }
+            let qc = *carriers.entry(cq).or_insert_with(|| Carrier::of(sk, cq));
+            let occ = *carriers.entry(co).or_insert_with(|| Carrier::of(sk, co));
+            match (qc, occ, sk.point(q), sk.point(o)) {
+                (Some(qc), Some(occ), Some(qp), Some(op)) => ends_on_each_other(qp, qc, op, occ),
+                _ => false,
+            }
+        })
+    };
+    // The curves' own ends: a piece end no other piece of the same curve shares (a free-form
+    // curve's chord joints are shared; a closed curve has none).
+    let mut by_curve: std::collections::HashMap<usize, Vec<Vec2>> = std::collections::HashMap::new();
+    for (ci, sh) in &shapes {
+        match *sh {
+            Shape::Line { a, b } => by_curve.entry(*ci).or_default().extend([a, b]),
+            Shape::Round { sweep, .. } if sweep < TAU - 1e-12 => by_curve.entry(*ci).or_default().extend([sh.point(0.0), sh.point(sweep)]),
             Shape::Round { .. } => {}
+        }
+    }
+    let mut curve_ends: Vec<Vec2> = Vec::new();
+    for pts in by_curve.values() {
+        for (i, p) in pts.iter().enumerate() {
+            // A chord joint's match is the neighbouring endpoint, so test those first: the scan
+            // stays linear for a curve of many chords, and only true curve ends search the rest.
+            let adjacent = [i.checked_sub(1), i.checked_add(1)].into_iter().flatten().filter_map(|j| pts.get(j)).any(|q| q.dist(*p) <= tol);
+            if !adjacent && !pts.iter().enumerate().any(|(j, q)| j != i && q.dist(*p) <= tol) {
+                curve_ends.push(*p);
+            }
         }
     }
     // Bounding boxes, and a uniform grid over them: only shapes sharing a cell can meet.
@@ -1198,9 +1777,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         _ => false,
     };
     let grid = Grid::new(&boxes);
-    // Each cut's parameter, and whether it is weak: a crossing next to an end that misses one of
-    // the two curves (below), which gives way to any other cut it is merged with.
-    let mut cuts: Vec<Vec<(f64, bool)>> = vec![Vec::new(); shapes.len()];
+    // Each cut's parameter, and how it merges with the cuts next to it ([`Cut`]).
+    let mut cuts: Vec<Vec<(f64, Cut)>> = vec![Vec::new(); shapes.len()];
     // End points of other curves lying on each shape.
     let mut end_cells: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (k, p) in ends.iter().enumerate() {
@@ -1213,12 +1791,21 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             Some(cs) => cs.iter().flat_map(|c| end_cells.get(c).map(Vec::as_slice).unwrap_or(&[])).copied().collect(),
             None => all_ends.clone(),
         };
+        let own = own_corners.get(i).copied().unwrap_or([None, None]);
         for k in cand {
+            // An end joined with an end of this curve where the two touch (an arc ending
+            // tangentially a hair short of a line's end) meets it at that end: cut there too, the
+            // curve would keep a piece from the cut to its end that starts and ends at one
+            // corner, and no loop gets past it. An end that merely lies near stays a cut, so a
+            // line overshooting a corner keeps the short piece open.
+            if touches_own_end(end_corners.get(k).copied().flatten(), own) {
+                continue;
+            }
             if let Some(p) = ends.get(k)
                 && let Some(t) = sh.param_on(*p, tol)
                 && let Some(cu) = cuts.get_mut(i)
             {
-                cu.push((t, false));
+                cu.push((t, Cut::Firm));
             }
         }
     }
@@ -1302,7 +1889,25 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 if gi == gj {
                     continue;
                 }
+                // A chord of a free-form curve that ends on a line or arc and crosses it again
+                // further on, where the curve itself only touches it (a spline tangent to an arc at
+                // their shared end), crosses it from sampling alone: no cut.
+                let sampled = |c: usize, other: &Shape| {
+                    let chord = shapes.get(c).map(|s| s.1);
+                    let tag = tags.get(c).copied().flatten();
+                    match (chord, tag) {
+                        (Some(chord), Some((ci, k, _, _))) => {
+                            exact.get(&ci).and_then(|ex| ex.get(k)).and_then(|seg| chord_crossing_from_sampling(&chord, seg, other, tol))
+                        }
+                        _ => None,
+                    }
+                };
+                let unsampled = |c: usize| tags.get(c).copied().flatten().is_none();
+                let touch = if unsampled(gj) { sampled(i, gy) } else { None }.or_else(|| if unsampled(gi) { sampled(j, gx) } else { None });
                 let mut pts = intersections_within(gx, gy, tol);
+                if let Some(on) = touch {
+                    pts.retain(|p| p.dist(on) <= tol * 100.0);
+                }
                 // A tangent touch gives two nearly equal roots: one point.
                 if let [p, q] = pts[..]
                     && p.dist(q) < tol * 100.0
@@ -1312,12 +1917,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 for p in pts {
                     let on_x = x.param_on(p, tol).or_else(|| end_param(x, p, tol));
                     let on_y = y.param_on(p, tol).or_else(|| end_param(y, p, tol));
-                    // Crossings at (or next to) curve ends are already cuts. Not next to an end of
-                    // one of the two curves that misses the other: nothing cut the other curve
-                    // there, and it would cross without meeting it (a line 3e-5 from the
-                    // junction of two curves of a loop, #755). Such a crossing is a weak cut.
+                    // Crossings at (or next to) curve ends lying on both curves are already cuts.
+                    // Not next to an end of one of the two curves that misses the other: nothing
+                    // cut the other curve there, and it would cross without meeting it (a line
+                    // 3e-5 from the junction of two curves of a loop, #755). Such a crossing is a
+                    // weak cut. An end of another curve cuts only the curves it lies on: next to
+                    // one lying on one of the two, the crossing is a point of its own on that one,
+                    // apart from the end's (a line crossing a circle 3e-5 from where a spline
+                    // ends on it meets the circle there, and the spline still does, #18208; a
+                    // line crossing a square's side next to its corner leaves the corner); next
+                    // to one lying on neither, the crossing is a plain cut.
                     let on = |sh: &Shape, e: Vec2| sh.param_on(e, tol).is_some() || end_param(sh, e, tol).is_some();
-                    let misses = |e: Vec2| (end_param(x, e, tol).is_some() && !on(y, e)) || (end_param(y, e, tol).is_some() && !on(x, e));
+                    let own = |e: Vec2| end_param(x, e, tol).is_some() || end_param(y, e, tol).is_some();
                     // Every end within reach, whatever the grid's cell size (so an island's
                     // smaller grid finds the same ends as the whole sketch's).
                     let near_ends = || {
@@ -1326,12 +1937,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                             Some(cs) => cs.iter().flat_map(|c| end_cells.get(c).map(Vec::as_slice).unwrap_or(&[])).copied().collect(),
                             None => all_ends.clone(),
                         };
-                        cand.into_iter()
-                            .filter_map(|k| ends.get(k).copied())
-                            .filter(|e| e.dist(p) < tol * 100.0)
-                            .fold((false, false), |(cut, weak), e| if misses(e) { (cut, true) } else { (true, weak) })
+                        cand.into_iter().filter_map(|k| ends.get(k).copied()).filter(|e| e.dist(p) < tol * 100.0).fold(
+                            (false, Cut::Firm),
+                            |(cut, kind), e| match (on(x, e), on(y, e)) {
+                                (true, true) => (true, kind),
+                                (false, false) => (cut, kind),
+                                _ if own(e) => (cut, Cut::Weak),
+                                _ if kind == Cut::Weak => (cut, kind),
+                                _ => (cut, Cut::Apart),
+                            },
+                        )
                     };
-                    let (already, weak) = near_ends();
+                    let (already, kind) = near_ends();
                     if on_x.is_none() || on_y.is_none() || already {
                         continue;
                     }
@@ -1339,12 +1956,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                         if x.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(i)
                         {
-                            c.push((tx, weak));
+                            c.push((tx, kind));
                         }
                         if y.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(j)
                         {
-                            c.push((ty, weak));
+                            c.push((ty, kind));
                         }
                         if (gi, gj) != (i, j) {
                             anchors.push(p);
@@ -1392,20 +2009,33 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         node(*a, None);
     }
     let mut loops: Vec<IslandLoop> = Vec::new();
+    // The whole circles that made loops of their own: centre, radius and whether the curve is
+    // linked (a projected edge, an included curve).
+    let mut whole_loops: Vec<(Vec2, f64, bool)> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     for (k, (ci, sh)) in shapes.iter().enumerate() {
         let mut ts = cuts.get(k).cloned().unwrap_or_default();
         ts.sort_by(|a, b| a.0.total_cmp(&b.0));
-        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots).
+        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots);
+        // a cut apart is one cut only with a cut within the tolerance of it.
         // A weak cut gives way to the other: it only adds a cut where there was none.
         let scale = match *sh {
             Shape::Line { a, b } => a.dist(b),
             Shape::Round { r, .. } => r,
         };
         let close = (tol * 100.0 / scale.max(1e-12)).max(1e-9);
+        let at_point = tol / scale.max(1e-12);
+        // Two weak cuts are two crossings next to the same end, not a tangent's double root: a
+        // circle just inside a polygon's corner crosses both sides within a fraction of a
+        // millimetre of the corner, and each crossing is a corner of its own sliver region
+        // (#20661). Only cuts at one point are one cut.
+        let same = |a: (f64, Cut), b: (f64, Cut), gap: f64| {
+            let both_weak = a.1 == Cut::Weak && b.1 == Cut::Weak;
+            if a.1 == Cut::Apart || b.1 == Cut::Apart || both_weak { gap <= at_point } else { gap < close }
+        };
         ts.dedup_by(|a, b| {
-            let same = (a.0 - b.0).abs() < close;
-            if same && b.1 && !a.1 {
+            let same = same(*a, *b, (a.0 - b.0).abs());
+            if same && b.1 == Cut::Weak && a.1 != Cut::Weak {
                 *b = *a;
             }
             same
@@ -1413,9 +2043,9 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         if let (Shape::Round { sweep, .. }, Some(&first), Some(&last)) = (*sh, ts.first(), ts.last())
             && sweep >= TAU - 1e-12
             && ts.len() > 1
-            && (first.0 + TAU - last.0).abs() < close
+            && same(first, last, (first.0 + TAU - last.0).abs())
         {
-            if first.1 && !last.1 {
+            if first.1 == Cut::Weak && last.1 != Cut::Weak {
                 ts.remove(0);
             } else {
                 ts.pop();
@@ -1437,8 +2067,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut ps = vec![a];
                 ps.extend(ts.iter().map(|t| sh.point(*t)));
                 ps.push(b);
-                // Pieces split by other curves no longer stand for their whole piece.
-                let tag = if ts.is_empty() { tags.get(k).copied().flatten() } else { None };
+                // Pieces split by other curves keep their free-form segment's tag, so a loop that
+                // turns at the crossing gets the exact sub-segment up to the true crossing
+                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A run that
+                // starts or stops at such a crossing is never the whole segment there: it does not
+                // run from the segment's start to its end.
+                let tag = tags.get(k).copied().flatten();
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
@@ -1453,6 +2087,15 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             Shape::Round { c, r, start, sweep } => {
                 let full = sweep >= TAU - 1e-12;
                 if full && ts.is_empty() {
+                    // A circle drawn onto a linked circle (a hole's projected rim) bounds the same
+                    // region: the first of the two in sketch order makes the loop, as where the
+                    // pieces of curves lie on each other ([`without_overlaps`]). Two circles of the
+                    // sketch's own drawn on each other stay a profile each (#10521).
+                    let linked = sk.curves.get(*ci).is_some_and(|c| c.link.is_some());
+                    if whole_loops.iter().any(|&(c2, r2, l2)| (linked || l2) && same_circle(c, r, c2, r2, tol)) {
+                        continue;
+                    }
+                    whole_loops.push((c, r, linked));
                     loops.push(IslandLoop::new(
                         Loop2::circle(c, r),
                         vec![id.clone()],
@@ -1483,9 +2126,58 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             }
         }
     }
+    // A piece no longer than the end join tolerance that runs beside another piece between the
+    // same two nodes is a point: its ends become one node. A split next to where a line touches
+    // an arc leaves such pairs, and the hairline face they close hides the profile around them
+    // (#14512). A short piece with no such partner is a gap the sketch keeps open, so it stays.
+    let mut between = std::collections::HashMap::<(usize, usize), usize>::new();
+    for e in &edges {
+        *between.entry((e.u.min(e.v), e.u.max(e.v))).or_default() += 1;
+    }
+    let mut short: Vec<usize> = (0..nodes.len()).collect();
+    edges.retain(|e| {
+        let length = match e.seg {
+            Seg2::Line { a, b } => a.dist(b),
+            Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            _ => f64::INFINITY,
+        };
+        if length > ENDPOINT_JOIN_TOL || e.u == e.v || between[&(e.u.min(e.v), e.u.max(e.v))] < 2 {
+            return true;
+        }
+        union(&mut short, e.u, e.v);
+        false
+    });
+    for e in &mut edges {
+        e.u = find(&mut short, e.u);
+        e.v = find(&mut short, e.v);
+    }
+    // A line or short arc whose ends merged into one node within `tol` is a zero-length
+    // self-loop (such as a micro-step between MERGE_TOL and tol): left in the graph, its two
+    // half-edges break the face walk around the enclosing loop. Longer self-loops (a full
+    // circle cut at one point, or a lone piece > tol bridged only by ENDPOINT_JOIN_TOL) stay.
+    edges.retain(|e| {
+        if e.u != e.v {
+            return true;
+        }
+        match e.seg {
+            Seg2::Line { a, b } => a.dist(b) > tol,
+            Seg2::Arc { radius, sweep, .. } => (sweep.abs() >= TAU - 1e-6 && radius > MERGE_TOL) || radius * sweep.abs() > tol,
+            _ => true,
+        }
+    });
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
-    let mut alive = without_overlaps(&edges, tol);
+    let twins = without_overlaps(&edges, tol);
+    let mut alive: Vec<bool> = twins.iter().map(Option::is_none).collect();
+    // The curves of the pieces left out on each kept piece (a side drawn on a projected edge).
+    let mut also: Vec<Vec<String>> = vec![Vec::new(); edges.len()];
+    for (e, twin) in edges.iter().zip(&twins) {
+        if let Some(list) = twin.and_then(|k| also.get_mut(k))
+            && !list.contains(&e.id)
+        {
+            list.push(e.id.clone());
+        }
+    }
     loop {
         let mut deg = vec![0usize; n];
         for (e, a) in edges.iter().zip(&alive) {
@@ -1523,103 +2215,276 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         let e = edges.get(h / 2)?;
         Some(if h.is_multiple_of(2) { (e.seg, e.u, e.v) } else { (e.seg.reversed(), e.v, e.u) })
     };
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for (ei, a) in alive.iter().enumerate() {
-        if !*a {
-            continue;
+    // How a half-edge leaves its start and reaches its end: a chord sampled from a free-form
+    // curve by the part of the exact curve it stands for, so that the turn at a corner sees the
+    // curve's own tangent and bend (a chord of a spline that leaves a corner along an arc, on
+    // the arc's outside, starts off on its inside).
+    let course = |h: usize| -> Option<Seg2> {
+        let (seg, _, _) = half(h)?;
+        let Some((ci, k, _, _)) = edges.get(h / 2).and_then(|e| e.tag) else { return Some(seg) };
+        Some(exact.get(&ci).and_then(|ex| ex.get(k)).and_then(|ex| exact_between(ex, seg.start(), seg.end(), tol)).unwrap_or(seg))
+    };
+    let mut pass = 0;
+    let kept = loops.len();
+    loop {
+        loops.truncate(kept);
+        let mut slivers: Vec<usize> = Vec::new();
+        // Half-edges whose twins lobes left out, and each loop kept with its half-edges and
+        // whether it is thinner than [`LOBE_WIDTH`].
+        let mut lobe_twins: HashSet<usize> = HashSet::new();
+        let mut traced: Vec<(usize, Vec<usize>, bool)> = Vec::new();
+        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (ei, a) in alive.iter().enumerate() {
+            if !*a {
+                continue;
+            }
+            for h in [2 * ei, 2 * ei + 1] {
+                if let Some((_, from, _)) = half(h)
+                    && let Some(o) = outgoing.get_mut(from)
+                {
+                    o.push(h);
+                }
+            }
         }
-        for h in [2 * ei, 2 * ei + 1] {
-            if let Some((_, from, _)) = half(h)
-                && let Some(o) = outgoing.get_mut(from)
+        let mut visited = vec![false; edges.len() * 2];
+        for start in 0..edges.len() * 2 {
+            if !alive.get(start / 2).copied().unwrap_or(false) || visited.get(start).copied().unwrap_or(true) {
+                continue;
+            }
+            let mut segs = Vec::new();
+            let mut hs: Vec<usize> = Vec::new();
+            let mut edge_nodes = Vec::new();
+            let mut edge_analytic = Vec::new();
+            let mut ids = Vec::new();
+            let mut alts: Vec<Vec<String>> = Vec::new();
+            let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
+            let mut coverage_tags = Vec::new();
+            let mut h = start;
+            let mut ok = true;
+            for _ in 0..=edges.len() * 2 {
+                if let Some(v) = visited.get_mut(h) {
+                    *v = true;
+                }
+                let Some((seg, from, to)) = half(h) else {
+                    ok = false;
+                    break;
+                };
+                segs.push(seg);
+                hs.push(h);
+                edge_nodes.push((from, to));
+                if let Some(e) = edges.get(h / 2) {
+                    ids.push(e.id.clone());
+                    alts.push(also.get(h / 2).cloned().unwrap_or_default());
+                    ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
+                    coverage_tags.push(e.coverage.map(|t| (t, h.is_multiple_of(2))));
+                    edge_analytic.push(e.analytic);
+                } else {
+                    ptags.push(None);
+                    coverage_tags.push(None);
+                    edge_analytic.push(false);
+                }
+                let back = (-course(h).unwrap_or(seg).end_tangent()).angle();
+                let twin = h ^ 1;
+                // First clockwise turn from the way back. Directions are compared a short way
+                // along each segment (curvature decides between equal tangents, e.g. a line tangent
+                // to an arc, or an arc leaving back along the incoming line).
+                // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
+                // apart either way, and the turn the round-off picked lost every region at a corner
+                // where two arcs leave along one line.
+                let kt = course(twin).map(|ts| curvature(&ts)).unwrap_or(0.0);
+                // (clockwise turn from the way back, curvature, chord, half-edge)
+                let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
+                for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
+                    if o == twin {
+                        continue;
+                    }
+                    let Some(os) = course(o) else { continue };
+                    let k = curvature(&os);
+                    let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
+                    // Leaving along the way back: just clockwise of it when it bends away to the
+                    // right of it, a whole turn round otherwise.
+                    if leave_same_way(raw.min(TAU - raw), kt - k, chord(&seg).min(chord(&os))) {
+                        raw = if kt - k > 1e-12 { 0.0 } else { TAU };
+                    }
+                    turns.push((raw, k, chord(&os), o));
+                }
+                // Of the first turns, the one bending most to the left comes first; between equal
+                // bends (two lines) the tangents decide.
+                let first = turns.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0));
+                let best = turns
+                    .into_iter()
+                    .filter(|t| first.is_some_and(|f| leave_same_way(t.0 - f.0, t.1 - f.1, t.2.min(f.2))))
+                    .min_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)))
+                    .map(|(d, _, _, o)| (d, o));
+                let Some((_, next)) = best else {
+                    ok = false;
+                    break;
+                };
+                h = next;
+                if h == start {
+                    break;
+                }
+                if visited.get(h).copied().unwrap_or(true) {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok || h != start {
+                continue;
+            }
+            let keep = without_lobes_of_no_area(&segs, &edge_nodes, |q| curve_ends.iter().any(|e| e.dist(q) <= tol));
+            // The lobe traced from its other side is a loop of its own: no region either (below).
+            lobe_twins.extend(hs.iter().zip(&keep).filter(|(_, k)| !**k).map(|(h, _)| h ^ 1));
+            if keep.iter().any(|k| !k) {
+                fn kept<T>(v: &mut Vec<T>, keep: &[bool]) {
+                    let mut k = keep.iter();
+                    v.retain(|_| k.next().copied().unwrap_or(true));
+                }
+                kept(&mut segs, &keep);
+                kept(&mut hs, &keep);
+                kept(&mut edge_nodes, &keep);
+                kept(&mut edge_analytic, &keep);
+                kept(&mut ids, &keep);
+                kept(&mut alts, &keep);
+                kept(&mut ptags, &keep);
+                kept(&mut coverage_tags, &keep);
+            }
+            let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
+            let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
+            let area = lp.signed_area();
+            let perimeter: f64 = lp.segs.iter().map(Seg2::length).sum();
+            // A sliver a chorded curve's chords leave against an analytic curve where the two
+            // only touch: the tangent contact is found as two crossings a few hundredths apart. The
+            // drawing has no region there, so its longest chord goes and the sliver joins the region
+            // across it (one more pass) -- but only where its corners are crossings, not a curve's own
+            // ends: a thin region a curve closes against its chord, at its ends, is a region.
+            let at_end = |q: Vec2| curve_ends.iter().any(|e| e.dist(q) <= tol);
+            if pass == 0
+                && area > 1e-9
+                && area < SLIVER_AREA
+                && 2.0 * area / perimeter.max(1e-12) < SLIVER_WIDTH
+                && !lp.segs.iter().any(|s| at_end(s.start()))
             {
-                o.push(h);
+                let chord = hs
+                    .iter()
+                    .filter_map(|&h| edges.get(h / 2).filter(|e| !e.analytic).map(|e| (e.seg.length(), h / 2)))
+                    .max_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, ei)) = chord {
+                    slivers.push(ei);
+                }
+            }
+            // A loop smaller than 1e-9 mm squared is still a region where it is wider than the
+            // merge tolerance: a circle crossing a polygon's sides a hair from a corner leaves a
+            // sliver of 5e-11 mm squared that is 3e-6 mm wide (#20992). Only a loop thinner than
+            // that (round-off) is no region.
+            let has_width = area > 0.0 && 2.0 * area / perimeter.max(1e-12) > MERGE_TOL;
+            if area > 1e-9 || has_width {
+                let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
+                let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
+                let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
+                traced.push((loops.len(), hs, 2.0 * area.abs() < LOBE_WIDTH * perimeter));
+                loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)).with_alternates(alts));
             }
         }
-    }
-    let mut visited = vec![false; edges.len() * 2];
-    for start in 0..edges.len() * 2 {
-        if !alive.get(start / 2).copied().unwrap_or(false) || visited.get(start).copied().unwrap_or(true) {
+        // A thin loop made only of the other sides of lobes another loop left out is that lobe
+        // seen from outside: no region of its own, so "all" doesn't build it alone (#22630).
+        let gone: HashSet<usize> =
+            traced.iter().filter(|(_, hs, thin)| *thin && !hs.is_empty() && hs.iter().all(|h| lobe_twins.contains(h))).map(|(i, _, _)| *i).collect();
+        if !gone.is_empty() {
+            let mut i = 0;
+            loops.retain(|_| {
+                i += 1;
+                !gone.contains(&(i - 1))
+            });
+        }
+        if pass == 0 && !slivers.is_empty() {
+            for ei in slivers {
+                if let Some(a) = alive.get_mut(ei) {
+                    *a = false;
+                }
+            }
+            pass = 1;
             continue;
         }
-        let mut segs = Vec::new();
-        let mut edge_nodes = Vec::new();
-        let mut edge_analytic = Vec::new();
-        let mut ids = Vec::new();
-        let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
-        let mut coverage_tags = Vec::new();
-        let mut h = start;
-        let mut ok = true;
-        for _ in 0..=edges.len() * 2 {
-            if let Some(v) = visited.get_mut(h) {
-                *v = true;
-            }
-            let Some((seg, from, to)) = half(h) else {
-                ok = false;
-                break;
-            };
-            segs.push(seg);
-            edge_nodes.push((from, to));
-            if let Some(e) = edges.get(h / 2) {
-                ids.push(e.id.clone());
-                ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
-                coverage_tags.push(e.coverage.map(|t| (t, h.is_multiple_of(2))));
-                edge_analytic.push(e.analytic);
-            } else {
-                ptags.push(None);
-                coverage_tags.push(None);
-                edge_analytic.push(false);
-            }
-            let back = (-seg.end_tangent()).angle();
-            let twin = h ^ 1;
-            // First clockwise turn from the way back. Directions are compared a short way
-            // along each segment (curvature decides between equal tangents, e.g. a line tangent
-            // to an arc, or an arc leaving back along the incoming line).
-            let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
-            let mut best: Option<(f64, f64, usize)> = None;
-            for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
-                if o == twin {
-                    continue;
-                }
-                let Some((os, _, _)) = half(o) else { continue };
-                let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
-                if raw > TAU - 1e-9 {
-                    raw = 0.0;
-                }
-                let mut d = raw + (kt - curvature(&os)) * 1e-7;
-                if d <= 1e-12 {
-                    d += TAU;
-                }
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, 0.0, o));
-                }
-            }
-            let best = best.map(|(d, _, o)| (d, o));
-            let Some((_, next)) = best else {
-                ok = false;
-                break;
-            };
-            h = next;
-            if h == start {
-                break;
-            }
-            if visited.get(h).copied().unwrap_or(true) {
-                ok = false;
-                break;
-            }
-        }
-        if !ok || h != start {
-            continue;
-        }
-        let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, ENDPOINT_JOIN_TOL);
-        let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
-        if lp.signed_area() > 1e-9 {
-            let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
-            let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
-            let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
-            loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)));
-        }
+        break;
     }
     Island { loops, incomplete }
+}
+
+/// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
+/// is left out, as the lens two near-tangent crossings leave (#14182), and so is one thinner than
+/// [`LOBE_WIDTH`] in a loop that is not, as an outline folding back on itself leaves (#22630):
+/// where two curves cross, never at a curve's end (`at_end`), where a thin region drawn on its
+/// own touches another outline at a corner.
+fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)], at_end: impl Fn(Vec2) -> bool) -> Vec<bool> {
+    let n = segs.len();
+    let mut keep = vec![true; n];
+    // The edges leaving each node, in loop order: a lobe closes only at a node two edges leave.
+    // A loop through its nodes once each (an imported outline does) has none, so the search below
+    // would look the whole loop round for every edge of it: time in the square of its length.
+    // Where two edges do leave a node, the next of them after an edge is found without scanning.
+    let mut starts: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (i, e) in edge_nodes.iter().enumerate().take(n) {
+        starts.entry(e.0).or_default().push(i);
+    }
+    if starts.values().all(|s| s.len() < 2) {
+        return keep;
+    }
+    // Thin lobes go only from a loop that is not thin itself: a thin region (a flat curve over
+    // its chord, sampled into pieces that meet the chord) is made of such lobes and stays whole.
+    let loop_perimeter: f64 = segs.iter().map(Seg2::length).sum();
+    let wide_loop = 2.0 * area_about_start(segs).abs() >= LOBE_WIDTH * loop_perimeter;
+    // The edges taken out so far: the search stops at the first of them, as the loop it walks does.
+    let mut removed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut i = 0;
+    while i < n {
+        if !keep.get(i).copied().unwrap_or(false) {
+            i += 1;
+            continue;
+        }
+        let from = edge_nodes.get(i).map(|e| e.0);
+        let leaves = from.and_then(|from| starts.get(&from)).filter(|leaves| leaves.len() > 1);
+        // The next edge leaving `from` after `i`, around the loop.
+        let back = leaves.and_then(|leaves| {
+            let next = leaves.partition_point(|&j| j <= i);
+            let j = leaves.get(next).copied().or_else(|| leaves.first().copied())?;
+            (j != i).then_some(j)
+        });
+        // A lobe is a stretch back to the node it left: anything taken out before that node is
+        // reached ends the walk, and with it the search for one.
+        let back = back.filter(|&j| {
+            if j > i {
+                removed.range(i + 1..=j).next().is_none()
+            } else {
+                removed.range(i + 1..n).next().is_none() && removed.range(..=j).next().is_none()
+            }
+        });
+        let lobe = back.and_then(|j| {
+            let idx: Vec<usize> = (0..n).map(|d| (i + d) % n).take_while(|&k| k != j).collect();
+            let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
+            let area = area_about_start(&lobe);
+            let perimeter: f64 = lobe.iter().map(Seg2::length).sum();
+            let thin = wide_loop && 2.0 * area.abs() < LOBE_WIDTH * perimeter && !segs.get(i).is_some_and(|s| at_end(s.start()));
+            (idx.len() < n && (area.abs() <= 1e-9 || thin)).then_some(idx)
+        });
+        match lobe {
+            Some(idx) => idx.into_iter().for_each(|k| {
+                if let Some(x) = keep.get_mut(k) {
+                    *x = false;
+                }
+                removed.insert(k);
+            }),
+            None => i += 1,
+        }
+    }
+    keep
+}
+
+/// Signed area about the loop's first point: far from the origin a loop closed only to round-off
+/// is off by the gap times the distance.
+fn area_about_start(segs: &[Seg2]) -> f64 {
+    let Some(o) = segs.first().map(Seg2::start) else { return 0.0 };
+    segs.iter().map(|s| s.area_term() - 0.5 * o.cross(s.end() - s.start())).sum()
 }
 
 /// Chord tolerance of the polylines free-form curves take part in the profile graph as.
@@ -1696,27 +2561,85 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
     let loops: Vec<(&Loop2, &Vec<String>, (usize, usize), &Option<Vec<String>>)> =
         all.iter().map(|(c, l)| (&l.lp, &l.ids, *c, &l.complete)).collect();
 
-    // Nesting: parent = smallest containing loop from another component. Bounding boxes rule
-    // out most pairs before the point-in-loop test.
+    // Nesting: parent = smallest containing loop from another component. Sweep along x while
+    // keeping active loops sorted by (area, index) so the first containing match with area > ai
+    // is the exact innermost parent (ties broken by smallest index). Cached loop polylines avoid
+    // re-tessellating during containment tests.
     let areas: Vec<f64> = all.iter().map(|(_, l)| l.area).collect();
     let boxes: Vec<solidcraft_geom::Aabb2> = all.iter().map(|(_, l)| l.bounds).collect();
-    let inside_box = |j: usize, p: Vec2| boxes.get(j).is_some_and(|b| b.contains(p));
+    let probes: Vec<Vec2> = loops.iter().map(|(li, ..)| li.segs.first().map(Seg2::mid).unwrap_or_default()).collect();
     let mut parent_of: Vec<Option<usize>> = vec![None; loops.len()];
-    for (i, (li, _, ci, _)) in loops.iter().enumerate() {
-        let probe = li.segs.first().map(Seg2::mid).unwrap_or_default();
-        let ai = areas.get(i).copied().unwrap_or(0.0);
-        let mut best: Option<(f64, usize)> = None;
-        for (j, (lj, _, cj, _)) in loops.iter().enumerate() {
-            let aj = areas.get(j).copied().unwrap_or(0.0);
-            if i == j || ci == cj || aj <= ai || !inside_box(j, probe) || best.is_some_and(|(ba, _)| aj >= ba) {
-                continue;
+    if areas.iter().any(|a| !a.is_finite()) {
+        for (i, (_, _, ci, _)) in loops.iter().enumerate() {
+            let probe = probes.get(i).copied().unwrap_or_default();
+            let ai = areas.get(i).copied().unwrap_or(0.0);
+            let mut best: Option<(f64, usize)> = None;
+            for (j, (_, _, cj, _)) in loops.iter().enumerate() {
+                let aj = areas.get(j).copied().unwrap_or(0.0);
+                if i == j || ci == cj || aj <= ai || !boxes.get(j).is_some_and(|b| b.contains(probe)) || best.is_some_and(|(ba, _)| aj >= ba) {
+                    continue;
+                }
+                if all.get(j).is_some_and(|(_, l)| l.poly.contains(probe)) {
+                    best = Some((aj, j));
+                }
             }
-            if lj.contains(probe) {
-                best = Some((aj, j));
+            if let Some(p) = parent_of.get_mut(i) {
+                *p = best.map(|(_, j)| j);
             }
         }
-        if let Some(p) = parent_of.get_mut(i) {
-            *p = best.map(|(_, j)| j);
+    } else {
+        let mut box_order: Vec<usize> = (0..loops.len()).filter(|&j| boxes.get(j).is_some_and(|b| !b.is_empty())).collect();
+        box_order.sort_by(|&a, &b| {
+            let ax = boxes.get(a).map_or(f64::INFINITY, |box_a| box_a.min.x);
+            let bx = boxes.get(b).map_or(f64::INFINITY, |box_b| box_b.min.x);
+            ax.total_cmp(&bx)
+        });
+        let mut probe_order: Vec<usize> = (0..loops.len()).filter(|&i| probes.get(i).is_some_and(|p| p.is_finite())).collect();
+        probe_order.sort_by(|&a, &b| {
+            let ax = probes.get(a).map_or(f64::INFINITY, |pa| pa.x);
+            let bx = probes.get(b).map_or(f64::INFINITY, |pb| pb.x);
+            ax.total_cmp(&bx)
+        });
+        let mut active: Vec<usize> = Vec::new();
+        let mut next_box = 0usize;
+        for i in probe_order {
+            let Some(&probe) = probes.get(i) else { continue };
+            let Some(&ai) = areas.get(i) else { continue };
+            let Some(&(_, _, ci, _)) = loops.get(i) else { continue };
+            active.retain(|&j| boxes.get(j).is_some_and(|b| b.max.x >= probe.x));
+            while let Some(&j) = box_order.get(next_box) {
+                if boxes.get(j).is_some_and(|b| b.min.x <= probe.x) {
+                    next_box += 1;
+                    if boxes.get(j).is_some_and(|b| b.max.x >= probe.x) {
+                        let aj = areas.get(j).copied().unwrap_or(0.0);
+                        let pos = active.partition_point(|&k| {
+                            let ak = areas.get(k).copied().unwrap_or(0.0);
+                            ak.total_cmp(&aj).then_with(|| k.cmp(&j)).is_lt()
+                        });
+                        active.insert(pos, j);
+                    }
+                } else {
+                    break;
+                }
+            }
+            let start = active.partition_point(|&j| areas.get(j).copied().unwrap_or(0.0) <= ai);
+            for &j in active.get(start..).unwrap_or(&[]) {
+                if i == j {
+                    continue;
+                }
+                if loops.get(j).is_none_or(|(_, _, cj, _)| ci == *cj) {
+                    continue;
+                }
+                if boxes.get(j).is_none_or(|b| !(b.min.y..=b.max.y).contains(&probe.y)) {
+                    continue;
+                }
+                if all.get(j).is_some_and(|(_, l)| l.poly.contains(probe)) {
+                    if let Some(p) = parent_of.get_mut(i) {
+                        *p = Some(j);
+                    }
+                    break;
+                }
+            }
         }
     }
     let mut kids_of: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
@@ -1725,6 +2648,13 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
             && let Some(v) = kids_of.get_mut(*p)
         {
             v.push(k);
+        }
+    }
+    // A loop drawn twice on top of itself is one hole of the loop around it, not two (#10521):
+    // of kids with the same boundary only the first stays.
+    for kids in &mut kids_of {
+        if kids.len() > 1 {
+            *kids = without_repeated_loops(kids, |k| loops.get(k).map(|(l, ..)| *l), |k| areas.get(k).copied().unwrap_or(0.0));
         }
     }
     let out: Vec<Profile> = loops
@@ -1744,6 +2674,7 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
             Profile {
                 region,
                 outer_curves: (*ids).clone(),
+                outer_alternates: all.get(i).map(|(_, l)| l.alternates.clone()).unwrap_or_default(),
                 hole_curves,
                 area,
                 centroid,
@@ -1762,6 +2693,33 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
     out
 }
 
+/// `kids` (indices, in order) with each whose loop repeats an earlier one's boundary left out.
+/// Only loops of nearly equal area are compared, so a long list stays cheap.
+fn without_repeated_loops<'a>(kids: &[usize], loop_of: impl Fn(usize) -> Option<&'a Loop2>, area_of: impl Fn(usize) -> f64) -> Vec<usize> {
+    let mut by_area: Vec<usize> = kids.to_vec();
+    by_area.sort_by(|&a, &b| area_of(a).total_cmp(&area_of(b)));
+    let mut dropped = std::collections::HashSet::new();
+    for (n, &k) in by_area.iter().enumerate() {
+        let Some(lk) = loop_of(k) else { continue };
+        let size: f64 = lk.segs.iter().map(Seg2::length).sum();
+        let tol = 1e-7 * (1.0 + size);
+        // The loops just before this one in area order that are as large within the tolerance.
+        for &j in by_area[..n].iter().rev().take_while(|&&j| (area_of(k) - area_of(j)).abs() <= tol * (1.0 + size)) {
+            if dropped.contains(&j) {
+                continue;
+            }
+            let Some(lj) = loop_of(j) else { continue };
+            let one = |l: &Loop2| Region2 { outer: l.ccw(), holes: Vec::new() };
+            if same_region(&one(lk), &one(lj), tol) {
+                // The one listed first stays.
+                dropped.insert(k.max(j));
+                break;
+            }
+        }
+    }
+    kids.iter().copied().filter(|k| !dropped.contains(k)).collect()
+}
+
 /// Why no single profile is bounded by a list of curves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CurvePick {
@@ -1777,19 +2735,35 @@ pub enum CurvePick {
 /// listed curve. Order and repeats don't matter. Holes don't take part (islands inside a profile
 /// are its holes, as for a profile picked by a point). When several profiles match, one whose
 /// loop has exactly the listed pieces (a curve listed twice for two pieces) wins; otherwise the
-/// pick is ambiguous, never a guess.
+/// pick is ambiguous, never a guess. When no loop is made of exactly the listed curves, a piece
+/// another curve lies on (a side drawn on a projected edge, #20503) may stand for that curve.
 pub fn profile_by_curves(profiles: &[Profile], ids: &[String]) -> Result<usize, CurvePick> {
     use std::collections::BTreeSet;
     let want: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
     if want.is_empty() {
         return Err(CurvePick::Missing);
     }
-    let hits: Vec<usize> = profiles
+    let mut hits: Vec<usize> = profiles
         .iter()
         .enumerate()
         .filter(|(_, p)| p.outer_curves.iter().map(String::as_str).collect::<BTreeSet<_>>() == want)
         .map(|(i, _)| i)
         .collect();
+    if hits.is_empty() {
+        // Every piece is a listed curve or lies on one, and every listed curve names a piece.
+        let covers = |p: &Profile| {
+            let mut named = BTreeSet::new();
+            p.outer_curves.iter().enumerate().all(|(k, id)| {
+                let on: Vec<&str> = std::iter::once(id.as_str())
+                    .chain(p.outer_alternates.get(k).into_iter().flatten().map(String::as_str))
+                    .filter(|c| want.contains(c))
+                    .collect();
+                named.extend(on.iter().copied());
+                !on.is_empty()
+            }) && named == want
+        };
+        hits = profiles.iter().enumerate().filter(|(_, p)| covers(p)).map(|(i, _)| i).collect();
+    }
     match hits.as_slice() {
         [] => Err(CurvePick::Missing),
         [i] => Ok(*i),
@@ -1917,20 +2891,33 @@ pub fn distinct_curves(ids: &[String]) -> Vec<String> {
     out
 }
 
-fn same_seg(a: &Seg2, b: &Seg2, tol: f64) -> bool {
+/// Whether `a` and `b` represent the same shared boundary segment: their endpoints meet within
+/// `end_tol`, while their carriers (line or circle) stay within `carrier_tol` so parallel walls
+/// of a narrow gap or sliver (> `carrier_tol` apart) are never falsely cancelled against each
+/// other.
+fn same_seg(a: &Seg2, b: &Seg2, end_tol: f64, carrier_tol: f64) -> bool {
+    let on_line = |p: Vec2, q: Vec2, pt: Vec2| -> bool {
+        let u = q - p;
+        let len = u.len();
+        len <= 1e-12 || (pt - p).cross(u).abs() <= carrier_tol * len
+    };
     match (*a, *b) {
-        (Seg2::Line { a: p, b: q }, Seg2::Line { a: r, b: s }) => p.dist(r) <= tol && q.dist(s) <= tol,
+        (Seg2::Line { a: p, b: q }, Seg2::Line { a: r, b: s }) => {
+            p.dist(r) <= end_tol
+                && q.dist(s) <= end_tol
+                && (end_tol <= carrier_tol || (on_line(p, q, r) && on_line(p, q, s) && on_line(r, s, p) && on_line(r, s, q)))
+        }
         (Seg2::Arc { center: c1, radius: r1, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
-            c1.dist(c2) <= tol
-                && (r1 - r2).abs() <= tol
-                && a.start().dist(b.start()) <= tol
-                && a.end().dist(b.end()) <= tol
-                && a.mid().dist(b.mid()) <= tol
+            c1.dist(c2) <= carrier_tol
+                && (r1 - r2).abs() <= carrier_tol
+                && a.start().dist(b.start()) <= end_tol
+                && a.end().dist(b.end()) <= end_tol
+                && a.mid().dist(b.mid()) <= end_tol
         }
         // Free-form segments (text outlines, ellipses, splines): the same curve when they run
         // through the same points.
         (Seg2::Line { .. } | Seg2::Arc { .. }, _) | (_, Seg2::Line { .. } | Seg2::Arc { .. }) => false,
-        _ => [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| a.point_at(*t).dist(b.point_at(*t)) <= tol),
+        _ => [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| a.point_at(*t).dist(b.point_at(*t)) <= end_tol),
     }
 }
 
@@ -1956,10 +2943,118 @@ fn rejoined(segs: Vec<Seg2>, joins: &impl Fn(&Seg2, &Seg2) -> bool) -> Vec<Seg2>
     out
 }
 
+/// Total-ordered `f64` key (`f64::total_cmp`) for indexing areas in a `BTreeSet`.
+#[derive(Clone, Copy)]
+struct OrderedF64(f64);
+
+impl PartialEq for OrderedF64 {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for OrderedF64 {}
+
+impl PartialOrd for OrderedF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OrderedF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+/// Spatial hash grid over 2D points for radius-`tol` neighborhood queries.
+/// Uses cell step `2 * tol` so any two points within `tol` fall in adjacent cells (within ±1 in
+/// each axis) without IEEE-754 floor-boundary misses. Non-finite or huge coordinates stay in
+/// `fallback` and are always checked; huge query coordinates fall back to scanning all entries.
+struct PointGrid {
+    cell_size: f64,
+    cells: std::collections::HashMap<(i64, i64), Vec<usize>>,
+    fallback: Vec<usize>,
+}
+
+impl PointGrid {
+    fn new(tol: f64, capacity: usize) -> Self {
+        Self { cell_size: tol * 2.0, cells: std::collections::HashMap::with_capacity(capacity), fallback: Vec::new() }
+    }
+
+    fn cell(&self, p: Vec2) -> Option<(i64, i64)> {
+        if !(p.is_finite() && self.cell_size.is_finite() && self.cell_size > 0.0) {
+            return None;
+        }
+        let gx = (p.x / self.cell_size).floor();
+        let gy = (p.y / self.cell_size).floor();
+        const LIMIT: f64 = 1e15;
+        if !(gx.is_finite() && gy.is_finite() && gx.abs() < LIMIT && gy.abs() < LIMIT) {
+            return None;
+        }
+        Some((gx as i64, gy as i64))
+    }
+
+    fn insert(&mut self, p: Vec2, idx: usize) {
+        match self.cell(p) {
+            Some(c) => self.cells.entry(c).or_default().push(idx),
+            None => self.fallback.push(idx),
+        }
+    }
+
+    fn for_each_near(&self, p: Vec2, mut f: impl FnMut(usize)) {
+        if !p.is_finite() {
+            return;
+        }
+        let Some((cx, cy)) = self.cell(p) else {
+            for bucket in self.cells.values() {
+                for &idx in bucket {
+                    f(idx);
+                }
+            }
+            for &idx in &self.fallback {
+                f(idx);
+            }
+            return;
+        };
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(bucket) = self.cells.get(&(cx + dx, cy + dy)) {
+                    for &idx in bucket {
+                        f(idx);
+                    }
+                }
+            }
+        }
+        for &idx in &self.fallback {
+            f(idx);
+        }
+    }
+
+    fn any_near(&self, p: Vec2, mut pred: impl FnMut(usize) -> bool) -> bool {
+        if !p.is_finite() {
+            return false;
+        }
+        let Some((cx, cy)) = self.cell(p) else {
+            return self.cells.values().any(|b| b.iter().copied().any(&mut pred)) || self.fallback.iter().copied().any(pred);
+        };
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(bucket) = self.cells.get(&(cx + dx, cy + dy))
+                    && bucket.iter().copied().any(&mut pred)
+                {
+                    return true;
+                }
+            }
+        }
+        self.fallback.iter().copied().any(pred)
+    }
+}
+
 /// `regions` with each region that repeats an earlier one (the same boundary within a small
 /// tolerance) left out.
 fn without_repeats(regions: &[Region2]) -> Vec<Region2> {
-    // Comparing every pair is quadratic: beyond this many the regions are kept as they are.
+    // Beyond this many regions, keep them as they are.
     const MAX_COMPARED: usize = 5000;
     if regions.len() < 2 || regions.len() > MAX_COMPARED {
         return regions.to_vec();
@@ -1967,15 +3062,31 @@ fn without_repeats(regions: &[Region2]) -> Vec<Region2> {
     let keys: Vec<(f64, Vec2, f64)> =
         regions.iter().map(|r| (r.outer.signed_area().abs(), r.outer.centroid(), r.outer.segs.iter().map(Seg2::length).sum::<f64>())).collect();
     let mut kept: Vec<usize> = Vec::new();
+    let mut by_area: std::collections::BTreeSet<(OrderedF64, usize)> = std::collections::BTreeSet::new();
+    let mut non_finite: Vec<usize> = Vec::new();
     for (i, r) in regions.iter().enumerate() {
         let Some(&(area, centroid, size)) = keys.get(i) else { continue };
         let tol = 1e-7 * (1.0 + size);
-        let repeat = kept.iter().any(|&k| {
-            keys.get(k).is_some_and(|&(a, c, _)| (a - area).abs() <= tol * (1.0 + size) && c.dist(centroid) <= tol)
+        let area_tol = tol * (1.0 + size);
+        let matches = |k: usize| {
+            keys.get(k).is_some_and(|&(a, c, _)| (a - area).abs() <= area_tol && c.dist(centroid) <= tol)
                 && regions.get(k).is_some_and(|other| same_region(r, other, tol))
-        });
+        };
+        let pad = area_tol + 4.0 * f64::EPSILON * (area + area_tol);
+        let lo = area - pad;
+        let hi = area + pad;
+        let repeat = if area.is_finite() && tol.is_finite() && area_tol.is_finite() && lo.is_finite() && hi.is_finite() && lo <= hi {
+            by_area.range((OrderedF64(lo), 0)..=(OrderedF64(hi), usize::MAX)).any(|&(_, k)| matches(k)) || non_finite.iter().copied().any(matches)
+        } else {
+            kept.iter().copied().any(matches)
+        };
         if !repeat {
             kept.push(i);
+            if area.is_finite() {
+                by_area.insert((OrderedF64(area), i));
+            } else {
+                non_finite.push(i);
+            }
         }
     }
     kept.iter().filter_map(|&i| regions.get(i).cloned()).collect()
@@ -1995,6 +3106,27 @@ fn same_region(a: &Region2, b: &Region2, tol: f64) -> bool {
     a.holes.len() == b.holes.len() && same_loop(&a.outer, &b.outer) && a.holes.iter().all(|h| b.holes.iter().any(|g| same_loop(h, g)))
 }
 
+/// `s` starting at `p`, a point within a corner's tolerance of its start, its end kept: a line
+/// from `p`, an arc from `p`'s angle about its centre, a free-form segment from `p` as its first
+/// control point.
+fn started_at(s: Seg2, p: Vec2) -> Seg2 {
+    match s {
+        Seg2::Line { b, .. } => Seg2::Line { a: p, b },
+        Seg2::Arc { center, radius, start, sweep } => {
+            let turn = ((p - center).angle() - start + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI;
+            Seg2::Arc { center, radius, start: start + turn, sweep: sweep - turn }
+        }
+        Seg2::Cubic { p1, p2, p3, .. } => Seg2::Cubic { p0: p, p1, p2, p3 },
+        Seg2::Conic { apex, b, w, .. } => Seg2::Conic { a: p, apex, b, w },
+        Seg2::Bezier { n, p: mut ctrl } => {
+            if let Some(c) = ctrl.first_mut() {
+                *c = p;
+            }
+            Seg2::Bezier { n, p: ctrl }
+        }
+    }
+}
+
 /// Union of regions that touch along shared boundary segments (one extrude of several adjacent
 /// profiles makes one body). Disjoint regions stay separate.
 pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
@@ -2003,34 +3135,70 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     // with four such circles retried with the tool nudged and took fifty times as long.
     let distinct = without_repeats(regions);
     let regions = distinct.as_slice();
-    let tol = MERGE_TOL * 10.0;
-    // Every boundary segment oriented with the region on its left.
+    // Curve ends this close are one corner of a profile, so two regions' copies of a boundary
+    // whose corners are that close are one shared boundary: a tangent touch splits into two
+    // corners a few hundredths of a micron apart, each region taking its own (#12612).
+    let tol = ENDPOINT_JOIN_TOL;
+    // Every boundary segment oriented with the region on its left, tagged with its source loop so
+    // opposite sides of a single narrow loop (e.g. a sliver <= ENDPOINT_JOIN_TOL wide) never
+    // cancel against each other.
     let mut segs: Vec<Seg2> = Vec::new();
+    let mut loop_ids: Vec<usize> = Vec::new();
+    let mut next_loop_id = 0usize;
     for r in regions {
-        segs.extend(r.outer.ccw().segs);
+        let outer = r.outer.ccw().segs;
+        loop_ids.extend(std::iter::repeat_n(next_loop_id, outer.len()));
+        segs.extend(outer);
+        next_loop_id += 1;
         for h in &r.holes {
-            segs.extend(h.ccw().reversed().segs);
+            let hole = h.ccw().reversed().segs;
+            loop_ids.extend(std::iter::repeat_n(next_loop_id, hole.len()));
+            segs.extend(hole);
+            next_loop_id += 1;
         }
     }
     if segs.len() > MAX_EDGES {
         return regions.to_vec();
     }
-    // Drop pairs that run against each other (shared boundaries).
+    // Drop pairs that run against each other (shared boundaries and exact slits).
+    // Pass 1 matches exact opposite segments within MERGE_TOL first (including zero-width slits
+    // within a single loop, e.g. a ring cut by a radial seam, while leaving slivers wider than
+    // MERGE_TOL intact); Pass 2 catches tangent-touch splits between distinct loops up to
+    // ENDPOINT_JOIN_TOL on the same carrier (#12612).
     let mut alive = vec![true; segs.len()];
     let mut shared = false;
-    for i in 0..segs.len() {
-        if !alive.get(i).copied().unwrap_or(false) {
-            continue;
+    for (end_tol, distinct_loops_only) in [(MERGE_TOL, false), (tol, true)] {
+        let mut end_grid = PointGrid::new(end_tol, segs.len());
+        for (j, seg) in segs.iter().enumerate() {
+            if alive.get(j).copied().unwrap_or(false) {
+                end_grid.insert(seg.end(), j);
+            }
         }
-        for j in (i + 1)..segs.len() {
-            if alive.get(j).copied().unwrap_or(false)
-                && let (Some(a), Some(b)) = (segs.get(i), segs.get(j))
-                && same_seg(a, &b.reversed(), tol)
-            {
-                alive[i] = false;
-                alive[j] = false;
+        for (i, a) in segs.iter().enumerate() {
+            if !alive.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            let mut best_j: Option<usize> = None;
+            end_grid.for_each_near(a.start(), |j| {
+                if j <= i || best_j.is_some_and(|best| j >= best) {
+                    return;
+                }
+                if alive.get(j).copied().unwrap_or(false)
+                    && (!distinct_loops_only || loop_ids.get(i) != loop_ids.get(j))
+                    && let Some(b) = segs.get(j)
+                    && same_seg(a, &b.reversed(), end_tol, MERGE_TOL)
+                {
+                    best_j = Some(j);
+                }
+            });
+            if let Some(j) = best_j {
+                if let Some(ai) = alive.get_mut(i) {
+                    *ai = false;
+                }
+                if let Some(aj) = alive.get_mut(j) {
+                    *aj = false;
+                }
                 shared = true;
-                break;
             }
         }
     }
@@ -2040,66 +3208,132 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     // Where the shared boundaries ended, the outline is left split in two: the lines on either
     // side are one edge again (else they make split faces and vertices that booleans trip on).
     let ends: Vec<Vec2> = segs.iter().zip(&alive).filter(|(_, a)| !**a).flat_map(|(s, _)| [s.start(), s.end()]).collect();
+    let mut ends_grid = PointGrid::new(tol, ends.len());
+    for (idx, &e) in ends.iter().enumerate() {
+        ends_grid.insert(e, idx);
+    }
     let rejoin = |s: &Seg2, t: &Seg2| match (*s, *t) {
         (Seg2::Line { a, b }, Seg2::Line { a: b2, b: c }) => {
-            b.dist(b2) <= tol
-                && ends.iter().any(|e| e.dist(b) <= tol)
+            b.dist(b2) <= MERGE_TOL
+                && ends_grid.any_near(b, |idx| ends.get(idx).is_some_and(|e| e.dist(b) <= tol))
                 && (b - a).normalized().zip((c - b).normalized()).is_some_and(|(u, v)| u.dot(v) > 1.0 - 1e-12)
         }
         _ => false,
     };
     let rest: Vec<Seg2> = segs.iter().zip(&alive).filter(|(_, a)| **a).map(|(s, _)| *s).collect();
-    // Chain into loops, taking the sharpest left turn where several continue.
+    let mut start_grid = PointGrid::new(tol, rest.len());
+    for (k, s) in rest.iter().enumerate() {
+        start_grid.insert(s.start(), k);
+    }
+    // Chain into loops, preferring exact-corner continuations before bridging up to `tol` and
+    // taking the sharpest left turn where several continue at the same corner.
     let mut used = vec![false; rest.len()];
+    let mut nearby: Vec<(usize, f64)> = Vec::new();
     let mut loops: Vec<Loop2> = Vec::new();
     for start in 0..rest.len() {
         if used.get(start).copied().unwrap_or(true) {
             continue;
         }
-        let mut lp = Vec::new();
+        let mut lp: Vec<Seg2> = Vec::new();
         let mut cur = start;
+        // Where the segment taken last ends: the next starts there, so each corner closes
+        // exactly where two regions' corners were apart.
+        let mut corner: Option<Vec2> = None;
         for _ in 0..=rest.len() {
             if let Some(u) = used.get_mut(cur) {
                 *u = true;
             }
             let Some(seg) = rest.get(cur).copied() else { break };
+            let seg = corner.map_or(seg, |p| started_at(seg, p));
             lp.push(seg);
             let end = seg.end();
-            if let Some(first) = rest.get(start)
-                && end.dist(first.start()) <= tol
-                && lp.len() > 1
-            {
+            let close_dist = rest.get(start).map_or(f64::INFINITY, |first| end.dist(first.start()));
+            nearby.clear();
+            let mut best_next_dist = f64::INFINITY;
+            start_grid.for_each_near(end, |k| {
+                if !used.get(k).copied().unwrap_or(true)
+                    && let Some(s) = rest.get(k)
+                {
+                    let dist = s.start().dist(end);
+                    if dist <= tol {
+                        best_next_dist = best_next_dist.min(dist);
+                        nearby.push((k, dist));
+                    }
+                }
+            });
+            if close_dist <= tol && lp.len() > 1 && (close_dist <= MERGE_TOL || close_dist <= best_next_dist + MERGE_TOL) {
+                if let Some(first) = lp.first_mut() {
+                    *first = started_at(*first, end);
+                }
                 break;
             }
+            corner = Some(end);
             let back = (-seg.end_tangent()).angle();
-            let next = (0..rest.len())
-                .filter(|k| !used.get(*k).copied().unwrap_or(true) && rest.get(*k).is_some_and(|s| s.start().dist(end) <= tol))
-                .min_by(|x, y| {
-                    let d = |k: usize| rest.get(k).map(|s| (back - s.start_tangent().angle()).rem_euclid(TAU)).unwrap_or(TAU);
-                    d(*x).total_cmp(&d(*y))
-                });
-            match next {
-                Some(k) => cur = k,
+            let next_tol = (best_next_dist + MERGE_TOL).min(tol);
+            let mut best_next: Option<(f64, usize)> = None;
+            for &(k, dist) in &nearby {
+                if dist <= next_tol
+                    && let Some(s) = rest.get(k)
+                {
+                    let angle = (back - s.start_tangent().angle()).rem_euclid(TAU);
+                    if best_next.is_none_or(|(ba, bk)| angle.total_cmp(&ba).then_with(|| k.cmp(&bk)).is_lt()) {
+                        best_next = Some((angle, k));
+                    }
+                }
+            }
+            match best_next {
+                Some((_, k)) => cur = k,
                 None => break,
             }
         }
-        // A loop that encloses nothing (pieces running back over themselves) is no boundary.
-        if !lp.is_empty() && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
+        // A loop that encloses nothing (pieces running back over themselves, or a lone straight
+        // line shorter than `tol`) is no boundary.
+        let is_single_line = lp.len() == 1 && matches!(lp.first(), Some(Seg2::Line { .. }));
+        if !lp.is_empty() && !is_single_line && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
             let lp = Loop2 { segs: rejoined(lp, &rejoin) };
-            if lp.signed_area().abs() > 1e-9 {
+            if area_about_start(&lp.segs).abs() > 1e-9 {
                 loops.push(lp);
             }
         }
     }
-    let outers: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() > 0.0).collect();
-    let holes: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() < 0.0).collect();
-    let mut out: Vec<Region2> = outers.iter().map(|o| Region2 { outer: (*o).clone(), holes: Vec::new() }).collect();
-    for h in holes {
-        let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
-        // Innermost containing outer loop.
-        let best = out.iter_mut().filter(|r| r.outer.contains(probe)).min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()));
-        if let Some(r) = best {
-            r.holes.push(h.clone());
+    let mut out: Vec<Region2> = Vec::new();
+    let mut outer_areas: Vec<f64> = Vec::new();
+    let mut holes: Vec<&Loop2> = Vec::new();
+    for l in &loops {
+        let area = l.signed_area();
+        if area > 0.0 {
+            out.push(Region2 { outer: l.clone(), holes: Vec::new() });
+            outer_areas.push(area);
+        } else if area < 0.0 {
+            holes.push(l);
+        }
+    }
+    if !holes.is_empty() {
+        let outer_polys: Vec<(Ring<Vec2>, Aabb2)> = out
+            .iter()
+            .map(|r| {
+                let poly = r.outer.polyline(CONTAINS_TOL);
+                let bounds = poly.bounds();
+                (poly, bounds)
+            })
+            .collect();
+        for h in holes {
+            let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
+            // Innermost containing outer loop.
+            let mut best: Option<(f64, usize)> = None;
+            for (idx, ((poly, bounds), &area)) in outer_polys.iter().zip(&outer_areas).enumerate() {
+                if !bounds.contains(probe) || best.is_some_and(|(ba, _)| !area.total_cmp(&ba).is_lt()) {
+                    continue;
+                }
+                if poly.contains(probe) {
+                    best = Some((area, idx));
+                }
+            }
+            if let Some((_, idx)) = best
+                && let Some(r) = out.get_mut(idx)
+            {
+                r.holes.push(h.clone());
+            }
         }
     }
     if out.is_empty() { regions.to_vec() } else { out }
@@ -2181,6 +3415,69 @@ mod tests {
 
     /// An infinite or huge box spans more cells than an `i64` holds; it is checked against all
     /// shapes instead of wrapping the count and filling memory (solidcraft#5020).
+    /// The island cache bounds itself by each loop's weight: the curves a loop keeps as
+    /// alternates of its pieces (#20503) are held too, so they count.
+    #[test]
+    fn a_loops_weight_counts_the_alternates_of_its_pieces() {
+        let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(0.0, 1.0)]);
+        let ids: Vec<String> = ["l1", "l2", "l3", "l4"].map(String::from).to_vec();
+        let plain = IslandLoop::new(square.clone(), ids.clone(), 0, None, (1, 0, 0));
+        let alternates = vec![vec!["p1".to_string(), "p2".to_string()], Vec::new(), Vec::new(), Vec::new()];
+        let with = IslandLoop::new(square, ids, 0, None, (1, 0, 0)).with_alternates(alternates);
+        assert_eq!(with.weight(), plain.weight() + 2);
+    }
+
+    /// A lobe is a stretch back to the node it left: it is left out of the loop, and a loop
+    /// through its nodes once each has no lobe to look for (the search would be the square of
+    /// the loop's length there — an imported outline of thousands of segments).
+    #[test]
+    fn a_lobe_of_no_area_is_left_out_and_a_loop_with_no_revisited_node_keeps_all() {
+        let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+        // A loop that runs out and back along one line: edges 1 and 2 are a lobe of no area.
+        let segs = [
+            line((0.0, 0.0), (1.0, 0.0)),
+            line((1.0, 0.0), (2.0, 0.0)),
+            line((2.0, 0.0), (1.0, 0.0)),
+            line((1.0, 0.0), (1.0, 1.0)),
+            line((1.0, 1.0), (0.0, 0.0)),
+        ];
+        let nodes = [(0, 1), (1, 2), (2, 1), (1, 3), (3, 0)];
+        assert_eq!(without_lobes_of_no_area(&segs, &nodes, |_| false), [true, false, false, true, true]);
+        // Each node is left once: nothing to take out, however long the loop.
+        let mut unique = Vec::new();
+        let n = 5000;
+        for k in 0..n {
+            let at = |k: usize| {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                (100.0 * a.cos(), 100.0 * a.sin())
+            };
+            unique.push(line(at(k), at(k + 1)));
+        }
+        let unique_nodes: Vec<(usize, usize)> = (0..n).map(|k| (k, (k + 1) % n)).collect();
+        assert!(without_lobes_of_no_area(&unique, &unique_nodes, |_| false).iter().all(|k| *k));
+    }
+
+    /// An outline imported as thousands of short segments is one closed profile, found as one:
+    /// the search splits it into islands by piece boxes, and the parts are a share of the
+    /// drawing's extent, not sixteen per segment.
+    #[test]
+    fn an_imported_outline_of_short_segments_is_one_profile() {
+        let mut sk = Sketch::new();
+        let n = 3000;
+        let at = |k: usize| {
+            let a = std::f64::consts::TAU * k as f64 / n as f64;
+            Vec2::new(100.0 * a.cos(), 100.0 * a.sin())
+        };
+        for k in 0..n {
+            sk.add_line(at(k), at(k + 1), None, None, None).unwrap();
+        }
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 1, "one closed outline");
+        let outline = &profiles[0];
+        assert!(outline.hole_curves.is_empty(), "no hole");
+        assert_eq!(outline.outer_curves.len(), n, "every segment is on the outline");
+    }
+
     #[test]
     fn grid_cells_refuse_infinite_and_huge_boxes() {
         let small = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };
@@ -2197,6 +3494,18 @@ mod tests {
         let grid = Grid::new(&[small, inf]);
         assert!(grid.cells(&inf).is_none());
         assert!(grid.cells(&huge).is_none());
+    }
+
+    /// The part of a conic between two of its points ends at the second one: a conic's tail
+    /// after a split has its parameter re-normalised, so the end is not at the old fraction.
+    #[test]
+    fn exact_between_ends_a_conic_part_at_its_given_point() {
+        let conic = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(1.0, 1.0), b: Vec2::new(2.0, 0.0), w: 0.5 };
+        let (from, to) = (conic.point_at(0.5), conic.point_at(0.75));
+        let part = exact_between(&conic, from, to, 1e-9).expect("both points lie on the conic");
+        assert!(part.start().dist(from) < 1e-9 && part.end().dist(to) < 1e-9, "{part:?}");
+        let back = exact_between(&conic, to, from, 1e-9).expect("both points lie on the conic");
+        assert!(back.start().dist(to) < 1e-9 && back.end().dist(from) < 1e-9, "{back:?}");
     }
 
     fn text_into(sk: &mut Sketch, text: &str, at: Vec2, height: f64) {
@@ -2232,6 +3541,84 @@ mod tests {
         }
         let curves: Vec<usize> = (0..sk.curves.len()).collect();
         islands(sk, &curves).len()
+    }
+
+    fn cubic_lens(sk: &mut Sketch, reversed: bool) {
+        // SVG's default pixel scale. The two cubic integrals give area 1353/20 before scaling.
+        let scale = 25.4 / 96.0;
+        for mut controls in [[(0.0, 0.0), (0.0, 5.0), (12.0, 4.0), (11.0, -1.0)], [(11.0, -1.0), (10.0, -6.0), (-1.0, -5.0), (0.0, 0.0)]] {
+            if reversed {
+                controls.reverse();
+            }
+            // Equal coordinates deliberately use separate point IDs, as imported curves can.
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x * scale, -y * scale), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+    }
+
+    /// #15408: repeated SVG outlines must not erase the region when their direction reverses.
+    #[test]
+    fn duplicate_cubic_outlines_keep_the_profile_and_source_curves() {
+        for reversed in [true, false] {
+            let mut sk = Sketch::new();
+            cubic_lens(&mut sk, false);
+            let original = find_profiles(&sk);
+            assert_eq!(original.len(), 1);
+            let expected = 1353.0 / 20.0 * (25.4_f64 / 96.0).powi(2);
+            assert!((original[0].area - expected).abs() < 1e-12);
+            let first_copy = sk.points.len();
+            cubic_lens(&mut sk, reversed);
+            for point in &mut sk.points[first_copy..] {
+                if point.pos.x == 0.0 {
+                    point.pos.x = -point.pos.x;
+                }
+                if point.pos.y == 0.0 {
+                    point.pos.y = -point.pos.y;
+                }
+            }
+            let source = serde_json::to_string(&sk).unwrap();
+            islands_match_whole(&sk);
+            assert_same(&find_profiles(&sk), &original);
+            assert_eq!(sk.curves.len(), 4);
+            assert_eq!(serde_json::to_string(&sk).unwrap(), source, "finding profiles preserves every imported curve and point");
+        }
+    }
+
+    #[test]
+    fn moving_a_duplicate_cubic_outline_updates_cached_profiles() {
+        let mut sk = Sketch::new();
+        cubic_lens(&mut sk, false);
+        let first_copy = sk.points.len();
+        cubic_lens(&mut sk, true);
+        assert_eq!(find_profiles(&sk).len(), 1);
+        for point in &mut sk.points[first_copy..] {
+            point.pos.x += 10.0;
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "moving the duplicate restores its independent region");
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
+    }
+
+    #[test]
+    fn cubic_boundaries_with_the_same_ends_keep_their_distinct_regions() {
+        let mut sk = Sketch::new();
+        for controls in [
+            [(0.0, 0.0), (0.0, 3.0), (3.0, 3.0), (3.0, 0.0)],
+            [(3.0, 0.0), (3.0, -3.0), (0.0, -3.0), (0.0, 0.0)],
+            [(0.0, 0.0), (0.0, 2.0), (3.0, 2.0), (3.0, 0.0)],
+        ] {
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+        islands_match_whole(&sk);
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2);
+        for curve in &sk.curves {
+            assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&curve.id)));
+        }
     }
 
     /// #6896: letters with counters (holes), a frame round them that touches none (its holes
@@ -2281,7 +3668,8 @@ mod tests {
         let ring = [(20.0, 0.0), (10.0, 17.0), (-10.0, 17.0), (-20.0, 0.0), (-10.0, -17.0), (10.0, -17.0)];
         let mut pts: Vec<usize> = ring.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
         pts.push(pts[0]);
-        let outline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        let outline =
+            sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let pieces = sk.exact_pieces(outline);
         assert!(pieces.len() >= 2, "{pieces:?}");
         // The point of a piece furthest out from the middle chord of its polyline.
@@ -2298,7 +3686,9 @@ mod tests {
         // Bulging out past the fit point the two pieces share.
         let corner = pieces[0].end() * 1.15;
         let bulge: Vec<usize> = [start, corner, end].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-        let bulge = sk.add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        let bulge = sk
+            .add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         islands_match_whole(&sk);
         let profiles = find_profiles(&sk);
         assert_eq!(profiles.len(), 2, "the inside and the bulge: {profiles:?}");
@@ -2308,6 +3698,134 @@ mod tests {
         let inside = profiles.iter().find(|p| !p.outer_curves.contains(&bulge)).unwrap();
         assert!(lens.area > 0.1 && lens.area < inside.area * 0.2, "{} of {}", lens.area, inside.area);
         assert!(lens.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{:?}", lens.region.outer.segs);
+    }
+
+    /// #20555: a region whose end runs along a spline split in two and a copy of it 0.0004 mm
+    /// away. The copies never cross, but their polylines do, so the loop changes curve many times
+    /// along its end. A junction whose crossing was found (a chord of one copy against the exact
+    /// other) moved its plain neighbour's end there; the exact run then gave up at its other end,
+    /// which put its polyline back and left the loop open by 0.0077 mm: the extrusion failed with
+    /// status 1001. The loop is closed, and its area is the drawing's: the end lies within the
+    /// copies' 0.00044 mm apart plus the 0.001 mm chord tolerance of the copy that bounds it,
+    /// over the region's 4 mm height, so within 0.006 mm2 of the area to the right of the copy.
+    #[test]
+    fn a_region_ending_on_two_near_copies_of_a_spline_is_a_closed_loop() {
+        let mut sk = Sketch::new();
+        sk.add_line(Vec2::new(10.0, -2.0006), Vec2::new(35.0, -2.0006), None, None, None).unwrap();
+        sk.add_line(Vec2::new(10.0, 1.9994), Vec2::new(35.0, 1.9994), None, None, None).unwrap();
+        sk.add_line(Vec2::new(35.0, -2.0006), Vec2::new(35.0, 1.9994), None, None, None).unwrap();
+        // A cubic quarter of the arc r = 20 about the origin from y = -2 to 0, the half from 0 to
+        // 2, and one cubic over the same arc about (0.0004, 0.0004), past both lines.
+        let splines: [[(f64, f64); 4]; 3] = [
+            [(19.89975, -2.0), (19.96654, -1.33543), (20.0, -0.66792), (20.0, 0.0)],
+            [(20.0, 0.0), (20.0, 0.66792), (19.96654, 1.33543), (19.89975, 2.0)],
+            [(19.8991, -2.01), (20.03515, -0.66338), (20.03416, 0.69358), (19.89613, 2.04)],
+        ];
+        for controls in splines {
+            let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        }
+        let profiles = find_profiles(&sk);
+        let region = profiles.iter().find(|p| p.contains(Vec2::new(30.0, 0.0))).expect("the region at (30, 0)");
+        let segs = &region.region.outer.segs;
+        for (a, b) in region.region.outer.joints() {
+            assert!(a.end().dist(b.start()) < 1e-9, "the loop is open at {:?} by {:e}: {segs:?}", a.end(), a.end().dist(b.start()));
+        }
+        // The area between the lines right of the copy, x = 35 - X(t) integrated against Y'(t)
+        // over the copy's cubic between the lines (Simpson's rule, 200 000 steps).
+        let right_of_copy = 60.131_932_8;
+        assert!((region.area - right_of_copy).abs() < 6e-3, "{} against {right_of_copy}", region.area);
+    }
+
+    /// #17462: a spline crossing a circle bounds both regions with its exact sub-curve up to the
+    /// true crossings. The polyline pieces the circle splits lost their spline's tag, so each
+    /// loop bridged from the last whole piece to the crossing with a straight chord, a sliver
+    /// face on the extruded wall that a fillet along the spline then ran into.
+    #[test]
+    fn a_spline_crossing_a_circle_keeps_its_exact_curve_to_the_crossings() {
+        let mut sk = Sketch::new();
+        let circle = sk.add_circle(Vec2::new(0.0, 0.0), 5.0, None, None).unwrap();
+        let controls = [(0.5, -8.0), (6.0, -3.0), (6.5, 3.5), (1.0, 8.0)];
+        let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        let spline =
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let (circle, spline) = (sk.curves[circle].id.clone(), sk.curves[spline].id.clone());
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the lens outside the spline and the rest of the disc: {profiles:?}");
+        // Together they are the disc: neither loop takes more or less of the spline.
+        let area: f64 = profiles.iter().map(|p| p.area).sum();
+        assert!((area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{area}");
+        for p in &profiles {
+            assert!(p.outer_curves.contains(&circle) && p.outer_curves.contains(&spline), "{:?}", p.outer_curves);
+            let segs = &p.region.outer.segs;
+            assert!(!segs.iter().any(|s| matches!(s, Seg2::Line { .. })), "no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+            for s in segs.iter().filter(|s| matches!(s, Seg2::Cubic { .. })) {
+                for end in [s.start(), s.end()] {
+                    assert!((end.len() - 5.0).abs() < 1e-9, "the spline's ends in the loop are its crossings: {end:?}");
+                }
+            }
+        }
+    }
+
+    /// #20781: a line crossing a closed spline at a shallow angle (close to its flat top) found no
+    /// true crossing within a hundredth of the chords' one, so both loops kept the spline's chords
+    /// instead of the exact curve, and a cut along it came out as a run of planar slivers.
+    #[test]
+    fn a_line_crossing_a_spline_at_a_shallow_angle_keeps_the_exact_curve() {
+        let mut sk = Sketch::new();
+        let controls = (0..12)
+            .map(|k| {
+                let a = std::f64::consts::TAU * f64::from(k) / 12.0;
+                sk.add_point(Vec2::new(30.0 * a.cos(), 10.0 * a.sin()), None).unwrap()
+            })
+            .collect();
+        let spline = sk
+            .add_curve(CurveKind::Spline { pts: controls, control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
+        let top = sk.polyline(spline).iter().map(|p| p.y).fold(f64::MIN, f64::max);
+        sk.add_line(Vec2::new(-40.0, top - 0.004), Vec2::new(40.0, top - 0.004), None, None, None).unwrap();
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the cap above the line and the rest of the hull: {profiles:?}");
+        for p in &profiles {
+            let segs = &p.region.outer.segs;
+            let lines = segs.iter().filter(|s| matches!(s, Seg2::Line { .. })).count();
+            assert_eq!(lines, 1, "only the cutting line is straight, no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{segs:?}");
+        }
+    }
+
+    /// #17462: a split piece keeps its free-form tag, so a loop that enters a spline at a
+    /// crossing inside its first piece and leaves it at one inside its last has as many
+    /// pieces, in order, as the whole spline. It is still only the part between the crossings:
+    /// the regions either side of a line cut close to the spline's ends add up to the uncut
+    /// region.
+    #[test]
+    fn a_loop_between_crossings_in_a_splines_end_pieces_takes_only_the_part_between_them() {
+        let lens = |cut: bool| {
+            let mut sk = Sketch::new();
+            let (a, b) = (sk.add_point(Vec2::new(0.0, 0.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 0.0), None).unwrap());
+            let (c, d) = (sk.add_point(Vec2::new(0.0, 6.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 6.0), None).unwrap());
+            sk.add_curve(
+                CurveKind::Spline { pts: vec![a, c, d, b], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                None,
+            )
+            .unwrap();
+            sk.add_line_pts(a, b, None).unwrap();
+            if cut {
+                // y = 0.1 meets the spline at t ~ 0.0056 and 0.9944, inside its first and last
+                // polyline pieces (about 0.011 of t each): the arch above it is the spline from
+                // the one crossing to the other, as many pieces in order as the whole spline.
+                sk.add_line(Vec2::new(-1.0, 0.1), Vec2::new(11.0, 0.1), None, None, None).unwrap();
+            }
+            find_profiles(&sk)
+        };
+        let whole = lens(false);
+        assert_eq!(whole.len(), 1, "{whole:?}");
+        let cut = lens(true);
+        assert_eq!(cut.len(), 2, "{cut:?}");
+        let sum: f64 = cut.iter().map(|p| p.area).sum();
+        assert!((sum - whole[0].area).abs() < 1e-9 * whole[0].area, "{sum} vs {}", whole[0].area);
     }
 
     /// #6896: past the edge limit, the old single search dropped profiles silently. The limit
@@ -2471,5 +3989,448 @@ mod tests {
             }
         }
         assert!(inside > 3000, "{inside}");
+    }
+
+    /// A circle and an ellipse that touch at two points (the ellipse as wide as the circle and
+    /// taller). The ellipse takes part as chords, which run within their tolerance of the circle on
+    /// both sides of each touch and so crossed it twice a few hundredths apart, leaving four slivers
+    /// of a few 1e-6 that the drawing does not have. The drawing has three regions: the circle and
+    /// the two crescents between it and the ellipse.
+    #[test]
+    fn tangent_touches_of_a_chorded_curve_leave_no_slivers() {
+        let mut sk = Sketch::new();
+        let (r, a) = (3.1, 6.2);
+        let o = Vec2::new(1.0, 2.0);
+        sk.add_circle(o, r, None, Some("circle")).unwrap();
+        let c = sk.add_point(o, None).unwrap();
+        let m = sk.add_point(Vec2::new(o.x, o.y + a), None).unwrap();
+        sk.add_curve(CurveKind::Ellipse { c, m, r }, Some("ellipse")).unwrap();
+        let mut areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.region.area()).collect();
+        areas.sort_by(f64::total_cmp);
+        let pi = std::f64::consts::PI;
+        assert_eq!(areas.len(), 3, "{areas:?}");
+        // the circle is exact; the ellipse takes part as its fitted curve, so the two crescents
+        // are equal and the three regions together hold to the ellipse's area within that fit
+        assert!((areas[2] - pi * r * r).abs() < 1e-6, "{areas:?}");
+        assert!((areas[0] - areas[1]).abs() < 1e-9, "{areas:?}");
+        let ellipse = pi * r * a;
+        assert!((areas.iter().sum::<f64>() - ellipse).abs() < 1e-3 * ellipse, "{areas:?}");
+    }
+
+    /// Loops along an ellipse hugged by its top's curvature circle keep the ellipse's exact curve.
+    #[test]
+    fn an_ellipse_hugged_by_its_top_curvature_circle_keeps_its_exact_curve() {
+        let mut sk = Sketch::new();
+        let c = sk.add_point(Vec2::new(0.0, 19.0), None).unwrap();
+        let m = sk.add_point(Vec2::new(0.0, 33.0), None).unwrap();
+        let e = sk.add_curve(CurveKind::Ellipse { c, m, r: 7.0 }, None).unwrap();
+        sk.add_circle(Vec2::new(0.0, 29.5), 3.5, None, None).unwrap();
+        sk.add_circle(Vec2::new(0.0, 19.0), 7.0, None, None).unwrap();
+        sk.add_arc(
+            Vec2::new(13.498971154260287, 29.333333333333037),
+            Vec2::new(3.4997332622520654, 29.45679012345668),
+            Vec2::new(5.5583998870771705, 23.25490196078415),
+            [None; 3],
+            None,
+        )
+        .unwrap();
+        let e = sk.curves[e].id.clone();
+        let along: Vec<Profile> = find_profiles(&sk).into_iter().filter(|p| p.outer_curves.contains(&e)).collect();
+        assert!(along.len() >= 3, "{along:?}");
+        for p in &along {
+            let segs = &p.region.outer.segs;
+            assert!(segs.iter().filter(|s| matches!(s, Seg2::Line { .. })).count() <= 2, "{segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+        }
+    }
+
+    /// A closed contour with a micro-step between MERGE_TOL (1e-6) and the node-merge tolerance
+    /// (1e-5) used to keep the collapsed step as a zero-length self-loop (`u == v`), which broke
+    /// the half-edge face walk and dropped the entire profile.
+    #[test]
+    fn micro_step_between_merge_tol_and_node_tol_keeps_enclosing_profile() {
+        for step in [2e-6, 5e-6, 8e-6] {
+            let mut sk = Sketch::new();
+            let pts = [
+                Vec2::new(0.0, 0.0),
+                Vec2::new(30.0, 0.0),
+                Vec2::new(30.0, 30.0),
+                Vec2::new(0.0, 30.0),
+                Vec2::new(0.0, 16.0),
+                Vec2::new(-step, 16.0),
+                Vec2::new(-step, 14.0),
+                Vec2::new(0.0, 14.0),
+            ];
+            let ids: Vec<usize> = pts.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+            for i in 0..ids.len() {
+                sk.add_curve(CurveKind::Line { a: ids[i], b: ids[(i + 1) % ids.len()] }, None).unwrap();
+            }
+            let profiles = find_profiles(&sk);
+            assert_eq!(profiles.len(), 1, "step {step}: expected 1 profile, got {}", profiles.len());
+            assert!((profiles[0].area - 900.0).abs() < 1e-3, "step {step}: area={}", profiles[0].area);
+            assert!(profiles[0].region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "step {step}: open joint");
+        }
+    }
+
+    /// Reference O(L^2) `assemble` matching the original nested-loop nesting logic verbatim.
+    fn assemble_naive(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
+        let mut all: Vec<((usize, usize), &IslandLoop)> =
+            islands.iter().enumerate().flat_map(|(k, island)| island.loops.iter().map(move |l| ((k, l.comp), l))).collect();
+        all.sort_by_key(|(_, l)| l.key);
+        let loops: Vec<(&Loop2, &Vec<String>, (usize, usize), &Option<Vec<String>>)> =
+            all.iter().map(|(c, l)| (&l.lp, &l.ids, *c, &l.complete)).collect();
+        let areas: Vec<f64> = all.iter().map(|(_, l)| l.area).collect();
+        let boxes: Vec<solidcraft_geom::Aabb2> = all.iter().map(|(_, l)| l.bounds).collect();
+        let inside_box = |j: usize, p: Vec2| boxes.get(j).is_some_and(|b| b.contains(p));
+        let mut parent_of: Vec<Option<usize>> = vec![None; loops.len()];
+        for (i, (li, _, ci, _)) in loops.iter().enumerate() {
+            let probe = li.segs.first().map(Seg2::mid).unwrap_or_default();
+            let ai = areas[i];
+            let mut best: Option<(f64, usize)> = None;
+            for (j, (lj, _, cj, _)) in loops.iter().enumerate() {
+                let aj = areas[j];
+                if i == j || ci == cj || aj <= ai || !inside_box(j, probe) || best.is_some_and(|(ba, _)| aj >= ba) {
+                    continue;
+                }
+                if lj.contains(probe) {
+                    best = Some((aj, j));
+                }
+            }
+            parent_of[i] = best.map(|(_, j)| j);
+        }
+        let mut kids_of: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
+        for (k, p) in parent_of.iter().enumerate() {
+            if let Some(p) = p {
+                kids_of[*p].push(k);
+            }
+        }
+        for kids in &mut kids_of {
+            if kids.len() > 1 {
+                *kids = without_repeated_loops(kids, |k| loops.get(k).map(|(l, ..)| *l), |k| areas[k]);
+            }
+        }
+        let out: Vec<Profile> = loops
+            .iter()
+            .enumerate()
+            .map(|(i, (l, ids, _, complete_outer))| {
+                let kids = &kids_of[i];
+                let holes: Vec<Loop2> = kids.iter().map(|&k| loops[k].0.ccw().reversed()).collect();
+                let hole_curves: Vec<Vec<String>> = kids.iter().map(|&k| loops[k].1.clone()).collect();
+                let region = Region2 { outer: l.ccw(), holes };
+                let area = region.area();
+                let centroid = region.centroid();
+                let mut complete_holes = kids.iter().map(|&k| loops[k].3.clone()).collect::<Option<Vec<_>>>();
+                if let Some(holes) = &mut complete_holes {
+                    holes.sort();
+                }
+                Profile {
+                    region,
+                    outer_curves: (*ids).clone(),
+                    outer_alternates: all[i].1.alternates.clone(),
+                    hole_curves,
+                    area,
+                    centroid,
+                    complete_outer: (*complete_outer).clone(),
+                    complete_holes,
+                    hull: OnceLock::new(),
+                    outline: OnceLock::new(),
+                }
+            })
+            .collect();
+        let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+        let first_curve = |p: &Profile| p.outer_curves.iter().filter_map(|id| index.get(id.as_str()).copied()).min().unwrap_or(usize::MAX);
+        let mut keyed: Vec<(usize, Profile)> = out.into_iter().map(|p| (first_curve(&p), p)).collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.area.total_cmp(&a.1.area)));
+        keyed.into_iter().map(|x| x.1).collect()
+    }
+
+    /// Reference O(N^2) `without_repeats` matching the original linear scan verbatim.
+    fn without_repeats_naive(regions: &[Region2]) -> Vec<Region2> {
+        const MAX_COMPARED: usize = 5000;
+        if regions.len() < 2 || regions.len() > MAX_COMPARED {
+            return regions.to_vec();
+        }
+        let keys: Vec<(f64, Vec2, f64)> =
+            regions.iter().map(|r| (r.outer.signed_area().abs(), r.outer.centroid(), r.outer.segs.iter().map(Seg2::length).sum::<f64>())).collect();
+        let mut kept: Vec<usize> = Vec::new();
+        for (i, r) in regions.iter().enumerate() {
+            let (area, centroid, size) = keys[i];
+            let tol = 1e-7 * (1.0 + size);
+            let repeat = kept.iter().any(|&k| {
+                let (a, c, _) = keys[k];
+                (a - area).abs() <= tol * (1.0 + size) && c.dist(centroid) <= tol && same_region(r, &regions[k], tol)
+            });
+            if !repeat {
+                kept.push(i);
+            }
+        }
+        kept.iter().map(|&i| regions[i].clone()).collect()
+    }
+
+    /// Reference O(S^2) `merge_regions` matching the original linear scans verbatim.
+    fn merge_regions_naive(regions: &[Region2]) -> Vec<Region2> {
+        let distinct = without_repeats_naive(regions);
+        let regions = distinct.as_slice();
+        let tol = ENDPOINT_JOIN_TOL;
+        let mut segs: Vec<Seg2> = Vec::new();
+        let mut loop_ids: Vec<usize> = Vec::new();
+        let mut next_loop_id = 0usize;
+        for r in regions {
+            let outer = r.outer.ccw().segs;
+            loop_ids.extend(std::iter::repeat_n(next_loop_id, outer.len()));
+            segs.extend(outer);
+            next_loop_id += 1;
+            for h in &r.holes {
+                let hole = h.ccw().reversed().segs;
+                loop_ids.extend(std::iter::repeat_n(next_loop_id, hole.len()));
+                segs.extend(hole);
+                next_loop_id += 1;
+            }
+        }
+        if segs.len() > MAX_EDGES {
+            return regions.to_vec();
+        }
+        let mut alive = vec![true; segs.len()];
+        let mut shared = false;
+        for (end_tol, distinct_loops_only) in [(MERGE_TOL, false), (tol, true)] {
+            for (i, a) in segs.iter().enumerate() {
+                if !alive[i] {
+                    continue;
+                }
+                for (j, b) in segs.iter().enumerate().skip(i + 1) {
+                    if alive[j] && (!distinct_loops_only || loop_ids[i] != loop_ids[j]) && same_seg(a, &b.reversed(), end_tol, MERGE_TOL) {
+                        alive[i] = false;
+                        alive[j] = false;
+                        shared = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !shared {
+            return regions.to_vec();
+        }
+        let ends: Vec<Vec2> = segs.iter().zip(&alive).filter(|(_, a)| !**a).flat_map(|(s, _)| [s.start(), s.end()]).collect();
+        let rejoin = |s: &Seg2, t: &Seg2| match (*s, *t) {
+            (Seg2::Line { a, b }, Seg2::Line { a: b2, b: c }) => {
+                b.dist(b2) <= MERGE_TOL
+                    && ends.iter().any(|e| e.dist(b) <= tol)
+                    && (b - a).normalized().zip((c - b).normalized()).is_some_and(|(u, v)| u.dot(v) > 1.0 - 1e-12)
+            }
+            _ => false,
+        };
+        let rest: Vec<Seg2> = segs.iter().zip(&alive).filter(|(_, a)| **a).map(|(s, _)| *s).collect();
+        let mut used = vec![false; rest.len()];
+        let mut loops: Vec<Loop2> = Vec::new();
+        for start in 0..rest.len() {
+            if used[start] {
+                continue;
+            }
+            let mut lp: Vec<Seg2> = Vec::new();
+            let mut cur = start;
+            let mut corner: Option<Vec2> = None;
+            for _ in 0..=rest.len() {
+                used[cur] = true;
+                let seg = corner.map_or(rest[cur], |p| started_at(rest[cur], p));
+                lp.push(seg);
+                let end = seg.end();
+                let close_dist = end.dist(rest[start].start());
+                let best_next_dist = (0..rest.len()).filter(|&k| !used[k]).map(|k| rest[k].start().dist(end)).fold(f64::INFINITY, f64::min);
+                if close_dist <= tol && lp.len() > 1 && (close_dist <= MERGE_TOL || close_dist <= best_next_dist + MERGE_TOL) {
+                    if let Some(first) = lp.first_mut() {
+                        *first = started_at(*first, end);
+                    }
+                    break;
+                }
+                corner = Some(end);
+                let back = (-seg.end_tangent()).angle();
+                let next_tol = (best_next_dist + MERGE_TOL).min(tol);
+                let next = (0..rest.len()).filter(|&k| !used[k] && rest[k].start().dist(end) <= next_tol).min_by(|&x, &y| {
+                    let dx = (back - rest[x].start_tangent().angle()).rem_euclid(TAU);
+                    let dy = (back - rest[y].start_tangent().angle()).rem_euclid(TAU);
+                    dx.total_cmp(&dy)
+                });
+                match next {
+                    Some(k) => cur = k,
+                    None => break,
+                }
+            }
+            let is_single_line = lp.len() == 1 && matches!(lp.first(), Some(Seg2::Line { .. }));
+            if !lp.is_empty() && !is_single_line && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
+                let lp = Loop2 { segs: rejoined(lp, &rejoin) };
+                if area_about_start(&lp.segs).abs() > 1e-9 {
+                    loops.push(lp);
+                }
+            }
+        }
+        let outers: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() > 0.0).collect();
+        let holes: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() < 0.0).collect();
+        let mut out: Vec<Region2> = outers.iter().map(|o| Region2 { outer: (*o).clone(), holes: Vec::new() }).collect();
+        for h in holes {
+            let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
+            let best = out.iter_mut().filter(|r| r.outer.contains(probe)).min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()));
+            if let Some(r) = best {
+                r.holes.push(h.clone());
+            }
+        }
+        if out.is_empty() { regions.to_vec() } else { out }
+    }
+
+    fn assert_same_regions(got: &[Region2], want: &[Region2]) {
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(want) {
+            assert_eq!(serde_json::to_string(g).unwrap(), serde_json::to_string(w).unwrap());
+        }
+    }
+
+    fn rect_loop(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop2 {
+        Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)])
+    }
+
+    /// `assemble()`'s x-interval sweep and cached loop polylines match the naive nested loop
+    /// bit-for-bit on a 40x40 (1,600-hole) nested plate, multi-level nesting, equal-area ties,
+    /// and non-finite area fallback.
+    #[test]
+    fn assemble_sweep_matches_naive_on_40x40_nested_plate_and_equal_area_ties() {
+        let mut sk = Sketch::new();
+        let mut islands: Vec<Arc<Island>> = Vec::new();
+        let mut curve_seq = 0usize;
+        let mut push_loop = |sk: &mut Sketch, lp: Loop2, kind: u8, comp: usize| -> String {
+            let id = format!("c{curve_seq}");
+            let idx = sk.add_circle(Vec2::new(curve_seq as f64, 0.0), 1.0, None, Some(&id)).unwrap();
+            let cid = sk.curves[idx].id.clone();
+            let key = (kind, idx, 0);
+            islands.push(Arc::new(Island {
+                loops: vec![IslandLoop::new(lp, vec![cid.clone()], comp, Some(vec![cid.clone()]), key)],
+                incomplete: false,
+            }));
+            curve_seq += 1;
+            cid
+        };
+
+        // Outer plate enclosing a 40x40 grid of 1,600 holes (alternating squares and circles).
+        let plate_id = push_loop(&mut sk, rect_loop(0.0, 0.0, 400.0, 400.0), 1, 0);
+        let mut inner_parent_id = String::new();
+        for row in 0..40_u32 {
+            for col in 0..40_u32 {
+                let cx = 5.0 + 10.0 * f64::from(col);
+                let cy = 5.0 + 10.0 * f64::from(row);
+                let lp = if (row + col) % 2 == 0 {
+                    // Slight size jitter on some cells, exact repeats on others.
+                    let half = 3.0 + if col % 4 == 0 { 0.0 } else { 0.01 * f64::from(col % 4) };
+                    rect_loop(cx - half, cy - half, cx + half, cy + half)
+                } else {
+                    Loop2::circle(Vec2::new(cx, cy), 3.0)
+                };
+                let id = push_loop(&mut sk, lp, if (row + col) % 2 == 0 { 1 } else { 0 }, 0);
+                if row == 10 && col == 10 {
+                    inner_parent_id = id;
+                }
+            }
+        }
+        // Multi-level nested island inside hole (10, 10) at (105, 105).
+        let nested_id = push_loop(&mut sk, rect_loop(104.0, 104.0, 106.0, 106.0), 1, 0);
+
+        // Equal-area tie case: two distinct-component 30x20 rectangles (exact area 600) both
+        // containing a 4x4 square inside their overlap. The smaller loop index must win.
+        let tie_first_id = push_loop(&mut sk, rect_loop(420.0, 0.0, 450.0, 20.0), 1, 0);
+        let tie_second_id = push_loop(&mut sk, rect_loop(430.0, 0.0, 460.0, 20.0), 1, 0);
+        let tie_child_id = push_loop(&mut sk, rect_loop(438.0, 8.0, 442.0, 12.0), 1, 0);
+
+        let got = assemble(&sk, &islands);
+        let want = assemble_naive(&sk, &islands);
+        assert_same(&got, &want);
+
+        let plate = got.iter().find(|p| p.outer_curves == [plate_id.clone()]).expect("outer plate");
+        assert_eq!(plate.hole_curves.len(), 1600);
+        let inner_parent = got.iter().find(|p| p.outer_curves == [inner_parent_id.clone()]).expect("nested hole parent");
+        assert_eq!(inner_parent.hole_curves, vec![vec![nested_id]]);
+        let tie_first = got.iter().find(|p| p.outer_curves == [tie_first_id.clone()]).expect("first tie container");
+        let tie_second = got.iter().find(|p| p.outer_curves == [tie_second_id.clone()]).expect("second tie container");
+        assert_eq!(tie_first.hole_curves, vec![vec![tie_child_id]]);
+        assert!(tie_second.hole_curves.is_empty());
+
+        // Non-finite area fallback path matches naive too.
+        let mut with_nan = islands.clone();
+        let mut nan_loop = IslandLoop::new(rect_loop(500.0, 0.0, 510.0, 10.0), vec!["nan".into()], 0, None, (1, curve_seq, 0));
+        nan_loop.area = f64::NAN;
+        with_nan.push(Arc::new(Island { loops: vec![nan_loop], incomplete: false }));
+        assert_same(&assemble(&sk, &with_nan), &assemble_naive(&sk, &with_nan));
+    }
+
+    /// `merge_regions()` and `without_repeats()` match their naive O(N^2)/O(S^2) references
+    /// bit-for-bit on a 30x30 adjacent grid union, 1,000 disjoint regions with duplicates, and
+    /// hole-nesting with tangent-split shared edges.
+    #[test]
+    fn merge_regions_and_without_repeats_match_naive_on_grid_disjoint_holes_and_duplicates() {
+        let solid = |l: Loop2| Region2 { outer: l, holes: Vec::new() };
+
+        // 1. 30x30 adjacent grid union (900 unit squares -> 1 rejoined 30x30 square).
+        let mut grid_regions: Vec<Region2> = Vec::with_capacity(900);
+        for row in 0..30_u32 {
+            for col in 0..30_u32 {
+                let (x, y) = (f64::from(col), f64::from(row));
+                grid_regions.push(solid(rect_loop(x, y, x + 1.0, y + 1.0)));
+            }
+        }
+        let merged_grid = merge_regions(&grid_regions);
+        let naive_grid = merge_regions_naive(&grid_regions);
+        assert_same_regions(&merged_grid, &naive_grid);
+        assert_eq!(merged_grid.len(), 1);
+        assert_eq!(merged_grid[0].outer.segs.len(), 4);
+        assert!((merged_grid[0].area() - 900.0).abs() < 1e-9);
+
+        // 2. 1,000 disjoint regions + 50 exact and segment-rotated duplicates.
+        let mut disjoint_with_dups: Vec<Region2> = Vec::with_capacity(1050);
+        for k in 0..1000_u32 {
+            let x = f64::from(k) * 5.0;
+            // Mix varying areas and repeated areas at different positions.
+            let size = 1.0 + 0.01 * f64::from(k % 250);
+            let r = solid(rect_loop(x, 0.0, x + size, size));
+            disjoint_with_dups.push(r.clone());
+            if k % 20 == 0 {
+                let mut rotated = r.outer.segs.clone();
+                rotated.rotate_left(2);
+                disjoint_with_dups.push(Region2 { outer: Loop2 { segs: rotated }, holes: Vec::new() });
+            }
+        }
+        let got_unique = without_repeats(&disjoint_with_dups);
+        let want_unique = without_repeats_naive(&disjoint_with_dups);
+        assert_same_regions(&got_unique, &want_unique);
+        assert_eq!(got_unique.len(), 1000);
+        assert_same_regions(&merge_regions(&disjoint_with_dups), &merge_regions_naive(&disjoint_with_dups));
+
+        // 3. Hole-nesting + duplicates + tangent-split shared edges within ENDPOINT_JOIN_TOL.
+        let mut mixed: Vec<Region2> = Vec::new();
+        // 4x4 ring of unit squares around a 2x2 central cavity [1, 3] x [1, 3].
+        for row in 0..4_u32 {
+            for col in 0..4_u32 {
+                if (1..=2).contains(&row) && (1..=2).contains(&col) {
+                    continue;
+                }
+                let (x, y) = (f64::from(col), f64::from(row));
+                mixed.push(solid(rect_loop(x, y, x + 1.0, y + 1.0)));
+            }
+        }
+        // Duplicate of a ring cell with rotated segments.
+        let mut dup_segs = rect_loop(0.0, 0.0, 1.0, 1.0).segs;
+        dup_segs.rotate_left(1);
+        mixed.push(solid(Loop2 { segs: dup_segs }));
+        // Inner island inside the 2x2 cavity, itself having a circular hole.
+        mixed.push(Region2 { outer: rect_loop(1.2, 1.2, 2.8, 2.8), holes: vec![Loop2::circle(Vec2::new(2.0, 2.0), 0.4).reversed()] });
+        // Outer enclosing frame with a hole that contains the entire 4x4 ring.
+        mixed.push(Region2 { outer: rect_loop(-2.0, -2.0, 6.0, 6.0), holes: vec![rect_loop(-1.0, -1.0, 5.0, 5.0).reversed()] });
+        // Two adjacent squares with a 5e-5 mm corner split along the shared carrier (Pass 2).
+        let eps = 5e-5;
+        mixed.push(solid(rect_loop(10.0, 0.0, 15.0, 5.0)));
+        mixed.push(solid(Loop2::polygon(&[Vec2::new(15.0, eps), Vec2::new(20.0, 0.0), Vec2::new(20.0, 5.0), Vec2::new(15.0, 5.0 - eps)])));
+
+        let got_mixed = merge_regions(&mixed);
+        let want_mixed = merge_regions_naive(&mixed);
+        assert_same_regions(&got_mixed, &want_mixed);
+        // Expected: outer frame (with 1 hole), merged 4x4 ring (with 2x2 hole), inner island (with
+        // circular hole), and merged 10x5 rectangle.
+        assert_eq!(got_mixed.len(), 4);
+        assert_eq!(got_mixed.iter().filter(|r| r.holes.len() == 1).count(), 3);
     }
 }

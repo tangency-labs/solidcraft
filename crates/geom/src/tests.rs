@@ -22,6 +22,70 @@ fn cube_mesh(s: f64) -> Mesh {
 }
 
 #[test]
+fn crease_normals_respect_angles_groups_and_duplicate_vertex_seams() {
+    let theta = 30f64.to_radians();
+    let mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let flat = mesh.crease_corner_normals(20f64.to_radians(), None).unwrap();
+    assert!((flat[0][0] - Vec3::Z).len() < 1e-12);
+    assert!((flat[1][1] - Vec3::new(0., theta.sin(), theta.cos())).len() < 1e-12);
+    let smooth = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    let expected = Vec3::new(0., (theta / 2.).sin(), (theta / 2.).cos());
+    assert!((smooth[0][0] - expected).len() < 1e-12);
+    assert_eq!(smooth[0][0], smooth[1][1]);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[1, 2])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[0, 0])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[7, 7])).unwrap(), smooth);
+    let split = Mesh {
+        positions: mesh.triangles.iter().flatten().map(|&i| mesh.positions[i as usize]).collect(),
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        ..Default::default()
+    };
+    assert_eq!(split.crease_corner_normals(1., None).unwrap(), smooth);
+    assert!(mesh.crease_corner_normals(f64::NAN, None).is_err());
+    assert!(mesh.crease_corner_normals(1., Some(&[1])).is_err());
+    let cube = cube_mesh(1.);
+    let normals = cube.crease_corner_normals(45f64.to_radians(), None).unwrap();
+    for (t, n) in cube.triangles.iter().zip(normals) {
+        let [a, b, c] = t.map(|i| cube.positions[i as usize]);
+        let face = (b - a).cross(c - a).normalized().unwrap();
+        for n in n {
+            assert!((n - face).len() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn crease_normals_skip_degenerate_faces_without_breaking_valid_fans() {
+    let theta = 30f64.to_radians();
+    let mut mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let expected = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    // Repeated indices, coincident vertices and distinct collinear vertices all
+    // touch the healthy pair's shared edge. None may break that smoothing fan.
+    mesh.positions.extend([Vec3::X, Vec3::X * 2.]);
+    mesh.triangles.extend([[0, 1, 1], [0, 1, 4], [0, 1, 5]]);
+    let groups = vec![7; mesh.triangles.len()];
+    for groups in [None, Some(groups.as_slice())] {
+        let normals = mesh.crease_corner_normals(40f64.to_radians(), groups).unwrap();
+        assert_eq!(&normals[..2], expected.as_slice());
+        assert_eq!(&normals[2..], &[[Vec3::Z; 3]; 3]);
+        assert!(normals.iter().flatten().all(|n| n.is_finite() && (n.len() - 1.).abs() < 1e-12));
+    }
+    mesh.triangles.push([0, 1, u32::MAX]);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("index is missing"));
+    mesh.triangles.pop();
+    mesh.positions[0] = Vec3::new(f64::INFINITY, 0., 0.);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("non-finite"));
+}
+
+#[test]
 fn display_edge_masks_keep_identity_and_break_only_certified_sharp_patches() {
     let mut mesh =
         Mesh { edges: vec![vec![Vec3::ZERO, Vec3::Z]; 2], edge_faces: vec![vec![0, 1], vec![1, 2]], seams: vec![true, true], ..Mesh::default() };
@@ -207,6 +271,26 @@ fn tangent_chains_follow_smooth_edges() {
     assert_eq!(seam.tangent_chain(0, 5f64.to_radians()), vec![0]);
 }
 
+#[test]
+fn a_mesh_chain_runs_through_one_and_a_half_degrees_and_stops_at_three() {
+    // Edges of an open polyline whose direction turns `turn` degrees at each vertex.
+    let polyline = |turn: f64| {
+        let mut m = Mesh { positions: vec![Vec3::ZERO, Vec3::X], ..Default::default() };
+        let (mut p, mut a) = (Vec3::ZERO, 0.0f64);
+        for _ in 0..4 {
+            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 5.0;
+            m.edges.push(vec![p, q]);
+            (p, a) = (q, a + turn.to_radians());
+        }
+        m.edge_faces = vec![vec![0]; 4];
+        m
+    };
+    let mut c = polyline(1.5).tangent_chain(0, TANGENT_CHAIN);
+    c.sort();
+    assert_eq!(c, vec![0, 1, 2, 3], "1.5° is inside the chain angle");
+    assert_eq!(polyline(3.0).tangent_chain(0, TANGENT_CHAIN), vec![0], "3° is a corner");
+}
+
 /// A helix of `pieces` edge pieces (a thread's crest), each five points long.
 fn helix(pieces: usize) -> Mesh {
     let at = |t: f64| Vec3::new(4.0 * t.cos(), 4.0 * t.sin(), 0.2 * t);
@@ -276,6 +360,38 @@ fn circular_rims_group_only_closed_cocircular_edges() {
     m.edges = vec![arc(0.0, pi, 0.7), arc(pi, pi, 0.7)];
     assert_eq!(m.circular_rim(0), vec![0]);
     assert_eq!(m.circular_rim(99), vec![99]);
+}
+
+#[test]
+fn circular_rims_keep_pieces_between_different_faces_apart() {
+    // #20049: two stacked discs of one radius, off axis. Their shared circle is three edges:
+    // edge 0 between the lower disc's top (face 0) and the upper disc's side, edges 1 and 2
+    // between that side and the upper disc's bottom (face 3), split at the side's seam
+    // (faces 1 and 2, joined across hidden seam edge 3).
+    let arc = |start: f64, sweep: f64| -> Vec<Vec3> {
+        (0..=32)
+            .map(|i| {
+                let a = start + sweep * i as f64 / 32.0;
+                Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), 0.0)
+            })
+            .collect()
+    };
+    let pi = std::f64::consts::PI;
+    let mut m = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0)],
+        edges: vec![arc(0.0, pi), arc(pi, pi / 2.0), arc(1.5 * pi, pi / 2.0)],
+        edge_faces: vec![vec![1, 3], vec![1, 3], vec![2, 3], vec![1, 2]],
+        seams: vec![false, false, false, true],
+        ..Default::default()
+    };
+    // The pieces of one rim split only at the side's seam still go together.
+    assert_eq!(m.circular_rim(0), vec![0, 1, 2]);
+    assert_eq!(m.circular_rim(2), vec![0, 1, 2]);
+    // Edge 0 separates other faces: each piece is picked on its own.
+    m.edge_faces[0] = vec![0, 1];
+    for e in 0..3 {
+        assert_eq!(m.circular_rim(e), vec![e]);
+    }
 }
 
 #[test]
@@ -362,6 +478,17 @@ fn split_at_and_closest_param() {
     let (l, r) = c.split_at(0.37);
     assert!(l.end().dist(q) < 1e-12 && r.start().dist(q) < 1e-12);
     assert!((quarter.closest_param(Vec2::new(20.0, 20.0)) - 0.5).abs() < 1e-9);
+    // A part between two parameters ends where the whole is there, for every kind; a conic's too,
+    // though its tail after the first cut is re-normalised.
+    let skew = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(-4.0, -2.0), b: Vec2::new(1.0, 2.0), w: 1.19 };
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 3.0, start: 0.5, sweep: -2.0 };
+    for seg in [quarter, skew, c, arc, Seg2::Line { a: Vec2::ZERO, b: Vec2::new(3.0, 1.0) }] {
+        for (t0, t1) in [(0.0, 0.4), (0.3, 0.7), (0.6, 1.0), (0.1, 0.1 + 1e-6)] {
+            let piece = seg.part(t0, t1);
+            assert!(piece.start().dist(seg.point_at(t0)) < 1e-12 && piece.end().dist(seg.point_at(t1)) < 1e-12, "{seg:?} {t0} {t1}");
+            assert_eq!(std::mem::discriminant(&piece), std::mem::discriminant(&seg));
+        }
+    }
 }
 
 /// An axis-aligned box as a closed mesh, with `n` x `n` quads on each side.
@@ -935,22 +1062,77 @@ fn a_box_from_points_holds_them_and_grows() {
     assert!(b.intersection(&far).is_empty());
 }
 
-/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
-/// points moved, its length scales, and an arc stays an arc turning the same way.
-#[test]
-fn a_similarity_moves_each_kind_of_segment_exactly() {
-    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+/// One segment of each kind: a line, an arc, a cubic, a conic and a quintic Bézier.
+fn every_kind_of_segment() -> [Seg2; 5] {
     let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
     for (i, q) in p.iter_mut().take(6).enumerate() {
         *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
     }
-    let segments = [
+    [
         Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
         Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
         Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
         Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
         Seg2::Bezier { n: 5, p },
-    ];
+    ]
+}
+
+/// A mirrored map moves every kind of segment exactly too: after a mirror in the x axis, a turn of
+/// 0.7, a scale of 2.5 and a shift, each segment's points are the original's mapped, its length
+/// scales and an arc's sweep reverses. And the arc numbers the sheet-metal flat and the sketch
+/// mirror wrote out by hand come out bit for bit.
+#[test]
+fn a_mirrored_map_moves_each_kind_of_segment_exactly() {
+    let (angle, scale, shift) = (0.7, 2.5, Vec2::new(-3.0, 11.0));
+    let (sin, cos) = f64::sin_cos(angle);
+    let f = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) * scale + shift;
+    for seg in every_kind_of_segment() {
+        let moved = seg.mapped(f, ArcMap { angle, mirrored: true, scale });
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - f(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * scale).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        if let (Seg2::Arc { sweep: s, .. }, Seg2::Arc { sweep: m, .. }) = (seg, moved) {
+            assert_eq!(m, -s);
+        }
+    }
+    // The sketch mirror's -start (a +0.0 start to -0.0), the mirrored flat's π - start, and the
+    // flat's rot - start mirrored or rot + start not.
+    let start_of = |s: Seg2| if let Seg2::Arc { start, .. } = s { start } else { f64::NAN };
+    let arc = |start: f64| Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start, sweep: 1.0 };
+    let same = |p: Vec2| p;
+    for (start, angle, mirrored, want) in [
+        (0.4, -0.0, true, -0.4),
+        (0.0, -0.0, true, -0.0),
+        (0.4, std::f64::consts::PI, true, std::f64::consts::PI - 0.4),
+        (0.4, 1.1, true, 1.1 - 0.4),
+        (0.4, 1.1, false, 1.1 + 0.4),
+    ] {
+        assert_eq!(start_of(arc(start).mapped(same, ArcMap::turn(angle, mirrored))).to_bits(), f64::to_bits(want), "{start} {angle} {mirrored}");
+    }
+}
+
+/// A rigid map's arc map comes from where it puts the origin and the unit axes: the x axis's turn,
+/// whether the axes come out reversed, and a scale of exactly 1, whatever the shift.
+#[test]
+fn a_rigid_maps_arc_map_is_its_turn_and_its_mirror() {
+    let (sin, cos) = f64::sin_cos(0.7);
+    let shift = Vec2::new(-3.0, 11.0);
+    let mirrored = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) + shift;
+    let turned = |p: Vec2| Vec2::new(cos * p.x - sin * p.y, sin * p.x + cos * p.y) + shift;
+    for (arc, mirror) in [(ArcMap::rigid(mirrored), true), (ArcMap::rigid(turned), false)] {
+        assert!((arc.angle - 0.7).abs() < 1e-12 && arc.mirrored == mirror && arc.scale == 1.0, "{arc:?}");
+    }
+    assert_eq!(ArcMap::rigid(|p| p), ArcMap::turn(0.0, false));
+}
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let segments = every_kind_of_segment();
     for seg in segments {
         let moved = seg.similar(&m);
         for i in 0..=8 {
@@ -978,4 +1160,13 @@ fn a_similarity_moves_each_kind_of_segment_exactly() {
     ] {
         assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
     }
+}
+
+/// The display mesh and its levels of detail are solidcore-tess's own types, not copies: a mesh
+/// the kernel's tessellation makes is the one the viewport draws, with nothing converted.
+#[test]
+fn the_display_mesh_and_its_levels_are_solidcore_tess_types() {
+    let mesh: solidcore_tess::Mesh = crate::Mesh { positions: vec![Vec3::X], ..Default::default() };
+    let level: solidcore_tess::simplify::Level = crate::simplify::Level { error: 0.5, ..Default::default() };
+    assert_eq!((mesh.positions, level.error), (vec![Vec3::X], 0.5));
 }

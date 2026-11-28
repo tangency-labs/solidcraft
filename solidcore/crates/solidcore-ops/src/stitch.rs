@@ -1,5 +1,7 @@
 //! Sewing and merging: a body's faces sewn along the vertices and edges that coincide within a
-//! tolerance, then oriented; and faces merged across the edges between them.
+//! tolerance, then oriented; several bodies gathered into one and sewn ([`gather`], [`sew`]);
+//! the edges one face uses ([`open_edges`]); and faces merged across the edges between them
+//! ([`merge_faces`], [`merge_faces_with`]).
 //!
 //! A stitch is `SmBrep::StitchFaces` at the caller's tolerance, once, then
 //! `SmBrep::OrientTrimmedSurfaces`: outward where the faces close into a solid, else only made to
@@ -22,29 +24,40 @@
 //! partitions the gluing made and are removed. The other reading, an enclosed cavity, would
 //! leave the sheet void on both sides, a sheet face and not a solid. A space closed only
 //! through material (a sheet inside a cavity) comes out void by the same parity: no new
-//! material, so the manifold stitch's result is kept, reported not closed.
+//! material, so the manifold stitch's result is kept, reported not closed. A body that comes
+//! in already closed but with no material region (a union of sheets glues them into a closed
+//! shell and leaves every region void) gets the same nesting: the space it encloses is material.
 //!
-//! Each takes its body by value and gives the result: an application that keeps its input copies
-//! it first ([`Body::copy`]). While a failure callback is installed, the body is written before
-//! the call, so a failure reports it as it came in.
+//! [`stitch`], [`merge_faces`] and [`merge_faces_with`] take their body by value and give the result: an application
+//! that keeps its input copies it first ([`Body::copy`]); [`gather`] and [`sew`] copy their
+//! bodies themselves and leave them unchanged. While a failure callback is installed, the body
+//! is written before the call, so a failure reports it as it came in.
 
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::region_material;
+use solidcore::query::brep::BrepQuery;
 use solidcore::topology::brep::p1 as bl;
+use solidcore::topology::brep::p1::SetRegionVoidType;
 use solidcore::topology::brep::p2::{is_manifold_solid, ArenaNotifyState};
 use solidcore::topology::brep::p3::{
-    brep_copy, delete_face, orient_trimmed_surfaces, with_kernel_callbacks, DeleteFaceOptions,
+    brep_copy, delete_face, merge_brep, notify_serial, orient_trimmed_surfaces, topology_ref,
+    with_kernel_callbacks, DeleteFaceOptions,
 };
 use solidcore::topology::brep::p4::stitch_faces;
-use solidcore::topology::brep::p5::remove_topological_edges_and_vertices;
+use solidcore::topology::brep::p5::{
+    find_and_set_infinite_region, remove_topological_edges_and_vertices,
+};
+use solidcore::topology::brep::validation::{validate_and_update_tolerances, CheckLevel};
+use solidcore::topology::edgeuse::p1::edge_is_lamina;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{edge, Brep, EdgeId, FaceId, FaceuseId, RegionId};
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_under, Body, Contract, Expect, Proof};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::run_taking;
+use crate::pick::{self, Miss};
+use crate::session::{run_on, run_taking};
 use crate::{Error, Result};
 
 type Out<T> = std::result::Result<T, Error>;
@@ -62,7 +75,7 @@ type Out<T> = std::result::Result<T, Error>;
 // The body is consumed: its B-rep is taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
 pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
-    if !tolerance.is_finite() || tolerance.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+    if !positive(tolerance) {
         return Err(Error::Argument);
     }
     if body.is_poisoned() {
@@ -81,6 +94,8 @@ pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
                 Ok(b) => b,
                 Err(e) => return Ok(Err(e)),
             };
+        } else if let Err(e) = fill_closed_shell(k, &mut b) {
+            return Ok(Err(status(e)));
         }
         let oriented = with_kernel_callbacks(k, &mut b, |k, b, env| {
             let mut marks = Marks::default();
@@ -93,6 +108,119 @@ pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
         let closed = lamina == 0 && is_manifold_solid(&b)?;
         Ok(Ok((Body::new(b), closed)))
     })?
+}
+
+/// Copies of `bodies` put in one body, unsewn: the first copied, the others merged into it
+/// ([`merge_brep`]). The bodies are unchanged; a body given twice is taken once.
+///
+/// # Errors
+/// [`Error::Argument`] for no body; [`Error::Empty`]; the kernel's.
+pub fn gather(bodies: &[&Body]) -> Result<Body> {
+    let inputs: Vec<(&'static str, &Body)> = bodies.iter().map(|b| ("brep", *b)).collect();
+    let made = run_on("stitch::gather", &inputs, |k| {
+        let Some((first, rest)) = bodies.split_first() else {
+            return Ok(Err(Error::Argument));
+        };
+        let mut gathered = {
+            let g = first.lock();
+            brep_copy(k, &g)?
+        };
+        let mut taken: Vec<&Body> = vec![*first];
+        for body in rest {
+            if taken.iter().any(|t| std::ptr::eq(*t, *body)) {
+                continue;
+            }
+            taken.push(*body);
+            let mut copy = {
+                let g = body.lock();
+                brep_copy(k, &g)?
+            };
+            let serial = notify_serial(&mut k.context, &mut copy)?;
+            let source_key = move |e| topology_ref(serial, e);
+            with_kernel_callbacks(k, &mut gathered, |k, g, env| {
+                merge_brep(k, env, g, &copy, &source_key, None, None, true)
+            })?;
+        }
+        gathered.refresh_cached_topology();
+        finish(k, gathered, Expect::FACES)
+    })??;
+    Ok(Body::new(made))
+}
+
+/// Several bodies sewn into one ([`sew`]).
+#[derive(Debug)]
+pub struct Sewn {
+    /// The sewn body.
+    pub body: Body,
+    /// Whether it closed into a solid ([`stitch`]).
+    pub closed: bool,
+    /// Its edges still used by one face, as record edge indices of `body` ([`open_edges`]).
+    pub open_edges: Vec<usize>,
+}
+
+/// Copies of `bodies` gathered into one body ([`gather`]) and sewn at `tolerance` ([`stitch`]),
+/// with the edges left open. The bodies are unchanged.
+///
+/// # Errors
+/// Those of [`gather`], [`stitch`] and [`open_edges`].
+pub fn sew(bodies: &[&Body], tolerance: f64) -> Result<Sewn> {
+    if !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    let (body, closed) = stitch(gather(bodies)?, tolerance)?;
+    let open_edges = open_edges(&body)?;
+    Ok(Sewn {
+        body,
+        closed,
+        open_edges,
+    })
+}
+
+/// The record edge indices (in [`Body::to_record`]'s order) of `body`'s edges used by one face
+/// once (`SmEdge::IsLamina`), ascending: the edges a sewing leaves open. An edge a face uses
+/// twice (a seam) and an edge of two or more faces are not open. The order and the edges are
+/// read in one call; the body is edited as [`Body::to_record`] edits it (each use given its UV
+/// trim), its shape unchanged.
+///
+/// # Errors
+/// Those of [`Body::to_record`]; the kernel's.
+pub fn open_edges(body: &Body) -> Result<Vec<usize>> {
+    body.with_record("stitch::open_edges", |b, _, order| {
+        let mut open = Vec::new();
+        for (i, &e) in order.edges.iter().enumerate() {
+            if edge_is_lamina(b, e)? {
+                open.push(i);
+            }
+        }
+        Ok(open)
+    })
+}
+
+/// A body with no lamina edge that is a manifold solid but has no material region (a closed
+/// shell that came in already glued, such as a union of sheets) gets its void flags set by
+/// nesting from the infinite region, as a stitch that closes the shell itself would: the space
+/// the shell encloses becomes material. A body with a material region is left as it is.
+fn fill_closed_shell(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
+    b.refresh_cached_topology();
+    if !is_manifold_solid(b)? {
+        return Ok(());
+    }
+    for r in bl::regions(b, None)? {
+        if region_material(b, r)? {
+            return Ok(());
+        }
+    }
+    let old = b.editing_enabled();
+    b.set_editing_enabled(false);
+    let query = BrepQuery::of_brep(b);
+    let r = find_and_set_infinite_region(k, b, &query, None, SetRegionVoidType::NestedSolid, None);
+    b.set_editing_enabled(old);
+    r
+}
+
+/// Whether `tolerance` is one a stitch takes: finite and positive.
+fn positive(tolerance: f64) -> bool {
+    tolerance.is_finite() && tolerance.partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater)
 }
 
 /// Whether region `r` (a side's, `None` for a side with no region: void) is material
@@ -250,18 +378,120 @@ fn close_onto_shared_edges(
 
 /// `body`'s faces merged across their edges (`SmBrep::RemoveTopologicalEdgesAndVertices`),
 /// keeping record edges `keep` (`order`; none: the kernel decides every edge); then the result
-/// contract: faces left, and a solid in gives a solid.
+/// contract: faces left, and a solid in gives a solid proved valid and facing out.
+///
+/// This is [`merge_faces_with`] keeping [`KeptEdges::Record`] under [`Contract::Proved`], its
+/// tolerances as the merge leaves them. Unlike most families' plain calls, the plain merge
+/// proves: it is the one SolidCraft's Offset Faces clean-up has always run.
 ///
 /// # Errors
-/// [`Error::Argument`] for an index past the edges; [`Error::Empty`], [`Error::NotSolid`]; the
-/// kernel's status.
+/// [`Error::Argument`] for an index past the edges; [`Error::Empty`], [`Error::NotSolidBecause`];
+/// the kernel's status.
+pub fn merge_faces(body: Body, order: &Order, keep: &[usize]) -> Result<Body> {
+    let options = MergeOptions {
+        contract: Contract::Proved,
+        grow_tolerances: false,
+    };
+    match merge_faces_with(body, KeptEdges::Record { order, edges: keep }, options)? {
+        Ok(b) => Ok(b),
+        // a record index never misses: only a pick by points does
+        Err(_) => Err(Error::Argument),
+    }
+}
+
+/// Which edges [`merge_faces_with`] keeps. Every other edge between two faces the kernel may
+/// merge across; an edge named twice is kept once, and naming none leaves every edge to the
+/// kernel.
+#[derive(Clone, Copy, Debug)]
+pub enum KeptEdges<'a> {
+    /// The edges at these indices in the body's record, through `order` (the conversion's).
+    Record {
+        /// The record's entities as the kernel's.
+        order: &'a Order,
+        /// Indices into the record's edges.
+        edges: &'a [usize],
+    },
+    /// The edges at these indices in the body's native edge list, the order [`pick::edges`]
+    /// answers in.
+    Native(&'a [usize]),
+    /// Per point, the edge nearest it within `tolerance`, by [`crate::pick`]'s rule, picked on
+    /// the body as it comes in. The first point that picks no edge, or is ambiguous, ends the
+    /// call with its [`Miss`] and nothing merged.
+    Nearest {
+        /// The points, each near the edge it keeps.
+        points: &'a [[f64; 3]],
+        /// How far a point may be from its edge: finite, positive and below
+        /// [`pick::MAX_TOLERANCE`].
+        tolerance: f64,
+    },
+}
+
+/// How [`merge_faces_with`] tests its body and what it requires of its result.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct MergeOptions {
+    /// What a solid body must give ([`Contract`]). [`Contract::Closed`] (the default): a
+    /// closed manifold body gives a closed manifold body, by the topology test alone
+    /// ([`Error::NotSolid`] if not). [`Contract::Proved`]: a body proved valid and facing out
+    /// gives one ([`Error::NotSolidBecause`] naming the test the result fails if not).
+    pub contract: Contract,
+    /// Grow the result's tolerances to cover marginal edge/vertex, vertex/face and edge/face
+    /// gaps before the contract tests it (`SmBrep::ValidateAndUpdateTolerances` at check level
+    /// 2, which never shrinks one). A body that already passes is unchanged. A failure of the
+    /// update is no refusal: the result goes on to the contract's test as the update left it.
+    pub grow_tolerances: bool,
+}
+
+/// `body`'s faces merged across their edges (`SmBrep::RemoveTopologicalEdgesAndVertices`),
+/// keeping the edges `keep` names; the result's tolerances grown if `options` asks; then the
+/// result contract `options` chooses: faces left ([`Error::Empty`] if not), and a solid in
+/// gives a solid. A pick by points that chooses no edge comes back as its [`Miss`]
+/// (`Ok(Err(..))`).
+///
+/// # Errors
+/// [`Error::Argument`] for an index past the edges, or for a point not finite or a pick
+/// tolerance out of range ([`KeptEdges::Nearest`]); [`Error::Empty`]; [`Error::NotSolid`] or
+/// [`Error::NotSolidBecause`] by the contract; [`Error::Internal`] for a body a panic left
+/// unfinished; the kernel's status.
+///
+/// # Examples
+///
+/// Two boxes side by side, united, have their shared wall's faces merged back into one box:
+///
+/// ```
+/// use solidcore_ops::boolean::{boolean, BooleanOp};
+/// use solidcore_ops::stitch::{merge_faces_with, KeptEdges, MergeOptions};
+/// use solidcore_ops::make_box;
+///
+/// let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+/// let b = make_box([1.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+/// let joined = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+/// let merged = merge_faces_with(joined, KeptEdges::Native(&[]), MergeOptions::default())
+///     .unwrap()
+///     .unwrap();
+/// assert_eq!(merged.counts().unwrap(), [6, 12, 8]);
+/// ```
 // The body is consumed: its B-rep is taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
-pub fn merge_faces(body: Body, order: &Order, keep: &[usize]) -> Result<Body> {
-    let kept = keep
-        .iter()
-        .map(|&i| order::edge(order, i))
-        .collect::<Result<Vec<_>>>()?;
+pub fn merge_faces_with(
+    body: Body,
+    keep: KeptEdges<'_>,
+    options: MergeOptions,
+) -> Result<std::result::Result<Body, Miss>> {
+    let recorded = match keep {
+        KeptEdges::Record { order, edges } => Some(
+            edges
+                .iter()
+                .map(|&i| order::edge(order, i))
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        KeptEdges::Native(_) | KeptEdges::Nearest { .. } => None,
+    };
+    let near = match keep {
+        KeptEdges::Nearest { points, tolerance } => {
+            Some((pick::checked(points, tolerance)?, tolerance))
+        }
+        KeptEdges::Record { .. } | KeptEdges::Native(_) => None,
+    };
     if body.is_poisoned() {
         return Err(Error::Internal(
             "SmBrep::RemoveTopologicalEdgesAndVertices: the body was left unfinished by an earlier panic"
@@ -273,15 +503,65 @@ pub fn merge_faces(body: Body, order: &Order, keep: &[usize]) -> Result<Body> {
         &[("body", &body)],
         |k| {
             let mut b = std::mem::replace(&mut *body.lock(), Brep::new());
-            let expect = Expect::of(k, &mut b)?;
+            let kept = match (keep, recorded, near) {
+                (_, Some(edges), _) => edges,
+                (KeptEdges::Native(indices), _, _) => match native_edges(&b, indices) {
+                    Some(kept) => kept,
+                    None => return Ok(Err(Error::Argument)),
+                },
+                (_, _, Some((points, tolerance))) => {
+                    match pick::edges_of(k, &b, &points, tolerance)? {
+                        // a picked index is always in the list
+                        Ok(each) => native_edges(&b, &each).unwrap_or_default(),
+                        Err(m) => return Ok(Ok(Err(m))),
+                    }
+                }
+                _ => Vec::new(),
+            };
+            let expect = match options.contract {
+                Contract::Proved => Expect::of(k, &mut b)?,
+                Contract::Closed => Expect::under(k, &mut b, Proof::default(), Contract::Closed)?,
+            };
             let keep_edges = (!kept.is_empty()).then_some(kept.as_slice());
             if let Err(e) = remove_topological_edges_and_vertices(k, &mut b, keep_edges, None) {
                 return Ok(Err(status(e)));
             }
             b.refresh_cached_topology();
-            Ok(finish(k, b, expect)?.map(Body::new))
+            if options.grow_tolerances {
+                // tolerances only grow; a failed update leaves the test below to judge
+                let _ = validate_and_update_tolerances(
+                    k,
+                    &mut b,
+                    false,
+                    None,
+                    CheckLevel::Level2 as u8,
+                );
+            }
+            let made = match options.contract {
+                Contract::Proved => finish(k, b, expect)?,
+                Contract::Closed => finish_under(k, b, expect, Contract::Closed)?.map(|(b, _)| b),
+            };
+            Ok(made.map(|b| Ok(Body::new(b))))
         },
     )?
+}
+
+/// The edges at `indices` in `b`'s native edge list, each once, in the order first named;
+/// `None` for an index past the list.
+fn native_edges(b: &Brep, indices: &[usize]) -> Option<Vec<EdgeId>> {
+    let all = b.edge_list();
+    let mut seen = vec![false; all.len()];
+    let mut kept = Vec::with_capacity(indices.len());
+    for &i in indices {
+        let e = *all.get(i)?;
+        if let Some(flag) = seen.get_mut(i) {
+            if !*flag {
+                *flag = true;
+                kept.push(e);
+            }
+        }
+    }
+    Some(kept)
 }
 
 #[cfg(test)]
@@ -556,6 +836,205 @@ mod tests {
         assert_eq!(
             merge_faces(u, &order, &[]).unwrap().counts().unwrap(),
             [6, 12, 8]
+        );
+    }
+
+    /// The same kept edges named three ways give the same body: by record index, by native
+    /// index, and by a point at each edge's midpoint. A point near no edge comes back as its
+    /// miss, an index past the edges as [`Error::Argument`], and the closed contract with
+    /// tolerances grown keeps the same faces.
+    #[test]
+    fn merge_faces_with_keeps_the_same_edges_by_index_or_point() {
+        all_fixes();
+        let cut = || {
+            let body = make_box([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]).unwrap();
+            let tool = make_box([1.0, -1.0, -1.0], [4.0, 4.0, 4.0]).unwrap();
+            crate::boolean::imprint(body, tool).unwrap().0
+        };
+        let u = cut();
+        let order = kernel_order(&u);
+        let (record, native, mids): (Vec<usize>, Vec<usize>, Vec<[f64; 3]>) = {
+            let k = u.lock();
+            let list = k.edge_list().to_vec();
+            let mut record = Vec::new();
+            let mut native = Vec::new();
+            let mut mids = Vec::new();
+            for (i, &e) in order.edges.iter().enumerate() {
+                let x = edge::vertices(&k, e, None).unwrap();
+                let ends: Vec<_> = x
+                    .iter()
+                    .flatten()
+                    .map(|&v| k.vertex(v).unwrap().point)
+                    .collect();
+                if ends.len() == 2 && ends.iter().all(|p| (p.x - 1.0).abs() < 1e-12) {
+                    record.push(i);
+                    native.push(list.iter().position(|&n| n == e).unwrap());
+                    mids.push([
+                        1.0,
+                        (ends[0].y + ends[1].y) / 2.0,
+                        (ends[0].z + ends[1].z) / 2.0,
+                    ]);
+                }
+            }
+            (record, native, mids)
+        };
+        assert_eq!(record.len(), 4, "the cut's four edges");
+        let proved = MergeOptions {
+            contract: Contract::Proved,
+            grow_tolerances: false,
+        };
+        let by_record = merge_faces_with(
+            cut(),
+            KeptEdges::Record {
+                order: &order,
+                edges: &record,
+            },
+            proved,
+        )
+        .unwrap()
+        .unwrap();
+        let by_native = merge_faces_with(cut(), KeptEdges::Native(&native), proved)
+            .unwrap()
+            .unwrap();
+        let near = KeptEdges::Nearest {
+            points: &mids,
+            tolerance: 1e-3,
+        };
+        let by_point = merge_faces_with(cut(), near, proved).unwrap().unwrap();
+        let bytes = |b: &Body| b.to_smb(false).unwrap();
+        assert_eq!(by_record.counts().unwrap(), [10, 20, 12]);
+        assert_eq!(bytes(&by_native), bytes(&by_record));
+        assert_eq!(bytes(&by_point), bytes(&by_record));
+        let far = KeptEdges::Nearest {
+            points: &[[50.0, 50.0, 50.0]],
+            tolerance: 1e-3,
+        };
+        assert_eq!(
+            merge_faces_with(cut(), far, proved).unwrap().unwrap_err(),
+            Miss::None(0)
+        );
+        assert_eq!(
+            merge_faces_with(cut(), KeptEdges::Native(&[usize::MAX]), proved).unwrap_err(),
+            Error::Argument
+        );
+        let closed = MergeOptions {
+            contract: Contract::Closed,
+            grow_tolerances: true,
+        };
+        let grown = merge_faces_with(cut(), KeptEdges::Native(&native), closed)
+            .unwrap()
+            .unwrap();
+        assert_eq!(grown.counts().unwrap(), [10, 20, 12]);
+    }
+
+    /// #16866, #15715, #15661: a rod of radius 6 threaded M12 x 1.75 (cut by the screw sweep of
+    /// a 60-degree groove: root flat P/4 wide at radius 6 - 5H/8, H = sqrt(3)/2 P, flanks out
+    /// past the crest), then merged as SolidCraft cleans a body up before Offset Faces. The
+    /// sweep's root wall is a cylinder in half-turn faces, each on its own cylinder turned half
+    /// a turn from the last: merged, a face takes in the next one across its surface's seam.
+    /// The merged face keeps a seam, as a face on a periodic surface has it (WR-599): without
+    /// it, its loop's UV trims jumped by the period and the check found the loop's orientation
+    /// wrong. The merge leaves a valid solid of the same volume.
+    #[test]
+    fn a_thread_s_root_merged_across_its_seam_stays_valid() {
+        use crate::CheckLevel;
+        all_fixes();
+        let pitch = 1.75;
+        // H = sqrt(3)/2 P = 1.5155444566227676; the root at 6 - 5H/8, the profile out at
+        // 6 + P/20; a flank's rise across them (out - root) tan 30 degrees.
+        let (root, out) = (5.0527847146107705, 6.0875);
+        let flank = 0.5973931485540923;
+        let (low, high) = (-pitch - pitch / 8.0, -pitch + pitch / 8.0);
+        let corners = [
+            [0.0, root, low],
+            [0.0, out, low - flank],
+            [0.0, out, high + flank],
+            [0.0, root, high],
+        ];
+        let groove: Vec<crate::sweep::Curve> = (0..4)
+            .map(|i| crate::sweep::Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        // two pitches of rod (z 0 to 3.5); the groove from z -2.6 to 5.2, past both ends
+        let tool = crate::sweep::screw_sweep(
+            &groove,
+            [0.0, 0.0, -pitch],
+            [0.0, 0.0, 1.0],
+            pitch,
+            3.5,
+            None,
+            pitch / 1e4,
+        )
+        .unwrap();
+        let rod = crate::make_cylinder([0.0; 3], 6.0, 2.0 * pitch).unwrap();
+        let cut = boolean(rod, tool, BooleanOp::Subtract).unwrap().unwrap();
+        assert!(cut.check(CheckLevel::All).unwrap().is_valid());
+        // each volume within its relative accuracy: the two agree within twice it
+        let accuracy = 1e-8;
+        let volume = cut.volume(accuracy).unwrap();
+        let order = kernel_order(&cut);
+        let merged = merge_faces(cut, &order, &[]).unwrap();
+        let report = merged.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{report}");
+        // Faces: the two caps; the crest (the rod's own cylinder) in its 3 turn pieces, apart
+        // at the rod's seam; the flanks in the 10 pieces the sweep made, cut to the rod; the
+        // root's 6 half-turn faces merged in pairs, each pair kept apart from the next at the
+        // kept surface's seam: 3. 2 + 3 + 10 + 3 = 18. Edges, by the faces they join: flank
+        // and flank 8, flank and crest 14, flank and root 14, flank and cap 4, crest and cap
+        // 2, root and cap 4, and the seams, 2 on the crest and 2 completed on the root: 50.
+        // One shell of faces with one loop each: V = 2 - F + E = 34.
+        assert_eq!(merged.counts().unwrap(), [18, 50, 34]);
+        // The completed seams: the axial edges between two root faces (their ends on the
+        // root's radius within the edge's tolerance) lie on both faces' surfaces within that
+        // tolerance, every sample's distance with its proved rounding bound.
+        let order = kernel_order(&merged);
+        let seams: Vec<(usize, Vec<usize>, f64)> = {
+            let g = merged.lock();
+            order
+                .edges
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &e)| {
+                    let tol = g.edge(e).unwrap().tolerance;
+                    let ends: Vec<_> = edge::vertices(&g, e, None)
+                        .unwrap()
+                        .into_iter()
+                        .flatten()
+                        .map(|v| g.vertex(v).unwrap().point)
+                        .collect();
+                    let [a, b] = ends.as_slice() else { return None };
+                    let (dx, dy) = (a.x - b.x, a.y - b.y);
+                    let axial = dx * dx + dy * dy <= tol * tol;
+                    // |r - root| <= tol, squared
+                    let on_root = [a, b].iter().all(|p| {
+                        let r2 = p.x * p.x + p.y * p.y;
+                        (root - tol) * (root - tol) <= r2 && r2 <= (root + tol) * (root + tol)
+                    });
+                    let faces: Vec<usize> = edge::faces(&g, e, None)
+                        .unwrap()
+                        .iter()
+                        .map(|f| order.faces.iter().position(|x| x == f).unwrap())
+                        .collect();
+                    (axial && on_root).then_some((i, faces, tol))
+                })
+                .collect()
+        };
+        assert_eq!(seams.len(), 2, "the root's two completed seams");
+        for (e, faces, tol) in seams {
+            assert_eq!(faces.len(), 2);
+            for f in faces {
+                for s in merged.edge_face_gap_samples(&order, e, f).unwrap() {
+                    let gap = s.distance.value + s.distance.bound;
+                    assert!(gap <= tol, "seam {e} is {gap} off face {f}");
+                }
+            }
+        }
+        let merged_volume = merged.volume(accuracy).unwrap();
+        assert!(
+            (merged_volume - volume).abs() <= 2.0 * accuracy * volume,
+            "{merged_volume} != {volume}"
         );
     }
 }

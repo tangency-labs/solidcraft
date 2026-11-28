@@ -6,13 +6,13 @@
 //! The vase is a full turn of the profile (0, 0) - (15, 5) - (15, 30) - (0, 30) in the
 //! XY plane about the y axis: a conical bottom whose generator starts on the axis, a
 //! cylindrical wall and a flat top. The bottom's inward offset generator crosses the
-//! axis, so (with WR-343's `revolution_offset_axis_both_sides`) the offset surface is
-//! cut there and its domain no longer holds the face's. `BuildOffsetOfFaceuse` then
+//! axis, so the offset surface is cut there (WR-343) and its domain no longer holds the
+//! face's. `BuildOffsetOfFaceuse` then
 //! clips the face to the offset domain with a 2D boolean of planar faces made from the
 //! face's UV loops. Taken from the inset's opposite face use, upstream's loops run
 //! clockwise, the planar face is inside out, the intersection is empty and the bottom
-//! gets no offset: the shell comes back open, of no volume. With
-//! `offset_clip_right_side_out` the bottom is offset and the shell is closed, its
+//! gets no offset: the offset is open. Here the loops are taken counterclockwise
+//! (WR-342), the bottom is offset and the shell is closed, its
 //! volume the vase's less the cavity bounded by the exact offsets (a cylinder r 13 and
 //! the bottom cone moved 2 along its normal):
 //! `pi R^2 (h/3 + H - h) - pi (R - 2)^2 ((H - y1) + (y1 - y0) / 3)`, with
@@ -64,11 +64,9 @@ fn vase(k: &mut Kernel, up: bool) -> Brep {
     create_rotational_sweep(k, &curves, origin, axis, 360.0, true).unwrap()
 }
 
-/// The vase shelled 2 inward, open at its top, with WR-342's `fixed` (WR-343 on).
-fn shelled(up: bool, fixed: bool) -> (Kernel, Brep) {
+/// The vase shelled 2 inward, open at its top.
+fn shelled(up: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.revolution_offset_axis_both_sides = true;
-    k.fixes.offset_clip_right_side_out = fixed;
     let part = vase(&mut k, up);
     let open = planar_faces_at(&k, &part, 1, H);
     assert_eq!(open.len(), 1, "the top");
@@ -88,7 +86,7 @@ fn closed_form() -> f64 {
 #[test]
 fn wr_342_vase_shells_closed_with_the_fix() {
     for up in [true, false] {
-        let (k, mut b) = shelled(up, true);
+        let (k, mut b) = shelled(up);
         assert!(brep_is_manifold_solid(&b).unwrap(), "up {up}");
         let v = volume(&k, &mut b).unwrap();
         let exact = closed_form();
@@ -96,15 +94,5 @@ fn wr_342_vase_shells_closed_with_the_fix() {
             ((v - exact) / exact).abs() < 1e-5,
             "up {up}: {v} against {exact}"
         );
-    }
-}
-
-/// Upstream: the bottom gets no offset, and the shell is open, of no volume.
-#[test]
-fn wr_342_default_leaves_the_bottom_without_an_offset() {
-    for up in [true, false] {
-        let (k, mut b) = shelled(up, false);
-        assert!(!brep_is_manifold_solid(&b).unwrap(), "up {up}");
-        assert!(volume(&k, &mut b).unwrap().abs() < 1e-9, "up {up}");
     }
 }

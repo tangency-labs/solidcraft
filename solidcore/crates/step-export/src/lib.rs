@@ -1,9 +1,12 @@
-//! ISO 10303-21 writer for the neutral [`step_import::Model`].
+//! ISO 10303-21 writer for the neutral [`solidcore_record::step::Model`], and the mapper ([`map`])
+//! that reads a Part 21 exchange ([`solidcore_record::step::p21`]) into it.
 //!
-//! The writer emits one `MANIFOLD_SOLID_BREP` per manifold body (one closed shell,
-//! planar faces, line edges) and one `FACETED_BREP` per faceted body, together with a
-//! complete AP203 product structure and unit context. Unsupported geometry is rejected
-//! with an [`ExportError`] instead of being silently approximated.
+//! The writer emits one `MANIFOLD_SOLID_BREP` per manifold body (one closed shell), or
+//! a `BREP_WITH_VOIDS` for one with voids (its outer closed shell, and each void's
+//! closed shell under an `ORIENTED_CLOSED_SHELL` of orientation `.F.`), and one
+//! `FACETED_BREP` per faceted body, together with a complete AP203 product structure and
+//! unit context. Unsupported geometry is rejected with an [`ExportError`] instead of
+//! being silently approximated.
 //!
 //! # Shared entities
 //!
@@ -36,10 +39,26 @@
 //! [`write_with_metadata`] (or [`write_faceted_with_metadata`]), which emits those
 //! entities directly; no post-write text rewriting is required.
 
+/// A kernel body as the neutral model this writer writes (moved from step-brep).
+pub mod brep_to_model;
+pub mod geom;
+pub mod map;
+pub mod validate;
+
+pub use map::import;
+pub use map::Limits;
+
+#[cfg(test)]
+mod import_tests;
+pub use brep_to_model::brep_to_model;
+pub use brep_to_model::ExportModelError;
+
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use step_import::model::{Body, BodyKind, Bound, Curve, Frame, Model, PcurveKey, Surface};
+use solidcore_record::step::model::{
+    Body, BodyKind, Bound, Curve, Frame, Model, PcurveKey, Surface,
+};
 
 /// Default distance, in millimetres, within which faceted vertices are welded.
 pub const WELD_TOLERANCE_MM: f64 = 1e-6;
@@ -442,7 +461,7 @@ fn write_surface(
 fn write_bspline_surface(
     entities: &mut Entities,
     points: &mut PointIds,
-    surface: &step_import::model::BSplineSurface,
+    surface: &solidcore_record::step::model::BSplineSurface,
 ) -> Result<u64, ExportError> {
     let mut ids = Vec::with_capacity(surface.points.len());
     for row in &surface.points {
@@ -556,10 +575,40 @@ fn write_curve(
     }
 }
 
+fn write_edge_curve(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    curve: &Curve,
+) -> Result<u64, ExportError> {
+    match curve {
+        Curve::Ellipse {
+            frame,
+            semi1,
+            semi2,
+        } if semi1 < semi2 => {
+            // Turn a quarter turn about `frame.z` so `semi_axis_1 >= semi_axis_2`
+            // while keeping the 3D curve and its direction (`EDGE_CURVE.same_sense`).
+            let rotated = Frame {
+                origin: frame.origin,
+                x: frame.y,
+                y: [-frame.x[0], -frame.x[1], -frame.x[2]],
+                z: frame.z,
+            };
+            let placement = frame_placement(entities, points, &rotated)?;
+            Ok(entities.add(format!(
+                "ELLIPSE('',#{placement},{},{})",
+                number(*semi2)?,
+                number(*semi1)?
+            )))
+        }
+        _ => write_curve(entities, points, curve),
+    }
+}
+
 fn write_bspline_curve(
     entities: &mut Entities,
     points: &mut PointIds,
-    curve: &step_import::model::BSplineCurve,
+    curve: &solidcore_record::step::model::BSplineCurve,
 ) -> Result<u64, ExportError> {
     let ids = curve
         .points
@@ -637,7 +686,7 @@ fn write_pcurve_edge(
             body.step_id
         ))
     })?;
-    let curve_3d = write_curve(entities, points, &edge.curve)?;
+    let curve_3d = write_edge_curve(entities, points, &edge.curve)?;
     let mut pcurve_ids = Vec::with_capacity(pcurves.len());
     for (surface_id, uv) in pcurves {
         let mut uv_ids = Vec::with_capacity(uv.len());
@@ -698,23 +747,38 @@ fn write_pcurve_edge(
 
 type EdgePcurves = BTreeMap<usize, Vec<(u64, Vec<[f64; 2]>)>>;
 
-fn shell(
+/// A solid body's shells: the outer `CLOSED_SHELL` first, then each void's
+/// `ORIENTED_CLOSED_SHELL` (orientation `.F.`). A `MANIFOLD_SOLID_BREP` has exactly one
+/// shell, the outer; a `BREP_WITH_VOIDS` has the outer and at least one void. Faces,
+/// edges and vertices are written once for the body and shared by its shells.
+fn solid_shells(
     entities: &mut Entities,
     body: &Body,
     pcurves: &BTreeMap<PcurveKey, Vec<Vec<[f64; 2]>>>,
-) -> Result<u64, ExportError> {
-    if body.shells.len() != 1 {
+) -> Result<Vec<u64>, ExportError> {
+    let voids_allowed = body.kind == BodyKind::SolidWithVoids;
+    let Some((outer, voids)) = body.shells.split_first() else {
         return Err(ExportError::new(format!(
-            "body #{} has {} shells; step-export supports one closed shell",
+            "body #{} has no shells",
+            body.step_id
+        )));
+    };
+    if voids_allowed == voids.is_empty() {
+        return Err(ExportError::new(format!(
+            "body #{} is {:?} with {} shells; a MANIFOLD_SOLID_BREP has one closed shell, a \
+             BREP_WITH_VOIDS an outer shell and its voids",
             body.step_id,
+            body.kind,
             body.shells.len()
         )));
     }
-    let step_shell = body
-        .shells
-        .first()
-        .ok_or_else(|| ExportError::new(format!("body #{} has no shells", body.step_id)))?;
-    if !step_shell.closed {
+    if !outer.orientation || voids.iter().any(|void| void.orientation) {
+        return Err(ExportError::new(format!(
+            "body #{}: the outer shell must keep its orientation and every void be reversed",
+            body.step_id
+        )));
+    }
+    if body.shells.iter().any(|shell| !shell.closed) {
         return Err(ExportError::new(format!(
             "body #{} has an open shell; step-export writes closed solids",
             body.step_id
@@ -731,7 +795,7 @@ fn shell(
         .collect::<Result<Vec<_>, ExportError>>()?;
     let context_2d = entities.add("PARAMETRIC_REPRESENTATION_CONTEXT('','2')".to_string());
     // Emit every surface first so edge pcurves can reference their basis surfaces.
-    let mut face_surfaces = Vec::with_capacity(body.faces.len());
+    let mut face_surfaces = Vec::new();
     for face in &body.faces {
         face_surfaces.push(write_surface(entities, &mut points, &face.surface)?);
     }
@@ -779,74 +843,84 @@ fn shell(
             *slot = Some(write_edge(entities, &mut points, body, index, &vertex_ids)?);
         }
     }
-    let mut face_ids = Vec::with_capacity(step_shell.faces.len());
-    for &face_index in &step_shell.faces {
-        let face = body.faces.get(face_index).ok_or_else(|| {
-            ExportError::new(format!(
-                "body #{} references missing face {face_index}",
-                body.step_id
-            ))
-        })?;
-        let surface_id = *face_surfaces
-            .get(
-                body.faces
-                    .iter()
-                    .position(|item| item.step_id == face.step_id)
-                    .unwrap_or(0),
-            )
-            .ok_or_else(|| ExportError::new("missing face surface"))?;
-        let mut bounds = Vec::with_capacity(face.loops.len());
-        for loop_ in &face.loops {
-            let Bound::Edges(edges) = &loop_.bound else {
-                return Err(ExportError::new(format!(
-                    "face #{} has a vertex loop; step-export needs edge loops",
-                    face.step_id
-                )));
-            };
-            let mut oriented = Vec::with_capacity(edges.len());
-            for oriented_edge in edges {
-                let edge_id = edge_ids
-                    .get(oriented_edge.edge)
-                    .and_then(|id| *id)
-                    .ok_or_else(|| {
-                        ExportError::new(format!("missing edge index {}", oriented_edge.edge))
-                    })?;
-                let orientation = if oriented_edge.forward { ".T." } else { ".F." };
-                oriented
-                    .push(entities.add(format!("ORIENTED_EDGE('',*,*,#{edge_id},{orientation})")));
+    let mut shell_ids = Vec::new();
+    for step_shell in &body.shells {
+        let mut face_ids = Vec::new();
+        for &face_index in &step_shell.faces {
+            let face = body.faces.get(face_index).ok_or_else(|| {
+                ExportError::new(format!(
+                    "body #{} references missing face {face_index}",
+                    body.step_id
+                ))
+            })?;
+            let surface_id = *face_surfaces
+                .get(
+                    body.faces
+                        .iter()
+                        .position(|item| item.step_id == face.step_id)
+                        .unwrap_or(0),
+                )
+                .ok_or_else(|| ExportError::new("missing face surface"))?;
+            let mut bounds = Vec::new();
+            for loop_ in &face.loops {
+                let Bound::Edges(edges) = &loop_.bound else {
+                    return Err(ExportError::new(format!(
+                        "face #{} has a vertex loop; step-export needs edge loops",
+                        face.step_id
+                    )));
+                };
+                let mut oriented = Vec::new();
+                for oriented_edge in edges {
+                    let edge_id = edge_ids
+                        .get(oriented_edge.edge)
+                        .and_then(|id| *id)
+                        .ok_or_else(|| {
+                            ExportError::new(format!("missing edge index {}", oriented_edge.edge))
+                        })?;
+                    let orientation = if oriented_edge.forward { ".T." } else { ".F." };
+                    oriented.push(
+                        entities.add(format!("ORIENTED_EDGE('',*,*,#{edge_id},{orientation})")),
+                    );
+                }
+                let loop_id = entities.add(format!(
+                    "EDGE_LOOP('',({}))",
+                    oriented
+                        .iter()
+                        .map(|id| format!("#{id}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+                let orientation = if loop_.orientation { ".T." } else { ".F." };
+                let kind = if loop_.outer {
+                    "FACE_OUTER_BOUND"
+                } else {
+                    "FACE_BOUND"
+                };
+                bounds.push(entities.add(format!("{kind}('',#{loop_id},{orientation})")));
             }
-            let loop_id = entities.add(format!(
-                "EDGE_LOOP('',({}))",
-                oriented
-                    .iter()
-                    .map(|id| format!("#{id}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-            let orientation = if loop_.orientation { ".T." } else { ".F." };
-            let kind = if loop_.outer {
-                "FACE_OUTER_BOUND"
-            } else {
-                "FACE_BOUND"
-            };
-            bounds.push(entities.add(format!("{kind}('',#{loop_id},{orientation})")));
+            let bound_refs = bounds
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sense = if face.same_sense { ".T." } else { ".F." };
+            face_ids.push(entities.add(format!(
+                "ADVANCED_FACE('',({bound_refs}),#{surface_id},{sense})"
+            )));
         }
-        let bound_refs = bounds
+        let refs = face_ids
             .iter()
             .map(|id| format!("#{id}"))
             .collect::<Vec<_>>()
             .join(",");
-        let sense = if face.same_sense { ".T." } else { ".F." };
-        face_ids.push(entities.add(format!(
-            "ADVANCED_FACE('',({bound_refs}),#{surface_id},{sense})"
-        )));
+        let closed = entities.add(format!("CLOSED_SHELL('',({refs}))"));
+        shell_ids.push(if step_shell.orientation {
+            closed
+        } else {
+            entities.add(format!("ORIENTED_CLOSED_SHELL('',*,#{closed},.F.)"))
+        });
     }
-    let refs = face_ids
-        .iter()
-        .map(|id| format!("#{id}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    Ok(entities.add(format!("CLOSED_SHELL('',({refs}))")))
+    Ok(shell_ids)
 }
 
 fn write_edge(
@@ -874,7 +948,7 @@ fn write_edge(
             body.step_id
         ))
     })?;
-    let curve_id = write_curve(entities, points, &edge.curve)?;
+    let curve_id = write_edge_curve(entities, points, &edge.curve)?;
     let sense = if edge.same_sense { ".T." } else { ".F." };
     Ok(entities.add(format!(
         "EDGE_CURVE('',#{start},#{end},#{curve_id},{sense})"
@@ -1271,20 +1345,36 @@ fn write_inner(
     for body in &model.bodies {
         match mode {
             WriteMode::Auto => match body.kind {
-                BodyKind::ManifoldSolid => {
-                    let shell_id = shell(&mut entities, body, &model.pcurves)?;
-                    let name = body.name.as_deref().unwrap_or("");
-                    manifold_ids.push(
-                        entities.add(format!("MANIFOLD_SOLID_BREP({},#{shell_id})", quoted(name))),
-                    );
+                BodyKind::ManifoldSolid | BodyKind::SolidWithVoids => {
+                    let shells = solid_shells(&mut entities, body, &model.pcurves)?;
+                    let name = quoted(body.name.as_deref().unwrap_or(""));
+                    let item = match shells.split_first() {
+                        Some((outer, [])) => format!("MANIFOLD_SOLID_BREP({name},#{outer})"),
+                        Some((outer, voids)) => format!(
+                            "BREP_WITH_VOIDS({name},#{outer},({}))",
+                            voids
+                                .iter()
+                                .map(|id| format!("#{id}"))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
+                        None => {
+                            return Err(ExportError::new(format!(
+                                "body #{} has no shells",
+                                body.step_id
+                            )))
+                        }
+                    };
+                    manifold_ids.push(entities.add(item));
                 }
                 BodyKind::Faceted => {
                     faceted_ids.push(faceted_shell(&mut entities, body, FacetedMode::Strict)?);
                 }
-                other => {
+                BodyKind::ShellModel => {
                     return Err(ExportError::new(format!(
-                        "body #{} is {:?}; step-export writes MANIFOLD_SOLID_BREP and FACETED_BREP",
-                        body.step_id, other
+                        "body #{} is a shell model; step-export writes MANIFOLD_SOLID_BREP, \
+                         BREP_WITH_VOIDS and FACETED_BREP",
+                        body.step_id
                     )));
                 }
             },
@@ -1390,8 +1480,8 @@ fn refs(ids: &[u64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use step_import::model::{Edge, Face, Loop, OrientedEdge, Shell, Vertex};
-    use step_import::part21::Header;
+    use solidcore_record::step::model::{Edge, Face, Loop, OrientedEdge, Shell, Vertex};
+    use solidcore_record::step::p21::Header;
 
     fn line(origin: [f64; 3], dir: [f64; 3], magnitude: f64) -> Curve {
         Curve::Line {
@@ -1516,7 +1606,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
-            file_pcurves: step_import::model::FilePcurves::default(),
+            file_pcurves: solidcore_record::step::model::FilePcurves::default(),
         }
     }
 
@@ -1646,7 +1736,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
-            file_pcurves: step_import::model::FilePcurves::default(),
+            file_pcurves: solidcore_record::step::model::FilePcurves::default(),
         }
     }
 
@@ -1684,8 +1774,7 @@ mod tests {
     }
 
     fn reimport(text: &str) -> Model {
-        let model = step_import::import(text.as_bytes(), &step_import::Limits::default())
-            .expect("re-import written STEP");
+        let model = import(text.as_bytes(), &Limits::default()).expect("re-import written STEP");
         assert!(model.skipped.is_empty(), "{:?}", model.skipped);
         model
     }
@@ -2037,7 +2126,7 @@ mod tests {
                 magnitude: 3.0,
             },
         ];
-        let bspline = step_import::model::BSplineSurface {
+        let bspline = solidcore_record::step::model::BSplineSurface {
             u_degree: 1,
             v_degree: 1,
             points: vec![
@@ -2067,7 +2156,7 @@ mod tests {
                 semi1: 2.0,
                 semi2: 1.0,
             },
-            Curve::BSpline(step_import::model::BSplineCurve {
+            Curve::BSpline(solidcore_record::step::model::BSplineCurve {
                 degree: 1,
                 points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
                 weights: None,
@@ -2084,6 +2173,45 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn normalizes_edge_ellipse_so_semi_axis_1_is_major() {
+        let mut model = triangle();
+        model.bodies[0].edges[0].curve = Curve::Ellipse {
+            frame: Frame {
+                origin: [0.0; 3],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                z: [0.0, 0.0, 1.0],
+            },
+            semi1: 5.0,
+            semi2: 8.0,
+        };
+        let text = write(&model).expect("ellipse write");
+        let ex = solidcore_record::step::p21::parse(&text).expect("parse");
+        let ellipse = ex.entities.values().find(|e| e.name() == "ELLIPSE");
+        let ellipse = ellipse.expect("ELLIPSE entity");
+        let semi1 = ellipse.params()[2].as_f64().expect("semi_axis_1");
+        let semi2 = ellipse.params()[3].as_f64().expect("semi_axis_2");
+        assert!((semi1 - 8.0).abs() < 1e-12 && (semi2 - 5.0).abs() < 1e-12);
+        let placement_id = ellipse.params()[1].as_ref_id().expect("placement ref");
+        let placement = ex.get(placement_id).expect("AXIS2_PLACEMENT_3D");
+        let axis_id = placement.params()[2].as_ref_id().expect("axis ref");
+        let ref_id = placement.params()[3]
+            .as_ref_id()
+            .expect("ref_direction ref");
+        let dir = |id: u64| -> Vec<f64> {
+            let entity = ex.get(id).expect("DIRECTION");
+            entity.params()[1]
+                .as_list()
+                .expect("ratios")
+                .iter()
+                .map(|p| p.as_f64().expect("real"))
+                .collect()
+        };
+        assert_eq!(dir(axis_id), vec![0.0, 0.0, 1.0]);
+        assert_eq!(dir(ref_id), vec![0.0, 1.0, 0.0]);
     }
 
     #[test]

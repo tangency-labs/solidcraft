@@ -23,7 +23,7 @@ struct Params {
     // ray epsilon, test environment radiance, studio scale, reserved
     lighting: vec4<f32>,
     environment: vec4<f32>, // RGB radiance, enabled flag
-    light_count: vec4<f32>, // x: hard directional count, y: point/spot count, w: rectangle count
+    light_count: vec4<f32>, // directional count, point/spot count, metal energy flag, rectangle count
     area_lights: array<AreaLight,4>,
     environment_map: vec4<f32>, // cosine rotation, sine rotation, intensity, enabled
     sun_direction: vec4<f32>, // normalized toward sun, cosine angular radius
@@ -37,6 +37,9 @@ struct Params {
     directional_lights: array<DirectionalLight,8>,
     punctual_lights: array<PunctualLight,8>,
     studio_weights: vec4<f32>,
+    // Global first pixel and local film-plane length; zero length is the full-image test layout.
+    // z: the indirect clamp limit as f32 bits (0 = off); w: reserved.
+    page: vec4<u32>,
 
 };
 @group(0) @binding(0) var<uniform> u: Params;
@@ -49,6 +52,9 @@ struct EnvironmentData { header: vec4<u32>, texels: array<EnvironmentTexel> };
 // Count low, first pixel/bounce/sample/code, count high, first-writer flag, spare.
 // Two atomic words count jobs with more than 2^32 paths without wrapping to zero.
 @group(0) @binding(6) var<storage, read_write> failures: array<atomic<u32>>;
+fn film_pixels()->u32 {return select(u.image.x*u.image.y,u.page.y,u.page.y!=0u);}
+fn film_index(pixel:u32)->u32 {return pixel-u.page.x;}
+
 // Codes: 1 escaped inside a medium, 2 exit with no medium, 3 exit from another
 // medium, 4 ambiguous origin/certificate, invalid entry or beyond16 nested media.
 fn medium_failure(radiance: vec3<f32>, coverage: f32, pixel: u32, bounce: u32, code: u32) -> vec4<f32> {
@@ -185,8 +191,11 @@ fn brdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> vec3<f32> {
     let ratio = (t.parameters.z - 1.0) / (t.parameters.z + 1.0);
     let f0 = mix(vec3<f32>(ratio*ratio), t.base.xyz, t.parameters.x);
     let diffuse = t.base.xyz * ((1.0-t.parameters.x)/PI);
-    let base = base_fresnel(f0,dot(v,h),t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
+    var base = base_fresnel(f0,dot(v,h),t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
         + (vec3<f32>(1.0)-base_fresnel(f0,nv,t.parameters.x,t.parameters.z)) * (vec3<f32>(1.0)-base_fresnel(f0,nl,t.parameters.x,t.parameters.z)) * diffuse;
+    if u.light_count.z > 0.0 && t.parameters.x > 0.0 && t.parameters.y > 0.35 {
+        base += metal_multiple_scattering(t.base.xyz,t.parameters.x,t.parameters.y,nv,nl);
+    }
     if t.coat.x <= 0.0 || t.coat.z == 1.0 { return base; }
     let coat_a = t.coat.y*t.coat.y;
     let coat_a2 = coat_a*coat_a;
@@ -267,16 +276,18 @@ fn fp_sub_bits(left: u32, right: u32) -> u32 {
 // RTE for a general floating subtraction, so approximate differences must retain
 // the integer implementation. The fast case has an exactly representable normal
 // result, independent of rounding direction and permitted subnormal flushing.
-fn fp_sub_barrier_bits(left: u32, right: u32) -> u32 {
+// `exact` is false where fp_sub_barrier_bits takes the integer subtraction.
+struct ExactDifference { bits: u32, exact: bool };
+fn fp_sub_exact(left: u32, right: u32) -> ExactDifference {
     let a=left&0x7fffffffu;
     let b=right&0x7fffffffu;
-    if a>=0x7f800000u || b>=0x7f800000u { return fp_sub_bits(left,right); }
+    if a>=0x7f800000u || b>=0x7f800000u { return ExactDifference(0u,false); }
     if a==0u {
-        if b==0u { return left&(right^0x80000000u)&0x80000000u; }
-        return right^0x80000000u;
+        if b==0u { return ExactDifference(left&(right^0x80000000u)&0x80000000u,true); }
+        return ExactDifference(right^0x80000000u,true);
     }
-    if b==0u { return left; }
-    if left==right { return 0u; }
+    if b==0u { return ExactDifference(left,true); }
+    if left==right { return ExactDifference(0u,true); }
     let small=min(a,b);
     let large=max(a,b);
     let small_exponent=small>>23u;
@@ -287,25 +298,50 @@ fn fp_sub_barrier_bits(left: u32, right: u32) -> u32 {
     // Encoded exponent 24 has spacing 2^-126. Any distinct pair admitted here
     // therefore has a normal difference, including the closest adjacent pair.
     if same_sign && small_exponent>=24u && within_two {
-        return bitcast<u32>(bitcast<f32>(left)-bitcast<f32>(right));
+        return ExactDifference(bitcast<u32>(bitcast<f32>(left)-bitcast<f32>(right)),true);
     }
+    return ExactDifference(0u,false);
+}
+fn fp_sub_barrier_bits(left: u32, right: u32) -> u32 {
+    let difference=fp_sub_exact(left,right);
+    if difference.exact { return difference.bits; }
     return fp_sub_bits(left,right);
 }
 fn anchored_delta_bits(a: u32, a_low: u32, b: u32, b_low: u32) -> u32 {
-    let offset=fp_sub_barrier_bits(a_low,b_low);
-    // Identical finite anchors have +0 difference. Adding it preserves a
-    // nonzero offset; either sign of a zero offset becomes +0.
-    if a==b && (a&0x7fffffffu)<0x7f800000u {
-        return select(offset,0u,(offset&0x7fffffffu)==0u);
+    // Step 0 is offset=a_low-b_low and step 1 anchor=a-b, each exactly as
+    // fp_sub_barrier_bits; step 2 is anchor+offset. Native compilers inline
+    // every call, so the three share one integer addition.
+    var offset=0u;
+    var anchor=0u;
+    var bits=0u;
+    for (var step=0u; step<3u; step+=1u) {
+        var left=anchor;
+        var right=offset;
+        var integer=true;
+        if step<2u {
+            left=select(a_low,a,step==1u);
+            right=select(b_low,b,step==1u);
+            let difference=fp_sub_exact(left,right);
+            bits=difference.bits;
+            integer=!difference.exact;
+            // fp_sub_bits(left,right) is fp_add_bits(left,right^sign).
+            right^=0x80000000u;
+        }
+        // At step 2 this nonlinear integer operation is the reassociation barrier.
+        // Keep it even when both component differences used exact hardware subtraction.
+        if integer { bits=fp_add_bits(left,right); }
+        if step==0u {
+            offset=bits;
+            // Identical finite anchors have +0 difference. Adding it preserves a
+            // nonzero offset; either sign of a zero offset becomes +0.
+            if a==b && (a&0x7fffffffu)<0x7f800000u { return select(offset,0u,(offset&0x7fffffffu)==0u); }
+        } else if step==1u {
+            anchor=bits;
+            // IEEE RTE addition of two zeros retains -0 only if both are -0.
+            if (offset&0x7fffffffu)==0u { return select(anchor,anchor&offset,(anchor&0x7fffffffu)==0u); }
+        }
     }
-    let anchor=fp_sub_barrier_bits(a,b);
-    if (offset&0x7fffffffu)==0u {
-        // IEEE RTE addition of two zeros retains -0 only if both are -0.
-        return select(anchor,anchor&offset,(anchor&0x7fffffffu)==0u);
-    }
-    // This nonlinear integer operation is the reassociation barrier. Keep it
-    // even when both component differences used exact hardware subtraction.
-    return fp_add_bits(anchor,offset);
+    return bits;
 }
 fn anchored_delta_component(a: f32, a_low: f32, b: f32, b_low: f32) -> f32 {
     return bitcast<f32>(anchored_delta_bits(bitcast<u32>(a),bitcast<u32>(a_low),bitcast<u32>(b),bitcast<u32>(b_low)));
@@ -314,7 +350,10 @@ fn anchored_delta_component(a: f32, a_low: f32, b: f32, b_low: f32) -> f32 {
 struct PrecisePoint { hi: vec3<f32>, lo: vec3<f32> };
 fn precise_point_delta(a: vec3<f32>, a_low: vec3<f32>, b: vec3<f32>, b_low: vec3<f32>) -> vec3<f32> {
     if all(a_low==vec3<f32>(0.0)) && all(b_low==vec3<f32>(0.0)) { return a-b; }
-    return vec3<f32>(anchored_delta_component(a.x,a_low.x,b.x,b_low.x),anchored_delta_component(a.y,a_low.y,b.y,b_low.y),anchored_delta_component(a.z,a_low.z,b.z,b_low.z));
+    // The three components share one inlined integer delta.
+    var delta=vec3<f32>(0.0);
+    for (var k=0u; k<3u; k+=1u) { delta[k]=anchored_delta_component(a[k],a_low[k],b[k],b_low[k]); }
+    return delta;
 }
 fn ray_segment_precise(o: vec3<f32>, o_low: vec3<f32>, previous: vec3<f32>, previous_low: vec3<f32>, d: vec3<f32>, distance: f32) -> vec3<f32> {
     // Subtract the physical origins before adding a possibly tiny ray segment.
@@ -347,10 +386,8 @@ fn triangle_ahead(t: Triangle, o: vec3<f32>, d: vec3<f32>) -> bool {
     if any((d==vec3<f32>(0.0))&((o<lo)|(o>hi))) { return false; }
     return true;
 }
-fn triangle_ahead_precise(t: Triangle, o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>) -> bool {
-    if all(o_low==vec3<f32>(0.0)) { return triangle_ahead(t,o,d); }
-    let lo=precise_point_delta(min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
-    let hi=precise_point_delta(max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+// The same test from the bounds' integer-defined deltas to an anchored origin.
+fn deltas_ahead(lo: vec3<f32>, hi: vec3<f32>, d: vec3<f32>) -> bool {
     if any((lo>=vec3<f32>(0.0))&(d<vec3<f32>(0.0))) || any((hi<=vec3<f32>(0.0))&(d>vec3<f32>(0.0))) { return false; }
     if any((d==vec3<f32>(0.0))&((lo>vec3<f32>(0.0))|(hi<vec3<f32>(0.0)))) { return false; }
     return true;
@@ -383,12 +420,6 @@ fn split_product(a: f32, b: f32) -> vec2<f32> {
     let e3=split_materialize(e2-ah*bl);
     return vec2<f32>(p,split_materialize(al*bl-e3));
 }
-fn split_two_sum(a: f32, b: f32) -> vec2<f32> {
-    let swap=abs(a)<abs(b);let large=select(a,b,swap);let small=select(b,a,swap);
-    let sum=split_add(large,small);
-    let delta=split_materialize(sum-large);
-    return vec2<f32>(sum,split_materialize(small-delta));
-}
 fn split_rescale(value: f32, exponent: i32) -> f32 {
     if value==0.0 { return value; }
     let scaled=split_scaled(value);let combined=scaled.exponent+exponent+1;
@@ -399,16 +430,43 @@ fn split_difference_products(a: f32, b: f32, c: f32, d: f32) -> f32 {
     let aa=split_scaled(a);let bb=split_scaled(b);let cc=split_scaled(c);let dd=split_scaled(d);
     let p=split_product(aa.value,bb.value);let q=split_product(cc.value,dd.value);
     let ep=aa.exponent+bb.exponent;let eq=cc.exponent+dd.exponent;
-    if p.x==0.0 { return split_rescale(-split_add(q.x,q.y),eq); }
-    if q.x==0.0 { return split_rescale(split_add(p.x,p.y),ep); }
-    let exponent=max(ep,eq);
-    let pp=ldexp(p,vec2<i32>(ep-exponent));let qq=ldexp(q,vec2<i32>(eq-exponent));
-    let high=split_materialize(pp.x-qq.x);
-    let tail=split_two_sum(pp.y,-qq.y);
-    if high==0.0 { return split_rescale(tail.x,exponent); }
-    if tail.x==0.0 { return split_rescale(high,exponent); }
-    let total=split_two_sum(high,tail.x);
-    return split_rescale(split_add(total.x,split_add(total.y,tail.y)),exponent);
+    // Native compilers inline every call, so the possible sums run as steps that
+    // share one split_add and one split_rescale. Each step is one split_add(x,y):
+    // 0 the sum of the product that is not zero (negated for q) when the other
+    // is; 1 the two-sum tail of (pp.y,-qq.y); 2 the two-sum total of (high,tail.x);
+    // 3 total.y+tail.y; 4 total.x plus that.
+    var step=1u;
+    var x=0.0;var y=0.0;
+    var exponent=0;
+    var high=0.0;
+    var tail=vec2<f32>(0.0);var total=vec2<f32>(0.0);
+    var value=0.0;
+    if p.x==0.0 || q.x==0.0 {
+        step=0u;
+        x=select(p.x,q.x,p.x==0.0);y=select(p.y,q.y,p.x==0.0);exponent=select(ep,eq,p.x==0.0);
+    } else {
+        exponent=max(ep,eq);
+        let pp=ldexp(p,vec2<i32>(ep-exponent));let qq=ldexp(q,vec2<i32>(eq-exponent));
+        high=split_materialize(pp.x-qq.x);
+        x=pp.y;y=-qq.y;
+    }
+    loop {
+        // A two-sum adds its operands larger first and keeps the rounding error.
+        let swap=(step==1u || step==2u) && abs(x)<abs(y);
+        let large=select(x,y,swap);let small=select(y,x,swap);
+        let sum=split_add(large,small);
+        if step==0u { value=select(sum,-sum,p.x==0.0); break; }
+        if step==4u { value=sum; break; }
+        if step==3u { x=total.x;y=sum;step=4u;continue; }
+        let delta=split_materialize(sum-large);
+        let pair=vec2<f32>(sum,split_materialize(small-delta));
+        if step==2u { total=pair;x=total.y;y=tail.y;step=3u;continue; }
+        tail=pair;
+        if high==0.0 { value=tail.x; break; }
+        if tail.x==0.0 { value=high; break; }
+        x=high;y=tail.x;step=2u;
+    }
+    return split_rescale(value,exponent);
 }
 fn difference_products(a: f32, b: f32, c: f32, d: f32) -> f32 {
     let ab=a*b;let cd=c*d;
@@ -419,6 +477,19 @@ fn difference_products(a: f32, b: f32, c: f32, d: f32) -> f32 {
         return fma(a,b,-cd)+error;
     }
     return split_difference_products(a,b,c,d);
+}
+// Signed edge functions of a projected triangle: weight k pairs the two vertices
+// after vertex k. Native compilers inline difference_products at every call
+// site, so all three weights share one.
+fn edge_weights(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> vec3<f32> {
+    var weights=vec3<f32>(0.0);
+    for (var k=0u; k<3u; k+=1u) {
+        // Selected, not indexed: the pairs (b,c), (c,a), (a,b) stay in registers.
+        let e=select(select(a,c,k==1u),b,k==0u);
+        let f=select(select(b,a,k==1u),c,k==0u);
+        weights[k]=difference_products(e.x,f.y,e.y,f.x);
+    }
+    return weights;
 }
 struct Hit { distance: f32, triangle: u32, bary: vec3<f32> };
 // A closed continuation that leaves its producing triangle at a shared edge or
@@ -444,7 +515,8 @@ fn tie_preferred(t: Triangle, d: vec3<f32>, inside: bool) -> bool {
     return front!=inside;
 }
 fn trace_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool) -> Hit {
-    if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,FAR,-1.0); }
+    // Without a low part, trace_precise_within is the ordered walk: the same
+    // origin, pad, error bound and candidate test. One walk is inlined here.
     return trace_precise_within(o,o_low,d,any_hit,excluded,minimum,inside,FAR,-1.0);
 }
 // Only hits closer than `limit` are reported, and nodes beyond it are culled.
@@ -517,85 +589,72 @@ fn trace_precise_within(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: b
             // IDs join only connected, exactly coplanar uploaded f32 triangles
             // of one body; curved facets and other bodies remain candidates.
             if excluded!=0xffffffffu && geometry[geometry[3]+i]==geometry[geometry[3]+excluded] { continue; }
-            // The ordinary source uses exactly the former ordered candidate
-            // branch. Sharing only the node walk avoids another inlined BVH.
-            if !has_origin_residual {
-                let t = triangle(i);
-                if !triangle_ahead(t,o,d) { continue; }
-                let pa=t.p0.xyz-o; let pb=t.p1.xyz-o; let pc=t.p2.xyz-o;
-                let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
-                let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
-                let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-                let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
-                if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
+            let t = triangle(i);
+            let lo=min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz));
+            let hi=max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz));
+            // Native compilers inline the candidate arithmetic once per call site,
+            // so one candidate test serves three policies, each evaluated exactly
+            // as on its own:
+            // 0: an origin without residual takes the former ordered test;
+            // 1: a residual origin's candidate beyond near_radius uses ordinary
+            //    arithmetic from the rounded origin while each decision clears
+            //    its error bound, and otherwise takes
+            // 2: integer-defined deltas from the anchored origin.
+            var policy=0u;
+            if has_origin_residual { policy=select(2u,1u,any(max(lo-rounded,rounded-hi)>vec3<f32>(near_radius))); }
+            // Each pass ends with break (next candidate) or, once, continue (policy 2).
+            loop {
+                var p=array<vec3<f32>,3>(t.p0.xyz-rounded,t.p1.xyz-rounded,t.p2.xyz-rounded);
+                if policy==0u {
+                    if !triangle_ahead(t,o,d) { break; }
+                } else if policy==1u {
+                    // The rounded origin is within origin_error of the true one on each
+                    // axis. Bound and edge decisions that close to their threshold could
+                    // flip, while a nearby neighbour across the edge is tested exactly:
+                    // a crossing would fall between them. Such candidates take policy 2.
+                    if any((rounded<=lo-vec3<f32>(origin_error))&(d<vec3<f32>(0.0))) || any((rounded>=hi+vec3<f32>(origin_error))&(d>vec3<f32>(0.0))) { break; }
+                    if any((d==vec3<f32>(0.0))&((rounded<lo-vec3<f32>(origin_error))|(rounded>hi+vec3<f32>(origin_error)))) { break; }
+                } else {
+                    // Bound deltas first: a candidate that is not ahead is rejected
+                    // before its vertex deltas are formed. The five points lo, hi,
+                    // p0, p1, p2 share one delta call site.
+                    var low=vec3<f32>(0.0);
+                    var ahead=true;
+                    for (var k=0u; k<5u; k+=1u) {
+                        let point=select(select(select(t.p2.xyz,t.p1.xyz,k==3u),t.p0.xyz,k==2u),select(hi,lo,k==0u),k<2u);
+                        let delta=precise_point_delta(point,vec3<f32>(0.0),o,o_low);
+                        if k==0u { low=delta; }
+                        else if k==1u { if !deltas_ahead(low,delta,d) { ahead=false; break; } }
+                        else if k==2u { p[0]=delta; }
+                        else if k==3u { p[1]=delta; }
+                        else { p[2]=delta; }
+                    }
+                    if !ahead { break; }
+                }
+                let a=vec2<f32>(p[0][kx]-shear.x*p[0][kz],p[0][ky]-shear.y*p[0][kz]);
+                let b=vec2<f32>(p[1][kx]-shear.x*p[1][kz],p[1][ky]-shear.y*p[1][kz]);
+                let c=vec2<f32>(p[2][kx]-shear.x*p[2][kz],p[2][ky]-shear.y*p[2][kz]);
+                let weights=edge_weights(a,b,c);
+                if policy==1u && !all(abs(weights)>origin_error*vec3<f32>(length(b-c),length(c-a),length(a-b))) { policy=2u; continue; }
+                if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { break; }
                 let det=weights.x+weights.y+weights.z;
-                if det==0.0 { continue; }
+                // As before, policy 1 has no det test: each weight cleared a
+                // nonnegative bound. Nor does it test a repeated crossing.
+                if det==0.0 && policy!=1u { break; }
                 // Retain all three directly evaluated weights: 1-u-v can erase a
                 // small corner clearance when the other two weights sum to one.
                 let bary=weights/det;
-                let depth=surface_ray_depth(t,bary,o,kz);
+                var depth=0.0;
+                if policy==2u { depth=surface_ray_depth_precise(t,bary,o,o_low,kz); }
+                else { depth=surface_ray_depth(t,bary,rounded,kz); }
                 let distance=depth*shear.z;
                 let key=depth*order;
-                if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
+                if policy!=1u && excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { break; }
                 if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
                     hit = Hit(distance,i,bary); best=key;
                     if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
                 }
-                continue;
-            }
-            let t = triangle(i);
-            let lo=min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz));
-            let hi=max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz));
-            let gap=max(lo-rounded,rounded-hi);
-            if any(gap>vec3<f32>(near_radius)) {
-                // The rounded origin is within origin_error of the true one on each
-                // axis. Bound and edge decisions that close to their threshold could
-                // flip, while a nearby neighbour across the edge is tested exactly:
-                // a crossing would fall between them. Such candidates take the exact
-                // path below.
-                if any((rounded<=lo-vec3<f32>(origin_error))&(d<vec3<f32>(0.0))) || any((rounded>=hi+vec3<f32>(origin_error))&(d>vec3<f32>(0.0))) { continue; }
-                if any((d==vec3<f32>(0.0))&((rounded<lo-vec3<f32>(origin_error))|(rounded>hi+vec3<f32>(origin_error)))) { continue; }
-                let qa=t.p0.xyz-rounded; let qb=t.p1.xyz-rounded; let qc=t.p2.xyz-rounded;
-                let fa=vec2<f32>(qa[kx]-shear.x*qa[kz],qa[ky]-shear.y*qa[kz]);
-                let fb=vec2<f32>(qb[kx]-shear.x*qb[kz],qb[ky]-shear.y*qb[kz]);
-                let fc=vec2<f32>(qc[kx]-shear.x*qc[kz],qc[ky]-shear.y*qc[kz]);
-                let far_weights=vec3<f32>(difference_products(fb.x,fc.y,fb.y,fc.x),difference_products(fc.x,fa.y,fc.y,fa.x),difference_products(fa.x,fb.y,fa.y,fb.x));
-                let edge_error=origin_error*vec3<f32>(length(fb-fc),length(fc-fa),length(fa-fb));
-                if all(abs(far_weights)>edge_error) {
-                    if any(far_weights<vec3<f32>(0.0)) && any(far_weights>vec3<f32>(0.0)) { continue; }
-                    let far_det=far_weights.x+far_weights.y+far_weights.z;
-                    let far_bary=far_weights/far_det;
-                    let far_depth=surface_ray_depth(t,far_bary,rounded,kz);
-                    let far_distance=far_depth*shear.z;
-                    let far_key=far_depth*order;
-                    if far_distance > minimum && far_distance < limit && (far_key < best || (far_key == best && tie_preferred(t,d,inside))) {
-                        hit = Hit(far_distance,i,far_bary); best=far_key;
-                        if any_hit || (far_distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
-                    }
-                    continue;
-                }
-            }
-            if !triangle_ahead_precise(t,o,o_low,d) { continue; }
-            let pa=precise_point_delta(t.p0.xyz,vec3<f32>(0.0),o,o_low);
-            let pb=precise_point_delta(t.p1.xyz,vec3<f32>(0.0),o,o_low);
-            let pc=precise_point_delta(t.p2.xyz,vec3<f32>(0.0),o,o_low);
-            let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
-            let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
-            let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
-            if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
-            let det=weights.x+weights.y+weights.z;
-            if det==0.0 { continue; }
-            // Retain all three directly evaluated weights: 1-u-v can erase a
-            // small corner clearance when the other two weights sum to one.
-            let bary=weights/det;
-            let depth=surface_ray_depth_precise(t,bary,o,o_low,kz);
-            let distance=depth*shear.z;
-            let key=depth*order;
-            if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
-            if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
-                hit = Hit(distance,i,bary); best=key;
-                if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+                break;
             }
         }
     }
@@ -660,7 +719,7 @@ fn trace_ordered_within(o: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32
             let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
             let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
             let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            let weights=edge_weights(a,b,c);
             if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
             let det=weights.x+weights.y+weights.z;
             if det==0.0 { continue; }
@@ -718,7 +777,7 @@ fn origin_on_boundary(t: Triangle, o: vec3<f32>) -> bool {
     let x=(axis+1u)%3u;let y=(x+1u)%3u;
     let pa=t.p0.xyz-o;let pb=t.p1.xyz-o;let pc=t.p2.xyz-o;
     let a=vec2<f32>(pa[x],pa[y]);let b=vec2<f32>(pb[x],pb[y]);let c=vec2<f32>(pc[x],pc[y]);
-    let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+    let weights=edge_weights(a,b,c);
     return !(any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)));
 }
 fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
@@ -775,10 +834,25 @@ fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
             // Keep the ray projection homogeneous: a rounded d[kx]/d[kz]
             // must not turn an exact uploaded-f32 edge tangent into a crossing.
             // All projected coordinates share d[kz], so barycentrics are invariant.
-            let a=vec2<f32>(difference_products(pa[kx],d[kz],d[kx],pa[kz]),difference_products(pa[ky],d[kz],d[ky],pa[kz]));
-            let b=vec2<f32>(difference_products(pb[kx],d[kz],d[kx],pb[kz]),difference_products(pb[ky],d[kz],d[ky],pb[kz]));
-            let c=vec2<f32>(difference_products(pc[kx],d[kz],d[kx],pc[kz]),difference_products(pc[ky],d[kz],d[ky],pc[kz]));
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            // Steps 0-5 project vertex k/2 on axis kx (even k) or ky (odd k);
+            // steps 6-8 then form the edge weights as edge_weights does. All
+            // nine share one inlined difference_products.
+            var a=vec2<f32>(0.0);var b=vec2<f32>(0.0);var c=vec2<f32>(0.0);
+            var weights=vec3<f32>(0.0);
+            for (var k=0u; k<9u; k+=1u) {
+                var products=vec4<f32>(0.0);
+                if k<6u {
+                    let point=select(select(pc,pb,k<4u),pa,k<2u);
+                    let axis=select(kx,ky,(k&1u)!=0u);
+                    products=vec4<f32>(point[axis],d[kz],d[axis],point[kz]);
+                } else {
+                    let e=select(select(a,c,k==7u),b,k==6u);
+                    let f=select(select(b,a,k==7u),c,k==6u);
+                    products=vec4<f32>(e.x,f.y,e.y,f.x);
+                }
+                let value=difference_products(products.x,products.y,products.z,products.w);
+                if k<2u { a[k]=value; } else if k<4u { b[k-2u]=value; } else if k<6u { c[k-4u]=value; } else { weights[k-6u]=value; }
+            }
             if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
             let det=weights.x+weights.y+weights.z;
             if det==0.0 { continue; }
@@ -871,17 +945,28 @@ fn sample_surface(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32
     let component = random(rng); let x = random(rng); let y = random(rng);
     return sample_surface_values(t,n,v,vec3<f32>(component,x,y));
 }
+// Share of the base (uncoated) continuation samples spent on the diffuse lobe: 0.5 at
+// metallic 0, none for a pure metal, whose diffuse response is zero. sample_surface_values
+// and surface_pdf both use it, so sampling and density agree (clear_coat::lobe_probabilities).
+fn diffuse_probability(t: Triangle) -> f32 {
+    return 0.5*(1.0-clamp(t.parameters.x,0.0,1.0));
+}
+fn visible_ggx_reflection_pdf(nh: f32, nv: f32, roughness: f32) -> f32 {
+    let alpha = roughness*roughness;
+    let a2 = alpha*alpha;
+    let root = sqrt(nv*nv+a2*(1.0-nv*nv));
+    return distribution(nh,a2)/(2.0*(nv+root));
+}
 // Conditional opaque mixture density; branch selection is accounted for by callers.
 fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
     let nl = dot(n,l);
-    if nl<=0.0 || dot(n,v)<=0.0 { return 0.0; }
-    let h = unit(v+l); let vh = max(dot(v,h),1e-20);
-    let nh = max(dot(n,h),0.0);
-    let alpha = t.parameters.y*t.parameters.y;
-    let base = 0.5*nl/PI+0.5*distribution(nh,alpha*alpha)*nh/(4.0*vh);
+    let nv = min(dot(n,v),1.0);
+    if nl<=0.0 || nv<=0.0 { return 0.0; }
+    let nh = clamp(dot(n,unit(v+l)),0.0,1.0);
+    let diffuse = diffuse_probability(t);
+    let base = diffuse*nl/PI+(1.0-diffuse)*visible_ggx_reflection_pdf(nh,nv,t.parameters.y);
     if t.coat.x<=0.0 { return base; }
-    let coat_alpha = t.coat.y*t.coat.y;
-    let coat_pdf = distribution(nh,coat_alpha*coat_alpha)*nh/(4.0*vh);
+    let coat_pdf = visible_ggx_reflection_pdf(nh,nv,t.coat.y);
     return (1.0-t.coat.x*0.5)*base+t.coat.x*0.5*coat_pdf;
 }
 fn power_weight(a: f32, b: f32) -> f32 {
@@ -891,9 +976,10 @@ fn power_weight(a: f32, b: f32) -> f32 {
     return 1.0/(1.0+ratio*ratio);
 }
 struct EmitterHit { distance: f32, index: u32 };
-fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
+fn emitter_hit_precise_except(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32, excluded: u32) -> EmitterHit {
     var hit = EmitterHit(FAR,0xffffffffu);
     for (var i=0u; i<u32(u.light_count.w); i+=1u) {
+        if i==excluded {continue;}
         let light = u.area_lights[i];
         let normal = unit(cross(light.u.xyz,light.v.xyz));
         let cosine = dot(normal,d);
@@ -908,6 +994,9 @@ fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f3
         }
     }
     return hit;
+}
+fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
+    return emitter_hit_precise_except(o,o_low,d,minimum,0xffffffffu);
 }
 fn emitter_hit_bounded(o: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
     return emitter_hit_precise(o,vec3<f32>(0.0),d,minimum);
@@ -1060,8 +1149,9 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
         if !studio || emitter_hit_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_minimum).distance>=emitter_limit {
             visibility = shadow_transmittance(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance,shadow_minimum);
             if !OPAQUE_SCENE && studio && u.volume_min.w>0.0 {
-                var attenuation=volume_transmittance_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance);
-                if punctual { attenuation=volume_transmittance_precise(physical.hi,physical.lo,sample.direction,physical_distance); }
+                // A punctual connection is attenuated along its physical segment.
+                let attenuation=volume_transmittance_precise(select(shadow_origin,physical.hi,punctual),select(shadow_origin_low,physical.lo,punctual),
+                    select(shadow_direction,sample.direction,punctual),select(shadow_distance,physical_distance,punctual));
                 visibility.transmittance*=attenuation;
                 visibility.branch_pdf*=attenuation;
             }
@@ -1097,6 +1187,25 @@ fn primary_ray(uv: vec2<f32>, lens_sample: vec2<f32>) -> CameraRay {
         d = unit(focal-displacement);
     }
     return CameraRay(o,d);
+}
+// Optional, biased firefly control (JobOptions::clamp_indirect). True only in the pipelines of
+// jobs that ask for it (Context::prepare_scene_pipeline, glass_pipeline and the caustic camera
+// program); its limit is page.z, as f32 bits. Other jobs keep the ordinary programs, where the clamp
+// is compiled out: even an untaken branch at these adds changes how the compiler fuses and orders them, which moves results by an ulp.
+override clamp_indirect: bool = false;
+// Scales a contribution so its largest channel is at most the limit, keeping its hue. A NaN
+// stays NaN and infinity becomes NaN, so checked_sample still reports a broken path.
+fn clamp_contribution(value: vec3<f32>, limit: f32) -> vec3<f32> {
+    let peak = max(value.x,max(value.y,value.z));
+    if limit <= 0.0 || peak <= limit { return value; }
+    return value*(limit/peak);
+}
+// Adds light a*b*w to a path's radiance at `bounce`: one vertex's direct light, or one emitter,
+// environment or sun hit. What the camera's first hit adds (bounce 0: emission it sees, direct
+// light there) is never clamped; with clamp_indirect, everything from the first bounce on is.
+fn add_light(radiance: vec3<f32>, a: vec3<f32>, b: vec3<f32>, w: f32, bounce: u32) -> vec3<f32> {
+    if clamp_indirect && bounce > 0u { return radiance+clamp_contribution(a*b*w,bitcast<f32>(u.page.z)); }
+    return radiance+a*b*w;
 }
 fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     if GLASS_DELTA_LIGHTS {transport_boundary_connection=false;}
@@ -1142,6 +1251,9 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     var previous_pdf = 0.0;
     var previous_delta = true;
     var continuous_prefix=false;
+    // Receiver plus its uninterrupted smooth closed-glass continuation.
+    // Zero means there is no opaque receiver eligible for area or environment photons.
+    var smooth_tail=0u;
     var optical_lights:array<vec4<u32>,6>;var optical_light_count=0u;
     var optical_light_rng=pixel*0x68bc21ebu ^ ordinal*0x02e5be93u ^ u.sampling.x ^ salt ^ lane*0x967a889bu ^ 0x5bd1e995u;
     var media: array<Medium,MEDIUM_CAPACITY>;
@@ -1193,7 +1305,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 if GLASS_DELTA_LIGHTS {
                     if !photon_enabled() || !continuous_prefix {
                         glass_offer_light(&optical_lights,&optical_light_count,&optical_light_rng,PrecisePoint(position,vec3<f32>(0.0)),d,throughput,current.ior,current.ior,0xffffffffu,1u,current);
-                        radiance+=throughput*photon_gather_volume(position,d,current);
+                        radiance=add_light(radiance,throughput,photon_gather_volume(position,d,current),1.0,bounce);
                     }
                     continuous_prefix=true;
                 }
@@ -1201,6 +1313,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // refracting-boundary suffixes use photons when enabled. Finite
                 // source endpoints retain the random walk's complete weight.
                 d=sample_hg(d,current.scatter.y,&rng);
+                smooth_tail=0u;
                 previous_delta=true;previous_pdf=0.0;suppress_direct=false;
                 previous_position=position;previous_position_low=vec3<f32>(0.0);
                 previous_scatter_position=position;previous_scatter_position_low=vec3<f32>(0.0);
@@ -1235,10 +1348,11 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                     let remaining=u.sampling.y-bounce-1u;
                     var physical=PrecisePoint(o,o_low+d*(segment.x+travel));
                     if u.light_count.y>0.0 {physical=punctual_offset(physical,vec3<f32>(0.0));}
-                    radiance+=throughput*volume_direct(position,physical,d,remaining,&rng);
+                    radiance=add_light(radiance,throughput,volume_direct(position,physical,d,remaining,&rng),1.0,bounce);
                     if remaining==0u { break; }
                     let next=volume_sample(d,&rng);
                     previous_pdf=volume_phase(dot(d,next));
+                    smooth_tail=0u;
                     previous_delta=false;
                     previous_scatter_position=position;
                     previous_scatter_position_low=vec3<f32>(0.0);
@@ -1260,15 +1374,22 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         if u.environment.w > 0.0 {
             if emitter.distance < hit.distance {
                 let light = u.area_lights[emitter.index];
-                let segment = ray_segment_precise(o,o_low,previous_position,previous_position_low,d,emitter.distance);
+                // The physical and scatter segments to the emitter share one inlined
+                // precise subtraction.
+                var segment=vec3<f32>(0.0);
+                var scatter_segment=vec3<f32>(0.0);
+                for (var k=0u; k<2u; k+=1u) {
+                    let delta=ray_segment_precise(o,o_low,select(previous_position,previous_scatter_position,k==1u),
+                        select(previous_position_low,previous_scatter_position_low,k==1u),d,emitter.distance);
+                    if k==0u { segment=delta; } else { scatter_segment=delta; }
+                }
                 if medium_count>0u {
                     throughput *= exp(-media[medium_count-1u].sigma*length(segment));
                 }
-                let scatter_segment = ray_segment_precise(o,o_low,previous_scatter_position,previous_scatter_position_low,d,emitter.distance);
                 let pdf = area_pdf(light,scatter_segment);
-                if pdf>0.0 && !suppress_direct {
+                if pdf>0.0 && !suppress_direct && !photon_owns_smooth_tail(smooth_tail,false) {
                     let weight = select(power_weight(previous_pdf,pdf),1.0,previous_delta);
-                    radiance += throughput*light.radiance.xyz*weight;
+                    radiance = add_light(radiance,throughput,light.radiance.xyz,weight,bounce);
                 }
                 coverage = 1.0;
                 break;
@@ -1281,11 +1402,13 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // The backplate remains request.background; environment lights covered paths.
                 if bounce>0u && !suppress_direct {
                     let weight = select(power_weight(previous_pdf,env_pdf(d)),1.0,previous_delta);
-                    radiance += throughput*env_eval(d)*weight;
+                    if !photon_owns_smooth_tail(smooth_tail,true) {
+                        radiance = add_light(radiance,throughput,env_eval(d),weight,bounce);
+                    }
                     let sun_weight=select(power_weight(previous_pdf,sun_pdf(d)),1.0,previous_delta);
-                    radiance += throughput*sun_eval(d)*sun_weight;
+                    radiance = add_light(radiance,throughput,sun_eval(d),sun_weight,bounce);
                 }
-            } else if u.sampling.w == 0u || d.z < 0.0 { radiance += throughput * u.lighting.y; }
+            } else if u.sampling.w == 0u || d.z < 0.0 { radiance = add_light(radiance,throughput,vec3<f32>(1.0),u.lighting.y,bounce); }
             break;
         }
         coverage = 1.0;
@@ -1303,10 +1426,17 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             position=point.hi;position_low=point.lo;
         }
         let shading_position=position+position_low;
-        texture_path_length+=length(precise_point_delta(position,position_low,o,o_low));
+        // The travelled ray segment and, inside a medium, its absorbing segment
+        // share one inlined precise subtraction.
+        var travelled=vec3<f32>(0.0);
+        var absorbing=vec3<f32>(0.0);
+        for (var k=0u; k<select(1u,2u,medium_count>0u); k+=1u) {
+            let delta=precise_point_delta(position,position_low,select(o,previous_position,k==1u),select(o_low,previous_position_low,k==1u));
+            if k==0u { travelled=delta; } else { absorbing=delta; }
+        }
+        texture_path_length+=length(travelled);
         if medium_count > 0u {
-            let segment=precise_point_delta(position,position_low,previous_position,previous_position_low);
-            throughput *= exp(-media[medium_count-1u].sigma*length(segment));
+            throughput *= exp(-media[medium_count-1u].sigma*length(absorbing));
         }
         previous_position = position; previous_position_low=position_low;
         o = position + geometric*(u.lighting.x*2.0); o_low=vec3<f32>(0.0);
@@ -1322,6 +1452,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         // making the texture sampling temporaries live.
         if !OPAQUE_SCENE && captured.base.w > 0.0 && random(&rng) < captured.base.w {
             let t=captured;
+            if smooth_tail>0u && t.parameters.w<0.0 && t.glass.x==0.0 {smooth_tail+=1u;}
+            else {smooth_tail=0u;}
             let interpolated=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
             let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
             var n=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
@@ -1361,7 +1493,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 var walk:GlassSheetWalk;
                 if GLASS_DELTA_LIGHTS {
                     let sampled=glass_camera_sheet(t,physical,hit.triangle,d,n,geometric,ni,nt,wavelength,u.sampling.y-bounce,lane,strata,continuous_prefix,throughput,&optical_lights,&optical_light_count,&optical_light_rng,&rng);
-                    radiance+=throughput*sampled.direct;continuous_prefix=sampled.continuous;walk=sampled.walk;
+                    radiance=add_light(radiance,throughput,sampled.direct,1.0,bounce);continuous_prefix=sampled.continuous;walk=sampled.walk;
                 } else {walk=glass_rough_sheet(t,d,n,ni,nt,wavelength,true,u.sampling.y-bounce,lane,strata,&rng);}
                 if !walk.valid || dot(walk.direction,n)*dot(walk.direction,geometric)<=0.0 {break;}
                 throughput*=walk.weight;d=walk.direction;
@@ -1378,7 +1510,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // prefix's transmitted family. Reflection remains a distinct path.
                 let light_mode=select(0u,4u,t.coat.w>0.0 && (suppress_direct || !previous_delta));
                 glass_offer_light(&optical_lights,&optical_light_count,&optical_light_rng,physical,d,throughput,ni,nt,hit.triangle,light_mode,glass_vacuum());
-                radiance+=throughput*photon_gather_glass(t,shading_position,n,geometric,d,ni,nt,wavelength,0);
+                radiance=add_light(radiance,throughput,photon_gather_glass(t,shading_position,n,geometric,d,ni,nt,wavelength,0),1.0,bounce);
             }
             let macro_normal=n;
             if rough {n=glass_visible_normal(n,v,t.glass.x*t.glass.x,vec2<f32>(random(&rng),random(&rng)));}
@@ -1395,7 +1527,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             let reflection_probability=dot(reflected_weight,vec3<f32>(1.0/3.0));
             // The first Fresnel choice is stratified conditionally on the same
             // primary/prefix path. Each stratum is weighted equally; later random
-            // dimensions use decorrelated streams, never clamped radiance.
+            // dimensions use decorrelated streams. Strata reduce variance without
+            // clamping: radiance is clamped only when the job sets clamp_indirect.
             var branch = random(&rng);
             if !stratified && u.adaptive_budget.z > 1u && u.image.z >= u.adaptive_budget.x {
                 branch = (f32(lane) + branch) / f32(u.adaptive_budget.z);
@@ -1475,8 +1608,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         let original_normal=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
         let mapped_normal=texture_normal(map_record,mapped_surface.normal,original_normal,geometric);
         let n=select(original_normal,mapped_normal,dot(mapped_normal,v)>0.0);
-        radiance += throughput*direct_light(t,shading_position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
-        radiance += throughput*photon_gather(t,shading_position,n,geometric,v);
+        radiance = add_light(radiance,throughput,direct_light(t,shading_position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng),1.0,bounce);
+        radiance = add_light(radiance,throughput,photon_gather(t,shading_position,n,geometric,v,u.sampling.y-bounce-1u),1.0,bounce);
         d = sample_surface(t,n,v,&rng);
         let nl = dot(n,d);
         if nl<=0.0 || dot(geometric,d)<=0.0 { break; }
@@ -1486,6 +1619,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         previous_scatter_position=position; previous_scatter_position_low=position_low;
         previous_delta = false;
         suppress_direct=false;
+        smooth_tail=select(0u,1u,t.base.w<=0.0);
         throughput *= brdf(t,n,v,d) * (nl/pdf);
         if medium_count>0u {
             o=position;o_low=position_low;ray_excluded=hit.triangle;ray_minimum=0.0;
@@ -1500,6 +1634,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     return vec4<f32>(radiance,coverage);
 }
 
+// A negative, NaN or overflowing sample is a broken path. An optional indirect clamp
+// (add_light) bounds finite contributions only, so it never hides one.
 fn checked_sample(pixel: u32, lane: u32) -> vec4<f32> {
     let value = sample_path_lane(pixel, lane);
     if !all(value >= vec4<f32>(0.0)) || !all(value <= vec4<f32>(3.4e38)) {
@@ -1529,42 +1665,42 @@ fn adaptive_target(mean: vec4<f32>, m2: vec4<f32>) -> u32 {
 // publish one bounded request per tile; a separate native program resolves its
 // visibility before entering this update, including final adaptive normalization.
 fn accumulate_path(pixel:u32,value:vec4<f32>) {
-    let pixels=u.image.x*u.image.y;let pilots=u.adaptive_budget.x;
+    let pixels=film_pixels();let local=film_index(pixel);let pilots=u.adaptive_budget.x;
     let strata=max(1u,u.adaptive_budget.z);let lane=u32(u.adaptive_error.w);
     var budget_count=0u;
-    if pilots>0u && u.image.z>=pilots {budget_count=u32(accumulation[2u*pixels+pixel].x);}
+    if pilots>0u && u.image.z>=pilots {budget_count=u32(accumulation[2u*pixels+local].x);}
     if pilots == 0u {
         let sample = value/f32(strata);
-        if u.image.z == 0u && lane == 0u { accumulation[pixel] = sample; }
-        else { accumulation[pixel] += sample; }
+        if u.image.z == 0u && lane == 0u { accumulation[local] = sample; }
+        else { accumulation[local] += sample; }
         return;
     }
     if u.image.z < pilots {
-        var mean = accumulation[pixels+pixel];
-        var m2 = accumulation[2u*pixels+pixel];
+        var mean = accumulation[pixels+local];
+        var m2 = accumulation[2u*pixels+local];
         if u.image.z == 0u { mean=vec4<f32>(0.0); m2=vec4<f32>(0.0); }
         let delta=value-mean;
         mean += delta/f32(u.image.z+1u);
         m2 += delta*(value-mean);
-        accumulation[pixels+pixel]=mean;
-        accumulation[2u*pixels+pixel]=m2;
+        accumulation[pixels+local]=mean;
+        accumulation[2u*pixels+local]=m2;
         if u.image.z+1u == pilots {
-            accumulation[2u*pixels+pixel]=vec4<f32>(f32(adaptive_target(mean,m2)),0.0,0.0,0.0);
-            accumulation[pixel]=vec4<f32>(0.0);
+            accumulation[2u*pixels+local]=vec4<f32>(f32(adaptive_target(mean,m2)),0.0,0.0,0.0);
+            accumulation[local]=vec4<f32>(0.0);
         }
         return;
     }
     let ordinal=u.image.z-pilots;
-    accumulation[pixel] += value/f32(strata);
+    accumulation[local] += value/f32(strata);
     // Per-pixel production means enter both raw EXR and denoising. Pilots do not.
-    if ordinal+1u == budget_count && lane+1u == strata { accumulation[pixel] /= f32(budget_count); }
+    if ordinal+1u == budget_count && lane+1u == strata { accumulation[local] /= f32(budget_count); }
 }
 @compute @workgroup_size(32)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
     if gid.x>=u.sampling.z || pixel>=pixels {return;}
     let pilots=u.adaptive_budget.x;
-    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*film_pixels()+film_index(pixel)].x) {return;}
     if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+6u]=vec4<f32>(0.0);}
     let value=sample_path(pixel);
     if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+7u]=value;return;}
@@ -1577,7 +1713,7 @@ fn optical_resolve(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
     if gid.x>=u.sampling.z || pixel>=pixels {return;}
     let pilots=u.adaptive_budget.x;
-    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*film_pixels()+film_index(pixel)].x) {return;}
     let address=glass_tile_address(pixel);let header=accumulation[address+6u];
     var packet:array<vec4<u32>,6>;
     if header.x>0.0 {
@@ -1649,15 +1785,13 @@ fn sample_surface_values(t: Triangle, n: vec3<f32>, v: vec3<f32>, variates: vec3
     let component = variates.x;
     let x = variates.y; let phi = 2.0*PI*variates.z;
     let coat_probability = t.coat.x*0.5;
-    if component < (1.0-coat_probability)*0.5 {
+    if component < (1.0-coat_probability)*diffuse_probability(t) {
         let radius = sqrt(x);
         return from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),sqrt(1.0-x)),n);
     }
     let roughness = select(t.parameters.y,t.coat.y,component >= 1.0-coat_probability);
     let alpha = roughness*roughness;
-    let cosine = sqrt((1.0-x)/(1.0+(alpha*alpha-1.0)*x));
-    let sine = sqrt(max(0.0,1.0-cosine*cosine));
-    let h = from_local(vec3<f32>(sine*cos(phi),sine*sin(phi),cosine),n);
+    let h = glass_visible_normal(n,v,alpha,variates.yz);
     return reflect(-v,h);
 }
 
@@ -1670,6 +1804,13 @@ fn surface_sample_reference() {
 @compute @workgroup_size(1)
 fn pdf_reference() {
     accumulation[0] = vec4<f32>(surface_pdf(triangle(0u),u.up.xyz,u.back.xyz,u.right.xyz),0.0,0.0,1.0);
+}
+
+// The production contribution clamp with the job's packed limit and pipeline: up.xyz added at
+// bounce sampling.x.
+@compute @workgroup_size(1)
+fn contribution_reference() {
+    accumulation[0] = vec4<f32>(add_light(vec3<f32>(0.0),u.up.xyz,vec3<f32>(1.0),1.0,u.sampling.x),1.0);
 }
 
 // Diagnostic entry point for independently specified closed-corner fixtures.
@@ -1716,7 +1857,7 @@ fn ordering_candidate(t: Triangle, o: vec3<f32>, d: vec3<f32>) -> vec2<f32> {
     let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
     let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
     let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-    let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+    let weights=edge_weights(a,b,c);
     let det=weights.x+weights.y+weights.z;
     let bary=weights/det;
     let distance=surface_ray_depth(t,bary,o,kz)*shear.z;

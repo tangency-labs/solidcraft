@@ -23,7 +23,11 @@
 //! corners, the curve's start tangent and the turn's sense agree with that layout, so a
 //! caller can swap it in for the B-spline and keep the trims and loop the B-spline
 //! layout gives. Any other curve, or a construction that fails, gives `None` and the
-//! caller keeps the upstream surface. No recursion.
+//! caller keeps the upstream surface. A cone lower than `Cone::MIN_HEIGHT` along the axis
+//! gives `None` too (tangency-labs/solidcraft#17085): `Cone::is_nurb_surface_cone` refuses a
+//! cone that low as a disk, so a body that kept it would not read back. A whole turn then
+//! keeps its surface of revolution; a partial turn keeps its B-spline surface, run through
+//! `copy_and_add_analytics` when analytics are asked for. No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result};
@@ -48,14 +52,15 @@ const PLANE_SAMPLES: u32 = 8;
 /// surface may miss the B-spline one. The surface replaces the B-spline, so the curve
 /// must be a line or arc to rounding, not only within the caller's (B-rep) tolerance:
 /// a short wavy curve lies within a B-rep tolerance of 1e-6 of some arc.
-const FIT_REL: f64 = 1.0e-9;
+pub const FIT_REL: f64 = 1.0e-9;
 
 /// The analytic surface swept by revolving `curve` (over its natural interval) by
 /// `angle_deg` degrees about the axis through `base_pt` along `axis`: a cylinder for a
 /// line parallel to the axis, a cone for another line that is not perpendicular to
-/// it, a sphere for a circular arc centred on the axis and a torus for one off it, the
-/// arc in a plane through the axis. Bounded to the curve and the turn, and laid out as
-/// the B-spline surface of revolution `reference` (`sm_CreateRotSrf`'s, made here when
+/// it and rises at least `Cone::MIN_HEIGHT` along it, a sphere for a circular arc
+/// centred on the axis and a torus for one off it, the arc in a plane through the
+/// axis. Bounded to the curve and the turn, and laid out as the B-spline surface of
+/// revolution `reference` (`sm_CreateRotSrf`'s, made here when
 /// `None`; see the module header): the result must reproduce its corners, its tangent
 /// along the curve at the start and its sense of turn, and its natural boundary must
 /// have the B-spline's: the same degenerate sides and the other sides' lengths.
@@ -63,8 +68,9 @@ const FIT_REL: f64 = 1.0e-9;
 /// at `FIT_REL` times the size of the curve and axis point (`1 +` their largest
 /// coordinate), so that only a curve that is a line or arc to rounding qualifies.
 ///
-/// `None` for any other curve (a line perpendicular to the axis sweeps a plane), a
-/// curve not in one half-plane through the axis, or a surface that does not pass.
+/// `None` for any other curve (a line perpendicular to the axis sweeps a plane; for a
+/// lower cone see the module header), a curve not in
+/// one half-plane through the axis, or a surface that does not pass.
 ///
 /// # Errors
 ///
@@ -96,18 +102,10 @@ pub fn analytic_revolution(
         .max(ends.end.max_dimension())
         .max(base_pt.max_dimension());
     // WR-471: the caller's own tolerance, which decides if an arc is centred on the axis
-    let axis_tol = if k.fixes.revolve_arc_centre_near_axis_is_sphere {
-        tol
-    } else {
-        0.0
-    };
+    let axis_tol = tol;
     // WR-552: the caller's own tolerance, within which a circle reaching the axis is
     // the horn torus's
-    let horn_tol = if k.fixes.revolve_arc_touching_axis_is_horn_torus {
-        tol
-    } else {
-        0.0
-    };
+    let horn_tol = tol;
     let tol = tol.min(FIT_REL * (1.0 + size));
     let Some(Some((candidate, reversed))) = ignored(candidate(
         k, curve, base_pt, axis, angle_deg, tol, axis_tol, horn_tol,
@@ -136,16 +134,15 @@ pub fn analytic_revolution(
             &made
         }
     };
-    // Not in the fork's hunk (WR-471): our own layout test, bypassed for this flag's
+    // Not in the fork's hunk (WR-471): our own layout test, bypassed for the
     // sphere so the fork's result holds; orientation signs kept. The fork uses
     // `AnalyticSurface`'s sphere as it is; our corner and boundary tests below (#545)
     // refuse the sphere whose poles it puts on the axis for an arc ending within
     // `axis_tol` of it
-    let fork_sphere = k.fixes.revolve_arc_centre_near_axis_is_sphere
-        && matches!(
-            candidate.kind(),
-            crate::surface::surface::SurfaceKind::Sphere(_)
-        );
+    let fork_sphere = matches!(
+        candidate.kind(),
+        crate::surface::surface::SurfaceKind::Sphere(_)
+    );
     let expected = ignored(Layout::of(k, reference, base_pt, axis))?;
     let actual = ignored(Layout::of(k, &candidate, base_pt, axis))?;
     let same_layout = match (expected, actual) {
@@ -330,7 +327,13 @@ fn candidate(
         };
         let inside_out = false;
         let origin = base_pt + axis * low_h;
-        let mut cone = if (start_dist - end_dist).abs() <= tol {
+        let cylinder = (start_dist - end_dist).abs() <= tol;
+        // a cone lower than `Cone::is_nurb_surface_cone` recognises would not read back: the
+        // caller keeps its own surface (tangency-labs/solidcraft#17085)
+        if !cylinder && height.abs() < Cone::MIN_HEIGHT {
+            return Ok(None);
+        }
+        let mut cone = if cylinder {
             Cone::new_cylinder_bounded(
                 origin,
                 x,
@@ -389,8 +392,9 @@ fn candidate(
         // #1490: never inside out (fork 9853e54 builds the sphere over its latitude
         // range); a falling meridian is laid out as the reversed arc's B-spline
         let rising = frame.z_axis().dot(-y) > 0.0;
-        let (mut centre, mut radius) = (centre, radius);
-        let (low, high) = if k.fixes.revolve_arc_centre_near_axis_is_sphere {
+        let mut centre = centre;
+        let radius;
+        let (low, high) = {
             // WR-471 (the fork's c4209ab, as its `AnalyticSurface`): the sphere centred on
             // the axis through the arc's two ends (the corners the neighbouring profile
             // edges share), not the arc's own circle, which misses both ends by up to
@@ -434,17 +438,6 @@ fn candidate(
                 if lat0 < lat1 { lat0 } else { lat1 },
                 if lat0 > lat1 { lat0 } else { lat1 },
             )
-        } else {
-            let latitude = |p: Point3| {
-                let d = p - centre;
-                d.dot(axis).atan2(d.dot(x)) * to_deg
-            };
-            let (start_lat, end_lat) = (latitude(ends.start), latitude(ends.end));
-            if rising {
-                (start_lat, end_lat)
-            } else {
-                (end_lat, start_lat)
-            }
         };
         let inside_out = false;
         if high - low <= EFF_ZERO {
@@ -944,6 +937,35 @@ mod tests {
         );
     }
 
+    /// tangency-labs/solidcraft#17085: a line almost square to the axis that rises less along
+    /// it than `Cone::MIN_HEIGHT` gives no analytic surface, so the caller keeps its own (a
+    /// whole turn's surface of revolution): `Cone::is_nurb_surface_cone` refuses a cone that
+    /// low, and a body with one does not read back. A rise of 1e-9 is under the fit tolerance
+    /// (about 2e-9 here) and is already refused as perpendicular, before the height floor; the
+    /// other rises below the floor reach it. The line starts at z = 0, so the cone's height is the rise exactly.
+    #[test]
+    fn a_cone_lower_than_the_recogniser_floor_keeps_the_surface_of_revolution() {
+        let k = Kernel::default();
+        let sweep = |rise: f64| {
+            let c = line(Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.01, 0.0, rise));
+            analytic_revolution(&k, &c, Vec3::ZERO, Vec3::Z, 360.0, 1e-6, None).unwrap()
+        };
+        let kept: Vec<_> = [1e-9, 1e-8, 1e-7, -1e-7, 9e-7, 9.99e-7]
+            .into_iter()
+            .filter_map(|rise| sweep(rise).map(|s| format!("{rise:e}: {}", kind(&s))))
+            .collect();
+        assert!(kept.is_empty(), "{kept:?}");
+        // At the floor and just above it the sweep still writes the cone. The recogniser can
+        // still refuse some of these cones: by its other tests, and at the floor because it
+        // measures the height between the NURB's circle centres, not as the sweep does, so
+        // a cone just at the floor here can be just under it there (tracked in
+        // tangency-labs/solidcraft#18226). This does not assert that they read back.
+        for rise in [1e-6, 1.000_000_1e-6, 1.5e-6, 2e-6, 1e-5] {
+            let s = sweep(rise);
+            assert_eq!(s.as_ref().map_or("none", kind), "cone", "{rise:e}");
+        }
+    }
+
     /// WR-471 (the fork's c4209ab): a half circle of radius 5 whose centre, and so both
     /// ends, are off the axis by less than the caller's tolerance 1e-6 (probe batch 53i).
     /// The sphere is centred on the axis through both ends and the ends, which the sweep
@@ -952,8 +974,7 @@ mod tests {
     #[test]
     fn wr471_arc_ends_within_tolerance_of_the_axis_are_the_poles() {
         use crate::surface::surface::SurfaceKind;
-        let mut k = Kernel::default();
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
+        let k = Kernel::default();
         for off in [3e-7, 9e-7] {
             let c = arc(Vec3::new(off, 0.0, 0.0), -Vec3::Z, Vec3::X, 5.0, 0.0, 180.0);
             let tol = 1e-6_f64.min(FIT_REL * (1.0 + 5.0));
@@ -995,8 +1016,7 @@ mod tests {
     #[test]
     fn wr471_sphere_with_poles_on_the_axis_replaces_the_b_spline() {
         use crate::surface::surface::SurfaceKind;
-        let mut k = Kernel::default();
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
+        let k = Kernel::default();
         for off in [3e-7, 9e-7] {
             let c = arc(Vec3::new(off, 0.0, 0.0), -Vec3::Z, Vec3::X, 5.0, 0.0, 180.0);
             assert!(off > FIT_REL * (1.0 + 5.0));

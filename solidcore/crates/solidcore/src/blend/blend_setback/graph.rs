@@ -34,10 +34,11 @@ use super::certify::{
 use super::convexity::{patch_curvatures, sector_conditions, sector_rows, SectorConditions};
 use super::qp::{dual_qp_rows_with_stats, dual_qp_source, QpOutcome, QpStats};
 use super::{
-    affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
-    monomials, over_patch, second, sm_err, smax, tensor_elevate, Face, Fill, FillOrders, FillStats,
-    Hom, Net, Probe, Refusal, Round, Tensor, GW, GX, HOM_ZERO,
+    affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, corner_step, el, el_mut,
+    el_ref, monomials, over_patch, past_table, second, smax, tensor_elevate, Face, Fill,
+    FillOrders, FillStats, Hom, Net, Probe, Refusal, Round, Tensor, GW, GX, HOM_ZERO,
 };
+use crate::error::blend::CornerStep;
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::sqrt;
 use crate::math::{Point3, Vec3, PI};
@@ -309,7 +310,7 @@ pub(super) fn graph_gk(
                 let col = if e == 0 {
                     c
                 } else {
-                    q.checked_sub(c).ok_or_else(sm_err)?
+                    q.checked_sub(c).ok_or_else(past_table)?
                 };
                 for k in 0..=order {
                     let w0 = el_ref(&h0, col)?[3];
@@ -448,7 +449,7 @@ pub(super) fn graph_gk(
         rho = smax(rho, sqrt((dx * dx) + (dy * dy)));
     }
     if !(rho > 0.0) {
-        return Err(sm_err().into());
+        return Err(corner_step(CornerStep::SetbackBasePointsCoincide).into());
     }
     // the domain scaled: x = (xi - centre) / rho
     let bs: Vec<P2> = xi
@@ -459,23 +460,16 @@ pub(super) fn graph_gk(
         })
         .collect();
 
-    // The degrees: 9 first, then up from the least. Proven unmet at 9 (the QP's
-    // certificate), the sector conditions are unmet at every degree, and the search stops.
-    // Else the least degree whose fill is certified, or 9's.
+    // The degrees: 9 first, then up from the least, for the fill and for a probe that asks
+    // it (the scale search's attempts, as the fork's 3843ddb fills them). Proven unmet at 9
+    // (the QP's certificate), the sector conditions are unmet at every degree, and the
+    // search stops. Else the least degree whose fill is certified, or 9's.
     let mut top: Vec<Net> = Vec::new();
     let mut top_degree = 0;
     let probe_only = probe.as_ref().is_some_and(|p| !p.fill);
-    let probe_fill = probe.as_ref().is_some_and(|p| p.fill);
-    let mut degrees: Vec<usize> = Vec::new();
-    if probe.is_none() || probe_only {
-        degrees.push(9);
-    }
+    let mut degrees: Vec<usize> = vec![9];
     if !probe_only {
-        for d in nc..=9 {
-            if d < 9 || probe_fill {
-                degrees.push(d);
-            }
-        }
+        degrees.extend(nc..9);
     }
     'degrees: for &d in &degrees {
         let mono = monomials(d);
@@ -841,7 +835,8 @@ pub(super) fn graph_gk(
         // each patch's curvature determinants, affine in y, and the side its normal faces
         // (o of one sign, certified, or the fill folds)
         let Ok(curvatures) = patch_curvatures(&patches, e, GRAPH_DEPTH)? else {
-            return Err(Refusal::sm_err(
+            return Err(Refusal::unbuildable(
+                CornerStep::SetbackFillMayFold,
                 "SmBlendSetback: the fill folds (a patch's normal turns across the corner's axis)",
             ));
         };
@@ -886,7 +881,7 @@ pub(super) fn graph_gk(
             };
             let det = ds.x * dt.y - ds.y * dt.x;
             if !(det.abs() > 0.0) {
-                return Err(sm_err().into());
+                return Err(corner_step(CornerStep::SetbackBaseSidesParallel).into());
             }
             let sq = el(&sigma, q)?;
             let a = (sq.x * dt.y - sq.y * dt.x) / det;
@@ -951,7 +946,12 @@ pub(super) fn graph_gk(
                     "the margin's programme is not positive definite",
                 )
                 .into()),
-                QpOutcome::Infeasible { .. } => Err(sm_err().into()),
+                QpOutcome::Infeasible { proven: true } => {
+                    Err(corner_step(CornerStep::SetbackMarginInfeasible).into())
+                }
+                QpOutcome::Infeasible { proven: false } => {
+                    Err(corner_step(CornerStep::SetbackMarginUnresolved).into())
+                }
             };
         }
         let rows = sector_rows(&patches, &curvatures, &kernel, &yp, &zn, free)?;
@@ -971,13 +971,13 @@ pub(super) fn graph_gk(
         };
         let Some(mut nets) = nets_at(&t)? else {
             // SER(netsAt): SM_ERR
-            return Err(sm_err().into());
+            return Err(corner_step(CornerStep::SetbackFacePointOffFace).into());
         };
         let plane_sides = sides_on_planes(&nets, n, &faces, cycle_face);
         if certified_convex(&nets, &plane_sides, e, GRAPH_DEPTH)?.is_err() {
             continue;
         }
-        if d == 9 && probe.is_none() {
+        if d == 9 {
             top = nets;
             top_degree = d;
             continue;
@@ -996,9 +996,12 @@ pub(super) fn graph_gk(
         )?);
     }
     stats.uncertified = true;
-    Err(Refusal::sm_err(if order == 1 {
-        "SmBlendSetback: no G1 fill up to degree 9 is certified convex at these setbacks"
-    } else {
-        "SmBlendSetback: no G2 fill up to degree 9 is certified convex at these setbacks"
-    }))
+    Err(Refusal::unbuildable(
+        CornerStep::SetbackFillNotCertified,
+        if order == 1 {
+            "SmBlendSetback: no G1 fill up to degree 9 is certified convex at these setbacks"
+        } else {
+            "SmBlendSetback: no G2 fill up to degree 9 is certified convex at these setbacks"
+        },
+    ))
 }

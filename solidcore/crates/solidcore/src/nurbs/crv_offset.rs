@@ -9,7 +9,7 @@
 //!
 //! Deviations:
 //! - The output curve `curQ` and the memory stacks become the return value; errors are
-//!   [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number instead of a flag
+//!   [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number instead of a flag
 //!   plus the global `NL_ERROR` record.
 //! - The `par` flag (`NL_UNIFORM` / `NL_CHORDLENGTH` / `NL_CENTRIPETAL` /
 //!   `NL_INHERITED`) and the `tan` flag (`NL_YES` / `NL_NO`) are [`OffsetParam`] and a
@@ -36,7 +36,7 @@
 //!   and never more than [`MAX_OFFSET_SAMPLES_ANY`] (about 30 s at opt-level 3).
 //! - Cancellation: `offset_pt_sampling_cancellable` (crate-private) polls a cancel token (#2136, #2372) per sample point and per knot removal step; `offset_pt_sampling` passes none.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::{max2, Vec3};
 use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
@@ -146,7 +146,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`NlibCode::Numerical`] when `1 / tol` is not computable; the errors of
+    /// [`NurbsFailure::Numerical`] when `1 / tol` is not computable; the errors of
     /// [`Curve::get_type`], [`normalize`] (zero `b`, a degenerate line direction or end
     /// tangent), the line and arc constructors, [`Curve::decompose_bez`],
     /// [`Curve::offset_max_2nd_deriv`], [`Curve::eval_tangent`], [`Curve::derivs`], the
@@ -243,7 +243,7 @@ impl Curve {
         let exp = if deg == 1 { 0.5 } else { 0.34 };
 
         if float_op_is_bad(1.0, tol, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
 
         let mut f1 = 1.0 / tol;
@@ -450,10 +450,7 @@ mod tests {
         let e = c.offset_pt_sampling(b, 0.1, 3, false, OffsetParam::Inherited, 0.0);
         assert!(matches!(
             e,
-            Err(SolidError::Nlib {
-                code: NlibCode::Numerical,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Numerical))
         ));
         let e = c.offset_pt_sampling(b, 0.1, 3, false, OffsetParam::Inherited, -1.0);
         assert!(matches!(e, Err(SolidError::InvalidInput { .. })));
@@ -467,10 +464,7 @@ mod tests {
         );
         assert!(matches!(
             e,
-            Err(SolidError::Nlib {
-                code: NlibCode::Geometry,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Geometry))
         ));
     }
 

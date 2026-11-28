@@ -93,12 +93,16 @@ fn hostile_frames_periods_amplitudes_and_precision_are_refused() {
 #[test]
 fn surface_names_and_reserved_selector_capacities_are_bounded_before_admission() {
     use crate::job::RaytraceOptions;
-    for name in [String::new(), "x".repeat(257), "body\nname".into()] {
+    for name in [String::new(), "x".repeat(513), "body\nname".into()] {
         let mut value = serde_json::to_value(effect()).unwrap();
         value["body"] = name.into();
         assert!(serde_json::from_value::<SurfaceEffect>(value).is_err());
     }
-    let mut body = String::with_capacity(512);
+    // Any body name a rename takes (128 characters, up to 512 bytes) is admitted.
+    let mut value = serde_json::to_value(effect()).unwrap();
+    value["body"] = "中".repeat(128).into();
+    assert!(serde_json::from_value::<SurfaceEffect>(value).is_ok_and(|e| e.prepare().is_ok()));
+    let mut body = String::with_capacity(513);
     body.push_str("Coupon");
     assert!(SurfaceEffect { body, ..effect() }.prepare().is_err());
     let mut values = Vec::with_capacity(64);
@@ -125,7 +129,7 @@ fn surface_dynamic_lease_sum_preserves_every_existing_options_capacity() {
 
 #[test]
 fn procedural_roughness_preserves_the_captured_clear_coat() {
-    let coat = crate::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
     let original = surface().with_clear_coat(coat);
     let mut input = effect();
     input.roughness_amplitude = 0.2;

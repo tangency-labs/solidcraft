@@ -165,7 +165,9 @@ fn cpt4(c: &[Option<f64>; 4]) -> [f64; 4] {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1073,6 +1075,99 @@ impl UnitDiff for Runner {
     }
 }
 
+/// The certificate of a touching point that `DoIntersection` adds for a start point
+/// that traced nothing (WR-51): `r` is that one touching curve, its UV points lie in
+/// the domains, the surfaces evaluated there are `r`'s deviation apart and closer than
+/// `tol`, and its 3D point lies midway between them.
+#[cfg(test)]
+pub(crate) fn certify_restored_touching_point(
+    k: &Kernel,
+    s: [&Surface; 2],
+    d: [&Extent2d; 2],
+    tol: f64,
+    r: &SurfaceIntersection,
+) {
+    use solidcore::surface::surface::p2::TsectCurveType;
+    assert_eq!(r.curves_3d.len(), 1, "{r:?}");
+    assert_eq!(r.curve_types, [TsectCurveType::Touching]);
+    let c3 = &r.curves_3d[0];
+    let p = c3.evaluate_point(k, 0.0).unwrap();
+    assert_eq!(p, c3.evaluate_point(k, 1.0).unwrap(), "a degenerate curve");
+    let uv = |c: &Option<Curve>| c.as_ref().unwrap().evaluate_point(k, 0.0).unwrap();
+    let (uv1, uv2) = (uv(&r.surface1_uv_curves[0]), uv(&r.surface2_uv_curves[0]));
+    let (uv1, uv2) = (Point2::new(uv1.x, uv1.y), Point2::new(uv2.x, uv2.y));
+    assert!(d[0].contains_point(uv1, 0.0) && d[1].contains_point(uv2, 0.0));
+    let p1 = s[0].evaluate_point(k, uv1).unwrap();
+    let p2 = s[1].evaluate_point(k, uv2).unwrap();
+    let dev = r.deviations[0];
+    // the intersector evaluated its points through other paths (the boundary curve,
+    // the surface caches): their rounding, far below any tolerance here
+    let slack = 1e-9 * (p1.length() + p2.length() + 1.0);
+    assert!((p1.distance(p2) - dev).abs() <= slack, "{} vs {dev}", p1.distance(p2));
+    assert!(dev < tol, "deviation {dev} not below the tolerance {tol}");
+    assert!(p1.distance(p2) < tol, "surface points not within the tolerance {tol}");
+    assert!(p.distance((p1 + p2) / 2.0) <= slack + 1e-9 * dev, "{p:?} {p1:?} {p2:?}");
+}
+
+/// Replays the tube certificate (`certify::tube`) on an answer (its curves, their UV
+/// curves and types) whose curve count the default tolerance from both surfaces moved
+/// (tangency-labs/solidcraft#17720). Each of `chains` (the answer's curve indices, in order
+/// along it) is one certified component, and the components are pairwise disjoint, so the
+/// true intersection has at least `chains.len()` of them. The crossing curves in no chain
+/// are `open`: each ends inside both domains at no other curve's end, since an arc of its
+/// component lies in no curve (known, tangency-labs/solidcraft#18488), and they prove
+/// nothing either way.
+#[cfg(test)]
+pub(crate) fn assert_certified_components(
+    k: &Kernel,
+    s: [&Surface; 2],
+    d: [&Extent2d; 2],
+    curves: &[Curve],
+    uv: [&[Option<Curve>]; 2],
+    types: &[solidcore::surface::surface::p2::TsectCurveType],
+    chains: &[&[usize]],
+    open: &[usize],
+) {
+    use crate::certify::tube::{self, AnswerCurve, System};
+    use solidcore::surface::surface::p2::TsectCurveType;
+    let crossing: Vec<usize> = (0..curves.len())
+        .filter(|&i| types[i] == TsectCurveType::Crossing)
+        .collect();
+    let curves: Vec<AnswerCurve<'_>> = crossing
+        .iter()
+        .map(|&i| AnswerCurve {
+            curve: &curves[i],
+            uv: [uv[0][i].as_ref(), uv[1][i].as_ref()],
+        })
+        .collect();
+    let sys = System::new(k, s, d);
+    let mut found = Vec::new();
+    let mut failed = Vec::new();
+    for c in tube::components(k, &sys, &curves) {
+        match c {
+            Ok(c) => found.push(c),
+            Err(e) => failed.push(e),
+        }
+    }
+    let got: Vec<Vec<usize>> = found
+        .iter()
+        .map(|c| c.curves.iter().map(|&j| crossing[j]).collect())
+        .collect();
+    assert_eq!(got, chains, "the certified components; not certified: {failed:?}");
+    for (i, a) in found.iter().enumerate() {
+        for b in &found[i + 1..] {
+            assert!(tube::disjoint(&a.tube, &b.tube), "components {:?} and {:?} meet", a.curves, b.curves);
+        }
+    }
+    let mut rest: Vec<usize> = crossing
+        .iter()
+        .copied()
+        .filter(|i| !chains.iter().any(|c| c.contains(i)))
+        .collect();
+    rest.sort_unstable();
+    assert_eq!(rest, open, "the curves in no component: {failed:?}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,6 +1261,55 @@ mod tests {
         }
     }
 
+    /// WR-51: the touching points `DoIntersection` adds for a start point that traced
+    /// nothing, in the five cases where the boundary search drops one: gen0236 (two
+    /// plane patches 9.9 apart at their corners, kept since upstream already reported
+    /// it) and the four that upstream left with no answer. Each is certified on both
+    /// surfaces and within the tolerance.
+    #[test]
+    fn wr51_restored_touching_points_are_certified_contacts() {
+        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let names = ["gen0133", "gen0236", "gen0247", "gen0351", "gen0840"];
+        let mut seen = 0;
+        for case in Runner.cases(&ctx).unwrap() {
+            if !names.contains(&case.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i: Inputs = case.parse().unwrap();
+            let a = rust_surface_with(&i.a, i.raw_knots[0]).unwrap();
+            let b_owned = i.b.as_ref().map(|b| rust_surface_with(b, i.raw_knots[1]).unwrap());
+            let b = b_owned.as_ref().unwrap_or(&a);
+            let (dom1, dom2) = (ext(i.dom1), ext(i.dom2));
+            let k = Kernel::default();
+            let (r, tol) = match &i.trees {
+                None => {
+                    let si = SurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false).unwrap();
+                    let tol = i.tol.unwrap_or(si.this_approx_tol_3d);
+                    let r = do_intersection(&k, &a, &dom1, b, &dom2, i.edges, i.tol, i.ang);
+                    (r.unwrap(), tol)
+                }
+                Some((ta, tb)) => {
+                    let mut caches = vec![rust_cache(a.clone(), ta, H(0)).unwrap()];
+                    if let Some(tb) = tb {
+                        caches.push(rust_cache(b.clone(), tb, H(1)).unwrap());
+                    }
+                    let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
+                        AdvSurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false).unwrap();
+                    ssi.base.set_use_surface_edges(i.edges[0], i.edges[1]);
+                    let r = ssi.do_intersection_with_caches(&k, &mut caches, i.tol, i.ang);
+                    (r.unwrap(), ssi.base.this_approx_tol_3d)
+                }
+            };
+            certify_restored_touching_point(&k, [&a, b], [&dom1, &dom2], tol, &r);
+        }
+        assert_eq!(seen, names.len());
+    }
+
     #[test]
     fn csi_former_polar_deferrals_record_values() {
         // Exact original seeds from main CI 39940775733; no generator changes or
@@ -1186,6 +1330,131 @@ mod tests {
             assert_eq!(rec.first(), Some(&0.0), "{}", case.name);
             assert!(rec.len() > 15, "{}: {} values", case.name, rec.len());
             assert!(rec.iter().skip(1).any(|v| *v != 0.0), "{}", case.name);
+        }
+    }
+
+    /// gen1277 (WR-455's contact move, tangency-labs/solidcraft#17404): main stopped its one
+    /// curve, along A's `v = 0` boundary, at `u = 0.0537` and found nothing along `v = 1`;
+    /// the new row runs that curve to `u = 0.625` and adds one along `v = 1` over
+    /// `[0, 0.875]`, tolerance 0.5635. PROVEN, per new curve: its 3D curve stays within the
+    /// tolerance of A's iso curve at that `v` along its UV curve's `u` range, and of B's iso
+    /// curve at the `v` its UV curve on B keeps, over that curve's `u` range
+    /// (`curves_stay_within`, certified, no samples; A and B build those iso curves
+    /// exactly, `max_gap_3d = 0`), so every point of it is a point of the tolerant
+    /// intersection. Main's curve, A's `v = 0` over `u in [0, 0.0537]` with its B side on
+    /// B's `v = 0` over `[0, 0.0773]`, lies on the first one's UV curves (main's record).
+    /// Class: closer (main left out tolerant intersection the new row certifies).
+    ///
+    /// Not this PR (MEASURED, the same on main): curve 2's UV curve on B is the drop of
+    /// its 3D curve onto B (`drop_and_trim_curve`, unchanged here, gives main the same
+    /// line from the same call), a line along B's `v` max edge to `u = 2.846`, where the
+    /// nearest point of that edge to the curve's end is near `u = 2.527`; B at that UV end
+    /// is 0.600 from the 3D curve's end, beyond the tolerance. The path for B therefore
+    /// ends near 2.527, not at the UV curve's end.
+    #[test]
+    fn wr455_gen1277_new_curves_are_certified_tolerant_intersections() {
+        use solidcore::curve::curve::p8::curves_stay_within;
+        use solidcore::nurbs::b_spline_surface::SurfParamType;
+        let seed = CaseContext::seed_for(Runner.id(), 1277);
+        let i: Inputs = serde_json::from_value(Runner.generate(&mut Rng::new(seed)).unwrap())
+            .unwrap();
+        let k = Kernel::default();
+        let a = rust_surface_with(&i.a, i.raw_knots[0]).unwrap();
+        let b = rust_surface_with(i.b.as_ref().unwrap(), i.raw_knots[1]).unwrap();
+        let (dom1, dom2) = (ext(i.dom1), ext(i.dom2));
+        let tol = i.tol.unwrap();
+        assert_eq!(tol, 0.563_509_128_660_695);
+        // as the runner: on caches holding the case's hand-built trees
+        let (ta, tb) = i.trees.as_ref().unwrap();
+        let mut caches = vec![
+            rust_cache(a.clone(), ta, H(0)).unwrap(),
+            rust_cache(b.clone(), tb.as_ref().unwrap(), H(1)).unwrap(),
+        ];
+        let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
+            AdvSurfaceIntersector::new(&k, &a, &dom1, &b, &dom2, false).unwrap();
+        ssi.base.set_use_surface_edges(i.edges[0], i.edges[1]);
+        let r = ssi.do_intersection_with_caches(&k, &mut caches, i.tol, i.ang).unwrap();
+        assert_eq!(r.curves_3d.len(), 2);
+        // per curve: A's iso v, its u range, B's iso v, the B parameters the path from the
+        // curve's start to its end runs between (curve 1: its UV curve's ends on B; curve 2:
+        // from its UV curve's start to near the nearest point of B's edge to the curve's end,
+        // see above: any end with a certified node only picks the path)
+        let rows = [
+            (0.0, [0.0, 0.625], 0.0, [0.0, 2.194_154_392_942_427]),
+            (1.0, [0.0, 0.875], 3.281_850_727_176_471, [0.0, 2.527]),
+        ];
+        for (j, (va, ua, vb, ub)) in rows.into_iter().enumerate() {
+            let c3 = &r.curves_3d[j];
+            let ivl = c3.natural_interval();
+            assert_eq!([ivl.min(), ivl.max()], ua, "curve {j}: the 3D curve's interval");
+            assert!(r.deviations[j] < tol);
+            let uv = |c: &Option<Curve>, t: f64| {
+                let p = c.as_ref().unwrap().evaluate_point(&k, t).unwrap();
+                [p.x, p.y]
+            };
+            // the UV curves run along A's iso `va` over `ua` and B's iso `vb`
+            let e1 = [uv(&r.surface1_uv_curves[j], ua[0]), uv(&r.surface1_uv_curves[j], ua[1])];
+            let e2 = [uv(&r.surface2_uv_curves[j], ua[0]), uv(&r.surface2_uv_curves[j], ua[1])];
+            assert!(e1.iter().all(|p| (p[1] - va).abs() <= 1e-15), "curve {j}: {e1:?}");
+            assert!((e1[0][0] - ua[0]).abs() <= 1e-15 && (e1[1][0] - ua[1]).abs() <= 1e-15);
+            assert!(e2.iter().all(|p| (p[1] - vb).abs() <= 1e-15), "curve {j}: {e2:?}");
+            assert!(e2[0][0].abs() <= 1e-15, "curve {j}: {e2:?}");
+            for (s, v, u) in [(&a, va, ua), (&b, vb, ub)] {
+                let iso = s
+                    .create_iso_parametric_curve(&k, SurfParamType::V, v, 0.0, None, false)
+                    .unwrap();
+                assert_eq!(iso.max_gap_3d, 0.0, "curve {j}: an exact iso curve");
+                assert!(
+                    curves_stay_within(&k, c3, &iso.curve, [ua[0], u[0]], [ua[1], u[1]], tol)
+                        .unwrap(),
+                    "curve {j}: not certified within {tol} of the iso curve v = {v}"
+                );
+            }
+        }
+    }
+
+
+    /// tangency-labs/solidcraft#17720: the rows whose curve count the default from both
+    /// surfaces moved, replayed through the tube certificate: each curve is one
+    /// component.
+    #[test]
+    fn moved_count_rows_are_certified_components() {
+        for name in [
+            "edge_crossing_tiny_bilinear_noedges",
+            "edge_crossing_tiny_bilinear_thin_noedges",
+            "edge_crossing_tiny_plane_noedges",
+            "edge_crossing_tiny_plane_thin_noedges",
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().unwrap();
+            let a = rust_surface_with(&i.a, i.raw_knots[0]).unwrap();
+            let b_owned = i.b.as_ref().map(|b| rust_surface_with(b, i.raw_knots[1]).unwrap());
+            let b = b_owned.as_ref().unwrap_or(&a);
+            let (dom1, dom2) = (ext(i.dom1), ext(i.dom2));
+            let k = Kernel::default();
+            let r = match &i.trees {
+                None => do_intersection(&k, &a, &dom1, b, &dom2, i.edges, i.tol, i.ang).unwrap(),
+                Some((ta, tb)) => {
+                    let mut caches = vec![rust_cache(a.clone(), ta, H(0)).unwrap()];
+                    if let Some(tb) = tb {
+                        caches.push(rust_cache(b.clone(), tb, H(1)).unwrap());
+                    }
+                    let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
+                        AdvSurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false).unwrap();
+                    ssi.base.set_use_surface_edges(i.edges[0], i.edges[1]);
+                    ssi.do_intersection_with_caches(&k, &mut caches, i.tol, i.ang).unwrap()
+                }
+            };
+            assert_certified_components(
+                &k,
+                [&a, b],
+                [&dom1, &dom2],
+                &r.curves_3d,
+                [&r.surface1_uv_curves, &r.surface2_uv_curves],
+                &r.curve_types,
+                &[&[0]],
+                &[],
+            );
         }
     }
 }

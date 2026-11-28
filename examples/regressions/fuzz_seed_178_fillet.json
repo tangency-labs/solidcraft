@@ -1,0 +1,12 @@
+{
+  "description": "Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern, then fillet. The final fillet is refused as \"SMLib fillet: SMLib's check refuses the result: Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)\". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test that fails without the fix.",
+  "commands": [
+    {"command": "solid.box", "params": {"height": 25.0, "length": 60.0, "width": 55.0}},
+    {"command": "solid.fillet", "params": {"edges": [[30.0, 55.0, 0.0]], "radius": 2.0}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [0.0, 0.0, 25.0], "height": 20.0, "operation": "cut", "radius": 1.25}},
+    {"command": "solid.box", "params": {"corner": [55.0, 20.0, 20.0], "height": 20.0, "length": 7.5, "operation": "cut", "width": 12.5}},
+    {"command": "solid.shell", "params": {"faces": [[30.023516175438306, 0.0, 12.49044522588344]], "thickness": 1.5}},
+    {"command": "solid.pattern.rectangular", "params": {"count1": 2, "dir1": [0.0, 1.0, 0.0], "features": ["Box2"], "spacing1": 7.5}},
+    {"command": "solid.fillet", "params": {"edges": [[60.0, 47.5, 25.0], [1.902443057161609, 0.0, 23.09755694283839], [1.4999999999999927, 53.3535533925765, 1.6464466141934373]], "radius": 0.5}}
+  ]
+}

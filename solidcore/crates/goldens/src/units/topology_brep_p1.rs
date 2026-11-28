@@ -653,7 +653,9 @@ const SM_ERR_INVALID_INPUT: f64 = 1007.0;
 /// callee's `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "topology::brep::p1" => {
             NULL_DEREF
         }
@@ -1090,7 +1092,7 @@ fn run_rust_op(
         }
         OpIn::SetSize { kind, value } => {
             if *kind == 0 {
-                let r = b.set_this_model_size_estimate(k, *value);
+                let r = b.set_this_model_size_estimate(*value);
                 o.push(r);
                 o.push(b.tolerance());
                 o.push(b.this_model_size_estimate(k, false));
@@ -1098,7 +1100,7 @@ fn run_rust_op(
                 o.push(k.context.this_model_size_estimate(k));
                 o.push(k.context.this_zone_tol_3d());
             } else {
-                b.set_this_large_small_size_ratio(k, *value);
+                b.set_this_large_small_size_ratio(*value);
                 o.push(b.this_large_small_size_ratio(k, false));
                 o.push(b.this_large_small_size_ratio(k, true));
                 // SmContext::GetThisLargeSmallSizeRatio
@@ -1784,6 +1786,22 @@ fn run_rust_op(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    run_rust_on(&mut crate::runner_kernel(), i)
+}
+
+/// The unit's Rust run of `case` on the caller's kernel `k` (a fresh default kernel in
+/// the unit's own runs), so a test can read what the kernel's diagnostics recorded
+/// (e.g. [`Kernel::coons_tangency_log`]). A B-rep against another B-rep runs on kernels
+/// of its own.
+///
+/// # Errors
+///
+/// As the unit's runner.
+pub fn run_case_on(k: &mut Kernel, case: &Case) -> Result<Output, HarnessError> {
+    run_rust_on(k, &case.parse::<Inputs>()?)
+}
+
+fn run_rust_on(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     if let OpIn::BrepIntersect2 {
         other,
         tol,
@@ -1793,8 +1811,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     {
         return run_rust_intersection(i, other, *tol, *ang, *want_points);
     }
-    let mut k = Kernel::default();
-    let (mut b, types, c) = match rust_brep(&mut k, i)? {
+    let (mut b, types, c) = match rust_brep(k, i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
@@ -1804,7 +1821,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Some(refused) = refused_input(&op) {
         return Ok(refused);
     }
-    match run_rust_op(&mut k, &mut b, &types, &op) {
+    match run_rust_op(k, &mut b, &types, &op) {
         Ok(Ok(o)) => Ok(guarded_output(o)),
         Ok(Err(o)) => Ok(o),
         Err(Fail::Solid(e)) => match Output::unported(&e) {
@@ -1963,7 +1980,7 @@ fn run_rust_intersection(
 ) -> Result<Output, HarnessError> {
     cross_body_input(i, other)?; // same input-kind check, no native construction/import
     let run = || -> Result<Output, Fail> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let first = i
             .brep
             .as_ref()

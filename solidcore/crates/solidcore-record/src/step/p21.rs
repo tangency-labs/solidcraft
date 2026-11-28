@@ -9,9 +9,8 @@
 //! capped, nothing is allocated from a count read out of the file (lists grow as their items are
 //! read), and every refusal is an [`Error`], never a panic.
 //!
-//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). With the STEP
-//! merge (#2577) this becomes solidcore's one Part 21 implementation; `step-import`'s `part21.rs`
-//! goes with #2585.
+//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). This is
+//! solidcore's one Part 21 implementation (`step-import`'s `part21.rs` is gone, #14123).
 //!
 //! Deviations from SolidCraft: [`Exchange::entities`] is a `BTreeMap` (was a `HashMap`), so
 //! iterating it is in id order on every platform; what is stored and which definition wins a
@@ -30,49 +29,126 @@
 //! in the raw text, so one inside a string in such a section ends the skip early and the rest is
 //! read as sections. No corpus file has these sections.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::num::IntErrorKind;
 
-/// Largest STEP text we parse.
+/// Largest STEP text [`parse`] and [`parse_with`] read. A caller whose user raised the limit
+/// passes its own to [`parse_with_max_bytes`] (SolidCraft's Preferences › General › Largest file
+/// to open, #13329).
 pub const MAX_BYTES: usize = 512 << 20;
-/// Most entity instances in one file, a repeated id counted each time.
-pub const MAX_ENTITIES: usize = 20_000_000;
+/// Fewest bytes of text a real file spends on one parameter, its separator counted.
+///
+/// The count limits follow the size limit at this density, so every file of a real density that
+/// is within the size limit is read (#15588: a 350 MB file was refused for its parameter count
+/// although the size limit is 512 MB). The densest corpus file (NIST
+/// `nist_stc_09_asme1_ap242-e3.stp`) spends about 5.4 bytes a parameter; CAD exports run about
+/// 9 to 14.
+const BYTES_PER_PARAM: usize = 4;
+/// Fewest bytes of text a real file spends on one entity instance or record. The densest corpus
+/// files spend about 38 bytes an instance (`#123=VERTEX_POINT('',#122);` is 28).
+const BYTES_PER_RECORD: usize = 16;
+/// The most of any count on a 32-bit target (wasm32), whose address space is 4 GB: the counts
+/// there stay where they held the parsed records and parameters to under 1 GB. A browser can't
+/// hold the parse of a file dense enough to reach them, so it is refused instead of running out
+/// of memory.
+const MAX_COUNT: usize = if cfg!(target_pointer_width = "32") {
+    20_000_000
+} else {
+    usize::MAX
+};
+/// Most entity instances in one file, a repeated id counted each time: one for every
+/// [`BYTES_PER_RECORD`] bytes of [`MAX_BYTES`].
+pub const MAX_ENTITIES: usize = min(MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT);
 /// Deepest parameter list nesting.
 const MAX_DEPTH: usize = 64;
 /// A complex instance is refused when more than this many of its parts have been read and
 /// another follows.
 const MAX_COMPLEX_PARTS: usize = 64;
-/// Most records in one file's DATA sections, each part of a complex instance counted.
+/// Most records in one file's DATA sections, each part of a complex instance counted: one for
+/// every [`BYTES_PER_RECORD`] bytes of [`MAX_BYTES`].
 ///
 /// A record holds no parameter when its list is empty, so [`MAX_PARAMS`] does not bound them:
-/// `A()` is three bytes and its [`Record`] 48 (on a 64-bit target) plus its name, so a text at
-/// the size cap of empty complex-instance parts could ask for about 8 GB of record slots. This
-/// cap holds them to under 1 GB there; the whole corpus holds under a million instances.
-pub const MAX_RECORDS: usize = 20_000_000;
-/// Most parameters in one file, nested ones and the header's included.
+/// `A()` is three bytes and its [`Record`] 48 (on a 64-bit target) plus its name. This cap holds
+/// the record slots to about three times the size of the text.
+pub const MAX_RECORDS: usize = min(MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT);
+/// Most parameters in one file, nested ones and the header's included: one for every
+/// [`BYTES_PER_PARAM`] bytes of [`MAX_BYTES`].
 ///
 /// [`MAX_BYTES`] alone does not bound memory: `$,` is two bytes and its [`Param`] 48 (on a
-/// 64-bit target), so a text at the size cap could ask for about 13 GB. This cap holds the
-/// parameters themselves to under 1 GB there, and less on wasm32, where a `Param` is smaller.
-/// The densest corpus file (NIST `nist_stc_09_asme1_ap242-e3.stp`, about 5.4 bytes a parameter
-/// counting its separators) would reach it at about 110 MB; it holds under a million.
-pub const MAX_PARAMS: usize = 20_000_000;
+/// 64-bit target), so a hostile text could ask for 24 times its size. A parse also holds its
+/// counts to the same density of its own text, so the memory a text of any content can make the
+/// parse hold stays under [`PEAK_PER_BYTE`] times its size.
+pub const MAX_PARAMS: usize = min(MAX_BYTES / BYTES_PER_PARAM, MAX_COUNT);
 
-/// The counts a parse refuses beyond: [`MAX_ENTITIES`] and [`MAX_PARAMS`] for every caller,
-/// smaller in tests so a limit is reached with a short text.
-#[derive(Clone, Copy)]
+/// Most memory reading a STEP text takes, for each byte of the text: the text, its parse and the
+/// topology read from that. Measured on a 200 MB file of real density (a corpus part repeated
+/// 238 times): the parse peaked at 11 times the text, and opening it in SolidCraft at 26 to 30
+/// times. A hostile text can't pass it: its counts are held to [`BYTES_PER_PARAM`] and
+/// [`BYTES_PER_RECORD`] of its length.
+/// [`parse_with_budget`] refuses a text whose reading would need more than the memory it is given.
+pub const PEAK_PER_BYTE: usize = 32;
+
+const fn min(a: usize, b: usize) -> usize {
+    if a < b { a } else { b }
+}
+
+/// The text size, the counts and the memory a parse refuses beyond: [`MAX_BYTES`],
+/// [`MAX_ENTITIES`], [`MAX_RECORDS`] and [`MAX_PARAMS`] by default, all raised together when a
+/// caller raises the size ([`Limits::for_bytes`]), smaller in tests so a limit is reached with a
+/// short text. `memory` is what the caller can spare for the reading, in bytes (no limit by
+/// default).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Limits {
+    bytes: usize,
     entities: usize,
     records: usize,
     params: usize,
+    memory: usize,
 }
 
 const LIMITS: Limits = Limits {
+    bytes: MAX_BYTES,
     entities: MAX_ENTITIES,
     records: MAX_RECORDS,
     params: MAX_PARAMS,
+    memory: usize::MAX,
 };
+
+impl Limits {
+    /// The limits for a text of up to `max_bytes` (never below the defaults). The counts follow
+    /// the size at [`BYTES_PER_PARAM`] and [`BYTES_PER_RECORD`] (at most [`MAX_COUNT`]), so a
+    /// file of a real density is read whenever its size is, and the memory they bound stays the
+    /// same multiple of the text's size.
+    fn for_bytes(max_bytes: usize) -> Self {
+        Self::at_density(max_bytes.max(MAX_BYTES))
+    }
+
+    /// The limits for a text of up to `bytes`, the counts at [`BYTES_PER_PARAM`] and
+    /// [`BYTES_PER_RECORD`] (at most [`MAX_COUNT`]).
+    fn at_density(bytes: usize) -> Self {
+        Self {
+            bytes,
+            entities: min(bytes / BYTES_PER_RECORD, MAX_COUNT),
+            records: min(bytes / BYTES_PER_RECORD, MAX_COUNT),
+            params: min(bytes / BYTES_PER_PARAM, MAX_COUNT),
+            memory: usize::MAX,
+        }
+    }
+
+    /// These limits for a text of `len` bytes: the counts no more than a real file of that length
+    /// holds, so the memory a parse takes follows the text it reads, not only the size limit.
+    fn for_text(self, len: usize) -> Self {
+        let own = Self::at_density(len);
+        Self {
+            entities: min(self.entities, own.entities),
+            records: min(self.records, own.records),
+            params: min(self.params, own.params),
+            ..self
+        }
+    }
+}
 
 /// A parameter value.
 #[derive(Clone, Debug, PartialEq)]
@@ -197,9 +273,34 @@ impl Entity {
     }
 }
 
+/// The HEADER section's file description and file name, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Header {
+    /// `FILE_DESCRIPTION` lines.
+    pub descriptions: Vec<String>,
+    /// `FILE_DESCRIPTION` implementation level.
+    pub implementation_level: String,
+    /// `FILE_NAME` name.
+    pub file_name: String,
+    /// `FILE_NAME` time stamp.
+    pub time_stamp: String,
+    /// `FILE_NAME` authors.
+    pub authors: Vec<String>,
+    /// `FILE_NAME` organizations.
+    pub organizations: Vec<String>,
+    /// `FILE_NAME` preprocessor version.
+    pub preprocessor_version: String,
+    /// `FILE_NAME` originating system.
+    pub originating_system: String,
+    /// `FILE_NAME` authorization.
+    pub authorization: String,
+}
+
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
+    /// The HEADER's description and file name, field by field.
+    pub header: Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// `FILE_NAME` originating system.
@@ -219,6 +320,34 @@ impl Exchange {
     pub fn get(&self, id: u64) -> Option<&Entity> {
         self.entities.get(&id)
     }
+
+    /// The original label shared by every listed face, including repeated source faces.
+    /// Missing, empty, `NONE` or different labels give no common name.
+    pub fn common_face_name(&self, faces: &[u64]) -> Option<&str> {
+        let (first, rest) = faces.split_first()?;
+        let name = self.face_name(*first)?;
+        rest.iter()
+            .all(|face| self.face_name(*face) == Some(name))
+            .then_some(name)
+    }
+
+    fn face_name(&self, mut id: u64) -> Option<&str> {
+        // Match the topology reader's limit of four nested oriented uses. Labels belong
+        // to the underlying face, not to its oriented wrapper.
+        for _ in 0..=4 {
+            let e = self.get(id)?;
+            match e.name() {
+                "ORIENTED_FACE" => id = e.params().get(2)?.as_ref_id()?,
+                "ADVANCED_FACE" | "FACE_SURFACE" | "FACE" => {
+                    let name = e.params().first()?.as_str()?.trim();
+                    return (!name.is_empty() && !name.eq_ignore_ascii_case("none"))
+                        .then_some(name);
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
 }
 
 struct Lexer<'a> {
@@ -232,17 +361,22 @@ struct Lexer<'a> {
     records: usize,
     /// The most records to read.
     max_records: usize,
+    /// The last place `line` counted to and the newlines before it, so errors met one after
+    /// another while skipping bad header records count each byte once.
+    counted: Cell<(usize, usize)>,
 }
 
 /// Why a text was refused. Its message is the one `parse` returned as a string before it had
 /// a type; `String::from` gives it back for callers that collect messages.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The text is longer than [`MAX_BYTES`].
-    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, MAX_BYTES >> 20)]
+    /// The text is longer than the limit ([`MAX_BYTES`] unless the caller raised it).
+    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, .limit >> 20)]
     TooLarge {
         /// The text's length.
         bytes: usize,
+        /// The limit it is longer than, in bytes.
+        limit: usize,
     },
     /// The text does not start with `ISO-10303-21;`.
     #[error("not a STEP file (no ISO-10303-21 header)")]
@@ -268,6 +402,18 @@ pub enum Error {
         /// The limit, [`MAX_PARAMS`].
         limit: usize,
     },
+    /// Reading the text would take more memory than the caller can spare.
+    #[error(
+        "STEP file needs about {} MB of memory to read, more than the {} MB available for it",
+        .needed >> 20,
+        .available >> 20
+    )]
+    NeedsMemory {
+        /// The memory reading it would take, [`PEAK_PER_BYTE`] times the text's length.
+        needed: usize,
+        /// The memory the caller can spare, in bytes.
+        available: usize,
+    },
     /// The [`Progress`] watcher cancelled.
     #[error("STEP import cancelled")]
     Cancelled,
@@ -289,9 +435,32 @@ impl From<Error> for String {
 
 impl Lexer<'_> {
     fn line(&self) -> usize {
-        self.s
-            .get(..self.i)
-            .map_or(0, |b| b.split(|c| *c == b'\n').count())
+        let (at, before) = self.counted.get();
+        let (from, before) = if self.i >= at { (at, before) } else { (0, 0) };
+        let Some(b) = self.s.get(from..self.i) else {
+            return 0;
+        };
+        #[allow(clippy::naive_bytecount)] // no bytecount dependency in the record
+        let newlines = before + b.iter().filter(|c| **c == b'\n').count();
+        self.counted.set((self.i, newlines));
+        newlines + 1
+    }
+    /// Where the next line after `from` that starts with a keyword begins.
+    fn next_header_line(&self, from: usize) -> Option<usize> {
+        let rest = self.s.get(from..)?;
+        let mut at = rest.iter().position(|&c| c == b'\n')? + 1;
+        loop {
+            let line = at
+                + rest
+                    .get(at..)?
+                    .iter()
+                    .take_while(|c| matches!(c, b' ' | b'\t' | b'\r'))
+                    .count();
+            if rest.get(line)?.is_ascii_uppercase() {
+                return Some(from + line);
+            }
+            at += rest.get(at..)?.iter().position(|&c| c == b'\n')? + 1;
+        }
     }
     fn fail<T>(&self, msg: &str) -> Result<T, Error> {
         Err(Error::Syntax {
@@ -519,12 +688,65 @@ impl Lexer<'_> {
             });
         }
         self.records += 1;
-        let name = self.keyword()?;
+        let name = long_name(self.keyword()?);
         self.expect(b'(')?;
         Ok(Record {
             name,
             params: self.list_rest(1)?,
         })
+    }
+}
+
+/// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
+/// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
+/// are read from, with their long names. Every pair is as ISO's short-names file gives it
+/// (<http://standards.iso.org/iso/10303/tech/short_names/short-names.txt>), checked entry by entry.
+/// `step-import`'s table (#2582) mapped `CMCRSG` to `COMPOSITE_CURVE`; it is
+/// `COMPOSITE_CURVE_SEGMENT`, and `COMPOSITE_CURVE` is `CMPCRV`.
+const SHORT_NAMES: [(&str, &str); 36] = [
+    ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("ADVFC", "ADVANCED_FACE"),
+    ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+    ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+    ("CLSSHL", "CLOSED_SHELL"),
+    ("CMCRSG", "COMPOSITE_CURVE_SEGMENT"),
+    ("CMPCRV", "COMPOSITE_CURVE"),
+    ("CNBSUN", "CONVERSION_BASED_UNIT"),
+    ("CRTPNT", "CARTESIAN_POINT"),
+    ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
+    ("DRCTN", "DIRECTION"),
+    ("EDGCRV", "EDGE_CURVE"),
+    ("EDGLP", "EDGE_LOOP"),
+    ("FBSR", "FACETED_BREP_SHAPE_REPRESENTATION"),
+    ("FCBND", "FACE_BOUND"),
+    ("FCOTBN", "FACE_OUTER_BOUND"),
+    ("FCSRF", "FACE_SURFACE"),
+    ("FCTBR", "FACETED_BREP"),
+    ("GMRPCN", "GEOMETRIC_REPRESENTATION_CONTEXT"),
+    ("GMTST", "GEOMETRIC_SET"),
+    ("LMWU", "LENGTH_MEASURE_WITH_UNIT"),
+    ("LNGUNT", "LENGTH_UNIT"),
+    ("MNSLBR", "MANIFOLD_SOLID_BREP"),
+    ("NMDUNT", "NAMED_UNIT"),
+    ("ORNEDG", "ORIENTED_EDGE"),
+    ("PAMWU", "PLANE_ANGLE_MEASURE_WITH_UNIT"),
+    ("PLYLP", "POLY_LOOP"),
+    ("PRDCT", "PRODUCT"),
+    ("PRDDFN", "PRODUCT_DEFINITION"),
+    ("PRDFSH", "PRODUCT_DEFINITION_SHAPE"),
+    ("SHDFRP", "SHAPE_DEFINITION_REPRESENTATION"),
+    ("SHPRPR", "SHAPE_REPRESENTATION"),
+    ("SHRPRL", "SHAPE_REPRESENTATION_RELATIONSHIP"),
+    ("TRMCRV", "TRIMMED_CURVE"),
+    ("UMWU", "UNCERTAINTY_MEASURE_WITH_UNIT"),
+    ("VRTPNT", "VERTEX_POINT"),
+];
+
+/// An entity name as its long form where it is one of [`SHORT_NAMES`].
+fn long_name(name: String) -> String {
+    match SHORT_NAMES.iter().find(|(short, _)| *short == name) {
+        Some((_, long)) => (*long).to_string(),
+        None => name,
     }
 }
 
@@ -644,15 +866,62 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
     parse_limited(text, watch, LIMITS)
 }
 
+/// [`parse_with`] reading a text of up to `max_bytes` (never less than [`MAX_BYTES`]); the
+/// entity, record and parameter limits grow in proportion. For a caller whose user raised the
+/// largest file to open (#13329).
+pub fn parse_with_max_bytes(
+    text: &str,
+    watch: Option<&dyn Progress>,
+    max_bytes: usize,
+) -> Result<Exchange, Error> {
+    parse_limited(text, watch, Limits::for_bytes(max_bytes))
+}
+
+/// [`parse_with_max_bytes`] refusing, before it reads anything, a text whose reading would take
+/// more than `memory` bytes ([`PEAK_PER_BYTE`] times its length): [`Error::NeedsMemory`]. For a
+/// caller that knows what the machine can spare, so a large file opens on a machine that can
+/// hold it and is refused by name on one that can't.
+pub fn parse_with_budget(
+    text: &str,
+    watch: Option<&dyn Progress>,
+    max_bytes: usize,
+    memory: usize,
+) -> Result<Exchange, Error> {
+    let limits = Limits {
+        memory,
+        ..Limits::for_bytes(max_bytes)
+    };
+    parse_limited(text, watch, limits)
+}
+
+/// Whether reading a STEP text of `len` bytes fits in `memory` bytes: [`Error::NeedsMemory`],
+/// naming [`PEAK_PER_BYTE`] times `len`, when it doesn't. A caller can ask this before it reads
+/// the file, to warn that it may need more memory than there is.
+pub fn check_memory(len: usize, memory: usize) -> Result<(), Error> {
+    let needed = len.saturating_mul(PEAK_PER_BYTE);
+    if needed > memory {
+        return Err(Error::NeedsMemory {
+            needed,
+            available: memory,
+        });
+    }
+    Ok(())
+}
+
 /// [`parse_with`] with the counts it refuses beyond given.
 fn parse_limited(
     text: &str,
     watch: Option<&dyn Progress>,
     limits: Limits,
 ) -> Result<Exchange, Error> {
-    if text.len() > MAX_BYTES {
-        return Err(Error::TooLarge { bytes: text.len() });
+    if text.len() > limits.bytes {
+        return Err(Error::TooLarge {
+            bytes: text.len(),
+            limit: limits.bytes,
+        });
     }
+    check_memory(text.len(), limits.memory)?;
+    let limits = limits.for_text(text.len());
     // Some writers start the file with a UTF-8 byte order mark.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lx = Lexer {
@@ -662,6 +931,7 @@ fn parse_limited(
         max_params: limits.params,
         records: 0,
         max_records: limits.records,
+        counted: Cell::new((0, 0)),
     };
     let magic = lx.keyword()?;
     if magic != "ISO-10303-21" {
@@ -679,14 +949,38 @@ fn parse_limited(
             "HEADER" => {
                 lx.expect(b';')?;
                 loop {
-                    let k = lx.keyword()?;
-                    if k == "ENDSEC" {
-                        lx.expect(b';')?;
-                        break;
+                    // The header only describes the file, and other CAD systems read past a
+                    // record that does not parse (#11650): skip to the next line that starts
+                    // with a keyword. If there is none, the file is not readable.
+                    let start = lx.i;
+                    // A header without its `ENDSEC;` must not read the DATA section as
+                    // header records to skip.
+                    if lx.keyword().as_deref() == Ok("DATA") {
+                        return lx.fail("expected `ENDSEC;` before `DATA`");
                     }
-                    lx.expect(b'(')?;
-                    let params = lx.list_rest(1)?;
-                    lx.expect(b';')?;
+                    lx.i = start;
+                    let record = (|| {
+                        let k = lx.keyword()?;
+                        if k == "ENDSEC" {
+                            lx.expect(b';')?;
+                            return Ok(None);
+                        }
+                        lx.expect(b'(')?;
+                        let params = lx.list_rest(1)?;
+                        lx.expect(b';')?;
+                        Ok(Some((k, params)))
+                    })();
+                    let (k, params) = match record {
+                        Ok(Some(record)) => record,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let Some(next) = lx.next_header_line(start) else {
+                                return Err(e);
+                            };
+                            lx.i = next;
+                            continue;
+                        }
+                    };
                     match k.as_str() {
                         "FILE_SCHEMA" => {
                             if let Some(Param::List(v)) = params.first() {
@@ -703,9 +997,39 @@ fn parse_limited(
                                     .filter_map(|p| p.as_str())
                                     .collect::<Vec<_>>()
                                     .join(" ");
+                                ex.header.descriptions = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect();
+                            }
+                            if let Some(level) = params.get(1).and_then(Param::as_str) {
+                                level.clone_into(&mut ex.header.implementation_level);
                             }
                         }
                         "FILE_NAME" => {
+                            let string = |i: usize| {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_str)
+                                    .unwrap_or("")
+                                    .to_string()
+                            };
+                            let strings = |i: usize| -> Vec<String> {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_list)
+                                    .unwrap_or(&[])
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect()
+                            };
+                            ex.header.file_name = string(0);
+                            ex.header.time_stamp = string(1);
+                            ex.header.authors = strings(2);
+                            ex.header.organizations = strings(3);
+                            ex.header.preprocessor_version = string(4);
+                            ex.header.originating_system = string(5);
+                            ex.header.authorization = string(6);
                             ex.preprocessor = params
                                 .get(4)
                                 .and_then(Param::as_str)
@@ -810,6 +1134,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn common_face_names_use_decoded_labels_and_ignore_oriented_wrappers() {
+        let ex = parse(
+            "ISO-10303-21;DATA;
+#1=ADVANCED_FACE('  Inspection \\X2\\00E9\\X0\\  ',(),$,.T.);
+#2=FACE_SURFACE('Inspection \\X2\\00E9\\X0\\',(),$,.T.);
+#3=FACE('Inspection \\X2\\00E9\\X0\\',());
+#4=ORIENTED_FACE('Wrapper',*,#1,.F.);
+#5=ORIENTED_FACE('',*,#4,.T.);
+#6=ORIENTED_FACE('',*,#5,.T.);
+#7=ORIENTED_FACE('',*,#6,.T.);
+#8=ORIENTED_FACE('',*,#7,.T.);
+ENDSEC;END-ISO-10303-21;",
+        )
+        .unwrap();
+        assert_eq!(
+            ex.common_face_name(&[1, 2, 3, 4, 7, 1]),
+            Some("Inspection é")
+        );
+        assert_eq!(
+            ex.common_face_name(&[8]),
+            None,
+            "a fifth oriented wrapper exceeds the bound"
+        );
+        assert_eq!(
+            ex.get(4).unwrap().params()[0].as_str(),
+            Some("Wrapper"),
+            "source labels are not rewritten"
+        );
+    }
+
+    #[test]
+    fn common_face_names_do_not_guess_missing_mixed_or_invalid_labels() {
+        let ex = parse(
+            "ISO-10303-21;DATA;
+#1=ADVANCED_FACE('Inspection surface',(),$,.T.);
+#2=ADVANCED_FACE('Other surface',(),$,.T.);
+#3=ADVANCED_FACE('   ',(),$,.T.);
+#4=ADVANCED_FACE(' nOnE ',(),$,.T.);
+#5=ADVANCED_FACE($,(),$,.T.);
+#6=ORIENTED_FACE('',*,#6,.T.);
+#7=ORIENTED_FACE('',*,$,.T.);
+#8=CARTESIAN_POINT('Inspection surface',(0.,0.,0.));
+ENDSEC;END-ISO-10303-21;",
+        )
+        .unwrap();
+        assert_eq!(ex.common_face_name(&[]), None);
+        for id in [2, 3, 4, 5, 6, 7, 8, 999] {
+            assert_eq!(ex.common_face_name(&[1, id]), None, "face #{id}");
+        }
+    }
+
+    #[test]
     fn parses_simple_and_complex() {
         let t = "ISO-10303-21;\nHEADER;FILE_DESCRIPTION((''),'2;1');\nFILE_NAME('a','',(''),(''),'','sys','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));ENDSEC;\nDATA;\n#1=CARTESIAN_POINT('p',(0.,1.5E1,-2));\n/* c */ #2=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#3=X('it''s','\\X2\\00E9\\X0\\',$,#1,LENGTH_MEASURE(1.E-3),\"0F\");\nENDSEC;\nEND-ISO-10303-21;\n";
         let ex = parse(t).unwrap();
@@ -838,6 +1214,82 @@ mod tests {
     /// A DATA section holding `data`, with no header.
     fn data(data: &str) -> String {
         format!("ISO-10303-21;DATA;{data}ENDSEC;END-ISO-10303-21;")
+    }
+
+    /// #11650: the header is metadata, so a malformed record in it must not stop the import.
+    #[test]
+    fn a_malformed_header_record_is_skipped() {
+        let t = "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''), '2;1');1');
+
+FILE_NAME('','',(''),(''),'','sys','');
+
+FILE_SCHEMA (('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('p',(0.,1.,2.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let ex = parse(t).unwrap();
+        // The records after the broken one are still read.
+        assert_eq!(ex.originating_system, "sys");
+        assert_eq!(ex.schemas, vec!["AUTOMOTIVE_DESIGN"]);
+        assert_eq!(ex.get(1).unwrap().name(), "CARTESIAN_POINT");
+        // A header with nothing after the junk to resume at is still an error.
+        assert!(
+            parse(
+                "ISO-10303-21;
+HEADER;
+FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
+            )
+            .is_err()
+        );
+    }
+
+    /// #11650: skipping bad header records stops at DATA when the header's `ENDSEC;` is
+    /// missing, so the entities are not skipped as header records and the file is an error.
+    #[test]
+    fn a_header_without_endsec_does_not_swallow_the_data_section() {
+        for data in ["DATA;", "DATA('d', ('AUTOMOTIVE_DESIGN'));"] {
+            let t = format!(
+                "ISO-10303-21;\nHEADER;\nBAD;\n{data}\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n"
+            );
+            let e = parse(&t).unwrap_err().to_string();
+            assert!(e.contains("line 4"), "{e}");
+        }
+    }
+
+    /// #11650: many bad header records in a row are skipped in time that grows with the file,
+    /// and the error after them still names the right line.
+    #[test]
+    fn many_bad_header_records_are_skipped_in_one_pass() {
+        let n = 100_000;
+        let bad = "BAD;\n".repeat(n);
+        let ok = format!(
+            "ISO-10303-21;\nHEADER;\n{bad}ENDSEC;\nDATA;\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n"
+        );
+        assert_eq!(parse(&ok).unwrap().get(1).unwrap().name(), "A");
+        let broken =
+            format!("ISO-10303-21;\nHEADER;\n{bad}DATA;\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n");
+        let e = parse(&broken).unwrap_err().to_string();
+        assert!(e.contains(&format!("line {}", n + 3)), "{e}");
+    }
+
+    #[test]
+    fn short_entity_names_read_as_their_long_names() {
+        let ex = parse(&data(
+            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');#4=VRTPNT('',#1);#5=FCBND('',#2,.T.);",
+        ))
+        .unwrap();
+        let name = |id: u64| ex.get(id).map(|e| e.name().to_string());
+        assert_eq!(name(1).as_deref(), Some("CARTESIAN_POINT"));
+        assert_eq!(name(2).as_deref(), Some("POLY_LOOP"));
+        assert_eq!(name(4).as_deref(), Some("VERTEX_POINT"));
+        assert_eq!(name(5).as_deref(), Some("FACE_BOUND"));
+        // A name outside the table is kept as written.
+        assert_eq!(name(3).as_deref(), Some("SOME_SHRT"));
     }
 
     #[test]
@@ -969,6 +1421,150 @@ mod tests {
             .unwrap_err(),
             Error::TooManyRecords { limit: 2 }
         );
+    }
+
+    #[test]
+    fn a_raised_size_limit_reads_a_longer_text_and_raises_the_counts_with_it() {
+        let t = data("#1=A($);");
+        let small = Limits {
+            bytes: t.len() - 1,
+            ..LIMITS
+        };
+        assert_eq!(
+            parse_limited(&t, None, small).unwrap_err(),
+            Error::TooLarge {
+                bytes: t.len(),
+                limit: t.len() - 1
+            }
+        );
+        assert!(
+            parse_limited(
+                &t,
+                None,
+                Limits {
+                    bytes: t.len(),
+                    ..LIMITS
+                }
+            )
+            .is_ok()
+        );
+        // The message names the limit in force, not the default (#13329).
+        let e = Error::TooLarge {
+            bytes: 909 << 20,
+            limit: 2048 << 20,
+        };
+        assert_eq!(e.to_string(), "STEP file too large (909 MB, limit 2048 MB)");
+        // A raised size raises every count by the same factor; a lower one changes nothing.
+        assert_eq!(Limits::for_bytes(0), LIMITS);
+        assert_eq!(Limits::for_bytes(MAX_BYTES), LIMITS);
+        assert_eq!(
+            Limits::for_bytes(4 * MAX_BYTES),
+            Limits {
+                bytes: 4 * MAX_BYTES,
+                entities: min(4 * MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT),
+                records: min(4 * MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT),
+                params: min(4 * MAX_BYTES / BYTES_PER_PARAM, MAX_COUNT),
+                memory: usize::MAX,
+            }
+        );
+    }
+
+    /// A text whose reading would take more memory than the caller can spare is refused before
+    /// anything is read, by name and with the memory it needs; the same text reads when the
+    /// memory is there.
+    #[test]
+    fn a_text_needing_more_memory_than_is_available_is_refused_with_what_it_needs() {
+        let text = include_str!("../../tests/fixtures/discord-2026-10-30-fillet.step");
+        let needed = text.len() * PEAK_PER_BYTE;
+        assert!(parse_with_budget(text, None, MAX_BYTES, needed).is_ok());
+        let refused = parse_with_budget(text, None, MAX_BYTES, needed - 1).unwrap_err();
+        assert_eq!(
+            refused,
+            Error::NeedsMemory {
+                needed,
+                available: needed - 1
+            }
+        );
+        let big = Error::NeedsMemory {
+            needed: 11 << 30,
+            available: 8 << 30,
+        };
+        assert_eq!(
+            big.to_string(),
+            "STEP file needs about 11264 MB of memory to read, more than the 8192 MB available for it"
+        );
+        // The check comes first: it reads nothing, not even the header.
+        assert_eq!(
+            parse_with_budget("not a step file", None, MAX_BYTES, 1).unwrap_err(),
+            Error::NeedsMemory {
+                needed: 15 * PEAK_PER_BYTE,
+                available: 1
+            }
+        );
+        // Asked before the file is read, the answer is the same.
+        assert_eq!(check_memory(text.len(), needed), Ok(()));
+        assert_eq!(check_memory(text.len(), needed - 1), Err(refused));
+    }
+
+    /// A text's counts are held to what a real file of its own length holds, so a hostile text
+    /// well within the size limit can't make the parse hold more than [`PEAK_PER_BYTE`] times
+    /// its size.
+    #[test]
+    fn a_text_s_counts_follow_its_own_length() {
+        // `$,` is two bytes a parameter, half the density any real file reaches.
+        let dense = data(&format!("#1=A({}$);", "$,".repeat(400)));
+        assert_eq!(
+            parse_limited(&dense, None, LIMITS).unwrap_err(),
+            Error::TooManyParams {
+                limit: dense.len() / BYTES_PER_PARAM
+            }
+        );
+        // At a real density the same count of parameters is read.
+        let real = data(&format!("#1=A({}$);", "1.5,".repeat(400)));
+        assert!(parse_limited(&real, None, LIMITS).is_ok());
+    }
+
+    /// #15588: a 350 MB file was refused for its parameter count although the size limit is
+    /// 512 MB, because the counts allowed one parameter for every 27 bytes and real files spend
+    /// 9 to 14. The counts now follow the size at a real file's density, so a real file the size
+    /// limit lets through is read.
+    #[test]
+    fn a_real_file_within_the_size_limit_is_not_refused_for_its_counts() {
+        let text = include_str!("../../tests/fixtures/discord-2026-10-30-fillet.step");
+        assert!(parse_limited(text, None, Limits::at_density(text.len())).is_ok());
+        // The old counts, scaled to this text's size, refused it.
+        let old = |count: u128| {
+            usize::try_from(count * text.len() as u128 / (512u128 << 20)).unwrap_or(usize::MAX)
+        };
+        let refused = parse_limited(
+            text,
+            None,
+            Limits {
+                bytes: text.len(),
+                entities: old(20_000_000),
+                records: old(20_000_000),
+                params: old(20_000_000),
+                memory: usize::MAX,
+            },
+        );
+        assert!(
+            matches!(refused, Err(Error::TooManyParams { .. })),
+            "{refused:?}"
+        );
+        // The densest corpus file, about 5.4 bytes a parameter, is read at the size limit, and
+        // so are the densest corpus files' instances, about 38 bytes each. A 32-bit target keeps
+        // its counts at MAX_COUNT instead.
+        #[cfg(target_pointer_width = "64")]
+        const {
+            assert!(MAX_PARAMS as u128 * 54 >= MAX_BYTES as u128 * 10);
+            assert!(MAX_RECORDS as u128 * 38 >= MAX_BYTES as u128);
+            assert!(MAX_ENTITIES as u128 * 38 >= MAX_BYTES as u128);
+        }
+        #[cfg(not(target_pointer_width = "64"))]
+        const {
+            assert!(MAX_PARAMS == MAX_COUNT && MAX_RECORDS == MAX_COUNT);
+            assert!(MAX_ENTITIES == MAX_COUNT);
+        }
     }
 
     #[test]

@@ -51,6 +51,52 @@ fn an_open_corner_has_its_inside_where_it_bends() {
     assert!(inside[0].contains(Vec2::new(5.0, 1.0)) && !inside[0].contains(Vec2::new(5.0, -1.0)));
 }
 
+/// Every corner of the wall's outlines lies in the closed area `inside`, within rounding.
+fn stays_within(regions: &[solidcore_record::Region2], inside: impl Fn(Vec2) -> bool) {
+    for r in regions {
+        for lp in std::iter::once(&r.outer).chain(&r.holes) {
+            for p in lp.polyline(1e-4) {
+                assert!(inside(p), "the wall reaches out to {p:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn walls_inside_sharp_corners_stay_inside_the_outline() {
+    // #7589: at corners sharper than a right angle a band's square end reached past the next
+    // side, out of the outline; the two bands now meet in a mitre on the corner's bisector.
+    let triangle = vec![line([0.0, 0.0], [20.0, 0.0]), line([20.0, 0.0], [0.0, 10.0]), line([0.0, 10.0], [0.0, 0.0])];
+    let regions = thin_wall_regions(&triangle, 1.0, 0.0).unwrap();
+    stays_within(&regions, |p| p.x >= -1e-9 && p.y >= -1e-9 && p.x / 20.0 + p.y / 10.0 <= 1.0 + 1e-9);
+    // The opening is the triangle shrunk about its incircle's centre.
+    let r = 200.0 / (30.0 + 500f64.sqrt());
+    close(area(&triangle, 1.0, 0.0), 100.0 * (1.0 - ((r - 1.0) / r).powi(2)));
+    assert_eq!((regions[0].outer.segs.len(), regions[0].holes[0].segs.len()), (3, 3));
+
+    // A parallelogram with 80° corners; its opening is a parallelogram 2 mm narrower each way.
+    let (c, s) = (80f64.to_radians().cos(), 80f64.to_radians().sin());
+    let p = [[0.0, 0.0], [20.0, 0.0], [20.0 + 10.0 * c, 10.0 * s], [10.0 * c, 10.0 * s]];
+    let sides: Vec<Vec<Seg2>> = (0..4).map(|k| line(p[k], p[(k + 1) % 4])).collect();
+    let regions = thin_wall_regions(&sides, 1.0, 0.0).unwrap();
+    stays_within(&regions, |q| q.y >= -1e-9 && q.y <= 10.0 * s + 1e-9);
+    let (h1, h2) = (10.0 * s, 20.0 * s);
+    close(area(&sides, 1.0, 0.0), (h1 * h2 - (h1 - 2.0) * (h2 - 2.0)) / s);
+
+    // A segment of a circle (chord and arc meeting at 60°): the opening is the segment of the
+    // circle 1 mm smaller above the chord 1 mm higher, so the line's and the arc's walls meet
+    // where their inner sides cross.
+    let a = Vec2::new(75f64.sqrt(), 5.0);
+    let cap = vec![
+        vec![Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: PI / 6.0, sweep: 2.0 * PI / 3.0 }],
+        vec![Seg2::Line { a: Vec2::new(-a.x, 5.0), b: a }],
+    ];
+    let regions = thin_wall_regions(&cap, 1.0, 0.0).unwrap();
+    stays_within(&regions, |q| q.y >= 5.0 - 1e-9 && q.len() <= 10.0 + 1e-9);
+    let segment = |r: f64, d: f64| r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    close(area(&cap, 1.0, 0.0), segment(10.0, 5.0) - segment(9.0, 6.0));
+}
+
 #[test]
 fn a_straight_wall_takes_its_side_from_the_drawn_direction() {
     let up = thin_wall_regions(&[line([0.0, 0.0], [10.0, 0.0])], 2.0, 0.0).unwrap();
@@ -115,10 +161,31 @@ fn a_spline_wall_is_its_length_times_its_thickness() {
     }
 }
 
+/// #7333: a wall as thick as the radius of an arc it follows, or thicker, on its inner side.
 #[test]
-fn walls_thicker_than_a_curve_bends_or_without_thickness_are_refused() {
+fn a_wall_thicker_than_an_arcs_radius_covers_the_arcs_whole_sector() {
+    let r: f64 = 2.0;
+    // A line, a quarter arc of radius 2 and a line: the wall follows them on both sides.
+    let path = vec![
+        line([-10.0, 0.0], [0.0, 0.0]),
+        vec![Seg2::Arc { center: Vec2::new(0.0, 2.0), radius: r, start: -PI / 2.0, sweep: PI / 2.0 }],
+        line([2.0, 2.0], [2.0, 12.0]),
+    ];
+    for half in [1.9, 2.0, 2.1, 3.0] {
+        let regions = thin_wall_regions(&path, half, half).unwrap_or_else(|e| panic!("wall of {} mm: {e}", 2.0 * half));
+        assert_eq!(regions.len(), 1, "{} mm", 2.0 * half);
+        assert!(regions[0].holes.is_empty(), "{} mm", 2.0 * half);
+    }
+    // The bands of a half-circle: the sector out to radius + the outer wall, however thick the inner one.
+    let arc = vec![Seg2::Arc { center: Vec2::ZERO, radius: r, start: 0.0, sweep: PI }];
+    close(area(std::slice::from_ref(&arc), 3.0, 0.0), 0.5 * PI * r * r);
+    close(area(std::slice::from_ref(&arc), 2.5, 2.5), 0.5 * PI * 4.5f64.powi(2));
+}
+
+#[test]
+fn walls_thicker_than_a_free_form_curve_bends_or_without_thickness_are_refused() {
     let arc = vec![Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: PI }];
-    assert!(thin_wall_regions(std::slice::from_ref(&arc), 3.0, 0.0).is_err());
+    // (a wall thicker than an arc's radius is no longer refused, see below)
     assert!(thin_wall_regions(&[arc], 0.0, 3.0).is_ok());
     let l = [line([0.0, 0.0], [10.0, 0.0])];
     for (a, b) in [(0.0, 0.0), (-1.0, 2.0), (f64::NAN, 1.0), (1.0, f64::INFINITY)] {

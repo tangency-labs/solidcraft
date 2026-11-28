@@ -217,3 +217,166 @@ fn a_bore_through_the_wall_is_not_measured_as_the_uncut_band() {
     let area = r["items"][0]["area_mm2"].as_f64().unwrap();
     assert!(area < TAU * 5.0 * 20.0 - 1.0, "the bored wall's area {area} is less than the uncut {}: {r}", TAU * 5.0 * 20.0);
 }
+
+/// A flat face with no hole: its perimeter is the length of its four edges, with no outer and
+/// inner split (#12048).
+#[test]
+fn a_box_faces_perimeter_is_the_length_of_its_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let top = flat_face_at(&s, 20.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    assert!(close(&item["perimeter_mm"], 140.0, 1e-9), "2 x (40 + 30): {r}");
+    assert!(item.get("outer_perimeter_mm").is_none() && item.get("inner_perimeter_mm").is_none(), "a face with no hole has one loop: {r}");
+}
+
+/// A flat face with two holes: the perimeter adds the outer loop and both circles, each circle at
+/// its exact 2πr and not at the length of the polyline drawn for it (#12048).
+#[test]
+fn a_faces_perimeter_splits_into_its_outer_loop_and_its_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 12, "base": [40, 20, -1], "operation": "cut"}));
+    let top = flat_face_at(&s, 10.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    let holes = TAU * 3.0 + TAU * 5.0;
+    assert!(close(&item["outer_perimeter_mm"], 200.0, 1e-9), "2 x (60 + 40): {r}");
+    assert!(close(&item["inner_perimeter_mm"], holes, 1e-9), "2π x (3 + 5): {r}");
+    assert!(close(&item["perimeter_mm"], 200.0 + holes, 1e-9), "{r}");
+}
+
+/// The outer loop is the one around the holes, even when the holes together are the longer: three
+/// long narrow slots in a small plate add up to more than the plate's outline (#12048).
+#[test]
+fn the_outer_loop_is_the_one_around_the_holes_not_the_longest() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 5}));
+    for x in [5, 14, 23] {
+        run(&mut s, "solid.box", json!({"corner": [x, 2, -1], "length": 2, "width": 26, "height": 7, "operation": "cut"}));
+    }
+    let top = flat_face_at(&s, 5.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    assert!(close(&item["outer_perimeter_mm"], 120.0, 1e-9), "the plate's outline: {r}");
+    assert!(close(&item["inner_perimeter_mm"], 3.0 * 56.0, 1e-9), "three slots of 2 x (2 + 26): {r}");
+}
+
+/// A cylinder's side: both rims at their exact 2πr and not the seam that closes the surface, and
+/// no outer or inner rim. A cap: its one rim. A whole sphere has no edge around it (#12048).
+#[test]
+fn a_curved_faces_perimeter_counts_its_rims_and_not_its_seam() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [40, 10, 0], "operation": "new"}));
+    let side = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Cylinder { .. }));
+    let r = measure(&mut s, vec![side]);
+    let item = &r["items"][0];
+    assert!(close(&item["perimeter_mm"], 2.0 * TAU * 5.0, 1e-9), "two rims and no seam: {r}");
+    assert!(item.get("outer_perimeter_mm").is_none(), "a cylinder's rims are not outer and inner: {r}");
+    let cap = flat_face_at(&s, 20.0);
+    let r = measure(&mut s, vec![cap]);
+    assert!(close(&r["items"][0]["perimeter_mm"], TAU * 5.0, 1e-9), "the cap's rim: {r}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 5, "operation": "new"}));
+    let ball = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. }));
+    let r = measure(&mut s, vec![ball]);
+    assert!(r["items"][0].get("perimeter_mm").is_none(), "{r}");
+}
+
+/// The curved face of the piece of a sphere of radius 50 at the origin kept by `cuts`, each a
+/// box cut away, as measured.
+fn sphere_piece_area(cuts: &[Value]) -> f64 {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 50, "base": [0, 0, 0], "operation": "new"}));
+    for cut in cuts {
+        run(&mut s, "solid.box", cut.clone());
+    }
+    let ball = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Sphere { radius, .. } if (radius - 50.0).abs() < 1e-6));
+    let r = measure(&mut s, vec![ball]);
+    r["items"][0]["area_mm2"].as_f64().unwrap_or_else(|| panic!("no area: {r}"))
+}
+
+/// A box that cuts away everything above height `z` (`above`) or below it.
+fn cut_at(z: f64, above: bool) -> Value {
+    let corner = if above { z } else { z - 200.0 };
+    json!({"corner": [-100, -100, corner], "length": 200, "width": 200, "height": 200, "operation": "cut"})
+}
+
+/// A sphere cut by parallel planes 12.5 apart into 8 slices: the curved face of every slice is
+/// the exact zone 2πR·Δh, and the 8 add up to 4πR². The display mesh's triangles read
+/// 3902–3933 (#22556, the report's own sphere).
+#[test]
+fn every_slice_of_a_sphere_is_its_exact_zone() {
+    let want = TAU * 50.0 * 12.5;
+    let mut sum = 0.0;
+    for k in 0..8 {
+        let (low, high) = (-50.0 + 12.5 * f64::from(k), -37.5 + 12.5 * f64::from(k));
+        let mut cuts = Vec::new();
+        if k > 0 {
+            cuts.push(cut_at(low, false));
+        }
+        if k < 7 {
+            cuts.push(cut_at(high, true));
+        }
+        let area = sphere_piece_area(&cuts);
+        assert!((area - want).abs() <= want * 1e-6, "slice {k} from {low} to {high} is 2πR·Δh = {want}: {area}");
+        sum += area;
+    }
+    let whole = 2.0 * TAU * 2500.0;
+    assert!((sum - whole).abs() <= whole * 1e-6, "the slices add up to 4πR² = {whole}: {sum}");
+}
+
+/// A cap of a sphere is its exact 2πR·h, and the sphere with the cap cut away the rest of 4πR².
+#[test]
+fn a_cap_of_a_sphere_is_its_exact_area() {
+    let cap = sphere_piece_area(&[cut_at(20.0, false)]);
+    let want = TAU * 50.0 * 30.0;
+    assert!((cap - want).abs() <= want * 1e-6, "the cap above z = 20 is 2πR·h = {want}: {cap}");
+    let rest = sphere_piece_area(&[cut_at(20.0, true)]);
+    let want = TAU * 50.0 * 70.0;
+    assert!((rest - want).abs() <= want * 1e-6, "the rest below z = 20 is 2πR·h = {want}: {rest}");
+}
+
+/// A sphere cut by planes that are not parallel keeps a face with corners: the quarter of the
+/// zone between z = 0 and z = 25 in x > 0, y > 0 is a quarter of 2πR·25, and the quarter of the
+/// sphere below z = 25 a quarter of 2πR·75.
+#[test]
+fn a_piece_of_a_sphere_with_corners_is_its_exact_area() {
+    let quarter = [
+        json!({"corner": [-100, -100, -100], "length": 100, "width": 200, "height": 200, "operation": "cut"}),
+        json!({"corner": [0, -100, -100], "length": 100, "width": 100, "height": 200, "operation": "cut"}),
+        cut_at(25.0, true),
+    ];
+    let below = sphere_piece_area(&quarter);
+    let want = TAU * 50.0 * 75.0 / 4.0;
+    assert!((below - want).abs() <= want * 1e-6, "the quarter below z = 25 is ¼·2πR·75 = {want}: {below}");
+    let mut zone = quarter.to_vec();
+    zone.push(cut_at(0.0, false));
+    let band = sphere_piece_area(&zone);
+    let want = TAU * 50.0 * 25.0 / 4.0;
+    assert!((band - want).abs() <= want * 1e-6, "the quarter zone from z = 0 to 25 is ¼·2πR·25 = {want}: {band}");
+}
+
+/// `model.faces` lists each face of a sliced sphere at its exact area, as a pick's measure
+/// does: the flat disc at z = 12.5 is π(50² − 12.5²), not the sum of the mesh's triangles
+/// (#22556, where the disc at z = 37.5 read 3413.946 for 3436.117).
+#[test]
+fn model_faces_lists_a_sliced_spheres_faces_at_their_exact_areas() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 50, "base": [0, 0, 0], "operation": "new"}));
+    run(&mut s, "solid.box", cut_at(0.0, false));
+    run(&mut s, "solid.box", cut_at(12.5, true));
+    let name = s.model.state().bodies.first().unwrap().name.clone();
+    let r = run(&mut s, "model.faces", json!({"body": name}));
+    let areas: Vec<f64> = r["faces"].as_array().unwrap().iter().filter_map(|f| f["area"].as_f64()).collect();
+    for want in [std::f64::consts::PI * (2500.0 - 156.25), std::f64::consts::PI * 2500.0] {
+        assert!(areas.iter().any(|a| (a - want).abs() <= want * 1e-6), "a flat face of area {want}: {r}");
+    }
+    let curved: f64 = TAU * 50.0 * 12.5;
+    let total: f64 = areas.iter().sum();
+    let want = curved + std::f64::consts::PI * (2500.0 - 156.25) + std::f64::consts::PI * 2500.0;
+    assert!((total - want).abs() <= want * 1e-6, "the faces add up to {want}: {r}");
+}

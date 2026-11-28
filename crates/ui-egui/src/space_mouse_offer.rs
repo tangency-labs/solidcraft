@@ -100,7 +100,7 @@ pub struct Offer {
 /// - Reads: the device key, saved calibrations, the offered set, the never switch and the 3D mouse
 ///   enable switch (`app.space_mouse.device`, `app.preferences`); the readers present
 ///   (`space_mouse.drivers`); `ctx.input` focus, time and pointer position; `app.status`, `computing_since`,
-///   `file_picker_busy`, `file_load.busy`, `prefs_window.open`, `space_mouse.calibrating`,
+///   `file_picker_busy`, `file_load.busy`, `prefs_window.shell.open`, `space_mouse.calibrating`,
 ///   `ui_kit::input_blocked`.
 /// - Writes, only its own: `space_mouse.offer_since`, `space_mouse.offer_hidden`;
 ///   `space_mouse_offered` and `space_mouse_offer_never` (preferences) when the user closes it (×),
@@ -182,9 +182,9 @@ pub(crate) fn offerable(app: &SolveApp) -> Option<String> {
 fn input_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
     !ctx.input(|i| i.focused)
         || app.file_picker_busy()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || crate::ui_kit::input_blocked()
-        || app.prefs_window.open
+        || app.prefs_window.shell.open
         || app.space_mouse.calibrating.is_some()
         || app.home.open
 }
@@ -274,16 +274,17 @@ mod tests {
 
     #[test]
     fn the_swap_to_direct_is_offered_only_when_spacenavd_was_chosen_and_is_read_with_a_device_there() {
-        use crate::prefs::SpaceMouseDriver::{Automatic, Direct, Spacenavd};
+        use crate::prefs::SpaceMouseDriver::{Automatic, Direct, Smed, Spacenavd};
         use crate::space_mouse::DriversPresent;
-        for device in ["spacenavd", "hid 046d:c62b", "hid 256f:c63a", "3dxware", "web 256f:c63a"] {
+        for device in ["spacenavd", "hid 046d:c62b", "hid 256f:c63a", "3dxware", "web 256f:c63a", "smed 256f:c633"] {
             for drivers in [
                 None,
-                Some(DriversPresent { spacenavd: true, direct: false, denied: false }),
-                Some(DriversPresent { spacenavd: true, direct: true, denied: false }),
-                Some(DriversPresent { spacenavd: false, direct: true, denied: false }),
+                Some(DriversPresent { smed: false, spacenavd: true, direct: false, denied: false }),
+                Some(DriversPresent { smed: false, spacenavd: true, direct: true, denied: false }),
+                Some(DriversPresent { smed: false, spacenavd: false, direct: true, denied: false }),
+                Some(DriversPresent { smed: true, spacenavd: true, direct: true, denied: false }),
             ] {
-                for driver in [Automatic, Spacenavd, Direct] {
+                for driver in [Automatic, Spacenavd, Direct, Smed] {
                     let expected = device == "spacenavd" && driver == Spacenavd && drivers.is_some_and(|d| d.direct);
                     assert_eq!(swap_offered(device, drivers, driver), expected, "{device} {drivers:?} {driver:?}");
                 }
@@ -329,7 +330,7 @@ mod tests {
         let mut h = offered();
         press(&mut h, "Calibrate…");
         h.frames(3);
-        assert!(h.app.space_mouse.calibrating.is_some() && h.app.prefs_window.open);
+        assert!(h.app.space_mouse.calibrating.is_some() && h.app.prefs_window.shell.open);
         assert!(h.app.preferences.space_mouse_offered.contains("hid 046d:c62b"));
     }
 
@@ -361,6 +362,8 @@ mod preferences_tests {
         // An uncalibrated device (the notice card is up first), the calibrated one and none.
         for device in [None, Some("hid 256f:c63a"), Some("spacenavd"), Some("hid 046d:c62b")] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.home.open = false;
             h.app.load_prefs(include_str!("test_data/prefs_space_mouse_user.json"));
             h.app.space_mouse.device = device.map(Into::into);
@@ -379,7 +382,7 @@ mod preferences_tests {
                 top.is_some_and(|layer| layer.id == egui::Id::unique("sc_prefs")),
                 "{device:?}: the layer on top at the window centre is {top:?}"
             );
-            assert!(h.app.prefs_window.open, "{device:?}: still open");
+            assert!(h.app.prefs_window.shell.open, "{device:?}: still open");
             assert!(crate::scenario::rect_of("dialog:window").is_some_and(|r| r.is_positive()), "{device:?}: the window is drawn");
         }
     }
@@ -389,6 +392,8 @@ mod preferences_tests {
     fn the_notice_never_closes_preferences() {
         for (open_first, frames_before) in [(false, 0), (false, 40), (true, 0), (true, 90)] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.home.open = false;
             h.app.custom_titlebar = true;
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
@@ -409,7 +414,7 @@ mod preferences_tests {
             }
             for frame in 0..200 {
                 h.frame();
-                assert!(h.app.prefs_window.open, "open_first {open_first}, before {frames_before}: closed at frame {frame}");
+                assert!(h.app.prefs_window.shell.open, "open_first {open_first}, before {frames_before}: closed at frame {frame}");
                 let window = crate::scenario::rect_of("dialog:window").expect("drawn");
                 // The window sizes itself over its first frames.
                 if frame < 4 {
@@ -437,6 +442,8 @@ mod preferences_tests {
     fn a_fresh_profile_opens_preferences_from_the_start_page_and_keeps_it() {
         for device in [None, Some("hid 046d:c62b"), Some("spacenavd")] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.custom_titlebar = true;
             h.app.home.open = true;
             h.frames(3);
@@ -447,7 +454,7 @@ mod preferences_tests {
             h.step(&serde_json::json!({"widget": "Preferences…"})).unwrap_or_else(|e| panic!("{device:?}: {e}"));
             for frame in 0..240 {
                 h.frame();
-                assert!(h.app.prefs_window.open, "{device:?}: closed at frame {frame}");
+                assert!(h.app.prefs_window.shell.open, "{device:?}: closed at frame {frame}");
                 if frame > 4 {
                     let window = crate::scenario::rect_of("dialog:window").expect("drawn");
                     let top = h.ctx.layer_id_at(window.center());
@@ -484,7 +491,7 @@ mod preferences_tests {
                 h.app.tool.is_some(),
                 h.app.session.selection.len(),
                 h.app.session.undo.len(),
-                h.app.prefs_window.open,
+                h.app.prefs_window.shell.open,
                 h.app.space_mouse.calibrating.is_some(),
                 h.app.keymap.open,
                 h.app.home.open,
@@ -516,7 +523,7 @@ mod preferences_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = Some("spacenavd".into());
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: true, denied: false });
         // Spacenavd chosen by the user, so the card may offer the swap to the device.
         h.app.preferences.space_mouse_driver = crate::prefs::SpaceMouseDriver::Spacenavd;
         h.frames(4);
@@ -534,7 +541,7 @@ mod preferences_tests {
         assert!(h.app.space_mouse.offer_since.is_none());
         // Without a direct device there is no such button.
         let mut h = spacenavd_harness();
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: false, denied: false });
         h.frames(3);
         assert!(h.step(&serde_json::json!({"widget": "Use Direct Driver"})).is_err());
     }
@@ -626,9 +633,9 @@ mod preferences_tests {
         let mut h = spacenavd_harness();
         run(&mut h, 3.0);
         assert!(card_up(&h));
-        h.app.prefs_window.open = true;
+        h.app.prefs_window.shell.open = true;
         run(&mut h, 45.0);
-        h.app.prefs_window.open = false;
+        h.app.prefs_window.shell.open = false;
         run(&mut h, 3.0);
         assert!(card_up(&h), "the offer waited for Preferences to close");
         run(&mut h, 25.0);
@@ -710,7 +717,7 @@ mod preferences_tests {
         h.app.space_mouse.device = None;
         h.step(&serde_json::json!({"widget": "Calibrate…"})).ok();
         h.frames(3);
-        assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.open, "no wizard for a device that is gone");
+        assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.shell.open, "no wizard for a device that is gone");
         assert_eq!(h.app.preferences, before);
     }
 
@@ -730,7 +737,7 @@ mod preferences_tests {
             h.step(&serde_json::json!({"click": at})).unwrap();
             h.frames(3);
             crate::ui_kit::set_input_blocked(false);
-            assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.open, "{widget}: no wizard, no Preferences");
+            assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.shell.open, "{widget}: no wizard, no Preferences");
             assert_eq!(h.app.preferences, before, "{widget}: nothing recorded or changed");
             // And the card is back once the guard is gone, untouched.
             run(&mut h, 1.0);
@@ -769,7 +776,7 @@ mod preferences_tests {
                 ("the device changed", |h| h.app.space_mouse.device = Some("hid 256f:c63a".into())),
                 ("the device went", |h| h.app.space_mouse.device = None),
                 ("an issue report took the input", |_| crate::ui_kit::set_input_blocked(true)),
-                ("Preferences opened", |h| h.app.prefs_window.open = true),
+                ("Preferences opened", |h| h.app.prefs_window.shell.open = true),
                 ("a status toast is up", |h| h.app.status = Some(("Done".into(), crate::now_ms(), false))),
                 ("the device was dismissed elsewhere", |h| {
                     h.app.preferences.space_mouse_offered.insert("spacenavd".into());
@@ -787,14 +794,14 @@ mod preferences_tests {
                 let (before, calibrating, window, hidden) = (
                     h.app.preferences.clone(),
                     h.app.space_mouse.calibrating.is_some(),
-                    h.app.prefs_window.open,
+                    h.app.prefs_window.shell.open,
                     h.app.space_mouse.offer_hidden.clone(),
                 );
                 act(&mut h.app, &h.ctx, &offer, action);
                 crate::ui_kit::set_input_blocked(false);
                 assert_eq!(h.app.preferences, before, "{action:?}, {what}: nothing recorded or changed");
                 assert_eq!(h.app.space_mouse.calibrating.is_some(), calibrating, "{action:?}, {what}: no wizard");
-                assert_eq!(h.app.prefs_window.open, window, "{action:?}, {what}: Preferences untouched");
+                assert_eq!(h.app.prefs_window.shell.open, window, "{action:?}, {what}: Preferences untouched");
                 assert_eq!(h.app.space_mouse.offer_hidden, hidden, "{action:?}, {what}");
             }
             // Swap alone: with Automatic chosen (the device is read when it opens) it is no longer on offer, the
@@ -839,7 +846,7 @@ mod preferences_tests {
     fn the_offer_follows_the_first_record_and_a_hidden_offer_stays_hidden() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: true, denied: false });
         h.app.preferences.space_mouse_driver = crate::prefs::SpaceMouseDriver::Spacenavd;
         h.app.space_mouse.device = None;
         run(&mut h, 3.0);
@@ -861,14 +868,14 @@ mod preferences_tests {
         // a device there is a device that does not open: a swap would do nothing, and is not offered.
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: true, denied: false });
         h.app.space_mouse.device = Some("spacenavd".into());
         run(&mut h, 2.0);
         assert!(card_up(&h) && h.widget("Use Direct Driver").is_none(), "no Swap under Automatic");
         // Without a direct device there is no Swap.
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: false, denied: false });
         h.app.space_mouse.device = Some("spacenavd".into());
         run(&mut h, 2.0);
         assert!(card_up(&h) && h.widget("Use Direct Driver").is_none());
@@ -930,14 +937,14 @@ mod preferences_tests {
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         run(&mut h, 3.0);
         assert!(!card_up(&h), "no card over Preferences");
-        h.app.prefs_window.open = false;
+        h.app.prefs_window.shell.open = false;
         run(&mut h, 2.0);
         assert!(card_up(&h), "back once Preferences is closed, nothing was dismissed");
         assert!(h.app.preferences.space_mouse_offered.is_empty());
         let offer = crate::space_mouse_offer::due(&mut h.app, &h.ctx).expect("due");
         crate::space_mouse_offer::act(&mut h.app, &h.ctx, &offer, crate::space_mouse_offer::Action::Calibrate);
         let from_card = h.app.space_mouse.calibrating.as_ref().map(|(device, wizard)| (device.clone(), wizard.stage(), wizard.kind()));
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         let mut other = spacenavd_harness();
         crate::space_mouse_calibration::start(&mut other.app);
         let from_prefs = other.app.space_mouse.calibrating.as_ref().map(|(device, wizard)| (device.clone(), wizard.stage(), wizard.kind()));

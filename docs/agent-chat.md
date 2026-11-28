@@ -8,6 +8,8 @@ coding agent runs on your computer under **your own account** with that agent: S
 doesn't sell or proxy a model and needs no key for it. An endpoint's key, if it needs one, goes
 into your system keychain, never into SolidCraft's settings.
 
+For implementation details, see [the in-app agent chat design](design/in-app-agent-chat.md).
+
 Desktop app only.
 
 ## Turning it on and off
@@ -29,6 +31,9 @@ Everything about it is on one page: **Preferences → AI**.
   as nothing was asked in that empty design's chat.
 - **Open the Assistant panel when SolidCraft starts** (off by default): the panel (or its own
   window) is shown at each launch.
+- **Keep one chat across design tabs** (off by default, under **Preferences → AI → Panel**): keep the same
+  Assistant conversation and connection when switching tabs, opening linked sub-assemblies, or editing in
+  place; tools always act on the active tab in front.
 
 Neither applies when SolidCraft is started with `--control` for automation.
 
@@ -44,9 +49,18 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
-In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
-space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
-clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
+Assistant uses the shared panel layout. Narrow panels keep the conversation above
+the composer. A wide floating panel places the conversation beside the provider
+controls and composer when both columns have enough width. The conversation,
+unsent draft and scroll state stay with the same Assistant when its placement
+changes. The shared header reports the agent state and pending approvals.
+The Assistant’s own native window keeps its existing layout.
+
+Assistant fills the available side height. The compass and navigation bar use the
+remaining viewport space. Clicks and scrolling over the panel stay in the chat.
+
+A new chat shows a short introduction at the bottom of the conversation, just above the message
+box, ending with the hint to type a request there (#11256).
 
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
@@ -57,6 +71,18 @@ To select more of the conversation than fits in the panel, drag the selection to
 bottom edge and hold it there: the conversation scrolls, faster the further past the edge you
 go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
 all of it.
+
+In Assistant, outside the message box, Ctrl+A (Cmd+A on macOS) selects the whole conversation:
+every prompt and answer, including those scrolled out of view, but not thoughts, tool cards, plans or
+notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
+click ends the selection; in the message box Ctrl+A selects only the draft.
+
+From the Assistant header, choose **Export conversation as Markdown…** to save the current
+chat as a `.md` file. The file preserves the original formatting of the prompts and replies
+still in the chat. If a reply is arriving, the export captures the text received when you
+open the save dialog. Select **Include tool details** to add the retained tool calls and results.
+With this option selected, the dialog reminds you to review the file before sharing it. The file
+lists attachments by name and skips the draft, thoughts, plans and approval cards.
 
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
@@ -80,6 +106,12 @@ all of it.
   reasoning effort. Changing the model can change or remove the effort choices. A selection is
   shown as applied only after the agent reports it; a rejected change leaves the confirmed
   selection in place and shows an error.
+- **Service tier** shows the speed choices reported by the ACP agent. For endpoints configured
+  with **Use OpenAI Responses API**, choose **Fast** or **Ultrafast**. OpenAI's hosted Chat
+  Completions endpoint also offers **Fast**. The endpoint choice applies from the next turn.
+  Choose **Provider default** to use the endpoint's configured tier. A new chat starts with that
+  default. Availability depends on the model and account, and faster tiers can cost more.
+  [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) · [OpenAI Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 - **Older agents and API endpoints** keep their model and mode drop-downs when they report those
   choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
   the last model choice for each agent and puts it back on the next session when still available.
@@ -144,8 +176,9 @@ sketch, a brief, a part to fit around.
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
   of the view); the other files are listed by name. Pictures in any of the formats above are
-  decoded in the background, with a spinner until they are in. A file that can't be attached says
-  why.
+  decoded in the background, with a spinner until they are in. A photo stored turned by its EXIF
+  orientation is attached upright: its chip and size are the turned picture's, and it is sent as
+  upright pixels. A file that can't be attached says why.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
@@ -234,6 +267,8 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+To copy an installation command during an active chat, open **Add agent…**, choose
+**Installed agent**, and expand **Not installed**.
 
 For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
 prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
@@ -270,6 +305,35 @@ These permissions apply to SolidCraft for your user account:
 Restart SolidCraft after applying the override. Other agents or installation folders
 may need different filesystem permissions.
 
+Starting from a computer with no Node, these steps set up Claude Code for the Flatpak. They were
+tested on Linux Mint:
+
+1. Install Node through nvm, not the distribution's package. A package such as `nodejs` from
+   `apt` can be too old, and it installs to `/usr/bin`, which the sandbox can't see. Install
+   nvm with the command from the [nvm README](https://github.com/nvm-sh/nvm#installing-and-updating),
+   open a new terminal, then run `nvm install --lts` and check it with `node -v`.
+2. Install Claude Code and its adapter:
+
+   ```sh
+   npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
+   npm install -g @agentclientprotocol/claude-agent-acp
+   ```
+
+   Newer npm versions skip a package's setup script unless it's allowed. Without
+   `--allow-scripts`, Claude Code installs but its setup doesn't run. Check it with
+   `claude --version`.
+3. Run `claude` once and sign in. Claude Code needs a Pro, Max, Team or Enterprise plan, or an
+   Anthropic Console account; the free Claude plan doesn't include it. Then quit it; it doesn't
+   need to trust your home folder for SolidCraft to use it.
+4. Run the `flatpak override` command above. **Preferences → Assistant** shows the same command
+   with a **Copy** button.
+5. Quit SolidCraft completely and start it again. **Preferences → Assistant → Agents** then lists
+   Claude Code with **login found**.
+
+The adapter includes the Claude Code engine itself, so steps 2 and 3 can likely be shortened to
+installing only `@agentclientprotocol/claude-agent-acp` and signing in from the panel (see
+[Signing in](#signing-in)). That shorter path hasn't been tested with the Flatpak yet.
+
 ### XAI Grok
 
 Install **Grok Build** and run `grok login` in a terminal to sign in with your Grok account.
@@ -290,11 +354,16 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
-  `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
+  `https://api.mistral.ai/v1`, Google Gemini `https://generativelanguage.googleapis.com/v1beta/openai`,
+  Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
+  For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
+  in the agent's settings. This routes requests to `/responses` and lets the model continue
+  reasoning after a tool call. Keep the base URL at `https://api.openai.com/v1` and choose a
+  reasoning effort the model supports. Turn the option off for endpoints that use Chat Completions.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one
@@ -309,7 +378,9 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
   (OpenRouter does), once you leave the address and key fields; opening it asks again after a
-  failure. You can also type a model.
+  failure. You can also type a model. When an endpoint names the API of each listed model in
+  `type` (AI/ML API does), only chat models are listed, and a model listed more than once
+  appears once.
 - An endpoint's card under Preferences → AI → **Agents** has the same **Model** picker. While the
   agent isn't running, opening the picker lists the models (just viewing the page asks nothing),
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
@@ -404,7 +475,10 @@ Whatever you typed before signing in is sent once the agent is ready.
 The agent reaches the open design only through SolidCraft's own tools (the
 [MCP server](mcp.md)), which SolidCraft hands it when the chat starts. That server is named
 `solidcraft-app`, so an MCP server you set up yourself under the name `solidcraft` (as in
-[client configuration](mcp.md#client-configuration)) doesn't take its place:
+[client configuration](mcp.md#client-configuration)) doesn't take its place. Claude Code gets no
+other MCP server in the chat: not the connectors of your claude.ai account (Google Drive and
+the like), nor the servers in your own Claude Code configuration. Other coding agents may still
+load servers you configured for them:
 
 - **Read the design:** list commands, inspect features, sketches and parameters, measure,
   take pictures of the view.
@@ -413,32 +487,50 @@ The agent reaches the open design only through SolidCraft's own tools (the
 - **One undo per message:** everything the agent changes while answering one message becomes
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
+- **Show in model:** when a message adds or edits features, its changes card counts them.
+  In a Model view, choose **Show in model** to highlight the features whose edits still match
+  the Assistant's changes. **Hide highlight** clears the highlight. Closing Assistant,
+  changing the design, switching tabs or undoing also clears it.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
-- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, code blocks
-  (with **Copy**), bold, italic, `code` and links (web links only; each link is a button that opens
-  it in your browser). What you type, and the agent's thoughts, stay plain text.
+- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
+  blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
+  that opens it in your browser). A wide table scrolls sideways; one without the `|---|` line
+  under its header, or with more than 200 rows or 2000 cells, shows as plain text. What you type, and the agent's thoughts, stay plain text.
 - **Attach view:** tick it to send a picture of the current view with your message, for agents
   that take pictures. The picture is taken when the agent starts on the message and then shows as
   a small thumbnail under it. Hold the pointer over the thumbnail for a bigger preview that stays
   while you do; click it to open the viewer (the message's pictures one at a time, with **‹** and
   **›** or the arrow keys, closed with Esc or a click outside). A long message scrolls inside its
   box, so **Send** and the buttons beside it stay in view.
-- **Attach selection:** tick it to send what is selected in the model with your message, so the
+- **Attach selection:** on by default (untick it for a message that should go without); it sends what is selected in the model with your message, so the
   agent knows what "this edge" or "that feature" is. The box shows how many things are selected, counted as you clicked them (the two halves of a rim you clicked once are one).
   Faces and edges go with the names and numbers the agent's tools take and with their size and
   place (so they can be found again after an edit), features with their name and kind, bodies with
   their name. The agent gets them as text after your message; the conversation shows your message
-  as typed with the things as chips below it, grouped (Elements, Features, Bodies) with a count;
-  hover a chip for what the agent was told about it. At most 64 things go with one message; the
+  as typed (picks as pills) with the things that are not in a pill as chips below it, grouped (Elements, Features, Bodies) with a count;
+  hover a chip to light its target in the model and to see what the agent was told about it. A chip
+  whose target has since left the design (deleted, or changed so its face or edge is gone) is
+  struck through, with a note on hover. At most 64 things go with one message; the
   rest are counted ("+N more"), not dropped silently. The selection is read when you send, also for
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
-  **Bodies**; click things in the model, the timeline or the browser to put them in the list that
-  is active (click a list to make it active; click a picked thing again to take it out). **OK**
-  puts them as chips above the message box, each with a **×**; they go with the next message like
-  an attached selection (and are shown the same way), and the box is empty again afterwards.
-  **Cancel** keeps what was picked before.
+  **Bodies**. A click in the model goes into the list that is active (click a list to make it
+  active). A step clicked in the History or the Browser goes into Features, and a body clicked in
+  the Browser into Bodies, whichever list is active. Click a picked thing again to take it out.
+  The arrow beside a list shows what it holds by name, as in every dialog; the × on a name takes
+  it out. **OK**
+  puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
+  end when the box was never used). Typing `@` where a word starts does the same: the `@` is
+  taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each
+  pick is a pill of its own, so "make `«1: …»` match `«2: …»`" says which is which. A pill is part
+  of the text: it is edited, selected, cut and pasted like text, drawn as a pill, and Backspace
+  or Delete next to it takes it whole (taking the mark out drops the pick). Hold the pointer on a
+  pill to light its target in the model and to list what it holds; a pill whose target has left
+  the design is struck through. The agent gets your text with the marks numbered 1, 2, 3 in
+  reading order, and under it each numbered group with the faces, edges, features and bodies in
+  it; what **Attach selection** adds is listed apart, as not placed in the message.
+  **Cancel**, or **OK** with nothing picked, adds nothing.
 
 ## Custom instructions
 
@@ -469,13 +561,19 @@ each agent can have its own setting in its row.
 **Always allow** remembers that command for that agent. The page lists what you allowed this way,
 per agent, with **Reset**.
 
+Installed plugins are tools too (`<plugin>.<entry>`, see [Plugins as tools for
+agents](plugins.md#plugins-as-tools-for-agents)). A call to one always waits for **Allow** or
+**Deny**, in every mode and after **Always allow**: running a plugin's code needs your go each
+time. So does opening a file with an importer plugin (`file.import`, or `doc.open` of a file an
+installed importer opens), alone or in a batch. The plugin opens none of its own dialogs.
+
 These settings cover SolidCraft's tools. A coding agent's own tools (its shell, its file edits)
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
 and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
-a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
-yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to an agent
+other than Claude Code yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -489,7 +587,8 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
 - **Files wait for you** unless you chose **Allow everything**. **Cancel** or **Stop** declines
   everything that's waiting, and a question nobody answers is declined after four minutes. The
   [MCP server's folder limits](mcp.md) still apply after you allow: the design's folder, the
-  recovery folder and the server's own scratch folder.
+  recovery folder, the server's own scratch folder, and any extra folders you add under
+  **Preferences → Assistant → Allowed folders** (passed as `--allow-path` to the bridged server).
 - **An optional limit per message.** There's none by default. Untick **Unlimited** on the AI
   page to cap the changes the agent may make per message (it starts at 24). Reading the design
   doesn't count. At the limit, it's told to stop and report what's left; send another message to
@@ -500,7 +599,9 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter to turn off its shell, file and web tools for the session.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, and with
+  SolidCraft's MCP server as its only one. Your claude.ai connectors, your own MCP servers, and
+  Claude Code's shell, file, web, scheduling and messaging tools aren't there.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.

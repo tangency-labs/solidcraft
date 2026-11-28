@@ -11,31 +11,19 @@ use serde_json::json;
 use crate::trace;
 use crate::{Brep, Result, core};
 
-/// A 3D curve of a profile, path or section.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Curve {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    /// Counter-clockwise about the unit `axis` from angle `start` to `end` (radians,
-    /// 0 < end - start <= 2 pi), angle 0 along the unit `reference` (square to `axis`).
-    Arc {
-        center: [f64; 3],
-        axis: [f64; 3],
-        reference: [f64; 3],
-        radius: f64,
-        start: f64,
-        end: f64,
-    },
-    /// Control points (x, y, z, weight > 0) and the clamped knot vector (points + degree + 1
-    /// knots).
-    Nurbs {
-        degree: usize,
-        points: Vec<[f64; 4]>,
-        knots: Vec<f64>,
-    },
+/// Screw-sweep topology and its approximation tolerance.
+#[derive(Clone, Copy, Debug)]
+pub struct ScrewSweepOptions<'a> {
+    /// Optional radial law as `(turn, offset)` pairs.
+    pub law: Option<&'a [(f64, f64)]>,
+    /// Join spline walls across cylinder seams; false retains the historical faces.
+    pub join_spline_walls: bool,
+    /// Maximum wall approximation error, mm.
+    pub tolerance: f64,
 }
+
+/// A 3D curve of a profile, path or section.
+pub use solidcore_ops::sweep::Curve;
 
 /// How a drafted [`Brep::extrude`] closes the gap its offset opens at a sharp corner of the
 /// profile. Where the offsets overlap instead, all three trim them where they cross.
@@ -136,12 +124,44 @@ impl Brep {
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the
     /// axis through `origin` along `direction`, in the profile's plane (touching it at most).
     pub fn revolve(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
-        let r = core::sweep::revolve(profile, origin, direction, angle, cap).map(Brep::made_core);
+        Self::revolve_profile(profile, origin, direction, angle, cap, false)
+    }
+
+    /// Like [`Self::revolve`], with contiguous pieces of the same circle certified and joined
+    /// before turning the profile.
+    pub fn revolve_joining_arcs(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
+        Self::revolve_profile(profile, origin, direction, angle, cap, true)
+    }
+
+    fn revolve_profile(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool, join_arcs: bool) -> Result<Brep> {
+        let revolve = |curves: &[Curve]| core::sweep::revolve(curves, origin, direction, angle, cap);
+        let (result, joined) = if join_arcs {
+            let join = || solidcore_ops::sweep::join_profile_arcs(profile);
+            let joined = match crate::stop::token() {
+                Some(stop) => solidcore_ops::cancel::within(&stop, join),
+                None => join(),
+            };
+            match joined {
+                Ok(curves) => (revolve(&curves), Some(curves)),
+                Err(e) => (
+                    Err(match e {
+                        solidcore_ops::Error::Argument => crate::Error::Argument,
+                        solidcore_ops::Error::Cancelled => crate::Error::Cancelled("smlib_revolve"),
+                        e => crate::Error::Refused(e),
+                    }),
+                    None,
+                ),
+            }
+        } else {
+            (revolve(profile), None)
+        };
+        let r = result.map(Brep::made_core);
+        // Replay the profile actually sent to the sweep, without needing the join recipe.
         trace::made(
             "revolve",
             &[],
             &r,
-            || json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "angle": angle, "cap": cap}),
+            || json!({"profile": trace::curves(joined.as_deref().unwrap_or(profile)), "origin": origin, "direction": direction, "angle": angle, "cap": cap}),
         );
         r
     }
@@ -243,11 +263,27 @@ impl Brep {
         r
     }
 
+    /// A loft from the planar first of `sections` through the rest (stations, each a NURBS curve
+    /// per curve of the first, a column's curves of one degree and knots) to the point `apex` off
+    /// the first's plane: the base the first section, and on each of its curves one wall skinned
+    /// through its column to the apex, at `params` (where each section lies along the loft, then
+    /// the apex: increasing from 0 to 1). A loft to a point following guide rails.
+    pub fn loft_to_point_through(sections: &[Vec<Curve>], apex: [f64; 3], params: &[f64]) -> Result<Brep> {
+        let r = core::sweep::loft_to_point_through(sections, apex, params).map(Brep::made_core);
+        trace::made(
+            "loft_to_point_through",
+            &[],
+            &r,
+            || json!({"sections": sections.iter().map(|s| trace::curves(s)).collect::<Vec<_>>(), "apex": apex, "params": params}),
+        );
+        r
+    }
+
     /// `profile` carried by a screw motion about the axis through `origin` along `direction`:
     /// `turns` right-handed turns about it, rising `pitch` (signed) per turn, capped at both ends,
     /// its walls within about `tolerance` of the true screw surfaces.
     pub fn screw_sweep(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], pitch: f64, turns: f64, tolerance: f64) -> Result<Brep> {
-        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance).map(Brep::made_core);
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance, false).map(Brep::made_core);
         trace::made(
             "screw_sweep",
             &[],
@@ -272,10 +308,32 @@ impl Brep {
         law: &[(f64, f64)],
         tolerance: f64,
     ) -> Result<Brep> {
-        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance).map(Brep::made_core);
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance, false).map(Brep::made_core);
         trace::made("screw_sweep", &[], &r, || {
             json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "pitch": pitch, "turns": turns,
                 "law": law, "tolerance": tolerance})
+        });
+        r
+    }
+
+    /// A screw sweep with explicit face layout. The historical entry points retain
+    /// half-turn faces; new thread features request continuous spline walls here.
+    pub fn screw_sweep_with_options(
+        profile: &[Curve],
+        origin: [f64; 3],
+        direction: [f64; 3],
+        pitch: f64,
+        turns: f64,
+        options: ScrewSweepOptions<'_>,
+    ) -> Result<Brep> {
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, options.law, options.tolerance, options.join_spline_walls)
+            .map(Brep::made_core);
+        trace::made("screw_sweep", &[], &r, || {
+            json!({
+                "profile": trace::curves(profile), "origin": origin, "direction": direction,
+                "pitch": pitch, "turns": turns, "law": options.law,
+                "tolerance": options.tolerance, "join_spline_walls": options.join_spline_walls,
+            })
         });
         r
     }

@@ -35,9 +35,9 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ArcCenterPointParams>(),
         &["center", "clockwise", "connect", "construction", "end", "id", "sketch", "start", "sweep"],
     );
-    assert_keys(input_schema_for::<RectTwoPointParams>(), &["connect", "construction", "p0", "p1", "sketch"]);
+    assert_keys(input_schema_for::<RectTwoPointParams>(), &["connect", "construction", "p0", "p1", "rotatable", "sketch"]);
     assert_keys(input_schema_for::<RectThreePointParams>(), &["connect", "construction", "p0", "p1", "p2", "sketch"]);
-    assert_keys(input_schema_for::<RectCenterParams>(), &["center", "connect", "construction", "corner", "sketch"]);
+    assert_keys(input_schema_for::<RectCenterParams>(), &["center", "connect", "construction", "corner", "rotatable", "sketch"]);
     assert_keys(input_schema_for::<RectRoundedParams>(), &["connect", "construction", "p0", "p1", "radius", "sketch"]);
     // The polygons draw no construction geometry: their handlers never read `construction`.
     assert_keys(input_schema_for::<PolygonInscribedParams>(), &["angle", "center", "connect", "diameter", "radius", "sides", "sketch"]);
@@ -52,6 +52,7 @@ fn strict_keeps_todays_errors() {
     let cases = [
         ("sketch.line", json!({"points": 5})),
         ("sketch.line", json!({"points": [[0, 0]]})),
+        ("sketch.line", json!({"points": vec![[0, 0]; 10_001]})),
         ("sketch.line", json!({"points": [[0, 0], "zz"]})),
         ("sketch.line", json!({"points": [[0, 0], [1]]})),
         ("sketch.line", json!({"points": [[0, 0], [true, "a"]]})),
@@ -68,6 +69,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.point", json!({"point": "mid:nope"})),
         ("sketch.point", json!({"point": {"vertex": "x"}})),
         ("sketch.point", json!({"point": "on:l1:x"})),
+        ("sketch.point", json!({"point": "x:l1:1,1"})),
+        ("sketch.point", json!({"point": "x:l1+l1:5,0"})),
         ("sketch.point", json!({"point": "vertex:1,2"})),
         ("sketch.point", json!({"point": [1, 2], "id": "a|b"})),
         ("sketch.circle.center", json!({"center": [0, 0]})),
@@ -122,7 +125,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5]})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 0})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": -2})),
-        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "4"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "nope"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "0 mm"})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 1e12})),
         ("sketch.slot.center_to_center", json!({"p0": [3, 5], "p1": [3, 5], "width": 4})),
         ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [10, 5]})),
@@ -179,6 +183,7 @@ fn replies_match_the_output_schema_and_forms_are_accepted() {
         json!({"point": ["10 mm", 40], "connect": false}),
         json!({"point": "mid:l1"}),
         json!({"point": "on:l1:5,0"}),
+        json!({"point": "x:l1+l4:0,0"}),
     ];
     let mut s = session(ParamCheck::Warn);
     for (id, p) in &calls {
@@ -317,7 +322,7 @@ fn rectangles_and_polygons_reply_with_their_types() {
     assert_eq!(keys(&r), ["constraints", "corners", "created", "curves", "sides", "sketch"]);
     assert!(r["sides"]["bottom"].is_string() && r["corners"]["top_left"].is_string(), "{r}");
     let r = run(&mut off, "sketch.rectangle.rounded", json!({"p0": [170, 0], "p1": [190, 10], "radius": 2}));
-    assert_eq!(keys(&r), ["arcs", "constraints", "created", "curves", "param", "sides", "sketch"]);
+    assert_eq!(keys(&r), ["arcs", "centre", "constraints", "created", "curves", "diagonal", "param", "sides", "sketch"]);
     assert_eq!((r["curves"].as_array().map(Vec::len), r["arcs"].as_array().map(Vec::len)), (Some(8), Some(4)), "{r}");
     assert!(r["param"].as_str().is_some_and(|name| !name.is_empty()), "{r}");
     let r = run(&mut off, "sketch.polygon.inscribed", json!({"center": [210, 5], "radius": 4}));
@@ -356,12 +361,9 @@ fn rectangles_and_polygons_report_wrong_typed_keys() {
     assert_eq!(message("sketch.polygon.edge", json!({"p0": [0, 0], "p1": [5, 0], "sides": 4})), None);
 }
 
-/// The slot replies keep the shape the handlers returned before the schemas: exactly the keys
-/// `curves`, `constraints` and `sketch` of the old `result()` helper, plus the `created` summary
-/// that `Session::execute` adds to every sketch command, and no `param_warnings`. Pinned by hand
-/// from the code on `origin/main`, so it does not depend on the checked path under test.
+/// Slot replies expose the construction centre line and its constrained middle point.
 #[test]
-fn slot_replies_keep_their_old_shape() {
+fn slot_replies_include_their_construction_middle() {
     let mut s = session(ParamCheck::Off);
     for (id, p) in [
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 4})),
@@ -371,7 +373,7 @@ fn slot_replies_keep_their_old_shape() {
         let o = r.as_object().unwrap_or_else(|| panic!("{id}: {r}"));
         let mut keys: Vec<&str> = o.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["constraints", "created", "curves", "sketch"], "{id}: {r}");
+        assert_eq!(keys, ["centre_line", "constraints", "created", "curves", "middle", "sketch"], "{id}: {r}");
         for k in ["curves", "constraints"] {
             let list = o[k].as_array().unwrap_or_else(|| panic!("{id} {k}: {r}"));
             assert!(!list.is_empty() && list.iter().all(Value::is_string), "{id} {k}: {r}");
@@ -379,10 +381,52 @@ fn slot_replies_keep_their_old_shape() {
         assert_eq!(o["curves"].as_array().map(Vec::len), Some(4), "{id}: {r}");
         assert_eq!(sorted_keys(&o["sketch"]), Some(vec!["dof", "solved"]), "{id}: {r}");
         assert_eq!(sorted_keys(&o["created"]), Some(vec!["constraints", "curves", "dimensions", "points"]), "{id}: {r}");
-        assert_eq!(o["created"]["curves"], o["curves"], "{id}: {r}");
+        assert!(o["centre_line"].is_string() && o["middle"].is_string(), "{id}: {r}");
+        let mut expected = o["curves"].as_array().cloned().unwrap_or_default();
+        expected.push(o["centre_line"].clone());
+        assert_eq!(o["created"]["curves"], json!(expected), "{id}: {r}");
     }
 }
 
 fn sorted_keys(v: &Value) -> Option<Vec<&str>> {
     v.as_object().map(|m| m.keys().map(String::as_str).collect())
+}
+
+/// A polyline of more points than one line takes is refused saying so and how many were given,
+/// not as one of too few (10 000 points read "a line needs 2 or more points").
+#[test]
+fn a_line_of_too_many_points_says_how_many() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+    let points: Vec<[f64; 2]> = (0..10_001).map(|i| [f64::from(i), 0.0]).collect();
+    let e = s.execute("sketch.line", &json!({"points": points})).unwrap_err().to_string();
+    assert!(e.contains("a line takes at most 10000 points, 10001 were given"), "{e}");
+}
+
+/// #18756: the corners of the 2-Point Rectangle and the centre and corner of the Center Rectangle
+/// take the snaps `sketch.point` takes. A malformed snap and a point's id are reported, and the
+/// Rounded Rectangle's corners stay coordinates.
+#[test]
+fn rectangle_corners_take_snaps() {
+    let two = |p0: Value| issues("sketch.rectangle.two_point", &json!({"p0": p0, "p1": [5, 5]}));
+    let center = |corner: Value| issues("sketch.rectangle.center", &json!({"center": [0, 0], "corner": corner}));
+    let snaps = [
+        json!("mid:l1"),
+        json!("on:l1:1,2"),
+        json!("x:l1+l2:1,2"),
+        json!("vertex:1,2,3"),
+        json!({"vertex": [1, 2, 3]}),
+        json!({"on_edge": [1, 2, 3]}),
+    ];
+    for good in snaps.iter().cloned().chain([json!([1, 2]), json!({"x": 1, "y": 2})]) {
+        assert!(two(good.clone()).is_empty(), "{good}: {:?}", two(good.clone()).first().map(|i| &i.message));
+        assert!(center(good.clone()).is_empty(), "{good}: {:?}", center(good.clone()).first().map(|i| &i.message));
+    }
+    for bad in [json!("on:l1:abc"), json!("on:l1"), json!("vertex:1,2"), json!({"vertex": [1, 2]}), json!("l1.end"), json!({"ref": "l1.end"})] {
+        assert_eq!(two(bad.clone()).len(), 1, "{bad}");
+        assert_eq!(center(bad.clone()).len(), 1, "{bad}");
+    }
+    for snap in snaps {
+        assert_eq!(issues("sketch.rectangle.rounded", &json!({"p0": snap, "p1": [5, 5], "radius": 1})).len(), 1, "{snap}");
+    }
 }

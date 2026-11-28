@@ -34,6 +34,12 @@
 //! - `DoStitching`'s edge gluing skips a lamina pair that crosses another lamina edge on
 //!   the same curve round it, where each face there meets that curve once (`RadialGlue`;
 //!   #2506, not upstream).
+//! - `DoStitching`'s region nesting sets the void flags by nesting
+//!   (`SM_VS_NESTEDSOLID`) where the faces came in loose (no region but the infinite
+//!   one), no lamina edge is left, every shell is closed and there are more than two
+//!   regions, so a cavity sewn from loose faces is a void; upstream only swaps the
+//!   infinite region's flag (`SM_VS_INFINITEREGION_SWAP`) and leaves it solid (not
+//!   upstream, WR-21540, as WR-569 for `StitchIntoSolid`).
 //! - `DoStitching` collects the modified faces (`sModifiedFaces`) as upstream, though
 //!   only commented-out code reads them; its `dMinEdgeLength` is dropped for the same
 //!   reason (the lengths are still computed).
@@ -48,7 +54,8 @@
 
 use super::p1::{sort_by_param, AdvancedStitch, DefaultStitchCallback, SplitReason, Stitch};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, SM_ERR};
+use crate::error::heal::HealFailure;
+use crate::error::{ignore_status, ignored, EntityRef, Failure};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::NotifyOperation;
@@ -60,6 +67,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
+use crate::topology::brep::p6::{every_shell_closed, InfiniteHalf};
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -93,12 +101,11 @@ fn deref(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-fn sm_err() -> SolidError {
-    SolidError::Upstream {
-        code: SM_ERR,
-        operation: OP,
-        entity: None,
-    }
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
 }
 
 /// The edge's curve; upstream dereferences a null curve pointer.
@@ -108,7 +115,12 @@ fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1).copied().ok_or_else(sm_err)
+    pv.get(1).copied().ok_or_else(|| {
+        defect(
+            "the curve's evaluation returned no first derivative, though an evaluation \
+             that succeeds returns the point and each derivative asked for",
+        )
+    })
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {
@@ -188,11 +200,11 @@ impl RadialGlue {
             }
         }
         let axis = self.axis.unitize()?;
-        let start = Self::leaving(k, b, first)?.project_to_plane(axis);
+        let start = Self::into_face(k, b, first)?.project_to_plane(axis);
         let side = axis.cross(start);
         // the angle round the axis from the first face to a face
         let angle = |k: &mut Kernel, b: &mut Brep, at: (EdgeId, f64)| -> Result<f64> {
-            let w = Self::leaving(k, b, at)?.project_to_plane(axis);
+            let w = Self::into_face(k, b, at)?.project_to_plane(axis);
             let a = w.dot(side).atan2(w.dot(start));
             Ok(if a < 0.0 { a + 2.0 * PI } else { a })
         };
@@ -269,8 +281,9 @@ impl RadialGlue {
 
     /// The direction a lamina edge's face leaves the edge at a curve parameter: the
     /// binormal of the edge's first edge use, which points into the face whichever face
-    /// use it is in.
-    fn leaving(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
+    /// use it is in. Not the direction an edge leaves a vertex in
+    /// ([`crate::query::edge_turn::leaving`]): this one is across the edge, into its face.
+    fn into_face(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
         let eu = edge::edgeuses(b, e, None, None)?
             .first()
             .copied()
@@ -292,7 +305,12 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
             true,
         )?
         .normal
-        .ok_or_else(sm_err)
+        .ok_or_else(|| {
+            defect(
+                "the edge curve's bounding box came back without the axis-aligned box, \
+                 though that box is computed whenever it is asked for",
+            )
+        })
 }
 
 /// `SmCurve::ApproximateLength(edge interval, samples)` of the edge's curve.
@@ -351,6 +369,62 @@ pub struct VertexList {
     pub min_unstitched_vert_gap: f64,
 }
 
+/// What the stitcher closed, as the entities it glued (solidcore#2975).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClosedGapKind {
+    /// A vertex pair glued into the kept vertex.
+    Vertex {
+        /// The vertex the glue kept.
+        kept: VertexId,
+        /// The vertex the glue deleted.
+        deleted: VertexId,
+    },
+    /// An edge pair glued into the kept edge.
+    Edge {
+        /// The edge the glue kept.
+        kept: EdgeId,
+        /// The edge the glue deleted.
+        deleted: EdgeId,
+    },
+    /// A vertex pair one edge was squeezed into (the kept vertex stays).
+    Squeezed {
+        /// The vertex the squeeze kept.
+        kept: VertexId,
+        /// The vertex the squeeze closed over.
+        deleted: VertexId,
+    },
+    /// A vertex dropped onto an edge and split there, with the vertex its split created.
+    Split {
+        /// The edge the vertex was dropped onto and split.
+        edge: EdgeId,
+        /// The vertex the split created.
+        created: VertexId,
+    },
+}
+
+/// A closure's certified geometry bound and tolerance accounting (solidcore#2975).
+/// The bound includes floating-point rounding. For edges it bounds both directed
+/// Hausdorff distances via an endpoint-to-endpoint parameter correspondence; it
+/// need not be the tightest Hausdorff bound. Unsupported enclosures return an
+/// error from the reporting operation, never a sampled estimate as a certificate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClosedGap {
+    /// What the stitcher closed.
+    pub kind: ClosedGapKind,
+    /// Certified upper bound on the gap, in model units. A squeeze bounds the
+    /// whole removed curve's distance to the kept point; a split bounds the source
+    /// point's distance to the original curve at the split parameter.
+    pub gap: f64,
+    /// Upper bound on `max(tolerance_after - tolerance_before, 0)`, rounded up.
+    /// Exactly zero when the surviving entity's stored tolerance did not grow.
+    pub growth: f64,
+    /// The surviving entity's own stored tolerance before this closure. For a
+    /// split this is the new vertex's tolerance before its explicit adjustment.
+    pub tolerance_before: f64,
+    /// The surviving entity's stored tolerance after this closure.
+    pub tolerance_after: f64,
+}
+
 /// The result of [`Stitch::split_edges_with_vertices`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SplitEdges {
@@ -404,6 +478,9 @@ impl Stitch<'_> {
         let old_doing_boolean = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
         let r = self.do_stitching_body(k, b, candidate_vertices, candidate_edges, &mut out);
+        // (not upstream, #18166: the joins' covers, on the final trims and faces, while
+        // editing is still enabled)
+        let r = self.finish_joins(k, b, r);
         k.context.set_doing_boolean(old_doing_boolean);
         b.set_editing_enabled(old_editing);
         r.map(|()| out)
@@ -420,6 +497,9 @@ impl Stitch<'_> {
     ) -> Result<()> {
         let tol_3d = self.stitch_tol_3d();
         k.check_cancelled("heal::stitch::p2::Stitch::do_stitching")?;
+        // (not upstream, WR-21540) loose faces: no region but the infinite one, so every
+        // region after the gluing is one the gluing made
+        let loose = bp1::regions(b, None)?.len() <= 1;
         // (status not checked)
         ignore_status(self.edit_brep_pre_edit(k, b))?;
 
@@ -430,10 +510,7 @@ impl Stitch<'_> {
                 // when face is a lamina sliver
                 if face_is_lamina(b, f)? && face_is_degenerate(k, b, f, true, Some(zone_tol))? {
                     // delete Face and its boundary edges and vertices from the Brep
-                    ignore_status(crate::error::passed_on(
-                        self.edit_delete_face(k, b, f, true, true, None, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    self.edit_delete_face(k, b, f, true, true, None, None)?;
                 }
             }
         }
@@ -479,9 +556,36 @@ impl Stitch<'_> {
                     }
 
                     let surv_v = surv_v.ok_or_else(|| deref("edge without vertex"))?;
+                    let deleted_report = del_v.unwrap_or(surv_v);
+                    // Bound all the removed geometry, not its sampled length or
+                    // merely the distance between its endpoints.
+                    let squeeze_report = if self.report_gaps.is_some() {
+                        Some((
+                            vertex::tolerance(b, surv_v)?,
+                            super::bounds::curve_to_point(
+                                curve_of(b, e)?,
+                                &edge::interval(b, e)?,
+                                vertex::point(b, surv_v)?,
+                            )?,
+                        ))
+                    } else {
+                        None
+                    };
                     // remove and delete edge from topology graph by squeezing
                     // [vertex-edge-vertex] into [vertex]
                     self.edit_squeeze_edge(k, b, Some(e), surv_v)?;
+                    if let Some((pre, gap)) = squeeze_report {
+                        let after = vertex::tolerance(b, surv_v)?;
+                        self.record_gap(
+                            ClosedGapKind::Squeezed {
+                                kept: surv_v,
+                                deleted: deleted_report,
+                            },
+                            gap,
+                            pre,
+                            after,
+                        )?;
+                    }
 
                     if candidate_vertices.is_some() {
                         add_unique(&mut cand_vertices, surv_v); // This becomes a candidate.
@@ -500,26 +604,28 @@ impl Stitch<'_> {
 
             // Check for Vertices coincident with Edges if asked.
             if self.split_edges_with_vertices {
-                // get modified Brep Bounding box (status not checked)
-                let brep_bbox = ignored(crate::error::passed_on(
-                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_default();
+                // get modified Brep Bounding box (status not checked upstream; passed on
+                // here, WR-658)
+                let brep_bbox =
+                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
                 // build modified Brep Edge spatial tree (lNumPerNode only sizes the
                 // memory blocks)
                 let edges = bp1::edges(b, None)?;
                 let mut edge_tree: Tree<EdgeId> = Tree::new_spatial(&brep_bbox);
                 for &e in &edges {
-                    let ebox = edge_box(k, b, e)?;
+                    let mut ebox = edge_box(k, b, e)?;
+                    if self.per_entity_candidate_split {
+                        ebox.expand_absolute(edge::tolerance(b, e)?);
+                    }
                     edge_tree.add_to_spatial_tree(&ebox, Some(e), NodeGeomType::default())?;
                 }
 
                 let vertices = bp1::vertices(b, None)?;
 
                 // Check only if either vertex or edge is on candidate list (upstream
-                // never resets these two flags).
+                // never resets these two flags; callers that opt into
+                // `per_entity_candidate_split` evaluate them per vertex and per edge).
                 let mut candidate_vtx = true;
                 let mut candidate_edge = true;
 
@@ -532,13 +638,20 @@ impl Stitch<'_> {
                         continue;
                     }
 
-                    if candidate_vertices.is_some() && !cand_vertices.contains(&v) {
+                    if self.per_entity_candidate_split {
+                        candidate_vtx = candidate_vertices.is_none() || cand_vertices.contains(&v);
+                    } else if candidate_vertices.is_some() && !cand_vertices.contains(&v) {
                         candidate_vtx = false;
                     }
 
                     // for every edge near this vertex
                     let mut vbox = Extent3d::from_point(vertex::point(b, v)?);
-                    vbox.expand_absolute(tol_3d);
+                    let query_tol = if self.per_entity_candidate_split {
+                        smos_max(tol_3d, vertex::tolerance(b, v)?)
+                    } else {
+                        tol_3d
+                    };
+                    vbox.expand_absolute(query_tol);
                     for object in edge_tree.objects_in_box(&vbox)? {
                         let e = object.ok_or_else(|| deref("tree object"))?;
 
@@ -550,7 +663,9 @@ impl Stitch<'_> {
                             continue;
                         }
 
-                        if candidate_edges.is_some() && !cand_edges.contains(&e) {
+                        if self.per_entity_candidate_split {
+                            candidate_edge = candidate_edges.is_none() || cand_edges.contains(&e);
+                        } else if candidate_edges.is_some() && !cand_edges.contains(&e) {
                             candidate_edge = false;
                         }
 
@@ -570,19 +685,60 @@ impl Stitch<'_> {
                             // candidates
                             let new_tol =
                                 smos_max(vertex::tolerance(b, v)?, vertex::tolerance(b, new_v)?);
+                            let split_report = if self.report_gaps.is_some() {
+                                let range = edge::interval(b, e)?;
+                                let parameter = if edge::start_vertex(b, e)? == Some(new_v) {
+                                    range.min()
+                                } else if edge::end_vertex(b, e)? == Some(new_v) {
+                                    range.max()
+                                } else {
+                                    return Err(SolidError::invalid_input(
+                                        "heal::stitch::bounds",
+                                        "split vertex is not on either resulting edge end",
+                                    ));
+                                };
+                                Some((
+                                    vertex::tolerance(b, new_v)?,
+                                    super::bounds::point_at_curve(
+                                        vertex::point(b, v)?,
+                                        curve_of(b, e)?,
+                                        parameter,
+                                    )?,
+                                ))
+                            } else {
+                                None
+                            };
                             vertex::set_tolerance(b, new_v, zone_tol3d(k, new_tol), true, true)?;
+                            if let Some((pre, bound)) = split_report {
+                                let after = vertex::tolerance(b, new_v)?;
+                                self.record_gap(
+                                    ClosedGapKind::Split {
+                                        edge: e,
+                                        created: new_v,
+                                    },
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
+                            }
                             more_work_needed = true;
 
                             cand_vertices.push(new_v);
                             if !candidate_vtx {
                                 cand_vertices.push(v);
+                                if self.per_entity_candidate_split {
+                                    candidate_vtx = true;
+                                }
                             }
                         }
 
                         // when split created a new edge
                         if let Some(new_e) = split.new_edge {
                             // add new edge->curve to edge spatial tree
-                            let ebox = edge_box(k, b, new_e)?;
+                            let mut ebox = edge_box(k, b, new_e)?;
+                            if self.per_entity_candidate_split {
+                                ebox.expand_absolute(edge::tolerance(b, new_e)?);
+                            }
                             edge_tree.add_to_spatial_tree(
                                 &ebox,
                                 Some(new_e),
@@ -734,6 +890,43 @@ impl Stitch<'_> {
                         continue;
                     }
 
+                    // (not upstream, #2975) capture the closure record's operands
+                    // before nothing else deflects them, and read the surviving
+                    // entity's tolerance after.
+                    let kept = if choice.keep_first { v } else { cv };
+                    let deleted = if choice.keep_first { cv } else { v };
+                    let pair_report = if self.report_gaps.is_some() && (do_glue || do_squeeze) {
+                        Some((
+                            vertex::tolerance(b, kept)?,
+                            if do_squeeze {
+                                if let Some(e) = squeeze_edge {
+                                    super::bounds::curve_to_point(
+                                        curve_of(b, e)?,
+                                        &edge::interval(b, e)?,
+                                        vertex::point(b, kept)?,
+                                    )?
+                                } else {
+                                    super::bounds::points(
+                                        vertex::point(b, kept)?,
+                                        vertex::point(b, deleted)?,
+                                    )?
+                                }
+                            } else {
+                                super::bounds::points(
+                                    vertex::point(b, kept)?,
+                                    vertex::point(b, deleted)?,
+                                )?
+                            },
+                            if do_glue {
+                                ClosedGapKind::Vertex { kept, deleted }
+                            } else {
+                                ClosedGapKind::Squeezed { kept, deleted }
+                            },
+                        ))
+                    } else {
+                        None
+                    };
+
                     // squeeze or glue vertices together (make pV the retained vertex)
                     if choice.keep_first {
                         if do_squeeze {
@@ -748,6 +941,10 @@ impl Stitch<'_> {
                             self.edit_glue_vertices(k, b, cv, v, Some(&wire_edges))?;
                         }
                         v = cv;
+                    }
+                    if let Some((pre, bound, kind)) = pair_report {
+                        let after = vertex::tolerance(b, v)?;
+                        self.record_gap(kind, bound, pre, after)?;
                     }
 
                     // The surviving vertex (which is pV) should be a candidate.
@@ -795,7 +992,25 @@ impl Stitch<'_> {
 
         // when asked - find and set the infinite region by classifying a ray from a
         // point outside the Brep
-        if self.do_region_nesting && bp1::regions(b, None)?.len() > 1 {
+        let regions = bp1::regions(b, None)?.len();
+        if self.do_region_nesting && regions > 1 {
+            // Not upstream (WR-21540, as WR-569 for `stitch_into_solid`): each closed shell
+            // the glue closed split off a new region, solid, and upstream only finds the
+            // infinite region, so the region inside a shell nested in another (a cavity)
+            // stays solid. When the faces came in loose and no lamina edge is left and
+            // every shell is closed, the regions are a nested solid model: material inside
+            // the outer shell, a void inside a shell within it, and so on. The flags are
+            // set once the gluing is done, from the nesting alone: a split cannot tell
+            // them, as a cavity's shell may close before the shell around it. A B-rep that
+            // came in with regions keeps their flags (a solid enclosed in material stays a
+            // solid, which a defeature then refuses). With two regions both settings give
+            // the same flags.
+            let nested = loose && regions > 2 && out.lamina_edges == 0 && every_shell_closed(b)?;
+            let void_setting = if nested {
+                SetRegionVoidType::NestedSolid
+            } else {
+                SetRegionVoidType::InfiniteRegionSwap
+            };
             let old = b.editing_enabled();
             b.set_editing_enabled(false);
             let r = find_and_set_infinite_region_with_identity(
@@ -803,7 +1018,7 @@ impl Stitch<'_> {
                 b,
                 self.query_identity,
                 None,
-                SetRegionVoidType::InfiniteRegionSwap,
+                void_setting,
                 None,
             );
             b.set_editing_enabled(old);
@@ -1057,6 +1272,21 @@ impl Stitch<'_> {
                     for f in edge::faces(b, delete, None)? {
                         add_unique(modified_faces, f);
                     }
+                    // (not upstream, #2975) capture the closure's operands before the
+                    // glue, and the kept edge's tolerance after.
+                    let edge_report = if self.report_gaps.is_some() {
+                        Some((
+                            edge::tolerance(b, keep)?,
+                            super::bounds::curves(
+                                curve_of(b, e)?,
+                                [e_ivl.min(), e_ivl.max()],
+                                curve_of(b, test_e)?,
+                                [t_start, t_end],
+                            )?,
+                        ))
+                    } else {
+                        None
+                    };
                     match self.edit_glue_edges(
                         k,
                         b,
@@ -1064,6 +1294,9 @@ impl Stitch<'_> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        // (one solid with a known outside: no ray at its closing glue)
+                        self.outside
+                            .map_or(InfiniteHalf::Searched, InfiniteHalf::Of),
                         delete,
                         None, // header default pInsideFaceuses = NULL
                     ) {
@@ -1076,9 +1309,25 @@ impl Stitch<'_> {
                             }
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
+                            if let Some((pre, bound)) = edge_report {
+                                let after = edge::tolerance(b, e)?;
+                                self.record_gap(
+                                    ClosedGapKind::Edge {
+                                        kept: e,
+                                        deleted: delete,
+                                    },
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
+                            }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                        Err(_) if !self.ignore_problems => return Err(sm_err()),
+                        Err(err) if !self.ignore_problems => {
+                            return Err(Failure::new(OP, HealFailure::EdgesNotGlued)
+                                .caused_by(err)
+                                .into_error())
+                        }
                         Err(_) => {
                             // forget the deleted edge when the failed glue removed it
                             if let Some(slot) = at(&v_edges, deleted_slot)? {
@@ -1147,7 +1396,7 @@ impl Stitch<'_> {
             has_brep = vertex::brep(b, v)?.is_some();
         }
         if !has_brep {
-            return Err(sm_err()); // we'll flag this as an error.
+            return Err(SolidError::heal(OP, HealFailure::NotInBrep)); // we'll flag this as an error.
         }
 
         // Sort on (1,2,3), unitized so that parameter differences are 3d distances.
@@ -1394,40 +1643,31 @@ impl Stitch<'_> {
                     let mid = (vertex::point(b, v)? + vertex::point(b, new_v)?) * 0.5;
                     self.edit_set_point(k, b, v, mid)?;
 
-                    // (status not checked)
-                    ignore_status(crate::error::passed_on(
-                        self.edit_glue_vertices(k, b, v, new_v, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (status not checked upstream; passed on here, WR-658)
+                    self.edit_glue_vertices(k, b, v, new_v, None)?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
 
                     // Set max distance.
                     out.max_vertex_gap = smos_max(out.max_vertex_gap, dist_to_edge);
 
-                    // (statuses not checked)
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Vertex(v)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(e)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (statuses not checked upstream; passed on here, WR-658)
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Vertex(v)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(e)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
                 } else if split.reason == SplitReason::FarFromGeom {
                     // Set min distance, if it didn't split due to being too far away
                     // (as opposed to being at a vertex).
@@ -1441,17 +1681,14 @@ impl Stitch<'_> {
                     out.new_edges.push(new_e);
 
                     let e_tol = edge::tolerance(b, e)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(new_e)),
-                            dist_to_edge,
-                            e_tol,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(new_e)),
+                        dist_to_edge,
+                        e_tol,
+                        false,
+                    )?;
 
                     // Also add to main Edges list: might still need processing here.
                     edges.push(Some(new_e));
@@ -1531,15 +1768,13 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// compare, no edge splitting and manifold gluing, from a tenth of the B-rep tolerance,
 /// doubling it while lamina edges remain and it is below 1/200 of the bounding box
 /// diagonal. The result is a solid when no lamina edge is left and the B-rep has more
-/// than one region. With
-/// [`UpstreamFixes::stitch_solid_nests_cavities`](crate::kernel::UpstreamFixes::stitch_solid_nests_cavities)
-/// (WR-569) such a solid is then made a nested solid model, so a closed shell inside
-/// another bounds a void.
+/// than one region. Such a solid is then made a nested solid model, so a closed shell
+/// inside another bounds a void (WR-569; upstream leaves it solid).
 ///
 /// # Errors
 ///
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
-/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; with the opt-in, those of
+/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; those of
 /// `FindAndSetInfiniteRegion`.
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
     stitch_into_solid_with(k, b, None)
@@ -1602,18 +1837,16 @@ pub(crate) fn stitch_into_solid_with(
     }
 
     if num_lamina == 0 && bp1::regions(b, None)?.len() > 1 {
-        // Not upstream (WR-569, opt-in; the fork's tangency-labs/smlib@351c57c): the
-        // stitching found the infinite region but left the regions inside nested closed
-        // shells solid, each shell where the glue put it. A solid is a nested solid model:
-        // inside the outer shell is material, inside a shell within it a void, and so on,
-        // each region's outer shell first.
-        if k.fixes.stitch_solid_nests_cavities {
-            let old = b.editing_enabled();
-            b.set_editing_enabled(false);
-            let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
-            b.set_editing_enabled(old);
-            r?;
-        }
+        // Not upstream (WR-569; the fork's tangency-labs/smlib@351c57c): the stitching
+        // found the infinite region but left the regions inside nested closed shells
+        // solid, each shell where the glue put it. A solid is a nested solid model: inside
+        // the outer shell is material, inside a shell within it a void, and so on, each
+        // region's outer shell first.
+        let old = b.editing_enabled();
+        b.set_editing_enabled(false);
+        let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
+        b.set_editing_enabled(old);
+        r?;
         out.produces_a_solid = true;
     }
     Ok(out)
@@ -1907,14 +2140,12 @@ mod tests {
     }
 
     /// A cube of side 10 with a cube cavity of side 4, as twelve loose faces: the stitch
-    /// closes both shells. With the opt-in (WR-569, the fork's
-    /// tangency-labs/smlib@351c57c) the region inside the inner shell is a void, as is the
-    /// infinite region; upstream leaves it solid.
+    /// closes both shells. The region inside the inner shell is a void (WR-569, the fork's
+    /// tangency-labs/smlib@351c57c), as is the infinite region; upstream leaves it solid.
     #[test]
     fn stitched_solid_cavity_is_a_void() {
-        let build = |fix: bool| {
+        let build = || {
             let mut k = Kernel::default();
-            k.fixes.stitch_solid_nests_cavities = fix;
             let mut b = crate::topology::brep::p3::new_brep(
                 &mut k,
                 crate::geom::tol::USE_DEFAULT,
@@ -1930,9 +2161,65 @@ mod tests {
             b
         };
         // the infinite region and the cavity are voids, between them the material
-        assert_eq!(void_count(&build(true)), 2);
-        // upstream: only the infinite region
-        assert_eq!(void_count(&build(false)), 1);
+        assert_eq!(void_count(&build()), 2);
+    }
+
+    /// (#21540) The same twelve loose faces sewn by `SmBrep::StitchFaces`, the cavity's
+    /// faces turned either way and given before or after the cube's: both shells close
+    /// (twelve edges glued on each cube), and the region inside the inner shell is a void,
+    /// so every face lies between material and a void. The infinite region holds the outer
+    /// shell, the material region the outer shell's other side first, then the inner
+    /// shell, the cavity the inner shell's other side.
+    #[test]
+    fn stitch_faces_leaves_a_closed_cavity_void() {
+        for (inward, cavity_first) in [(true, false), (false, false), (true, true), (false, true)] {
+            let case = format!("inward {inward}, cavity first {cavity_first}");
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            if cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
+            add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
+            if !cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
+            let r =
+                crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false).unwrap();
+            assert_eq!((r.stitched_edges, r.lamina_edges), (24, 0), "{case}");
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "{case}");
+            let infinite = b.infinite_region().unwrap();
+            let mut regions: Vec<(bool, i32, usize)> = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .map(|r| {
+                    let region = b.region(r).unwrap();
+                    (r == infinite, region.is_void, region.shells.len())
+                })
+                .collect();
+            regions.sort_unstable();
+            // (infinite, void flag, shells): the material, the cavity, the infinite region
+            assert_eq!(
+                regions,
+                vec![(false, 0, 2), (false, 1, 1), (true, 1, 1)],
+                "{case}"
+            );
+            // the material region's first shell is its outer one, across from the infinite
+            // region's shell
+            let material = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&r| b.region(r).unwrap().is_void == 0)
+                .unwrap();
+            let outer = b.region(material).unwrap().shells[0];
+            let outside = b.region(infinite).unwrap().shells[0];
+            let mated = b.shell(outer).unwrap().mated_shells(&mut k, &b).unwrap();
+            assert_eq!(mated, vec![outside], "{case}");
+        }
     }
 
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half
@@ -2186,5 +2473,86 @@ mod tests {
         assert_eq!(r.stitched_edges, 0);
         let r = stitch_into_shell(&mut k, &mut b, false, f64::NAN).unwrap();
         assert_eq!(r.max_edge_gap, 0.0);
+    }
+
+    /// When `per_entity_candidate_split` is enabled, a candidate face whose lamina edge meets
+    /// a T-junction vertex on pre-existing non-candidate faces still splits and sews along both
+    /// halves even though the non-candidate vertices and edges appear earlier in traversal order.
+    #[test]
+    fn per_entity_candidate_split_splits_candidate_edge_after_non_candidate_entities() {
+        use crate::math::Point3;
+        use crate::topology::face::p4 as face4;
+
+        let run = |per_entity: bool| -> (u64, u64) {
+            let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            // Two non-candidate squares sharing the T-junction vertex (1, 0, 0) along y = 0,
+            // created first so their vertices and edges precede the candidate face in the B-rep.
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(0.0, 0.0, 0.0),
+                    p(1.0, 0.0, 0.0),
+                    p(1.0, 1.0, 0.0),
+                    p(0.0, 1.0, 0.0),
+                ]),
+            );
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(1.0, 0.0, 0.0),
+                    p(2.0, 0.0, 0.0),
+                    p(2.0, 1.0, 0.0),
+                    p(1.0, 1.0, 0.0),
+                ]),
+            );
+            // Candidate face whose top edge runs straight from (0, 0, 0) to (2, 0, 0) without a
+            // vertex at (1, 0, 0).
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(0.0, -1.0, 0.0),
+                    p(2.0, -1.0, 0.0),
+                    p(2.0, 0.0, 0.0),
+                    p(0.0, 0.0, 0.0),
+                ]),
+            );
+            let faces = bp1::faces(&b, None).unwrap();
+            let candidate = faces[2];
+            let cand_verts = face4::vertices(&b, candidate, None, false, None).unwrap();
+            let cand_edges = face4::edges(&b, candidate, None, false, None).unwrap();
+
+            let mut cb = DefaultStitchCallback::new();
+            let mut stitch = Stitch::new(&mut cb, 1e-4, false, true);
+            stitch.making_manifold_solid = true;
+            stitch.split_edges_with_vertices = true;
+            stitch.per_entity_candidate_split = per_entity;
+            let r = stitch
+                .do_stitching(
+                    &mut k,
+                    &mut b,
+                    Some(&cand_verts),
+                    Some(&cand_edges),
+                    MinGapRequest::default(),
+                )
+                .unwrap();
+            (r.stitched_edges, r.lamina_edges)
+        };
+
+        // Upstream behavior latches both flags to false on the first non-candidate entities,
+        // so the candidate edge is never split at (1, 0, 0) and neither half sews.
+        assert_eq!(run(false).0, 0);
+        // With per-entity candidate splitting, (1, 0, 0) splits the candidate edge and both
+        // halves sew cleanly.
+        assert_eq!(run(true).0, 2);
     }
 }

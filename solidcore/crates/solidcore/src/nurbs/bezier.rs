@@ -65,7 +65,7 @@
 //!   [`degree_reduce_coefs`] therefore returns a `Result`. [`reduce_degree`] checks
 //!   that `Pw[0]` and `Pw[p]` exist before allocating its `p` output points.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::geom::{dist_cpolygon, dist_cpt_cpt, dist_cpt_cpt_homo};
 use crate::nurbs::math::{CPoint, MatrixType, RealMatrix};
 use crate::nurbs::srf_basic::{Direction, Surface, SurfaceIndices};
@@ -115,10 +115,6 @@ const OP_ARC_LENGTH: &str = "nurbs::bezier::calc_arc_length";
 const OP_CRV_EXTEND: &str = "nurbs::bezier::crv_extend";
 const OP_SRF_EXTEND: &str = "nurbs::bezier::srf_extend_4d";
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
 /// `InvalidInput` for a degree upstream's `short` `NL_DEGREE` cannot hold
 /// (above [`MAX_SHORT_DEGREE`]). Routines that do index arithmetic with a caller's
 /// degree call this first, so that arithmetic cannot overflow.
@@ -126,7 +122,7 @@ pub(crate) fn check_short_degree(p: usize, operation: &'static str) -> Result<()
     if p > MAX_SHORT_DEGREE {
         return Err(SolidError::InvalidInput {
             operation,
-            reason: "degree exceeds upstream's NL_DEGREE (short) range",
+            reason: "degree above the largest degree a knot index can hold",
         });
     }
     Ok(())
@@ -189,10 +185,11 @@ pub fn binomial(i: usize, j: usize) -> Result<f64> {
 /// `max(0, i-q) <= j <= min(i, p)`, the lower half mirrored from the upper.
 fn band_matrix_into(p: usize, q: usize, a: &mut RealMatrix, op: &'static str) -> Result<()> {
     let n = p.checked_add(q).ok_or_else(|| out_of_range(op))?;
-    a.ensure(n, p, MatrixType::Full, p).map_err(|e| match e {
-        SolidError::Nlib { code, .. } => nlib(op, code),
-        other => other,
-    })?;
+    a.ensure(n, p, MatrixType::Full, p)
+        .map_err(|e| match e.nurbs_failure().copied() {
+            Some(failure) => SolidError::nurbs(op, failure),
+            None => e,
+        })?;
 
     let r = n / 2;
     a.set(0, 0, 1.0).map_err(|_| out_of_range(op))?;
@@ -310,7 +307,7 @@ pub fn func_multiply_func(
 ) -> Result<()> {
     let op = OP_FUNC_FUNC;
     if !product_range_ok(p, q, s, e) {
-        return Err(nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     let mut local = None;
     let a = given_or_local(pm, &mut local, || product_matrix(p, q))?;
@@ -341,7 +338,7 @@ fn func_times_crv(
     op: &'static str,
 ) -> Result<()> {
     if !product_range_ok(p, q, s, e) {
-        return Err(nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     let mut local = None;
     let a = given_or_local(pm, &mut local, || product_matrix(p, q))?;
@@ -434,7 +431,7 @@ pub fn srf_elevate_degree(
                 *at2_mut(qw, roc, j, op)? = c;
             }
         }
-        Direction::UV => return Err(nlib(op, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(op, NurbsFailure::CallFailed)),
     }
     Ok(())
 }
@@ -447,10 +444,10 @@ pub fn eval_one_basis(p: usize, i: usize, u: f64) -> Result<f64> {
     let op = OP_ONE_BASIS;
     check_short_degree(p, op)?;
     if i > p {
-        return Err(nlib(op, NlibCode::Index));
+        return Err(SolidError::nurbs(op, NurbsFailure::Index));
     }
     if u < 0.0 || u > 1.0 {
-        return Err(nlib(op, NlibCode::Parameter));
+        return Err(SolidError::nurbs(op, NurbsFailure::Parameter));
     }
 
     if u == 0.0 {
@@ -619,7 +616,7 @@ pub fn reduce_degree(pw: &[CPoint], p: usize, c: &ReduceCoefs) -> Result<Reduced
 pub fn split(pw: &[CPoint], p: usize, u: f64) -> Result<(Vec<CPoint>, Vec<CPoint>)> {
     let op = OP_SPLIT;
     if u < 0.0 || u > 1.0 {
-        return Err(nlib(op, NlibCode::Parameter));
+        return Err(SolidError::nurbs(op, NurbsFailure::Parameter));
     }
     let n = p.checked_add(1).ok_or_else(|| out_of_range(op))?;
     let aw = pw.get(..n).ok_or_else(|| out_of_range(op))?;
@@ -859,10 +856,10 @@ pub fn srf_extend_4d(sur: &Surface, dir: Direction, whr: ExtendAt, rev: bool) ->
     let (p, q) = sur.degrees();
 
     if dir == Direction::U && p != n {
-        return Err(nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     if dir == Direction::V && q != m {
-        return Err(nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
 
     let mut net = vec![vec![CPoint::ZERO; m + 1]; n + 1];

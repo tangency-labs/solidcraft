@@ -3,7 +3,10 @@
 //! `SETBACK_CASES` of the fork's `capi/tests/ops_kernel.cpp`, with the fork's values and
 //! tolerances. `870c970` committed the fill's cases as known failing; `beba428` and `3fdb76b`
 //! make every case pass (`52da453` keeps them passing at the whole spoke's speed), which is
-//! the end state here: all seven pass.
+//! the end state here: all seven pass. Two of the fork's later cases follow them, with G2 and
+//! a Moebius map that changes along the rounds added (tangency-labs/solidcore#2697):
+//! `fill_is_the_geometry_s` (fork main `8eac63c`) and `fill_is_the_geometry_across` (the fork's
+//! `archive/wip/85c-curved-setback`, `37c9e1d`, known failing there).
 //!
 //! The box corner is `x, y, z >= 0` at the origin: face f (0, 1, 2) the plane where coordinate
 //! f is 0, its normal out of the material `-e_f`; the edge along axis a lies between faces
@@ -32,7 +35,8 @@
 )] // test helpers
 
 use solidcore::blend::blend_setback::{
-    certified_scale, containment, distances, ease_surface, fill_hole, EaseRamp, Edge, Face, Round,
+    certified_scale, containment, distances, ease_surface, fill_hole, fill_hole_to, EaseRamp, Edge,
+    Face, Fill, FillOrders, Round,
 };
 use solidcore::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use solidcore::error::SolidError;
@@ -173,10 +177,11 @@ fn box_corner_gn_round(k: &Kernel, a: usize, r: f64, s: f64, len: f64) -> BSplin
             },
         )
         .unwrap();
-    // (a plain B-spline without `fillet_round_as_definition`)
-    let solidcore::surface::surface::SurfaceKind::BSpline(out) = out.into_kind() else {
-        panic!("the G^n round is a B-spline without the definition flag");
+    // the round is its definition; its net is the G^n section's B-spline
+    let solidcore::surface::surface::SurfaceKind::ProceduralBlend(out) = out.into_kind() else {
+        panic!("the G^n round is not its definition");
     };
+    let out = out.net().copy();
     // its end section against the closed form
     let closed = box_corner_round(a, r, s, len, 2);
     let u0 = out.natural_uv_domain().u_interval().min();
@@ -417,6 +422,61 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
         }
     }
     let len = 10.0;
+    if order == 2 {
+        // the G2 fill is certified convex only past the least scale of the setbacks that
+        // certifies it (as the G1's is, certified_scale; #13775): grow to it
+        let build = |scale: f64| -> bool {
+            let mut rs = Vec::new();
+            for a in 0..3 {
+                let (r, sb) = (radii[a], setbacks[a] * scale);
+                let mut own = if round_order == 3 {
+                    box_corner_gn_round(&k, a, r, sb, len)
+                } else {
+                    box_corner_round(a, r, sb, len, round_order)
+                };
+                if ease > 0.0 {
+                    let g2 = box_corner_round(a, r, sb, len, 2);
+                    let ramp = [EaseRamp {
+                        from: sb + ease,
+                        to: sb,
+                    }];
+                    own = ease_surface(&own, &g2, SurfParamType::U, &ramp).unwrap();
+                }
+                rs.push(own);
+            }
+            let surfaces: Vec<Surface> = rs.iter().cloned().map(Surface::from).collect();
+            let input: Vec<Round<'_>> = surfaces
+                .iter()
+                .map(|own| Round {
+                    surface: own,
+                    along: SurfParamType::U,
+                    end: own
+                        .natural_uv_domain_with_nurb(&k)
+                        .unwrap()
+                        .u_interval()
+                        .min(),
+                    corner_above: false,
+                })
+                .collect();
+            fill_hole(&k, &faces, &input, order, 1e-9).is_ok()
+        };
+        assert!(
+            build(12.0),
+            "no setback up to 12 times the default certifies this corner"
+        );
+        let (mut lo, mut hi) = (1.0f64, 12.0f64);
+        while hi - lo > 0.01 {
+            let mid = 0.5 * (lo + hi);
+            if build(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        for x in &mut setbacks {
+            *x *= hi;
+        }
+    }
     let mut rounds = Vec::new();
     for a in 0..3 {
         let (r, s) = (radii[a], setbacks[a]);
@@ -616,6 +676,35 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
     if order == 1 {
         println!("  least Gaussian curvature over the fill {least:.3e}");
     }
+    // a G2 fill's seam with its round is parabolic: the round is its section swept
+    // along a line (degree 1 along, so its Gaussian curvature is 0; an eased round's
+    // law `10 s^3 - 15 s^4 + 6 s^5` is flat to second order at `to`, so its jets at
+    // the end row are the swept section's), and the fill's rows 0..=2, taken from the
+    // round's geometry (#14041), carry those jets to the seam whatever the interior
+    // solve chooses: the fill's K on the seam u = 0 is 0. Exact rational arithmetic
+    // on the returned net finds K exactly 0 at 129 stations — more than the
+    // curvature numerator's degree, so the identity holds on the whole seam — and the
+    // sampled residual is f64 evaluation rounding alone. #13775's certificate will
+    // prove this as an identity of the definition; this keeps it on the returned net.
+    // The G^n round (order 3, cubic Hermite along) is not derived here.
+    if order == 2 && round_order <= 2 {
+        let mut worst = 0.0f64;
+        for m in 0..3 {
+            for j in 0..=16 {
+                let uv = at(0.0, f64::from(j) / 16.0);
+                let kg = gaussian_curvature(&k, &patches[m], uv).unwrap_or_else(|| {
+                    panic!("strip {m} at {uv:?}: no curvature on its round seam")
+                });
+                worst = worst.max(kg.abs());
+                assert!(
+                    kg.abs() <= 1e-11 / (size * size),
+                    "strip {m} at {uv:?}: Gaussian curvature {kg:e} on its round seam, \
+                     the parabolic identity broken"
+                );
+            }
+        }
+        println!("  worst |K| on the round seams {worst:.3e}");
+    }
 }
 
 /// `setback_distances_box_corner`: the setbacks by the owner's rule, `max(1.5 r, least +
@@ -660,6 +749,42 @@ fn box_corner_g2_eased() {
     setback_box_corner([2.0, 2.0, 2.0], 1, 2.0, 2);
 }
 
+/// A G2 fill at the corner's default setbacks is refused where its convexity certificate
+/// does not hold (the fills there carry residual saddles; #13775): the refusal names the
+/// certificate, as the G1's does at its own least setbacks.
+#[test]
+fn box_corner_g2_rounds_refused_at_the_default_setbacks() {
+    let k = Kernel::default();
+    let faces = box_corner_faces();
+    let setbacks = distances(&faces, &box_corner_edges([2.0, 2.0, 2.0]))
+        .unwrap()
+        .setbacks;
+    let rounds: Vec<Surface> = (0..3)
+        .map(|a| Surface::from(box_corner_round(a, 2.0, setbacks[a], 10.0, 2)))
+        .collect();
+    let input: Vec<Round<'_>> = rounds
+        .iter()
+        .map(|own| Round {
+            surface: own,
+            along: SurfParamType::U,
+            end: own
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap()
+                .u_interval()
+                .min(),
+            corner_above: false,
+        })
+        .collect();
+    let refusal = fill_hole(&k, &faces, &input, 2, 1e-9).unwrap_err();
+    assert!(
+        refusal
+            .reason
+            .unwrap_or_default()
+            .contains("no G2 fill up to degree 9 is certified convex"),
+        "{refusal:?}"
+    );
+}
+
 /// Order-2 rounds r 2 (no ease), filled to G2.
 #[test]
 fn box_corner_g2_rounds() {
@@ -700,4 +825,496 @@ fn g2_fill_of_uneased_rounds_refused() {
     assert!(matches!(refusal.error, SolidError::InvalidInput { .. }));
     let why = refusal.reason.expect("a reason");
     println!("  refused: {why}");
+}
+
+// ---- the fill is the rounds' geometry's, not their parametrization's ----
+// (tangency-labs/solidcore#2697)
+
+/// `C(n, k)`.
+fn choose(n: usize, k: usize) -> f64 {
+    let mut c: u64 = 1;
+    for i in 0..k as u64 {
+        c = c * (n as u64 - i) / (i + 1);
+    }
+    c as f64
+}
+
+/// The product of two polynomials in Bernstein form on `[0, 1]`, in Bernstein form.
+fn bernstein_product(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let (p, q) = (a.len() - 1, b.len() - 1);
+    let mut c = vec![0.0; p + q + 1];
+    for (i, &ai) in a.iter().enumerate() {
+        for (j, &bj) in b.iter().enumerate() {
+            c[i + j] += choose(p, i) * choose(q, j) / choose(p + q, i + j) * ai * bj;
+        }
+    }
+    c
+}
+
+/// A polynomial in Bernstein form raised to degree `deg` (at least its own).
+fn bernstein_raised(a: &[f64], deg: usize) -> Vec<f64> {
+    let mut a = a.to_vec();
+    while a.len() - 1 < deg {
+        let p = a.len() - 1;
+        let mut b = vec![0.0; p + 2];
+        b[0] = a[0];
+        b[p + 1] = a[p];
+        for i in 1..=p {
+            let t = i as f64 / (p + 1) as f64;
+            b[i] = t * a[i - 1] + (1.0 - t) * a[i];
+        }
+        a = b;
+    }
+    a
+}
+
+/// `box_corner_round` with its across parameter moved by a Moebius map (the fork's
+/// `setback_fill_is_the_geometry_across`): column j's weights times `rho^j`, the same
+/// surface.
+fn box_corner_round_moved(
+    a: usize,
+    r: f64,
+    s: f64,
+    len: f64,
+    order: usize,
+    rho: f64,
+) -> BSplineSurface {
+    let own = box_corner_round(a, r, s, len, order);
+    let c = own.canonical().unwrap();
+    let nv = c.v_degree + 1;
+    let w: Vec<f64> = c
+        .weights
+        .iter()
+        .enumerate()
+        .map(|(i, &w)| w * rho.powi((i % nv) as i32))
+        .collect();
+    BSplineSurface::create_canonical(&CanonicalSurfaceData {
+        u_degree: c.u_degree,
+        v_degree: c.v_degree,
+        control_points: &c.control_points,
+        form: BSplineSurfaceForm::Unspecified,
+        u_multiplicities: &c.u_multiplicities,
+        v_multiplicities: &c.v_multiplicities,
+        u_knots: &c.u_knots,
+        v_knots: &c.v_knots,
+        knot_type: KnotType::Unspecified,
+        weights: Some(&w),
+        uv_domain: None,
+    })
+    .unwrap()
+}
+
+/// `box_corner_round` with its across parameter moved by a Moebius map that changes along it:
+/// column j's homogeneous points (linear along) times `m(u)^j`, m linear from `rho0` at the
+/// end section to `rho1` at the far end, of degree `q + 1` along (q its degree across). Each
+/// section is the same curve at another parameter, so the surface is the same.
+fn box_corner_round_moved_along(
+    a: usize,
+    r: f64,
+    s: f64,
+    len: f64,
+    order: usize,
+    rho0: f64,
+    rho1: f64,
+) -> BSplineSurface {
+    let own = box_corner_round(a, r, s, len, order);
+    let c = own.canonical().unwrap();
+    assert_eq!(c.u_degree, 1);
+    let nv = c.v_degree + 1;
+    let deg = nv;
+    let mut rows = vec![vec![[0.0f64; 4]; nv]; deg + 1];
+    for j in 0..nv {
+        let mut power = vec![1.0];
+        for _ in 0..j {
+            power = bernstein_product(&power, &[rho0, rho1]);
+        }
+        for comp in 0..4 {
+            let at = |i: usize| {
+                let (p, w) = (c.control_points[i * nv + j], c.weights[i * nv + j]);
+                [p.x * w, p.y * w, p.z * w, w][comp]
+            };
+            let along = bernstein_raised(&bernstein_product(&power, &[at(0), at(1)]), deg);
+            for (i, x) in along.into_iter().enumerate() {
+                rows[i][j][comp] = x;
+            }
+        }
+    }
+    let (mut pts, mut w) = (Vec::new(), Vec::new());
+    for h in rows.iter().flatten() {
+        pts.push(Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+        w.push(h[3]);
+    }
+    BSplineSurface::create_canonical(&CanonicalSurfaceData {
+        u_degree: deg,
+        v_degree: nv - 1,
+        control_points: &pts,
+        form: BSplineSurfaceForm::Unspecified,
+        u_multiplicities: &[deg + 1, deg + 1],
+        v_multiplicities: &[nv, nv],
+        u_knots: &[s, s + len],
+        v_knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: Some(&w),
+        uv_domain: None,
+    })
+    .unwrap()
+}
+
+/// The fork's `box_corner_round_reparametrized`: `box_corner_round` over the same stretch of
+/// its edge in another parameter along it, quadratic along, its middle row of sections at
+/// `s + mid len` and that row's weights times `wmid`: the same surface, its rails and sections
+/// the same curves, at another speed along (not constant unless `mid = 1/2`, `wmid = 1`).
+fn box_corner_round_reparametrized(
+    a: usize,
+    r: f64,
+    s: f64,
+    len: f64,
+    order: usize,
+    mid: f64,
+    wmid: f64,
+) -> BSplineSurface {
+    let lin = box_corner_round(a, r, s, len, order);
+    let c = lin.canonical().unwrap();
+    assert_eq!(c.u_degree, 1);
+    let nv = c.v_degree + 1;
+    let (mut pts, mut w) = (Vec::new(), Vec::new());
+    for (share, rho) in [(0.0, 1.0), (mid, wmid), (1.0, 1.0)] {
+        for j in 0..nv {
+            // the first row, at s, moved along the edge
+            let p = c.control_points[j];
+            let mut x = [p.x, p.y, p.z];
+            x[a] = s + share * len;
+            pts.push(Point3::new(x[0], x[1], x[2]));
+            w.push(rho * c.weights[j]);
+        }
+    }
+    BSplineSurface::create_canonical(&CanonicalSurfaceData {
+        u_degree: 2,
+        v_degree: nv - 1,
+        control_points: &pts,
+        form: BSplineSurfaceForm::Unspecified,
+        u_multiplicities: &[3, 3],
+        v_multiplicities: &[nv, nv],
+        u_knots: &[s, s + len],
+        v_knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: Some(&w),
+        uv_domain: None,
+    })
+    .unwrap()
+}
+
+/// The box corner's setbacks for rounds of `radii`: the owner's rule, and for a G1 fill grown
+/// to the least scale that certifies it convex (the fork's capi `box_corner_g1_setbacks`).
+fn corner_setbacks(k: &Kernel, radii: [f64; 3], order: usize) -> Vec<f64> {
+    let faces = box_corner_faces();
+    let mut setbacks = distances(&faces, &box_corner_edges(radii))
+        .unwrap()
+        .setbacks;
+    if order == 1 {
+        let scale = certified_scale(k, &faces, &box_corner_edges(radii), &setbacks, None)
+            .unwrap()
+            .scale;
+        assert!(scale >= 1.0);
+        for x in &mut setbacks {
+            *x *= scale;
+        }
+    }
+    setbacks
+}
+
+/// The setbacks the geometric default grown to the least at which the fill of `orders` of
+/// rounds of `section`'s order certifies convex (the G1 by `certified_scale`, the G2 and the
+/// fill G2 to circular rounds by a bisection on the grid of hundredths over the same
+/// rounds: the convexity certificate needs the corner's room, #13775; the rounds moved or
+/// reparametrized are the same geometry and certify at the same setbacks).
+fn certifying_setbacks(
+    k: &Kernel,
+    radii: [f64; 3],
+    orders: FillOrders,
+    section: usize,
+) -> Vec<f64> {
+    if orders == G1 {
+        return corner_setbacks(k, radii, 1);
+    }
+    let base = corner_setbacks(k, radii, section.max(1));
+    let certifies = |scale: f64| -> bool {
+        let rounds: Vec<BSplineSurface> = (0..3)
+            .map(|a| box_corner_round(a, radii[a], base[a] * scale, 10.0, section))
+            .collect();
+        fill_of(k, &rounds, orders).is_ok()
+    };
+    assert!(
+        certifies(12.0),
+        "no setback up to 12 times the default certifies this corner"
+    );
+    // the least certifying scale on the grid of hundredths whose neighbour below fails
+    let (mut lo, mut hi) = (1.0f64, 12.0f64);
+    while hi - lo > 0.01 {
+        let mid = 0.5 * (lo + hi);
+        if certifies(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    base.iter().map(|&x| x * hi).collect()
+}
+
+/// The box corner's fill to `orders` of `rounds` (u along each, from its end section at its
+/// least u, the corner below it) at the fork's tolerance 1e-9, or why it is refused.
+fn fill_of(k: &Kernel, rounds: &[BSplineSurface], orders: FillOrders) -> Result<Fill, String> {
+    let surfaces: Vec<Surface> = rounds.iter().cloned().map(Surface::from).collect();
+    let input: Vec<Round<'_>> = surfaces
+        .iter()
+        .map(|own| Round {
+            surface: own,
+            along: SurfParamType::U,
+            end: own
+                .natural_uv_domain_with_nurb(k)
+                .unwrap()
+                .u_interval()
+                .min(),
+            corner_above: false,
+        })
+        .collect();
+    let fill = fill_hole_to(k, &box_corner_faces(), &input, orders, 1e-9)
+        .map_err(|e| format!("refused ({})", e.reason.unwrap_or("no reason")))?;
+    assert_eq!(fill.patches.len(), 6);
+    Ok(fill)
+}
+
+/// How far two fills of one corner lie apart, patch for patch, at 9 x 9 parameters of each.
+fn fill_gap(a: &Fill, b: &Fill) -> f64 {
+    assert_eq!(
+        (&a.round, &a.face, &a.reversed),
+        (&b.round, &b.face, &b.reversed)
+    );
+    assert_eq!(a.patches.len(), b.patches.len());
+    let mut worst = 0.0f64;
+    for (pa, pb) in a.patches.iter().zip(&b.patches) {
+        for i in 0..=8 {
+            for j in 0..=8 {
+                let uv = Point2::new(f64::from(i) / 8.0, f64::from(j) / 8.0);
+                let (p, q) = (
+                    pa.evaluate_point(uv).unwrap(),
+                    pb.evaluate_point(uv).unwrap(),
+                );
+                worst = worst.max(p.distance(q));
+            }
+        }
+    }
+    worst
+}
+
+/// The box corner's rounds r 2, 3, 4 (sections of `box_corner_round`'s `section`) at the
+/// setbacks a fill to `orders` takes (G1: grown to the least scale that certifies it convex;
+/// otherwise the rule's), filled once as they are and once with their sections moved across by a
+/// Moebius map (`w_j rho0^j`, and with `rho1` one changing along them from `rho0` at the end
+/// section to `rho1` at the far end): the same surfaces at another parameter across. Returns how
+/// far the two fills lie apart, patch for patch, against `1e-12` of the corner's size, or why the
+/// moved rounds' fill is refused. The rounds as they are must fill.
+fn fill_moved_across(
+    orders: FillOrders,
+    section: usize,
+    rho0: f64,
+    rho1: Option<f64>,
+) -> Result<(f64, f64), String> {
+    let k = Kernel::default();
+    let radii = [2.0, 3.0, 4.0];
+    let setbacks = certifying_setbacks(&k, radii, orders, section);
+    let size = setbacks.iter().copied().fold(f64::MIN, f64::max);
+    let rounds = |moved: bool| -> Vec<BSplineSurface> {
+        (0..3)
+            .map(|a| {
+                let (r, s) = (radii[a], setbacks[a]);
+                match (moved, rho1) {
+                    (false, _) => box_corner_round(a, r, s, 10.0, section),
+                    (true, None) => box_corner_round_moved(a, r, s, 10.0, section, rho0),
+                    (true, Some(rho1)) => {
+                        box_corner_round_moved_along(a, r, s, 10.0, section, rho0, rho1)
+                    }
+                }
+            })
+            .collect()
+    };
+    let own = fill_of(&k, &rounds(false), orders)
+        .unwrap_or_else(|why| panic!("the rounds as they are: {why}"));
+    let other = fill_of(&k, &rounds(true), orders)?;
+    Ok((fill_gap(&own, &other), 1e-12 * size))
+}
+
+/// [`fill_moved_across`]'s case, graded: the same fill to `1e-12` of the corner's size.
+fn assert_fill_moved_across(orders: FillOrders, section: usize, rho0: f64, rho1: Option<f64>) {
+    let name = format!(
+        "{orders:?}, the rounds moved across by {rho0}^j{}",
+        rho1.map_or(String::new(), |r| format!(", changing along to {r}^j"))
+    );
+    let (gap, tol) = fill_moved_across(orders, section, rho0, rho1)
+        .unwrap_or_else(|why| panic!("{name}: the fill is {why}"));
+    println!("  {name}: the fill off by {gap:.3e} (allowed {tol:.1e})");
+    assert!(gap <= tol, "{name}: the fill is off by {gap:e}");
+}
+
+const G1: FillOrders = FillOrders {
+    rounds: 1,
+    faces: 1,
+};
+const G2: FillOrders = FillOrders {
+    rounds: 2,
+    faces: 2,
+};
+
+/// The fill is the rounds' geometry's across them (the fork's
+/// `setback_fill_is_the_geometry_across`, known failing in its `archive/wip/85c-curved-setback`):
+/// the G1 fill of circular rounds r 2, 3, 4, their sections moved across by `1.7^j`.
+#[test]
+fn fill_is_the_geometry_across() {
+    assert_fill_moved_across(G1, 1, 1.7, None);
+}
+
+/// As [`fill_is_the_geometry_across`], moved only by `1.001^j`: the setbacks are the least that
+/// certify, so the fill of rounds moved further (`1.003^j` already) may be refused; this one is
+/// still certified convex, and it is the fill's distance that is graded.
+#[test]
+fn fill_is_the_geometry_across_mildly() {
+    assert_fill_moved_across(G1, 1, 1.001, None);
+}
+
+/// As [`fill_is_the_geometry_across`], the map changing along the rounds, `1.7^j` at the end
+/// section to `1.2^j` at the far end: the rows' derivatives along move too.
+#[test]
+fn fill_is_the_geometry_across_changing_along() {
+    assert_fill_moved_across(G1, 1, 1.7, Some(1.2));
+}
+
+/// The G2 fill of order-2 rounds r 2, 3, 4, their sections moved across by `1.7^j`.
+#[test]
+fn g2_fill_is_the_geometry_across() {
+    assert_fill_moved_across(G2, 2, 1.7, None);
+}
+
+/// As [`g2_fill_is_the_geometry_across`], the map changing along the rounds (`1.7^j` to
+/// `1.2^j`): the rows' first and second derivatives along move too.
+#[test]
+fn g2_fill_is_the_geometry_across_changing_along() {
+    assert_fill_moved_across(G2, 2, 1.7, Some(1.2));
+}
+
+/// The fill G2 to circular rounds and G1 to the faces: its rows come from the arc about the
+/// ball's centre already, its setback patches' speed across from the spoke, which must be the
+/// geometry's too. The circles moved across by `1.7^j`.
+#[test]
+fn g2_fill_is_the_geometry_across_beside_circles() {
+    assert_fill_moved_across(
+        FillOrders {
+            rounds: 2,
+            faces: 1,
+        },
+        1,
+        1.7,
+        None,
+    );
+}
+
+/// The fill is the rounds' geometry's along them (the fork's `setback_fill_is_the_geometry_s`,
+/// fork main `8eac63c`): the same rounds linear along their edges and in other parameters along
+/// them (polynomial, the middle row at 0.3 of the way; rational, at 0.65 with weight 2.5: other
+/// speeds and accelerations at their ends), and for G2 also the circles eased into the order-2
+/// sections over 2 before their ends (the sections there the order-2 ones, flat to second
+/// order), give the same fill, patch for patch, at every (u, v) to `1e-12` of its size.
+#[test]
+fn fill_is_the_geometry_s() {
+    let k = Kernel::default();
+    let radii = [2.0, 3.0, 4.0];
+    for order in [1, 2] {
+        // the least setbacks at which every parameterization certifies convex: the
+        // eased circles are another geometry than the plain rounds and may need more
+        // room than they do (#13775)
+        let orders = FillOrders {
+            rounds: order,
+            faces: order,
+        };
+        let base = corner_setbacks(&k, radii, order);
+        let setbacks = if order == 1 {
+            base
+        } else {
+            let rounds_at = |scale: f64, how: usize| -> Vec<BSplineSurface> {
+                (0..3)
+                    .map(|a| {
+                        let (r, sb) = (radii[a], base[a] * scale);
+                        match how {
+                            0 => box_corner_round(a, r, sb, 10.0, order),
+                            1 => box_corner_round_reparametrized(a, r, sb, 10.0, order, 0.3, 1.0),
+                            2 => box_corner_round_reparametrized(a, r, sb, 10.0, order, 0.65, 2.5),
+                            _ => {
+                                let ramp = [EaseRamp {
+                                    from: sb + 2.0,
+                                    to: sb,
+                                }];
+                                let circle = box_corner_round(a, r, sb, 10.0, 1);
+                                let g2 = box_corner_round(a, r, sb, 10.0, 2);
+                                ease_surface(&circle, &g2, SurfParamType::U, &ramp).unwrap()
+                            }
+                        }
+                    })
+                    .collect()
+            };
+            let all_certify = |scale: f64| -> bool {
+                (0..4usize).all(|how| fill_of(&k, &rounds_at(scale, how), orders).is_ok())
+            };
+            assert!(
+                all_certify(12.0),
+                "G{order}: no setback up to 12 times the default certifies every parameterization"
+            );
+            let (mut lo, mut hi) = (1.0f64, 12.0f64);
+            while hi - lo > 0.01 {
+                let mid = 0.5 * (lo + hi);
+                if all_certify(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            base.iter().map(|&x| x * hi).collect()
+        };
+        let size = setbacks.iter().copied().fold(f64::MIN, f64::max);
+        let rounds = |how: usize| -> Vec<BSplineSurface> {
+            (0..3)
+                .map(|a| {
+                    let (r, s) = (radii[a], setbacks[a]);
+                    match how {
+                        0 => box_corner_round(a, r, s, 10.0, order),
+                        1 => box_corner_round_reparametrized(a, r, s, 10.0, order, 0.3, 1.0),
+                        2 => box_corner_round_reparametrized(a, r, s, 10.0, order, 0.65, 2.5),
+                        _ => {
+                            let ramp = [EaseRamp {
+                                from: s + 2.0,
+                                to: s,
+                            }];
+                            let circle = box_corner_round(a, r, s, 10.0, 1);
+                            let g2 = box_corner_round(a, r, s, 10.0, 2);
+                            ease_surface(&circle, &g2, SurfParamType::U, &ramp).unwrap()
+                        }
+                    }
+                })
+                .collect()
+        };
+        let own = fill_of(&k, &rounds(0), orders).unwrap();
+        let ways: &[(usize, &str)] = if order == 1 {
+            &[(1, "polynomial"), (2, "rational")]
+        } else {
+            &[(1, "polynomial"), (2, "rational"), (3, "eased")]
+        };
+        for &(how, name) in ways {
+            let other = fill_of(&k, &rounds(how), orders)
+                .unwrap_or_else(|why| panic!("G{order}, the rounds {name}: {why}"));
+            let gap = fill_gap(&own, &other);
+            println!("  G{order}: the rounds {name} along: the fill off by {gap:.3e}");
+            assert!(
+                gap <= 1e-12 * size,
+                "G{order}, the rounds {name} along: the fill is off by {gap:e}"
+            );
+        }
+    }
 }
