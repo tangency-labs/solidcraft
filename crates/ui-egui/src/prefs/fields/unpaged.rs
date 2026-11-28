@@ -25,6 +25,11 @@ macro_rules! unpaged_preferences {
             /// The local appearance library the Appearance panel loads whenever it opens (#20361); empty:
             /// none, the panel opens with no library, as it always has. Set by the panel's own checkbox.
             appearance_library: String = String::new();
+            /// Automatically hide a sketch when a feature consumes it (Extrude, Revolve, Hole at
+            /// sketch points, sheet metal flanges, etc.; on by default, matching existing
+            /// behaviour). Set by the Hide sketch option in feature tool dialogs and remembered
+            /// across sessions; no Preferences page shows or resets it (#23256).
+            auto_hide_sketches: bool = true;
             /// The programs the user added to the slicer list, newest first.
             custom_slicers: Vec<String> = Vec::new();
             /// Imported theme files (`theme_files`), kept here so they also work in the browser.

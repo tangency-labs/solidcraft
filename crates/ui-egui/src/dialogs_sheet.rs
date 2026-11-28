@@ -1136,6 +1136,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                     *symmetric = direction == 1;
                     enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
                     crate::ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Other side", reverse)], 2);
+                    crate::dialogs::hide_sketch_option(app, ui);
+                });
+            } else if *ty == 0 {
+                crate::ui_kit::section(ui, "sheet_options", "Options", true, |ui| {
+                    crate::ui_kit::checkbox_grid(ui, &mut [("Flip", flip)], 2);
+                    crate::dialogs::hide_sketch_option(app, ui);
                 });
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
@@ -1223,6 +1229,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             form_row(ui, "Thickness", |ui| {
                 ui.label(solidcraft_ui_text::tr_label("from the rule"));
             });
+            crate::dialogs::hide_sketch_options_section(app, ui, "sheet_tab_options");
         }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule, side, thin } => {

@@ -13,11 +13,6 @@ macro_rules! design_preferences {
             /// when not set, or set to one this version doesn't have for an assembly), or a template
             /// file's path (#22120).
             assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
-            /// Automatically hide a sketch when a feature consumes it (Extrude, Revolve, Hole at
-            /// sketch points, sheet metal flanges, etc.; on by default, matching existing
-            /// behaviour). Off: creating a feature from a sketch leaves the sketch visible so it
-            /// can be reused across features without turning its eye back on (#23256).
-            auto_hide_sketches: bool = true, PAGE_DESIGN => check_id("prefs.auto_hide_sketches");
             /// Hovering an Origin plane, axis or point row in the Browser shows that item in the view,
             /// for the design's Origin and each part's, also while it is hidden (#15658): a hidden item
             /// shows only during the hover, its eye and saved visibility unchanged. Off: a hover lights

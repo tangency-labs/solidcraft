@@ -7610,7 +7610,6 @@ mod tests {
         use super::*;
         let fields = [
             ("default_units", json!("ft"), PAGE_DESIGN),
-            ("auto_hide_sketches", json!(false), PAGE_DESIGN),
             ("default_projection", json!("first"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),
@@ -10583,63 +10582,41 @@ mod tests {
     }
 
     /// #23256: `auto_hide_sketches` defaults to on (including when omitted from saved preferences),
-    /// toggles from Preferences -> Design (with Cancel and Restore Defaults), and keeps a sketch
-    /// visible when turned off during feature creation.
+    /// is unpaged (no longer shown on Preferences -> Design or reset by Design Defaults), and
+    /// persists across restarts.
     #[test]
-    fn auto_hide_sketches_defaults_on_toggles_in_design_prefs_and_keeps_sketches_visible() {
+    fn auto_hide_sketches_defaults_on_is_unpaged_and_persists_across_restarts() {
         use serde_json::json;
         // Backwards compatibility: old saved preferences without `auto_hide_sketches` default to true.
         assert!(serde_json::from_value::<super::Prefs>(json!({})).unwrap().auto_hide_sketches);
         assert!(super::lenient(&json!({})).auto_hide_sketches);
+        assert_eq!(super::FIELD_PAGES.iter().find(|(field, _)| *field == "auto_hide_sketches").copied(), Some(("auto_hide_sketches", None)));
 
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         assert!(h.app.preferences.auto_hide_sketches);
         assert!(h.app.session.auto_hide_sketches);
 
-        // Toggle off in Preferences -> Design, verify live sync, and confirm Cancel restores true.
+        // No longer shown on Preferences -> Design.
         h.call("ui.prefs", json!({"language": "en", "open": "Design"}));
-        h.frames(2);
-        super::reveal_preference(&mut h, "prefs:auto_hide_sketches");
-        h.step(&json!({"click": {"handle": "prefs:auto_hide_sketches"}})).unwrap();
-        h.frames(2);
-        assert!(!h.app.preferences.auto_hide_sketches);
-        assert!(!h.app.session.auto_hide_sketches);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:auto_hide_sketches").is_none());
         h.call("ui.prefs", json!({"button": "cancel"}));
-        assert!(h.app.preferences.auto_hide_sketches);
-        assert!(h.app.session.auto_hide_sketches);
 
-        // With default ON, creating an Extrude auto-hides the sketch.
-        let s1 = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
-        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
-        h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.run("solid.extrude", json!({"sketch": s1, "distance": 5})).unwrap();
-        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, s1));
-        assert!(!crate::browser::sketch_visible(&h.app, s1));
-
-        // Toggle off and apply via Preferences -> Design; a new Extrude keeps its sketch visible.
-        h.call("ui.prefs", json!({"language": "en", "open": "Design"}));
-        h.frames(2);
-        super::reveal_preference(&mut h, "prefs:auto_hide_sketches");
-        h.step(&json!({"click": {"handle": "prefs:auto_hide_sketches"}})).unwrap();
-        h.frames(2);
-        h.call("ui.prefs", json!({"button": "ok"}));
+        // Toggling off syncs the session, survives Design Defaults, and persists across restarts.
+        h.call("ui.prefs", json!({"auto_hide_sketches": false}));
         assert!(!h.app.preferences.auto_hide_sketches);
         assert!(!h.app.session.auto_hide_sketches);
-
-        let s2 = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
-        h.app.run("sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]})).unwrap();
-        h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.run("solid.extrude", json!({"sketch": s2, "distance": 5, "operation": "new"})).unwrap();
-        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, s2), "off: Extrude keeps sketch visible");
-        assert!(crate::browser::sketch_visible(&h.app, s2), "off: Browser eye stays on");
-        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, s1), "earlier sketch stays hidden");
-
-        // Restore Defaults on Design turns auto-hide back on.
         h.call("ui.prefs", json!({"open": "Design", "button": "defaults"}));
         h.call("ui.prefs", json!({"button": "ok"}));
-        assert!(h.app.preferences.auto_hide_sketches);
-        assert!(h.app.session.auto_hide_sketches);
+        assert!(!h.app.preferences.auto_hide_sketches, "unpaged choice survives Design Defaults");
+        assert!(!h.app.session.auto_hide_sketches);
+
+        let saved = h.app.prefs();
+        let mut reloaded = SolveApp::new(Default::default(), Default::default());
+        reloaded.load_prefs(&saved);
+        assert!(!reloaded.preferences.auto_hide_sketches, "remembered choice survives restart");
+        assert!(!reloaded.session.auto_hide_sketches, "reloaded session syncs remembered choice");
     }
 
     #[test]

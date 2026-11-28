@@ -793,6 +793,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         enter |= expr_row_positive(ui, "Thickness Outside", wall2);
                     }
                 }
+                hide_sketch_option(app, ui);
             });
             let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
             ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
@@ -1021,8 +1022,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= hint_row(ui, "Bridge", &mut opts.bridge, tr("None"));
             }
             // The section through the hole, each size beside its dimension (#2171).
+            let multiple = opts.multiple;
             let to_object = to_object_on(&d.inputs);
             enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &eval);
+            if multiple {
+                hide_sketch_options_section(app, ui, "hole_options");
+            }
         }
         _ => enter |= additional_rows(app, d, ui),
     }
@@ -1337,6 +1342,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             }
             crate::op_auto::op_row(ui, "rv_op", operation);
+            hide_sketch_options_section(app, ui, "revolve_options");
         }
         Kind::Shell { thickness } => {
             // The direction below says which side the wall grows to; the label stays short enough
@@ -1766,7 +1772,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Dogbone(k) => enter |= crate::dialogs_dogbone::rows(app, ui, k, &mut d.extra),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
-        Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
+        Kind::CellGrid(k) => {
+            enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs);
+            hide_sketch_options_section(app, ui, "cell_grid_options");
+        }
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
@@ -3278,6 +3287,86 @@ mod tests {
         assert!((degrees("6.283185307179586 rad").unwrap() - 360.0).abs() < 1e-9);
         assert_eq!(degrees("a / 2"), None);
         assert_eq!(degrees(""), None);
+    }
+
+    /// #23256: `Hide sketch` lives in the right-bar feature tool options (Extrude, Revolve, Hole
+    /// at sketch points, sheet metal Base/Contour flanges, Sheet Tab, Cell Grid), defaults on,
+    /// remembers the last choice across feature tools and restarts, and keeps sketches visible
+    /// when unticked.
+    #[test]
+    fn hide_sketch_option_defaults_on_remembers_choice_and_keeps_sketches_visible() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1400, "height": 1000}));
+        assert!(h.app.preferences.auto_hide_sketches);
+        assert!(h.app.session.auto_hide_sketches);
+
+        // With default ON, creating an Extrude auto-hides the sketch.
+        let s1 = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": s1, "distance": 5})).unwrap();
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, s1));
+        assert!(!crate::browser::sketch_visible(&h.app, s1));
+
+        // Open Extrude, verify Hide sketch is shown and untick it in the right-bar options.
+        h.step(&json!({"start": "solid.extrude"})).unwrap();
+        h.frames(4);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some());
+        h.step(&json!({"click": {"handle": "dialog:ui.hide_sketch"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.preferences.auto_hide_sketches);
+        assert!(!h.app.session.auto_hide_sketches);
+        cancel(&mut h.app);
+
+        // Creating a new Extrude while Hide sketch is off keeps the sketch visible.
+        let s2 = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": s2, "distance": 5, "operation": "new"})).unwrap();
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, s2), "off: Extrude keeps sketch visible");
+        assert!(crate::browser::sketch_visible(&h.app, s2), "off: Browser eye stays on");
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, s1), "earlier sketch stays hidden");
+
+        // Revolve shows Hide sketch and remembers the off choice.
+        h.step(&json!({"start": "solid.revolve"})).unwrap();
+        h.frames(4);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some());
+        assert!(!h.app.preferences.auto_hide_sketches);
+        cancel(&mut h.app);
+
+        // Hole shows Hide sketch only in Multiple (sketch points) placement, not Single face placement.
+        h.step(&json!({"start": "solid.hole"})).unwrap();
+        h.frames(4);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_none(), "Single Hole does not consume a sketch");
+        choose(&mut h, "Placement", "Multiple");
+        h.frames(3);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some(), "Hole at sketch points offers Hide sketch");
+        h.step(&json!({"click": {"handle": "dialog:ui.hide_sketch"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.auto_hide_sketches);
+        assert!(h.app.session.auto_hide_sketches);
+        cancel(&mut h.app);
+
+        // Sheet Metal Flange shows Hide sketch for Base (ty 0) and Contour (ty 2), not Edge (ty 1).
+        h.step(&json!({"start": "sheet.flange"})).unwrap();
+        h.frames(4);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some(), "Base flange offers Hide sketch");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { sketch: Some(s2), id: "l1".into() }];
+        h.frames(3);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some(), "Contour flange offers Hide sketch");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::ZERO }];
+        h.frames(3);
+        assert!(scenario::handle_at("dialog:ui.hide_sketch").is_none(), "Edge flange does not consume a sketch");
+        cancel(&mut h.app);
+
+        // Other sketch-consuming dialogs (Sheet Tab, Cell Grid) also show Hide sketch.
+        for command in ["sheet.tab", "solid.cell_grid"] {
+            h.step(&json!({"start": command})).unwrap();
+            h.frames(4);
+            assert!(scenario::handle_at("dialog:ui.hide_sketch").is_some(), "{command} offers Hide sketch");
+            cancel(&mut h.app);
+        }
     }
 }
 

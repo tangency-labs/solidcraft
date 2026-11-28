@@ -1,42 +1,42 @@
 {
   "ar": {
-    "prefs.auto_hide_sketches": "إخفاء الرسم التخطيطي تلقائيًا عند إنشاء ميزة",
-    "prefs.auto_hide_sketches_help": "يخفي الرسم التخطيطي عند استخدامه في ميزة (بثق، تدوير، ثقب عند نقاط الرسم، شفة صاج، إلخ). عند الإيقاف: يبقى الرسم مرئيًا لإعادة استخدامه في عدة ميزات دون إظهاره مجددًا."
+    "ui.hide_sketch": "إخفاء الرسم التخطيطي",
+    "ui.hide_sketch_help": "يخفي الرسم التخطيطي عند إنشاء هذه الميزة. عند الإيقاف: يبقى الرسم مرئيًا لإعادة استخدامه في عدة ميزات دون إظهاره مجددًا. يُحفظ للميزة التالية."
   },
   "de": {
-    "prefs.auto_hide_sketches": "Skizze beim Erstellen eines Features automatisch ausblenden",
-    "prefs.auto_hide_sketches_help": "Blendet eine Skizze aus, sobald ein Feature (Extrusion, Drehung, Bohrung an Skizzenpunkten, Blechflansch usw.) sie verwendet. Aus: Die Skizze bleibt sichtbar, damit sie ohne erneutes Einblenden für weitere Features verwendet werden kann."
+    "ui.hide_sketch": "Skizze ausblenden",
+    "ui.hide_sketch_help": "Blendet die Skizze beim Erstellen dieses Features aus. Aus: Die Skizze bleibt sichtbar, damit sie ohne erneutes Einblenden für weitere Features verwendet werden kann. Bleibt für das nächste Feature erhalten."
   },
   "en": {
-    "prefs.auto_hide_sketches": "Auto-hide sketch on feature creation",
-    "prefs.auto_hide_sketches_help": "Hide a sketch when a feature (Extrude, Revolve, Hole at sketch points, sheet metal flange, etc.) uses it. Off: the sketch stays visible so you can reuse it across multiple features without turning its eye back on."
+    "ui.hide_sketch": "Hide sketch",
+    "ui.hide_sketch_help": "Hide the sketch when this feature is created. Off: the sketch stays visible so you can reuse it across multiple features without turning its eye back on. Remembered for the next feature."
   },
   "es": {
-    "prefs.auto_hide_sketches": "Ocultar boceto automáticamente al crear una operación",
-    "prefs.auto_hide_sketches_help": "Oculta un boceto cuando una operación (Extruir, Revolución, Agujero en puntos de boceto, brida de chapa, etc.) lo usa. Desactivado: el boceto permanece visible para reutilizarlo en varias operaciones sin volver a mostrarlo."
+    "ui.hide_sketch": "Ocultar boceto",
+    "ui.hide_sketch_help": "Oculta el boceto al crear esta operación. Desactivado: el boceto permanece visible para reutilizarlo en varias operaciones sin volver a mostrarlo. Se recuerda para la siguiente operación."
   },
   "fr": {
-    "prefs.auto_hide_sketches": "Masquer automatiquement l'esquisse lors de la création d'une fonction",
-    "prefs.auto_hide_sketches_help": "Masque une esquisse lorsqu'une fonction (Extrusion, Révolution, Perçage sur points d'esquisse, pli de tôlerie, etc.) l'utilise. Désactivé : l'esquisse reste visible afin de la réutiliser pour plusieurs fonctions sans la réafficher."
+    "ui.hide_sketch": "Masquer l'esquisse",
+    "ui.hide_sketch_help": "Masque l'esquisse lors de la création de cette fonction. Désactivé : l'esquisse reste visible afin de la réutiliser pour plusieurs fonctions sans la réafficher. Mémorisé pour la fonction suivante."
   },
   "he": {
-    "prefs.auto_hide_sketches": "הסתרת סקיצה אוטומטית ביצירת פיצ'ר",
-    "prefs.auto_hide_sketches_help": "מסתיר סקיצה כאשר פיצ'ר (שיחול, סיבוב, קדח בנקודות סקיצה, אוגן פח וכו') משתמש בה. כבוי: הסקיצה נשארת גלויה לשימוש חוזר בפיצ'רים נוספים בלי להדליק אותה מחדש."
+    "ui.hide_sketch": "הסתר סקיצה",
+    "ui.hide_sketch_help": "מסתיר את הסקיצה בעת יצירת פיצ'ר זה. כבוי: הסקיצה נשארת גלויה לשימוש חוזר בפיצ'רים נוספים בלי להדליק אותה מחדש. נשמר לפיצ'ר הבא."
   },
   "ja": {
-    "prefs.auto_hide_sketches": "フィーチャー作成時にスケッチを自動で非表示",
-    "prefs.auto_hide_sketches_help": "フィーチャー（押し出し、回転、スケッチ点の穴、シートメタルのフランジなど）がスケッチを使用すると、そのスケッチを非表示にします。オフ：スケッチが表示されたままになるため、再表示せずに複数のフィーチャーで再利用できます。"
+    "ui.hide_sketch": "スケッチを非表示",
+    "ui.hide_sketch_help": "このフィーチャーの作成時にスケッチを非表示にします。オフ：スケッチが表示されたままになるため、再表示せずに複数のフィーチャーで再利用できます。次のフィーチャーでも保持されます。"
   },
   "ko": {
-    "prefs.auto_hide_sketches": "피처 생성 시 스케치 자동 숨기기",
-    "prefs.auto_hide_sketches_help": "피처(돌출, 회전, 스케치 점 구멍, 판금 플랜지 등)가 스케치를 사용하면 해당 스케치를 숨깁니다. 끄기: 스케치가 표시된 상태로 유지되어 다시 표시하지 않고 여러 피처에서 재사용할 수 있습니다."
+    "ui.hide_sketch": "스케치 숨기기",
+    "ui.hide_sketch_help": "이 피처를 생성할 때 스케치를 숨깁니다. 끄기: 스케치가 표시된 상태로 유지되어 다시 표시하지 않고 여러 피처에서 재사용할 수 있습니다. 다음 피처에도 유지됩니다."
   },
   "vi": {
-    "prefs.auto_hide_sketches": "Tự động ẩn phác thảo khi tạo đối tượng",
-    "prefs.auto_hide_sketches_help": "Ẩn phác thảo khi một đối tượng (Đùn, Xoay, Lỗ tại điểm phác thảo, gờ kim loại tấm, v.v.) sử dụng nó. Tắt: phác thảo vẫn hiển thị để tái sử dụng cho nhiều đối tượng mà không cần bật lại."
+    "ui.hide_sketch": "Ẩn phác thảo",
+    "ui.hide_sketch_help": "Ẩn phác thảo khi tạo đối tượng này. Tắt: phác thảo vẫn hiển thị để tái sử dụng cho nhiều đối tượng mà không cần bật lại. Được ghi nhớ cho đối tượng tiếp theo."
   },
   "zh": {
-    "prefs.auto_hide_sketches": "创建特征时自动隐藏草图",
-    "prefs.auto_hide_sketches_help": "当特征（拉伸、旋转、草图点打孔、钣金法兰等）使用草图时自动将其隐藏。关闭：草图保持可见，无需重新打开显示即可在多个特征中重复使用。"
+    "ui.hide_sketch": "隐藏草图",
+    "ui.hide_sketch_help": "创建此特征时隐藏草图。关闭：草图保持可见，无需重新打开显示即可在多个特征中重复使用。下次创建特征时保留此设置。"
   }
 }
