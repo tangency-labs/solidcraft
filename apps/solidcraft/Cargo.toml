@@ -39,6 +39,8 @@ print_stderr = "deny"
 
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
+# Our own window runner, when asked for (`own_runner`).
+solidcraft-window-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }

@@ -14,32 +14,28 @@ use solidcraft_engine::control_auth::APP;
 use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::control_switch;
 
-/// Wakes the app's event loop for a control request: eframe runs the app's logic pass for it at
-/// once, without waiting for the compositor's next frame (#743). The proxy arrives when the
-/// event loop starts (eframe's `event_loop_ready` hook); until then the requests ride the usual
-/// `request_repaint` repaint.
+/// Wakes the app's event loop for a control request: the window runner runs the app's logic pass
+/// for it at once, without waiting for the compositor's next frame (#743). The waker arrives when
+/// the event loop starts (eframe's `event_loop_ready` hook, or our own runner's `Waker`); until
+/// then the requests ride the usual `request_repaint` repaint.
 #[derive(Clone, Default)]
 pub struct Wake {
-    proxy: std::sync::Arc<std::sync::Mutex<Option<eframe::EventLoopProxy<eframe::UserEvent>>>>,
+    waker: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>>,
 }
 
 impl Wake {
-    /// Keep this launch's proxy; the event loop's `event_loop_ready` hook fills it once.
-    pub fn new(proxy: std::sync::Arc<std::sync::Mutex<Option<eframe::EventLoopProxy<eframe::UserEvent>>>>) -> Self {
-        Self { proxy }
-    }
-
-    /// The event loop started; remember its proxy.
-    pub fn set(&self, proxy: eframe::EventLoopProxy<eframe::UserEvent>) {
-        *self.proxy.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(proxy);
+    /// The event loop started; remember how to wake it for a logic pass.
+    pub fn set(&self, waker: impl Fn() + Send + Sync + 'static) {
+        *self.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::sync::Arc::new(waker));
     }
 
     /// Run the app's logic pass now, so a request just sent is served without waiting for a GUI
     /// frame: a window the compositor has stopped giving frames to (off-screen, another
     /// workspace) would otherwise answer each request once per second (#743).
     fn run_logic_now(&self) {
-        if let Some(proxy) = self.proxy.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
-            let _ = proxy.send_event(eframe::UserEvent::RunLogicNow { viewport_id: eframe::egui::ViewportId::ROOT });
+        let waker = self.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        if let Some(waker) = waker {
+            waker();
         }
     }
 }
@@ -258,15 +254,21 @@ fn listen_on_listener(
 mod tests {
     use super::*;
 
-    /// #743: the wake's proxy arrives when the event loop starts. Clones share the launch's
-    /// holder, and a wake without a proxy yet (the loop not started) is a no-op, not an error.
+    /// #743: the wake's waker arrives when the event loop starts. Clones share the launch's
+    /// holder, and a wake without a waker yet (the loop not started) is a no-op, not an error.
     #[test]
-    fn the_wake_shares_its_proxy_holder() {
+    fn the_wake_shares_its_waker_holder() {
         let wake = Wake::default();
         wake.run_logic_now();
         let other = wake.clone();
-        assert!(std::sync::Arc::ptr_eq(&wake.proxy, &other.proxy));
-        assert!(wake.proxy.lock().unwrap().is_none());
+        assert!(std::sync::Arc::ptr_eq(&wake.waker, &other.waker));
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = woken.clone();
+        other.set(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        wake.run_logic_now();
+        assert_eq!(woken.load(std::sync::atomic::Ordering::Relaxed), 1, "the clone's waker wakes the original");
     }
 
     use solidcraft_control::server::Waits;
