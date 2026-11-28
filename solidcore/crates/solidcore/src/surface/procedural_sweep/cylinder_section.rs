@@ -124,35 +124,64 @@ pub(crate) fn intersect(
         let Some((q0, q1)) = clip(&height, q_ivl.min(), q_ivl.max(), h_lo, h_hi)? else {
             continue;
         };
-        // The face's domain with its stretch across the turns cut to the clip.
-        let iso_domain = if swapped {
-            Extent2d::from_bounds(q0, p_ivl.min(), q1, p_ivl.max())
-        } else {
-            Extent2d::from_bounds(p_ivl.min(), q0, p_ivl.max(), q1)
+        // The cylinder's face is one period of its angle, its seam at the angle of its
+        // domain's first corner: the helix is cut there, each piece within the face. The
+        // angle is measured from opposite the seam, so the seam is where it wraps.
+        let seam = {
+            let q = other.evaluate_point(k, other_domain.min())? - c_origin;
+            q - c_axis * q.dot(c_axis)
         };
-        let iso = net.create_iso_parametric_curve(
-            k,
-            w_dir,
-            p0,
-            IsoCurveOptions {
-                domain: Some(iso_domain),
-                uv_iso_curve: true,
-            },
-        )?;
-        // The net's iso curve is on the net exactly. That it is on the cylinder is checked on
-        // the curve itself, span by span (`on_cylinder`): a net that is not the definition's
-        // construction fails it, and the general intersection runs.
-        let Some(off_radius) = on_cylinder(&iso.curve, o, k_axis, radius)? else {
+        let Some(x_axis) = (seam.length() > 0.0).then(|| seam * (-1.0 / seam.length())) else {
             return Ok(None);
         };
-        let rounding = 64.0 * f64::EPSILON * (reach + h_hi.abs().max(h_lo.abs()));
-        result.curves_3d.push(Curve::from(iso.curve));
-        result.curve_types.push(TsectCurveType::Crossing);
-        result
-            .deviations
-            .push(residual.max(off_radius) + misaligned + rounding);
-        result.surface1_uv_curves.push(iso.uv_iso_curve);
-        result.surface2_uv_curves.push(None);
+        let y_axis = c_axis.cross(x_axis);
+        let angle = |q: f64| -> Result<f64> {
+            let r = point(q)? - c_origin;
+            Ok(r.dot(y_axis).atan2(r.dot(x_axis)))
+        };
+        let samples = 8 * sweep.stations().len() + 64;
+        let Some(cuts) = seam_cuts(&angle, q0, q1, samples)? else {
+            return Ok(None);
+        };
+        let mut ends = vec![q0];
+        ends.extend(cuts);
+        ends.push(q1);
+        for piece in ends.windows(2) {
+            let [qa, qb] = *piece else {
+                continue;
+            };
+            if !(qa < qb) {
+                continue;
+            }
+            let iso_domain = if swapped {
+                Extent2d::from_bounds(qa, p_ivl.min(), qb, p_ivl.max())
+            } else {
+                Extent2d::from_bounds(p_ivl.min(), qa, p_ivl.max(), qb)
+            };
+            let iso = net.create_iso_parametric_curve(
+                k,
+                w_dir,
+                p0,
+                IsoCurveOptions {
+                    domain: Some(iso_domain),
+                    uv_iso_curve: true,
+                },
+            )?;
+            // The net's iso curve is on the net exactly. That it is on the cylinder is checked
+            // on the curve itself, span by span (`on_cylinder`): a net that is not the
+            // definition's construction fails it, and the general intersection runs.
+            let Some(off_radius) = on_cylinder(&iso.curve, o, k_axis, radius)? else {
+                return Ok(None);
+            };
+            let rounding = 64.0 * f64::EPSILON * (reach + h_hi.abs().max(h_lo.abs()));
+            result.curves_3d.push(Curve::from(iso.curve));
+            result.curve_types.push(TsectCurveType::Crossing);
+            result
+                .deviations
+                .push(residual.max(off_radius) + misaligned + rounding);
+            result.surface1_uv_curves.push(iso.uv_iso_curve);
+            result.surface2_uv_curves.push(None);
+        }
     }
     Ok(Some(result))
 }
@@ -400,4 +429,49 @@ fn on_cylinder(
         worst = worst.max(ends);
     }
     Ok(Some(worst))
+}
+
+/// The parameters in `(lo, hi)` where `angle` (in `(-pi, pi]`) wraps through `pi`, the
+/// cylinder's seam: found between `samples` samples, where the angle jumps by more than a half
+/// turn, by bisection on the side it is continuous with. `None` for a step of more than a
+/// quarter turn between samples that is not a wrap (the samples are too few to follow it).
+fn seam_cuts(
+    angle: &dyn Fn(f64) -> Result<f64>,
+    lo: f64,
+    hi: f64,
+    samples: usize,
+) -> Result<Option<Vec<f64>>> {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let at = |i: usize| {
+        if i == samples {
+            hi
+        } else {
+            lo + (hi - lo) * (i as f64) / (samples as f64)
+        }
+    };
+    let mut cuts = Vec::new();
+    let mut previous = angle(lo)?;
+    for i in 1..=samples {
+        let current = angle(at(i))?;
+        let step = current - previous;
+        if step.abs() > PI {
+            let (mut a, mut b, fa) = (at(i - 1), at(i), previous);
+            for _ in 0..BISECTIONS {
+                let mid = 0.5 * (a + b);
+                if !(a < mid && mid < b) {
+                    break;
+                }
+                if (angle(mid)? - fa).abs() < PI {
+                    a = mid;
+                } else {
+                    b = mid;
+                }
+            }
+            cuts.push(0.5 * (a + b));
+        } else if step.abs() > FRAC_PI_2 {
+            return Ok(None);
+        }
+        previous = current;
+    }
+    Ok(Some(cuts))
 }
