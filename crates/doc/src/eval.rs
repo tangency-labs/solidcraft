@@ -16857,6 +16857,37 @@ fn replay(
             }
             continue;
         }
+        // A Draft repeats at the copied faces of the body they lie on, about the copied neutral
+        // plane and pull direction (#18048).
+        if let FeatureKind::Draft { faces, angle, neutral, pull, body } = &src.kind {
+            if let Some(batch) = pending.take() {
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
+            }
+            let a = val(vals, angle, Kind::Angle)?;
+            let pl = doc.resolve_plane_in(vals, neutral, 0, src.component, Some(st))?;
+            let picked: Vec<Vec3> = crate::plain(faces);
+            let picks = PickFrames::new(doc, st, own, src);
+            let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
+            for m in mats {
+                let (m, on) = match picked.first() {
+                    Some(p) => picks.copy(st, m, *p, named)?,
+                    None => (*m, None),
+                };
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
+                let i = match on {
+                    Some(i) => i,
+                    None => body_at(st, body, &moved)?,
+                };
+                let neutral = placed_plane(&m, &pl)?;
+                let pull = crate::apply_vector(&m, pull.0);
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = Traced::step(kernel::draft(&mb.body, &moved, &neutral, pull, a)?, &[&mb.traced()]);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = mb.remade(nb);
+                }
+            }
+            continue;
+        }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
         // placed by the pattern (#5931). Frame members are too: each instance is every member
         // the feature made, as it is here, placed by the pattern.
@@ -17088,6 +17119,7 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
         }
         FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::Draft { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
         FeatureKind::Hole { position, points: None, .. } => (
             match src.participants.as_slice() {
                 [one] if one != "*" => Some(one.as_str()),

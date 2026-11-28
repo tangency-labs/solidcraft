@@ -3462,6 +3462,52 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
     }
 }
 
+/// #18048: a pattern or mirror of a Draft drafts the copied face instead of failing with
+/// "Draft1 cannot be patterned or mirrored yet". A 20 x 20 x 20 pad joined on a 100 x 40 x 10
+/// plate has its side at x = 10 drafted 5 deg about its bottom edge (neutral plane z = 10): the
+/// side sweeps a wedge of 0.5 * 20 * (20 tan 5 deg) * 20 = 4000 tan 5 deg. Each copy of the pad
+/// is drafted by the same wedge, whether the pad is copied with the draft or was copied before.
+#[test]
+fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let pattern = json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": 50});
+    let with = |features: Value, mut p: Value| {
+        p["features"] = features;
+        p
+    };
+    let cases = [
+        ("mirror", None, ("solid.mirror", json!({"features": ["Pad1", "Draft1"], "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}))),
+        ("pattern", None, ("solid.pattern.rectangular", with(json!(["Pad1", "Draft1"]), pattern.clone()))),
+        (
+            "pattern of the draft alone",
+            Some(with(json!(["Pad1"]), pattern.clone())),
+            ("solid.pattern.rectangular", with(json!(["Draft1"]), pattern.clone())),
+        ),
+    ];
+    for (what, before, (copy, params)) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        if let Some(p) = before {
+            let r = run(&mut s, "solid.pattern.rectangular", p);
+            assert!(r["error"].is_null(), "{what}: {r}");
+        }
+        let pads = volume(&mut s);
+        run(
+            &mut s,
+            "solid.draft",
+            json!({"faces": [[10, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+        );
+        let drafted = volume(&mut s) - pads;
+        assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{what}: {r}");
+        let pads = if what == "pattern of the draft alone" { pads } else { 48000.0 + 8000.0 };
+        let want = pads + 2.0 * drafted;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+    }
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
