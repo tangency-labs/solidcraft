@@ -49,6 +49,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::MeshReduce { .. } => Some("mesh.reduce"),
+        Kind::MeshSectionStack { .. } => Some("mesh.section_stack"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
@@ -59,6 +60,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
+        Kind::ScanAlign(_) => Some("scan.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
@@ -1270,6 +1272,10 @@ fn degrees(text: &str) -> Option<f64> {
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::fields(ui, app, d);
+        return false;
+    }
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
     if crate::dialogs_move::several_destinations(d) {
@@ -1415,6 +1421,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else {
                 form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
             }
+        }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            form_row(ui, "Spacing", |ui| enter |= field(ui, spacing));
+            form_row(ui, "From", |ui| enter |= field(ui, from));
+            form_row(ui, "To", |ui| enter |= field(ui, to));
+            ui_kit::options(ui, "section_stack_options", &mut [("Extrude slabs", extrude)]);
         }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));

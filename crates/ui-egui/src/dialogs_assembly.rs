@@ -163,6 +163,7 @@ const MOVES: &[&str] = &[
     "assembly.constraint.create",
     "assembly.constraint.edit",
     "occurrence.align",
+    "scan.align",
     "parts.insert",
     "parts.fastener",
 ];
