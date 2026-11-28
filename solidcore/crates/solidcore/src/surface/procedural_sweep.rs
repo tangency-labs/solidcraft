@@ -337,6 +337,8 @@ pub struct ProceduralSweep {
     taus: Vec<f64>,
     bound: f64,
     map: SweepMap,
+    /// The definition is the wall's label only ([`ProceduralSweep::is_label`]).
+    label: bool,
 }
 
 /// `sum_{n >= 0} (-1)^n c(n) p0 r^n` enclosed, for `0 <= p0`, `0 <= r` and terms that fall
@@ -472,6 +474,23 @@ impl ProceduralSweep {
         stations: &[f64],
         halves: &[f64],
     ) -> Result<Self> {
+        let mut sweep = Self::checked(profile, motion, stations, halves)?;
+        sweep.bound = sweep.certify()?;
+        Ok(sweep)
+    }
+
+    /// [`ProceduralSweep::create`]'s definition with its checks, its bound not yet certified
+    /// (nought).
+    ///
+    /// # Errors
+    ///
+    /// As [`ProceduralSweep::create`]'s, but for the bound's.
+    pub(crate) fn checked(
+        profile: &BSplineCurve,
+        motion: ScrewMotion,
+        stations: &[f64],
+        halves: &[f64],
+    ) -> Result<Self> {
         let c = profile.canonical()?;
         let finite = c
             .control_points
@@ -507,7 +526,7 @@ impl ProceduralSweep {
         }
         let mut profile = profile.copy();
         profile.set_out_of_bounds_enabled(false);
-        let mut sweep = Self {
+        let sweep = Self {
             profile,
             motion: Motion::Screw(motion),
             stations: stations.to_vec(),
@@ -515,8 +534,8 @@ impl ProceduralSweep {
             taus: halves.iter().map(|h| (0.5 * h).tan()).collect(),
             bound: 0.0,
             map: SweepMap::default(),
+            label: false,
         };
-        sweep.bound = sweep.certify()?;
         Ok(sweep)
     }
 
@@ -574,6 +593,18 @@ impl ProceduralSweep {
     #[must_use]
     pub const fn bound(&self) -> f64 {
         self.bound
+    }
+
+    /// Whether the definition is the wall's label only: the wall a record names by its
+    /// definition, read back from it. The kernel works on such a wall's net alone, exactly as
+    /// on a plain B-spline (no evaluation reads the definition:
+    /// [`crate::surface::surface::Surface::procedural_sweep`] is `None` for it), carries the
+    /// definition with the net through copies, pieces, moves and reparametrisations as it does a
+    /// live one, and writes it back to the record ([`record`]). Its bound is the record's, never
+    /// re-proved, since nothing reads it as one.
+    #[must_use]
+    pub const fn is_label(&self) -> bool {
+        self.label
     }
 
     /// Whether the net answers an evaluation on `k`: the innermost [`NetScope`] asks for
@@ -1082,6 +1113,7 @@ impl ProceduralSweep {
                 swapped: true,
                 ..SweepMap::default()
             },
+            label: false,
         };
         Ok((sweep, net))
     }
@@ -1107,6 +1139,7 @@ impl ProceduralSweep {
                 swapped,
                 ..SweepMap::default()
             },
+            label: false,
         })
     }
 }

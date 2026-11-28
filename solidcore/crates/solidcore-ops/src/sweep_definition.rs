@@ -1,7 +1,8 @@
 //! A body's screw-swept walls between its record and the kernel, body by body in the body's face
 //! order: each face's definition as the record keeps it ([`definitions`]), and the definitions a
-//! record holds given back to the faces of the body built from it, their bounds certified again
-//! ([`adopt`]). The kernel reads and rebuilds; `solidcore-convert` copies the fields.
+//! record holds given back to the faces of the body built from it as their labels ([`adopt`]):
+//! the kernel works on the nets, as on walls read back as plain B-splines, and writes the
+//! definitions back with them. The kernel reads and rebuilds; `solidcore-convert` copies the fields.
 
 use solidcore::kernel::Kernel;
 use solidcore::surface::procedural_sweep::record::{adopt_sweeps, face_sweep};
@@ -30,8 +31,8 @@ pub fn definitions(b: &Brep) -> Result<Vec<Option<SweepDefinition>>> {
 }
 
 /// Give the faces `faces` names (each by its index in the body's face order) the definitions their
-/// record holds: the face's net carries its wall's definition again, its bound certified again and
-/// never below the record's (`adopt_sweeps`). A face whose net does not agree with its definition
+/// record holds, as their labels: the face's net carries its wall's definition again, which no
+/// evaluation reads (`adopt_sweeps`). A face whose net does not agree with its definition
 /// keeps its net alone; nothing valid is refused.
 ///
 /// # Errors
@@ -48,5 +49,5 @@ pub fn adopt(k: &Kernel, b: &mut Brep, faces: &[(usize, &SweepDefinition)]) -> R
         };
         made.push((f, record));
     }
-    adopt_sweeps(k, b, &solidcore::topology::loopuse::notify_ref, &made).map_err(status)
+    adopt_sweeps(k, b, &made).map_err(status)
 }

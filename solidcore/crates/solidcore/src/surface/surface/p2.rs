@@ -1311,9 +1311,22 @@ impl Surface {
     #[must_use]
     pub fn procedural_sweep(&self) -> Option<SweepRef<'_>> {
         match (self.definition.as_deref(), self.kind()) {
-            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) => {
+            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net))
+                if !sweep.is_label() =>
+            {
                 Some(SweepRef { sweep, net })
             }
+            _ => None,
+        }
+    }
+
+    /// The screw-swept wall's definition this B-spline net keeps, live or as its label only
+    /// ([`ProceduralSweep::is_label`]): what a record names the wall by. `None` for any other
+    /// surface.
+    #[must_use]
+    pub fn kept_sweep(&self) -> Option<&ProceduralSweep> {
+        match (self.definition.as_deref(), self.kind()) {
+            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(_)) => Some(sweep),
             _ => None,
         }
     }

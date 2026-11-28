@@ -786,8 +786,9 @@ fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> 
     if !definitions.is_empty() {
         adopt_definitions(k, b, &notify_ref, &definitions)?;
     }
-    // A screw-swept wall's net carries its definition again, its bound certified again; a face
-    // whose net it does not describe keeps its net alone ([`adopt_sweeps`]).
+    // A screw-swept wall's net carries its definition again as its label, which no evaluation
+    // reads: the kernel works on the net as before. A face whose net it does not describe keeps
+    // its net alone ([`adopt_sweeps`]).
     let mut sweeps = Vec::new();
     for (i, f) in record.faces.iter().enumerate() {
         let r::Surface::Sweep { definition } = &f.surface else {
@@ -802,7 +803,7 @@ fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> 
         sweeps.push((face, sweep));
     }
     if !sweeps.is_empty() {
-        adopt_sweeps(k, b, &notify_ref, &sweeps)?;
+        adopt_sweeps(k, b, &sweeps)?;
     }
     Ok(())
 }

@@ -591,8 +591,8 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
 }
 
 /// A screw sweep's walls go into the record as their definitions (`sweep` faces on their nets)
-/// and come back with them: a body built from the record writes the very same record again, and
-/// its volume is the sweep's own.
+/// and come back with them as their labels: a body built from the record writes the very same
+/// record again, and its volume is the sweep's own.
 #[test]
 fn screw_sweep_walls_cross_the_record_as_their_definitions() {
     use solidcore_record::brep::Surface;

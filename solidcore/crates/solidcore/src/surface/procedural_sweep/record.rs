@@ -1,6 +1,8 @@
 //! A screw-swept wall's definition as plain data, both ways (not upstream): read off a face's
 //! surface for its record ([`face_sweep`]), and given back to the face of a body built from a
-//! record ([`adopt_sweeps`]), its bound certified again. Its numbers are the kernel's stored
+//! record as the wall's label ([`adopt_sweeps`], [`ProceduralSweep::is_label`]): the kernel goes
+//! on working on the net, exactly as it did on a wall read back as a plain B-spline, and writes
+//! the definition back with it. Its numbers are the kernel's stored
 //! values, bit for bit: the profile's control points as stored (weighted when rational) and its
 //! full knot vector, so a wall written, read back and adopted is the wall it was written from.
 //! `solidcore-convert` copies these fields to and from `solidcore_record::brep::sweep`.
@@ -8,8 +10,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{Motion, ProceduralSweep, RadialLaw, ScrewMotion, SweepMap};
-use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::object::ObjectRef;
+use crate::error::{Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::Point2;
@@ -58,18 +59,17 @@ fn arr(p: Point3) -> [f64; 3] {
     [p.x, p.y, p.z]
 }
 
-/// The definition of the wall `surface` is the net of, when it is a screw-swept wall's
-/// ([`Surface::procedural_sweep`] with a screw motion); `None` for any other surface (a path
-/// sweep keeps its walls as their nets in a record).
+/// The definition of the wall `surface` is the net of, live or as its label, when it is a
+/// screw-swept wall's ([`Surface::kept_sweep`] with a screw motion); `None` for any other surface
+/// (a path sweep keeps its walls as their nets in a record).
 ///
 /// # Errors
 ///
 /// Those of reading the profile.
 pub fn face_sweep(surface: &Surface) -> Result<Option<SweepRecord>> {
-    let Some(sweep) = surface.procedural_sweep() else {
+    let Some(d) = surface.kept_sweep() else {
         return Ok(None);
     };
-    let d = sweep.definition();
     let Motion::Screw(m) = d.motion() else {
         return Ok(None);
     };
@@ -90,14 +90,15 @@ pub fn face_sweep(surface: &Surface) -> Result<Option<SweepRecord>> {
     }))
 }
 
-/// The definition a record holds, rebuilt: its bound certified again
-/// ([`ProceduralSweep::certify`]) and the larger of that and the record's kept.
+/// The definition a record holds, rebuilt as a wall's label ([`ProceduralSweep::is_label`]): the
+/// same checks as [`ProceduralSweep::create`]'s, its bound the record's (a label's is never read
+/// as one, so it is not proved again).
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a map whose terms are not finite or whose scales are nought; those of
-/// rebuilding the profile, the motion, the law and the definition
-/// ([`ProceduralSweep::create`]).
+/// `InvalidInput` for a map whose terms are not finite or whose scales are nought, or a bound
+/// that is not finite and nonnegative; those of rebuilding the profile, the motion and the law,
+/// and of [`ProceduralSweep::create`]'s checks.
 pub fn sweep_of(r: &SweepRecord) -> Result<ProceduralSweep> {
     let law = match &r.law {
         Some(l) => Some(RadialLaw::new(
@@ -121,12 +122,17 @@ pub fn sweep_of(r: &SweepRecord) -> Result<ProceduralSweep> {
             "a sweep's map has finite terms and non-zero scales",
         ));
     }
-    let mut sweep =
-        ProceduralSweep::create(&curve_of(&r.profile)?, motion, &r.stations, &r.halves)?;
-    sweep.map = SweepMap { a, b, swapped };
-    if r.bound.is_finite() && r.bound > sweep.bound {
-        sweep.bound = r.bound;
+    if !(r.bound.is_finite() && r.bound >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP_ADOPT,
+            "a sweep's bound is finite and nonnegative",
+        ));
     }
+    let mut sweep =
+        ProceduralSweep::checked(&curve_of(&r.profile)?, motion, &r.stations, &r.halves)?;
+    sweep.map = SweepMap { a, b, swapped };
+    sweep.bound = r.bound;
+    sweep.label = true;
     Ok(sweep)
 }
 
@@ -159,48 +165,39 @@ fn agrees(k: &Kernel, net: &Surface, sweep: &ProceduralSweep) -> Result<bool> {
 }
 
 /// Give the faces `faces` (each by its id in `b`) the definitions their record holds: each
-/// face's surface, a B-spline net, carries its wall's definition again ([`sweep_of`]). A face
+/// face's surface, a B-spline net, carries its wall's definition again as its label
+/// ([`sweep_of`]), which no evaluation reads. A face
 /// whose surface is not a plain B-spline, or whose net does not agree with the definition (a
 /// record whose definition belongs to another net), keeps its net alone: the face is valid as
 /// it is, and is never refused.
 ///
 /// # Errors
 ///
-/// Those of `SetSurface`.
-pub fn adopt_sweeps(
-    k: &Kernel,
-    b: &mut Brep,
-    key_of: &dyn Fn(EntityRef) -> ObjectRef,
-    faces: &[(FaceId, SweepRecord)],
-) -> Result<()> {
+/// `InvalidInput` for a face `b` does not have.
+pub fn adopt_sweeps(k: &Kernel, b: &mut Brep, faces: &[(FaceId, SweepRecord)]) -> Result<()> {
     for (face, record) in faces {
         let face = *face;
-        let Some(surface) = b.face(face)?.surface.as_ref() else {
-            continue;
-        };
-        if !matches!(surface.kind(), SurfaceKind::BSpline(_))
-            || surface.procedural_definition().is_some()
-        {
-            continue;
-        }
         // A definition that does not rebuild, or a net it does not describe, leaves the face on
         // its net, which is the face's geometry either way.
         let Ok(sweep) = sweep_of(record) else {
             continue;
         };
-        if !agrees(k, surface, &sweep).unwrap_or(false) {
-            continue;
+        let takes = match b.face(face)?.surface.as_ref() {
+            Some(surface) => {
+                matches!(surface.kind(), SurfaceKind::BSpline(_))
+                    && surface.procedural_definition().is_none()
+                    && surface.kept_sweep().is_none()
+                    && agrees(k, surface, &sweep).unwrap_or(false)
+            }
+            None => false,
+        };
+        // The label goes on the face's own surface, in place: the net, its caches and its
+        // trims stay exactly as they are (a copy of the surface would refit its knots).
+        if takes {
+            if let Some(surface) = b.face_mut(face)?.surface.as_mut() {
+                surface.set_sweep_definition(sweep);
+            }
         }
-        let mut made = surface.clone();
-        made.set_sweep_definition(sweep);
-        crate::topology::face::p1::set_surface(
-            k,
-            b,
-            face,
-            key_of(EntityRef::Face(face)),
-            made,
-            true,
-        )?;
     }
     Ok(())
 }
