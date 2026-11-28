@@ -13498,6 +13498,9 @@ fn feature_tools_with_constructor(
                         .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
                 Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
+            // A coil without a diameter of its own takes its picked edge's or face's (a circular
+            // edge, a cylinder, a flat end face's round outline), as the model is now.
+            let mut picked_diameter = None;
             let (base, direction) = match axis_ref {
                 Some(AxisRef::Construction { name }) => {
                     let recorded = sketch.and_then(|sk| {
@@ -13526,9 +13529,17 @@ fn feature_tools_with_constructor(
                         // Pick and orient the axis in the same frame as the command and viewport.
                         let world = construction_state(doc, st, 0)?;
                         let (origin, direction) = crate::construct::coil_model_axis(&world, geo)?;
+                        if diameter.is_none() && sketch.is_none() {
+                            picked_diameter = crate::construct::coil_model_diameter(&world, geo)?;
+                        }
                         line_from_world(origin, direction)?
                     }
-                    _ => crate::construct::model_axis_in(Some(doc), st, geo, f.component)?,
+                    _ => {
+                        if diameter.is_none() && sketch.is_none() {
+                            picked_diameter = crate::construct::coil_placed_edge_diameter(doc, st, geo)?;
+                        }
+                        crate::construct::model_axis_in(Some(doc), st, geo, f.component)?
+                    }
                 },
                 Some(AxisRef::Line { origin, dir }) => (point(vals, origin)?, dir.0),
                 Some(AxisRef::SketchLine { curve, sketch: owner }) => {
@@ -13599,14 +13610,25 @@ fn feature_tools_with_constructor(
                 kernel::require_unfolded_screw_section(&ss.plane, region, *base, axis, pitch)?;
                 return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
             }
-            let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
+            let d = match diameter {
+                Some(diameter) => val(vals, diameter, Kind::Length)?,
+                None => picked_diameter.ok_or_else(|| {
+                    DocError::Invalid("a coil needs a `sketch`, a `diameter`, or a circular edge or round end face to take it from".into())
+                })?,
+            };
             let section_size = section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
-            let (d, s) = (val(vals, diameter, Kind::Length)?, val(vals, section_size, Kind::Length)?);
+            let s = val(vals, section_size, Kind::Length)?;
             if !(d > 0.0 && s > 0.0 && n > 0.0) {
                 return Err(DocError::Invalid("the coil diameter, section size and revolutions must be positive".into()));
             }
-            let r = d / 2.0 + f64::from(*position) * s / 2.0;
-            if r <= s / 2.0 {
+            // How far the section reaches across the diameter: a triangle of side `s` is its
+            // height deep, its point toward the axis.
+            let depth = match section {
+                crate::CoilSection::Triangle => s * 3f64.sqrt() / 2.0,
+                crate::CoilSection::Circular | crate::CoilSection::Square => s,
+            };
+            let r = d / 2.0 + f64::from(*position) * depth / 2.0;
+            if r <= depth / 2.0 {
                 return Err(DocError::Invalid("the section reaches the coil's axis".into()));
             }
             let a0 = match start_angle {
@@ -13636,6 +13658,12 @@ fn feature_tools_with_constructor(
                 crate::CoilSection::Square => {
                     let h = s / 2.0;
                     solidcore_record::Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)])
+                }
+                crate::CoilSection::Triangle => {
+                    // Centred on the diameter across its depth: the point toward the axis, the
+                    // side of length `s` along it, outward.
+                    let (h, half) = (depth / 2.0, s / 2.0);
+                    solidcore_record::Loop2::polygon(&[c + Vec2::new(-h, 0.0), c + Vec2::new(h, -half), c + Vec2::new(h, half)])
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };

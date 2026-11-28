@@ -3092,6 +3092,37 @@ fn coil_keeps_face_placement_until_the_user_picks_an_axis() {
     assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(origin));
 }
 
+/// Coil from an end face: with the Axis field active, a click on a shaft's flat top takes the face
+/// itself (not a placement on it), fills Diameter with its round edge's, and the coil cut from
+/// there grooves the shaft's wall with the triangle section.
+#[test]
+fn coil_starts_from_a_picked_end_face_and_takes_its_diameter() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft"})).unwrap();
+    h.app.start("solid.coil");
+    h.call("ui.dialogInput", json!({"index":1}));
+    h.frames(4);
+    h.step(&json!({"click":{"world":[5, 5, 40]}})).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Face { body, .. }] if body == "Shaft"), "{:?}", d.inputs[1].items);
+    let Kind::Primitive { fields, .. } = &d.kind else { panic!("a coil dialog") };
+    assert_eq!(fields.iter().find(|(k, _)| *k == "diameter").map(|(_, v)| v.as_str()), Some("40 mm"));
+    d.extra.insert("section".into(), json!("triangle"));
+    d.extra.insert("reversed".into(), json!(true));
+    if let Kind::Primitive { operation, .. } = &mut d.kind {
+        *operation = OPS.iter().position(|o| *o == "cut").unwrap();
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    let commands = apply_commands(&h.app, d).unwrap();
+    let axis = &commands[0].1["axis"];
+    assert!(axis.get("face").is_some() || axis["type"] == "face", "the face is the reference: {axis}");
+    let before = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+    let after = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(after < before, "the triangle groove cuts the shaft: {before} -> {after}");
+}
+
 #[test]
 fn coil_picks_origin_axes_and_reverses_without_changing_clockwise() {
     let mut h = Harness::new();
