@@ -662,7 +662,11 @@ fn a_near_axial_line_through_a_cylinders_seam_meets_the_side() {
     for (place, azimuth_deg, phi) in cases {
         // The azimuth's sine and cosine (33 degrees, written out: this crate computes no geometry),
         // and the tilt's: sin phi = phi to 1e-9 for phi <= 1e-3, cos phi = 1 - phi^2/2 to 5e-14 (the next term is phi^4/24).
-        let (sin_a, cos_a) = if azimuth_deg == 0.0 { (0.0, 1.0) } else { (0.544_639_035_015_027, 0.838_670_567_945_424) };
+        let (sin_a, cos_a) = if azimuth_deg == 0.0 {
+            (0.0, 1.0)
+        } else {
+            (0.544_639_035_015_027, 0.838_670_567_945_424)
+        };
         let (sin_p, cos_p) = (phi, 1.0 - phi * phi / 2.0);
         let through = [20.0 * cos_a, 20.0 * sin_a, 20.0];
         let direction = [sin_p * cos_a, sin_p * sin_a, cos_p];
