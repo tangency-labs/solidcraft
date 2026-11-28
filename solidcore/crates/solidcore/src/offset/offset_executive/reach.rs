@@ -1854,11 +1854,11 @@ fn trace_quadric_piece(
 
 /// The certified upper bound of the reach over a piece where a plane `(o, ν)` and a bare
 /// net meet in the edge's normal sections ([`local_extension_reach`]): the plane's trace
-/// `x0 + τ u` there, its foot and direction by their mean-value forms over the piece, meets
-/// the net (or its extension) at a `τ` proved for every section of the piece
-/// ([`net::line_meets`]), `√(|x0 − p|² + τ²)` from the edge point; the same at the middle,
-/// from its own box, is the value that steers the halving. `guess` carries Newton's last
-/// root from piece to piece.
+/// `x0(s) + τ u(s)` there meets the net (or its extension) at a `τ` proved for every section
+/// of the piece (by linear-predictor Krawczyk [`net::line_meets_piece`] on closed nets, and
+/// [`net::line_meets`] on open nets), `√(|x0 − p|² + τ²)` from the edge point; the same at
+/// the middle is the value that steers the halving. `guess` carries Newton's last root from
+/// piece to piece.
 fn plane_net_piece(
     over: (Dv, Dv),
     mid: (Dv, Dv),
@@ -1881,23 +1881,53 @@ fn plane_net_piece(
         ]
     };
     let numbers = |a: Dv| Vec3::new(a.x.v.mid(), a.y.v.mid(), a.z.v.mid());
-    let at_middle = (numbers(mline.x0), numbers(mline.u));
     let values = |a: Dv| [a.x.v, a.y.v, a.z.v];
     // `|x0 + τ u − p|² = |x0 − p|² + τ² |u|²` (`u` across the foot), `|u|` enclosed about 1
     let reach = |foot2: Ivl, tau: Ivl, u: [Ivl; 3]| {
         let along = round_up(tau.mag() * net::length_bound(u));
         round_up(sqrt(round_up(foot2.hi.max(0.0) + round_up(along * along))))
     };
-    let piece = (centred(line.x0, mline.x0), centred(line.u, mline.u));
-    let Ok(Some(tau)) = net::line_meets(net, piece, at_middle, guess) else {
-        return PieceBound::Unknown;
-    };
-    let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, piece.1);
-    // a meeting at the middle, from its own box: its distance only steers the halving (it
-    // need not be the nearest meeting there, nor rounded down)
-    let lower = match net::line_meets(net, (values(mline.x0), values(mline.u)), at_middle, guess) {
-        Ok(Some(tau)) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
-        _ => 0.0,
+    let (upper, lower) = if net.is_closed() {
+        let derivs = |a: Dv| [a.x.d, a.y.d, a.z.d];
+        let deriv_numbers = |a: Dv| Vec3::new(a.x.d.mid(), a.y.d.mid(), a.z.d.mid());
+        let u_over = centred(line.u, mline.u);
+        let piece = net::LinePiece {
+            x0_mid: values(mline.x0),
+            u_mid: values(mline.u),
+            x0_over: centred(line.x0, mline.x0),
+            dx0_over: derivs(line.x0),
+            u_over,
+            du_over: derivs(line.u),
+            mid_x0: numbers(mline.x0),
+            mid_u: numbers(mline.u),
+            mid_dx0: deriv_numbers(mline.x0),
+            mid_du: deriv_numbers(mline.u),
+            dt,
+        };
+        let Ok(Some((tau, tau_mid))) = net::line_meets_piece(net, &piece, guess) else {
+            return PieceBound::Unknown;
+        };
+        let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, u_over);
+        let lower = match tau_mid {
+            Some(tau) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
+            None => 0.0,
+        };
+        (upper, lower)
+    } else {
+        let at_middle = (numbers(mline.x0), numbers(mline.u));
+        let piece = (centred(line.x0, mline.x0), centred(line.u, mline.u));
+        let Ok(Some(tau)) = net::line_meets(net, piece, at_middle, guess) else {
+            return PieceBound::Unknown;
+        };
+        let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, piece.1);
+        // a meeting at the middle, from its own box: its distance only steers the halving (it
+        // need not be the nearest meeting there, nor rounded down)
+        let lower =
+            match net::line_meets(net, (values(mline.x0), values(mline.u)), at_middle, guess) {
+                Ok(Some(tau)) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
+                _ => 0.0,
+            };
+        (upper, lower)
     };
     if upper.is_finite() {
         PieceBound::Value {
@@ -2181,11 +2211,11 @@ fn bound_inputs(
 
 /// The bits of a surface's exact class an edge's bound is of ([`EdgeBounds`]): a tag for
 /// its kind, then its data; `None` for a class no edge's bound by pieces is of (a plane as
-/// an [`Implicit`], a torus, a B-spline face), which is then bounded and not recorded.
+/// an [`Implicit`], a torus), which is then bounded and not recorded.
 fn exact_bits(c: &Exact) -> Option<Vec<u64>> {
     let v = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
     let mut bits = Vec::new();
-    match *c {
+    match c {
         Exact::Plane(t) => {
             bits.push(0);
             bits.extend(v(t.point));
@@ -2199,18 +2229,19 @@ fn exact_bits(c: &Exact) -> Option<Vec<u64>> {
             tan_angle,
         }) => {
             bits.push(1);
-            bits.extend(v(origin));
-            bits.extend(v(axis));
+            bits.extend(v(*origin));
+            bits.extend(v(*axis));
             bits.extend([radius.to_bits(), tan_angle.to_bits()]);
         }
         Exact::Quadric(Implicit::Sphere { centre, radius }) => {
             bits.push(2);
-            bits.extend(v(centre));
+            bits.extend(v(*centre));
             bits.push(radius.to_bits());
         }
-        Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. })
-        | Exact::Net(_)
-        | Exact::Torus(_) => {
+        Exact::Net(n) => {
+            bits.extend(n.bits());
+        }
+        Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. }) | Exact::Torus(_) => {
             return None;
         }
     }
@@ -3177,10 +3208,15 @@ pub fn local_extension_reach(
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         Ok(plane_net_piece(over, mid, dt, plane, n, &guess))
                     };
-                    // a net's bound is not recorded: it carries no bits to key it on
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
-                    pieces(&piece, bounds, pair, None)?
+                    // recorded under the plane's bits and the net's ([`net::Net::bits`]),
+                    // the same from either face: the second face takes the first's bound
+                    let surfaces = exact_bits(&Exact::Plane(plane)).map(|mut b| {
+                        b.extend(n.bits());
+                        b
+                    });
+                    pieces(&piece, bounds, pair, surfaces.as_deref())?
                 }
                 (Exact::Quadric(q), Exact::Net(n)) | (Exact::Net(n), Exact::Quadric(q)) => {
                     let guess = std::cell::Cell::new(None);
@@ -5300,6 +5336,35 @@ mod tests {
         }
     }
 
+    /// #22804: moving [`half_torus`]'s flat face outward (up to nearly the tube's full
+    /// radius) or inward builds a 2-face manifold solid at the exact Pappus volume.
+    #[test]
+    fn a_half_toruss_flat_face_moves_outward_and_inward_to_the_cut_volume() {
+        use crate::mass::integrator::properties::brep_volume_default;
+        let (major, minor) = (30.0_f64, 8.0_f64);
+        let pi = core::f64::consts::PI;
+        for d in [0.2, 3.2, 7.5, -2.0] {
+            let mut k = Kernel::default();
+            let mut b =
+                half_torus_flat_face_offset(&mut k, d).unwrap_or_else(|e| panic!("d {d}: {e:?}"));
+            assert!(
+                crate::topology::brep::p2::is_manifold_solid(&b).unwrap(),
+                "d {d}"
+            );
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 2, "d {d}");
+            let volume = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+            let expected = pi * pi * major * minor * minor
+                + 2.0
+                    * pi
+                    * major
+                    * (d * (minor * minor - d * d).sqrt() + minor * minor * det::asin(d / minor));
+            assert!(
+                (volume - expected).abs() < 1e-4,
+                "d {d}: {volume} against {expected}"
+            );
+        }
+    }
+
     #[test]
     fn cancelling_a_quadric_solve_does_not_cache_an_uncertified_edge() {
         use crate::kernel::CancelToken;
@@ -6137,6 +6202,117 @@ mod tests {
             within(centre) >= farthest,
             "{} < {farthest}",
             within(centre)
+        );
+    }
+
+    /// #22808: `(Exact::Plane, Exact::Net)` edge bounds are cached in [`EdgeBounds`] across
+    /// both faces of a shared edge and converge in far fewer pieces via linear-predictor
+    /// Krawczyk (no `MAX_INTERVALS` explosion on a vertically moved plane meeting a curved
+    /// bare net).
+    #[test]
+    fn plane_net_edge_bound_caches_and_converges_without_box_wrapping_explosion() {
+        let mut k = Kernel::default();
+        let (b, round, _, bottom) = rounded_cube(&mut k);
+        let net_surf = bare_net(&k, &b, round);
+        let moved_bottom = Surface::from(crate::surface::plane::Plane::from_normal(
+            Point3::new(0.0, 0.0, -2.0),
+            Vec3::Z,
+        ));
+        let moved = [(bottom, &moved_bottom)];
+        let kept = [(round, &net_surf)];
+        let mut held = EdgeBounds::default();
+        let r_round = local_extension_reach(
+            &k,
+            &b,
+            faceuse_of(&b, round),
+            &moved,
+            &kept,
+            1e-3,
+            &mut held,
+        )
+        .unwrap()
+        .unwrap();
+        let cached_after_round = held.held();
+        assert!(
+            cached_after_round > 0,
+            "plane-net edge bound must be cached"
+        );
+        assert!(bounds(&b, r_round.reach, 2.0), "{}", r_round.reach);
+        let r_bottom = local_extension_reach(
+            &k,
+            &b,
+            faceuse_of(&b, bottom),
+            &moved,
+            &kept,
+            1e-3,
+            &mut held,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(bounds(&b, r_bottom.reach, 2.0), "{}", r_bottom.reach);
+
+        // Verify direct piece count on a closed curved bare net (a seamed cylinder's side
+        // meeting its vertically moved bottom cap) stays tiny (well below MAX_INTERVALS =
+        // 16,384) via linear-predictor Krawczyk and the second call with the same `EdgeBounds`
+        // evaluates zero pieces.
+        let (cb, side, caps, _, _) = seamed_cylinder(&mut k, 2.0);
+        let cbottom = caps
+            .into_iter()
+            .find(|&f| {
+                let Some(SurfaceKind::Plane(p)) =
+                    cb.face(f).unwrap().surface.as_ref().map(Surface::kind)
+                else {
+                    return false;
+                };
+                p.position().origin().z.abs() < 1e-6
+            })
+            .unwrap();
+        let closed_net_surf = bare_net(&k, &cb, side);
+        let Some(Exact::Net(net)) = exact_class(&k, &closed_net_surf, cb.tolerance()).unwrap()
+        else {
+            panic!("a closed bare net");
+        };
+        assert!(net.is_closed(), "seamed cylinder bare net must be closed");
+        let arc = edge_between(&cb, cbottom, side);
+        let plane = Tangent {
+            point: Vec3::new(0.0, 0.0, -2.0),
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        let mut surfaces = exact_bits(&Exact::Plane(plane)).unwrap();
+        surfaces.extend(exact_bits(&Exact::Net(net.clone())).unwrap());
+        let calls = std::cell::Cell::new(0_usize);
+        let guess = std::cell::Cell::new(None);
+        let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+            calls.set(calls.get() + 1);
+            Ok(plane_net_piece(over, mid, dt, plane, &net, &guess))
+        };
+        let pair = EdgeQuantity::Meeting(Some(cbottom.min(side)), Some(cbottom.max(side)));
+        let mut cache = EdgeBounds::default();
+        let (reach, apart, _) =
+            edge_interval_maximum(&cb, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+                .unwrap()
+                .unwrap();
+        let first_calls = calls.get();
+        assert!(
+            reach >= 2.0 - cb.tolerance() && reach <= 2.0 + 1e-3 && !apart,
+            "{reach}"
+        );
+        // Full 360° closed cylinder edge (4× a quarter-turn fillet): linear predictor keeps
+        // piece count bounded well below 2048 (vs >60k under box-wrapping explosion).
+        assert!(
+            first_calls < 2048,
+            "linear-predictor plane_net_piece should converge in < 2048 pieces on a full 360° edge at 1e-3 tol, took {first_calls}"
+        );
+        let (cached_reach, _, _) =
+            edge_interval_maximum(&cb, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+                .unwrap()
+                .unwrap();
+        assert_eq!(cached_reach.to_bits(), reach.to_bits());
+        assert_eq!(
+            calls.get(),
+            first_calls,
+            "second plane-net lookup must hit EdgeBounds with 0 piece evaluations"
         );
     }
 }

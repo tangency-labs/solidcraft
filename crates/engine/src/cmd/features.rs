@@ -13,7 +13,7 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
-use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
+use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams, TransformFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams,
@@ -53,6 +53,7 @@ const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new()
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
 const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new();
+const TRANSFORM_FACE_CONTRACT: TypedContract<TransformFaceParams> = TypedContract::new();
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
@@ -207,7 +208,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); ",
             "setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); ",
             "turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); ",
-            "fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)",
+            "fit?: exact|reduce|taper|keep_edge (keep_edge: a concave edge whose flat wall is lower than the radius is rounded by a round tangent to the floor only, ending on the wall's top edge, so the top face and its edge stay as they are; the wall needs a straight top edge parallel to the edge and each end square to the edge or an upright face bounding the floor, such as a ring's cylinder; every other edge is rounded as usual; constant radius only; exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)",
         )),
     CommandSpec::new("solid.chamfer", "Chamfer", crate::checked!("solid.chamfer", chamfer)).begins_edit()
         .at("SOLID", "MODIFY")
@@ -381,6 +382,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
+    CommandSpec::new("solid.transform_face", "Transform Face", crate::checked!("solid.transform_face", transform_face)).begins_edit()
+        .at("SOLID", "MODIFY")
+        .icon("move")
+        .contract(&TRANSFORM_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("face: [x,y,z] or name from model.faces; body?; translate?: [dx,dy,dz]; axis?: X|Y|Z|[x,y,z]; origin?: [x,y,z]; angle?: expr"),
     CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("thread")
@@ -1225,6 +1232,15 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
                 return Err(EngineError::Other("selected cylinder face has no persistent identity".into()));
             }
             names
+        } else if let FeatureKind::TransformFace { body, face, .. } = &kind {
+            // Never recapture a named pick from a point or borrow an unnamed face's identity
+            // from a coincident neighbour. Store the name on the input body alone.
+            let name = str_(p, "face").map(str::to_owned).or_else(|| {
+                let owner = before.body(body)?;
+                let index = owner.body.face_at_point(face.0).ok().flatten()?;
+                solidcraft_doc::naming::face_names(owner).get(index).filter(|name| !name.is_empty()).cloned()
+            });
+            vec![name.ok_or_else(|| bad("solid.transform_face", "the picked face has no persistent name"))?]
         } else if pts.is_empty() {
             Vec::new()
         } else if matches!(kind, FeatureKind::Hole { .. }) {
@@ -3015,10 +3031,11 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some("exact") => solidcraft_doc::FilletFit::Exact,
         Some("reduce") => solidcraft_doc::FilletFit::Reduce,
         Some("taper") => solidcraft_doc::FilletFit::Taper,
-        Some(o) => return Err(bad(cmd, format!("unknown fit `{o}` (exact, reduce or taper)"))),
+        Some("keep_edge") => solidcraft_doc::FilletFit::KeepEdge,
+        Some(o) => return Err(bad(cmd, format!("unknown fit `{o}` (exact, reduce, taper or keep_edge)"))),
     };
     if !fit.is_exact() && !style.is_constant() {
-        return Err(bad(cmd, "`fit: reduce` and `fit: taper` take a constant radius"));
+        return Err(bad(cmd, "`fit: reduce`, `fit: taper` and `fit: keep_edge` take a constant radius"));
     }
     // What fills the corners where three blended edges meet.
     let corner = match str_(p, "corner").map(str::to_ascii_lowercase).as_deref() {
@@ -3734,6 +3751,86 @@ pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &
     Ok((origin, dir))
 }
 
+/// A mirror plane given by name is read where its plane is (a construction plane in its own
+/// component's frame, an origin plane in the active component's), not in the frame of the
+/// features it mirrors: put it into `target`, the frame the mirror is authored in, as an
+/// explicit plane when the two frames differ.
+fn mirror_plane_into(s: &Session, kind: &mut FeatureKind, target: &solidcraft_doc::Mat) {
+    use solidcraft_doc::PlaneRef;
+    let FeatureKind::Mirror { plane, .. } = kind else { return };
+    let (source, found) = match &*plane {
+        PlaneRef::Construction { feature, placement: None } => {
+            let Some(f) = s.doc.feature(feature.0) else { return };
+            let source =
+                if f.component == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(f.component) };
+            let state = s.model.state();
+            let found = state.construct.iter().find(|c| c.feature == f.id).and_then(|c| match &c.geom {
+                solidcraft_doc::construct::ConstructGeom::Plane(p) => Some(*p),
+                _ => None,
+            });
+            (source, found)
+        }
+        PlaneRef::Origin { name } => (s.active_component_frame(), solidcore_record::Plane::named(name)),
+        _ => return,
+    };
+    let alike = |a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= 1e-9);
+    if alike(&source, target) {
+        return;
+    }
+    let local = found.and_then(|p| {
+        let inverse = solidcraft_doc::mat_inverse(target)?;
+        solidcraft_doc::map_plane(&inverse, &solidcraft_doc::map_plane(&source, &p)?)
+    });
+    if let Some(local) = local {
+        *plane = PlaneRef::Custom { plane: local };
+    }
+}
+
+/// Add a mirror or pattern of `features`, in the component those features belong to. Its
+/// geometry replays theirs in that component's own frame, so the plane, axis and directions have
+/// to be in that frame too: a copy made from a placed component's features in another component
+/// (the root, say) would otherwise build local geometry about a world plane or axis.
+/// `kind` is in the world, or in the active component's frame when `frames` mapped it. Features
+/// of two components are refused.
+fn add_copy_of_features(s: &mut Session, p: &Value, mut kind: FeatureKind, features: &[solidcraft_doc::FeatureId], cmd: &str) -> Result<Value> {
+    let mut owners: Vec<u64> = features.iter().filter_map(|f| s.doc.feature(f.0)).map(|f| f.component).collect();
+    owners.sort_unstable();
+    owners.dedup();
+    let owner = match owners.as_slice() {
+        [] => s.active_component,
+        [one] => *one,
+        // Features of several components keep the replay's own mapping, as before.
+        _ => return add_feature(s, p, kind),
+    };
+    if !crate::frames::placed(s) {
+        return add_feature(s, p, kind);
+    }
+    if owner == s.active_component {
+        // Authored in the active component's frame, where `frames` leaves a named plane as it is.
+        let target = if crate::frames::mapped() { s.active_component_frame() } else { solidcraft_doc::IDENTITY };
+        mirror_plane_into(s, &mut kind, &target);
+        return add_feature(s, p, kind);
+    }
+    // Only features that make bodies of their own are copied in their component's frame. A join,
+    // cut or round acts on bodies that may belong to other components, which replay maps itself.
+    let own_bodies = features.iter().all(|f| s.model.state().bodies.iter().any(|b| b.feature == f.0));
+    if !own_bodies {
+        return add_feature(s, p, kind);
+    }
+    let owner_frame = s.placed_document().component_transform(owner);
+    let to_owner = solidcraft_doc::mat_inverse(&owner_frame)
+        .ok_or_else(|| bad(cmd, "the component holding the features to copy is in a singular frame, so the copy cannot be placed"))?;
+    // From the frame the kind is in to the owner's.
+    let from = if crate::frames::mapped() { s.active_component_frame() } else { solidcraft_doc::IDENTITY };
+    kind.transform_geometry(&solidcraft_doc::mat_mul(&to_owner, &from));
+    mirror_plane_into(s, &mut kind, &owner_frame);
+    let saved = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = owner;
+    let reply = add_feature_in(s, p, kind, false);
+    (s.active_component, s.active_occurrence_path) = saved;
+    reply
+}
+
 /// A pattern feature, or for `components`, a Pattern that places them again as occurrences.
 /// Named components keep a managed Pattern so count changes rebuild placements (#12116). Path
 /// occurrences stay one-shot beside the picked placement (main).
@@ -3755,19 +3852,17 @@ fn finish_pattern(
     }
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let mut reply = add_feature(
-            s,
-            p,
-            FeatureKind::Pattern {
-                features,
-                pattern,
-                bodies: bodies.into_iter().map(BodyName).collect(),
-                placements,
-                components: Vec::new(),
-                occurrences: Vec::new(),
-                join,
-            },
-        )?;
+        let sources = features.clone();
+        let kind = FeatureKind::Pattern {
+            features,
+            pattern,
+            bodies: bodies.into_iter().map(BodyName).collect(),
+            placements,
+            components: Vec::new(),
+            occurrences: Vec::new(),
+            join,
+        };
+        let mut reply = add_copy_of_features(s, p, kind, &sources, "pattern")?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before. (Appearance copy from main.)
@@ -4150,8 +4245,9 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         resolve_explicit_placements(s, bodies, explicit_placements, cmd)?
     };
-    let mut reply =
-        add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
+    let sources = features.clone();
+    let kind = FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements };
+    let mut reply = add_copy_of_features(s, p, kind, &sources, cmd)?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
         copies_keep_looks(s, &reply, &bodies)?;
@@ -6507,6 +6603,44 @@ fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::OffsetFace { faces: faces.into_iter().map(FacePick).collect(), distance, body: picked.body.clone().map(BodyName) },
     )
+}
+
+/// Check motion in the frame it was given in. The frame mapper uses this before composing
+/// expressions, so an invalid coordinate cannot disappear while mapping to the owner's frame.
+pub(crate) fn transform_face_motion(s: &Session, p: &Value) -> Result<(PointExpr, Dir, Option<PointExpr>, Option<Expr>)> {
+    let cmd = "solid.transform_face";
+    if p.get("translate").is_none() && p.get("angle").is_none() {
+        return Err(bad(cmd, "give `translate`, `angle`, or both"));
+    }
+    let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
+    let axis = Dir(p.get("axis").map(axis_dir_form).transpose().map_err(|why| bad(cmd, why))?.unwrap_or(Vec3::Z));
+    let origin = point_param(s, p, "origin", cmd)?;
+    let angle = p.get("angle").map(|_| req_expr(cmd, p, "angle")).transpose()?;
+    if let Some(angle) = &angle {
+        check_expr(s, angle, Kind::Angle, cmd, "angle")?;
+    }
+    Ok((translate, axis, origin, angle))
+}
+
+fn transform_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.transform_face";
+    // Unlike Move/Copy this command must not silently ignore a copy, matrix or multi-body
+    // request. Enforce its shape even when the session does not require contracts.
+    if s.param_check != crate::schema::ParamCheck::Strict
+        && let Some(issue) = crate::schema::Contract::check(&TRANSFORM_FACE_CONTRACT, p).into_iter().next()
+    {
+        return Err(bad(cmd, issue.message));
+    }
+    let (translate, rotate_axis, origin, angle) = transform_face_motion(s, p)?;
+    let input = s.model.state();
+    let pick = p.get("face").ok_or_else(|| bad(cmd, "`face` is required"))?;
+    let owner = super::face::transform_face_owner(&input, pick, str_(p, "body"))?;
+    // A nested constructor also receives component-local picks. Look up a named face in this
+    // input state even when the enclosing command has no coordinate mapping of its own.
+    let _local = crate::frames::local_geometry();
+    let face = FacePick(super::face::face_ref(s, pick, Some(&owner.name), cmd)?);
+    let body = BodyName(owner.definition_name().to_owned());
+    add_feature_local(s, p, FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle })
 }
 
 #[cfg(test)]

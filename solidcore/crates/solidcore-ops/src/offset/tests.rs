@@ -8,7 +8,7 @@ use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 
-use super::{offset_faces, offset_sheet, shell, thicken};
+use super::{offset_faces, offset_sheet, shell, thicken, transform_face};
 use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
@@ -1024,6 +1024,233 @@ fn the_top_moves_out() {
     let o = order(&b);
     offset_faces(&b, &o, &[top(&b, &o)], 2.0).unwrap();
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
+}
+
+// Definitions and certificates §5: at tens of mm, coordinates within this floor agree.
+const PART_SCALE_FLOOR_MM: f64 = 1e-10;
+
+/// The roof is z = 12 + y: a 45-degree turn around the line at y=0, z=10
+/// followed by a 2 mm lift. The volume is base area times mean height.
+#[test]
+fn transform_face_tilt_meets_the_kept_sides() {
+    use crate::history::{recorded_if_changed, Change, FaceOrigin, Made};
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let mut o = order(&b);
+    // A recorder's input order need not match the kernel's output order.
+    o.faces.rotate_left(1);
+    let roof = top(&b, &o);
+    let history = recorded_if_changed(&b, &o, Made::Local { moved: &[roof] }, || {
+        transform_face(
+            &b,
+            &o,
+            roof,
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, 10.0],
+            [1.0, 0.0, 0.0],
+            PI / 4.0,
+        )
+    })
+    .unwrap()
+    .expect("the roof changed");
+    let new_roof = through(&b, &order(&b), [5.0, 5.0, 17.0]);
+    assert_eq!(history.faces[new_roof].change, Change::Modified);
+    assert_eq!(history.faces[new_roof].origins, [FaceOrigin::Face(roof)]);
+    let record = b.to_record().unwrap().0;
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    for x in [0.0, 10.0] {
+        for y in [0.0, 10.0] {
+            assert!(record.vertices.iter().any(|v| v.point == [x, y, 0.0]));
+            assert!(
+                record.vertices.iter().any(|v| {
+                    (v.point[0] - x).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[1] - y).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[2] - (12.0 + y)).abs() <= PART_SCALE_FLOOR_MM
+                }),
+                "missing roof corner at ({x}, {y})"
+            );
+        }
+    }
+    b.check_solid().unwrap();
+    assert!(b.is_manifold_solid().unwrap());
+    assert!(rel(volume(&b), 1700.0) <= 1e-9);
+}
+
+/// A hole r=2 going through the block still removes 40π mm³ after its axis
+/// moves 1 mm along x. The centres of the circular rims, not the volume, move.
+#[test]
+fn transform_face_translates_a_bore_without_resizing_it() {
+    all_fixes();
+    let drill = make_cylinder([10.0, 10.0, -1.0], 2.0, 12.0).unwrap();
+    let b = crate::boolean::boolean(block(), drill, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let wall = through(&b, &o, [10.0, 12.0, 5.0]);
+    assert!(transform_face(
+        &b,
+        &o,
+        wall,
+        [1.0, 0.0, 0.0],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        0.0
+    )
+    .unwrap());
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.faces.len(), 7);
+    let (frame, radius) = record
+        .faces
+        .iter()
+        .find_map(|f| match &f.surface {
+            solidcore_record::brep::Surface::Cylinder { frame, radius } => Some((frame, radius)),
+            _ => None,
+        })
+        .expect("the bore must retain its cylindrical support");
+    assert!((radius - 2.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[0] - 11.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[1] - 10.0).abs() <= PART_SCALE_FLOOR_MM);
+    // Across either radius the rim must stay in its plane to the same linear floor.
+    assert!(radius * frame.x_axis[2].abs() <= PART_SCALE_FLOOR_MM);
+    assert!(radius * frame.y_axis[2].abs() <= PART_SCALE_FLOOR_MM);
+    for x in [0.0, 30.0] {
+        for y in [0.0, 20.0] {
+            for z in [0.0, 10.0] {
+                assert!(record.vertices.iter().any(|v| v.point == [x, y, z]));
+            }
+        }
+    }
+    b.check_solid().unwrap();
+    assert!(rel(volume(&b), ABC - 40.0 * PI) <= 1e-9);
+}
+
+#[test]
+fn transform_face_on_an_invariant_plane_preserves_topology_and_origins() {
+    use crate::history::{recorded, Change, FaceOrigin, Made};
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let before = b.to_smb(false).unwrap();
+    for (slide, spin) in [
+        ([0.0; 3], 0.0),
+        ([2.0, -4.0, 0.0], 0.0),
+        ([0.0; 3], PI / 4.0),
+    ] {
+        let h = recorded(&b, &o, Made::Plain, || {
+            let changed =
+                transform_face(&b, &o, f, slide, [4.0, 5.0, 10.0], [0.0, 0.0, 1.0], spin)?;
+            assert!(!changed);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(h.faces.len(), 6);
+        for (i, f) in h.faces.iter().enumerate() {
+            assert_eq!(f.change, Change::Kept);
+            assert_eq!(f.origins, [FaceOrigin::Face(i)]);
+        }
+        assert_eq!(h.edges.len(), 12);
+        for (i, origins) in h.edges.iter().enumerate() {
+            assert_eq!(origins, &[i]);
+        }
+        assert_eq!(b.to_smb(false).unwrap(), before);
+    }
+}
+
+#[test]
+fn transform_face_slide_along_an_oblique_plane_is_exact() {
+    use crate::sweep::{extrude, Curve, DraftCorner};
+    all_fixes();
+    let a = [1000.0, 0.0, 0.0];
+    let b = [1010.0, 10.0, 0.0];
+    let c = [1000.0, 10.0, 0.0];
+    let profile = [(a, b), (b, c), (c, a)].map(|(start, end)| Curve::Line { start, end });
+    let prism = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let o = order(&prism);
+    let diagonal = through(&prism, &o, [1005.0, 5.0, 5.0]);
+    // The sweep reconstructs a segment endpoint from its direction and length.
+    // Use the stored plane's tangent, not its nominal (1,1,0) direction.
+    let slide = {
+        let brep = prism.lock();
+        let surface = solidcore::topology::face::p2::surface(&brep, o.faces[diagonal])
+            .unwrap()
+            .unwrap();
+        let solidcore::surface::surface::SurfaceKind::Plane(plane) = surface.kind() else {
+            panic!("the diagonal wall must be a plane");
+        };
+        let frame = plane.position();
+        let u = frame.x_axis();
+        assert!(u.x.abs() > 0.5 && (u.x - u.y).abs() < 1e-12 && u.z == 0.0);
+        let d = u * 0.125; // exact binary scaling
+        let origin = frame.origin();
+        let rounded = (origin + d) - origin;
+        assert_ne!(
+            rounded.x * d.y,
+            rounded.y * d.x,
+            "rounding must break tangency"
+        );
+        d.to_array()
+    };
+    let before = prism.to_smb(false).unwrap();
+    assert!(!transform_face(&prism, &o, diagonal, slide, a, [0.0, 0.0, 1.0], 0.0).unwrap());
+    assert_eq!(prism.to_smb(false).unwrap(), before);
+}
+
+#[test]
+fn transform_face_refuses_an_inverted_box_and_restores_its_input() {
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let before = b.to_smb(false).unwrap();
+    let reason =
+        transform_face(&b, &o, f, [0.0, 0.0, -11.0], [0.0; 3], [0.0, 0.0, 1.0], 0.0).unwrap_err();
+    assert!(
+        matches!(
+            reason,
+            Error::OffsetRefused { .. }
+                | Error::NotSolidBecause(_)
+                | Error::NoRoom
+                | Error::WallsTouch
+                | Error::Refused { .. }
+        ),
+        "inverting the top must give a geometric refusal, not {reason}"
+    );
+    assert_eq!(b.to_smb(false).unwrap(), before);
+    b.check_solid().unwrap();
+    assert!(rel(volume(&b), ABC) <= 1e-9);
+}
+
+#[test]
+fn transform_face_checks_inputs_before_accepting_identity() {
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let z = [0.0, 0.0, 1.0];
+    for (face, delta, origin, axis, angle) in [
+        (o.faces.len(), [0.0; 3], [0.0; 3], z, 0.0),
+        (f, [0.0; 3], [0.0; 3], [0.0; 3], 0.0),
+        (f, [0.0; 3], [0.0; 3], [f64::NAN; 3], 0.0),
+        (f, [0.0; 3], [f64::INFINITY; 3], z, 0.0),
+        (f, [f64::NAN; 3], [0.0; 3], z, 0.0),
+        (f, [0.0; 3], [0.0; 3], z, f64::NAN),
+    ] {
+        assert_eq!(
+            transform_face(&b, &o, face, delta, origin, axis, angle),
+            Err(Error::Argument)
+        );
+    }
+    let sheet = plate();
+    assert!(transform_face(&sheet, &order(&sheet), 0, [0.0; 3], [0.0; 3], z, 0.0).is_err());
 }
 
 /// An 82 x 47 x 20 box with a post r 10, 10 high, about each corner (#14370), the posts'
@@ -2338,7 +2565,9 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
     );
     assert_eq!(
         e.map(|e| e.to_string()).as_deref(),
-        Some("the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point")
+        Some(
+            "the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point"
+        )
     );
     let what = Unsoundness::NotManifoldSolid;
     assert_eq!(
@@ -4522,4 +4751,138 @@ fn a_ringed_countersinks_cone_moves_within_the_ring() {
         volume(&b)
     );
     b.check_solid().unwrap();
+}
+
+/// A `side` cube on `z`, turned 45 degrees about the vertical through `(cx, cy)`: a square pad
+/// whose corners point along the axes.
+#[allow(clippy::disallowed_methods)] // the turn places the test body, not ops geometry
+fn turned_pad(cx: f64, cy: f64, z: f64, side: f64) -> Body {
+    let half = side / 2.0;
+    let pad = make_box([cx - half, cy - half, z], [side, side, side]).unwrap();
+    let (s, c) = (PI / 4.0).sin_cos();
+    pad.transform(&[
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [cx - c * cx + s * cy, cy - s * cx - c * cy, 0.0, 1.0],
+    ])
+    .unwrap();
+    pad
+}
+
+fn shells_to(b: &Body, open: &[usize], t: f64, want: f64, what: &str) {
+    shell(b, &order(b), open, -t).unwrap_or_else(|e| panic!("{what}, wall {t}: {e}"));
+    let v = volume(b);
+    assert!(rel(v, want) < 1e-9, "{what}, wall {t}: {v} {want}");
+    assert!(b.is_manifold_solid().unwrap(), "{what}, wall {t}");
+    assert_eq!(
+        b.check(crate::CheckLevel::All).unwrap().failures,
+        0,
+        "{what}, wall {t}"
+    );
+}
+
+/// solidcraft#22791 (stress corpus S4981, S6660, S2241, S1020, ...): a 4.8 pad on the top of a
+/// 60 x 40 x 25 block, turned 45 degrees with its +X corner on the top's +X edge, or 0.00001
+/// or 0.00002 inside it, or 0.00001 past it. The join merges the corner into the edge, which it
+/// splits there, and the top's one loop runs along the edge to that vertex, round the pad's
+/// footprint and on along the edge: it passes through the vertex twice. One offset vertex
+/// cannot stand for it: the edge's two pieces' offsets meet at (30 - t, 0), the footprint's at
+/// the corner of the pad's inset, (30 - sqrt 2 t, 0). The offset now builds from a working copy
+/// where the loop is cut in two there and the vertex split in one per fan of faces.
+///
+/// Closed form, wall t: the block and pad, 60000 + 4.8^3, less the block's void,
+/// (60 - 2t)(40 - 2t)(25 - 2t) (25 - t high, open at the bottom), less the pad's, a
+/// (4.8 - 2t) square column 4.8 high from the block's void to t under the pad's top (its corner
+/// nearest the edge, 30 - sqrt 2 t, inside the void's side, 30 - t). A wall of 3, more than half
+/// the pad, leaves it solid (`thin_features`). The corner past the edge adds a sliver of
+/// 4.8 x 1e-10, below the bound. For the issue's script (wall 1): 9380.960.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_pads_corner_on_its_faces_edge_shells_to_its_closed_form() {
+    all_fixes();
+    let h = 2.4 * 2f64.sqrt();
+    let cases: [(f64, &[(f64, bool)]); 4] = [
+        (
+            0.0,
+            &[(1.0, false), (1.92, false), (3.0, false), (1.0, true)],
+        ),
+        (1e-5, &[(1.0, false), (1.92, false), (1.0, true)]),
+        (2e-5, &[(1.0, false), (3.0, false), (1.0, true)]),
+        (-1e-5, &[(1.0, false), (1.92, false), (1.0, true)]),
+    ];
+    for (gap, walls) in cases {
+        for &(t, open_bottom) in walls {
+            let base = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+            let pad = turned_pad(30.0 - h - gap, 0.0, 25.0, 4.8);
+            let b = crate::boolean::boolean(base, pad, crate::BooleanOp::Union)
+                .unwrap()
+                .unwrap();
+            assert!(b.outline_touch().unwrap().is_some(), "gap {gap}: no pinch");
+            let o = order(&b);
+            let open = if open_bottom {
+                vec![face(&b, &o, |bx| {
+                    bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+                })]
+            } else {
+                Vec::new()
+            };
+            let high = if open_bottom {
+                25.0 - t
+            } else {
+                25.0 - 2.0 * t
+            };
+            let inner = (4.8_f64 - 2.0 * t).max(0.0);
+            let want = 60000.0 + 4.8_f64.powi(3)
+                - (60.0 - 2.0 * t) * (40.0 - 2.0 * t) * high
+                - inner * inner * 4.8;
+            shells_to(&b, &open, t, want, &format!("pad {gap} from the edge"));
+        }
+    }
+}
+
+/// A 3 x 4 peg (stress corpus S0085) with a 0.36 pad turned 45 degrees on its top, its +X corner
+/// on the rim, or 0.00001 inside it, where the rim's circle has its one vertex (#18568's
+/// case): the top's loop runs round the rim from that vertex and round the footprint from it
+/// again. Shelled closed by 0.05: the peg pi 1.5^2 4 and the pad 0.36^3, less the void
+/// pi 1.45^2 3.9 and the pad's 0.26 square column 0.36 high (its far corner at radius
+/// 1.5 - 0.18 sqrt 2 + 0.13 sqrt 2 < 1.45).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_pads_corner_on_a_cylinders_rim_shells_to_its_closed_form() {
+    all_fixes();
+    for gap in [0.0, 1e-5] {
+        let base = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let pad = turned_pad(1.5 - 0.18 * 2f64.sqrt() - gap, 0.0, 4.0, 0.36);
+        let b = crate::boolean::boolean(base, pad, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let t = 0.05;
+        let want = PI * 2.25 * 4.0 + 0.36_f64.powi(3)
+            - PI * 1.45_f64.powi(2) * 3.9
+            - 0.26_f64.powi(2) * 0.36;
+        shells_to(&b, &[], t, want, &format!("peg pad {gap} from the rim"));
+    }
+}
+
+/// A 4.8 hole 10 deep in the 60 x 40 x 25 block's top, 0.00001 from its +X side (stress corpus
+/// S1948, S9699): the join merges the hole's circle into the top's edge, so the top's loop
+/// passes through that vertex twice. Shelled closed by 1: the block less the hole,
+/// 60000 - pi 2.4^2 10, less the void, 58 x 38 x 23 less the hole grown by 1 (r 3.4, from
+/// z = 14 to the void's top, 24) where it lies inside the void, x < 29: its disc less the
+/// segment past a chord 1.4 + 0.00001 from its centre.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_hole_by_its_faces_edge_shells_to_its_closed_form() {
+    all_fixes();
+    let gap = 1e-5;
+    let base = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+    let hole = make_cylinder([27.6 - gap, 0.0, 15.0], 2.4, 10.0).unwrap();
+    let b = crate::boolean::boolean(base, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(b.outline_touch().unwrap().is_some());
+    let cavity = 58.0 * 38.0 * 23.0 - (PI * 3.4 * 3.4 - disc_segment(3.4, 1.4 + gap)) * 10.0;
+    let want = 60000.0 - PI * 2.4 * 2.4 * 10.0 - cavity;
+    shells_to(&b, &[], 1.0, want, "hole 0.00001 from the edge");
 }

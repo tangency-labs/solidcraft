@@ -7665,6 +7665,8 @@ mod tests {
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_fold_other_components", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
+            ("browser_hide_construction_folder", json!(true), PAGE_LAYOUT),
+            ("browser_hide_sketches_folder", json!(true), PAGE_LAYOUT),
             ("browser_history_without_folder", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
@@ -15719,7 +15721,7 @@ mod settings_search_tests {
             let body = crate::scenario::rect_of("dialog:page_body");
             h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
         };
-        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil"] {
+        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil", "Emboss"] {
             h.app.prefs_window.shell.filter = query.into();
             h.frames(4);
             assert!(drawn(&h, "Placement handles"), "searching '{query}' should show Placement handles");

@@ -148,9 +148,10 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
 - `src/renderer.rs`, `src/winit.rs`: `FrameCompositor`, an optional owner of a whole frame
-  (`Renderer::frame_compositor`, unset unless the blur behind panels is on, #8876), and
-  `Renderer::render_with_mesh_offset`, which continues an uploaded frame in another render pass;
-  the blur (`crates/ui-kit/src/blur_native.rs`) draws through them.
+  (`Renderer::frame_compositor`, unset unless the blur behind panels is on, #8876), which
+  eframe's painter hands the frame to (`crates/ui-kit/src/blur_native.rs`). Our own runner's
+  painter (`crates/window-gpu`) has the same hook without a patch; this one goes when the app
+  runs there by default.
 - `src/renderer.rs`: `Callback::downcast_ref` (and `CallbackTrait: Any`), so tests can count the
   kinds of paint callbacks a frame emitted (`crates/ui-egui/src/gpu.rs`).
 

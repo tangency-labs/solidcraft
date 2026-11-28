@@ -63,6 +63,7 @@ use K::*;
 
 /// What `timeline.redefine` maps for a surface revolve, which no command is called.
 const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
+const TRANSFORM_FACE: &str = "solid.transform_face";
 
 /// The construction planes made of picks alone (`cmd::picked_plane`): their references are
 /// parsed and mapped as a whole, saved forms included, rather than key by key (#12022).
@@ -101,6 +102,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", PrimitiveAxis), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
+        TRANSFORM_FACE => &[("face", Pick), ("body", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Plane), ("up_to", Plane)],
         "shaft_spline.insert" => &[("shaft_face", Pick), ("shaft_start", Pick), ("bore_face", Pick), ("bore_start", Pick)],
         "solid.emboss" => &[("face", Make)],
@@ -825,6 +827,56 @@ fn thread_body_picks(s: &Session, input: &solidcraft_doc::ModelState, faces: &[V
     Ok(normalized)
 }
 
+/// A face transform is expressed in the world, including its default axis. Resolve the
+/// owner there before mapping any motion. A named face stays named for the constructor.
+fn transform_face_local(s: &Session, params: &Value, prefix: Option<std::sync::Arc<solidcraft_doc::ModelState>>) -> crate::Result<Value> {
+    let face = params.get("face").ok_or_else(|| crate::params::bad(TRANSFORM_FACE, "`face` must be a point or a face name"))?;
+    let explicit =
+        params.get("body").map(|v| v.as_str().ok_or_else(|| crate::params::bad(TRANSFORM_FACE, "`body` must be a body name"))).transpose()?;
+    let (translate, axis, origin, _) = crate::cmd::transform_face_motion(s, params)?;
+    let placed = placed(s);
+    let world = match (placed, &prefix) {
+        (true, Some(input)) => std::sync::Arc::new(solidcraft_doc::world_state(&s.placed_document(), input)?),
+        (true, None) => s.world_state()?,
+        (false, Some(input)) => input.clone(),
+        (false, None) => s.model.state(),
+    };
+    let pick = crate::cmd::face_ref_form(face).map_err(|why| crate::params::bad(TRANSFORM_FACE, why))?;
+    // Selection can distinguish touching bodies or two occurrences whose faces have the
+    // same name. An unrelated selection never changes the meaning of a scripted command.
+    let selected = match (explicit, s.selection.as_slice()) {
+        (None, [crate::Sel::Face { body, index, point }]) => {
+            let matches = match &pick {
+                crate::cmd::FaceRefForm::Point(p) => p == point,
+                crate::cmd::FaceRefForm::Name(n) => world.body(body).is_some_and(|b| solidcraft_doc::naming::face_has_name(b, *index, n)),
+            };
+            matches.then_some(body.as_str())
+        }
+        _ => None,
+    };
+    let owner = crate::cmd::transform_face_owner(&world, face, explicit.or(selected))?;
+    let mut out = params.clone();
+    out["body"] = Value::String(owner.name.clone());
+    if let crate::cmd::FaceRefForm::Point(p) = pick {
+        out["face"] = pt(p);
+    }
+    if !placed {
+        return Ok(out);
+    }
+    out["axis"] = pt(axis.0);
+    // Expand point objects, preserving the meaning of bare lengths before the affine
+    // conversion combines them with other expressions or with a placement measured in mm.
+    let lengths = |p: solidcraft_doc::PointExpr| serde_json::json!(p.map(|e| s.doc.with_design_unit(&e, solidcraft_doc::expr::Kind::Length)));
+    if params.get("translate").is_some() {
+        out["translate"] = lengths(translate);
+    }
+    if let Some(origin) = origin {
+        out["origin"] = lengths(origin);
+    }
+    map_local_with_input(s, &world, TRANSFORM_FACE, &out, prefix.as_deref(), None)
+        .ok_or_else(|| crate::params::bad(TRANSFORM_FACE, format!("could not map the placement of `{}`", owner.name)))
+}
+
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model
 /// that cannot be placed is the error.
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
@@ -842,6 +894,22 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
 }
 
 fn to_local_unchecked(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
+    if id == TRANSFORM_FACE {
+        return transform_face_local(s, params, None).map(Some);
+    }
+    if id == "timeline.redefine" && params.get("command").and_then(Value::as_str).is_some_and(|c| c.trim().eq_ignore_ascii_case(TRANSFORM_FACE)) {
+        // Use the same name/id precedence as timeline.redefine, not the final model:
+        // the existing transform or a later feature can have moved or removed this face.
+        let feature = match params.get("feature") {
+            Some(Value::String(name)) => s.doc.resolve_feature_name(name).ok(),
+            Some(value) => value.as_u64().and_then(|id| s.doc.feature(id)),
+            None => None,
+        };
+        let (Some(feature), Some(inner)) = (feature, params.get("params")) else { return Ok(None) };
+        let mut out = params.clone();
+        out["params"] = transform_face_local(s, inner, Some(s.model.state_before(feature.id)))?;
+        return Ok(Some(out));
+    }
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
     // Edit Feature of a revolve or coil restores its saved axis (and the origin's expressions) even
@@ -1174,12 +1242,21 @@ fn map_local_with_input(
     // frame's origin and, without `axis`, its Z, so moves written before `origin` existed land
     // where they did. A given `origin` (a matrix gives [0, 0, 0]) puts the whole turn in the
     // world: a missing axis is then world Z.
-    let first = saved_copies.and_then(|copies| copies.first()).map(|m| solidcraft_doc::mat_mul(&command_frames.active, m)).or_else(|| {
-        (id == "solid.move")
-            .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
-            .flatten()
-            .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m))
-    });
+    let first = if id == TRANSFORM_FACE {
+        // The exact owner was resolved before this mapping, including for a named face
+        // (where `pick` sees no coordinate). Never substitute the active component.
+        let name = obj.get("body")?.as_str()?;
+        let (_, _, frame) = command_frames.bodies(s).iter().find(|(world, ..)| world == name)?;
+        mat_inverse(frame)?;
+        Some(*frame)
+    } else {
+        saved_copies.and_then(|copies| copies.first()).map(|m| solidcraft_doc::mat_mul(&command_frames.active, m)).or_else(|| {
+            (id == "solid.move")
+                .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
+                .flatten()
+                .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m))
+        })
+    };
     let world_axis;
     let obj = if id == "solid.move" && obj.contains_key("origin") && obj.contains_key("angle") && !obj.contains_key("axis") {
         let mut with_axis = obj.clone();
@@ -1189,7 +1266,7 @@ fn map_local_with_input(
     } else {
         obj
     };
-    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
+    let mut m = Mapper { s, world, f: command_frames, first, changed: id == TRANSFORM_FACE, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     if id == "solid.move" && obj.get("copy").and_then(Value::as_bool) == Some(true) {

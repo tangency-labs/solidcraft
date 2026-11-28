@@ -130,6 +130,19 @@ chart often gives it for a 90° bend. Compare *bend allowance*.
 - **Elsewhere:** BD.
 - **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
 
+### bend offset
+
+The distance an edge flange's bend is moved out past where its bend position starts it.
+
+The panel the flange stands on grows by the strip between, and so does the flat. A negative bend
+offset moves the bend in.
+
+- **In SolidCraft:** the Flange dialog's Bend Offset; `sheet.flange`'s `offset` and the edge
+  flange feature's `offset` key.
+- **Don't use:** flange offset, bend shift.
+- **Elsewhere:** offset (of a flange position).
+- **For translators:** not an offset plane, not the Combine offset, and not a sketch offset.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.

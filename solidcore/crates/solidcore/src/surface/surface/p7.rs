@@ -2244,18 +2244,7 @@ impl Surface {
         t_guess: f64,
     ) -> Result<Option<CurveSurfaceSolution>> {
         let signed = op == SolverOperation::Signed3dDirectedMinimize;
-
-        // the problem intervals [t, u, v (, distance)] and guess
-        let mut intervals = vec![
-            *interval,
-            Extent1d::from_min_max(uv_domain.min().x, uv_domain.max().x),
-            Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y),
-        ];
-        let mut guess = vec![t_guess, uv_guess.x, uv_guess.y];
-        if signed {
-            intervals.push(Extent1d::from_min_max(-BIG_DOUBLE, BIG_DOUBLE));
-            guess.push(0.0);
-        }
+        let (intervals, guess) = local_curve_bounds(uv_domain, interval, signed, uv_guess, t_guess);
 
         let Some(solution) = cs_normalize_local_solve(
             k,
@@ -2270,7 +2259,51 @@ impl Surface {
         else {
             return Ok(None);
         };
+        Ok(Some(self.curve_surface_solution_at(
+            k,
+            curve,
+            signed,
+            opt_vectors,
+            &solution,
+        )?))
+    }
 
+    /// The best `[t, u, v]` of a minimize [`Surface::local_curve_solve`] from the same
+    /// guesses, and whether that solve accepted it. [`Surface::local_curve_solve`] still
+    /// returns `None` when it is not accepted; the point is only a seed.
+    pub(crate) fn local_curve_minimize_point(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+        uv_guess: Point2,
+        t_guess: f64,
+    ) -> Result<(bool, Vec<f64>)> {
+        let (intervals, guess) = local_curve_bounds(uv_domain, interval, false, uv_guess, t_guess);
+        cs_normalize_local_solve_status(
+            k,
+            self,
+            curve,
+            SolverOperation::Minimize,
+            distance_tolerance,
+            &[],
+            &intervals,
+            &guess,
+        )
+    }
+
+    /// The curve/surface gap of a `[t, u, v]` solve vector: the distance
+    /// [`Surface::local_curve_solve`] reports, signed the same way.
+    pub(crate) fn curve_surface_solution_at(
+        &self,
+        k: &Kernel,
+        curve: &Curve,
+        signed: bool,
+        opt_vectors: &[Vec3],
+        solution: &[f64],
+    ) -> Result<CurveSurfaceSolution> {
         let s0 = solution.first().copied().unwrap_or(0.0);
         let s1 = solution.get(1).copied().unwrap_or(0.0);
         let s2 = solution.get(2).copied().unwrap_or(0.0);
@@ -2288,11 +2321,11 @@ impl Surface {
                 dist = -dist;
             }
         }
-        Ok(Some(CurveSurfaceSolution {
+        Ok(CurveSurfaceSolution {
             distance: dist,
             t: s0,
             uv,
-        }))
+        })
     }
 
     /// The curves of the parallel projection of `curve` along `projection_vector`
@@ -4181,6 +4214,28 @@ fn singular_param_solve(
     Ok((r.found, r.t))
 }
 
+/// The problem intervals `[t, u, v]` of `LocalCurveSolve`, plus a free distance
+/// parameter when `signed`, and the guess in the same order.
+fn local_curve_bounds(
+    uv_domain: &Extent2d,
+    interval: &Extent1d,
+    signed: bool,
+    uv_guess: Point2,
+    t_guess: f64,
+) -> (Vec<Extent1d>, Vec<f64>) {
+    let mut intervals = vec![
+        *interval,
+        Extent1d::from_min_max(uv_domain.min().x, uv_domain.max().x),
+        Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y),
+    ];
+    let mut guess = vec![t_guess, uv_guess.x, uv_guess.y];
+    if signed {
+        intervals.push(Extent1d::from_min_max(-BIG_DOUBLE, BIG_DOUBLE));
+        guess.push(0.0);
+    }
+    (intervals, guess)
+}
+
 /// The `SmLocalSolveNd` solve of `LocalCurveSolve` over `SmCSNormalizeENFO`
 /// (boundary handler `SM_BH_TOTAL_BOUNDARY_HITS` 5, accuracy `SM_EFF_ZERO_SQRT`,
 /// evaluator tolerance `SM_EFF_ZERO^2`, no periodicity): the solution vector, `None`
@@ -4195,6 +4250,32 @@ fn cs_normalize_local_solve(
     intervals: &[Extent1d],
     guess: &[f64],
 ) -> Result<Option<Vec<f64>>> {
+    let (found, x) = cs_normalize_local_solve_status(
+        k,
+        surface,
+        curve,
+        op,
+        distance_tolerance,
+        opt_vectors,
+        intervals,
+        guess,
+    )?;
+    // No: see note in upstream [B234]: not found is not found, whatever the reason.
+    Ok(found.then_some(x))
+}
+
+/// [`cs_normalize_local_solve`], keeping the best point when the acceptance test
+/// refuses it: `(found, x)`.
+fn cs_normalize_local_solve_status(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    op: SolverOperation,
+    distance_tolerance: f64,
+    opt_vectors: &[Vec3],
+    intervals: &[Extent1d],
+    guess: &[f64],
+) -> Result<(bool, Vec<f64>)> {
     let mut bounds = ExtentNd::new(intervals.len());
     for (i, ivl) in intervals.iter().enumerate() {
         if let Some(slot) = bounds.get_mut(i) {
@@ -4215,8 +4296,7 @@ fn cs_normalize_local_solve(
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 5);
     let solution = solver.solve_it(guess, EFF_ZERO_SQRT)?;
-    // No: see note in upstream [B234]: not found is not found, whatever the reason.
-    Ok(solution.found.then_some(solution.x))
+    Ok((solution.found, solution.x))
 }
 
 #[cfg(test)]

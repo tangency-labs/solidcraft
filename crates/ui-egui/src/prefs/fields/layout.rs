@@ -23,6 +23,12 @@ macro_rules! layout_preferences {
             /// rows down to the active one, so only the component being worked on is open. Off by
             /// default: activating leaves the rows as they are.
             browser_fold_other_components: bool = false, PAGE_LAYOUT;
+            /// The Browser draws no Construction folder (except while searching): the History lists the
+            /// construction planes, axes and points, so they are not shown twice. Off by default.
+            browser_hide_construction_folder: bool = false, PAGE_LAYOUT;
+            /// The Browser draws no Sketches folder (except while searching): the History lists the
+            /// sketches, so they are not shown twice. Off by default: every component has its folder.
+            browser_hide_sketches_folder: bool = false, PAGE_LAYOUT;
             /// With the History in the Browser, each component lists its features straight under its
             /// row, after its folders, instead of in a History folder. Off by default: the folder.
             browser_history_without_folder: bool = false, PAGE_LAYOUT;
