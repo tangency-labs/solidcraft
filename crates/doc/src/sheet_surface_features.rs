@@ -1528,6 +1528,14 @@ impl SurfaceSheet {
         Ok(if n.dot(f.across) > 0.0 { FoldSide::Left } else { FoldSide::Right })
     }
 
+    /// Where a fold along the line from `a` to `b` lies when the side `stays` stays (see
+    /// [`SurfaceSheet::add_fold`]): where the panel it folds lies in space, and the unit vector
+    /// across the line toward the side that moves, in that panel's chart.
+    pub(crate) fn fold_toward(&self, a: Vec3, b: Vec3, angle: f64, radius: f64, flip: bool, stays: FoldSide) -> Result<(Rigid3, Vec2)> {
+        let f = self.fold_setup(a, b, angle, radius, flip)?;
+        Ok((f.place, if stays == FoldSide::Left { f.across } else { -f.across }))
+    }
+
     /// What a fold works on, whichever side stays (see [`SurfaceSheet::add_fold`]).
     fn fold_setup(&self, a: Vec3, b: Vec3, angle: f64, radius: f64, flip: bool) -> Result<FoldSetup> {
         if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {

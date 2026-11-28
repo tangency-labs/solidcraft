@@ -3297,6 +3297,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.hardware"
                 | "sheet.fold"
                 | "sheet.path_flange"
+                | "sheet.jog"
                 | "sheet.tab"
                 | "sheet.bead"
                 | "sheet.unfold"

@@ -19527,6 +19527,7 @@ fn eval_feature_kind(
         | FeatureKind::SheetPerforate { .. }
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
+        | FeatureKind::SheetJog { .. }
         | FeatureKind::SheetTab { .. }
         | FeatureKind::SheetBead { .. }
         | FeatureKind::SheetUnfold { .. }

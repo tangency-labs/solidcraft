@@ -20,9 +20,9 @@ use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BeadParams, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, CornerJoinParams, DxfFile, ExportDxfParams, ExportDxfResult,
     FlangeParams, FlatCircle, FlatHardware, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo,
-    HardwareKindParam, HardwareParams, HardwareResult, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult,
-    MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply,
-    RulesParams, RulesResult, SheetBodyMeasure, TabParams, UnfoldParams,
+    HardwareKindParam, HardwareParams, HardwareResult, HemParams, JogParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
+    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
+    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, TabParams, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
 const HARDWARE_CONTRACT: TypedContract<HardwareParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
+const JOG_CONTRACT: TypedContract<JogParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
 const TAB_CONTRACT: TypedContract<TabParams> = TypedContract::new();
@@ -152,6 +153,20 @@ pub static COMMANDS: &[CommandSpec] = &[
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
          stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
+    ),
+    CommandSpec::new("sheet.jog", "Jog", crate::checked!("sheet.jog", jog)).begins_edit()
+        .at("SHEET METAL", "CREATE")
+        .icon("jog")
+        .contract(&JOG_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+        "line: sketch + curve (a sketch line across a flat panel; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
+         offset: expr (the height of the step); measure?: outside|inside|faces (what the offset is measured between: outer face to outer face, \
+         inner face to inner face, or a face to the same face; default outside); angle? (default 90 deg, both bends); radius? (default: rule); \
+         position?: start|middle|end (where the line sits in the jog, from the line toward the side that moves; default start); \
+         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
+         (default: the side with more of the sheet joined to it; decided once, as the jog is made, and kept); flip? (step the other way); body? - two bends and a straight wall \
+         in one feature; an offset too small for the bends is refused with the smallest that fits",
     ),
     CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
@@ -778,6 +793,16 @@ pub(crate) fn fold_position(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "centerline" | "start" | "end" | "mould" | "mold"))
 }
 
+/// A jog's `measure` (in any case), lower-cased: outside, inside or faces.
+pub(crate) fn jog_measure(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "outside" | "inside" | "faces"))
+}
+
+/// A jog's `position` (in any case), lower-cased: start, middle or end.
+pub(crate) fn jog_position(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "start" | "middle" | "end"))
+}
+
 /// A fold's `stays` (in any case), lower-cased: left or right.
 pub(crate) fn fold_stays(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "left" | "right"))
@@ -970,8 +995,8 @@ fn hem(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn fold(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "sheet.fold";
+/// The line of a fold or jog: a sketch line (`sketch` + `curve`) or two `points`.
+fn bend_line(s: &Session, p: &Value, cmd: &str) -> Result<(Option<SketchId>, Option<String>, Vec3, Vec3)> {
     let (sketch, curve, a, b) = match p.get("points") {
         Some(v) => {
             let (a, b) = fold_points(v).map_err(|why| bad(cmd, format!("`points` {why}")))?;
@@ -993,6 +1018,12 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     if a.dist(b) < 1e-9 {
         return Err(bad(cmd, "the fold line has no length"));
     }
+    Ok((sketch.map(SketchId), curve, a, b))
+}
+
+fn fold(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.fold";
+    let (sketch, curve, a, b) = bend_line(s, p, cmd)?;
     let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let radius = expr(p, "radius");
@@ -1001,14 +1032,7 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let position =
         fold_position(str_(p, "position").unwrap_or("centerline")).ok_or_else(|| bad(cmd, "`position` must be centerline, start, end or mould"))?;
-    let stays = match str_(p, "stays") {
-        Some(t) => match fold_stays(t).as_deref() {
-            Some("left") => Some(solidcraft_doc::FoldSide::Left),
-            Some(_) => Some(solidcraft_doc::FoldSide::Right),
-            None => return Err(bad(cmd, "`stays` must be left or right")),
-        },
-        None => None,
-    };
+    let stays = stays_param(p, cmd)?;
     // A side given says which side stays: `fixed` is then ignored, neither read nor kept, so it
     // is not checked against the sheet below.
     let fixed = match p.get("fixed") {
@@ -1017,7 +1041,7 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let body = str_(p, "body").map(str::to_string);
     let mut kind = FeatureKind::SheetFold {
-        sketch: sketch.map(SketchId),
+        sketch,
         curve,
         a: Position(a),
         b: Position(b),
@@ -1029,39 +1053,61 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         stays,
         body: body.map(BodyName),
     };
-    // Which side stays is decided once, here, on the sheet as it is now: by `fixed`, else as the
-    // sheet joins on either side. The fold keeps that side and not the point, so no later edit
-    // decides it again. A fold this cannot decide keeps its point and is left to decide, or fail,
-    // as it is evaluated. It is decided on the fold as it will be evaluated: in the active
-    // component's frame, bare lengths in the design's unit.
-    if stays.is_none() {
-        let mut authored = kind.clone();
-        super::component::to_active_frame(s, &mut authored);
-        if s.doc.units.trim() != "mm" {
-            let doc = s.doc.clone();
-            for (_, e, k) in authored.inputs_mut() {
-                *e = doc.with_design_unit(e, k).into();
-            }
-        }
-        let st = s.model.state();
-        // A fixed point that touches no material of the sheet picks no side: refused, here and
-        // only here, against the sheet the fold is made on (#263).
-        if let Some(f) = fixed
-            && s.doc.fold_fixed_off_sheet(&st, &authored, s.active_component)
-        {
-            return Err(bad(
-                cmd,
-                format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
-            ));
-        }
-        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored, s.active_component)
-            && let FeatureKind::SheetFold { stays, fixed, .. } = &mut kind
-        {
-            *stays = Some(side);
-            *fixed = None;
+    settle_side(s, &mut kind, cmd)?;
+    add_feature(s, p, kind)
+}
+
+/// A fold's or a jog's `stays`: left or right of its line as drawn.
+fn stays_param(p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::FoldSide>> {
+    Ok(match str_(p, "stays") {
+        Some(t) => match fold_stays(t).as_deref() {
+            Some("left") => Some(solidcraft_doc::FoldSide::Left),
+            Some(_) => Some(solidcraft_doc::FoldSide::Right),
+            None => return Err(bad(cmd, "`stays` must be left or right")),
+        },
+        None => None,
+    })
+}
+
+/// Which side of a new fold or jog stays is decided once, here, on the sheet as it is now: by
+/// `fixed`, else as the sheet joins on either side. The feature keeps that side and not the
+/// point, so no later edit decides it again. One this cannot decide keeps its point and is left
+/// to decide, or fail, as it is evaluated. It is decided on the feature as it will be evaluated:
+/// in the active component's frame, bare lengths in the design's unit.
+fn settle_side(s: &Session, kind: &mut FeatureKind, cmd: &str) -> Result<()> {
+    let fixed = match kind {
+        FeatureKind::SheetFold { stays: None, fixed, .. } | FeatureKind::SheetJog { stays: None, fixed, .. } => *fixed,
+        _ => return Ok(()),
+    };
+    let mut authored = kind.clone();
+    super::component::to_active_frame(s, &mut authored);
+    if s.doc.units.trim() != "mm" {
+        let doc = s.doc.clone();
+        for (_, e, k) in authored.inputs_mut() {
+            *e = doc.with_design_unit(e, k).into();
         }
     }
-    add_feature(s, p, kind)
+    let st = s.model.state();
+    // A fixed point that touches no material of the sheet picks no side: refused, here and only
+    // here, against the sheet the feature is made on (#263).
+    if let Some(f) = fixed
+        && s.doc.fold_fixed_off_sheet(&st, &authored, s.active_component)
+    {
+        return Err(bad(
+            cmd,
+            format!(
+                "the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays",
+                f.0.x, f.0.y, f.0.z
+            ),
+        ));
+    }
+    if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored, s.active_component)
+        && let FeatureKind::SheetFold { stays, fixed, .. } | FeatureKind::SheetJog { stays, fixed, .. } = kind
+    {
+        *stays = Some(side);
+        *fixed = None;
+    }
+    Ok(())
 }
 
 /// `sheet.bead`: formed beads along straight sketch lines on a planar panel of a sheet.
@@ -1136,6 +1182,52 @@ fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::SheetPath { edge: Position(edge), sketch: SketchId(sketch), curves, radius, body: str_(p, "body").map(BodyName::from) },
     )
+}
+
+fn jog(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.jog";
+    let (sketch, curve, a, b) = bend_line(s, p, cmd)?;
+    let offset = req_expr(cmd, p, "offset")?;
+    check_expr(s, &offset, Kind::Length, cmd, "offset")?;
+    // A value that is not one of the words, or not text at all, is refused, never read as the default.
+    let measure = match p.get("measure") {
+        None | Some(Value::Null) => "outside".to_string(),
+        Some(v) => v.as_str().and_then(jog_measure).ok_or_else(|| bad(cmd, "`measure` must be outside, inside or faces"))?,
+    };
+    let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let radius = expr(p, "radius");
+    if let Some(r) = &radius {
+        check_expr(s, r, Kind::Length, cmd, "radius")?;
+    }
+    let position = match p.get("position") {
+        None | Some(Value::Null) => "start".to_string(),
+        Some(v) => v.as_str().and_then(jog_position).ok_or_else(|| bad(cmd, "`position` must be start, middle or end"))?,
+    };
+    // As for a fold: a side given says which side stays, and `fixed` is then ignored.
+    let stays = stays_param(p, cmd)?;
+    let fixed = match p.get("fixed") {
+        Some(v) if stays.is_none() => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
+        _ => None,
+    };
+    let mut kind = FeatureKind::SheetJog {
+        sketch,
+        curve,
+        a: Position(a),
+        b: Position(b),
+        offset,
+        measure,
+        angle,
+        radius,
+        position,
+        flip: bool_(p, "flip").unwrap_or(false),
+        fixed: fixed.map(Position),
+        stays,
+        body: str_(p, "body").map(|b| BodyName(b.to_string())),
+    };
+    // As for a fold: a new jog refuses a fixed point off the sheet (#263).
+    settle_side(s, &mut kind, cmd)?;
+    add_feature(s, p, kind)
 }
 
 fn tab(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2418,6 +2510,9 @@ mod face_names_tests;
 #[cfg(test)]
 #[path = "sheet_parity_tests.rs"]
 mod parity_tests;
+#[cfg(test)]
+#[path = "sheet_surface_jog_tests.rs"]
+mod surface_jog_tests;
 #[cfg(test)]
 #[path = "sheet_surface_tab_tests.rs"]
 mod surface_tab_tests;

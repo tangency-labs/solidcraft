@@ -279,6 +279,8 @@ pub(crate) use sheet::flat_reply;
 pub(crate) use sheet::fold_points;
 pub(crate) use sheet::fold_position;
 pub(crate) use sheet::fold_stays;
+pub(crate) use sheet::jog_measure;
+pub(crate) use sheet::jog_position;
 pub(crate) use sheet::material_side;
 pub(crate) use sheet::perforation_pattern;
 pub(crate) use sheet::sheet_points;

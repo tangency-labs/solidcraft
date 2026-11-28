@@ -179,6 +179,8 @@ sheet_fold
   moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
 sheet_path
   moves: edge[0], edge[1], edge[2]
+sheet_jog
+  moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
 sheet_tab
   profiles: 1 all
 sheet_bead

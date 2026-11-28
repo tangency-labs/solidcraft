@@ -35,6 +35,10 @@ const CORNER_KINDS: [CornerJoinKind; 3] = [CornerJoinKind::Butt, CornerJoinKind:
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
+const JOG_MEASURES: [&str; 3] = ["outside", "inside", "faces"];
+const JOG_MEASURE_LABELS: [&str; 3] = ["Outside", "Inside", "Faces"];
+const JOG_POSITIONS: [&str; 3] = ["start", "middle", "end"];
+const JOG_POSITION_LABELS: [&str; 3] = ["Start of Jog", "Middle of Jog", "End of Jog"];
 /// The flange types' messages, by the type's index (Base, Edge, Contour).
 const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
 const CONTOUR_ORIENTATIONS: [&str; 3] = ["ui.center", "sheet.flange.side_1", "sheet.flange.side_2"];
@@ -398,6 +402,27 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SheetPath { radius, .. }) {
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({});
+        Jog("sheet.jog", "JOG", [("Jog Line", AXES, false), ("Stationary Side", PLANAR_FACES, false)],
+            FeatureKind::SheetJog { offset, measure, angle, radius, position, flip, stays, .. }) {
+            offset: String = "10 mm".into() => offset.to_string(),
+            measure: usize = 0 => JOG_MEASURES.iter().position(|x| x == measure).unwrap_or(0),
+            angle: String = "90 deg".into() => angle.to_string(),
+            radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
+            position: usize = 0 => JOG_POSITIONS.iter().position(|x| x == position).unwrap_or(0),
+            flip: bool = false => *flip,
+            // The side that stays, as Fold's: 0 decided as the jog is made, 1 left, 2 right.
+            stays: usize = 0 => match stays {
+                Some(FoldSide::Left) => 1,
+                Some(FoldSide::Right) => 2,
+                None => 0,
+            },
+        } => json!({
+            "offset": offset,
+            "measure": JOG_MEASURES.get(*measure).copied().unwrap_or("outside"),
+            "angle": angle,
+            "position": JOG_POSITIONS.get(*position).copied().unwrap_or("start"),
+            "flip": flip
+        });
         Tab("sheet.tab", "ui.sheet_tab_title", [("Profile", PROFILES, true)],
             FeatureKind::SheetTab { .. }) {
         } => json!({});
@@ -553,6 +578,7 @@ impl Sm {
             Sm::Flange { ty: 2, distance, .. } => ("Distance", ValueKind::Length, distance),
             Sm::Hem { length, .. } => ("Length", ValueKind::Length, length),
             Sm::Fold { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Sm::Jog { offset, .. } => ("Offset", ValueKind::Length, offset),
             _ => return None,
         })
     }
@@ -1160,22 +1186,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             enter |= expr_row(ui, "Angle", angle);
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
-            // Which side of the line as drawn stays, seen from the sheet's surface. A new fold
-            // decides it as it is made (the side of the face picked, else the side more of the
-            // sheet joins) and keeps it; an edit shows the fold's own side, and swaps it. A face
-            // picked decides it again.
-            let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
-            form_row(ui, "Stationary Side", |ui| {
-                ui.label(solidcraft_ui_text::tr_label(match *stays {
-                    _ if picked => "Fixed Face",
-                    1 => "Left",
-                    2 => "Right",
-                    _ => "Automatic",
-                }));
-                if !picked && *stays > 0 && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
-                    *stays = 3 - *stays;
-                }
-            });
+            stays_row(ui, inputs, stays);
         }
         Sm::Path { radius } => {
             path_chain(app, inputs);
@@ -1191,6 +1202,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             });
             crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+        }
+        Sm::Jog { offset, measure, angle, radius, position, flip, stays } => {
+            enter |= expr_row(ui, "Offset", offset);
+            choice_row(ui, "Measure", "sm_jog_measure", measure, &JOG_MEASURE_LABELS);
+            enter |= expr_row(ui, "Angle", angle);
+            choice_row(ui, "Bend Line Position", "sm_jog_pos", position, &JOG_POSITION_LABELS);
+            enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+            crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
+            stays_row(ui, inputs, stays);
         }
         Sm::Hardware { kind, thread, length } => {
             choice_row(ui, "Type", "sm_hardware_kind", kind, &HARDWARE_LABELS);
@@ -1573,6 +1593,28 @@ fn rule_value(app: &SolveApp, rule: usize) -> Option<String> {
 
 /// A path flange's path is a chain: a line picked into Path brings every line joined to it end
 /// to end, so one click takes the whole path.
+/// Which side of a fold's or jog's line as drawn stays, seen from the sheet's surface. A new one
+/// decides it as it is made (the side of the face picked, else the side more of the sheet joins)
+/// and keeps it; an edit shows its own side, and swaps it. A face picked decides it again.
+/// Which side of the line as drawn stays, seen from the sheet's surface. A new fold or jog
+/// decides it as it is made (the side of the face picked, else the side more of the sheet
+/// joins) and keeps it; an edit shows the feature's own side, and swaps it. A face picked
+/// decides it again.
+fn stays_row(ui: &mut egui::Ui, inputs: &[SelInput], stays: &mut usize) {
+    let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
+    form_row(ui, "Stationary Side", |ui| {
+        ui.label(solidcraft_ui_text::tr_label(match *stays {
+            _ if picked => "Fixed Face",
+            1 => "Left",
+            2 => "Right",
+            _ => "Automatic",
+        }));
+        if !picked && *stays > 0 && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
+            *stays = 3 - *stays;
+        }
+    });
+}
+
 fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
     let edge = inputs.first().and_then(|i| i.items.edge_points().first().copied());
     let Some(input) = inputs.get_mut(1) else { return };
@@ -2037,7 +2079,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("gap", gap)]);
             ("sheet.hem", p)
         }
-        Sm::Fold { radius, stays, .. } => {
+        Sm::Fold { radius, stays, .. } | Sm::Jog { radius, stays, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
@@ -2050,20 +2092,21 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 }
                 // An edited fold made from two points keeps them (in `extra`).
                 _ if extra.contains_key("points") => {}
+                _ if matches!(k, Sm::Jog { .. }) => return Err("select the jog line (a sketch line) first".into()),
                 _ => return Err("select the bend line (a sketch line) first".into()),
             }
             put(&mut p, &[("radius", radius)]);
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
             } else {
-                // No face picked: the fold's own side, where it has one.
+                // No face picked: the fold's or jog's own side, where it has one.
                 match *stays {
                     1 => p["stays"] = json!("left"),
                     2 => p["stays"] = json!("right"),
                     _ => {}
                 }
             }
-            ("sheet.fold", p)
+            (if matches!(k, Sm::Jog { .. }) { "sheet.jog" } else { "sheet.fold" }, p)
         }
         Sm::Path { radius } => {
             let edge = edge_points(inputs).into_iter().next().ok_or("select the sheet edge first")?;
@@ -2198,6 +2241,11 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
     k.fill_simple_params(&mut p);
     if let Value::Object(m) = &mut p {
         for (k, v) in extra {
+            // A sketch line picked in an edited fold or jog replaces the two points it was made
+            // from: the engine reads `points` before `sketch` and `curve`.
+            if k == "points" && m.contains_key("curve") {
+                continue;
+            }
             m.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
@@ -2456,6 +2504,36 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             return Some((Kind::Sheet(Sm::simple_restore(kind)?), ins, extra));
         }
         FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
+        FeatureKind::SheetJog { sketch, curve, a, b, fixed, stays, body, .. } => {
+            if let Some(bd) = body {
+                extra.insert("body".into(), json!(bd));
+            }
+            let k = Sm::simple_restore(kind)?;
+            let (_, mut ins) = start(app, "sheet.jog")?;
+            match curve {
+                // The curve with its sketch, as Fold restores it: an id alone could name a curve
+                // of a later sketch.
+                Some(c) => {
+                    if let Some(i) = ins.first_mut() {
+                        i.items = vec![match sketch {
+                            Some(k) => crate::selection::curve_pick(c, k.0, app.session.active_sketch),
+                            None => Sel::SketchCurve { id: c.clone(), sketch: None },
+                        }];
+                    }
+                }
+                // A jog given by two points keeps them.
+                None => {
+                    extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
+                }
+            }
+            // As for a fold: the side the face picked decided is the jog's own, kept.
+            if let Some(i) = ins.get_mut(1)
+                && stays.is_none()
+            {
+                i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
+            }
+            return Some((Kind::Sheet(k), ins, extra));
+        }
         FeatureKind::SheetUnfold { body, refold, .. } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }

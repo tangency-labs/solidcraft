@@ -1948,6 +1948,76 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
     assert!(flat_circles(&mut app, &dialog, rect).is_empty());
 }
 
+/// The Jog dialog builds `sheet.jog` from the picked sketch line and its rows; Edit Feature brings
+/// the line, the offset, what it is measured between and the line's position back.
+#[test]
+fn jog_dialog_builds_the_command_and_edit_feature_restores_it() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        let sk = app.session.doc.features[0].id;
+        app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+        app.start("sheet.flange");
+        let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        run_all(&mut app, c);
+        app.dialog = None;
+        let t = app.session.model.state().surface_sheets[0].thickness;
+        app.session.execute("sketch.create", &json!({"plane": "XY", "offset": t, "name": "JogLine"})).unwrap();
+        app.session.execute("sketch.line", &json!({"points": [[40, 0], [40, 60]], "ids": ["jl"]})).unwrap();
+        app.session.execute("sketch.finish", &json!({})).unwrap();
+        app.session.selection = vec![Sel::SketchCurve { id: "jl".into(), sketch: None }];
+        app.start("sheet.jog");
+        let mut d = app.dialog.clone().unwrap();
+        assert_eq!(d.primary().map(|p| p.0), Some("Offset"));
+        if let Kind::Sheet(Sm::Jog { offset, measure, position, flip, .. }) = &mut d.kind {
+            *offset = "15 mm".into();
+            *measure = 1;
+            *position = 2;
+            *flip = true;
+        } else {
+            panic!("the Jog dialog");
+        }
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c[0].0, "sheet.jog");
+        assert_eq!(c[0].1["offset"], "15 mm");
+        assert_eq!(c[0].1["measure"], "inside");
+        assert_eq!(c[0].1["position"], "end");
+        assert_eq!(c[0].1["flip"], true);
+        assert_eq!(c[0].1["curve"], "jl");
+        run_all(&mut app, c);
+        assert_eq!(app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len), Some(2));
+        let f = app.session.doc.features.last().unwrap().clone();
+        let e = edit_dialog(&app, f.id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Jog { measure: 1, position: 2, flip: true, .. })));
+        assert!(matches!(e.inputs[0].items.first(), Some(Sel::SketchCurve { id, .. }) if id == "jl"));
+        let c = apply_commands(&app, &e).unwrap();
+        assert_eq!(c[0].0, "timeline.redefine");
+        assert_eq!(c[0].1["params"]["offset"], "15 mm");
+        assert_eq!(c[0].1["params"]["measure"], "inside");
+    }
+}
+
+/// An edited jog made from two points, given a sketch line instead, follows the line: the points
+/// it kept are not sent with it (the engine reads `points` before `sketch` and `curve`).
+#[test]
+fn an_edited_jog_from_points_follows_a_sketch_line_picked_instead() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let t = app.session.model.state().surface_sheets[0].thickness;
+    app.session.execute("sketch.create", &json!({"plane": "XY", "offset": t, "name": "JogLine"})).unwrap();
+    app.session.execute("sketch.line", &json!({"points": [[40, 0], [40, 60]], "ids": ["jl"]})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.run("sheet.jog", json!({"points": [[60, 0, t], [60, 60, t]], "offset": 15})).unwrap();
+    let f = app.session.doc.features.last().unwrap().clone();
+    let mut e = edit_dialog(&app, f.id, None).unwrap();
+    let kept = apply_commands(&app, &e).unwrap();
+    assert!(kept[0].1["params"].get("points").is_some(), "{}", kept[0].1);
+    e.inputs[0].items = vec![Sel::SketchCurve { id: "jl".into(), sketch: None }];
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(c[0].1["params"]["curve"], "jl");
+    assert!(c[0].1["params"].get("points").is_none(), "{}", c[0].1);
+}
+
 /// The hem's handle sits on the centre line of the hem layer, at the outer face of its fold, and
 /// points along the hem toward its tip (#5828): dragging it changes the Length, which is measured
 /// from the fold's outer face to the tip, so the handle's start plus Length lands on the tip.

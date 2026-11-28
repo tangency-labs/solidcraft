@@ -175,6 +175,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.fold",
     "sheet.hardware",
     "sheet.hem",
+    "sheet.jog",
     "sheet.manage_rules",
     "sheet.path_flange",
     "sheet.perforate",

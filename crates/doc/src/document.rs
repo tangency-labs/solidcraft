@@ -2503,6 +2503,42 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Jog a sheet along a line on its base face: it bends by `angle`, runs straight for a short
+    /// wall and bends back, so the far side lies `offset` from where it was (a sketch line,
+    /// followed when the sketch changes, else the points `a`, `b`).
+    SheetJog {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        curve: Option<String>,
+        a: Position,
+        b: Position,
+        #[walk(length = "Offset")]
+        offset: Expr,
+        /// outside | inside | faces: what the offset is measured between.
+        measure: String,
+        #[walk(angle = "Angle")]
+        angle: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bend radius")]
+        radius: Option<Expr>,
+        /// start | middle | end: where the line sits in the jog.
+        position: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// The point the side that stays was picked by, kept as it was given: the jog made with
+        /// it stores that side in `stays`, so the point no longer decides; a point off the sheet
+        /// is still said.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<Position>,
+        /// The side of the line that stays put (see [`FoldSide`]), decided once when the jog is
+        /// made, as a fold's is: by `fixed`, else the side with more of the sheet joined to it.
+        /// Every rebuild keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stays: Option<FoldSide>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     /// Tab: the closed profiles of a sketch on a flat face of a sheet (either side, or in a plane
     /// level with one) join that panel through the sheet's thickness, part of its outline
     /// (`SurfaceSheet::add_tab`).
@@ -4375,6 +4411,7 @@ impl FeatureKind {
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
+                | FeatureKind::SheetJog { .. }
                 | FeatureKind::SheetTab { .. }
                 | FeatureKind::SheetBead { .. }
                 | FeatureKind::SheetUnfold { .. }
@@ -4461,6 +4498,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
+            FeatureKind::SheetJog { .. } => "JogFeature",
             FeatureKind::SheetTab { .. } => "TabFeature",
             FeatureKind::SheetBead { .. } => "BeadFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
@@ -4563,6 +4601,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
+            FeatureKind::SheetJog { .. } => "sheet_jog",
             FeatureKind::SheetTab { .. } => "sheet_tab",
             FeatureKind::SheetBead { .. } => "sheet_bead",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
@@ -4668,6 +4707,7 @@ impl FeatureKind {
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
             "PathFlangeFeature" => "sheet_path",
+            "JogFeature" => "sheet_jog",
             "TabFeature" => "sheet_tab",
             "BeadFeature" => "sheet_bead",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
@@ -4773,6 +4813,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
+            FeatureKind::SheetJog { .. } => "Jog",
             FeatureKind::SheetTab { .. } => "Tab",
             FeatureKind::SheetBead { .. } => "Bead",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
