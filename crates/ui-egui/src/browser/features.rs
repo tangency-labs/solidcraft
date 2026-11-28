@@ -2167,10 +2167,7 @@ mod tests {
         );
         crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();
         assert!(h.app.preferences.browser_history_without_folder, "a click turns it on");
-        assert!(
-            crate::browser::menu_toggles(&h.app).contains(&("history-without-folder", "prefs.browser_history_without_folder", true)),
-            "ticked"
-        );
+        assert!(crate::browser::menu_toggles(&h.app).contains(&("history-without-folder", "prefs.browser_history_without_folder", true)), "ticked");
         crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();
         assert!(!h.app.preferences.browser_history_without_folder, "a second click turns it off");
     }
