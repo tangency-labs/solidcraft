@@ -82,6 +82,7 @@ fn unchecked_distance_and_exact_conform_to_output_schema() {
             Unchecked { a: "C".into(), b: Some("D".into()), reason: "gaps".into(), distance_mm: Some(0.25), exact: Some(false) },
             Unchecked { a: "Mesh".into(), b: None, reason: "mesh body: not checked".into(), distance_mm: None, exact: None },
         ],
+        unchecked_count: 3,
         bodies: 4,
         pairs_checked: 2,
         pairs_reused: 0,

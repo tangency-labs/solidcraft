@@ -150,6 +150,8 @@ struct Row {
     reader_features: usize,
     /// A text parameter's text.
     text: Option<String>,
+    /// Read-only evaluated parameter (e.g. driven sketch dimension, #14426).
+    read_only: bool,
 }
 
 impl Row {
@@ -179,6 +181,11 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                     owner.insert(p.clone(), f.name.clone());
                     measures.insert(p.clone(), redesign::measure(sketch, &c.kind));
                 }
+                if c.driven
+                    && let Some(p) = &c.driven_param
+                {
+                    measures.insert(p.clone(), redesign::measure(sketch, &c.kind));
+                }
             }
         }
     }
@@ -197,7 +204,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             let name = s(r, "name");
             let source = s(r, "source");
             let group = match source.as_str() {
-                "feature" => s(r, "feature"),
+                "feature" | "driven" => s(r, "feature"),
                 "sketch" => owner.get(&name).cloned().unwrap_or_else(|| "Sketch".into()),
                 _ => String::new(),
             };
@@ -216,6 +223,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 comment: s(r, "comment"),
                 favorite: r.get("favorite").and_then(Value::as_bool).unwrap_or(false),
                 text: r.get("text").and_then(Value::as_str).map(str::to_string),
+                read_only: r.get("read_only").and_then(Value::as_bool).unwrap_or(false),
                 source,
                 group,
                 name,
@@ -448,7 +456,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
     .wide()
-    .reset_scroll(d.reset_scroll);
+    // A reset asked for while drawing (a view switch, a parameter chosen in a Used by list) is
+    // kept for the next frame's panel; this frame's is used up here.
+    .reset_scroll(std::mem::take(&mut d.reset_scroll));
     // Expanded Key controls use the available body height; the shared body scrolls the rest.
     // A manually resized height still takes precedence below.
     let panel = if d.redesign.compact.is_some() { panel } else { panel.body_rows(16.0) };
@@ -503,7 +513,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| apply_live_checkbox(ui, &mut live_choice, held_status.as_deref()),
         );
         resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
-        d.reset_scroll = false;
     });
     if live_choice != live {
         app.preferences.parameters_apply_live = live_choice;
@@ -735,8 +744,10 @@ impl ui_kit::GridSource for ParamGrid<'_> {
 
     fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
         let col = self.column(col);
+        let r = self.row(row)?;
         // A model parameter's unit is the dimension's: shown, not chosen.
-        (col == UNIT && self.row(row).is_some_and(|r| r.source != "user")).then_some(ui_kit::CellKind::ReadOnly)
+        // A driven dimension's expression is measured, not edited (#14426).
+        ((col == UNIT && r.source != "user") || (col == EXPRESSION && r.read_only)).then_some(ui_kit::CellKind::ReadOnly)
     }
 
     fn message(&self, row: usize, col: usize) -> Option<(std::borrow::Cow<'_, str>, bool)> {
@@ -753,6 +764,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
             NAME if !redesign::named(r) => redesign::validate_name(self.app, &r.name, text, true),
             NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr("parameters.grid_name_required").to_owned()),
             UNIT => unit_from(text).map(|_| ()),
+            EXPRESSION if r.read_only => Err(String::new()),
             // Applied as you go, an expression is checked before it is handed back, so a wrong one
             // keeps its box open; held for Apply, it is checked when it is held (#9279).
             EXPRESSION if self.app.preferences.parameters_apply_live => {
@@ -796,6 +808,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 Some(response)
             }
             UNIT if r.source != "user" => Some(ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell)),
+            EXPRESSION if r.read_only => Some(ui_kit::text(ui, &r.expression, ui_kit::Text::MonoCell)),
             VALUE => {
                 let (shown, error) = self.shown(r);
                 let number = if self.d.redesign.view == redesign::View::Named && !self.d.redesign.narrow && !error && !r.unit.is_empty() {
@@ -815,7 +828,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 Some(response)
             }
             redesign::MEASURES => Some(ui_kit::text(ui, &r.measures, ui_kit::Text::MonoCell)),
-            redesign::USED => Some(redesign::used_by(self.app, ui, r)),
+            redesign::USED => Some(redesign::used_by(self.app, ui, self.d, r)),
             ACTIONS => Some(redesign::row_menu(self.app, ui, self.d, r, self.rows)),
             _ => None,
         }
@@ -1001,7 +1014,9 @@ fn band_at(
     }
     let mut live = std::collections::HashMap::new();
     for r in rows {
-        if let Some(edited) = d.editing.get(&r.name).filter(|e| **e != r.expression) {
+        if !r.read_only
+            && let Some(edited) = d.editing.get(&r.name).filter(|e| **e != r.expression)
+        {
             let edited = edited.clone();
             live.insert(r.name.clone(), check(app, &edited, &r.unit));
         }
@@ -1111,6 +1126,7 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::RowRef::Existing(name) => {
                 let Some(r) = find(name) else { continue };
                 match edit.col() {
+                    EXPRESSION if r.read_only => {}
                     EXPRESSION if !live => {
                         // Kept in `editing` for Apply or OK, checked now (#9279).
                         held_error = held_error.or(check(app, text, &r.unit).err());
@@ -1275,7 +1291,10 @@ fn enter_for(ui: &mut egui::Ui, focused: bool) -> bool {
 
 /// The expression edits waiting for Apply (#9279): each draft that differs from the design.
 fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
-    rows.iter().filter_map(|r| d.editing.get(&r.name).filter(|e| **e != r.expression).map(|e| (r.name.clone(), json!(e)))).collect()
+    rows.iter()
+        .filter(|r| !r.read_only)
+        .filter_map(|r| d.editing.get(&r.name).filter(|e| **e != r.expression).map(|e| (r.name.clone(), json!(e))))
+        .collect()
 }
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
@@ -1409,7 +1428,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let comment_id = ui.make_persistent_id("pnew_comment");
     let focused_id = ui.memory(|m| [name_id, expr_id, comment_id].into_iter().find(|id| m.has_focus(*id) || m.had_focus_last_frame(*id)));
     let mut row_ids = vec![name_id, expr_id, comment_id];
-    let menu_was_open = egui::Popup::is_any_open(ui.ctx());
+    let menu_was_open = egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx());
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
@@ -1490,7 +1509,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
     // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
@@ -1829,6 +1848,44 @@ mod tests {
         h.step(&json!({"click":{"handle":"param:users:width"}})).unwrap();
         h.frames(2);
         assert!(crate::scenario::rect_of("param:reader:width:double_width").is_some());
+    }
+
+    /// The Used by list follows a reading parameter, selects every reading feature at once, and
+    /// names the uses it cannot select (#20879).
+    #[test]
+    fn used_by_follows_a_parameter_selects_all_and_names_other_uses() {
+        let mut h = redesign_model();
+        h.app.run("parameters.add", json!({"name":"w","expression":"10 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name":"depth","expression":"w * 2"})).unwrap();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Outline"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":2})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["c1"],"type":"radius","value":"w"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let block = h.app.run("solid.box", json!({"length":"w","width":10,"height":5})).unwrap()["feature"].as_u64().unwrap();
+        h.app.start("parameters.change");
+        h.frames(4);
+        let open = |h: &mut crate::scenario::Harness| {
+            h.step(&json!({"click":{"handle":"param:users:w"}})).unwrap();
+            h.frames(2);
+        };
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:readers:w:all"}})).unwrap();
+        h.frames(2);
+        let selected = h.app.session.selection.clone();
+        for id in [sketch, block] {
+            assert!(selected.contains(&solidcraft_engine::Sel::Feature { id }), "{selected:?}");
+        }
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:reader:w:depth"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().map(|d| d.filter.as_str()), Some("depth"));
+        assert_eq!(h.app.session.selection, selected, "a parameter reader filters, it doesn't select");
+
+        // A use the list cannot select is still named: a component's quantity reads `span`.
+        h.app.run("parameters.add", json!({"name":"span","expression":"1","unit":"m"})).unwrap();
+        h.app.run("component.create", json!({"name":"Cable","virtual":true,"bom_quantity":"2 * span"})).unwrap();
+        let users = h.app.session.execute("parameters.users", &json!({"name":"span"})).unwrap();
+        assert_eq!(redesign::other_uses(&users), vec!["Cable".to_string()]);
     }
 
     #[test]
@@ -3861,5 +3918,105 @@ mod tests {
         h.frames(2);
         let short = crate::scenario::rect_of("param:width").unwrap();
         assert!(short.width() <= cell.width() + 0.5, "a formula that fits stays in its cell: {short:?} vs {cell:?}");
+    }
+
+    /// #14426 + #21892: a named driven sketch dimension appears in Named (and moves to Dimensions
+    /// if demoted to `dN`), keeps its Expression and Unit cells read-only under every column
+    /// layout, reserves its name against renames/promotions, and renders read-only in Key view.
+    #[test]
+    fn driven_dimension_parameters_stay_read_only_across_named_and_dimensions_views() {
+        use crate::ui_kit::GridSource as _;
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 40]})).unwrap();
+        h.app.run("sketch.constraint.coincident", json!({"a": "p1", "b": "origin"})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities": ["l1"], "value": 30})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities": ["l2"], "value": 40})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true, "name": "diag"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.start("parameters.change");
+        h.frames(4);
+
+        let all = rows(&mut h.app);
+        let diag = all.iter().find(|r| r.name == "diag").expect("driven parameter listed").clone();
+        assert_eq!(diag.source, "driven");
+        assert!(diag.read_only);
+        assert_eq!(diag.group, "Sketch1");
+        assert!(diag.measures.contains("Distance"), "measures comes from the sketch constraint: {}", diag.measures);
+        assert!(redesign::validate_name(&h.app, "d1", "diag", true).is_err(), "driven name is taken");
+
+        let visible: Vec<&Row> = all.iter().collect();
+        let shown = sections(&visible, ui_kit::Sort::Listed);
+        assert!(shown.users.iter().any(|r| r.name == "diag"), "custom-named driven dimension belongs in Named");
+
+        // Column remapping in Named (wide & narrow) and Dimensions keeps Expression and Unit read-only.
+        for (view, narrow) in [(redesign::View::Named, false), (redesign::View::Named, true), (redesign::View::Dimensions, false)] {
+            let mut d = ParamsDialog::new();
+            d.redesign.view = view;
+            d.redesign.narrow = narrow;
+            let cols = redesign::column_order(&d);
+            let columns = redesign::columns(120.0, 60.0, cols);
+            let row_slice = [&diag];
+            let grid = ParamGrid {
+                app: &mut h.app,
+                d: &mut d,
+                rows: &row_slice,
+                salt: "user",
+                columns: &columns,
+                right: 800.0,
+                live: Default::default(),
+                cols,
+            };
+            let expr_col = cols.iter().position(|c| *c == EXPRESSION).unwrap();
+            assert_eq!(grid.kind(0, expr_col), Some(ui_kit::CellKind::ReadOnly));
+            if let Some(unit_col) = cols.iter().position(|c| *c == UNIT) {
+                assert_eq!(grid.kind(0, unit_col), Some(ui_kit::CellKind::ReadOnly));
+            }
+        }
+
+        // Expression edits are ignored; comment edits still apply cleanly.
+        let mut d = h.app.params.take().unwrap();
+        apply_grid(
+            &mut h.app,
+            &h.ctx,
+            &mut d,
+            &[&diag],
+            "user",
+            ui_kit::GridOutput {
+                edits: vec![
+                    ui_kit::Edit::Set { row: ui_kit::RowRef::Existing("diag".into()), col: EXPRESSION, text: "99 mm".into() },
+                    ui_kit::Edit::Set { row: ui_kit::RowRef::Existing("diag".into()), col: COMMENT, text: "diagonal".into() },
+                ],
+                ..Default::default()
+            },
+        );
+        assert!(d.error.is_none(), "{:?}", d.error);
+        assert_eq!(h.app.session.doc.param_comments.get("diag").map(String::as_str), Some("diagonal"));
+        h.app.params = Some(d);
+
+        // Starring a driven dimension puts it in Key parameters and compact mode keeps it read-only.
+        h.app.run("parameters.favorite", json!({"name": "diag", "favorite": true})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "params:key:toggle"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("params:key:diag").is_some(), "compact Key view shows the driven parameter");
+        assert!(crate::scenario::rect_of("params:key:slider:diag").is_none(), "read-only driven parameter has no slider");
+        assert!(!h.app.params.as_ref().unwrap().redesign.compact.as_ref().unwrap().contains_key("diag"));
+
+        // Demoting a driven dimension moves it to Dimensions under its owning sketch group.
+        let mut d = h.app.params.take().unwrap();
+        let all = rows(&mut h.app);
+        let diag_row = all.iter().find(|r| r.name == "diag").unwrap();
+        redesign::demote(&mut h.app, &mut d, diag_row, &all).unwrap();
+        assert!(d.redesign.view == redesign::View::Dimensions);
+        let after = rows(&mut h.app);
+        let demoted = after.iter().find(|r| r.source == "driven").expect("demoted driven parameter");
+        assert!(demoted.read_only && demoted.group == "Sketch1");
+        let after_visible: Vec<&Row> = after.iter().collect();
+        let after_sections = sections(&after_visible, ui_kit::Sort::Listed);
+        assert!(after_sections.groups.iter().any(|(g, m)| *g == "Sketch1" && m.iter().any(|r| r.name == demoted.name)));
     }
 }

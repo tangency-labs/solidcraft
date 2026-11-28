@@ -294,6 +294,10 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Ro
 fn finish_view_edit(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row]) -> bool {
     let Some((_, name, col, _)) = d.typing.clone() else { return true };
     let Some(row) = all.iter().find(|r| r.name == name) else { return true };
+    if col == EXPRESSION && row.read_only {
+        d.typing = None;
+        return true;
+    }
     let draft = match col {
         EXPRESSION => d.editing.get(&name),
         COMMENT => d.comments.get(&name),
@@ -362,6 +366,7 @@ pub(super) fn validate_name(app: &SolveApp, old: &str, new: &str, promoting: boo
     }
     let taken = app.session.doc.param(new).is_some()
         || app.session.doc.text_param(new).is_some()
+        || app.session.doc.is_driven_param(new)
         || app.session.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == new));
     if new != old && taken {
         return Err(solidcraft_ui_text::format("parameters.redesign.taken_name", &[("name", new)]));
@@ -436,22 +441,14 @@ pub(super) fn renamed(app: &SolveApp, d: &mut ParamsDialog, old: &str, new: &str
     d.redesign.toast = Some((app.session.revision, solidcraft_ui_text::format("parameters.redesign.promoted", &[("old", old), ("name", new)])));
 }
 
-fn show_feature(app: &mut SolveApp, name: &str) {
-    if let Some(feature) = app.session.doc.features.iter().find(|f| f.name == name) {
-        let id = feature.id;
-        let _ = app.run("select.set", json!({"items":[{"type":"feature","id":id}]}));
-    }
-}
-
-fn show_reader(app: &mut SolveApp, reader: &str) {
+/// The feature a reader stands for: the feature itself (`Feature:<name>`), or the feature or sketch
+/// that owns a dimension or feature-input parameter. A user parameter has none.
+fn reader_feature(app: &SolveApp, reader: &str) -> Option<u64> {
+    let doc = &app.session.doc;
     if let Some(name) = reader.strip_prefix("Feature:") {
-        show_feature(app, name);
-        return;
+        return doc.features.iter().find(|f| f.name == name).map(|f| f.id);
     }
-    let owner = app
-        .session
-        .doc
-        .features
+    doc.features
         .iter()
         .find(|f| {
             f.param_names.iter().any(|n| n == reader)
@@ -462,13 +459,45 @@ fn show_reader(app: &mut SolveApp, reader: &str) {
                     _ => false,
                 }
         })
-        .map(|f| f.name.clone());
-    if let Some(owner) = owner {
-        show_feature(app, &owner);
+        .map(|f| f.id)
+}
+
+fn show_feature(app: &mut SolveApp, name: &str) {
+    if let Some(id) = app.session.doc.features.iter().find(|f| f.name == name).map(|f| f.id) {
+        select_features(app, &[id]);
     }
 }
 
-pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, r: &Row) -> egui::Response {
+fn select_features(app: &mut SolveApp, ids: &[u64]) {
+    let items: Vec<Value> = ids.iter().map(|id| json!({"type":"feature","id":id})).collect();
+    let _ = app.run("select.set", json!({ "items": items }));
+}
+
+/// The users `parameters.users` reports that are not readers in the Used by list, and that the
+/// list cannot select: a component's quantity, a joint, a configuration column, a rule, a canvas
+/// or a moved occurrence (#20879), by their names in the design.
+pub(super) fn other_uses(users: &Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for user in users.get("users").and_then(Value::as_array).into_iter().flatten() {
+        let name = match user.get("type").and_then(Value::as_str) {
+            Some("parameter" | "feature" | "dimension") | None => continue,
+            Some("configuration") => user.get("column"),
+            Some(_) => user.get("name"),
+        };
+        if let Some(name) = name.and_then(Value::as_str)
+            && !out.iter().any(|known| known == name)
+        {
+            out.push(name.to_owned());
+        }
+    }
+    out
+}
+
+/// The Used by cell and its list. Choosing a reader selects its feature or sketch, so it lights in
+/// the viewport and the Browser; a reader that is a user parameter filters the window to it
+/// instead, to follow a chain of parameters; Select All selects every reader's feature at once;
+/// uses the list cannot select are named under Other uses (#20879).
+pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, r: &Row) -> egui::Response {
     let response = ui_kit::text(ui, &r.readers.len().to_string(), ui_kit::Text::Cell).interact(egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("parameters.redesign.used_by")));
     let key = response.id.with(("readers", app.session.revision));
@@ -478,34 +507,64 @@ pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, r: &Row) -> egui::R
         ui.ctx().data_mut(|data| data.insert_temp(key, users));
     }
     crate::scenario::publish_target(&format!("param:users:{}", r.name), response.rect);
-    ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).show(|ui| {
-        let title = solidcraft_ui_text::format("parameters.redesign.used_title", &[("name", &r.name), ("count", &r.readers.len().to_string())]);
-        ui_kit::text(ui, &title, ui_kit::Text::Hint("used_by_title"));
-        let users = ui.ctx().data(|data| data.get_temp::<Value>(key)).unwrap_or_default();
-        let room = (ui.ctx().content_rect().height() * 0.5).min(solidcraft_theme::Tokens::get().form_card_width);
-        ui_kit::menu::scroll_rows(ui, key.with("scroll"), room, r.readers.len() as f32 * ui_kit::table_row_height(), |ui| {
-            for reader in &r.readers {
-                let label = reader.strip_prefix("Feature:").unwrap_or(reader);
-                let detail =
-                    users.get("users").and_then(Value::as_array).into_iter().flatten().find(|u| u.get("name").and_then(Value::as_str) == Some(label));
-                let detail = detail.and_then(|u| u.get("input").or_else(|| u.get("constraint"))).and_then(Value::as_str).unwrap_or_default();
-                let shown = if detail.is_empty() {
-                    label.to_owned()
-                } else {
-                    solidcraft_ui_text::format("parameters.redesign.reader_detail", &[("name", label), ("detail", detail)])
-                };
-                let response = ui_kit::button(ui, &shown, ui_kit::Button::Normal);
-                crate::scenario::publish_target(&format!("param:reader:{}:{reader}", r.name), response.rect);
-                if response.clicked() {
-                    show_reader(app, reader);
-                    ui.close();
-                }
-            }
-        });
-        if r.readers.is_empty() {
-            ui_kit::text(ui, tr("parameters.redesign.no_readers"), ui_kit::Text::Hint("no_readers"));
+    if !response.clicked() && !ui_kit::Menu::response_is_open(&response) {
+        return response;
+    }
+    let users = ui.ctx().data(|data| data.get_temp::<Value>(key)).unwrap_or_default();
+    let title = solidcraft_ui_text::format("parameters.redesign.used_title", &[("name", &r.name), ("count", &r.readers.len().to_string())]);
+    let mut items = vec![ui_kit::Item::heading(&title)];
+    for (index, reader) in r.readers.iter().enumerate() {
+        let label = reader.strip_prefix("Feature:").unwrap_or(reader);
+        let detail =
+            users.get("users").and_then(Value::as_array).into_iter().flatten().find(|user| user.get("name").and_then(Value::as_str) == Some(label));
+        let detail = detail.and_then(|user| user.get("input").or_else(|| user.get("constraint"))).and_then(Value::as_str).unwrap_or_default();
+        let shown = if detail.is_empty() {
+            label.to_owned()
+        } else {
+            solidcraft_ui_text::format("parameters.redesign.reader_detail", &[("name", label), ("detail", detail)])
+        };
+        let mut item = ui_kit::Item::action(&format!("reader:{index}"), &shown, "");
+        item.aliases.push(format!("param:reader:{}:{reader}", r.name));
+        items.push(item);
+    }
+    let mut features = Vec::new();
+    for id in r.readers.iter().filter_map(|reader| reader_feature(app, reader)) {
+        if !features.contains(&id) {
+            features.push(id);
         }
-    });
+    }
+    if features.len() > 1 {
+        let mut item = ui_kit::Item::action("all", solidcraft_ui_text::tr_label("Select All"), "select");
+        item.aliases.push(format!("param:readers:{}:all", r.name));
+        items.push(item);
+    }
+    let others = other_uses(&users);
+    if !others.is_empty() {
+        items.push(ui_kit::Item::heading(tr("parameters.redesign.other_uses")));
+        items.extend(others.iter().map(|other| ui_kit::Item::heading(other)));
+    }
+    if r.readers.is_empty() && others.is_empty() {
+        items.push(ui_kit::Item::heading(tr("parameters.redesign.no_readers")));
+    }
+    let picked = {
+        // User names and already resolved captions must remain literal.
+        let _names = solidcraft_ui_text::resolved_labels();
+        ui_kit::Menu::button_items(&response, &items)
+    };
+    if let Some(picked) = picked {
+        if picked.id == "all" {
+            select_features(app, &features);
+        } else if let Some(reader) =
+            picked.id.strip_prefix("reader:").and_then(|index| index.parse::<usize>().ok()).and_then(|index| r.readers.get(index))
+        {
+            if let Some(id) = reader_feature(app, reader) {
+                select_features(app, &[id]);
+            } else if app.session.doc.param(reader).is_some() {
+                d.filter = reader.clone();
+                d.reset_scroll = true;
+            }
+        }
+    }
     response
 }
 
@@ -527,70 +586,86 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
     }
     let response = ui_kit::compact_button(ui, "…", tr("parameters.redesign.actions"), true, false);
     crate::scenario::publish_handle(&format!("param:menu:{}", r.name), response.rect.center());
-    // Editing a comment keeps the menu open; commands close it explicitly.
-    let menu = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    menu.show(|ui| {
-        if !r.group.is_empty() && ui_kit::menu::button(ui, tr("parameters.redesign.show_model"), "select").clicked() {
-            show_feature(app, &r.group);
-            ui.close();
+    let mut items = Vec::new();
+    if !r.group.is_empty() {
+        items.push(ui_kit::Item::action("show_model", tr("parameters.redesign.show_model"), "select"));
+    }
+    if r.source != "user" {
+        items.push(ui_kit::Item::action("demote", tr("parameters.redesign.demote"), "rename"));
+    } else {
+        items.push(ui_kit::Item::action("delete", solidcraft_ui_text::tr_label("Delete"), "delete"));
+        let users = members.iter().copied().filter(|row| row.source == "user").collect::<Vec<_>>();
+        if let Some(index) = users.iter().position(|row| row.name == r.name) {
+            for (label, side, neighbour) in
+                [("Move up", "before", index.checked_sub(1).and_then(|i| users.get(i))), ("Move down", "after", users.get(index + 1))]
+            {
+                let mut item = ui_kit::Item::action(side, solidcraft_ui_text::tr_label(label), "reorder")
+                    .on_if(d.sort == ui_kit::Sort::Listed && neighbour.is_some());
+                item.aliases.push(format!("param:{side}:{}", r.name));
+                if let Some(neighbour) = neighbour {
+                    item.params = Some(json!({"name":r.name,side:neighbour.name}));
+                }
+                items.push(item);
+            }
         }
-        if r.source != "user" && ui_kit::menu::button(ui, tr("parameters.redesign.demote"), "rename").clicked() {
-            d.redesign.demote = Some(r.name.clone());
-            ui.close();
-        }
-        if r.source == "user" && ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Delete"), "delete").clicked() {
-            d.error = app.run("parameters.delete", json!({"name":r.name})).err();
-            ui.close();
-        }
-        if r.source == "user" {
-            let users: Vec<_> = members.iter().copied().filter(|r| r.source == "user").collect();
-            if let Some(index) = users.iter().position(|row| row.name == r.name) {
-                for (label, side, neighbour) in
-                    [("Move up", "before", index.checked_sub(1).and_then(|i| users.get(i))), ("Move down", "after", users.get(index + 1))]
-                {
-                    let response = ui_kit::menu::button_enabled(
-                        ui,
-                        solidcraft_ui_text::tr_label(label),
-                        "reorder",
-                        d.sort == ui_kit::Sort::Listed && neighbour.is_some(),
-                    );
-                    crate::scenario::publish_handle(&format!("param:{side}:{}", r.name), response.rect.center());
-                    if response.clicked()
-                        && let Some(neighbour) = neighbour
-                    {
-                        d.error = app.run("parameters.move", json!({"name":r.name,side:neighbour.name})).err();
-                        ui.close();
+    }
+    let mut picked = None;
+    if !d.redesign.narrow {
+        picked = ui_kit::Menu::button_items(&response, &items);
+    } else {
+        // This host also contains real unit/comment editors; its action rows use the shared menu.
+        let menu =
+            ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        menu.show(|ui| {
+            let output = ui_kit::Menu::items(ui, response.id.with("actions"), &items, response.clicked());
+            picked = output.picked;
+            if output.close {
+                ui.close();
+            }
+            if d.redesign.narrow {
+                let _ = used_by(app, ui, d, r);
+                if r.source == "user" {
+                    // A combo popup replaces the parent popup in egui's memory. Use the kit's
+                    // nested menu so the row remains available while choosing a unit.
+                    let response = ui_kit::text_button(ui, unit_label(&r.unit), true);
+                    let units = UNITS
+                        .iter()
+                        .map(|unit| {
+                            let mut item = ui_kit::Item::action(unit, unit_label(unit), "");
+                            item.checked = Some(*unit == r.unit);
+                            item.radio = true;
+                            item
+                        })
+                        .collect::<Vec<_>>();
+                    if let Some(picked) = ui_kit::Menu::button_items(&response, &units) {
+                        edit_cell(app, ui.ctx(), d, r, "user", UNIT, picked.id);
                     }
                 }
+                let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
+                let id = ui.make_persistent_id("menu_comment");
+                let response = ui_kit::cell_editor(ui, id, &mut comment, solidcraft_ui_text::tr_label("Comment"), false);
+                if response.changed() {
+                    d.comments.insert(r.name.clone(), comment.clone());
+                }
+                if response.lost_focus() {
+                    d.error = app.run("parameters.comment", json!({"name":r.name,"comment":comment})).err();
+                }
             }
+        });
+    }
+    if let Some(picked) = picked {
+        match picked.id.as_str() {
+            "show_model" => show_feature(app, &r.group),
+            "demote" => d.redesign.demote = Some(r.name.clone()),
+            "delete" => d.error = app.run("parameters.delete", json!({"name":r.name})).err(),
+            "before" | "after" => {
+                if let Some(params) = picked.params {
+                    d.error = app.run("parameters.move", params).err();
+                }
+            }
+            _ => {}
         }
-        if d.redesign.narrow {
-            let _ = used_by(app, ui, r);
-            if r.source == "user" {
-                // A combo popup replaces the parent popup in egui's memory. Use the kit's
-                // nested menu so the row remains available while choosing a unit.
-                ui_kit::Menu::button(ui, unit_label(&r.unit), |ui| {
-                    for unit in UNITS {
-                        let mut item = ui_kit::menu::MenuItem::new(unit, unit_label(unit), "");
-                        item.checked = Some(*unit == r.unit);
-                        if item.show(ui).clicked() {
-                            edit_cell(app, ui.ctx(), d, r, "user", UNIT, unit.to_string());
-                            ui.close();
-                        }
-                    }
-                });
-            }
-            let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
-            let id = ui.make_persistent_id("menu_comment");
-            let response = ui_kit::cell_editor(ui, id, &mut comment, solidcraft_ui_text::tr_label("Comment"), false);
-            if response.changed() {
-                d.comments.insert(r.name.clone(), comment.clone());
-            }
-            if response.lost_focus() {
-                d.error = app.run("parameters.comment", json!({"name":r.name,"comment":comment})).err();
-            }
-        }
-    });
+    }
     response
 }
 
@@ -805,7 +880,7 @@ pub(super) fn states(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog
                 None
             } else {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
-                Some(all.iter().filter(|r| named(r) && r.favorite).map(|r| (r.name.clone(), r.expression.clone())).collect())
+                Some(all.iter().filter(|r| named(r) && r.favorite && !r.read_only).map(|r| (r.name.clone(), r.expression.clone())).collect())
             };
         }
         compact(app, ui, d, all);
@@ -817,10 +892,17 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
     let Some(originals) = d.redesign.compact.take() else { return };
     for r in all.iter().filter(|r| named(r) && r.favorite) {
         ui.push_id(("key_field", &r.name), |ui| {
-            let changed = originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
+            let changed = !r.read_only && originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
             let label = if changed { solidcraft_ui_text::format("parameters.redesign.changed_key", &[("name", &r.name)]) } else { r.name.clone() };
             ui_kit::text(ui, &label, ui_kit::Text::MonoCell);
             ui_kit::text(ui, &r.comment, ui_kit::Text::Hint("key_comment"));
+            if r.read_only {
+                let shown = show_value(r);
+                let response = ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("key_value:{}", r.name), r.error.is_some()))
+                    .backing_on_hover_text(&r.expression);
+                crate::scenario::publish_target(&format!("params:key:{}", r.name), response.rect);
+                return;
+            }
             let id = ui.make_persistent_id("expression");
             let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
             let response = ui_kit::cell_editor(ui, id, &mut expression, "Expression", false);
@@ -858,6 +940,7 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
     if reset.clicked() {
         let edits: Vec<_> = all
             .iter()
+            .filter(|r| !r.read_only)
             .filter_map(|r| {
                 let original = originals.get(&r.name)?;
                 (d.editing.get(&r.name).unwrap_or(&r.expression) != original).then(|| ui_kit::Edit::Set {

@@ -1538,3 +1538,71 @@ fn already_refreshed_is_guarded_against_pending_and_unsettled_import_checks() {
     s.refresh();
     assert!(s.already_refreshed());
 }
+
+/// a draft's neutral plane with its origin in the air, on a block placed three ways, drafts
+/// as the unplaced block does with the same local values.
+#[test]
+fn placed_draft_neutral_plane_in_the_air_maps_into_the_blocks_frame() {
+    fn block(place: usize) -> Session {
+        let mut s = Session::default();
+        let make = |s: &mut Session| {
+            run(s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        };
+        match place {
+            0 | 1 => {
+                let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+                make(&mut s);
+                let mut p = json!({"occurrence": part["occurrence"], "translate": [50, 0, 100]});
+                if place == 1 {
+                    p["axis"] = json!([1, 0, 0]);
+                    p["angle"] = json!("90 deg");
+                }
+                run(&mut s, "occurrence.move", p);
+            }
+            _ => {
+                let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}));
+                let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+                make(&mut s);
+                run(
+                    &mut s,
+                    "occurrence.move",
+                    json!({"occurrence": inner["occurrence"], "translate": [5, 0, 30], "axis": [0, 1, 0], "angle": "90 deg"}),
+                );
+                run(&mut s, "occurrence.move", json!({"occurrence": outer["occurrence"], "translate": [20, 10, 70]}));
+            }
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        s
+    }
+    let world = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let p = solidcraft_doc::apply_point(m, Vec3::new(local[0], local[1], local[2]));
+        json!([p.x, p.y, p.z])
+    };
+    let world_dir = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let d = solidcraft_doc::apply_vector(m, Vec3::new(local[0], local[1], local[2]));
+        json!([d.x, d.y, d.z])
+    };
+    for neutral_z in [-30.0, 5.0] {
+        let mut flat = Session::default();
+        run(&mut flat, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(
+            &mut flat,
+            "solid.draft",
+            json!({"faces": [[10, 20, 5]], "neutral": {"origin": [10, 10, neutral_z], "normal": [0, 0, 1]}, "pull": [0, 0, 1], "angle": "5 deg", "body": "Block"}),
+        );
+        let want = volume(&mut flat);
+        for place in 0..3 {
+            let mut s = block(place);
+            let faces = json!([world(&s, [10.0, 20.0, 5.0])]);
+            let neutral = json!({"origin": world(&s, [10.0, 10.0, neutral_z]), "normal": world_dir(&s, [0.0, 0.0, 1.0])});
+            let pull = world_dir(&s, [0.0, 0.0, 1.0]);
+            run(&mut s, "solid.draft", json!({"faces": faces, "neutral": neutral, "pull": pull, "angle": "5 deg", "body": "Block"}));
+            let got = volume(&mut s);
+            assert!((got - want).abs() < 1e-6, "place {place}, neutral z {neutral_z}: volume {got}, unplaced {want}");
+        }
+    }
+}

@@ -64,9 +64,15 @@ pub struct Place {
     pub measured_dpi: f64,
     /// How far, in mm, a removed edge may lie from the outline kept: lines that meet end to end
     /// are followed with fewer edges (see `sketch.insert_svg`'s `simplify`). 0 keeps every edge as
-    /// drawn. A drawing with more edges than the largest sketch takes starts at a small distance
-    /// it can be lowered to 0 from.
+    /// drawn.
     pub simplify: f64,
+    /// Simplify is Auto: the engine works out the smallest distance at which the drawing fits the
+    /// sketch (`sketch.drawing_bounds`'s `fit`), and [`Place::auto_value`] holds it. Turning Auto
+    /// off keeps the number it set and lets it be changed.
+    pub auto: bool,
+    /// The engine's fit distance for this drawing: 0 when it fits as drawn, `None` when no
+    /// distance up to the cap does (Auto is then unavailable).
+    pub auto_value: Option<f64>,
     /// The middle of the drawing's box in the file's own coordinates, when it could be read.
     pub middle: Option<(f64, f64)>,
     pub align: Align,
@@ -116,7 +122,7 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut copy = app.session.scratch();
-        let given = json!({"path": path.clone(), "format": if command.ends_with("dxf") { "dxf" } else { "svg" }});
+        let given = json!({"path": path.clone(), "format": if command.ends_with("dxf") { "dxf" } else { "svg" }, "fit": true});
         let (tx, done) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
@@ -194,16 +200,21 @@ pub fn tick(app: &mut SolveApp) {
 /// Open the placement for `path`, read here on the window's thread: the tests' path, and the
 /// browser's. The picker calls [`start`] instead.
 pub fn open(app: &mut SolveApp, command: &str, path: String) {
-    let bounds =
-        app.session.execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }})).ok();
+    let bounds = app
+        .session
+        .execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }, "fit": true}))
+        .ok();
     open_with_bounds(app, command, path, bounds.as_ref());
 }
 
 /// The placement window for `path`, with what `sketch.drawing_bounds` answered (`None`: the file
 /// could not be read, and the window opens without a size).
 fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Option<&Value>) {
-    let (natural, middle, edges) = measured(bounds);
-    let simplify = suggested_simplify(edges, solidcraft_engine::sketch::limits::max_points(), natural);
+    let (natural, middle, _edges, auto_value) = measured(bounds);
+    // Auto is on when the drawing needs simplifying to fit: the engine's smallest distance that
+    // does (measured on the drawing, so it means the same at any scale).
+    let auto = auto_value.is_some_and(|d| d > 0.0);
+    let simplify = if auto { auto_value.unwrap_or(0.0) } else { 0.0 };
     let place = Place {
         command: command.to_string(),
         path,
@@ -215,6 +226,8 @@ fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Opt
         dpi: DEFAULT_DPI,
         measured_dpi: DEFAULT_DPI,
         simplify,
+        auto,
+        auto_value,
         middle,
         align: Align::Middle,
     };
@@ -223,7 +236,7 @@ fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Opt
 
 /// The drawing's own width and height, the middle of its box and how many edges it has, from what
 /// `sketch.drawing_bounds` answered.
-fn measured(bounds: Option<&Value>) -> (Option<(f64, f64)>, Option<(f64, f64)>, u64) {
+fn measured(bounds: Option<&Value>) -> (Option<(f64, f64)>, Option<(f64, f64)>, u64, Option<f64>) {
     let natural = bounds
         .and_then(|b| Some((b.get("width")?.as_f64()?, b.get("height")?.as_f64()?)))
         .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9);
@@ -233,7 +246,8 @@ fn measured(bounds: Option<&Value>) -> (Option<(f64, f64)>, Option<(f64, f64)>, 
         .and_then(|b| Some((corner(b, "min")?, corner(b, "max")?)))
         .map(|(lo, hi)| ((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0))
         .filter(|(x, y)| x.is_finite() && y.is_finite());
-    (natural, middle, edges)
+    let auto_value = bounds.and_then(|b| b.get("auto_simplify")).and_then(Value::as_f64).filter(|d| d.is_finite() && *d >= 0.0);
+    (natural, middle, edges, auto_value)
 }
 
 /// The file being measured again beside the window, for a new Resolution.
@@ -263,7 +277,7 @@ fn remeasure(app: &mut SolveApp, p: &mut Place) {
     if p.dpi == p.measured_dpi || !(1.0..=10000.0).contains(&p.dpi) {
         return;
     }
-    let given = json!({"path": p.path, "format": "svg", "dpi": p.dpi});
+    let given = json!({"path": p.path, "format": "svg", "dpi": p.dpi, "fit": true});
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut copy = app.session.scratch();
@@ -282,24 +296,15 @@ fn remeasure(app: &mut SolveApp, p: &mut Place) {
 }
 
 fn take_measure(p: &mut Place, dpi: f64, bounds: Option<&Value>) {
-    (p.natural, p.middle, _) = measured(bounds);
+    (p.natural, p.middle, _, p.auto_value) = measured(bounds);
+    // At another Resolution the drawing's own size, and so its fit, can change: Auto follows it.
+    if p.auto {
+        match p.auto_value {
+            Some(d) => p.simplify = d,
+            None => p.auto = false,
+        }
+    }
     p.measured_dpi = dpi;
-}
-
-/// A starting Simplify distance (mm) for a drawing with `edges` entities: none while the largest
-/// sketch takes it as drawn, else a two-hundredth of its size (a smoothed outline of a dense
-/// drawing usually loses most of its edges there), rounded up to 0.01 mm. The window shows it and
-/// it can be lowered to 0; a drawing that still does not fit says so in its preview.
-pub fn suggested_simplify(edges: u64, limit: usize, natural: Option<(f64, f64)>) -> f64 {
-    if edges <= limit as u64 {
-        return 0.0;
-    }
-    let Some((w, h)) = natural else { return 0.0 };
-    let span = w.max(h);
-    if !(span.is_finite() && span > 1e-9) {
-        return 0.0;
-    }
-    ((span / 200.0) * 100.0).ceil().max(1.0) / 100.0
 }
 
 pub fn title(p: &Place) -> &'static str {
@@ -366,7 +371,26 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     });
     crate::ui_kit::with_row_label_tooltip(ui, solidcraft_ui_text::tr("ui.insert_simplify_tip"), |ui| {
         form_row(ui, solidcraft_ui_text::tr("ui.insert_simplify"), |ui| {
+            // Auto: the engine's smallest distance at which the drawing fits the sketch (worked
+            // out with the file's size). It owns the number; turning it off keeps that number and
+            // lets it be changed. A drawing no distance fits has no Auto to offer.
+            let mut auto = p.auto;
+            let boxed =
+                ui.add_enabled(p.auto_value.is_some(), |ui: &mut egui::Ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("Auto"), &mut auto));
+            if boxed.changed() {
+                p.auto = auto;
+                if auto {
+                    p.simplify = p.auto_value.unwrap_or(0.0);
+                }
+            }
+            let boxed = boxed.on_hover_text(solidcraft_ui_text::tr("ui.insert_simplify_auto_tip"));
+            crate::scenario::publish_handle("dialog:insert:auto", boxed.rect.center());
+            // The field stays editable, as it always was: a distance typed into it is the
+            // person's, so Auto lets go of it (turn Auto back on for the fitted distance again).
             let r = crate::ui_kit::number_field(ui, &mut p.simplify, 0.0..=MAX_SIMPLIFY_MM, 0.01, " mm");
+            if r.changed() {
+                p.auto = false;
+            }
             crate::scenario::publish_handle("dialog:insert:simplify", r.rect.center());
         });
     });
@@ -577,6 +601,8 @@ mod tests {
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
         };
         let mut p = p;
         p.simplify = 0.2;
@@ -620,6 +646,8 @@ mod tests {
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
         };
         let q = placed(solidcore_record::Vec2::new(10.0, 5.0), &p);
         assert!((q.x + 5.0).abs() < 1e-9 && (q.y - 17.0).abs() < 1e-9, "twice, a quarter turn, then moved: {q:?}");
@@ -708,6 +736,56 @@ mod tests {
         assert_eq!(p.path, svg_file("second-pick.svg"), "the window is the second pick's");
     }
 
+    /// Typing a distance is the person's: Auto lets go of it, and its value is the one typed.
+    #[test]
+    fn typing_a_distance_turns_auto_off() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("typed-distance.svg", 25_000));
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement") };
+        assert!(p.auto && p.simplify > 0.0, "Auto opens on: {}", p.simplify);
+        h.step(&json!({"click": {"handle": "dialog:insert:simplify"}})).unwrap();
+        h.frame();
+        h.step(&json!({"text": "0.5"})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(!p.auto, "the typed distance is not Auto's");
+        assert!((p.simplify - 0.5).abs() < 1e-9, "the distance typed: {}", p.simplify);
+    }
+
+    /// OK waits while another Resolution is being measured: the distance shown is fitted at the
+    /// old one until the file is read again at the new one.
+    #[test]
+    fn ok_waits_for_a_new_resolutions_fit() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("resolution-fit.svg", 25_000));
+        h.frames(2);
+        let measured = |h: &Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::InsertDrawing(p)) => Some((p.dpi, p.measured_dpi)),
+            _ => None,
+        };
+        assert_eq!(measured(&h), Some((DEFAULT_DPI, DEFAULT_DPI)), "measured at 96 dpi to start");
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.dpi = 72.0;
+        }
+        h.frame();
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0), "OK waits for the fit at 72 dpi");
+        for _ in 0..600 {
+            h.frame();
+            if measured(&h) == Some((72.0, 72.0)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frame();
+        assert_eq!(measured(&h), Some((72.0, 72.0)), "the file was measured at 72 dpi");
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "OK is back with the new fit");
+    }
+
     /// A read whose sketch was finished meanwhile opens nothing: the answer arrives after the
     /// interaction it was for is over.
     #[test]
@@ -766,6 +844,8 @@ mod tests {
         h.frames(2);
         let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
         assert!(p.simplify > 0.0 && p.simplify <= MAX_SIMPLIFY_MM, "a Simplify distance is offered: {}", p.simplify);
+        assert!(p.auto && p.auto_value == Some(p.simplify), "it is the engine's Auto distance: {}", p.simplify);
+        assert!(handle_at("dialog:insert:auto").is_some(), "the Auto box is drawn");
         h.step(&json!({"key": "Enter"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -773,14 +853,37 @@ mod tests {
         assert!(n > 0 && n <= solidcraft_engine::sketch::limits::DEFAULT_POINTS, "the drawing comes in: {n}");
     }
 
+    /// Auto owns the distance: turning it off keeps the number the engine set and lets it be
+    /// lowered by hand; turning it back on restores the engine's fit.
+    #[test]
+    fn turning_auto_off_keeps_the_distance_it_set() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("auto-off.svg", 25_000));
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
+        let auto = p.simplify;
+        assert!(p.auto && auto > 0.0, "Auto opens on: {}", p.simplify);
+        h.step(&json!({"click": {"handle": "dialog:insert:auto"}})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(!p.auto, "Auto is off");
+        assert_eq!(p.simplify, auto, "the distance it set is kept");
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.simplify = 0.5;
+        }
+        h.frame();
+        h.step(&json!({"click": {"handle": "dialog:insert:auto"}})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(p.auto && p.simplify == auto, "Auto back on restores the fit: {} vs {auto}", p.simplify);
+    }
+
     /// The Simplify distance starts at 0 for a drawing the sketch takes as drawn, is drawn as a
     /// field, and reaches the import: OK then follows the outline with fewer edges.
     #[test]
     fn the_simplify_distance_reaches_the_import() {
-        assert_eq!(suggested_simplify(100, 20_000, Some((50.0, 50.0))), 0.0, "a drawing the sketch takes is not simplified");
-        assert_eq!(suggested_simplify(30_000, 20_000, Some((50.0, 50.0))), 0.25, "a two-hundredth of its size");
-        assert_eq!(suggested_simplify(30_000, 20_000, Some((3.0, 1.0))), 0.02, "at least 0.01 mm, rounded up");
-        assert_eq!(suggested_simplify(30_000, 20_000, None), 0.0, "no size, nothing to go by");
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.settle();
@@ -907,6 +1010,8 @@ mod tests {
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
             middle: None,
             align: Align::Middle,
         };
@@ -968,6 +1073,8 @@ mod tests {
             natural: None,
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
+            auto: false,
+            auto_value: None,
             middle: None,
             align: Align::Middle,
             simplify: 0.0,

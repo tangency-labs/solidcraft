@@ -28,7 +28,8 @@ in bounded space, bad UTF-8 and bad JSON are parse errors, and serving goes on.
 | `Tools` | An app's tools: `instructions`, `list`, `call`, and optionally `resources`, `resource_templates`, `read_resource`, `prompts`, `get_prompt`, `complete` |
 | `Contents` | What a resource read sends: `Text` or `Blob`, each with its MIME type; `Contents::json(value)` for JSON |
 | `Reference` | What a completion asks about: a `Prompt` by name or a `Resource` by URI or URI template |
-| `Server::new(info, tools)` | A server over `tools`; `serve(input, output)` until input closes, `handle_line`, `handle`, `tools()`, `is_initialized()` |
+| `Server::new(info, tools)` | A server over `tools`; `serve(input, output)` until input closes, `serve_http(addr, config)` / `serve_http_listener(listener, config)` for local loopback Streamable HTTP, `handle_line`, `handle`, `tools()`, `is_initialized()` |
+| `http`, `HttpConfig`, `HttpStop` | Loopback-only MCP Streamable HTTP transport (`POST /mcp`, `GET /mcp`, `DELETE /mcp`) with mandatory constant-time Bearer auth, `Host`/`Origin` DNS rebinding protection, per-client `Mcp-Session-Id` management and FIFO serialized dispatch |
 | `Info` | `name`, `title`, `version` for `serverInfo`, and `max_line`, the longest request line read |
 | `PROTOCOL_VERSION`, `SUPPORTED_VERSIONS` | The protocol revisions spoken; the newest is offered for one not known |
 | `tool(name, title, desc, schema, effect)` | A tool definition with annotations from its `Effect` |

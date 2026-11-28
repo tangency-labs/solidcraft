@@ -63,7 +63,10 @@ the same for any feature.
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
 what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
-(I) does more.
+(I) does more. With its **Spacing of several holes** option ticked, three or more round edges or
+holes measure together: the gap between each neighbouring pair in order along the row, the span,
+whether the spacing is even (and the gap that differs when a hole is left out), and for a bolt
+circle its pitch-circle diameter and the angle between holes.
 
 **Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
@@ -158,8 +161,11 @@ and is smoothed over. A taper steeper than the profile's details (a stroke, a cu
 narrower than it) is refused with that reason; a smaller taper or distance builds. A taper
 composes with a start offset (a drafted pocket that starts part way up a part): the offset moves
 the profile along the normal and the sides are drafted from there, so the profile is the section
-at the start whatever the offset. A taper with a two-sided or symmetric extent is not built yet
-and says so.
+at the start whatever the offset. On a symmetric extrude the taper drafts both halves from the
+start plane outward; on two sides it drafts the first side, and `taper2` (Taper Angle 2) the
+second, which takes the taper when `taper2` is left out. A taper of 6 deg with `taper2: "-6 deg"`
+makes one slope through the profile. A thin wall on two sides or symmetric, and a symmetric
+extrude with Symmetric Offset, are not tapered yet and say so.
 
 **Thin Extrude** (`thin: true` on `solid.extrude`, the Thin Extrude box in its dialog) builds a
 wall of constant thickness along sketch curves instead of filling profiles: open chains (a single
@@ -497,6 +503,13 @@ An explicit origin must contain three finite numeric coordinates in millimetres
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
 
+Linear, rectangular, and circular body patterns require the stored coordinates of
+each copy to be finite and at most 10¹² in absolute value. This includes surface
+origins and curve control points. A cylinder's cap plane origin can cross the
+limit while all of its vertices still fit. Reduce the spacing or the number of
+copies in a linear or rectangular pattern, or adjust the axis origin, angle, or
+number of copies in a circular pattern.
+
 ## Axes and points on round edges and faces
 
 Wherever a 3D command takes an axis (Revolve, Surface Revolve, Circular Pattern, Plane at
@@ -540,7 +553,7 @@ still be added through `set`. The fields of the common features:
 
 | Feature | Fields |
 |---|---|
-| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
+| Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `taper2`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
 | Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |

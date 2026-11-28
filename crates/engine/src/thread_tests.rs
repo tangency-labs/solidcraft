@@ -159,6 +159,108 @@ fn unified_threads_refuse_mismatched_shafts_and_suggest_a_catalogued_size() {
     }
 }
 
+/// The two places an ISO metric thread is tried with a class: an 8 mm shaft 6 mm long, and a 6.8
+/// mm hole (the tap maker's M8 drill) through a 6 mm plate. The point on the face, the face's side.
+fn metric_class_stock(s: &mut Session, hole: bool) -> ([f64; 3], bool) {
+    if hole {
+        run(s, "solid.box", json!({"length":20,"width":20,"height":6}));
+        run(s, "solid.hole", json!({"position":[10,10,6],"diameter":6.8}));
+        ([13.4, 10.0, 3.0], true)
+    } else {
+        run(s, "solid.cylinder", json!({"radius":4,"height":6}));
+        ([4.0, 0.0, 3.0], false)
+    }
+}
+
+/// An ISO metric designation keeps its ISO 965-1 tolerance class in the callout, through a save
+/// and reopen, under either parameter check; the size is the designation's without the class.
+#[test]
+fn metric_shaft_and_hole_threads_keep_their_class_after_reopen() {
+    for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        for (hole, given, shown, major, pitch) in [
+            (false, "M8-6g", "M8-6g", 8.0, 1.25),
+            (false, "M8x1.25-5g6g", "M8-5g6g", 8.0, 1.25),
+            (false, "M8 – 4h", "M8-4h", 8.0, 1.25),
+            (true, "M8-6H", "M8-6H", 8.0, 1.25),
+            (true, "M8x1-5H6H", "M8x1-5H6H", 8.0, 1.0),
+        ] {
+            let mut s = Session { param_check: check, ..Session::default() };
+            let (face, internal) = metric_class_stock(&mut s, hole);
+            let reply = run(&mut s, "solid.thread", json!({"face":face,"designation":given}));
+            assert_eq!(reply["thread"]["designation"], shown, "{given}");
+            assert_eq!(run(&mut s, "model.threads", json!({}))["threads"][0]["designation"], shown);
+            let assert_thread = |session: &Session| {
+                assert!(session.model.results.iter().all(|r| r.error.is_none()), "{given}");
+                let state = session.model.state();
+                let thread = &state.threads[0];
+                assert_eq!(thread.designation, shown);
+                assert_eq!((thread.major_diameter, thread.pitch, thread.internal), (major, pitch, internal), "{given}");
+            };
+            assert_thread(&s);
+            let saved = s.doc.to_json();
+            let value: Value = serde_json::from_str(&saved).unwrap();
+            assert_eq!(value["features"].as_array().unwrap().last().unwrap()["designation"], given, "saved as given");
+            // The class is part of format 73 since the 0.51.1 release, so it is never pending,
+            // whatever other changes are.
+            if let Some(pending) = value.get("format_pending").and_then(Value::as_array) {
+                assert!(!pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
+            }
+            assert_thread(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
+        }
+    }
+}
+
+/// A lowercase class is a shaft's and an uppercase one a hole's (ISO 965-1); the other side's is
+/// refused, cosmetic or modelled, and the design is left as it was.
+#[test]
+fn a_metric_class_for_the_other_side_is_refused() {
+    for (hole, given, wants) in [(false, "M8-6H", "this shaft needs e, f, g or h"), (true, "M8-6g", "this hole needs G or H")] {
+        for modeled in [false, true] {
+            let mut s = Session::default();
+            let (face, _) = metric_class_stock(&mut s, hole);
+            let before = s.doc.to_json();
+            let error = s.execute("solid.thread", &json!({"face":face,"designation":given,"modeled":modeled})).unwrap_err().to_string();
+            assert!(error.contains(&format!("class {}", &given[3..])) && error.contains(wants), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+    // A size that doesn't fit is refused with the size that does, not with the class added.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10}));
+    let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"M8-6g"})).unwrap_err().to_string();
+    assert!(error.contains("an M8-6g thread does not fit a 10.00 mm shaft; this shaft takes M10"), "{error}");
+}
+
+/// The class is an annotation: a modelled thread with it is the thread without it, record for
+/// record (the native B-rep encoding, compared byte for byte, two sessions without a class first
+/// to show the build is repeatable), and a cosmetic one has the same numbers, bit for bit.
+#[test]
+fn a_metric_class_changes_no_geometry() {
+    let build = |hole: bool, designation: &str, modeled: bool| {
+        let mut s = Session::default();
+        let (face, _) = metric_class_stock(&mut s, hole);
+        run(&mut s, "solid.thread", json!({"face":face,"designation":designation,"modeled":modeled}));
+        let state = s.model.state();
+        let body = solidcraft_kernel::encode_native_body(&state.bodies[0].body).unwrap();
+        // A modelled thread is the groove itself and leaves no cosmetic marking.
+        assert_eq!(state.threads.len(), usize::from(!modeled));
+        let marking = state.threads.first().map(|t| {
+            let numbers =
+                [t.major_diameter, t.radius, t.pitch, t.axis_point.x, t.axis_point.y, t.axis_point.z, t.axis.x, t.axis.y, t.axis.z, t.start, t.end]
+                    .map(f64::to_bits);
+            (numbers, t.internal, t.form, t.hand, t.starts)
+        });
+        (body, marking)
+    };
+    for (hole, class) in [(false, "M8-6g"), (true, "M8-6H")] {
+        for modeled in [false, true] {
+            let plain = build(hole, "M8", modeled);
+            assert!(build(hole, "M8", modeled) == plain, "the build repeats (hole {hole}, modelled {modeled})");
+            assert!(build(hole, class, modeled) == plain, "{class} (modelled {modeled}) changed the geometry");
+        }
+    }
+}
+
 #[test]
 fn automatic_thread_sizing_stays_metric_until_unified_is_selected() {
     for (form, designation, major, pitch) in [(None, "M6", 6.0, 1.0), (Some("metric"), "M6", 6.0, 1.0), (Some("unified"), "1/4-20 UNC", 6.35, 1.27)] {
@@ -957,6 +1059,219 @@ fn a_blind_tapped_hole_stops_clear_of_its_bottom() {
     assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
 }
 
+/// The span a thread's reply gives, as world z from its axis point (low, high).
+fn thread_z(th: &Value) -> (f64, f64) {
+    let t = &th["thread"];
+    let at = |u: &str| t["axis_point"][2].as_f64().unwrap() + t["axis"][2].as_f64().unwrap() * t[u].as_f64().unwrap();
+    let (a, b) = (at("start"), at("end"));
+    (a.min(b), a.max(b))
+}
+
+/// #23145: `offset` starts the thread that far in from the end it starts at, and the extent is
+/// measured from there. On a d10 × 30 cylinder (z 0..30), offset 5: length 15 from the top is
+/// z 25 down to 10, from the bottom 5 up to 20; Full from the top runs on to the far end (0..25);
+/// up to the plane z = 12 from the top is 12..25; a length past the far end stops there (0..25).
+#[test]
+fn an_offset_thread_starts_that_far_in_from_its_end() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let top = json!([0, 0, 30]);
+    for (extra, want) in [
+        (json!({"length": 15, "from": top}), (10.0, 25.0)),
+        (json!({"length": 15, "from": [0, 0, 0]}), (5.0, 20.0)),
+        (json!({"from": top}), (0.0, 25.0)),
+        (json!({"up_to": {"origin": [0, 0, 12], "normal": [0, 0, 1]}, "from": top}), (12.0, 25.0)),
+        (json!({"length": 40, "from": top}), (0.0, 25.0)),
+    ] {
+        let mut p = json!({"face": [5, 0, 15], "designation": "M10", "offset": "5 mm"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let th = run(&mut s, "solid.thread", p);
+        let (z0, z1) = thread_z(&th);
+        assert!((z0 - want.0).abs() < 1e-9 && (z1 - want.1).abs() < 1e-9, "{extra}: {th}");
+        // `model.threads` reports the same span as the reply.
+        let listed = run(&mut s, "model.threads", json!({}));
+        let feature = th["feature"].as_u64().unwrap();
+        let mine = listed["threads"].as_array().unwrap().iter().find(|t| t["feature"].as_u64() == Some(feature)).unwrap();
+        assert_eq!(mine, &th["thread"]);
+    }
+}
+
+/// A modelled M10 on the d10 × 30 cylinder, offset 5 and length 15 from the top: both ends of the
+/// groove are square stops inside the face (5 mm from the top, 10 mm from the bottom, each more
+/// than half a pitch), so it takes exactly 15 / P = 10 turns. A turn's volume is `ext_turn`, the
+/// closed form 2π∫ r g(r) dr of the ISO 68-1 groove section (a screw motion keeps volume, so one
+/// lead of the sweep has the volume of the section revolved), from the standard's profile alone.
+/// Just under the surface the 5 mm at the top and the 10 mm at the bottom stay whole, short of the
+/// groove's widest half width w (`ext_half_width`, 0.70 mm for M10) at each stop.
+#[test]
+fn a_modelled_offset_thread_leaves_its_start_plain() {
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let before = exact_volume(&s, "Rod");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "offset": 5, "length": 15, "from": [0, 0, 30], "modeled": true}));
+    let want = before - 15.0 / p * ext_turn(10.0, p, 5.0);
+    let got = exact_volume(&s, "Rod");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+    let st = s.model.state();
+    let body = &st.body("Rod").unwrap().body;
+    assert!(body.validity().is_empty());
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
+    let rings = |z0: f64, z1: f64| (0..=40).map(move |i| z0 + (z1 - z0) * i as f64 / 40.0).flat_map(ring);
+    let inside = |q: Vec3| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside;
+    assert!(rings(25.0 + w + 0.1, 29.9).all(inside), "the offset at the top is cut");
+    assert!(rings(0.1, 10.0 - w - 0.1).all(inside), "the bottom past the thread is cut");
+    assert!(rings(11.0, 24.0).filter(|q| !inside(*q)).count() > 100, "the band 10..25 is not threaded");
+}
+
+/// The runout stays at the inner end, away from the offset start: the plain top stays whole and
+/// the fade goes on below z = 10, where the square stop would have ended.
+#[test]
+fn an_offset_threads_runout_stays_at_its_inner_end() {
+    let w = ext_half_width(10.0, 1.5);
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let p = json!({"face": [5, 0, 15], "designation": "M10", "offset": 5, "length": 15, "from": [0, 0, 30], "modeled": true, "ease_out": "standard"});
+    run(&mut s, "solid.thread", p);
+    let st = s.model.state();
+    let body = &st.body("Rod").unwrap().body;
+    assert!(body.validity().is_empty());
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
+    let rings = |z0: f64, z1: f64| (0..=20).map(move |i| z0 + (z1 - z0) * i as f64 / 20.0).flat_map(ring);
+    let inside = |q: Vec3| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside;
+    assert!(rings(25.0 + w + 0.1, 29.9).all(inside), "the offset at the top is cut");
+    assert!(rings(8.0, 10.0 - w - 0.1).filter(|q| !inside(*q)).count() > 10, "no runout below the threaded length");
+}
+
+/// A blind tapped hole (8.5 mm, M10's tap drill, 12 deep from the top of a 20 mm block), threaded
+/// Full with an offset of 3 from its mouth, its only free end. The groove's start is a square stop
+/// 3 mm down; at the bottom it stops with its section clear of the bottom, its centre the widest
+/// half width w inside it, as in `a_blind_tapped_hole_stops_clear_of_its_bottom`: the section is
+/// ISO 68-1's internal groove, g(r) = P/8 + 2 (d/2 - r) tan 30° (the flat P/8 at the major
+/// diameter), reaching 0.1 P inside the minor radius d/2 - 5 P √3 / 16 so it crosses the wall,
+/// so w = (P/8 + 2 (d/2 - (minor - 0.1 P)) tan 30°) / 2. That leaves 12 - 3 - w of square-ended
+/// sweep: (12 - 3 - w) / P turns of 2π∫ r g(r) dr over the wall, r 4.25..5.
+#[test]
+fn an_offset_tapped_thread_starts_below_the_holes_mouth() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 8.5, "depth": 12}));
+    let before = exact_volume(&s, "Block");
+    let th = run(&mut s, "solid.thread", json!({"face": [4.25, 0, 14], "designation": "M10", "offset": 3, "modeled": true}));
+    assert_eq!(th.get("warning"), None, "{th}");
+    let (d, p, rh) = (10.0, 1.5, 4.25);
+    let t = (PI / 6.0).tan();
+    let minor = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let w = (p / 8.0 + 2.0 * (d / 2.0 - (minor - 0.1 * p)) * t) / 2.0;
+    let f = |r: f64| (p / 8.0 + d * t) * r * r / 2.0 - 2.0 * t * r * r * r / 3.0;
+    let turn = 2.0 * PI * (f(d / 2.0) - f(rh));
+    let want = before - (12.0 - 3.0 - w) / p * turn;
+    let got = exact_volume(&s, "Block");
+    assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
+    // Just outside the bore, the 3 mm below the mouth (less the stop's half width) is whole.
+    let st = s.model.state();
+    let body = &st.body("Block").unwrap().body;
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.4 * a.cos(), 4.4 * a.sin(), z));
+    assert!(
+        (0..=10)
+            .map(|i| 19.9 - (2.9 - w - 0.1) * i as f64 / 10.0)
+            .flat_map(ring)
+            .all(|q| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside)
+    );
+}
+
+/// Each face of one Thread takes the offset from its own start end; a face shorter than the offset
+/// refuses the feature, naming its length.
+#[test]
+fn an_offset_applies_to_each_face_from_its_own_end() {
+    let shafts = |second_height: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "A"}));
+        run(&mut s, "solid.cylinder", json!({"base": [30, 0, 0], "radius": 5, "height": second_height, "body_name": "B"}));
+        s
+    };
+    let params = |h: f64| {
+        json!({"faces": [{"body": "A", "point": [5, 0, 15]}, {"body": "B", "point": [35, 0, h / 2.0]}],
+            "designation": "M10", "offset": 5, "length": 10, "from": [0, 0, 30]})
+    };
+    let mut s = shafts(20.0);
+    let made = run(&mut s, "solid.thread", params(20.0));
+    let spans: Vec<(f64, f64)> = made["threads"].as_array().unwrap().iter().map(|t| thread_z(&json!({"thread": t}))).collect();
+    assert_eq!(spans.len(), 2, "{made}");
+    // A runs 25 down to 15; B (z 0..20), started from its top as `from` is nearer it, 15 down to 5.
+    for (got, want) in spans.iter().zip([(15.0, 25.0), (5.0, 15.0)]) {
+        assert!((got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9, "{got:?} vs {want:?}: {made}");
+    }
+    let mut s = shafts(4.0);
+    let before = s.doc.to_json();
+    let e = s.execute("solid.thread", &params(4.0)).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("leaves nothing to thread") && e.contains("(4 mm)"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// The refusals, each with its reason, leaving the design as it was: an offset below 0 (typed, or
+/// an expression a parameter change makes negative, with one message), one as long as the face
+/// or longer, one with a chamfered tip at its start, an `up_to` limit inside the offset, and an
+/// offset on a taper pipe thread.
+#[test]
+fn an_offset_is_refused_with_its_reason() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let base = json!({"face": [5, 0, 15], "designation": "M10", "from": [0, 0, 30]});
+    let with = |extra: Value| {
+        let mut p = base.clone();
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p
+    };
+    for (extra, reason) in [
+        (json!({"offset": -1}), solidcraft_doc::THREAD_OFFSET_NEGATIVE),
+        (json!({"offset": 30}), "leaves nothing to thread"),
+        (json!({"offset": 31}), "leaves nothing to thread"),
+        (json!({"offset": 2, "modeled": true, "tip": "start"}), solidcraft_doc::THREAD_OFFSET_WITH_TIP),
+        (json!({"offset": 5, "up_to": {"origin": [0, 0, 27], "normal": [0, 0, 1]}}), "past its offset"),
+    ] {
+        let before = s.doc.to_json();
+        let e = s.execute("solid.thread", &with(extra.clone())).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(reason), "{extra}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{extra}");
+    }
+    // An expression: the same reason when a parameter change makes it negative.
+    run(&mut s, "parameters.add", json!({"name": "lead_in", "expression": "2 mm"}));
+    run(&mut s, "solid.thread", with(json!({"offset": "lead_in", "name": "Lead-in"})));
+    let changed = s.execute("parameters.change", &json!({"name": "lead_in", "expression": "-1 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).chain(changed.err().map(|e| e.to_string())).collect();
+    assert!(errors.iter().any(|e| e.contains(solidcraft_doc::THREAD_OFFSET_NEGATIVE)), "{errors:?}");
+    // A taper pipe thread's standard diameter is set at the pipe's end: no offset (cosmetic too).
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20.955 / 2.0, "height": 30, "body_name": "Pipe"}));
+    let e = s.execute("solid.thread", &json!({"face": [20.955 / 2.0, 0, 15], "designation": "R 1/2", "offset": 2, "from": [0, 0, 30]}));
+    let e = e.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("takes no offset"), "{e}");
+}
+
+/// An offset of 0 is no offset: the modelled body is the same to the byte, and the cosmetic thread
+/// the same record. A thread saved without one has no `offset` key, as before this change.
+#[test]
+fn a_zero_offset_builds_exactly_what_no_offset_does() {
+    let build = |modeled: bool, offset: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+        let mut p = json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "from": [0, 0, 30], "modeled": modeled});
+        if let Some(o) = offset {
+            p["offset"] = json!(o);
+        }
+        run(&mut s, "solid.thread", p);
+        s
+    };
+    let bytes = |s: &Session| solidcraft_kernel::encode_native_body(&s.model.state().body("Rod").unwrap().body).unwrap();
+    let (plain, zero) = (build(true, None), build(true, Some("0 mm")));
+    assert!(bytes(&plain) == bytes(&zero), "a zero offset changed the modelled body");
+    let (mut plain, mut zero) = (build(false, None), build(false, Some("0 mm")));
+    assert_eq!(run(&mut plain, "model.threads", json!({})), run(&mut zero, "model.threads", json!({})));
+    assert!(zero.doc.to_json().contains("\"offset\""), "the offset given is saved");
+    assert!(!plain.doc.to_json().contains("\"offset\""), "a thread without an offset saves none");
+}
+
 /// A form's groove width at radius r between its root and crest: the pitch less the tooth, the
 /// tooth `flat` wide at the crest radius `crest` and widening by tan a + tan b per unit of depth.
 fn form_turn(p: f64, flat: f64, crest: f64, a: f64, b: f64, r0: f64, r1: f64, internal: bool) -> f64 {
@@ -1000,6 +1315,11 @@ fn every_form_cuts_its_standard_profile() {
             (7.0, 45.0),
             0.75 * inch - 0.6 * inch / 8.0,
         ),
+        // The 90° custom profile: H = P / (2 tan 45°) = P/2, depth 5H/8 = 0.3125 P, flat P/8 at
+        // the crest, so g(r) = P/4 + 2 (r - r3) from the root r3 = 5 - 0.46875 = 4.53125. One turn
+        // is 2π∫ r g(r) dr from r3 to 5 = 2π [a r²/2 + 2 r³/3] with a = P/4 - 2 r3 = -8.6875:
+        // 2π (1.9020081 mm³) = 11.950669 mm³; six turns 71.704 mm³.
+        ("custom", "C10x1.5x90", 10.0, 1.5, 1.5 / 8.0, (45.0, 45.0), 5.0 - 0.3125 * 1.5),
     ];
     for (form, designation, d, p, flat, (a, b), r3) in cases {
         let mut volumes = Vec::new();
@@ -1135,6 +1455,8 @@ fn a_tapped_holes_class_is_saved_and_kept_through_an_edit() {
     for (params, why) in [
         (json!({"position": [40, 30, 12], "depth": 10, "diameter": 6, "thread_class": "6H"}), "`thread_class` needs `thread` (a tapped hole)"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8", "thread_class": "6g"}), "an ISO metric tapped hole's class is"),
+        // The class goes in `thread_class`, not after the hole's thread size (as before).
+        (json!({"position": [40, 30, 12], "depth": 10, "thread": "M8-6H"}), "unknown tapped thread `M8-6H`"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "1/4-20 UNC", "thread_class": "2A"}), "class is 1B, 2B or 3B"),
         (json!({"position": [40, 30, 12], "depth": 10, "thread": "G 1/4", "thread_class": "2B"}), "has no tolerance class"),
     ] {
@@ -1175,6 +1497,21 @@ fn a_square_thread_is_refused() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
+}
+
+/// A custom thread keeps its designation in the callout and stores its form; it refuses a
+/// chamfered tip and an angle past 90°. Its groove's volume: `every_form_cuts_its_standard_profile`.
+#[test]
+fn a_custom_thread_keeps_its_designation_and_refuses_a_tip() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Shaft"}));
+    let th = run(&mut s, "solid.thread", json!({"face": [5, 0, 10], "designation": "c10x1.5x90"}));
+    assert_eq!(th["thread"]["designation"], "C10x1.5x90", "{th}");
+    assert_eq!(th["thread"]["form"], "custom", "{th}");
+    let tip = s.execute("solid.thread", &json!({"face": [5, 0, 10], "designation": "C10x1.5x90", "modeled": true, "tip": "both"}));
+    assert!(tip.err().map(|e| e.to_string()).unwrap_or_default().contains("not offered for a custom thread"));
+    let wide = s.execute("solid.thread", &json!({"face": [5, 0, 10], "form": "custom", "designation": "C10x1.5x95"}));
+    assert!(wide.err().map(|e| e.to_string()).unwrap_or_default().contains("must be 20° to 90°"));
 }
 
 /// Ladder 06/008: n starts are n grooves of lead n P, each a turn's n-th further round: over the
@@ -1414,7 +1751,10 @@ fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
                 let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
                 assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
                 assert!(
-                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
+                    matches!(
+                        shaft.body.record().faces[face].surface,
+                        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Sweep { .. }
+                    ),
                     "{tip}: {name} must not select a cylinder"
                 );
             }
@@ -1454,7 +1794,10 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
             .faces
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|(_, f)| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .map(|(i, _)| i)
             .collect();
         assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
@@ -1474,7 +1817,10 @@ fn a_modelled_thread_keeps_each_flank_as_one_face() {
         for (name, point) in picks {
             let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
             assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
-            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
+            assert!(matches!(
+                shaft.body.record().faces[face].surface,
+                Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Sweep { .. }
+            ));
         }
     }
 }
@@ -2314,4 +2660,526 @@ fn a_thread_goes_on_a_body_of_its_own_component() {
     let s = studs(false);
     let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
     assert_eq!(on, [body_of(&s, "Stud B")]);
+}
+/// A plain `solid.move` (no copy) must carry the body's thread record with the body.
+/// The record keeps the thread feature's id and its hand; a rigid turn does not flip that hand,
+/// and a body left out of the move keeps the record it had. A copied move is covered above.
+#[test]
+fn a_plain_move_carries_the_bodys_thread_record() {
+    // A modelled thread is cut into the body and moves with it; only a cosmetic one has a record to carry.
+    {
+        let modeled = false;
+        let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+        let shaft_feature =
+            run(&mut s, "solid.thread", json!({"face":[4,0,4],"designation":"M8-6g","hand":"left","modeled":modeled}))["feature"].clone();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"base":[40,0,0],"body_name":"Peg","operation":"new"}));
+        let peg_feature = run(&mut s, "solid.thread", json!({"face":[44,0,4],"designation":"M8-6g","modeled":modeled}))["feature"].clone();
+        assert_ne!(shaft_feature, peg_feature, "modeled {modeled}, before the move: the two threads are different features");
+
+        let (shaft_start, shaft_end, peg_start, peg_end) = {
+            let listed = run(&mut s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {listed}"));
+            let pick = |body: &str| {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, before the move: expected one {body} record, got {listed}");
+                found[0]
+            };
+            let num = |t: &Value, body: &str, key: &str| {
+                t[key].as_f64().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {body} {key} is {t}"))
+            };
+            let shaft = pick("Shaft");
+            let peg = pick("Peg");
+            (num(shaft, "Shaft", "start"), num(shaft, "Shaft", "end"), num(peg, "Peg", "start"), num(peg, "Peg", "end"))
+        };
+
+        let coords_near = |got: &Value, want: [f64; 3], step: &str, what: &str| {
+            for (i, want_i) in want.into_iter().enumerate() {
+                let g = got.get(i).and_then(Value::as_f64);
+                assert!(g.is_some_and(|g| (g - want_i).abs() < 1e-6), "modeled {modeled}, {step}: {what}[{i}] is {got}, expected {want:?}");
+            }
+        };
+        let scalar_near = |got: &Value, want: f64, step: &str, what: &str| {
+            let g = got.as_f64();
+            assert!(g.is_some_and(|g| (g - want).abs() < 1e-6), "modeled {modeled}, {step}: {what} is {got}, expected {want}");
+        };
+        let expect = |s: &mut Session, step: &str, shaft_point: [f64; 3], shaft_axis: [f64; 3]| {
+            let listed = run(s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, {step}: {listed}"));
+            assert_eq!(threads.len(), 2, "modeled {modeled}, {step}: expected one record each for Shaft and Peg, got {listed}");
+            for (body, feature, point, axis, hand, start, end) in [
+                ("Shaft", &shaft_feature, shaft_point, shaft_axis, "left", shaft_start, shaft_end),
+                ("Peg", &peg_feature, [40.0, 0.0, 0.0], [0.0, 0.0, 1.0], "right", peg_start, peg_end),
+            ] {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, {step}: expected one {body} record, got {listed}");
+                let t = found[0];
+                coords_near(&t["axis_point"], point, step, &format!("{body} axis_point"));
+                coords_near(&t["axis"], axis, step, &format!("{body} axis"));
+                assert_eq!(t["feature"], *feature, "modeled {modeled}, {step}: {body} feature id, got {t}");
+                assert_eq!(t["body"], body, "modeled {modeled}, {step}: body, got {t}");
+                assert_eq!(t["hand"], hand, "modeled {modeled}, {step}: {body} hand, got {t}");
+                assert_eq!(t["designation"], "M8-6g", "modeled {modeled}, {step}: {body} designation, got {t}");
+                scalar_near(&t["start"], start, step, &format!("{body} start"));
+                scalar_near(&t["end"], end, step, &format!("{body} end"));
+            }
+        };
+        let body_names = |s: &Session| {
+            let mut names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+            names.sort();
+            names
+        };
+        let at_origin = ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let translated = ([30.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        // Right-hand quarter turn about +X: (x, y, z) relative to the pivot maps to (x, -z, y).
+        let turned = ([30.0, 0.0, 0.0], [0.0, -1.0, 0.0]);
+
+        expect(&mut s, "before the move", at_origin.0, at_origin.1);
+
+        let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft"],"translate":[30,0,0]}));
+        assert_eq!(moved["created_bodies"], json!([]), "modeled {modeled}, after the 30 mm move: a plain move must not create a copy: {moved}");
+        assert_eq!(
+            body_names(&s),
+            ["Peg".to_string(), "Shaft".to_string()],
+            "modeled {modeled}, after the 30 mm move: Shaft stays the moved body and Peg stays"
+        );
+        expect(&mut s, "after the 30 mm move", translated.0, translated.1);
+        let contains = |at: [f64; 3]| {
+            let state = s.model.state();
+            let shaft = state.body("Shaft").unwrap_or_else(|| panic!("modeled {modeled}, after the 30 mm move: Shaft is gone"));
+            shaft.body.classify_point(Vec3::new(at[0], at[1], at[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+        };
+        assert!(contains([30.0, 0.0, 4.0]), "modeled {modeled}, after the 30 mm move: the shaft should contain [30, 0, 4]");
+        assert!(!contains([0.0, 0.0, 4.0]), "modeled {modeled}, after the 30 mm move: the shaft should not contain [0, 0, 4]");
+
+        let turned_reply = run(&mut s, "solid.move", json!({"bodies":["Shaft"],"axis":[1,0,0],"angle":"90 deg","origin":[30,0,0]}));
+        assert_eq!(
+            turned_reply["created_bodies"],
+            json!([]),
+            "modeled {modeled}, after the 90 deg turn: a plain move must not create a copy: {turned_reply}"
+        );
+        assert_eq!(body_names(&s), ["Peg".to_string(), "Shaft".to_string()], "modeled {modeled}, after the 90 deg turn: Shaft and Peg only");
+        expect(&mut s, "after the 90 deg turn", turned.0, turned.1);
+
+        run(&mut s, "edit.undo", json!({}));
+        expect(&mut s, "after undoing the turn", translated.0, translated.1);
+        run(&mut s, "edit.undo", json!({}));
+        expect(&mut s, "after undoing the move", at_origin.0, at_origin.1);
+        run(&mut s, "edit.redo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        expect(&mut s, "after redoing both", turned.0, turned.1);
+
+        let folder = crate::tests::Folder::new(&format!("plain-move-thread-record-{modeled}"));
+        let path = folder.path("move.sc");
+        run(&mut s, "file.save_as", json!({"path":path,"format":"container","cache":true}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path":path,"read_only":true}));
+        assert_eq!(reopened.model.last_recomputed, 0, "modeled {modeled}, reopened: reopen should reuse the saved model");
+        expect(&mut reopened, "reopened", turned.0, turned.1);
+        let mut rebuilt = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        expect(&mut rebuilt, "rebuilt", turned.0, turned.1);
+        std::fs::remove_dir_all(&folder.0).unwrap();
+    }
+}
+
+/// #310: a plain `solid.move` (no copy) that lists the same body more than once applies that
+/// one rigid motion once per listing, to the body and to each of that body's thread records.
+/// The record ends where the body ends. Hand, feature id, designation, class, start and end
+/// stay. A body left out of the move does not move.
+#[test]
+fn a_plain_move_that_names_a_body_more_than_once_carries_its_thread_record() {
+    // A modelled thread is cut into the body and moves with it; only a cosmetic one has a record to carry.
+    {
+        let modeled = false;
+        let prepare = || {
+            let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+            run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+            let shaft_feature =
+                run(&mut s, "solid.thread", json!({"face":[4,0,4],"designation":"M8-6g","hand":"left","modeled":modeled}))["feature"].clone();
+            run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"base":[40,0,0],"body_name":"Peg","operation":"new"}));
+            let peg_feature = run(&mut s, "solid.thread", json!({"face":[44,0,4],"designation":"M8-6g","modeled":modeled}))["feature"].clone();
+            assert_ne!(shaft_feature, peg_feature, "modeled {modeled}, before the move: the two threads are different features");
+            let (shaft_start, shaft_end, peg_start, peg_end) = {
+                let listed = run(&mut s, "model.threads", json!({}));
+                let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {listed}"));
+                let pick = |body: &str| {
+                    let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                    assert_eq!(found.len(), 1, "modeled {modeled}, before the move: expected one {body} record, got {listed}");
+                    found[0]
+                };
+                let num = |t: &Value, body: &str, key: &str| {
+                    t[key].as_f64().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {body} {key} is {t}"))
+                };
+                let shaft = pick("Shaft");
+                let peg = pick("Peg");
+                (num(shaft, "Shaft", "start"), num(shaft, "Shaft", "end"), num(peg, "Peg", "start"), num(peg, "Peg", "end"))
+            };
+            (s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end)
+        };
+        let coords_near = |got: &Value, want: [f64; 3], step: &str, what: &str| {
+            for (i, want_i) in want.into_iter().enumerate() {
+                let g = got.get(i).and_then(Value::as_f64);
+                assert!(g.is_some_and(|g| (g - want_i).abs() < 1e-6), "modeled {modeled}, {step}: {what}[{i}] is {got}, expected {want:?}");
+            }
+        };
+        let scalar_near = |got: &Value, want: f64, step: &str, what: &str| {
+            let g = got.as_f64();
+            assert!(g.is_some_and(|g| (g - want).abs() < 1e-6), "modeled {modeled}, {step}: {what} is {got}, expected {want}");
+        };
+        let expect = |s: &mut Session,
+                      step: &str,
+                      shaft_feature: &Value,
+                      peg_feature: &Value,
+                      shaft_start: f64,
+                      shaft_end: f64,
+                      peg_start: f64,
+                      peg_end: f64,
+                      shaft_point: [f64; 3],
+                      shaft_axis: [f64; 3]| {
+            let listed = run(s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, {step}: {listed}"));
+            assert_eq!(threads.len(), 2, "modeled {modeled}, {step}: expected one record each for Shaft and Peg, got {listed}");
+            for (body, feature, point, axis, hand, start, end) in [
+                ("Shaft", shaft_feature, shaft_point, shaft_axis, "left", shaft_start, shaft_end),
+                ("Peg", peg_feature, [40.0, 0.0, 0.0], [0.0, 0.0, 1.0], "right", peg_start, peg_end),
+            ] {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, {step}: expected one {body} record, got {listed}");
+                let t = found[0];
+                coords_near(&t["axis_point"], point, step, &format!("{body} axis_point"));
+                coords_near(&t["axis"], axis, step, &format!("{body} axis"));
+                assert_eq!(t["feature"], *feature, "modeled {modeled}, {step}: {body} feature id, got {t}");
+                assert_eq!(t["body"], body, "modeled {modeled}, {step}: body, got {t}");
+                assert_eq!(t["hand"], hand, "modeled {modeled}, {step}: {body} hand, got {t}");
+                assert_eq!(t["designation"], "M8-6g", "modeled {modeled}, {step}: {body} designation, got {t}");
+                scalar_near(&t["start"], start, step, &format!("{body} start"));
+                scalar_near(&t["end"], end, step, &format!("{body} end"));
+            }
+        };
+        let class_at = |s: &Session, at: [f64; 3], step: &str| {
+            let state = s.model.state();
+            let shaft = state.body("Shaft").unwrap_or_else(|| panic!("modeled {modeled}, {step}: Shaft is gone"));
+            shaft
+                .body
+                .classify_point(Vec3::new(at[0], at[1], at[2]))
+                .unwrap_or_else(|err| panic!("modeled {modeled}, {step}: classify_point {at:?} failed: {err}"))
+        };
+        let at_origin = ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+
+        // Two listings of +30 mm: the body and its record both end at x = 60.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(&mut s, "before the move", &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, at_origin.0, at_origin.1);
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft"],"translate":[30,0,0]}));
+            assert_eq!(
+                moved["created_bodies"],
+                json!([]),
+                "modeled {modeled}, after naming Shaft twice: a plain move must not create a copy: {moved}"
+            );
+            let step = "after naming Shaft twice";
+            assert_eq!(
+                class_at(&s, [60.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [60, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [30.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [30, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [0.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [0, 0, 4]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [60.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+            run(&mut s, "edit.undo", json!({}));
+            expect(&mut s, "after one undo", &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, at_origin.0, at_origin.1);
+        }
+
+        // Three listings of +30 mm land at x = 90.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(
+                &mut s,
+                "before the three-name move",
+                &shaft_feature,
+                &peg_feature,
+                shaft_start,
+                shaft_end,
+                peg_start,
+                peg_end,
+                at_origin.0,
+                at_origin.1,
+            );
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft","Shaft"],"translate":[30,0,0]}));
+            assert_eq!(
+                moved["created_bodies"],
+                json!([]),
+                "modeled {modeled}, after naming Shaft three times: a plain move must not create a copy: {moved}"
+            );
+            let step = "after naming Shaft three times";
+            assert_eq!(
+                class_at(&s, [90.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [90, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [30.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [30, 0, 4]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [90.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        }
+
+        // Two right-hand quarter turns about +X: (x, y, z) -> (x, -z, y) each time,
+        // so the axis [0, 0, 1] becomes [0, 0, -1] and the axis point stays at the origin.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(
+                &mut s,
+                "before the two turns",
+                &shaft_feature,
+                &peg_feature,
+                shaft_start,
+                shaft_end,
+                peg_start,
+                peg_end,
+                at_origin.0,
+                at_origin.1,
+            );
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft"],"axis":[1,0,0],"angle":"90 deg","origin":[0,0,0]}));
+            assert_eq!(moved["created_bodies"], json!([]), "modeled {modeled}, after two 90 deg turns: a plain move must not create a copy: {moved}");
+            let step = "after two 90 deg turns about +X";
+            // (0, 0, 4) -> (0, -4, 0) -> (0, 0, -4). One turn would still contain (0, -4, 0).
+            assert_eq!(
+                class_at(&s, [0.0, 0.0, -4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [0, 0, -4]"
+            );
+            assert_ne!(
+                class_at(&s, [0.0, -4.0, 0.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [0, -4, 0]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [0.0, 0.0, 0.0], [0.0, 0.0, -1.0]);
+        }
+    }
+}
+
+/// Ungrounded "Part" with Shaft local z 0..12, translated to world z 100..112, root active.
+fn placed_shaft() -> Session {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 12, "body_name": "Shaft"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": part["occurrence"], "translate": [0, 0, 100]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bounds = s.world_state().unwrap().body("Shaft").expect("Shaft in the world").mesh().bounds();
+    assert!(
+        (bounds.min.z - 100.0).abs() < 1e-6 && (bounds.max.z - 112.0).abs() < 1e-6,
+        "Shaft should sit at world z 100..112, got {:?}..{:?}",
+        bounds.min,
+        bounds.max
+    );
+    s
+}
+
+/// `up_to` as `{x, y, z}` on a placed component stops where the array form does.
+/// World z 108 is local z 8 on a shaft whose axis parameter runs 0..12.
+#[test]
+fn placed_thread_up_to_xyz_object_maps_like_an_array() {
+    let mut array_session = placed_shaft();
+    let array = run(&mut array_session, "solid.thread", json!({"face": [4, 0, 102], "up_to": [4, 0, 108]}));
+    let array_end = array["thread"]["end"].as_f64().unwrap();
+    assert!((array_end - 8.0).abs() < 1e-6, "array up_to end {array_end}, reply {array}");
+
+    let mut s = placed_shaft();
+    let reply = run(&mut s, "solid.thread", json!({"face": [4, 0, 102], "up_to": {"x": 4, "y": 0, "z": 108}}));
+    let end = reply["thread"]["end"].as_f64().unwrap();
+    assert!((end - 8.0).abs() < 1e-6, "xyz up_to end {end}, same as array {array_end}, reply {reply}");
+}
+
+/// `face: {point: [x, y, z]}` on a placed component finds the cylinder, as `face: [x, y, z]` does.
+#[test]
+fn placed_thread_face_point_wrapper_finds_the_cylinder() {
+    let mut s = placed_shaft();
+    let reply = s.execute("solid.thread", &json!({"face": {"point": [4, 0, 102]}}));
+    assert!(reply.is_ok(), "{reply:?}");
+}
+
+/// How a shaft's component is placed for the placed-frame tests.
+#[derive(Clone, Copy, Debug)]
+enum Place {
+    Translated,
+    Rotated,
+    Nested,
+}
+
+const PLACES: [Place; 3] = [Place::Translated, Place::Rotated, Place::Nested];
+
+/// A shaft (radius 4, local z 0..12) in a component placed as `place`, root active.
+fn shaft_placed(place: Place) -> Session {
+    let mut s = Session::default();
+    let shaft = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 4, "height": 12, "body_name": "Shaft"}));
+    };
+    match place {
+        Place::Translated | Place::Rotated => {
+            let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+            shaft(&mut s);
+            let turn = if matches!(place, Place::Rotated) { json!({"axis": [1, 0, 0], "angle": "90 deg"}) } else { json!({}) };
+            let mut p = json!({"occurrence": part["occurrence"], "translate": [30, 40, 100]});
+            for (k, v) in turn.as_object().into_iter().flatten() {
+                p[k] = v.clone();
+            }
+            run(&mut s, "occurrence.move", p);
+        }
+        Place::Nested => {
+            let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}));
+            let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+            shaft(&mut s);
+            run(&mut s, "occurrence.move", json!({"occurrence": inner["occurrence"], "translate": [5, 0, 30], "axis": [0, 1, 0], "angle": "90 deg"}));
+            run(&mut s, "occurrence.move", json!({"occurrence": outer["occurrence"], "translate": [20, 10, 70]}));
+        }
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// The world point and direction of the shaft's local ones.
+fn shaft_world(s: &Session, local: [f64; 3]) -> Value {
+    let frames = s.body_frames();
+    let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Shaft").expect("Shaft is placed");
+    let p = solidcraft_doc::apply_point(m, Vec3::new(local[0], local[1], local[2]));
+    json!([p.x, p.y, p.z])
+}
+
+fn shaft_world_dir(s: &Session, local: [f64; 3]) -> Value {
+    let frames = s.body_frames();
+    let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Shaft").expect("Shaft is placed");
+    let d = solidcraft_doc::apply_vector(m, Vec3::new(local[0], local[1], local[2]));
+    json!([d.x, d.y, d.z])
+}
+
+fn thread_end_with(place: Place, limit: impl Fn(&Session) -> Value, what: &str) {
+    let mut s = shaft_placed(place);
+    let face = shaft_world(&s, [4.0, 0.0, 2.0]);
+    let up_to = limit(&s);
+    let reply = s.execute("solid.thread", &json!({"face": face, "up_to": up_to}));
+    let reply = reply.unwrap_or_else(|e| panic!("{place:?} {what}: {e} (up_to {up_to})"));
+    let end = reply["thread"]["end"].as_f64().expect("a thread end");
+    assert!((end - 8.0).abs() < 1e-6, "{place:?} {what}: thread end {end}, want 8 (up_to {up_to})");
+}
+
+/// an `up_to` point on the axis or off the surface of a placed shaft, in every form.
+#[test]
+fn placed_thread_up_to_point_off_the_surface_maps_into_the_faces_frame() {
+    for place in PLACES {
+        let xyz = |v: &Value| json!({"x": v[0], "y": v[1], "z": v[2]});
+        thread_end_with(place, |s| shaft_world(s, [4.0, 0.0, 8.0]), "on the surface, array");
+        thread_end_with(place, |s| shaft_world(s, [0.0, 0.0, 8.0]), "on the axis, array");
+        thread_end_with(place, |s| xyz(&shaft_world(s, [0.0, 0.0, 8.0])), "on the axis, xyz");
+        thread_end_with(place, |s| shaft_world(s, [9.0, 0.0, 8.0]), "in the air, array");
+        thread_end_with(place, |s| xyz(&shaft_world(s, [9.0, 0.0, 8.0])), "in the air, xyz");
+        thread_end_with(place, |s| json!({"point": shaft_world(s, [0.0, 0.0, 8.0])}), "on the axis, point wrapper");
+    }
+}
+
+/// a plane limit of a placed shaft with its origin off the surface, in every plane form.
+#[test]
+fn placed_thread_plane_limit_maps_an_origin_off_the_surface() {
+    for place in PLACES {
+        let normal_form = |s: &Session, origin: Value| json!({"origin": origin, "normal": shaft_world_dir(s, [0.0, 0.0, 1.0])});
+        thread_end_with(place, |s| normal_form(s, shaft_world(s, [0.0, 0.0, 8.0])), "plane origin on the axis");
+        thread_end_with(place, |s| normal_form(s, shaft_world(s, [9.0, 0.0, 8.0])), "plane origin in the air");
+        thread_end_with(place, |s| normal_form(s, shaft_world(s, [4.0, 0.0, 8.0])), "plane origin on the surface");
+        thread_end_with(
+            place,
+            |s| {
+                json!({"origin": shaft_world(s, [0.0, 0.0, 8.0]),
+                    "x_dir": shaft_world_dir(s, [1.0, 0.0, 0.0]), "y_dir": shaft_world_dir(s, [0.0, 1.0, 0.0])})
+            },
+            "plane from x_dir and y_dir",
+        );
+        thread_end_with(
+            place,
+            |s| {
+                let o = shaft_world(s, [0.0, 0.0, 8.0]);
+                normal_form(s, json!([o[0].as_f64().unwrap().to_string(), o[1].as_f64().unwrap().to_string(), o[2].as_f64().unwrap().to_string()]))
+            },
+            "plane origin as expressions",
+        );
+    }
+}
+
+/// an `up_to` named as a root construction plane, on a placed shaft.
+#[test]
+fn placed_thread_up_to_a_root_construction_plane_maps_into_the_faces_frame() {
+    for place in PLACES {
+        let mut s = shaft_placed(place);
+        let origin = shaft_world(&s, [0.0, 0.0, 4.0]);
+        let normal = shaft_world_dir(&s, [0.0, 0.0, 1.0]);
+        run(&mut s, "construct.plane.offset", json!({"base": {"origin": origin, "normal": normal}, "offset": 0, "name": "Lim"}));
+        let face = shaft_world(&s, [4.0, 0.0, 2.0]);
+        let reply = run(&mut s, "solid.thread", json!({"face": face, "up_to": "Lim"}));
+        let end = reply["thread"]["end"].as_f64().expect("a thread end");
+        assert!((end - 4.0).abs() < 1e-6, "{place:?}: thread end {end}, want 4");
+    }
+    // The reported case: the root plane XY offset 104 over a shaft translated 100.
+    let mut s = placed_shaft();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 104, "name": "Lim"}));
+    let reply = run(&mut s, "solid.thread", json!({"face": [4, 0, 102], "up_to": "Lim"}));
+    assert!((reply["thread"]["end"].as_f64().unwrap() - 4.0).abs() < 1e-6, "{reply}");
+}
+
+/// a malformed `up_to` is refused with the forms it takes, and `{point}` is read as the point.
+#[test]
+fn thread_up_to_refusals_name_the_forms_it_takes() {
+    let mut s = placed_shaft();
+    for bad in [json!({"x": 4, "z": 108}), json!({}), json!({"x": "a", "y": 0, "z": 1})] {
+        let e = s.execute("solid.thread", &json!({"face": [4, 0, 102], "up_to": bad})).expect_err("refused").to_string();
+        assert!(e.contains("[x, y, z]") && !e.contains("plane needs"), "{bad}: {e}");
+    }
+}
+
+/// a `face` object naming a body that does not exist is refused.
+#[test]
+fn thread_face_point_with_an_unknown_body_is_refused() {
+    let mut s = placed_shaft();
+    let e = s.execute("solid.thread", &json!({"face": {"point": [4, 0, 102], "body": "Nope"}})).expect_err("refused").to_string();
+    assert!(e.contains("Nope"), "{e}");
+    assert!(s.execute("solid.thread", &json!({"face": {"point": [4, 0, 102], "body": "Shaft"}})).is_ok());
+}
+
+/// A component's origin plane key names a plane of that part, so from the root it is already in
+/// the placed shaft's frame: the thread runs up to the part's XY plane, as an explicit plane does.
+#[test]
+fn placed_thread_up_to_the_parts_origin_plane_key_ends_on_that_plane() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, -4], "radius": 4, "height": 12, "body_name": "Shaft"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [0, 0, 100]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let key = format!("o:{occurrence}/origin/XY");
+    let reply = run(&mut s, "solid.thread", json!({"face": [4, 0, 102], "from": [4, 0, 108], "up_to": key}));
+    // The shaft spans local z -4 to 8 (world 96 to 108); from the top end down to the part's XY
+    // plane (local z 0) the thread is 8 mm long. Had the key been read in the root frame it would
+    // be world z 0, 108 mm away, and the limit would be refused.
+    let (a, b) = (reply["thread"]["start"].as_f64().unwrap(), reply["thread"]["end"].as_f64().unwrap());
+    assert!(((b - a).abs() - 8.0).abs() < 1e-6, "ends on the part's XY plane, reply {reply}");
+}
+
+/// A plane key that names no plane of any part is refused with a reason, never passed through to
+/// be read in the wrong frame.
+#[test]
+fn placed_thread_up_to_an_unmappable_plane_name_is_refused() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 12, "body_name": "Shaft"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [0, 0, 100]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let e = s.execute("solid.thread", &json!({"face": [4, 0, 102], "up_to": "o:9999/origin/XY"})).expect_err("refused").to_string();
+    assert!(e.contains("cannot be mapped") && e.contains("explicit"), "{e}");
 }

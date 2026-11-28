@@ -124,6 +124,7 @@ mod tests {
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
     use crate::mass::integrator::properties::brep_volume_default;
+    use crate::math::det;
     use crate::math::Point3;
     use crate::math::Vec3;
     use crate::primitive::api_curves::{create_arc, create_line_segment};
@@ -292,7 +293,7 @@ mod tests {
         let (axis, angle): ([f64; 3], f64) = ([1.0, 2.0, 3.0], 37f64.to_radians());
         let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
         let a = [axis[0] / n, axis[1] / n, axis[2] / n];
-        let (s, c) = angle.sin_cos();
+        let (s, c) = det::sin_cos(angle);
         // Rodrigues: p cos + (a × p) sin + a (a · p)(1 − cos)
         let turn = move |p: [f64; 3]| {
             let d = a[0] * p[0] + a[1] * p[1] + a[2] * p[2];

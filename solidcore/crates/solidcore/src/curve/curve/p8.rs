@@ -4371,6 +4371,7 @@ mod tests {
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::geom::solution_array::ObjectKind;
     use crate::geom::vector3d::Vec3;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
@@ -4961,7 +4962,7 @@ mod tests {
         // radius of curvature ρ = (2 / d.x)² / 2 at the top
         let below = Vec3::new(0.0, 0.0, -1e-3);
         let cut = Curve::from(Line::from_points(a + below, b + below, 3));
-        let half = (2.0 * 1e-3 * (2.0 / d.x).powi(2) / 2.0).sqrt();
+        let half = (2.0 * 1e-3 * det::powi(2.0 / d.x, 2) / 2.0).sqrt();
         let crossings = [top + below - half * d, top + below + half * d];
         assert_eq!(run(&cut, &crossings, 1e-5, false).len(), 2);
         // a hair (1e-9) inside the top, with no contact tolerance: the circle rule's zero

@@ -45,6 +45,9 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
     if op == BooleanOp::Union {
         return call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::union_copies(a, b));
     }
+    if op == BooleanOp::Intersect {
+        return call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::intersect_copies(a, b));
+    }
     let mut c = copies(&[a, b])?.into_iter();
     let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))
@@ -53,15 +56,16 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
 /// [`boolean`] of `a` and `b` tagged as operands 0 and 1 ([`super::history::tag`]): the tagged
 /// copies are the operation's to consume, so they are not copied again. A boolean of tagged
 /// copies made them and then copied them both, the larger operand's copy as dear as the
-/// boolean on a body of many faces (solidcore#3359). On a union radial-sector failure, retries
-/// via [`ops::union_copies`] on fresh tagged copies so tagged unions keep the same recovery as
-/// [`boolean`] (#21114) without copying on the fast path. A failure's dump gets `a` and `b`.
+/// boolean on a body of many faces (solidcore#3359). On a union or intersection radial-sector
+/// failure, retries via [`ops::union_copies`] / [`ops::intersect_copies`] on fresh tagged copies
+/// so tagged operations keep the same recovery as [`boolean`] (#21114) without copying on the
+/// fast path. A failure's dump gets `a` and `b`.
 pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
     usable("SmApiBoolean", &[a, b])?;
     let ta = super::history::tag(a, 0)?;
     let tb = super::history::tag(b, 1)?;
     let first = call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ta, tb, operation(op)));
-    if op != BooleanOp::Union {
+    if !matches!(op, BooleanOp::Union | BooleanOp::Intersect) {
         return first;
     }
     let Err(ref err) = first else {
@@ -72,8 +76,14 @@ pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option
     }
     let ta = super::history::tag(a, 0)?;
     let tb = super::history::tag(b, 1)?;
-    match call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::union_copies(&ta, &tb)) {
+    let retry = match op {
+        BooleanOp::Union => call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::union_copies(&ta, &tb)),
+        BooleanOp::Intersect => call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::intersect_copies(&ta, &tb)),
+        BooleanOp::Subtract => return first,
+    };
+    match retry {
         ok @ Ok(Some(_)) => ok,
+        ok @ Ok(None) if op == BooleanOp::Intersect => ok,
         Err(e @ Error::Cancelled(_)) => Err(e),
         _ => first,
     }

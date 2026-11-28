@@ -1,0 +1,26 @@
+{
+  "en": {
+    "coil.plane_unavailable": "The selected plane is unavailable. Pick a plane again."
+  },
+  "ar": {
+    "coil.plane_unavailable": "المستوى المحدد غير متاح. اختر مستوى مرة أخرى."
+  },
+  "de": {
+    "coil.plane_unavailable": "Die ausgewählte Ebene ist nicht verfügbar. Wählen Sie erneut eine Ebene."
+  },
+  "he": {
+    "coil.plane_unavailable": "המישור שנבחר אינו זמין. יש לבחור מישור שוב."
+  },
+  "ja": {
+    "coil.plane_unavailable": "選択した平面は使用できません。平面を選び直してください。"
+  },
+  "ko": {
+    "coil.plane_unavailable": "선택한 평면을 사용할 수 없습니다. 평면을 다시 선택하세요."
+  },
+  "vi": {
+    "coil.plane_unavailable": "Mặt phẳng đã chọn không khả dụng. Hãy chọn lại một mặt phẳng."
+  },
+  "zh": {
+    "coil.plane_unavailable": "所选平面不可用。请重新选择一个平面。"
+  }
+}

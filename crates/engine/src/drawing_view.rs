@@ -19,7 +19,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind};
+use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, HiddenBody, Pose, Shows, StudyStep, ViewConfiguration};
@@ -790,6 +790,36 @@ pub fn measured<'a>(
     Ok((set, extents))
 }
 
+/// Outcome of cutting one model body along a section plane.
+enum SectionCut {
+    /// Kept (whole or cut) on the kept side, with how its cut faces are told.
+    Kept(Box<ModelBody>, Option<CutFaces>),
+    /// Nothing of the body lies on the kept side.
+    Away,
+    /// The cut failed or was cancelled: drawn uncut, with the reason.
+    Failed(String),
+}
+
+/// Pre-warms the display meshes of unmeshed bodies in parallel so measuring extents across
+/// many-body assemblies does not tessellate serially on one thread. Rigid placements of one
+/// definition share one lazy source mesh, so each definition is warmed once.
+fn warm_mesh_in_place(bodies: &[&ModelBody]) {
+    let mut seen = HashSet::new();
+    let cold: Vec<&ModelBody> = bodies
+        .iter()
+        .copied()
+        .filter(|b| {
+            b.cached_mesh().is_none()
+                && seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize))
+        })
+        .collect();
+    if cold.len() > 1 {
+        solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+}
+
 /// What a full section view along `cut` shows of `set`: each model body cut by the line's plane, the
 /// side its arrows point to kept ([`ModelBody::section`], which remembers it), and a body with nothing
 /// on that side left out. Reference parts show whole around the cut, as context. Mesh bodies have no
@@ -800,6 +830,35 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
     let mut state = ModelState::clone(&set.state);
     let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
     let mut cut_bodies = BTreeMap::new();
+    let to_cut: Vec<&ModelBody> = match &plane {
+        Ok(_) => set.bodies.iter().filter(|s| !s.reference).filter_map(|s| set.body(s)).filter(|b| !b.body.is_mesh()).collect(),
+        Err(_) => Vec::new(),
+    };
+    let cut_one = |body: &ModelBody, plane: &Plane| -> SectionCut {
+        if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+            return SectionCut::Failed("cancelled".into());
+        }
+        match body.section(plane) {
+            Ok(Some(section)) => {
+                // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                let telling = hatch::cut_faces(&body.body, &section.body, plane);
+                SectionCut::Kept(Box::new(section), telling)
+            }
+            Ok(None) => SectionCut::Away,
+            Err(e) => SectionCut::Failed(e.to_string()),
+        }
+    };
+    let mut results = match &plane {
+        Ok(plane) if to_cut.len() > 1 => {
+            solidcraft_kernel::map_with_local_pools(&to_cut, crate::mesh_lines::WORKERS, |&body| Ok(cut_one(body, plane)))
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|e| SectionCut::Failed(e.to_string())))
+                .collect::<Vec<_>>()
+                .into_iter()
+        }
+        Ok(plane) => to_cut.iter().map(|&body| cut_one(body, plane)).collect::<Vec<_>>().into_iter(),
+        Err(_) => Vec::new().into_iter(),
+    };
     for shown in &set.bodies {
         let Some(body) = set.body(shown) else { continue };
         if shown.reference {
@@ -811,20 +870,22 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
             bodies.push(shown.clone());
             continue;
         }
-        match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
-            Ok(Some(section)) => {
+        let outcome = match &plane {
+            Ok(_) => results.next().unwrap_or_else(|| SectionCut::Failed("missing section result".into())),
+            Err(why) => SectionCut::Failed(why.clone()),
+        };
+        match outcome {
+            SectionCut::Kept(section, telling) => {
                 if let Some(slot) = state.bodies.get_mut(shown.index) {
-                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
-                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
                     if let Some(telling) = telling {
                         cut_bodies.insert(shown.index, telling);
                     }
-                    *slot = section;
+                    *slot = *section;
                 }
                 bodies.push(shown.clone());
             }
-            Ok(None) => {}
-            Err(why) => {
+            SectionCut::Away => {}
+            SectionCut::Failed(why) => {
                 failed += 1;
                 why_failed.get_or_insert(why);
                 bodies.push(shown.clone());
@@ -849,8 +910,9 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
 /// reference parts.
 pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
     let has_model = shown.bodies.iter().any(|b| !b.reference);
-    let bodies = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b));
-    let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
+    let bodies: Vec<&ModelBody> = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b)).collect();
+    warm_mesh_in_place(&bodies);
+    let extents = bodies.into_iter().fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
         model: e.model.union(&body.mesh_bounds_in(basis)),
         error_mm: e.error_mm.max(body.display_tol()),
         bodies: e.bodies + 1,
@@ -865,8 +927,9 @@ pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -
     if percent <= 0.0 {
         return extents.model;
     }
-    let references = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b));
-    let all = references.fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
+    let references: Vec<&ModelBody> = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b)).collect();
+    warm_mesh_in_place(&references);
+    let all = references.into_iter().fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
     let part = percent / 100.0;
     let side = |from: f64, to: f64| if from == to { from } else { from * (1.0 - part) + to * part };
     let model = extents.model;
@@ -936,8 +999,8 @@ pub(crate) struct ViewOnSheet {
 
 /// Where the view of `dimension` puts what it draws on its sheet, as the sheet draws it: its frame,
 /// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
-/// an occurrence move not captured yet is left out). A full section can place distances between
-/// named model faces. Edges made by the cut have no model references yet (#13046).
+/// an occurrence move not captured yet is left out). A full section places what points at the model
+/// as any view does; the edges its cut makes have no model references (#13046).
 /// A missing or unsupported view, or one with nothing to measure, returns
 /// [`crate::drawing_scene::NOT_DRAWN`]. A view that draws no model edges, a flat
 /// pattern view ([`no_model_edges`]), has no place for what points at the model
@@ -951,10 +1014,7 @@ pub(crate) fn dimension_view_on_sheet(s: &Session, d: &Drawing, dimension: &Dime
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
     }
-    if not_drawable_apart(&view).is_some()
-        || not_cut_yet(&view).is_some()
-        || (view.cut.is_some() && !matches!(dimension.kind, DimensionKind::Faces { .. }))
-    {
+    if not_drawable_apart(&view).is_some() || not_cut_yet(&view).is_some() {
         return Err(NOT_DRAWN);
     }
     let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
@@ -1123,5 +1183,106 @@ mod tests {
             let filter = Filter::new(source, &hides, &hidden);
             assert_eq!(filter.keeps(&body, &name), long_way, "seed {seed}: {body:?} {name} {sources:?} {hides:?} {hidden:?}");
         }
+    }
+
+    /// Parallel section cuts, extents measurement and reference growth match sequential per-body
+    /// sectioning in exact body order, cut-face map, extents and repeated determinism.
+    #[test]
+    fn parallel_section_cut_preserves_order_and_matches_serial() {
+        use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine};
+        use solidcraft_geom::drawing_view::NamedView;
+
+        let mut s = Session::default();
+        // 10 boxes: 2 wholly below z = 10, 6 spanning z = 10, 2 wholly above z = 10.
+        for i in 0..10 {
+            let (z0, h) = match i {
+                0 | 1 => (0.0, 5.0),
+                8 | 9 => (15.0, 10.0),
+                _ => (0.0, 20.0),
+            };
+            s.execute(
+                "solid.box",
+                &serde_json::json!({
+                    "length": 15,
+                    "width": 15,
+                    "height": h,
+                    "corner": [25 * i, 0, z0],
+                    "body_name": format!("Part {i}"),
+                    "operation": "new",
+                }),
+            )
+            .unwrap();
+        }
+        let set = shown(&s).unwrap();
+        let parent = NamedView::Front.basis();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-10.0, 10.0), Vec2::new(300.0, 10.0)], ArrowSide::Left).unwrap();
+        let cut = Cut { parent, line };
+        let plane = cut.line.planes(&cut.parent).unwrap().into_iter().next().unwrap();
+
+        let par_a = sectioned(&set, &cut).unwrap();
+        let par_b = sectioned(&set, &cut).unwrap();
+        assert_eq!(par_a.bodies, par_b.bodies);
+        assert_eq!(par_a.cut, par_b.cut);
+        assert_eq!(par_a.uncut, par_b.uncut);
+
+        let mut serial_bodies = Vec::new();
+        let mut serial_cut = BTreeMap::new();
+        for item in &set.bodies {
+            let body = set.body(item).unwrap();
+            if let Some(section) = body.section(&plane).unwrap() {
+                if let Some(telling) = hatch::cut_faces(&body.body, &section.body, &plane) {
+                    serial_cut.insert(item.index, telling);
+                }
+                serial_bodies.push(item.clone());
+            }
+        }
+        assert_eq!(par_a.bodies, serial_bodies);
+        assert_eq!(par_a.cut, serial_cut);
+        assert_eq!(par_a.uncut, None);
+        assert_eq!(par_a.cut.len(), 6);
+
+        let extents = measure(&par_a, &plane).unwrap();
+        let serial_model = par_a.bodies.iter().filter_map(|b| par_a.body(b)).fold(Aabb2::EMPTY, |acc, b| acc.union(&b.mesh_bounds_in(&plane)));
+        assert_eq!(extents.model, serial_model);
+        assert_eq!(extents.bodies, par_a.bodies.len());
+        assert_eq!(shows(&par_a, &plane, &extents, 50.0), extents.model);
+    }
+
+    /// A cancelled kernel watch stops parallel section cuts without cutting remaining bodies.
+    #[test]
+    fn section_cut_respects_watch_cancellation() {
+        use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine};
+        use solidcraft_geom::drawing_view::NamedView;
+
+        struct Cancelled;
+        impl solidcraft_kernel::watch::Watch for Cancelled {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _stage: &'static str, _done: usize, _total: usize) {}
+        }
+
+        let mut s = Session::default();
+        for i in 0..4 {
+            s.execute(
+                "solid.box",
+                &serde_json::json!({
+                    "length": 10,
+                    "width": 10,
+                    "height": 20,
+                    "corner": [20 * i, 0, 0],
+                    "body_name": format!("Block {i}"),
+                    "operation": "new",
+                }),
+            )
+            .unwrap();
+        }
+        let set = shown(&s).unwrap();
+        let parent = NamedView::Front.basis();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-10.0, 10.0), Vec2::new(100.0, 10.0)], ArrowSide::Left).unwrap();
+        let cut = Cut { parent, line };
+        let result = solidcraft_kernel::watch::watching(Arc::new(Cancelled), || sectioned(&set, &cut)).unwrap();
+        assert!(result.cut.is_empty());
+        assert!(result.uncut.as_deref().is_some_and(|why| why.contains("cancelled")), "{:?}", result.uncut);
     }
 }

@@ -869,11 +869,11 @@ fn sheet_card(
 struct SheetMenu {
     owner: (u64, u64, u64),
     anchor: Rect,
-    keyboard_row: Option<usize>,
+    first: bool,
 }
 
 fn open_sheet_menu(app: &mut SolveApp, drawing: u64, sheet: u64, anchor: Rect) {
-    app.drawing_workspace.sheet_menu = Some(SheetMenu { owner: (app.session.uid, drawing, sheet), anchor, keyboard_row: None });
+    app.drawing_workspace.sheet_menu = Some(SheetMenu { owner: (app.session.uid, drawing, sheet), anchor, first: true });
 }
 
 fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
@@ -887,37 +887,22 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
-    let popup = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::unique(("drawing_sheet_actions", menu.owner)))
-        .fixed_pos(menu.anchor.right_bottom())
-        .constrain(true)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            ui_kit::Menu::show(ui, ui_kit::LIST_W, |ui| {
-                use ui_kit::Item;
-                ui_kit::Menu::heading(ui, &sheet.name);
-                let items = [
-                    Item::action("open_new", app.tr("sheet_views.open_new"), "sheet"),
-                    Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
-                    Item::action("rename", app.tr_label("Rename"), "rename"),
-                    Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
-                        .off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
-                    Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
-                    Item::sep(),
-                    Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
-                        .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
-                ];
-                let enabled = items.each_ref().map(|item| item.enabled && !item.is_sep());
-                let keyboard_pick = ui_kit::Menu::navigate(ctx, &enabled, &mut menu.keyboard_row)
-                    .then(|| menu.keyboard_row.and_then(|index| items.get(index)).cloned())
-                    .flatten();
-                items
-                    .iter()
-                    .enumerate()
-                    .fold(keyboard_pick, |chosen, (index, item)| ui_kit::menu::list_row_lit(ui, item, menu.keyboard_row == Some(index)).or(chosen))
-            })
-        });
-    if let Some(action) = popup.inner {
+    use ui_kit::Item;
+    let items = [
+        Item::heading(&sheet.name),
+        Item::action("open_new", app.tr("sheet_views.open_new"), "sheet"),
+        Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
+        Item::action("rename", app.tr_label("Rename"), "rename"),
+        Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy").off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
+        Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
+        Item::sep(),
+        Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
+            .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
+    ];
+    let output =
+        ui_kit::Menu::popup(ctx, egui::Id::unique(("drawing_sheet_actions", menu.owner)), ui_kit::MenuAnchor::Rect(menu.anchor), &items, menu.first);
+    menu.first = false;
+    if let Some(action) = output.picked {
         match action.id.as_str() {
             "open_new" => {
                 if let Err(error) = crate::sheet_views::open_in(app, drawing_id, sheet_id, true) {
@@ -942,12 +927,7 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     }
-    let escape = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    let outside = ctx.input(|input| {
-        input.pointer.any_pressed()
-            && input.pointer.interact_pos().is_some_and(|point| !menu.anchor.contains(point) && !popup.response.rect.contains(point))
-    });
-    if !escape && !outside {
+    if !output.close {
         app.drawing_workspace.sheet_menu = Some(menu);
     }
 }
@@ -1075,16 +1055,27 @@ fn strip_drag(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect) {
         app.preferences.drawing_sheet_dock = target.into();
     }
     // Keyboard-accessible alternative to dragging, like History's layout menu.
-    ui_kit::Menu::context(&drag, |ui| dock_menu(app, ui));
+    if let Some(item) = ui_kit::Menu::context_items(&drag, &dock_items(app)) {
+        apply_dock_item(app, &item);
+    }
 }
 
-fn dock_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
-    for (value, label) in [("top", "Dock at top"), ("bottom", "Dock at bottom"), ("under_browser", "Dock beneath Browser")] {
-        if ui_kit::button(ui, solidcraft_ui_text::tr_label(label), ui_kit::Button::Enabled(value != "under_browser" || app.ui.show_browser)).clicked()
-        {
-            app.preferences.drawing_sheet_dock = value.into();
-            ui.close();
-        }
+fn dock_items(app: &SolveApp) -> Vec<ui_kit::Item> {
+    [("top", "Dock at top"), ("bottom", "Dock at bottom"), ("under_browser", "Dock beneath Browser")]
+        .into_iter()
+        .map(|(value, label)| {
+            let mut item =
+                ui_kit::Item::action(value, solidcraft_ui_text::tr_label(label), "").on_if(value != "under_browser" || app.ui.show_browser);
+            item.checked = Some(app.preferences.drawing_sheet_dock == value);
+            item.radio = true;
+            item
+        })
+        .collect()
+}
+
+fn apply_dock_item(app: &mut SolveApp, item: &ui_kit::Item) {
+    if matches!(item.id.as_str(), "top" | "bottom" | "under_browser") {
+        app.preferences.drawing_sheet_dock.clone_from(&item.id);
     }
 }
 
@@ -1127,11 +1118,14 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
             let buttons = |app: &mut SolveApp, ui: &mut egui::Ui| {
                 icon_action(ui, "drawing:sheets:add", "plus", "Add sheet (not implemented)", false);
                 let management = icon_action(ui, "drawing:sheets:manage", "dots", "Manage sheets and docking", true);
-                Container::new(ui.ctx(), Surface::Popup).menu(&management).frame(ui_kit::Menu::frame()).show(|ui| {
-                    ui_kit::button(ui, solidcraft_ui_text::tr_label("Manage sheets (not implemented)"), ui_kit::Button::Enabled(false));
-                    ui.separator();
-                    dock_menu(app, ui);
-                });
+                let mut items = vec![
+                    ui_kit::Item::action("manage", solidcraft_ui_text::tr_label("Manage sheets (not implemented)"), "").on_if(false),
+                    ui_kit::Item::sep(),
+                ];
+                items.extend(dock_items(app));
+                if let Some(item) = ui_kit::Menu::button_items(&management, &items) {
+                    apply_dock_item(app, &item);
+                }
                 if icon_action(ui, "drawing:sheets:settings", "settings", "Sheet Settings", true).clicked() {
                     toggle_sheet_settings(app);
                 }

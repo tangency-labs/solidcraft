@@ -463,6 +463,68 @@ fn placed_imports(parts: usize) -> Document {
     doc
 }
 
+#[test]
+fn deleting_an_imported_component_reuses_only_matching_pinned_slots() {
+    let mut doc = placed_imports(1);
+    let f = &mut doc.features[0];
+    let FeatureKind::Import { step, components, .. } = &mut f.kind else { panic!("expected the two-box STEP import") };
+    *components = kernel::step_import_shared(step).unwrap().tree.clone();
+    f.body_names = vec![String::new(), "small".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let before = model.state();
+    let large_name = before.bodies[0].name.clone();
+    doc.features[0].pin_body_names(&[large_name.clone(), "small".into()], &[]);
+    let old_fingerprint = model.results[0].fingerprint;
+    model.refingerprint(&doc);
+    assert_ne!(model.results[0].fingerprint, old_fingerprint, "pinning the first slot must change the import fingerprint");
+    let original = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut doc.features[0].kind else { panic!("expected the two-box STEP import") };
+    skip.push(0);
+    let (_, work) = measure(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "dropping a slot must not ask the STEP reader for the assembly");
+    let state = model.state();
+    let remaining = state.body("small").unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(remaining.body.same(&before.body("small").unwrap().body));
+    let mut fresh = Model::new();
+    let (_, baseline) = measure(|| fresh.evaluate(&doc));
+    assert_eq!(baseline.imports_read, 1);
+    let reference = fresh.state();
+    let fresh_body = reference.body("small").unwrap();
+    assert_eq!(remaining.body.exact_bounds().unwrap(), fresh_body.body.exact_bounds().unwrap());
+    assert!((remaining.body.volume_at(1e-3).unwrap() - fresh_body.body.volume_at(1e-3).unwrap()).abs() < 1e-9);
+    assert_eq!(remaining.key, fresh_body.key);
+    assert_eq!(crate::naming::face_names(remaining), crate::naming::face_names(fresh_body));
+    assert_eq!(remaining.component, fresh_body.component);
+
+    // A longer skip list can also bring a body back. That body is absent from the previous result.
+    let mut swapped = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut swapped.features[0].kind else { panic!("expected the two-box STEP import") };
+    *skip = vec![1, 12];
+    let (_, work) = measure(|| model.evaluate(&swapped));
+    assert_eq!(work.imports_read, 1);
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, large_name);
+
+    // A renamed pin, or a new STEP payload with the same slots, needs ordinary evaluation.
+    for change_source in [false, true] {
+        let mut model = Model::new();
+        model.evaluate(&original);
+        let mut changed = doc.clone();
+        if change_source {
+            let FeatureKind::Import { step, .. } = &mut changed.features[0].kind else { panic!("expected the two-box STEP import") };
+            *step = format!("{}\n", step).into();
+        } else {
+            changed.features[0].body_names[1] = "new".into();
+        }
+        let (_, work) = measure(|| model.evaluate(&changed));
+        assert_eq!(work.imports_read, 1);
+        let expected = if change_source { "small" } else { "new" };
+        assert_eq!(model.state().bodies[0].name, expected);
+    }
+}
+
 fn line_sketch(plane: PlaneRef, to: Vec2) -> FeatureKind {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
@@ -1480,6 +1542,7 @@ fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
         angle2: None,
         symmetric: false,
         convention: Default::default(),
+        join_profile_arcs: false,
         to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
     };
     let revolve = add_named(&mut doc, kind);
@@ -2533,6 +2596,7 @@ fn marking(p: Vec3) -> FeatureKind {
         face: FacePick(p),
         designation: Some("M6".into()),
         length: None,
+        offset: None,
         modeled: false,
         from: None,
         up_to: None,
@@ -2827,7 +2891,10 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .record()
             .faces
             .iter()
-            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|f| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .count();
         if continuous_flanks {
             assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
@@ -5011,16 +5078,18 @@ fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) ->
 /// one the kernel still cannot size.
 #[test]
 fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
-    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 2 mm
+    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 5 mm
     // round of its four top edges (solidcore-ops'
-    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused`).
+    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred`).
     // The top face is the rectangle less its corners outside the circle of radius
     // rho = sqrt(35.75^2 - 12.5^2) = 33.49, so the four edges end on the ball and share no
     // corner. Past their ends the rails of two neighbouring rounds run on as the lines
     // x = 30 - r and y = 20 - r and cross on the top face while (30 - r)^2 + (20 - r)^2 < rho^2,
-    // so no round larger than r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850 fits. The kernel
-    // finds the bands overlapping past the edges' ends and refuses the round as having no room
-    // there, without naming a radius that fits.
+    // above r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850. Since #22798 the mitre handles that
+    // crossing: such rounds are built in turns and meet in the conic where their cylinders
+    // cross, so 2 mm builds (59677.698 mm^3). At 5 mm the mitred body exists too (the same
+    // section integral gives 58861.194 mm^3), but the kernel cannot build it: its turns are
+    // refused, and the round is refused as having no room, without naming a radius that fits.
     let mut doc = Document::new("ball-trimmed block");
     block(&mut doc, "Part", Vec3::new(-30.0, -20.0, 0.0), [60.0, 40.0, 25.0]);
     let ball = FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, 12.5)), radius: "35.75".into(), operation: Operation::Intersect };
@@ -5031,7 +5100,7 @@ fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
     let top = [Vec3::new(30.0, -10.0, 25.0), Vec3::new(-30.0, 10.0, 25.0), Vec3::new(-15.0, -20.0, 25.0), Vec3::new(15.0, 20.0, 25.0)];
     let kind = FeatureKind::Fillet {
         edges: top.into_iter().map(Position).collect(),
-        radius: "2".into(),
+        radius: "5".into(),
         body: None,
         style: Default::default(),
         fit: Default::default(),
@@ -6255,6 +6324,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevB"),
@@ -6323,6 +6393,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevC"),
@@ -6589,6 +6660,178 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     assert_eq!(err_batch, err_seq);
 }
 
+/// Captured cross-component face anchors (`FaceAnchor::placement`), their `auto_face` border links,
+/// captured construction planes, and pinned sketch-to-sketch links (`Link::sketch_placements`) keep
+/// identical `placement_digest` values across rigid assembly motion, so driving a joint recomputes
+/// zero features on the stationary component while still invalidating broken occurrence paths and
+/// keeping legacy/root uncaptured anchors live.
+#[test]
+fn captured_face_anchor_and_sketch_link_digests_stay_invariant_across_rigid_motion() {
+    use solidcraft_sketch::{LinkKind, LinkSource, SketchPlacement};
+
+    let mut doc = Document::new("rigid assembly in-place references");
+    let housing = doc.add_component(Some("Housing"), 0).unwrap();
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let mut extras = Vec::new();
+    for k in 0..4 {
+        let c = doc.add_component(Some(&format!("Hardware{k}")), 0).unwrap();
+        place(&mut doc, c, rigid(Vec3::new(100.0 + k as f64 * 20.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.3));
+        let b = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "5".into(),
+                    width: "5".into(),
+                    height: "5".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                Some(&format!("HardwareBox{k}")),
+            )
+            .unwrap();
+        doc.feature_mut(b).unwrap().component = c;
+        extras.push(c);
+    }
+    let housing_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-20.0, -20.0, 0.0)),
+                length: "40".into(),
+                width: "40".into(),
+                height: "20".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("HousingBody"),
+        )
+        .unwrap();
+    doc.feature_mut(housing_box).unwrap().component = housing;
+    let cap_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-20.0, -20.0, 40.0)),
+                length: "40".into(),
+                width: "40".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("CapBody"),
+        )
+        .unwrap();
+    doc.feature_mut(cap_box).unwrap().component = cap;
+    let cap_sketch_id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(6.0, 4.0)), Some("CapSketch")).unwrap();
+    doc.feature_mut(cap_sketch_id).unwrap().component = cap;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let cap_body = state.bodies.iter().find(|b| b.feature == cap_box).unwrap();
+    let top_index =
+        cap_body.body.face_sources().unwrap().iter().position(|s| matches!(s, Some(kernel::FaceSource::Box { axis: 2, high: true, .. }))).unwrap();
+    let picked = cap_body.body.face_plane(top_index).unwrap();
+    let cap_path = doc.first_path(cap);
+    let housing_path = doc.first_path(housing);
+    let anchor = doc.capture_face_anchor(cap_body, top_index, &picked, &cap_path, housing, &housing_path).unwrap();
+    assert!(anchor.placement.is_some(), "cross-component anchor captures its placement");
+
+    // 1. In-place sketch on Cap's face with an auto_face border link.
+    let face_plane = PlaneRef::Face { plane: picked, at: picked.origin, name: None, anchor: Some(Box::new(anchor.clone())) };
+    let resolved = crate::project::resolve_anchored_face(&doc, &state, &picked, LinkKind::Project, &anchor).unwrap();
+    let mut face_sk = Sketch::new();
+    let p0 = face_sk.add_point(Vec2::new(-4.0, -4.0), None).unwrap();
+    let p1 = face_sk.add_point(Vec2::new(4.0, 4.0), None).unwrap();
+    face_sk.add_line_pts(p0, p1, None).unwrap();
+    let link_id = face_sk.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+    if let Some(link) = face_sk.links.iter_mut().find(|l| l.id == link_id) {
+        link.face_name = Some(anchor.target.name.clone());
+        link.auto_face = true;
+    }
+    let anchored_sketch = doc.add_feature(FeatureKind::Sketch { plane: face_plane.clone(), sketch: face_sk }, Some("AnchoredSketch")).unwrap();
+    doc.feature_mut(anchored_sketch).unwrap().component = housing;
+
+    // 2. In-place offset construction plane on Cap's face.
+    let offset_plane = PlaneRef::Offset { base: Box::new(face_plane), distance: "5 mm".into() };
+    let anchored_plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset_plane }, Some("AnchoredPlane")).unwrap();
+    doc.feature_mut(anchored_plane).unwrap().component = housing;
+
+    // 3. In-place sketch projecting Cap's sketch with captured `sketch_placements`.
+    let cap_curve = doc.sketch(cap_sketch_id).unwrap().curves[0].id.clone();
+    let link_src = LinkSource::SketchCurve { sketch: cap_sketch_id, curve: cap_curve };
+    let resolved_curve = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &link_src).unwrap();
+    let mut linked_sk = Sketch::new();
+    let sk_link_id = linked_sk.add_link(LinkKind::Project, link_src, &resolved_curve.geom).unwrap();
+    if let Some(link) = linked_sk.links.iter_mut().find(|l| l.id == sk_link_id) {
+        link.sketch_placements.push(SketchPlacement { sketch: cap_sketch_id, placement: IDENTITY });
+    }
+    let pinned_link_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: linked_sk }, Some("PinnedLinkSketch")).unwrap();
+    doc.feature_mut(pinned_link_sketch).unwrap().component = housing;
+
+    // 4. Downstream housing cut after the cross-component references.
+    let housing_cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-5.0, -5.0, 5.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("HousingCut"),
+        )
+        .unwrap();
+    doc.feature_mut(housing_cut).unwrap().component = housing;
+
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // `state_for_face_anchor_only` avoids transforming the 4 unrelated rotated Hardware bodies
+    // when evaluating `AnchoredSketch` and `AnchoredPlane` (only `PinnedLinkSketch` frames live state).
+    assert!(initial.moved <= extras.len() + 2, "unexpected frame body transforms: {initial:?}");
+
+    let tracked = [anchored_sketch, anchored_plane, pinned_link_sketch, housing_cut];
+    let digests_before: Vec<u64> =
+        tracked.iter().map(|&id| placement_digest(&doc, doc.feature(id).unwrap(), Some(&model.state_before(id)))).collect();
+    let state_before = model.state();
+
+    // Rigidly translate Cap along Z (simulating a slider `joint.drive` stroke).
+    for stroke in [-20.0_f64, -100.0, -250.0, 0.0] {
+        place(&mut doc, cap, rigid(Vec3::new(0.0, 0.0, stroke), Vec3::ZERO, Vec3::Z, 0.0));
+        let digests_after: Vec<u64> =
+            tracked.iter().map(|&id| placement_digest(&doc, doc.feature(id).unwrap(), Some(&model.state_before(id)))).collect();
+        assert_eq!(digests_after, digests_before, "rigid stroke {stroke} must not change captured placement digests");
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, 0, "rigid stroke {stroke} must recompute zero features");
+        assert_eq!(work.moved, 0, "rigid stroke {stroke} must move zero frame bodies");
+        assert!(Arc::ptr_eq(&state_before, &model.state()), "rigid stroke {stroke} must retain the evaluated state");
+    }
+
+    // Breaking Cap's occurrence path must still invalidate the captured face anchor and fail cleanly.
+    let mut broken = doc.clone();
+    broken.occurrences.retain(|o| o.component != cap);
+    let broken_sketch_digest = placement_digest(&broken, broken.feature(anchored_sketch).unwrap(), Some(&model.state_before(anchored_sketch)));
+    let broken_plane_digest = placement_digest(&broken, broken.feature(anchored_plane).unwrap(), Some(&model.state_before(anchored_plane)));
+    assert_ne!(broken_sketch_digest, digests_before[0], "missing source occurrence must invalidate captured sketch anchor");
+    assert_ne!(broken_plane_digest, digests_before[1], "missing source occurrence must invalidate captured plane anchor");
+    let mut broken_model = model.clone();
+    broken_model.evaluate(&broken);
+    assert!(broken_model.result(anchored_sketch).and_then(|r| r.error.as_ref()).is_some());
+    assert!(broken_model.result(anchored_plane).and_then(|r| r.error.as_ref()).is_some());
+
+    // An uncaptured (legacy) FaceAnchor (`placement: None`) must remain live when Cap moves.
+    let mut legacy = doc.clone();
+    if let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(a), .. }, .. } = &mut legacy.feature_mut(anchored_sketch).unwrap().kind {
+        a.placement = None;
+    }
+    let mut legacy_model = Model::new();
+    legacy_model.evaluate(&legacy);
+    let legacy_before = placement_digest(&legacy, legacy.feature(anchored_sketch).unwrap(), Some(&legacy_model.state_before(anchored_sketch)));
+    place(&mut legacy, cap, rigid(Vec3::new(0.0, 0.0, -50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let legacy_after = placement_digest(&legacy, legacy.feature(anchored_sketch).unwrap(), Some(&legacy_model.state_before(anchored_sketch)));
+    assert_ne!(legacy_after, legacy_before, "uncaptured legacy FaceAnchor must stay live across motion");
+}
+
 /// Appending features to a growing multi-body timeline must not make `Model::release_left`
 /// rescan every historical state's bodies on each command; editing an earlier feature so a body
 /// actually leaves the model still scans and releases departed forms.
@@ -6809,6 +7052,144 @@ fn fast_path_model_renames_clear_last_recomputed() {
     renamed_body.feature_mut(feature).unwrap().body_names = vec!["PlateBody".into()];
     assert!(model.rename_body(&renamed_body, "Body1", "PlateBody"));
     assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}
+
+/// Zero-allocation hashing in `EvalKey::new` (threads, component ancestry via `ComponentDigests`,
+/// and body-name collision checks via `HashSet`) distinguishes every relevant change while keeping
+/// unrelated sibling components and unrelated body threads out of the `relative` key.
+#[test]
+fn eval_key_distinguishes_threads_components_and_body_names() {
+    use crate::thread_forms::{ThreadForm, ThreadHand};
+
+    let mut doc = Document::new("eval key hashing");
+    let grand = doc.add_component(Some("Grand"), 0).unwrap();
+    let parent = doc.add_component(Some("Parent"), grand).unwrap();
+    let child = doc.add_component(Some("Child"), parent).unwrap();
+    let mut unrelated = 0u64;
+    for k in 0..10 {
+        unrelated = doc.add_component(Some(&format!("Sibling{k}")), 0).unwrap();
+    }
+
+    let make_box = |doc: &mut Document, comp: u64, name: &str, corner: Vec3| -> u64 {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(corner),
+                    length: "20".into(),
+                    width: "20".into(),
+                    height: "20".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = comp;
+        f.body_names = vec![name.into()];
+        id
+    };
+    make_box(&mut doc, child, "Target", Vec3::ZERO);
+    make_box(&mut doc, unrelated, "Other", Vec3::new(100.0, 0.0, 0.0));
+
+    let cut_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(5.0, 5.0, -1.0)),
+                length: "5".into(),
+                width: "5".into(),
+                height: "22".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(cut_id).unwrap();
+        f.component = child;
+        f.participants = vec!["Target".into()];
+        // More than 4 body names exercises the `HashSet<&str>` body-name collision path.
+        f.body_names = vec!["Out1".into(), "Out2".into(), "Out3".into(), "Out4".into(), "Out5".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    // State immediately before `cut_id`.
+    let before = (*model.results[1].state).clone();
+    let steps = super::ImportDigests::default();
+
+    let eval_key = |doc: &Document, st: &ModelState| {
+        let vals = super::evaluation_values(doc).0;
+        let comps = super::ComponentDigests::of(doc);
+        let constructions = super::construction_indices(doc);
+        let f = doc.feature(cut_id).unwrap();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, Some(st), &constructions);
+        let k = super::EvalKey::new(doc, &vals, f, fp, 11, 22, st, &steps, &constructions, &comps);
+        (k.reads.map(|(h, _)| h).unwrap(), k.relative.unwrap())
+    };
+
+    let base = eval_key(&doc, &before);
+
+    // 1. Thread changes: thread on `Target` changes both `reads` and `relative`; thread on
+    //    unrelated `Other` changes `reads` only.
+    let sample_thread = |body: &str, designation: &str| ThreadInfo {
+        feature: 99,
+        body: body.into(),
+        designation: designation.into(),
+        major_diameter: 8.0,
+        radius: 4.0,
+        pitch: 1.25,
+        internal: true,
+        axis_point: Vec3::ZERO,
+        axis: solidcraft_geom::UnitVec3::Z,
+        start: 0.0,
+        end: 10.0,
+        form: ThreadForm::Metric,
+        hand: ThreadHand::Right,
+        starts: 1,
+    };
+    let mut with_other_thread = before.clone();
+    with_other_thread.threads.push(sample_thread("Other", "M8"));
+    let k_other_thread = eval_key(&doc, &with_other_thread);
+    assert_ne!(k_other_thread.0, base.0, "unrelated thread still changes `reads`");
+    assert_eq!(k_other_thread.1, base.1, "unrelated thread does not change `relative`");
+
+    let mut with_target_thread = before.clone();
+    with_target_thread.threads.push(sample_thread("Target", "M8"));
+    let k_target_m8 = eval_key(&doc, &with_target_thread);
+    assert_ne!(k_target_m8.0, base.0);
+    assert_ne!(k_target_m8.1, base.1);
+
+    with_target_thread.threads[0].pitch = 1.0;
+    let k_target_fine = eval_key(&doc, &with_target_thread);
+    assert_ne!(k_target_fine.0, k_target_m8.0);
+    assert_ne!(k_target_fine.1, k_target_m8.1);
+
+    // 2. Component ancestry changes: renaming `Grand` (depth 2 ancestor) or `Child` changes
+    //    `relative`; renaming an unrelated sibling does not.
+    let mut doc_sibling = doc.clone();
+    doc_sibling.components.iter_mut().find(|c| c.id == unrelated).unwrap().name = "RenamedSibling".into();
+    assert_eq!(eval_key(&doc_sibling, &before).1, base.1, "unrelated component does not change `relative`");
+
+    let mut doc_ancestor = doc.clone();
+    doc_ancestor.components.iter_mut().find(|c| c.id == grand).unwrap().name = "RenamedGrand".into();
+    assert_ne!(eval_key(&doc_ancestor, &before).1, base.1, "ancestor rename must invalidate `relative`");
+
+    let mut doc_child = doc.clone();
+    doc_child.components.iter_mut().find(|c| c.id == child).unwrap().name = "RenamedChild".into();
+    assert_ne!(eval_key(&doc_child, &before).1, base.1, "component rename must invalidate `relative`");
+
+    // 3. Body-name collision check (> 4 names): renaming an unrelated body to another non-colliding
+    //    name keeps `relative`, while renaming it to match `f.body_names` invalidates both keys.
+    let mut renamed_unrelated = before.clone();
+    renamed_unrelated.bodies[1].name = "StillUnrelated".into();
+    assert_eq!(eval_key(&doc, &renamed_unrelated).1, base.1, "non-colliding unrelated rename must keep `relative`");
+    let mut colliding = before.clone();
+    colliding.bodies[1].name = "Out5".into();
+    let k_colliding = eval_key(&doc, &colliding);
+    assert_ne!(k_colliding.0, base.0);
+    assert_ne!(k_colliding.1, base.1);
 }
 
 /// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,
@@ -7698,6 +8079,71 @@ fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
 }
 
 #[test]
+fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
+    use crate::joints::{Constraint, Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("last valid Center pose");
+    let slot = doc.add_component(Some("Slot"), 0).unwrap();
+    let slider = doc.add_component(Some("Slider"), 0).unwrap();
+    let wall_occ = doc.occurrences.iter_mut().find(|o| o.component == slot).unwrap();
+    wall_occ.grounded = true;
+    wall_occ.base_transform = Some(IDENTITY);
+    let wall_occ = wall_occ.id;
+    let slider_occ = doc.occurrences.iter().find(|o| o.component == slider).unwrap().id;
+    for (x, name) in [(0.0, "Left"), (30.0, "Right")] {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(x, 0.0, 0.0)),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = slot;
+        f.body_names = vec![name.into()];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let [a, b] = [10.0, 30.0].map(|x| joints::between_face_pick(&doc, &model.state(), slot, Vec3::new(x, 5.0, 5.0)).unwrap());
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "Center1".into(),
+        kind: JointKind::Planar,
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b, snap: None }),
+        b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
+        values: vec![0.0; 3],
+        limits: vec![None; 3],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: Some(Constraint::Center),
+    });
+
+    // No intervening feature reads the pose. The solve must still see both walls once.
+    let rem = doc.add_feature(FeatureKind::Remove { bodies: vec!["Right".into()] }, Some("RemoveRight")).unwrap();
+    doc.feature_mut(rem).unwrap().component = slot;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "Center after wall removal");
+    let landed = apply_point(&model.resolved_occurrences()[&slider_occ], Vec3::ZERO);
+    assert!((landed.x - 20.0).abs() < 1e-6, "last valid Center pose was at x = 20, got {landed:?}");
+}
+
+#[test]
 fn capture_position_revolute_joint_on_built_faces_matches_eager_solve() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
     let mut doc = Document::new("revolute built faces vs eager");
@@ -7975,6 +8421,7 @@ fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevRoot"),
@@ -8268,4 +8715,507 @@ fn body_transfer_cache_invalidates_when_destination_component_is_added() {
     assert_eq!(cached.result(transfer).and_then(|r| r.error.as_deref()), None, "transfer must succeed once destination component exists");
     assert_eq!(cached.state().body("Plate").unwrap().component, dest);
     assert!(cached.last_recomputed >= 1);
+}
+
+// ---- sketch helpers
+
+fn add_circle_sketch(doc: &mut Document, comp: u64, plane: PlaneRef, center: Vec2, radius: f64, id_name: &str) -> u64 {
+    let mut sk = Sketch::new();
+    sk.add_circle(center, radius, None, Some(id_name)).unwrap();
+    let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    id
+}
+
+fn add_line_sketch(doc: &mut Document, comp: u64, plane: PlaneRef, a: Vec2, b: Vec2, id_name: &str) -> u64 {
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(a, None).unwrap();
+    let p1 = sk.add_point(b, None).unwrap();
+    sk.add_line_pts(p0, p1, Some(id_name)).unwrap();
+    let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    id
+}
+
+fn add_arc_rail_sketch(doc: &mut Document, comp: u64, id_name: &str) -> u64 {
+    let mut sk = Sketch::new();
+    // Bulges from x = 10 at z = 0 and z = 40 out to x = 15 at z = 20 in XZ (y runs down world Z).
+    sk.add_arc(Vec2::new(-27.5, -20.0), Vec2::new(10.0, -40.0), Vec2::new(10.0, 0.0), [None, None, None], Some(id_name)).unwrap();
+    let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XZ".into() }, sketch: sk }, None).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    id
+}
+
+fn eval_fresh_no_cache(doc: &Document) -> Model {
+    let mut m = Model::new();
+    m.no_cache = true;
+    m.evaluate(doc);
+    assert!(
+        m.results.iter().all(|r| r.error.is_none()),
+        "fresh eval errors: {:?}",
+        m.results.iter().filter_map(|r| r.error.as_deref()).collect::<Vec<_>>()
+    );
+    m
+}
+
+fn assert_body_matches_fresh(cached: &Model, fresh: &Model, body_name: &str) {
+    let c = kernel::measure(&cached.state().body(body_name).unwrap().body).unwrap();
+    let f = kernel::measure(&fresh.state().body(body_name).unwrap().body).unwrap();
+    assert!((c.volume - f.volume).abs() < 1e-3, "{body_name} volume: cached {} vs fresh {}", c.volume, f.volume);
+    assert!((c.area - f.area).abs() < 1e-3, "{body_name} area: cached {} vs fresh {}", c.area, f.area);
+    assert!(c.bbox.min.dist(f.bbox.min) < 1e-3 && c.bbox.max.dist(f.bbox.max) < 1e-3, "{body_name} bbox: cached {:?} vs fresh {:?}", c.bbox, f.bbox);
+}
+
+#[test]
+fn planar_sweep_path_sketch_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("sweep path in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 4.0, "c");
+    let path = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -20.0), "p");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(path),
+                path: vec![PathEntry::OfPathSketch("p".into())],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: Vec::new(),
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+    doc.feature_mut(sw).unwrap().body_names = vec!["Swept".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(3.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "Swept");
+}
+
+#[test]
+fn planar_sweep_of_sketch_path_entry_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("sweep OfSketch in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 4.0, "c");
+    let dummy_path = add_line_sketch(&mut doc, c1, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -10.0), "d");
+    let c2_path = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -25.0), "seg");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(dummy_path),
+                path: vec![PathEntry::OfSketch { sketch: SketchId(c2_path), curve: "seg".into() }],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: Vec::new(),
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+    doc.feature_mut(sw).unwrap().body_names = vec!["SweptOfSketch".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(3.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "SweptOfSketch");
+}
+
+#[test]
+fn planar_sweep_rail_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("sweep rail in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 10.0, "c");
+    let path = add_line_sketch(&mut doc, c1, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -40.0), "up");
+    let rail = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::new(10.0, 0.0), Vec2::new(5.0, -40.0), "in");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(path),
+                path: vec![PathEntry::OfPathSketch("up".into())],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: vec![SweepRail { sketch: SketchId(rail), curves: vec!["in".into()] }],
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+    doc.feature_mut(sw).unwrap().body_names = vec!["RailedSweep".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(4.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "RailedSweep");
+}
+
+#[test]
+fn planar_loft_rail_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("loft rail in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let s0 = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 10.0, "c0");
+    let s1 = add_circle_sketch(
+        &mut doc,
+        c1,
+        PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "40 mm".into() },
+        Vec2::ZERO,
+        10.0,
+        "c1",
+    );
+    let rail = add_arc_rail_sketch(&mut doc, c2, "arc");
+    let loft = doc
+        .add_feature(
+            FeatureKind::Loft {
+                sections: vec![
+                    LoftSection { sketch: SketchId(s0), profiles: ProfileSel::All, point: None },
+                    LoftSection { sketch: SketchId(s1), profiles: ProfileSel::All, point: None },
+                ],
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                rails: vec![SweepRail { sketch: SketchId(rail), curves: vec!["arc".into()] }],
+                rail_fit: RailFit::Stretch,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(loft).unwrap().component = c1;
+    doc.feature_mut(loft).unwrap().body_names = vec!["RailedLoft".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "RailedLoft");
+}
+
+#[test]
+fn planar_surface_sweep_rail_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("surface sweep rail in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 10.0, "c");
+    let path = add_line_sketch(&mut doc, c1, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -40.0), "up");
+    let rail = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::new(10.0, 0.0), Vec2::new(5.0, -40.0), "in");
+    let ssw = doc
+        .add_feature(
+            FeatureKind::SurfaceSweep {
+                sketch: SketchId(prof),
+                profiles: None,
+                curves: vec!["c".into()],
+                path_sketch: SketchId(path),
+                path: vec!["up".into()],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: vec![SweepRail { sketch: SketchId(rail), curves: vec!["in".into()] }],
+                rail_fit: RailFit::Scale,
+                spline_as_samples: false,
+                stays_surface: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(ssw).unwrap().component = c1;
+    doc.feature_mut(ssw).unwrap().body_names = vec!["RailedSurfaceSweep".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(4.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "RailedSurfaceSweep");
+}
+
+#[test]
+fn planar_surface_loft_rail_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("surface loft rail in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let s0 = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 10.0, "c0");
+    let s1 = add_circle_sketch(
+        &mut doc,
+        c1,
+        PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "40 mm".into() },
+        Vec2::ZERO,
+        10.0,
+        "c1",
+    );
+    let rail = add_arc_rail_sketch(&mut doc, c2, "arc");
+    let sloft = doc
+        .add_feature(
+            FeatureKind::SurfaceLoft {
+                sections: vec![
+                    SheetSection { sketch: SketchId(s0), profiles: None, curves: vec!["c0".into()], body: None, edges: Vec::new() },
+                    SheetSection { sketch: SketchId(s1), profiles: None, curves: vec!["c1".into()], body: None, edges: Vec::new() },
+                ],
+                continuity: [kernel::Continuity::G0, kernel::Continuity::G0],
+                crown: [0.0, 0.0],
+                rails: vec![SweepRail { sketch: SketchId(rail), curves: vec!["arc".into()] }],
+                rail_fit: RailFit::Stretch,
+                faced: true,
+                stays_surface: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sloft).unwrap().component = c1;
+    doc.feature_mut(sloft).unwrap().body_names = vec!["RailedSurfaceLoft".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "RailedSurfaceLoft");
+}
+
+#[test]
+fn planar_surface_network_in_moved_component_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("surface network in C2");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let mut sk = Sketch::new();
+    let p00 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p10 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    let p11 = sk.add_point(Vec2::new(10.0, 10.0), None).unwrap();
+    let p01 = sk.add_point(Vec2::new(0.0, 10.0), None).unwrap();
+    sk.add_line_pts(p00, p10, Some("u0")).unwrap();
+    sk.add_line_pts(p01, p11, Some("u1")).unwrap();
+    sk.add_line_pts(p00, p01, Some("v0")).unwrap();
+    sk.add_line_pts(p10, p11, Some("v1")).unwrap();
+    let sk_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.feature_mut(sk_id).unwrap().component = c2;
+    let nc = |curve: &str| NetworkCurve {
+        sketch: Some(SketchId(sk_id)),
+        curves: vec![curve.into()],
+        body: None,
+        edges: Vec::new(),
+        point: None,
+        continuity: kernel::Continuity::G0,
+    };
+    let net = doc
+        .add_feature(FeatureKind::SurfaceNetwork { u: vec![nc("u0"), nc("u1")], v: vec![nc("v0"), nc("v1")], operation: Operation::NewBody }, None)
+        .unwrap();
+    doc.feature_mut(net).unwrap().component = c1;
+    doc.feature_mut(net).unwrap().body_names = vec!["NetPatch".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    let fresh = eval_fresh_no_cache(&doc);
+    assert!(model.last_recomputed > 0, "expected recomputation after moving C2");
+    assert_body_matches_fresh(&model, &fresh, "NetPatch");
+}
+
+#[test]
+fn moving_unrelated_component_preserves_planar_sweep_cache() {
+    let mut doc = Document::new("unrelated C3");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let c3 = doc.add_component(Some("C3"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 4.0, "c");
+    let path = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -20.0), "p");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(path),
+                path: vec![PathEntry::OfPathSketch("p".into())],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: Vec::new(),
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+    block(&mut doc, "C3Box", Vec3::ZERO, [5.0, 5.0, 5.0]);
+    doc.features.last_mut().unwrap().component = c3;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c3, rigid(Vec3::new(15.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "moving unrelated C3 must preserve cache");
+}
+
+#[test]
+fn moving_parent_assembly_containing_both_components_preserves_cache() {
+    let mut doc = Document::new("parent assembly");
+    let asm = doc.add_component(Some("Asm"), 0).unwrap();
+    let c1 = doc.add_component(Some("C1"), asm).unwrap();
+    let c2 = doc.add_component(Some("C2"), asm).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 4.0, "c");
+    let path = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -20.0), "p");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(path),
+                path: vec![PathEntry::OfPathSketch("p".into())],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: Vec::new(),
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, asm, rigid(Vec3::new(10.0, -5.0, 2.0), Vec3::ZERO, Vec3::Z, 0.5));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "moving parent assembly containing both C1 and C2 must preserve cache");
+}
+
+#[test]
+fn same_component_planar_path_sketch_has_zero_placement_digest_and_preserves_cache() {
+    let mut doc = Document::new("same component sweep");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let prof = add_circle_sketch(&mut doc, c1, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, 4.0, "c");
+    let path = add_line_sketch(&mut doc, c1, PlaneRef::Origin { name: "XZ".into() }, Vec2::ZERO, Vec2::new(0.0, -20.0), "p");
+    let sw = doc
+        .add_feature(
+            FeatureKind::Sweep {
+                sketch: SketchId(prof),
+                profiles: ProfileSel::All,
+                path_sketch: SketchId(path),
+                path: vec![PathEntry::OfPathSketch("p".into())],
+                path_body: None,
+                path_edges: Vec::new(),
+                orientation: SweepOrientation::Perpendicular,
+                twist: None,
+                scale: None,
+                rails: Vec::new(),
+                rail_fit: RailFit::Scale,
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(sw).unwrap().component = c1;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let st = model.state();
+    let f = doc.feature(sw).unwrap();
+    assert_eq!(placement_digest(&doc, f, Some(&st)), 0);
+
+    place(&mut doc, c1, rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.4));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "moving C1 when path_sketch is in C1 must preserve cache");
+}
+
+#[test]
+fn cross_component_thin_extrude_recomputes_and_matches_fresh() {
+    let mut doc = Document::new("cross component thin extrude");
+    let c1 = doc.add_component(Some("C1"), 0).unwrap();
+    let c2 = doc.add_component(Some("C2"), 0).unwrap();
+    let sk = add_line_sketch(&mut doc, c2, PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, Vec2::new(10.0, 0.0), "l");
+    let ext = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                sketch: SketchId(sk),
+                profiles: ProfileSel::All,
+                extent: serde_json::from_value(serde_json::json!({"distance": "5"})).unwrap(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                thin: Some(ThinWall { curves: vec!["l".into()], thickness: "2".into(), side: ThinSide::Center, thickness2: None }),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(ext).unwrap().component = c1;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    place(&mut doc, c2, rigid(Vec3::new(6.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert!(model.last_recomputed > 0, "moving C2 owning thin extrude sketch must invalidate cache");
+
+    let fresh = eval_fresh_no_cache(&doc);
+    let body_name = model.state().bodies[0].name.clone();
+    assert_body_matches_fresh(&model, &fresh, &body_name);
 }

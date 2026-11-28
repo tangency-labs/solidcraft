@@ -70,6 +70,11 @@ impl Envelopes {
         Self { paths: envelopes.into_iter().collect(), body_paths, holder }
     }
 
+    /// Whether no component envelopes exist in the world state.
+    pub(super) fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
     /// Whether `name` is an envelope.
     pub(super) fn is_envelope(&self, name: &str) -> bool {
         self.paths.contains_key(name)

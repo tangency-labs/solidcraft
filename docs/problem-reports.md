@@ -24,10 +24,10 @@ attachment is a checkbox with what it holds, shown before it goes:
 | Attachment | Default | What it holds |
 | --- | --- | --- |
 | Screenshot of the 3D view | on | The view as it was when the report opened (Retake updates it). |
-| Log | on | The last 500 lines (at most 128 KB) of the app's log file, `<data folder>/logs/solidcraft.log`, after the end of the run before's (`solidcraft.previous.log`) when this run has fewer; the home folder shown as `~`. The log has SolidCraft's info lines and other libraries' warnings: every command and how it went, and every message shown. The web build, which has no log file, sends the command log and the Messages. |
-| System info | on | App version, commit, target, renderer, graphics card and driver, window size, language. Nothing about the design. |
+| Log | on | The last 500 lines (at most 128 KB) of the app's log file, `<data folder>/logs/solidcraft.log`, after the end of the run before's (`solidcraft.previous.log`) when this run has fewer; the home folder shown as `~`. A report made from a crash report sends the end of the crashed run's own log instead, from the last 5 runs' logs the app keeps. The log has SolidCraft's info lines and other libraries' warnings: every command and how it went, and every message shown. The web build, which has no log file, sends the command log and the Messages. |
+| System info | on | App version, commit, target, renderer, graphics card and driver, window size, language. Nothing about the design. A report made from a crash report names the crashed run's graphics card, driver and graphics API, and this run's under `reported_from`. |
 | Failed operation details | on | `session_start` (new, opened, recovered or crashed), the attached design's SHA-256 (not the file) or why there is none, its format version, undo and redo steps, the recent `steps` (the last 50 commands of the session, or the crash report's, with whether each worked; their parameters, which name things in the design, go only when the model is included, and a command about files keeps only the file's name) and the failed command with its exact parameters and error. |
-| Crash report | off | Offered for a report made from a crash report. |
+| Crash report | on | Offered for a report made from a crash report: its `report.json` (the internal error, where it happened, the startup step, the native module and offset, the renderer, the commands before it). Untick it to leave it out. The minidump is never sent; it stays in the crash folder. |
 
 The ticket carries a `consent` record listing exactly which boxes were ticked.
 

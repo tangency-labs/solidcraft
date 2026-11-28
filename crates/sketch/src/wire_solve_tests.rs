@@ -222,6 +222,7 @@ fn a_new_id_never_takes_a_3d_constraint_s_id() {
         kind: WireConstraintKind::AlongAxis { line: a, axis: Axis::Z },
         param: None,
         driven: false,
+        driven_param: None,
     });
     sk.validate_wire_constraints().unwrap();
     sk.clear_id_counters();
@@ -271,6 +272,7 @@ fn hostile_saved_constraints_are_refused() {
         kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 7 }, at: v(0.0, 0.0, 0.0), exprs: None },
         param: None,
         driven: false,
+        driven_param: None,
     });
     assert!(sk.validate_wire_constraints().is_err());
     // As a design is opened, one naming a point its curve no longer has is dropped instead.
@@ -281,6 +283,7 @@ fn hostile_saved_constraints_are_refused() {
         kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 0 }, at: v(f64::NAN, 0.0, 0.0), exprs: None },
         param: None,
         driven: false,
+        driven_param: None,
     });
     assert!(sk.validate_wire_constraints().is_err());
     sk.wire_constraints.clear();
@@ -290,6 +293,7 @@ fn hostile_saved_constraints_are_refused() {
             kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X },
             param: None,
             driven: false,
+            driven_param: None,
         });
     }
     assert!(sk.validate_wire_constraints().is_err(), "duplicate ids");
@@ -300,6 +304,7 @@ fn hostile_saved_constraints_are_refused() {
         kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X },
         param: None,
         driven: false,
+        driven_param: None,
     };
     sk.wire_constraints = (0..crate::MAX_CONSTRAINTS + 1).map(along).collect();
     sk.validate_wire_constraints().unwrap();
@@ -449,6 +454,7 @@ fn a_saved_constraint_cannot_take_another_entity_s_id() {
         kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X },
         param: None,
         driven: false,
+        driven_param: None,
     });
     assert!(sk.validate_wire_constraints().is_err());
     // A direction a hair off an axis is not along it.
@@ -1107,7 +1113,7 @@ fn model_plane_constraints_never_mix_component_planes_with_world_fixed_points() 
     let error = sk.add_wire_constraint(kind.clone()).unwrap_err().to_string();
     assert!(error.contains("fixed in the world"), "{error}");
     // A constraint read from an old design must also fail without moving its world point.
-    sk.wire_constraints.push(WireConstraint { id: "loaded".into(), kind, param: None, driven: false });
+    sk.wire_constraints.push(WireConstraint { id: "loaded".into(), kind, param: None, driven: false, driven_param: None });
     let report = sk.solve_wires(None);
     assert!(!report.ok && report.failing == ["loaded"], "{report:?}");
     assert_eq!(at(&sk, &q), v(3.0, 4.0, 20.0));
