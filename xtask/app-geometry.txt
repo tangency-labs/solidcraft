@@ -1377,7 +1377,6 @@ crates/ui-egui/src/point_clouds.rs:Key::of triangles
 crates/ui-egui/src/point_clouds.rs:records triangles
 crates/ui-egui/src/prefs.rs:same_orientation dot
 crates/ui-egui/src/preview.rs:SurfaceIndex::new triangles
-crates/ui-egui/src/preview.rs:build_copies triangles
 crates/ui-egui/src/preview.rs:build_scene triangles
 crates/ui-egui/src/preview.rs:build_tool triangles
 crates/ui-egui/src/preview.rs:new_faces triangles

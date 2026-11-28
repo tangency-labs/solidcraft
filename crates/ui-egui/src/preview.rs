@@ -1263,19 +1263,14 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
     let mut sc = GpuScene::default();
     let fill = sc.color(c.mirrored);
     let edge = sc.color([c.mirrored[0], c.mirrored[1], c.mirrored[2], 255]);
-    let kept: Vec<SurfaceIndex> = sources.iter().filter_map(|n| before.body(n)).filter_map(|b| SurfaceIndex::new(&b.mesh())).collect();
+    let sources: Vec<SurfaceIndex> = sources.iter().filter_map(|n| before.body(n)).filter_map(|b| SurfaceIndex::new(&b.mesh())).collect();
+    let kept: Vec<&SurfaceIndex> = sources.iter().collect();
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
-        for t in &m.triangles {
-            let Some(corners) = m.tri(t) else { continue };
-            if kept.iter().any(|k| on_surface(k, corners)) {
-                continue;
-            }
-            for k in t {
-                let i = *k as usize;
-                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                    sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
-                }
+        let resolution = kept.iter().map(|k| k.tol).fold(f64::INFINITY, f64::min);
+        for piece in m.pieces_off(|p| kept.iter().any(|k| k.contains(p)), resolution) {
+            for (p, n) in piece {
+                sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
             }
         }
         // Depth-tested, as a body's own edges: the renderer draws no on-top line of a preview.
@@ -1638,16 +1633,15 @@ fn build_scene(
             // boundary moved) the two triangulations cross by up to their chord error, far past the
             // ghost's depth bias, so the ghost showed through the new face in slivers.
             let own = if motion || gone || combine.is_some() { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
-            for t in &m.triangles {
-                let Some(corners) = m.tri(t) else { continue };
-                if own.iter().chain(&result).any(|k| on_surface(k, corners)) {
-                    continue;
-                }
-                for k in t {
-                    let i = *k as usize;
-                    if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                        sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
-                    }
+            let kept: Vec<&SurfaceIndex> = own.iter().chain(&result).collect();
+            let resolution = kept.iter().map(|k| k.tol).fold(f64::INFINITY, f64::min);
+            // Only what is off the kept surfaces is removed material: a facet partly on them is
+            // split (`pieces_off`). Ghosted whole, a long facet of a face the feature only trims
+            // (an extruded side under a fillet) ran down the face the result keeps and showed
+            // through it in red streaks (T-2799).
+            for piece in m.pieces_off(|p| kept.iter().any(|k| k.contains(p)), resolution) {
+                for (p, n) in piece {
+                    sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
                 }
             }
             if tool {
@@ -1692,12 +1686,6 @@ fn build_scene(
         plugin_view: None,
         centrelines: Vec::new(),
     }
-}
-
-/// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
-/// and its centroid all on it?
-fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
-    [a, b, c, (a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0, (a + b + c) / 3.0].into_iter().all(|p| index.contains(p))
 }
 
 /// Points of one face the vote in [`new_faces`] asks about: every centroid of a face with no
@@ -3072,6 +3060,23 @@ mod tests {
         });
         assert_eq!(on_boss.count(), 0, "the boss keeps its surface: no ghost on it");
         assert!(!b.scene.ghost.is_empty(), "the edge the fillet removes is still shown as ghost");
+    }
+
+    /// A fillet round the top of a cylinder trims its side, which is meshed in strips from the
+    /// bottom to the top: the ghost is the material the fillet takes off, at most its radius
+    /// below the top (and a tolerance), not whole strips. Those ran down the kept side and,
+    /// where its new mesh differs from the old one, showed through it in red streaks (T-2799).
+    #[test]
+    fn a_fillet_preview_ghosts_no_strip_of_a_trimmed_face() {
+        let s = session_of(&[("solid.cylinder", json!({"radius": 20, "height": 30, "base": [0, 0, 0]}))]);
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[20, 0, 30]], "radius": 4}))], colors()).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        let zs: Vec<f64> =
+            b.scene.ghost.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().map(|v| f32::from_le_bytes([v[8], v[9], v[10], v[11]]) as f64).collect();
+        assert!(!zs.is_empty(), "the edge the fillet removes is shown as ghost");
+        // The surface tolerance: 2e-3 of the 64 mm diagonal, 0.13 mm.
+        let lowest = zs.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(lowest > 30.0 - 4.0 - 0.2, "the ghost reaches down to z = {lowest}, below the fillet");
     }
 
     /// Graphics' Tint new surface in a preview, off: the changed body is drawn as itself, and
