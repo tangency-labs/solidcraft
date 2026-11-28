@@ -244,7 +244,9 @@ pub(crate) fn download_dir() -> Result<PathBuf, Refusal> {
         hasher.write_u32(std::process::id());
         hasher.write_u32(attempt);
         let dir = base.join(std::format!("solidcraft-workshop-{:016x}", hasher.finish()));
-        let mut builder = std::fs::DirBuilder::new();
+        let builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let mut builder = builder;
         #[cfg(unix)]
         std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
         match builder.create(&dir) {
