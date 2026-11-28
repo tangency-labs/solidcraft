@@ -933,7 +933,8 @@ fn sagitta_fit_of(refused: &SolidError) -> Option<f64> {
 /// or a sphere); the foot blend's refusals, typed and with the size that builds (a toe off
 /// its face: checked on every edge, with the legs' sizes and what a shaped end refuses,
 /// before anything that depends on the sagitta; no toe at the leg, found while a bead is
-/// built; an arc that would cut into a face: the smallest sagitta that fits over all of
+/// built, with a leg at which that side's feet are proved or with no size; an arc that would
+/// cut into a face: the smallest sagitta that fits over all of
 /// `edges`, naming that edge, so a retry at it is not refused for a leg or a toe off its
 /// face on any edge. With shaped ends that sagitta is the float below the exact bead's bound
 /// on every edge, so a retry at it is not refused for the sagitta either; with square ends it
@@ -1103,10 +1104,12 @@ fn between_planes(target: &Brep, edge_id: EdgeId) -> Result<bool> {
     Ok(straight && planes)
 }
 
-/// `refused` with a leg that fits below the smallest `target` builds
-/// ([`is_radius_supported`]: eight times its tolerance) made 0: a retry at such a leg is
-/// refused for its size before anything else is read ([`bead_body`]'s first pass, as the
-/// planar bead's frame), so no leg on that side builds.
+/// `refused` without its size where that is a leg below the smallest `target` builds
+/// ([`is_radius_supported`]: eight times its tolerance): a retry at such a leg is refused for
+/// its size before anything else is read ([`bead_body`]'s first pass, as the planar bead's
+/// frame), so it is not a size that builds, and none is named. 0 is not named either: that
+/// no leg on that side builds would rest on the feet missed at the stations tried, which
+/// are samples, not a proof.
 fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
     let mut failure = match refused {
         SolidError::Failed(failure) => failure,
@@ -1116,7 +1119,7 @@ fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
         if matches!(fit.measure, FitMeasure::Leg)
             && !is_radius_supported(fit.size, target.tolerance())
         {
-            failure.fit = Some(Fit::new(0.0, FitMeasure::Leg, fit.edge));
+            failure.fit = None;
         }
     }
     SolidError::Failed(failure)

@@ -2187,13 +2187,15 @@ fn a_tolerance_the_net_cannot_hold_is_refused_at_the_station_cap() {
 /// A sagitta's fit is named only where the feet are proved: on a branch off the main tube's
 /// axis (main r 20, branch r 10 from (0, 6, 0) along (1, 0, 0.3)) the feet at legs of 4 are
 /// not, and a bead with a sagitta is refused without a sagitta to retry at, concave and
-/// convex. The refusal is the station's own: its Newton does not converge at one of the
-/// joint's check stations (`StationDidNotConverge`, naming the station, the residual and the
-/// tolerance it had to reach). The part does not change.
+/// convex. The refusal is the feet's proof's own (`NotCertified`: a piece of one side's feet
+/// stays unproved after its halvings), the proof the build and the sagitta's search both run
+/// before a size is named; it names no size. The part does not change.
 ///
-/// This records a defect as it is, #22763: `StationDidNotConverge` is the defect class, and
-/// these stations should converge or be refused with a size that builds. The match on it, and
-/// with it the refusal carrying no sagitta, are to be rewritten when #22763 is fixed.
+/// The joint is #22763's: at one of its check stations a foot's Newton does not converge, so
+/// no bound on the sagitta is enclosed over it either. That defect is still there, but it is
+/// not what this refusal reports any more: the proof makes its own stations and fails first.
+/// When #22763 is fixed this joint should build, or be refused with a size that builds, and
+/// this test is to be rewritten.
 #[test]
 fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
     use solidcore::error::FitMeasure;
@@ -2225,14 +2227,11 @@ fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
                 .is_none_or(|fit| fit.measure != FitMeasure::Sagitta),
             "{err:?}"
         );
-        match err.blend_failure() {
-            Some(&BlendFailure::StationDidNotConverge {
-                residual: Some(residual),
-                tolerance,
-                ..
-            }) => assert!(residual > tolerance && tolerance > 0.0, "{err}"),
-            _ => panic!("{err:?}"),
-        }
+        assert!(
+            matches!(err.blend_failure(), Some(BlendFailure::NotCertified { .. })),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), ErrorKind::NotWithinTolerance, "{err}");
     }
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
@@ -2640,14 +2639,14 @@ fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
     assert!(smb(&k, &b) == before, "the part changed");
 }
 
-// ---- the feet proved between the stations (the certificate, step 1) ----
+// ---- the feet proved over a segment (the certificate, step 1) ----
 
 /// Between planes at 60, 90 and 120 degrees (equal and unequal legs) and round the tube
-/// T-joint, every span between the section face's stations is proved: for each support, one
-/// foot in a box about the stations' feet for every point of the span (Krawczyk), the
-/// stations' own feet in it, and joined to the root by a chain of boxes over the leg on the
-/// face's branch (one chain per piece and support). The pieces cover every span; the
-/// T-joint's count is printed.
+/// T-joint, the feet are proved over the whole joint: for each support on its own, one foot
+/// in a box about its pieces' end feet for every point of each piece (Krawczyk), and joined
+/// to the root by a chain of boxes over the leg on the face's branch (one chain per piece).
+/// Each side's pieces are counted, at least three a side (a segment's proof starts from four
+/// stations); the T-joint's count is printed.
 #[test]
 fn the_feet_are_proved_between_the_stations() {
     use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
@@ -2661,12 +2660,8 @@ fn the_feet_are_proved_between_the_stations() {
                 let proof = blend
                     .prove_section(&k, legs, h, WELD_FIT_TOLERANCE)
                     .unwrap();
-                assert!(proof.pieces >= 3, "{adeg} {legs:?} {h}: {proof:?}");
-                assert_eq!(
-                    proof.chains,
-                    2 * proof.pieces,
-                    "{adeg} {legs:?} {h}: {proof:?}"
-                );
+                assert!(proof.pieces >= 6, "{adeg} {legs:?} {h}: {proof:?}");
+                assert_eq!(proof.chains, proof.pieces, "{adeg} {legs:?} {h}: {proof:?}");
             }
         }
     }
@@ -2684,7 +2679,7 @@ fn the_feet_are_proved_between_the_stations() {
         started.elapsed()
     );
     assert!(proof.pieces >= 94, "{proof:?}");
-    assert_eq!(proof.chains, 2 * proof.pieces, "{proof:?}");
+    assert_eq!(proof.chains, proof.pieces, "{proof:?}");
 }
 
 /// The feet's Taylor series (the certificate's fourth derivatives) in a square corner: the
@@ -2902,36 +2897,6 @@ fn the_arc_s_section_face_is_within_its_proved_bound() {
             }
         }
     }
-}
-
-/// The proof is not empty: stations whose last foot was moved onto the other branch (across
-/// the edge, on the plane's continuation) are not proved, a typed failure, not a pass.
-#[test]
-fn a_foot_on_the_other_branch_is_not_proved() {
-    use solidcore::blend::foot_blend::FootBlend;
-    use solidcore::error::blend::BlendFailure;
-    let mut k = kernel();
-    let (mut b, at) = corner(&mut k, FRAC_PI_2);
-    let edge = pick(&k, &b, at);
-    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-    let (lo, hi) = (blend.interval().min(), blend.interval().max());
-    let legs = [5.0, 5.0];
-    let mut stations = Vec::new();
-    for f in [0.0, 0.25, 0.5] {
-        let near = stations.last();
-        stations.push(blend.station(&k, lo + f * (hi - lo), legs, near).unwrap());
-    }
-    assert!(blend.prove_feet(&k, legs, &stations).is_ok());
-    let last = stations.last_mut().unwrap();
-    last.feet[0] = last.root - (last.feet[0] - last.root);
-    let err = blend.prove_feet(&k, legs, &stations).err().unwrap();
-    assert!(
-        matches!(
-            err.blend_failure(),
-            Some(BlendFailure::NotCertified { .. } | BlendFailure::NoRoom(_))
-        ),
-        "{err:?}"
-    );
 }
 
 /// An L of walls standing on a floor plate, joined by booleans: the floor [-60, 60]^2 x
@@ -3156,24 +3121,6 @@ fn ledge(k: &mut Kernel, w: f64) -> (Brep, [f64; 3]) {
     (b, [0.0, 0.0, LENGTH / 2.0])
 }
 
-/// The leg that fits each side of the corner's edge in turn (`along` each of its two faces)
-/// for the legs `legs`, where the bead is refused with one.
-fn leg_fits(k: &mut Kernel, b: &mut Brep, at: [f64; 3], legs: [f64; 2]) -> Vec<f64> {
-    use solidcore::error::FitMeasure;
-    let joint = pick(k, b, at);
-    let size = ChamferSize::Distances(legs);
-    edge::faces(b, joint, None)
-        .unwrap()
-        .into_iter()
-        .filter_map(|f| {
-            let fit = weld_bead_body(k, b, &[joint], &[size], 0.0, &[Some(f)], &[], SQUARE)
-                .err()?
-                .fit()?;
-            (fit.measure == FitMeasure::Leg).then_some(fit.size)
-        })
-        .collect()
-}
-
 /// A leg far past a narrow face is refused with the leg that fits: on a face 0.05 wide a leg
 /// of 1e6 is refused with 0.05 (the search stops at a ten-millionth of the leg found, not of
 /// the leg asked, which would leave 0): no more than the face's width, where the face's plane
@@ -3212,26 +3159,120 @@ fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
     }
 }
 
+/// A leg is named only where that side's feet are proved at it, by the proof the build runs
+/// on the same segments. Round the tee (a branch of diameter 20 on a main tube of 40) a leg
+/// of 45 has no toe on one of the joint's faces and is refused as `NoToeAtLeg`, naming that
+/// face and a leg below 45. A bead at the leg named builds: it is not refused for that side
+/// again. (The largest leg that finds its toes there, 17.314, is not one the feet are proved
+/// at; while that leg was named, the bead at it was refused.) Along the joint's other face
+/// the refusal is the foot's solve's own and is not this test's. The tubes' file is
+/// unchanged.
+#[test]
+fn a_leg_too_large_on_a_tee_names_a_leg_whose_feet_are_proved() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::FitMeasure;
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let joint = joints[0];
+    let before = smb(&k, &part);
+    let mut refused = 0;
+    for face in edge::faces(&part, joint, None).unwrap() {
+        let along = [Some(face)];
+        let size = ChamferSize::Distances([45.0, 4.0]);
+        let err = weld_bead_body(
+            &mut k,
+            &mut part,
+            &[joint],
+            &[size],
+            0.0,
+            &along,
+            &[],
+            SQUARE,
+        )
+        .err()
+        .unwrap();
+        if !matches!(
+            err.blend_failure(),
+            Some(BlendFailure::NoRoom(NoRoomReason::NoToeAtLeg))
+        ) {
+            println!("a leg of 45 along {face:?}: {err}");
+            continue;
+        }
+        refused += 1;
+        assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+        let named = err
+            .site()
+            .and_then(|s| s.face)
+            .map(solidcore::error::TargetFace::id);
+        assert_eq!(named, Some(face), "{err:?}");
+        let fit = err.fit().expect("a leg is proved on that side and named");
+        assert_eq!(fit.measure, FitMeasure::Leg, "{err:?}");
+        assert!(fit.size > 0.0 && fit.size < 45.0, "{}", fit.size);
+        println!("a leg of 45 along {face:?}: {} is named", fit.size);
+        let size = ChamferSize::Distances([fit.size, 4.0]);
+        if let Err(e) = weld_bead_body(
+            &mut k,
+            &mut part,
+            &[joint],
+            &[size],
+            0.0,
+            &along,
+            &[],
+            SQUARE,
+        ) {
+            panic!("the bead at the leg named, {}: {e:?}", fit.size);
+        }
+    }
+    assert_eq!(refused, 1, "one face of the tee has no toe at a leg of 45");
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
 /// A face narrower than the smallest leg the body builds leaves no room: on a face 5e-5 wide
-/// (the body's tolerance is 1e-5, a leg is built from eight times it) no leg fits, whether 1
-/// or 1e6 is asked, so the fit is 0. The refusal is that the face has no toe at the leg
-/// (`NoToeAtLeg`: it ends within the leg).
+/// (the body's tolerance is 1e-5, a leg is built from eight times it) no leg that builds
+/// finds its toe, whether 1 or 1e6 is asked along either face. The refusal is that a face
+/// has no toe at the leg (`NoToeAtLeg`: it ends within the leg). Where the face named is the
+/// narrow one no size is named: a leg below the body's resolution is not one that builds,
+/// and that no leg builds is not proved, so 0 is not named either. A size that is named is
+/// one the body builds.
 #[test]
 fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
     let mut k = kernel();
     let (mut b, at) = ledge(&mut k, 5e-5);
-    assert!(5e-5 < 8.0 * b.tolerance(), "{}", b.tolerance());
-    for leg in [1.0, 1e6] {
-        let fits = leg_fits(&mut k, &mut b, at, [leg, 5.0]);
-        assert!(fits.contains(&0.0), "{leg}: {fits:?}");
-    }
+    let smallest = 8.0 * b.tolerance();
+    assert!(5e-5 < smallest, "{smallest}");
     let joint = pick(&k, &b, at);
+    for leg in [1.0, 1e6] {
+        let mut no_size = 0;
+        for face in edge::faces(&b, joint, None).unwrap() {
+            let size = ChamferSize::Distances([leg, 5.0]);
+            let along = [Some(face)];
+            let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &along, &[], SQUARE)
+                .err()
+                .unwrap();
+            assert!(
+                matches!(
+                    err.blend_failure(),
+                    Some(BlendFailure::NoRoom(NoRoomReason::NoToeAtLeg))
+                ),
+                "{leg} along {face:?}: {err:?}"
+            );
+            match err.fit() {
+                None => no_size += 1,
+                Some(fit) => assert!(fit.size >= smallest, "{leg} along {face:?}: {err:?}"),
+            }
+        }
+        assert!(
+            no_size >= 1,
+            "{leg}: the narrow face's refusal names a size"
+        );
+    }
     let size = ChamferSize::Distances([1.0, 5.0]);
     let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &[], &[], SQUARE)
         .err()
         .unwrap();
     assert!(format!("{err:?}").contains("NoToeAtLeg"), "{err:?}");
-    assert_eq!(err.fit().map(|f| f.size), Some(0.0), "{err:?}");
+    assert_eq!(err.fit().map(|f| f.size), None, "{err:?}");
 }
 
 /// A leg below the body's resolution is refused for its size by the welds' one entry point

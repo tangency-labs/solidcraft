@@ -303,8 +303,8 @@ pub enum NoRoomReason {
     LegPastFace,
     /// A weld bead's face has no point at the leg's distance from the joint line on its side
     /// in a station's plane (#15129): the face turns away or back within the leg, so no toe
-    /// leaves the joint line along it. The fit is the largest leg on that side that finds its
-    /// toe at the stations checked.
+    /// leaves the joint line along it. The fit, where there is one, is a leg on that side at
+    /// which its feet are proved over the weld; where none is proved no size is named.
     NoToeAtLeg,
     /// A weld bead's arc would cut into a face at a station (#15129): its sagitta is past the
     /// open bound `(c / 2) tan(min(beta_i) / 2)` there (concave; convex `(c / 2) tan((pi -

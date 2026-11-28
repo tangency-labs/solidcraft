@@ -287,19 +287,28 @@ rolling-ball blend, which it leaves unchanged.
   tolerance, 0.01 mm, at the midpoint between each two stations. That is a **sampled** check, not
   a certificate (§2.4): until the net is certified the foot blend's stated bound is the sampled
   tolerance.
-- **Feet proved.** Between each two stations, and for each support, the foot is proved: over a
+- **Feet proved.** Over each segment the bead is built in (a span, or a quarter of a closed
+  joint) the feet are proved by one proof (`FootBlend::prove_feet`). The build runs it before a
+  station of the net is made; a size's search and a record's rebuild run it again. It reads the
+  blend, the legs and the segment and nothing of the net, so the three agree: a leg or a sagitta
+  named as the size that fits is one the build's own proof passes. Each side is proved on its own
+  (`FootBlend::prove_side`): its own stations at the segment's ends and the leader's knots (at
+  least four), its own pieces between them, its own halvings and its own test for a leg that
+  grazes the face; of the other side only the leg enters, as a length. Over a
   piece T of the leader (at most an eighth of the smaller leg long, halved up to four times
   where needed) Krawczyk's test (`geom::krawczyk`) holds in a box on the support's NURBS form
   for every t in T at once, so the box holds one foot for each t and no other, and it holds the
-  stations' own feet, found on the face's side: the foot between them is theirs, on its branch.
+  piece's end feet, found on the face's side: the foot between them is theirs, on its branch.
   The foot is taken as the straight path between the piece's end feet plus a correction δ (the
   unknowns), and the equations are enclosed in their centred form along that path,
   G(t̃) + G′(T)(t − t̃), with G′ = (w′·e′ + w·e″, 2 w·w′) and w′ = S_u u′ + S_v v′ − e′. That
   rate nearly vanishes where the path follows the foot. Enclosed apart, the toe's travel along
   the joint, and the leg times the joint's turn, would enter the Jacobian at their full size and
   no piece would be proved. A periodic support's box across its seam is cut there; past a
-  non-periodic support's knots its end piece is continued. On the T-joint (4 mm legs) a section
-  face's 94 stations take 177 pieces, none halved.
+  non-periodic support's knots its end piece is continued. The corner's rise, (n₁ × n₂)·e′ with
+  the supports' normals over the root's path, is proved to keep one sign apart from the sides,
+  on pieces of the joint that no leg sets (`FootBlend::prove_rise`): where it is not decided the
+  refusal is its own and names no size, so it cannot move a leg's fit.
 - **Body.** The bead is a body of its own: per span the section face, a strip on each support
   between the root and its foot, and square end caps in the stations' planes, stitched and
   oriented. A closed joint is built in four segments, so no face runs a full turn. A strip on a
@@ -344,16 +353,17 @@ The foot blend is a record kind of its own, not a field added to an older record
 that predates it can take a bead for a chamfer (as one that predates `ChamferRecord::sagitta` can,
 §2.2). The part file (`FaceDefinition`) does not carry it yet: how it enters the format is open.
 
-**Refusals.** Every station refused is typed, with the size that builds over the stations checked:
+**Refusals.** Every refusal is typed, with a size that builds where one is proved:
 
 | cause | reason | class | fit |
 |---|---|---|---|
 | a leg below the smallest size the body builds (eight times its tolerance), on any joint of the call: checked first, as the planar bead's frame checks it | `SizeBelowResolution`, naming the edge and the leg | `InvalidInput` | none |
 | a toe on its face's surface but off the face (classified on the face, at least 32 stations; a foot past a periodic support's seam moved into its domain first) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down (until the bracket is 1e-7 (1 + its upper end) wide), less the face's tolerance (a toe that far past the face's edge still classifies on it), as the exact bead's; 0 where it is below the smallest leg the body builds |
-| no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes over the whole weld, halved down the same way; 0 below the smallest leg the body builds |
+| no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | a leg on that side at which that side's feet are proved over every segment of the weld (`FootBlend::leg_fit`: the proof the build runs, on the same segments, so a retry at it is not refused for that side's feet or their proof; the other side is not looked at, its refusal comes once this size is asked). First the largest leg that finds its toes, halved down the same way; that leg where the side is proved at it, else halved down from it on proved (at most 16 times, to a thousandth of the leg). Whether a side is proved need not grow with the leg, so the leg named is a proved one, not always the largest. None where no leg finds its toes, where none tried is proved, or where the leg found is below the smallest the body builds: that no leg builds is not proved (the feet are missed at sampled stations), so 0 is not named |
 | the arc would cut into a face somewhere along a span | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the largest sagitta below the bound, (c/2) tan(min βᵢ/2) concave and (c/2) tan((π − max βᵢ)/2) convex. On a straight edge between two planes the bound is the same all along and the size is the planar bead's own, the float below its closed form (`BeadDefinition::bound`; evaluated in floats, not enclosed, so within rounding of the bound, as the planar bead's). On any other joint it is the float below a lower end proved for the bound's least over every parameter of a span (`FootBlend::bound_over`: Taylor models over the pieces the feet are proved on; within 10⁻⁴ of the least where the bound is known at some parameter of the span, further below where a foot runs along a knot line of its support or a limit of the search runs out), each span enclosed alone. The size named is the least over the weld's spans and over every joint of the call, naming the joint whose fit it is. The build reads each span's size the same way, so a retry at it is not refused for its sagitta; the legs and toes of every joint are checked before it. It is named only once the feet are proved over the weld's spans: where they are not, or no lower end above 0 is proved, the refusal is the proof's (`NotCertified`, or a station's own) |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
-| the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
+| a side's feet not proved over a piece after the halvings | `NotCertified` (`NoToeAtLeg` where that side's equations are near singular at an end of the piece: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (where `NoToeAtLeg`: as its row) |
+| the corner's rise not proved of one sign over a piece of the joint after its halvings | `NotCertified` | `NotWithinTolerance` | none |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
 | beads meeting at a vertex | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none |
 | a concave bead on a face where the bound at the toe is not proved enough: any face but a plane and the outside of a cylinder, a cone or a sphere, or one of those with the other toe not on the bead's side of its tangent plane (§2); checked on every joint before any sagitta is read against its size | `WeldNotBuilt(ConcaveNotProved)`, naming the edge, the face and the toe | `Unsupported` | none |
