@@ -695,23 +695,40 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                         }
 
                         // Attach context menu
-                        if state.drag.is_none() {
-                            Menu::context(&resp, |ui| {
-                                // Built only while the menu is open, not for every chip each frame.
-                                let targets = if state.selected_features.contains(&fid) {
-                                    state.selected_features.iter().copied().collect::<Vec<_>>()
-                                } else {
-                                    vec![fid]
-                                };
-                                let is_adjacent = state.is_selection_adjacent(&dep_graph.features);
-                                let sel_count = state.selected_features.len();
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Edit Feature"), "edit").clicked() {
-                                    action_to_edit = Some(fid);
-                                    ui.close();
-                                }
-                                if is_adjacent && sel_count >= 2 {
-                                    let label = solidcraft_ui_text::format("ui.timeline_2d_group_selection", &[("count", &sel_count.to_string())]);
-                                    if crate::ui_kit::menu::button(ui, &label, "folder").clicked() {
+                        if state.drag.is_none() && Menu::context_active(&resp) {
+                            let targets = if state.selected_features.contains(&fid) {
+                                state.selected_features.iter().copied().collect::<Vec<_>>()
+                            } else {
+                                vec![fid]
+                            };
+                            let is_adjacent = state.is_selection_adjacent(&dep_graph.features);
+                            let sel_count = state.selected_features.len();
+                            let mut items = vec![crate::ui_kit::Item::action("edit", solidcraft_ui_text::tr_label("Edit Feature"), "edit")];
+                            if is_adjacent && sel_count >= 2 {
+                                let label = solidcraft_ui_text::format("ui.timeline_2d_group_selection", &[("count", &sel_count.to_string())]);
+                                items.push(crate::ui_kit::Item::action("group", &label, "folder"));
+                            }
+                            if sel_count <= 1 {
+                                items.push(crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr_label("Rename"), "rename"));
+                            }
+                            let suppress_key = if is_suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+                            let suppress_icon = if is_suppressed { "eye" } else { "suppress" };
+                            let delete_label = match targets.len() {
+                                1 => solidcraft_ui_text::tr_label("Delete").to_string(),
+                                n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
+                            };
+                            items.extend([
+                                crate::ui_kit::Item::action("suppress", solidcraft_ui_text::tr(suppress_key), suppress_icon),
+                                crate::ui_kit::Item::action("rollback", solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback"),
+                                crate::ui_kit::Item::sep(),
+                                crate::ui_kit::Item::action("delete", &delete_label, "delete"),
+                            ]);
+                            if let Some(picked) = Menu::context_items(&resp, &items) {
+                                match picked.id.as_str() {
+                                    "edit" => {
+                                        action_to_edit = Some(fid);
+                                    }
+                                    "group" => {
                                         let ordered_selected: Vec<u64> =
                                             dep_graph.features.iter().copied().filter(|id| state.selected_features.contains(id)).collect();
                                         let group_name = format!("Group {}", app.session.doc.timeline_groups.len() + 1);
@@ -726,63 +743,49 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                                             state.folded_groups.insert(gid);
                                             app.tree.collapsed.insert(format!("timeline_group:{gid}"));
                                         }
-                                        ui.close();
                                     }
-                                }
-                                // 2D Timeline only: Rename is hidden when the right-clicked chip is part of a
-                                // multi-selection, because this menu then acts on the whole selection. The 1D
-                                // timeline (crates/ui-egui/src/timeline.rs) keeps its own Rename rule.
-                                if sel_count <= 1 && crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Rename"), "rename").clicked() {
-                                    let f_name = app.session.doc.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
-                                    app.dialog = Some(crate::dialogs::Dialog::rename(fid, &f_name));
-                                    ui.close();
-                                }
-                                let suppress_key = if is_suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
-                                let suppress_icon = if is_suppressed { "eye" } else { "suppress" };
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr(suppress_key), suppress_icon).clicked() {
-                                    let base_targets = if state.selected_features.contains(&fid) {
-                                        state.selected_features.iter().copied().collect::<Vec<_>>()
-                                    } else {
-                                        vec![fid]
-                                    };
-                                    state.separately_suppressed_features.retain(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+                                    "rename" => {
+                                        let f_name = app.session.doc.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
+                                        app.dialog = Some(crate::dialogs::Dialog::rename(fid, &f_name));
+                                    }
+                                    "suppress" => {
+                                        let base_targets = if state.selected_features.contains(&fid) {
+                                            state.selected_features.iter().copied().collect::<Vec<_>>()
+                                        } else {
+                                            vec![fid]
+                                        };
+                                        state.separately_suppressed_features.retain(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
 
-                                    let target_features = if is_suppressed {
-                                        dep_graph.collect_unsuppression_with_mode(
-                                            &app.session.doc,
-                                            &base_targets,
-                                            app.preferences.timeline_2d_unsuppress_mode,
-                                            &state.separately_suppressed_features,
-                                        )
-                                    } else {
-                                        for &id in &base_targets {
-                                            state.separately_suppressed_features.insert(id);
-                                        }
-                                        dep_graph.collect_suppression_cascade_for_set(&base_targets)
-                                    };
-                                    let _ = app.run_heavy(
-                                        "timeline.suppress",
-                                        serde_json::json!({
-                                            "features": target_features,
-                                            "suppressed": !is_suppressed,
-                                        }),
-                                    );
-                                    ui.close();
+                                        let target_features = if is_suppressed {
+                                            dep_graph.collect_unsuppression_with_mode(
+                                                &app.session.doc,
+                                                &base_targets,
+                                                app.preferences.timeline_2d_unsuppress_mode,
+                                                &state.separately_suppressed_features,
+                                            )
+                                        } else {
+                                            for &id in &base_targets {
+                                                state.separately_suppressed_features.insert(id);
+                                            }
+                                            dep_graph.collect_suppression_cascade_for_set(&base_targets)
+                                        };
+                                        let _ = app.run_heavy(
+                                            "timeline.suppress",
+                                            serde_json::json!({
+                                                "features": target_features,
+                                                "suppressed": !is_suppressed,
+                                            }),
+                                        );
+                                    }
+                                    "rollback" => {
+                                        let _ = app.run_heavy("timeline.roll_to", serde_json::json!({ "feature": fid }));
+                                    }
+                                    "delete" => {
+                                        crate::timeline::delete_features(app, targets);
+                                    }
+                                    _ => {}
                                 }
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
-                                    let _ = app.run_heavy("timeline.roll_to", serde_json::json!({ "feature": fid }));
-                                    ui.close();
-                                }
-                                ui.separator();
-                                let delete_label = match targets.len() {
-                                    1 => solidcraft_ui_text::tr_label("Delete").to_string(),
-                                    n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
-                                };
-                                if crate::ui_kit::menu::button(ui, &delete_label, "delete").clicked() {
-                                    crate::timeline::delete_features(app, targets);
-                                    ui.close();
-                                }
-                            });
+                            }
                         }
                     }
                 }
@@ -891,25 +894,30 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
             // Group Context Menu
             let gid = *group_id;
             let g_name = grp_name.clone();
-            Menu::context(&resp, |ui| {
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_open_group"), "folder").clicked() {
-                    state.set_group_folded(gid, false);
-                    ui.close();
+            let items = vec![
+                crate::ui_kit::Item::action("fold", solidcraft_ui_text::tr("ui.timeline_2d_open_group"), "folder"),
+                crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename"),
+                crate::ui_kit::Item::action("ungroup", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder"),
+                crate::ui_kit::Item::action("delete", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete"),
+            ];
+            if let Some(picked) = Menu::context_items(&resp, &items) {
+                match picked.id.as_str() {
+                    "fold" => {
+                        state.set_group_folded(gid, false);
+                    }
+                    "rename" => {
+                        app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
+                    }
+                    "ungroup" => {
+                        let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
+                    }
+                    "delete" => {
+                        let contents = crate::timeline_left::folder_features(app, &[gid]);
+                        crate::timeline::delete_folders(app, vec![gid], contents);
+                    }
+                    _ => {}
                 }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename").clicked() {
-                    app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
-                    ui.close();
-                }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder").clicked() {
-                    let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
-                    ui.close();
-                }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete").clicked() {
-                    let contents = crate::timeline_left::folder_features(app, &[gid]);
-                    crate::timeline::delete_folders(app, vec![gid], contents);
-                    ui.close();
-                }
-            });
+            }
 
             paint_virtual_group_chip(&painter, card_rect, &grp_name, features.len(), is_active, is_group_selected, &t);
         }
@@ -1484,25 +1492,30 @@ fn paint_two_tier_header(
 
                 let gid = grp_id;
                 let g_name = grp_name.clone();
-                Menu::context(&resp, |ui| {
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_close_group"), "folder").clicked() {
-                        state.set_group_folded(gid, true);
-                        ui.close();
+                let items = vec![
+                    crate::ui_kit::Item::action("fold", solidcraft_ui_text::tr("ui.timeline_2d_close_group"), "folder"),
+                    crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename"),
+                    crate::ui_kit::Item::action("ungroup", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder"),
+                    crate::ui_kit::Item::action("delete", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete"),
+                ];
+                if let Some(picked) = Menu::context_items(&resp, &items) {
+                    match picked.id.as_str() {
+                        "fold" => {
+                            state.set_group_folded(gid, true);
+                        }
+                        "rename" => {
+                            app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
+                        }
+                        "ungroup" => {
+                            let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
+                        }
+                        "delete" => {
+                            let contents = crate::timeline_left::folder_features(app, &[gid]);
+                            crate::timeline::delete_folders(app, vec![gid], contents);
+                        }
+                        _ => {}
                     }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename").clicked() {
-                        app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
-                        ui.close();
-                    }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder").clicked() {
-                        let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
-                        ui.close();
-                    }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete").clicked() {
-                        let contents = crate::timeline_left::folder_features(app, &[gid]);
-                        crate::timeline::delete_folders(app, vec![gid], contents);
-                        ui.close();
-                    }
-                });
+                }
 
                 p.rect_filled(banner_rect, 4.0, pill_color);
                 p.rect_stroke(banner_rect, 4.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
@@ -1652,21 +1665,18 @@ fn paint_pinned_left(
         // Right-click context menu for component row (Rename Component, Show/Hide)
         let menu_pos = resp.interact_pointer_pos().unwrap_or(row_rect.left_bottom());
         let can_toggle_vis = (cid != 0 && !first_path.is_empty()) || !bodies.is_empty();
-        Menu::context(&resp, |ui| {
-            if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Rename Component"), "rename").clicked() {
-                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Component(cid), menu_pos);
-                ui.close();
+        let items = [
+            crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr_label("Rename Component"), "rename"),
+            crate::ui_kit::Item::action("visibility", solidcraft_ui_text::tr_label("Show/Hide"), if is_visible { "eye" } else { "suppress" })
+                .on_if(can_toggle_vis),
+        ];
+        if let Some(picked) = Menu::context_items(&resp, &items) {
+            match picked.id.as_str() {
+                "rename" => crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Component(cid), menu_pos),
+                "visibility" => toggle_visibility(app),
+                _ => {}
             }
-            let vis_icon = if is_visible { "eye" } else { "suppress" };
-            if ui
-                .add_enabled_ui(can_toggle_vis, |ui| crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Show/Hide"), vis_icon))
-                .inner
-                .clicked()
-            {
-                toggle_visibility(app);
-                ui.close();
-            }
-        });
+        }
 
         // Active / Hover row background
         if is_active {

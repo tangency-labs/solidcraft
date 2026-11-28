@@ -2176,14 +2176,13 @@ fn grouped_gears() -> Listed {
 
 #[test]
 fn declared_ribbon_group_replaces_only_its_entries_and_lists_them_in_order() {
-    use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.plugin_menu.listed = vec![grouped_gears()];
     let buttons = ribbon_buttons(&app);
     assert_eq!(buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["plugin_group:gears:0", "plugin_entry:gears:inspect"]);
     assert_eq!((buttons[0].label.as_str(), buttons[0].icon.as_str()), ("Gears", "prefs_plugins"));
     let menu = ribbon_group_rows(&app, &buttons[0].id);
-    let items: Vec<_> = menu.iter().filter_map(|r| if let FileRow::Item(i) = r { Some((i.id.as_str(), i.label.as_str())) } else { None }).collect();
+    let items: Vec<_> = menu.iter().filter(|i| !i.is_sep() && i.children.is_empty()).map(|i| (i.id.as_str(), i.label.as_str())).collect();
     assert_eq!(items, [("entry:0:1", "Bevel Gear"), ("entry:0:0", "Spur Gear")]);
     assert_eq!(rows(&app).len(), 4, "the full Plugins menu still contains the plugin submenu");
     assert!(app.plugin_menu.dialogs.is_empty(), "listing a group runs and opens nothing");
@@ -2298,29 +2297,48 @@ fn a_numeric_plugin_editor_interrupts_external_joint_drive() {
 
 #[test]
 fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
-    use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let empty = rows(&app);
-    assert!(matches!(&empty[0], FileRow::Item(i) if i.id == INSTALL));
-    assert!(matches!(&empty[1], FileRow::Item(i) if i.id == LAST_REPORT && !i.enabled), "no import yet: nothing to show again");
-    assert!(matches!(&empty[2], FileRow::Separator));
-    assert!(matches!(&empty[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
+    assert!({
+        let i = &empty[0];
+        i.id == INSTALL
+    });
+    assert!(
+        {
+            let i = &empty[1];
+            i.id == LAST_REPORT && !i.enabled
+        },
+        "no import yet: nothing to show again"
+    );
+    assert!(&empty[2].is_sep());
+    assert!({
+        let i = &empty[3];
+        i.label == app.tr("ui.plugin_menu_empty") && !i.enabled
+    });
     app.plugin_menu.listed = vec![
         listed("gears", vec![entry("spur", "edit", json!([{"kind":"menu","name":"Spur Gear"}]))]),
         listed("tools", vec![entry("measure", "read", json!([])), entry("tidy", "edit", json!([{"kind":"ribbon","name":"x"}]))]),
     ];
     let listed_rows = rows(&app);
     assert_eq!(listed_rows.len(), 5);
-    assert!(matches!(&listed_rows[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Spur Gear…"), "menu slot names the row");
-    let FileRow::Sub { label, rows: sub } = &listed_rows[4] else { panic!("several entries: a submenu") };
+    assert!(
+        {
+            let i = &listed_rows[3];
+            i.id == "entry:0:0" && i.label == "Spur Gear…"
+        },
+        "menu slot names the row"
+    );
+    let menu_node = &listed_rows[4];
+    assert!(!menu_node.children.is_empty(), "several entries: a submenu");
+    let label = &menu_node.label;
+    let sub = &menu_node.children;
     assert_eq!(label, "tools plugin");
-    let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
+    let labels: Vec<&str> = sub.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
 }
 
 #[test]
 fn importer_menu_rows_use_the_same_entry_icon_for_single_entries_and_submenus() {
-    use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let importer = |name: &str| {
         serde_json::from_value(json!({"name":name,"kind":"importer","extensions":["sample"],
@@ -2330,18 +2348,37 @@ fn importer_menu_rows_use_the_same_entry_icon_for_single_entries_and_submenus() 
     let mut plugin = listed("imports", vec![importer("convert")]);
     plugin.images.insert("format.svg".into(), "checked-format-icon".into());
     app.plugin_menu.listed = vec![plugin];
-    assert!(matches!(&rows(&app)[3], FileRow::Item(item) if item.icon == "checked-format-icon"));
+    assert!({
+        let item = &rows(&app)[3];
+        item.icon == "checked-format-icon"
+    });
     app.plugin_menu.listed[0].entries.push(importer("other"));
     let menu = rows(&app);
-    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
-    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == "checked-format-icon")));
+    let menu_node = &menu[3];
+    assert!(!menu_node.children.is_empty(), "several importers have a submenu");
+    let rows = &menu_node.children;
+    assert!(rows.iter().all(|row| {
+        let item = row;
+        item.icon == "checked-format-icon"
+    }));
     app.plugin_menu.listed[0].images.clear();
     let menu = super::rows(&app);
-    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
-    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == crate::plugin_images::GENERIC)));
+    let menu_node = &menu[3];
+    assert!(!menu_node.children.is_empty(), "several importers have a submenu");
+    let rows = &menu_node.children;
+    assert!(rows.iter().all(|row| {
+        let item = row;
+        item.icon == crate::plugin_images::GENERIC
+    }));
     app.plugin_menu.listed[0].entries.truncate(1);
     app.plugin_menu.listed[0].entries[0].input_schema = json!({"type":"object"});
-    assert!(matches!(&super::rows(&app)[3], FileRow::Item(item) if item.icon.is_empty()), "no annotation keeps the old menu row");
+    assert!(
+        {
+            let item = &super::rows(&app)[3];
+            item.icon.is_empty()
+        },
+        "no annotation keeps the old menu row"
+    );
     assert_eq!(ribbon_buttons(&app)[0].icon, crate::plugin_images::GENERIC);
 }
 
@@ -2349,7 +2386,6 @@ fn importer_menu_rows_use_the_same_entry_icon_for_single_entries_and_submenus() 
 /// name) and its own ribbon button, and a plugin turned off in Preferences shows in neither.
 #[test]
 fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plugin_is_hidden() {
-    use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.plugin_menu.listed = vec![
         listed("gears", vec![entry("spur", "edit", json!([]))]),
@@ -2364,8 +2400,16 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert!(app.plugin_menu.dialogs.is_empty(), "listing opens nothing");
 
     let menu = rows(&app);
-    assert!(matches!(&menu[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
-    assert!(matches!(&menu[4], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
+    assert!({
+        let i = &menu[3];
+        i.id == "entry:0:0" && i.label == "gears plugin…"
+    });
+    assert!({
+        let menu_node = &menu[4];
+        let label = &menu_node.label;
+        let rows = &menu_node.children;
+        !menu_node.children.is_empty() && (label == "tools plugin" && rows.len() == 2)
+    });
 
     // The ribbon button opens that one command's dialog, titled by it alone.
     assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
@@ -2387,14 +2431,21 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert_eq!(ids, ["plugin_entry:tools:measure", "plugin_entry:tools:tidy"], "off: no ribbon button");
     let menu = rows(&app);
     assert_eq!(menu.len(), 4, "off: no menu row");
-    assert!(matches!(&menu[3], FileRow::Sub { label, .. } if label == "tools plugin"));
+    assert!({
+        let menu_node = &menu[3];
+        let label = &menu_node.label;
+        !menu_node.children.is_empty() && (label == "tools plugin")
+    });
     choose_ribbon(&mut app, "plugin_entry:gears:spur");
     choose(&mut app, "entry:0:0");
     assert!(app.plugin_menu.dialogs.is_empty(), "a plugin turned off opens nothing");
 
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
-    assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+    assert!({
+        let i = &rows(&app)[3];
+        i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled
+    });
 }
 
 #[test]
@@ -2485,15 +2536,29 @@ fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes
 fn file_plugins_row_opens_preferences_on_the_plugins_page() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let rows = crate::toolbar::file_rows(&app);
-    let item = rows
+    let settings = rows
+        .iter()
+        .find_map(|row| match row {
+            node if node.label == "Settings" => Some(&node.children),
+            _ => None,
+        })
+        .expect("File has Settings");
+    let item = settings
         .iter()
         .find_map(|r| match r {
-            crate::app_bar::FileRow::Item(i) if i.id == "plugins.preferences" => Some(i),
+            i if i.id == "plugins.preferences" => Some(i),
             _ => None,
         })
         .expect("File has a Plugins… row");
     assert_eq!(item.label, format!("{}…", app.tr("ui.plugins")));
-    assert!(!rows.iter().any(|r| matches!(r, crate::app_bar::FileRow::Sub { label, .. } if label == app.tr("ui.plugins"))), "no Plugins submenu");
+    assert!(
+        !rows.iter().any(|r| {
+            let menu_node = r;
+            let label = &menu_node.label;
+            !menu_node.children.is_empty() && (label == app.tr("ui.plugins"))
+        }),
+        "no Plugins submenu"
+    );
     crate::toolbar::run_file_row(&mut app, "plugins.preferences");
     assert!(app.prefs_window.shell.open);
 }

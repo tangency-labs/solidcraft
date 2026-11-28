@@ -393,22 +393,6 @@ pub(crate) fn begin(app: &mut SolveApp, command: &str) {
     }
 }
 
-pub(crate) fn menu_rows(app: &mut SolveApp, ui: &mut egui::Ui, name: &'static str) -> bool {
-    let entries = items(app, Slot::Menu(name));
-    if entries.is_empty() {
-        return false;
-    }
-    ui.separator();
-    for item in entries {
-        let row = ui_kit::Item::action(&item.command, &item.label, &item.icon);
-        if ui_kit::menu::list_row(ui, &row).is_some() {
-            begin(app, &item.command);
-            return true;
-        }
-    }
-    false
-}
-
 pub(crate) struct RibbonGroup {
     key: String,
     name: String,
@@ -465,11 +449,7 @@ impl RibbonGroup {
             enabled: true,
             open: self.open,
             running: None,
-            more: self
-                .entries
-                .iter()
-                .map(|e| ribbon::MoreRow { id: &e.command, label: &e.label, icon: &e.icon, shortcut: "", enabled: true, checked: None, hint: None })
-                .collect(),
+            more: self.entries.iter().map(|entry| ui_kit::Item::action(&entry.command, &entry.label, &entry.icon)).collect(),
         }
     }
     pub(crate) fn toggle(&self, ctx: &egui::Context, toggle: bool) {
@@ -487,47 +467,35 @@ impl RibbonGroup {
         if ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) != Some(self.popup) {
             return None;
         }
-        let mut chosen = None;
-        let out = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
-            .area(self.popup)
-            .fixed_pos(drawn.label.left_bottom())
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                ui_kit::Menu::show_frame(ui, ui_kit::Menu::frame(), |ui| {
-                    ui_kit::Menu::heading(ui, &self.name);
-                    for item in &self.entries {
-                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, &item.icon)).is_some() {
-                            chosen = Some(item.command.clone());
-                        }
-                    }
-                });
-            });
-        if let Some(command) = chosen {
-            begin(app, &command);
-            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
-        } else if ctx.input(|i| i.key_pressed(egui::Key::Escape))
-            || (ctx.input(|i| i.pointer.any_pressed()) && !out.response.contains_pointer() && !drawn.label_response.contains_pointer())
-        {
-            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        let mut items = vec![ui_kit::Item::heading(&self.name)];
+        items.extend(self.entries.iter().map(|entry| ui_kit::Item::action(&entry.command, &entry.label, &entry.icon)));
+        let output = ui_kit::Menu::popup(ctx, self.popup, ui_kit::MenuAnchor::Rect(drawn.label), &items, drawn.label_response.clicked());
+        if let Some(item) = output.picked {
+            begin(app, &item.id);
         }
-        Some((self.popup, out.response.rect))
+        if output.close {
+            ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        }
+        output.rect.map(|rect| (self.popup, rect))
     }
 }
 
 /// The finish group remains last; the app still addresses its original built-in group indices.
-pub(crate) fn restore_group_indices(out: &mut crate::ribbon::Out, builtin: usize, plugins: usize, exit: bool) {
+pub(crate) fn original_group_index(group: usize, builtin: usize, plugins: usize, exit: bool) -> usize {
     if !exit || builtin == 0 || plugins == 0 {
-        return;
+        return group;
     }
-    let original = |group: usize| {
-        if group == builtin + plugins - 1 {
-            builtin - 1
-        } else if group >= builtin - 1 {
-            group + 1
-        } else {
-            group
-        }
-    };
+    if group == builtin.saturating_add(plugins).saturating_sub(1) {
+        builtin - 1
+    } else if group >= builtin - 1 {
+        group.saturating_add(1)
+    } else {
+        group
+    }
+}
+
+pub(crate) fn restore_group_indices(out: &mut crate::ribbon::Out, builtin: usize, plugins: usize, exit: bool) {
+    let original = |group| original_group_index(group, builtin, plugins, exit);
     for button in &mut out.buttons {
         button.group = original(button.group);
     }

@@ -80,7 +80,13 @@
   "click": {"handle": "appbar:file"}
  },
  {
-  "widget": "Export STEP\u2026"
+  "click": {"handle": "menu:Export"}
+ },
+ {
+  "click": {"handle": "menu:CAD & 2D"}
+ },
+ {
+  "widget": "STEP\u2026"
  },
  {
   "expect": {
@@ -95,7 +101,13 @@
   "click": {"handle": "appbar:file"}
  },
  {
-  "widget": "Export STL\u2026"
+  "click": {"handle": "menu:Export"}
+ },
+ {
+  "click": {"handle": "menu:Mesh"}
+ },
+ {
+  "widget": "STL\u2026"
  },
  {
   "expect": {
